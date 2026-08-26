@@ -18,22 +18,6 @@ import (
 // user think they have the wrong version, and a command that silently does
 // nothing is the failure this product exists to prevent.
 
-func newInsightsCommand(env *Env) *cobra.Command {
-	return &cobra.Command{
-		Use:   "insights",
-		Short: "Rehearse migrations and compare query behavior against the base branch",
-		Long: strings.TrimSpace(`
-Pending migrations are applied to a fresh branch with per statement timing and
-the strongest lock held per table, pg_stat_statements is diffed between
-branches to catch a query loop, and query plans are compared to catch an index
-that stopped being used.`),
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af insights")
-		},
-	}
-}
-
 func newExplainCommand(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "explain",

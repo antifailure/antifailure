@@ -60,13 +60,17 @@ af runner install / check   put the runner where af test finds it
 
 af env list / prune   what this machine is holding, and a cutoff to clear it
 
+af insights    what the database noticed: the N+1, the index that stopped
+               being used, the scan on a table that grew
+
 af doctor      ten checks, each with a remediation
 af init        reads a repository, writes a manifest, explains what it assumed
 af explain     the effective configuration with every default resolved
 af version     version, commit, edition, platform
 ```
 
-Every command in the tree now does something. The three that returned
+Every command in the tree does something except `af env pull`, which needs
+the control plane. The three that returned
 AF-RUN-001 inside otherwise working groups are wired: `af mask preview`,
 `af golden verify`, and `af support bundle`. What remains unimplemented is
 whole subsystems rather than gaps inside working ones: `af insights` and
