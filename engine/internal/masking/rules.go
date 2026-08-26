@@ -1,0 +1,349 @@
+package masking
+
+import (
+	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// Rules decide what happens to each column.
+//
+// The default is the important half. A column nobody wrote a rule for is
+// reported as unclassified rather than left alone, because "left alone" for a
+// column called customer_notes means the notes ship. The plan lists them and
+// refuses to run until each one has an answer, even if the answer is "this is
+// fine".
+//
+// Matching is by name and type rather than by an exhaustive list, so a column
+// added tomorrow is classified today.
+
+// Rule assigns a transform to the columns it matches.
+type Rule struct {
+	// Table matches the schema qualified table name, with * as a wildcard.
+	// Empty matches every table.
+	Table string `json:"table,omitempty" yaml:"table,omitempty"`
+	// Column matches the column name, with * as a wildcard.
+	Column string `json:"column,omitempty" yaml:"column,omitempty"`
+	// Type matches the Postgres type name. Empty matches every type.
+	Type string `json:"type,omitempty" yaml:"type,omitempty"`
+	// Transform is the name of the transform to apply.
+	Transform string `json:"transform" yaml:"transform"`
+	// Link makes several columns mask identically. Two columns joined by a
+	// foreign key must share one, or the join breaks the moment they are
+	// masked to different values.
+	Link string `json:"link,omitempty" yaml:"link,omitempty"`
+	// Why is one sentence explaining the rule, printed by af mask plan.
+	Why string `json:"why,omitempty" yaml:"why,omitempty"`
+
+	table, column *regexp.Regexp
+}
+
+// compile prepares a rule for matching.
+func (r *Rule) compile() error {
+	if r.Transform == "" {
+		return fmt.Errorf("masking: a rule for %s has no transform", r.describe())
+	}
+	if _, ok := Lookup(r.Transform); !ok {
+		return fmt.Errorf("masking: %s names the transform %q, which does not exist; there is %s",
+			r.describe(), r.Transform, strings.Join(Names(), ", "))
+	}
+	var err error
+	if r.table, err = compileGlob(r.Table); err != nil {
+		return fmt.Errorf("masking: the table pattern in %s: %w", r.describe(), err)
+	}
+	if r.column, err = compileGlob(r.Column); err != nil {
+		return fmt.Errorf("masking: the column pattern in %s: %w", r.describe(), err)
+	}
+	return nil
+}
+
+func (r Rule) describe() string {
+	parts := []string{}
+	if r.Table != "" {
+		parts = append(parts, "table "+r.Table)
+	}
+	if r.Column != "" {
+		parts = append(parts, "column "+r.Column)
+	}
+	if r.Type != "" {
+		parts = append(parts, "type "+r.Type)
+	}
+	if len(parts) == 0 {
+		return "the catch all rule"
+	}
+	return "the rule for " + strings.Join(parts, ", ")
+}
+
+func compileGlob(pattern string) (*regexp.Regexp, error) {
+	if pattern == "" || pattern == "*" {
+		return nil, nil
+	}
+	var b strings.Builder
+	b.WriteString("^")
+	for _, r := range pattern {
+		switch r {
+		case '*':
+			b.WriteString(".*")
+		case '?':
+			b.WriteString(".")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(r)))
+		}
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
+}
+
+// matches reports whether a rule applies, and how specifically.
+//
+// Specificity decides, not order, for the same reason it does in the egress
+// policy: appending a rule must not silently change what an existing one does.
+func (r Rule) matches(table Table, col ColumnInfo) (int, bool) {
+	score := 0
+	if r.table != nil {
+		if !r.table.MatchString(table.String()) && !r.table.MatchString(table.Name) {
+			return 0, false
+		}
+		score += 100
+	}
+	if r.column != nil {
+		if !r.column.MatchString(col.Name) {
+			return 0, false
+		}
+		// A literal column name is the most specific thing anybody writes.
+		score += 1000
+		if !strings.ContainsAny(r.Column, "*?") {
+			score += 1000
+		}
+	}
+	if r.Type != "" {
+		if !strings.EqualFold(r.Type, col.Type) {
+			return 0, false
+		}
+		score += 10
+	}
+	return score, true
+}
+
+// RuleSet is the rules plus the defaults they sit on top of.
+type RuleSet struct {
+	rules []Rule
+}
+
+// NewRuleSet compiles a set of rules.
+//
+// A rule that cannot be compiled is refused rather than skipped, because a
+// masking configuration that silently enforces less than it says is the worst
+// possible failure for this particular subsystem.
+func NewRuleSet(rules []Rule) (*RuleSet, error) {
+	out := make([]Rule, 0, len(rules)+len(DefaultRules()))
+	for _, r := range rules {
+		if err := r.compile(); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	// The defaults sit underneath, so a user rule for the same column always
+	// wins on specificity and nobody has to restate what is already known.
+	for _, r := range DefaultRules() {
+		if err := r.compile(); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return &RuleSet{rules: out}, nil
+}
+
+// DefaultRules classify the columns that appear in almost every schema.
+//
+// They exist so that a first run of af mask plan is mostly answered rather
+// than mostly questions. Every one is a name that means the same thing in
+// every application anybody has written, and each carries the reason it is
+// there so a reader can disagree with it specifically.
+func DefaultRules() []Rule {
+	return []Rule{
+		{Column: "email", Transform: "email", Why: "An address a real person reads."},
+		{Column: "email_address", Transform: "email", Why: "An address a real person reads."},
+		{Column: "*_email", Transform: "email", Why: "An address a real person reads."},
+		{Column: "username", Transform: "username", Why: "Identifies a person across systems."},
+		{Column: "first_name", Transform: "first_name", Why: "A person's name."},
+		{Column: "last_name", Transform: "last_name", Why: "A person's name."},
+		{Column: "full_name", Transform: "name", Why: "A person's name."},
+		{Column: "name", Type: "text", Transform: "name",
+			Why: "A name column on a text type is usually a person's."},
+		{Column: "phone", Transform: "phone", Why: "A number that rings a real phone."},
+		{Column: "phone_number", Transform: "phone", Why: "A number that rings a real phone."},
+		{Column: "*_phone", Transform: "phone", Why: "A number that rings a real phone."},
+		{Column: "address", Transform: "address", Why: "Where somebody lives."},
+		{Column: "address_line1", Transform: "address", Why: "Where somebody lives."},
+		{Column: "address_line2", Transform: "address", Why: "Where somebody lives."},
+		{Column: "street", Transform: "address", Why: "Where somebody lives."},
+		{Column: "city", Transform: "city", Why: "Where somebody lives."},
+		{Column: "postcode", Transform: "postcode", Why: "Where somebody lives."},
+		{Column: "postal_code", Transform: "postcode", Why: "Where somebody lives."},
+		{Column: "zip", Transform: "postcode", Why: "Where somebody lives."},
+		{Column: "zip_code", Transform: "postcode", Why: "Where somebody lives."},
+		{Column: "company", Transform: "company", Why: "Identifies a real organisation."},
+		{Column: "company_name", Transform: "company", Why: "Identifies a real organisation."},
+		{Column: "ip", Transform: "ip", Why: "Locates a person."},
+		{Column: "ip_address", Transform: "ip", Why: "Locates a person."},
+		{Column: "last_ip", Transform: "ip", Why: "Locates a person."},
+		{Column: "password", Transform: "hash_hex", Why: "Never needs to survive, and must not."},
+		{Column: "password_hash", Transform: "hash_hex", Why: "Never needs to survive, and must not."},
+		{Column: "*_token", Transform: "hash_hex", Why: "Grants access if it escapes."},
+		{Column: "*_secret", Transform: "hash_hex", Why: "Grants access if it escapes."},
+		{Column: "api_key", Transform: "hash_hex", Why: "Grants access if it escapes."},
+		{Column: "*_key", Type: "text", Transform: "hash_hex", Why: "Grants access if it escapes."},
+		{Column: "session_token", Transform: "nullify", Why: "A live session must not survive into a copy."},
+		{Column: "notes", Transform: "free_text", Why: "Free text holds whatever somebody typed."},
+		{Column: "description", Transform: "free_text", Why: "Free text holds whatever somebody typed."},
+		{Column: "bio", Transform: "free_text", Why: "Free text holds whatever somebody typed."},
+		{Column: "comment", Transform: "free_text", Why: "Free text holds whatever somebody typed."},
+		{Column: "body", Transform: "free_text", Why: "Free text holds whatever somebody typed."},
+		{Column: "card_number", Transform: "credit_card", Why: "A payment instrument."},
+		{Column: "*_url", Transform: "url", Why: "A URL can carry a token in its query."},
+		{Column: "avatar", Transform: "url", Why: "A URL can carry a token in its query."},
+	}
+}
+
+// Assignment is what a column gets, and why.
+type Assignment struct {
+	Table  Table
+	Column ColumnInfo
+	// Transform is the name to apply, or empty when nothing matched.
+	Transform string
+	// Link, when set, makes this column mask identically to others sharing it.
+	Link string
+	// Why explains the decision in one sentence.
+	Why string
+	// FromDefault reports whether a built in rule decided, rather than one the
+	// user wrote. A plan shows these separately so somebody can see what was
+	// decided for them.
+	FromDefault bool
+	// Problem, when set, says why this column cannot be masked as assigned.
+	Problem string
+}
+
+// Masked reports whether anything happens to this column.
+func (a Assignment) Masked() bool { return a.Transform != "" && a.Problem == "" }
+
+// Assign classifies every column of every table.
+func (rs *RuleSet) Assign(tables []Table) []Assignment {
+	defaults := map[string]bool{}
+	for _, r := range DefaultRules() {
+		defaults[r.describe()+"/"+r.Transform] = true
+	}
+
+	var out []Assignment
+	for _, t := range tables {
+		for _, c := range t.Columns {
+			a := Assignment{Table: t, Column: c}
+
+			best := -1
+			for _, r := range rs.rules {
+				score, ok := r.matches(t, c)
+				if !ok || score <= best {
+					continue
+				}
+				best = score
+				a.Transform, a.Link, a.Why = r.Transform, r.Link, r.Why
+				a.FromDefault = defaults[r.describe()+"/"+r.Transform]
+			}
+
+			// Columns holding the same kind of thing mask identically unless
+			// somebody says otherwise, and the default link is the transform's
+			// own name.
+			//
+			// Without this each column derives its own subkey, so
+			// customers.email and orders.customer_email would map one address
+			// to two different fake addresses and the join between them would
+			// stop working. A foreign key is the same case: the key column and
+			// the column it references share a transform, so they share a
+			// link, and the join survives without anybody writing it out.
+			if a.Transform != "" && a.Link == "" {
+				a.Link = a.Transform
+			}
+			out = append(out, checkFeasible(a))
+		}
+	}
+	return out
+}
+
+// checkFeasible records why an assignment cannot be carried out.
+//
+// Caught here rather than at execution, because a masking run that fails
+// halfway leaves a table partly masked, which is worse than not starting: the
+// data is neither real nor safe, and nothing says which rows are which.
+func checkFeasible(a Assignment) Assignment {
+	if a.Transform == "" {
+		return a
+	}
+	if a.Column.Generated {
+		a.Problem = "the database computes this column, so it cannot be written to"
+		return a
+	}
+	t, ok := Lookup(a.Transform)
+	if !ok {
+		a.Problem = "there is no transform called " + a.Transform
+		return a
+	}
+	if a.Column.Unique && !t.PreservesUniqueness() {
+		a.Problem = fmt.Sprintf(
+			"%s does not preserve uniqueness and this column has a unique constraint, "+
+				"so the update would fail partway through and leave the table half masked",
+			a.Transform)
+		return a
+	}
+	if a.Transform == "nullify" && !a.Column.Nullable {
+		a.Problem = "the column is not nullable, so it cannot be set to null"
+		return a
+	}
+	return a
+}
+
+// Unclassified returns the assignments nothing matched.
+//
+// These are the point of the whole exercise. A column called customer_notes
+// that no rule covers holds whatever somebody typed, and shipping it because
+// nobody wrote a rule is the failure this reports rather than allows.
+func Unclassified(assignments []Assignment) []Assignment {
+	var out []Assignment
+	for _, a := range assignments {
+		if a.Transform == "" && looksSensitive(a.Column) {
+			out = append(out, a)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Table.String() != out[j].Table.String() {
+			return out[i].Table.String() < out[j].Table.String()
+		}
+		return out[i].Column.Name < out[j].Column.Name
+	})
+	return out
+}
+
+// looksSensitive decides which unmatched columns are worth asking about.
+//
+// A bigint called quantity is not worth a question, and asking about every
+// column in the schema would produce a list nobody reads, which is the same as
+// producing no list at all. Free text and unbounded strings are where anything
+// unexpected actually lives.
+func looksSensitive(c ColumnInfo) bool {
+	switch strings.ToLower(c.Type) {
+	case "text", "character varying", "character", "json", "jsonb", "xml":
+		return true
+	}
+	return false
+}
+
+// Problems returns the assignments that cannot be carried out.
+func Problems(assignments []Assignment) []Assignment {
+	var out []Assignment
+	for _, a := range assignments {
+		if a.Problem != "" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
