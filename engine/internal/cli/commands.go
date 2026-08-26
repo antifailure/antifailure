@@ -162,40 +162,6 @@ completes.`),
 	return cmd
 }
 
-func newInboxCommand(env *Env) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "inbox",
-		Short: "Read the mail and messages the environment tried to send",
-		Long: strings.TrimSpace(`
-Every message a captured provider was asked to send lands here instead of
-reaching a real address, with its links and one time codes extracted. It is how
-a magic link login works in an environment with no mail provider at all.`),
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "List captured messages",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af inbox list")
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "get <id>",
-		Short: "Show one message, with its links and codes",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af inbox get")
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "wait",
-		Short: "Wait for a message matching a recipient or subject",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af inbox wait")
-		},
-	})
-	return cmd
-}
-
 func newInsightsCommand(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "insights",

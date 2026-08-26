@@ -627,3 +627,95 @@ func probeInspected(
 	t.Fatal("the probe never finished")
 	return -1
 }
+
+func TestCapture_RecordsAMessageAndAnswersAsTheProviderWould(t *testing.T) {
+	r := requireRuntime(t)
+	img := curlImage(t)
+	id := envID(t, r, "capture1")
+
+	ca, err := envcert.Generate("test-capture", time.Now())
+	require.NoError(t, err)
+
+	// The mode that lets an agent finish a sign up. Nobody receives the mail,
+	// the application's own error handling never fires because the response is
+	// the shape its client expects, and the message is readable afterwards.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	payload := `{"from":"hello@shop.test","to":["someone@example.test"],` +
+		`"subject":"Confirm your email",` +
+		`"html":"<a href=\"https://shop.test/verify?token=Zq81LmPPqrs82kdlxx\">Confirm</a> code 481920"}`
+
+	_, err = r.Up(ctx, provider.EnvSpec{
+		EnvID: id,
+		Egress: &schema.Egress{
+			Default: schema.ModeBlock,
+			Rules:   []schema.EgressRule{{Host: "api.resend.com", Mode: schema.ModeCapture}},
+		},
+		CACertPEM: ca.CertPEM, CAKeyPEM: ca.KeyPEM,
+		Services: []provider.ServiceSpec{{
+			Name: "sender", Image: img, Kind: "worker",
+			Command: `curl -sS --max-time 25 -X POST https://api.resend.com/emails ` +
+				`-H 'content-type: application/json' -d '` + payload + `' > /tmp/out; sleep 45`,
+		}},
+	})
+	require.NoError(t, err)
+
+	msg, err := r.WaitForMessage(ctx, id, func(m local.Message) bool {
+		return m.Subject == "Confirm your email"
+	}, 60*time.Second)
+	require.NoError(t, err)
+
+	require.Equal(t, "resend", msg.Provider)
+	require.Equal(t, "email", msg.Kind)
+	require.Equal(t, "someone@example.test", msg.Recipient())
+	require.Equal(t, "481920", msg.Code, "the code an agent has to type is extracted")
+	require.Equal(t, "https://shop.test/verify?token=Zq81LmPPqrs82kdlxx", msg.Link())
+}
+
+func TestCapture_SendsNothingToTheRealProvider(t *testing.T) {
+	r := requireRuntime(t)
+	requireInternet(t)
+	img := curlImage(t)
+	id := envID(t, r, "capture2")
+
+	ca, err := envcert.Generate("test-capture2", time.Now())
+	require.NoError(t, err)
+
+	// The property that matters most about capture, checked rather than
+	// assumed: the request never leaves. A rule that recorded the message and
+	// forwarded it anyway would look identical from inside the environment and
+	// would email a real customer.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	_, err = r.Up(ctx, provider.EnvSpec{
+		EnvID: id,
+		Egress: &schema.Egress{
+			Default: schema.ModeBlock,
+			Rules:   []schema.EgressRule{{Host: allowedHost, Mode: schema.ModeCapture}},
+		},
+		CACertPEM: ca.CertPEM, CAKeyPEM: ca.KeyPEM,
+		Services: []provider.ServiceSpec{{
+			Name: "sender", Image: img, Kind: "worker",
+			Command: `curl -sS --max-time 25 -X POST https://` + allowedHost + `/anything ` +
+				`-d 'subject=captured' -o /tmp/body; sleep 45`,
+		}},
+	})
+	require.NoError(t, err)
+
+	_, err = r.WaitForMessage(ctx, id, func(m local.Message) bool { return true }, 60*time.Second)
+	require.NoError(t, err, "the request was not captured")
+
+	decisions, err := r.Decisions(ctx, id, 100)
+	require.NoError(t, err)
+	var sawCapture bool
+	for _, d := range decisions {
+		if d.Host == allowedHost && d.Mode == "capture" {
+			sawCapture = true
+			require.False(t, d.Allowed,
+				"a captured request is answered inside the environment and must not count as reaching out")
+		}
+	}
+	require.True(t, sawCapture, "the decision log does not show the capture")
+}

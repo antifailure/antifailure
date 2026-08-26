@@ -688,6 +688,18 @@ No mock matched {method} {path} on {host}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/mocking](/docs/guides/mocking/) |
 
+### AF-NET-011
+
+No message matching {match} arrived within {timeout}.
+
+**What to do.** Check 'af net log' to see whether the request was refused, and 'af inbox list' for what did arrive.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/inbox](/docs/guides/inbox/) |
+
 ### AF-NET-020
 
 {host} rejected the environment certificate, which usually means the client pins its own.

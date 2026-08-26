@@ -139,7 +139,9 @@ func (r *Runtime) startProxy(
 	if err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN040, "detail", "compiling the policy: "+err.Error())
 	}
-	if err := r.copyInto(ctx, resp.ID, configPath, compiled); err != nil {
+	// Readable only by root, and the sidecar is the one container that runs
+	// as root, because this file carries the authority's private key.
+	if err := r.copyInto(ctx, resp.ID, configPath, 0o600, compiled); err != nil {
 		return "", err
 	}
 
@@ -316,11 +318,11 @@ func (r *Runtime) ensureProxyImage(ctx context.Context, progress func(string)) e
 // the machine and editing a rule rebuilds nothing. The container has to exist
 // and must not have started, which is why the create and start are separated
 // around this call.
-func (r *Runtime) copyInto(ctx context.Context, id, path string, body []byte) error {
+func (r *Runtime) copyInto(ctx context.Context, id, path string, mode int64, body []byte) error {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	if err := tw.WriteHeader(&tar.Header{
-		Name: strings.TrimPrefix(path, "/"), Mode: 0o600, Size: int64(len(body)),
+		Name: strings.TrimPrefix(path, "/"), Mode: mode, Size: int64(len(body)),
 		ModTime: r.clock.Now().UTC(), Format: tar.FormatPAX, Typeflag: tar.TypeReg,
 	}); err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
@@ -426,4 +428,147 @@ func (r *Runtime) Decisions(ctx context.Context, envID string, limit int) ([]Dec
 		out = out[len(out)-limit:]
 	}
 	return out, nil
+}
+
+// Message is one message the sidecar captured instead of sending.
+type Message struct {
+	Event    string   `json:"event"`
+	AtRaw    string   `json:"at"`
+	Seq      uint64   `json:"seq"`
+	Provider string   `json:"provider"`
+	Kind     string   `json:"kind"`
+	From     string   `json:"from"`
+	To       []string `json:"to"`
+	Subject  string   `json:"subject"`
+	Text     string   `json:"text"`
+	HTML     string   `json:"html"`
+	Links    []string `json:"links"`
+	Code     string   `json:"code"`
+	Host     string   `json:"host"`
+	Path     string   `json:"path"`
+}
+
+// At returns the time the message was captured.
+func (m Message) At() time.Time {
+	t, _ := time.Parse(time.RFC3339Nano, m.AtRaw)
+	return t
+}
+
+// Recipient returns the first recipient, which is what a workflow waits on.
+func (m Message) Recipient() string {
+	if len(m.To) == 0 {
+		return ""
+	}
+	return m.To[0]
+}
+
+// Link returns the most likely link in the message, which is what an agent
+// following a magic link needs.
+func (m Message) Link() string {
+	if len(m.Links) == 0 {
+		return ""
+	}
+	return m.Links[0]
+}
+
+// Messages reads what the sidecar captured for an environment.
+func (r *Runtime) Messages(ctx context.Context, envID string, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	lines, err := r.sidecarLines(ctx, envID, limit*4)
+	if err != nil {
+		return nil, err
+	}
+	var out []Message
+	for _, line := range lines {
+		var m Message
+		if err := json.Unmarshal([]byte(line), &m); err != nil || m.Event != "message" {
+			continue
+		}
+		out = append(out, m)
+	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out, nil
+}
+
+// sidecarLines reads the tail of the sidecar's output.
+func (r *Runtime) sidecarLines(ctx context.Context, envID string, tail int) ([]string, error) {
+	id := proxyName(envID)
+	if _, err := r.cli.ContainerInspect(ctx, id); err != nil {
+		if client.IsErrNotFound(err) {
+			// Nothing running is not an error. Somebody asking what arrived
+			// before bringing the environment up should be told that, not
+			// handed a Docker error.
+			return nil, nil
+		}
+		return nil, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
+	}
+	rc, err := r.cli.ContainerLogs(ctx, id, container.LogsOptions{
+		ShowStdout: true, ShowStderr: true, Tail: strconv.Itoa(tail),
+	})
+	if err != nil {
+		return nil, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
+	}
+	defer func() { _ = rc.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(rc, 32<<20))
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
+	}
+	var out []string
+	for _, line := range strings.Split(stripDockerLogFraming(string(body)), "\n") {
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, "{") {
+			out = append(out, line)
+		}
+	}
+	return out, nil
+}
+
+// WaitForMessage blocks until a message arrives that matches, or the deadline
+// passes.
+//
+// The polling interval is short because a workflow is blocked on this: an
+// agent that signed up is standing still until the welcome email arrives, and
+// every second of interval is a second added to every test that waits.
+func (r *Runtime) WaitForMessage(
+	ctx context.Context, envID string, match func(Message) bool, timeout time.Duration,
+) (Message, error) {
+	deadline := r.clock.Now().Add(timeout)
+	seen := uint64(0)
+	if existing, err := r.Messages(ctx, envID, 200); err == nil {
+		for _, m := range existing {
+			if m.Seq > seen {
+				seen = m.Seq
+			}
+			// Checked before waiting, because the message often arrived
+			// before anybody started waiting for it. A wait that only ever
+			// looks forward is how a test flakes on a fast machine.
+			if match(m) {
+				return m, nil
+			}
+		}
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return Message{}, ctx.Err()
+		case <-r.clock.After(250 * time.Millisecond):
+		}
+		msgs, err := r.Messages(ctx, envID, 200)
+		if err != nil {
+			return Message{}, err
+		}
+		for _, m := range msgs {
+			if m.Seq > seen && match(m) {
+				return m, nil
+			}
+		}
+		if !r.clock.Now().Before(deadline) {
+			return Message{}, aferrors.Coded(aferrors.AFNET011,
+				"match", "the filter", "timeout", timeout.Round(time.Second).String())
+		}
+	}
 }

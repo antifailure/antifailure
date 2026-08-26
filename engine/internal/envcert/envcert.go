@@ -107,9 +107,12 @@ func TrustEnv() map[string]string {
 		"CURL_CA_BUNDLE":      BundlePath,
 		"GIT_SSL_CAINFO":      BundlePath,
 		"AWS_CA_BUNDLE":       BundlePath,
-		// Deno and Bun each read their own.
-		"DENO_CERT":     BundlePath,
-		"NODE_OPTIONS":  "--use-openssl-ca",
-		"BUN_CA_BUNDLE": BundlePath,
+		"DENO_CERT":           BundlePath,
 	}
+	// Deliberately absent: NODE_OPTIONS=--use-openssl-ca. It looks like it
+	// helps and does the opposite, switching Node to OpenSSL's own store and
+	// making it ignore NODE_EXTRA_CA_CERTS, so every HTTPS call fails with
+	// "self-signed certificate in certificate chain" and nothing in the
+	// environment explains why. Bun reads NODE_EXTRA_CA_CERTS too, so it needs
+	// nothing of its own.
 }

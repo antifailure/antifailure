@@ -631,3 +631,43 @@ func (o *Orchestrator) Decisions(ctx context.Context, limit int) ([]local.Decisi
 	// wants to know what the environment reached is while it is doing it.
 	return rt.Decisions(ctx, o.envID, limit)
 }
+
+// Messages returns what the environment captured instead of sending.
+func (o *Orchestrator) Messages(ctx context.Context, limit int) ([]local.Message, error) {
+	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rt.Close() }()
+	return rt.Messages(ctx, o.envID, limit)
+}
+
+// WaitForMessage blocks until a matching message arrives.
+func (o *Orchestrator) WaitForMessage(
+	ctx context.Context, to, subject string, timeout time.Duration,
+) (local.Message, error) {
+	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	if err != nil {
+		return local.Message{}, err
+	}
+	defer func() { _ = rt.Close() }()
+
+	return rt.WaitForMessage(ctx, o.envID, func(m local.Message) bool {
+		if to != "" {
+			matched := false
+			for _, r := range m.To {
+				if strings.EqualFold(r, to) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return false
+			}
+		}
+		if subject != "" && !strings.Contains(strings.ToLower(m.Subject), strings.ToLower(subject)) {
+			return false
+		}
+		return true
+	}, timeout)
+}

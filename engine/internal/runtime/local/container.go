@@ -53,6 +53,20 @@ func (r *Runtime) startService(
 	if err := journal("container", name); err != nil {
 		return running, err
 	}
+	// A container left by an interrupted run holds the name. Reusing a running
+	// one keeps Up idempotent; replacing a stopped one is what makes a second
+	// Up after a crash work rather than fail on a name conflict.
+	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
+		if existing.State != nil && existing.State.Running {
+			running.ContainerID = existing.ID
+			running.State = "running"
+			running.Ready = true
+			return running, nil
+		}
+		if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
+			return running, rmErr
+		}
+	}
 
 	id, err := r.create(ctx, spec, s, nets, proxyIP, name, "")
 	if err != nil {
@@ -355,7 +369,12 @@ func (r *Runtime) installCA(ctx context.Context, id string, spec provider.EnvSpe
 	if spec.CACertPEM == "" {
 		return nil
 	}
-	return r.copyInto(ctx, id, envcert.BundlePath, []byte(spec.CACertPEM))
+	// World readable, because a certificate authority's certificate is public
+	// by construction and the service does not run as root. Copying it in at
+	// 0600 produced a container whose runtime could see the file, could not
+	// open it, and reported a self-signed certificate error that pointed
+	// nowhere near the permissions.
+	return r.copyInto(ctx, id, envcert.BundlePath, 0o644, []byte(spec.CACertPEM))
 }
 
 // runOnce runs a command to completion in a throwaway container.

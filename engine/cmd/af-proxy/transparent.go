@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/policy"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // The transparent listeners are the other half of what the DNS server starts.
@@ -57,6 +58,13 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 		Event: "decision", Method: req.Method, Host: host, Port: port, Path: req.URL.Path,
 		Mode: string(d.Mode), Rule: d.RuleHost, Reason: d.Reason(),
 		Allowed: d.Allowed(), Via: "transparent",
+	}
+	if d.Mode == schema.ModeCapture {
+		rec.Status = http.StatusOK
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		p.capture(conn, req, host)
+		return
 	}
 	if !d.Allowed() {
 		rec.Status = http.StatusForbidden

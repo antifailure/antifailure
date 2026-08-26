@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/policy"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // Reading inside TLS is what capture, mock, sandbox, and any rule naming a
@@ -235,6 +236,13 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 		Event: "decision", Method: req.Method, Host: host, Port: 443, Path: req.URL.Path,
 		TLS: true, Mode: string(d.Mode), Rule: d.RuleHost, Reason: d.Reason(),
 		Allowed: d.Allowed(), Via: "inspect",
+	}
+	if d.Mode == schema.ModeCapture {
+		rec.Status = http.StatusOK
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		p.capture(w, req, host)
+		return false
 	}
 	if !d.Allowed() {
 		rec.Status = http.StatusForbidden

@@ -105,6 +105,12 @@ func TestTrustEnv_CoversTheRuntimesThatDisagree(t *testing.T) {
 	} {
 		require.Equal(t, envcert.BundlePath, env[name], "%s is not pointed at the bundle", name)
 	}
+	// NODE_OPTIONS=--use-openssl-ca looks like it helps here and does the
+	// opposite: it switches Node to OpenSSL's own store, which makes it ignore
+	// NODE_EXTRA_CA_CERTS, and every HTTPS call in the environment fails with
+	// a self-signed certificate error that nothing explains. Setting it cost
+	// an afternoon once.
+	require.NotContains(t, env, "NODE_OPTIONS")
 }
 
 func TestCertificate_SignsALeafThatVerifies(t *testing.T) {

@@ -454,6 +454,13 @@ errors:
     docs: guides/workflows
     retryable: false
     exit_code: 8
+  - code: AF-NET-011
+    area: NET
+    message: "No message matching {match} arrived within {timeout}."
+    next_step: "Check 'af net log' to see whether the request was refused, and 'af inbox list' for what did arrive."
+    docs: guides/inbox
+    retryable: true
+    exit_code: 8
   - code: AF-AGT-010
     area: AGT
     message: "Invariant {invariant} did not finish within {timeout}."

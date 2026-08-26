@@ -263,6 +263,22 @@ func (p *proxy) emit(r record) {
 	_ = p.out.Encode(r)
 }
 
+// emitMessage writes a captured message to the log.
+//
+// It shares the encoder's lock with the decisions, so the two streams
+// interleave by line rather than by byte, and a reader can take the log apart
+// with nothing more than a JSON decoder per line.
+func (p *proxy) emitMessage(m message) {
+	m.Env = p.envID
+	if m.At == "" {
+		m.At = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	m.Seq = p.seq.Add(1)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_ = p.out.Encode(m)
+}
+
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodConnect {
 		p.serveConnect(w, r)
@@ -291,7 +307,17 @@ func (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 		TLS: true, Mode: string(d.Mode), Rule: d.RuleHost,
 		Reason: d.Reason(), Allowed: d.Allowed(),
 	}
-	if !d.Allowed() {
+	// Whether to read inside comes before whether to allow, and the order is
+	// load bearing. Capture, mock, and sandbox all answer from inside the
+	// tunnel and none of them counts as reaching out, so testing Allowed first
+	// refuses the CONNECT and the request that would have been captured never
+	// exists. That is exactly what happened: a client that honoured its proxy
+	// variables got a 403 for a host set to capture, while a client that
+	// ignored them was captured correctly, so the mode worked or did not
+	// depending on which HTTP library the application happened to use.
+	inspect := p.ca != nil && p.engine.InspectsHost(host, port)
+
+	if !inspect && !d.Allowed() {
 		rec.Status = http.StatusForbidden
 		rec.Duration = time.Since(started).String()
 		p.emit(rec)
@@ -326,7 +352,7 @@ func (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 	// A client that opted into the proxy still gets its request read when the
 	// policy needs it read. The tunnel it just opened carries a TLS handshake
 	// like any other, and the same rule decides what happens to it.
-	if p.ca != nil && p.engine.InspectsHost(host, port) {
+	if inspect {
 		rec.Status = http.StatusOK
 		rec.Duration = time.Since(started).String()
 		p.emit(rec)

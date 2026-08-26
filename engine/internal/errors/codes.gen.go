@@ -152,6 +152,8 @@ const (
 	AFNET005 Code = "AF-NET-005"
 	// No mock matched {method} {path} on {host}.
 	AFNET010 Code = "AF-NET-010"
+	// No message matching {match} arrived within {timeout}.
+	AFNET011 Code = "AF-NET-011"
 	// {host} rejected the environment certificate, which usually means the
 	// client pins its own.
 	AFNET020 Code = "AF-NET-020"
@@ -694,6 +696,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/mocking",
 		Retryable: false,
 		ExitCode:  ExitPolicyDenied,
+	},
+	AFNET011: {
+		Code:      AFNET011,
+		Area:      "NET",
+		Message:   "No message matching {match} arrived within {timeout}.",
+		NextStep:  "Check 'af net log' to see whether the request was refused, and 'af inbox list' for what did arrive.",
+		Docs:      "guides/inbox",
+		Retryable: true,
+		ExitCode:  ExitTestFailure,
 	},
 	AFNET020: {
 		Code:      AFNET020,
