@@ -17,6 +17,12 @@ This file is updated in the same pull request as the code it describes.
 ## What works today
 
 ```
+af up          builds every service, branches a Postgres golden, seals the
+               network, and prints where the app is
+af down        removes every container, network, and database branch it made
+af status      what is running for this branch, and where
+af net policy   the effective egress policy, in the order that decides
+af net explain  what would happen to one request, and which rule decides it
 af doctor      ten checks, each with a remediation
 af init        reads a repository, writes a manifest, explains what it assumed
 af explain     shows the effective configuration with every default resolved
@@ -24,6 +30,24 @@ af version     version, commit, edition, platform
 ```
 
 Everything else in the command tree exists and returns AF-RUN-001.
+
+Proved end to end on a Node repository with no Dockerfile: a generated
+build, a Postgres branch reachable at `db:5432` from inside the environment,
+the app serving on localhost, and nothing left on the daemon after `af down`.
+
+### What the containment is, exactly
+
+Today an environment has **no route to the internet at all**. That is not the
+per host policy the manifest describes; the policy engine decides correctly and
+nothing enforces it per host yet, because the proxy sidecar is Phase 5.
+
+The seal itself is real and measured. The first implementation disabled IP
+masquerading, which looks like it removes a container's route out and does not:
+on Docker Desktop the traffic is translated again by the virtual machine's own
+gateway, and a supposedly sealed service still reached 1.1.1.1. What works is an
+internal network, with a small forwarder per web service publishing it back to
+the host. There is a test for the seal and a negative control beside it, so the
+seal cannot pass because the probe was broken.
 
 ## Phase 1. Foundation
 
@@ -94,32 +118,59 @@ Everything else in the command tree exists and returns AF-RUN-001.
 | `engine/conformance` | proven | 23 behaviors |
 | `internal/db/docker` | proven | full suite green against a real daemon |
 
-## Phases 4 to 14
+## Phase 4. Build and runtime
+
+| Component | State | Notes |
+| --- | --- | --- |
+| `internal/dockerutil` | proven | one label scheme for every component that creates Docker resources; filters match on the label being present, not its value, so a resource an older release stamped differently is still found |
+| `internal/build` context | proven | deterministic tar, content digest as the cache key, symlinks out of the root dropped |
+| `internal/build` ignore | proven | `.dockerignore` implemented here rather than added as a dependency |
+| `internal/build` buildpacks | proven | Go, Node, Python, Ruby; the first three are built against a real daemon in CI, so a generated Dockerfile that does not build fails the suite |
+| `internal/build` docker | proven | image tag derived from context, Dockerfile, target, and args; build output redacted at the writer |
+| `internal/runtime/local` | proven | 12 behaviors against a real daemon, seal measured with a negative control |
+| `internal/env` | proven | lock, state, journal, database, build, runtime, in the one order that works |
+| `internal/policy` | proven | 100 percent, 48ns per decision, zero allocations |
+
+## Phase 5. Egress control
+
+| Sub-phase | State | Notes |
+| --- | --- | --- |
+| Policy decision function | proven | `internal/policy`, and `af net policy` and `af net explain` run off it |
+| Proxy sidecar | planned | until it lands, an environment has no route out at all rather than a per host one |
+| Capture, mock, sandbox, synth | planned | |
+| Inbox and webhooks | planned | |
+
+## Phases 6 to 14
 
 Not started.
-
 ## Where to pick up
 
 In order of what unblocks the most:
 
-1. The masking rules model, SQL compiler, and resumable executor, so that
+1. The proxy sidecar, so that egress becomes the per host policy the manifest
+   already describes and `af net explain` already answers about. The decision
+   function is done and proven; what is missing is the thing that consults it
+   on a real connection. This is also what turns the ingress forwarder into
+   the component it was designed to become.
+2. The masking rules model, SQL compiler, and resumable executor, so that
    `af mask plan` and `af mask apply` work against a real database. The
    transforms and the key hierarchy are done; what is missing is reading the
    Postgres catalog, compiling chunked UPDATE statements in dependency order,
    and checkpointing per chunk.
-2. `internal/verify`'s streaming table scan and signed attestation, so that a
+3. `internal/verify`'s streaming table scan and signed attestation, so that a
    golden can be marked verified for real rather than by the Docker provider's
    current assumption that a committed image was verified.
-3. `internal/policy`, the egress decision function, which is pure and
-   self-contained and is the input to everything in phase 5.
-4. `internal/build` and `internal/runtime/local`, so that `af up` has services
-   to run alongside the database branch it can already create.
-5. Wiring `af up` and `af down` to the journal, the lock, and the Docker
-   provider, which is the first moment the product does the thing it promises.
+4. `af logs`, which is a small amount of work over what the runtime already
+   does and is the first thing anybody asks for when a service does not start.
+5. The agent runner, Phase 6, which is where bring your own model key lands.
 
-Two notes for whoever picks this up. The conformance suite is not yet tested
+Three notes for whoever picks this up. The conformance suite is not yet tested
 against a deliberately buggy provider, so it is not yet proved that every
 subtest can fail; that is worth doing before a second provider is written
 against it. And the Docker provider reports every committed image as verified,
 which is true by construction today because the commit is the last step of a
-refresh, but will stop being true once goldens can be imported.
+refresh, but will stop being true once goldens can be imported. And `af up`
+creates an empty golden when no source database is configured, so the schema
+arrives with the migrations rather than from production; masking and
+verification run and trivially pass on no rows, which is the honest answer
+rather than a skipped step.
