@@ -116,6 +116,18 @@ The build context for {service} is {size}, above the {limit} limit.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/build](/docs/guides/build/) |
 
+### AF-BLD-004
+
+The build context for {service} holds more than {count} files; {path} is where the count was reached.
+
+**What to do.** Add the generated directories to .dockerignore; a build context should hold source, not output.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/builds](/docs/guides/builds/) |
+
 ### AF-BLD-010
 
 No build strategy could be detected for {service}.

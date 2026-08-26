@@ -266,6 +266,13 @@ errors:
     docs: guides/build
     retryable: false
     exit_code: 3
+  - code: AF-BLD-004
+    area: BLD
+    message: "The build context for {service} holds more than {count} files; {path} is where the count was reached."
+    next_step: "Add the generated directories to .dockerignore; a build context should hold source, not output."
+    docs: guides/builds
+    retryable: false
+    exit_code: 3
   - code: AF-BLD-010
     area: BLD
     message: "No build strategy could be detected for {service}."

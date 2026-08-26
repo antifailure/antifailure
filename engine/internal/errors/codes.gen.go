@@ -22,6 +22,9 @@ const (
 	AFBLD002 Code = "AF-BLD-002"
 	// The build context for {service} is {size}, above the {limit} limit.
 	AFBLD003 Code = "AF-BLD-003"
+	// The build context for {service} holds more than {count} files;
+	// {path} is where the count was reached.
+	AFBLD004 Code = "AF-BLD-004"
 	// No build strategy could be detected for {service}.
 	AFBLD010 Code = "AF-BLD-010"
 
@@ -266,6 +269,15 @@ var catalog = map[Code]Entry{
 		Message:   "The build context for {service} is {size}, above the {limit} limit.",
 		NextStep:  "Add large directories to .dockerignore; the build does not need them.",
 		Docs:      "guides/build",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFBLD004: {
+		Code:      AFBLD004,
+		Area:      "BLD",
+		Message:   "The build context for {service} holds more than {count} files; {path} is where the count was reached.",
+		NextStep:  "Add the generated directories to .dockerignore; a build context should hold source, not output.",
+		Docs:      "guides/builds",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
