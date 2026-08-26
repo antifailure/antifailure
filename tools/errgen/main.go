@@ -33,6 +33,12 @@ type entry struct {
 	Docs      string `yaml:"docs"`
 	Retryable bool   `yaml:"retryable"`
 	ExitCode  int    `yaml:"exit_code"`
+	// Planned marks a code reserved for a feature this version does not have.
+	// The constant is still generated, so the code that will return it compiles
+	// the moment it is written, and the reference page leaves it out: a page
+	// describing errors the software cannot produce sends somebody searching
+	// for their problem to a description of a different one.
+	Planned bool `yaml:"planned"`
 }
 
 type catalog struct {
@@ -311,13 +317,30 @@ func renderDocs(es []entry) []byte {
 
 	byArea := map[string][]entry{}
 	var areas []string
+	planned := 0
 	for _, e := range es {
+		// Reserved codes are not documented. Somebody reading this page is
+		// looking up an error they just saw, and an entry for something this
+		// version cannot produce is at best noise and at worst a wrong answer
+		// that looks right.
+		if e.Planned {
+			planned++
+			continue
+		}
 		if _, ok := byArea[e.Area]; !ok {
 			areas = append(areas, e.Area)
 		}
 		byArea[e.Area] = append(byArea[e.Area], e)
 	}
 	sort.Strings(areas)
+
+	if planned > 0 {
+		fmt.Fprintf(&b,
+			"%d further codes are reserved for features this version does not have. "+
+				"They are in `engine/internal/errors/catalog.yaml` and are left out here "+
+				"because this page is for looking up an error you have actually seen.\n\n",
+			planned)
+	}
 
 	for _, a := range areas {
 		fmt.Fprintf(&b, "## %s\n\n", areaNames[a])

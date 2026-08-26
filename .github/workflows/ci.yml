@@ -42,7 +42,15 @@ jobs:
           go run ./tools/errgen
           go run ./tools/proxysrc
           (cd engine && go test ./internal/policy -update-vectors)
+          (cd engine && go test ./internal/cli -update-reference)
           git diff --exit-code
+
+      - name: The error catalog and the code agree
+        # The reference page promises that a code with no entry fails the build
+        # and an entry nothing returns fails it too. It promised that for a
+        # while before anything enforced it, which is how a claim in
+        # documentation quietly stops being true.
+        run: go run ./tools/errcheck .
 
       - name: Vet
         run: cd engine && go vet ./...

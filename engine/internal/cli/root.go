@@ -362,3 +362,23 @@ Global flags:
 
 Run "{{.CommandPath}} [command] --help" for more about a command.{{end}}
 `
+
+// RootForDocs builds the command tree for the reference generator.
+//
+// It exists because the generator has to read the same tree the binary serves,
+// and the tree is built inside Execute alongside a great deal of runtime setup
+// it has no business doing: no working directory, no clock, no output.
+//
+// Nothing here runs a command. The generator reads names, descriptions, and
+// flags, so the environment it is given only has to be non-nil, and giving it
+// a real one would mean generating documentation could touch a Docker daemon.
+func RootForDocs() *cobra.Command {
+	return newRootCommand(&Env{
+		Out:      NewOutput(io.Discard, io.Discard),
+		Clock:    clock.New(),
+		Redactor: redact.New(),
+		Getenv:   func(string) string { return "" },
+		Stdin:    strings.NewReader(""),
+		WorkDir:  ".",
+	})
+}

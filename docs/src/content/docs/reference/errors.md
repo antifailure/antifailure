@@ -28,6 +28,8 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
+38 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+
 ## Agents
 
 ### AF-AGT-001
@@ -77,30 +79,6 @@ The agent runner could not be found: {detail}
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/agents](/docs/concepts/agents/) |
-
-### AF-AGT-010
-
-Invariant {invariant} did not finish within {timeout}.
-
-**What to do.** Make the invariant cheaper; it runs after every workflow and must be a quick read.
-
-| | |
-| --- | --- |
-| Exit code | `8` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/invariants](/docs/guides/invariants/) |
-
-### AF-AGT-011
-
-Invariant {invariant} is not read only.
-
-**What to do.** Rewrite it as a single SELECT; invariants run inside a read only transaction.
-
-| | |
-| --- | --- |
-| Exit code | `3` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/invariants](/docs/guides/invariants/) |
 
 ## Build
 
@@ -166,32 +144,6 @@ No build strategy could be detected for {service}.
 
 ## Control plane
 
-### AF-CP-001
-
-The control plane at {url} could not be reached.
-
-**What to do.** Antifailure works without it. Unset control_plane.url to run fully locally.
-
-| | |
-| --- | --- |
-| Exit code | `5` |
-| Retryable | Yes. The engine retries automatically where it can. |
-| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
-
-### AF-CP-002
-
-The control plane rejected this engine's token.
-
-**What to do.** Run 'af login' to obtain a new token.
-
-| | |
-| --- | --- |
-| Exit code | `4` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
-
-## Control plane
-
 ### AF-CPL-001
 
 No control plane token is configured.
@@ -216,31 +168,7 @@ The control plane has no environment called {env}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
 
-### AF-CPL-003
-
-The control plane could not be reached: {detail}
-
-**What to do.** Environments keep working without it; events are buffered and sent when it returns. Check AF_CONTROL_PLANE_URL and the network.
-
-| | |
-| --- | --- |
-| Exit code | `5` |
-| Retryable | Yes. The engine retries automatically where it can. |
-| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
-
 ## Database
-
-### AF-DB-001
-
-The database provider {provider} is not registered in this build.
-
-**What to do.** Set database.provider to one of: {available}.
-
-| | |
-| --- | --- |
-| Exit code | `3` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/overview](/docs/providers/overview/) |
 
 ### AF-DB-002
 
@@ -302,54 +230,6 @@ The provider's concurrent branch limit ({limit}) is reached.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/limits](/docs/providers/limits/) |
 
-### AF-DB-007
-
-Extension {extension} is required by the golden and is not available on the target.
-
-**What to do.** Install {extension} on the target, or remove its use from the schema before refreshing.
-
-| | |
-| --- | --- |
-| Exit code | `5` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/overview](/docs/providers/overview/) |
-
-### AF-DB-010
-
-The storage pool has {available} free and the operation needs {needed}.
-
-**What to do.** Run 'af golden gc' to reclaim unreferenced versions, or grow the pool.
-
-| | |
-| --- | --- |
-| Exit code | `5` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/goldens](/docs/concepts/goldens/) |
-
-### AF-DB-020
-
-Personas cannot be provisioned because {provider} creates users only through its own API.
-
-**What to do.** Configure SANDBOX mode for {provider} so that personas are created in its sandbox tenant.
-
-| | |
-| --- | --- |
-| Exit code | `3` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/personas](/docs/guides/personas/) |
-
-### AF-DB-030
-
-Migrations failed on the branch: {detail}
-
-**What to do.** Read the migration log at {location}, fix the migration, and push again.
-
-| | |
-| --- | --- |
-| Exit code | `5` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/insights](/docs/concepts/insights/) |
-
 ## Detection
 
 ### AF-DET-001
@@ -364,131 +244,7 @@ No application could be detected in {path}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/detection](/docs/concepts/detection/) |
 
-### AF-DET-002
-
-Detection stopped after {budget} with partial results.
-
-**What to do.** Add large directories to .gitignore or .dockerignore, or pass --detect-timeout to raise the budget.
-
-| | |
-| --- | --- |
-| Exit code | `3` |
-| Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/detection](/docs/concepts/detection/) |
-
-### AF-DET-003
-
-Services {first} and {second} both claim port {port}.
-
-**What to do.** Give one of them a different port in antifailure.yaml.
-
-| | |
-| --- | --- |
-| Exit code | `3` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/detection](/docs/concepts/detection/) |
-
-## Enterprise
-
-### AF-EE-001
-
-The enterprise license could not be verified.
-
-**What to do.** Reinstall the license with 'af license install'; the token may have been truncated in transit.
-
-| | |
-| --- | --- |
-| Exit code | `4` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [enterprise/licensing](/docs/enterprise/licensing/) |
-
-### AF-EE-002
-
-The system clock is {skew} behind the last time this license was seen.
-
-**What to do.** Correct the system clock. Enterprise features resume once it passes the recorded time.
-
-| | |
-| --- | --- |
-| Exit code | `4` |
-| Retryable | Yes. The engine retries automatically where it can. |
-| More | [enterprise/licensing](/docs/enterprise/licensing/) |
-
-### AF-EE-003
-
-This license was issued for organization {issued_for} and this instance is {actual}.
-
-**What to do.** Install the license issued for {actual}.
-
-| | |
-| --- | --- |
-| Exit code | `4` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [enterprise/licensing](/docs/enterprise/licensing/) |
-
-### AF-EE-004
-
-The license covers {seats} seats and they are all in use.
-
-**What to do.** Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed.
-
-| | |
-| --- | --- |
-| Exit code | `6` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [enterprise/licensing](/docs/enterprise/licensing/) |
-
-### AF-EE-010
-
-Organization policy {policy} refuses this environment: {detail}
-
-**What to do.** Ask an organization administrator to review {policy}, or bring the repository into compliance.
-
-| | |
-| --- | --- |
-| Exit code | `6` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [enterprise/policy](/docs/enterprise/policy/) |
-
-## GitHub
-
-### AF-GH-001
-
-The webhook signature did not verify.
-
-**What to do.** Confirm that the webhook secret stored for this installation matches the one configured in GitHub.
-
-| | |
-| --- | --- |
-| Exit code | `4` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/github](/docs/guides/github/) |
-
-### AF-GH-002
-
-The GitHub API rejected the request: {detail}
-
-**What to do.** Check the App's permissions against the list on the GitHub integration page.
-
-| | |
-| --- | --- |
-| Exit code | `4` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/github](/docs/guides/github/) |
-
 ## Infrastructure
-
-### AF-INF-001
-
-The cloud API returned a quota error for {quota} in {region}.
-
-**What to do.** Request more {quota} in {region}, then run the command again.
-
-| | |
-| --- | --- |
-| Exit code | `5` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [self-hosting/azure](/docs/self-hosting/azure/) |
 
 ### AF-INF-002
 
@@ -503,30 +259,6 @@ The provider rate limited this operation and asked to wait {retry_after}.
 | More | [providers/limits](/docs/providers/limits/) |
 
 ## Load
-
-### AF-LOD-001
-
-The load target {target} is not an environment this engine created.
-
-**What to do.** Point the load run at an environment from 'af status'. Load is never generated against an external host.
-
-| | |
-| --- | --- |
-| Exit code | `6` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/load](/docs/concepts/load/) |
-
-### AF-LOD-002
-
-The load run was aborted after the error rate exceeded {threshold} for {duration}.
-
-**What to do.** The service is failing under this load. The report above shows the first failing endpoint.
-
-| | |
-| --- | --- |
-| Exit code | `8` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/load](/docs/concepts/load/) |
 
 ### AF-LOD-010
 
@@ -614,18 +346,6 @@ The manifest at {path} is larger than the {limit} limit.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/manifest](/docs/reference/manifest/) |
 
-### AF-MAN-006
-
-The path {path} in the manifest resolves outside the repository.
-
-**What to do.** Use a path relative to the repository root, with no leading slash and no parent directory segments.
-
-| | |
-| --- | --- |
-| Exit code | `3` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/manifest](/docs/reference/manifest/) |
-
 ## Masking and verification
 
 ### AF-MSK-001
@@ -651,66 +371,6 @@ Verification found data matching {detector} in {table}.{column}.
 | Exit code | `7` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/verification](/docs/concepts/verification/) |
-
-### AF-MSK-003
-
-The masking rule for {table}.{column} names a column that does not exist in the schema.
-
-**What to do.** Remove the rule or correct the name; 'af mask plan' lists the columns it found.
-
-| | |
-| --- | --- |
-| Exit code | `3` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/masking](/docs/concepts/masking/) |
-
-### AF-MSK-004
-
-Masking would violate the check constraint {constraint} on {table}.{column}.
-
-**What to do.** Choose a format preserving transform for {table}.{column} that satisfies {constraint}.
-
-| | |
-| --- | --- |
-| Exit code | `7` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/transforms](/docs/reference/transforms/) |
-
-### AF-MSK-005
-
-Masking is only permitted on a golden candidate, and {target} is a source database.
-
-**What to do.** Run masking against a golden candidate; the engine never rewrites a source.
-
-| | |
-| --- | --- |
-| Exit code | `6` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/masking](/docs/concepts/masking/) |
-
-### AF-MSK-007
-
-The transform on {table}.{column} produced duplicate values under the unique constraint {constraint}.
-
-**What to do.** Use a transform that preserves uniqueness, such as email or uuid_remap, for {table}.{column}.
-
-| | |
-| --- | --- |
-| Exit code | `7` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/transforms](/docs/reference/transforms/) |
-
-### AF-MSK-008
-
-The columns {columns} hold free text and have no masking rule.
-
-**What to do.** Give each column a rule, or allowlist it explicitly if it is known to hold no personal data.
-
-| | |
-| --- | --- |
-| Exit code | `7` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/masking](/docs/concepts/masking/) |
 
 ### AF-MSK-010
 
@@ -750,30 +410,6 @@ The request to {host} was blocked by rule {rule}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/cli/af_net_explain](/docs/reference/cli/af_net_explain/) |
 
-### AF-NET-004
-
-A request to {host} carried a live credential in the {header} header and was blocked.
-
-**What to do.** Replace the credential with a sandbox key; an environment must never hold a live one.
-
-| | |
-| --- | --- |
-| Exit code | `6` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/egress](/docs/concepts/egress/) |
-
-### AF-NET-005
-
-The sandbox credential for {host} was rejected: {detail}
-
-**What to do.** Check the sandbox key's permissions at the provider.
-
-| | |
-| --- | --- |
-| Exit code | `4` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/sandbox](/docs/guides/sandbox/) |
-
 ### AF-NET-010
 
 No mock matched {method} {path} on {host}.
@@ -809,42 +445,6 @@ The webhook could not be delivered to {service}: {detail}
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/webhooks](/docs/guides/webhooks/) |
-
-### AF-NET-020
-
-{host} rejected the environment certificate, which usually means the client pins its own.
-
-**What to do.** Set the host to ALLOW so that its traffic is not intercepted, or disable pinning in the client for previews.
-
-| | |
-| --- | --- |
-| Exit code | `6` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/egress](/docs/concepts/egress/) |
-
-### AF-NET-021
-
-{host} resolves only to IPv6 and the environment has IPv6 disabled.
-
-**What to do.** Set egress.allow_ipv6 for this environment, or use a host with an IPv4 address.
-
-| | |
-| --- | --- |
-| Exit code | `6` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/egress](/docs/concepts/egress/) |
-
-### AF-NET-030
-
-The synthesis model returned no usable response for {method} {path}.
-
-**What to do.** SYNTH is an escape hatch, not a pass. Write a fixture for this endpoint instead.
-
-| | |
-| --- | --- |
-| Exit code | `5` |
-| Retryable | Yes. The engine retries automatically where it can. |
-| More | [guides/synth](/docs/guides/synth/) |
 
 ## Runtime
 
@@ -932,18 +532,6 @@ Writing to {path} failed because the disk is full; {needed} is required.
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/local-runtime](/docs/guides/local-runtime/) |
 
-### AF-RUN-011
-
-The local state database at {path} is corrupt.
-
-**What to do.** A backup was written to {backup}. The database was rebuilt; run 'af down --all' to reconcile any resources it no longer tracks.
-
-| | |
-| --- | --- |
-| Exit code | `1` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/journal](/docs/concepts/journal/) |
-
 ### AF-RUN-020
 
 Docker has no room left for the environment: {detail}
@@ -1004,32 +592,6 @@ Service {service} depends on {missing}, which the manifest does not declare.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/manifest](/docs/reference/manifest/) |
 
-## Scheduling
-
-### AF-SCH-001
-
-No runtime satisfies the placement requirement {requirement}.
-
-**What to do.** Register a runtime that meets it, or relax the requirement in the placement rules.
-
-| | |
-| --- | --- |
-| Exit code | `5` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [enterprise/runtimes](/docs/enterprise/runtimes/) |
-
-### AF-SCH-002
-
-The organization is at its concurrent environment limit ({limit}); this run is queued at position {position}.
-
-**What to do.** It will start automatically. Tear down an unused environment to start sooner.
-
-| | |
-| --- | --- |
-| Exit code | `5` |
-| Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/scheduling](/docs/concepts/scheduling/) |
-
 ## Secrets
 
 ### AF-SEC-001
@@ -1044,18 +606,6 @@ The variables {names} are declared in the manifest but were not found in any con
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/secrets](/docs/guides/secrets/) |
 
-### AF-SEC-002
-
-The credential for {source} was rejected after one refresh.
-
-**What to do.** Rotate the credential and store the new value where {source} reads it.
-
-| | |
-| --- | --- |
-| Exit code | `4` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/secrets](/docs/guides/secrets/) |
-
 ### AF-SEC-003
 
 The value supplied for {name} carries a live credential prefix, and {name} is configured for sandbox use.
@@ -1065,18 +615,6 @@ The value supplied for {name} carries a live credential prefix, and {name} is co
 | | |
 | --- | --- |
 | Exit code | `6` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/secrets](/docs/guides/secrets/) |
-
-### AF-SEC-004
-
-No operating system keyring is available and no fallback passphrase is set.
-
-**What to do.** Set AF_KEYRING_PASSPHRASE to use the encrypted file fallback, or install a Secret Service provider.
-
-| | |
-| --- | --- |
-| Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/secrets](/docs/guides/secrets/) |
 

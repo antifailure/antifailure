@@ -61,6 +61,7 @@ errors:
     retryable: false
     exit_code: 3
   - code: AF-MAN-006
+    planned: true
     area: MAN
     message: "The path {path} in the manifest resolves outside the repository."
     next_step: "Use a path relative to the repository root, with no leading slash and no parent directory segments."
@@ -77,6 +78,7 @@ errors:
     retryable: false
     exit_code: 3
   - code: AF-DET-002
+    planned: true
     area: DET
     message: "Detection stopped after {budget} with partial results."
     next_step: "Add large directories to .gitignore or .dockerignore, or pass --detect-timeout to raise the budget."
@@ -84,6 +86,7 @@ errors:
     retryable: true
     exit_code: 3
   - code: AF-DET-003
+    planned: true
     area: DET
     message: "Services {first} and {second} both claim port {port}."
     next_step: "Give one of them a different port in antifailure.yaml."
@@ -100,6 +103,7 @@ errors:
     retryable: false
     exit_code: 3
   - code: AF-SEC-002
+    planned: true
     area: SEC
     message: "The credential for {source} was rejected after one refresh."
     next_step: "Rotate the credential and store the new value where {source} reads it."
@@ -121,6 +125,7 @@ errors:
     retryable: true
     exit_code: 1
   - code: AF-SEC-004
+    planned: true
     area: SEC
     message: "No operating system keyring is available and no fallback passphrase is set."
     next_step: "Set AF_KEYRING_PASSPHRASE to use the encrypted file fallback, or install a Secret Service provider."
@@ -130,6 +135,7 @@ errors:
 
   # Database
   - code: AF-DB-001
+    planned: true
     area: DB
     message: "The database provider {provider} is not registered in this build."
     next_step: "Set database.provider to one of: {available}."
@@ -172,6 +178,7 @@ errors:
     retryable: false
     exit_code: 5
   - code: AF-DB-007
+    planned: true
     area: DB
     message: "Extension {extension} is required by the golden and is not available on the target."
     next_step: "Install {extension} on the target, or remove its use from the schema before refreshing."
@@ -179,6 +186,7 @@ errors:
     retryable: false
     exit_code: 5
   - code: AF-DB-010
+    planned: true
     area: DB
     message: "The storage pool has {available} free and the operation needs {needed}."
     next_step: "Run 'af golden gc' to reclaim unreferenced versions, or grow the pool."
@@ -186,6 +194,7 @@ errors:
     retryable: false
     exit_code: 5
   - code: AF-DB-020
+    planned: true
     area: DB
     message: "Personas cannot be provisioned because {provider} creates users only through its own API."
     next_step: "Configure SANDBOX mode for {provider} so that personas are created in its sandbox tenant."
@@ -193,6 +202,7 @@ errors:
     retryable: false
     exit_code: 3
   - code: AF-DB-030
+    planned: true
     area: DB
     message: "Migrations failed on the branch: {detail}"
     next_step: "Read the migration log at {location}, fix the migration, and push again."
@@ -216,6 +226,7 @@ errors:
     retryable: false
     exit_code: 7
   - code: AF-MSK-003
+    planned: true
     area: MSK
     message: "The masking rule for {table}.{column} names a column that does not exist in the schema."
     next_step: "Remove the rule or correct the name; 'af mask plan' lists the columns it found."
@@ -223,6 +234,7 @@ errors:
     retryable: false
     exit_code: 3
   - code: AF-MSK-004
+    planned: true
     area: MSK
     message: "Masking would violate the check constraint {constraint} on {table}.{column}."
     next_step: "Choose a format preserving transform for {table}.{column} that satisfies {constraint}."
@@ -230,6 +242,7 @@ errors:
     retryable: false
     exit_code: 7
   - code: AF-MSK-005
+    planned: true
     area: MSK
     message: "Masking is only permitted on a golden candidate, and {target} is a source database."
     next_step: "Run masking against a golden candidate; the engine never rewrites a source."
@@ -237,6 +250,7 @@ errors:
     retryable: false
     exit_code: 6
   - code: AF-MSK-007
+    planned: true
     area: MSK
     message: "The transform on {table}.{column} produced duplicate values under the unique constraint {constraint}."
     next_step: "Use a transform that preserves uniqueness, such as email or uuid_remap, for {table}.{column}."
@@ -244,6 +258,7 @@ errors:
     retryable: false
     exit_code: 7
   - code: AF-MSK-008
+    planned: true
     area: MSK
     message: "The columns {columns} hold free text and have no masking rule."
     next_step: "Give each column a rule, or allowlist it explicitly if it is known to hold no personal data."
@@ -360,6 +375,7 @@ errors:
     retryable: true
     exit_code: 1
   - code: AF-RUN-011
+    planned: true
     area: RUN
     message: "The local state database at {path} is corrupt."
     next_step: "A backup was written to {backup}. The database was rebuilt; run 'af down --all' to reconcile any resources it no longer tracks."
@@ -404,6 +420,7 @@ errors:
     retryable: false
     exit_code: 2
   - code: AF-NET-004
+    planned: true
     area: NET
     message: "A request to {host} carried a live credential in the {header} header and was blocked."
     next_step: "Replace the credential with a sandbox key; an environment must never hold a live one."
@@ -411,6 +428,7 @@ errors:
     retryable: false
     exit_code: 6
   - code: AF-NET-005
+    planned: true
     area: NET
     message: "The sandbox credential for {host} was rejected: {detail}"
     next_step: "Check the sandbox key's permissions at the provider."
@@ -425,6 +443,7 @@ errors:
     retryable: false
     exit_code: 6
   - code: AF-NET-020
+    planned: true
     area: NET
     message: "{host} rejected the environment certificate, which usually means the client pins its own."
     next_step: "Set the host to ALLOW so that its traffic is not intercepted, or disable pinning in the client for previews."
@@ -432,6 +451,7 @@ errors:
     retryable: false
     exit_code: 6
   - code: AF-NET-021
+    planned: true
     area: NET
     message: "{host} resolves only to IPv6 and the environment has IPv6 disabled."
     next_step: "Set egress.allow_ipv6 for this environment, or use a host with an IPv4 address."
@@ -439,6 +459,7 @@ errors:
     retryable: false
     exit_code: 6
   - code: AF-NET-030
+    planned: true
     area: NET
     message: "The synthesis model returned no usable response for {method} {path}."
     next_step: "SYNTH is an escape hatch, not a pass. Write a fixture for this endpoint instead."
@@ -490,6 +511,7 @@ errors:
     retryable: true
     exit_code: 1
   - code: AF-AGT-010
+    planned: true
     area: AGT
     message: "Invariant {invariant} did not finish within {timeout}."
     next_step: "Make the invariant cheaper; it runs after every workflow and must be a quick read."
@@ -497,6 +519,7 @@ errors:
     retryable: false
     exit_code: 8
   - code: AF-AGT-011
+    planned: true
     area: AGT
     message: "Invariant {invariant} is not read only."
     next_step: "Rewrite it as a single SELECT; invariants run inside a read only transaction."
@@ -520,6 +543,7 @@ errors:
     retryable: false
     exit_code: 8
   - code: AF-LOD-001
+    planned: true
     area: LOD
     message: "The load target {target} is not an environment this engine created."
     next_step: "Point the load run at an environment from 'af status'. Load is never generated against an external host."
@@ -527,6 +551,7 @@ errors:
     retryable: false
     exit_code: 6
   - code: AF-LOD-002
+    planned: true
     area: LOD
     message: "The load run was aborted after the error rate exceeded {threshold} for {duration}."
     next_step: "The service is failing under this load. The report above shows the first failing endpoint."
@@ -536,6 +561,7 @@ errors:
 
   # GitHub
   - code: AF-GH-001
+    planned: true
     area: GH
     message: "The webhook signature did not verify."
     next_step: "Confirm that the webhook secret stored for this installation matches the one configured in GitHub."
@@ -543,6 +569,7 @@ errors:
     retryable: false
     exit_code: 4
   - code: AF-GH-002
+    planned: true
     area: GH
     message: "The GitHub API rejected the request: {detail}"
     next_step: "Check the App's permissions against the list on the GitHub integration page."
@@ -552,6 +579,7 @@ errors:
 
   # Control plane
   - code: AF-CP-001
+    planned: true
     area: CP
     message: "The control plane at {url} could not be reached."
     next_step: "Antifailure works without it. Unset control_plane.url to run fully locally."
@@ -559,6 +587,7 @@ errors:
     retryable: true
     exit_code: 5
   - code: AF-CP-002
+    planned: true
     area: CP
     message: "The control plane rejected this engine's token."
     next_step: "Run 'af login' to obtain a new token."
@@ -568,6 +597,7 @@ errors:
 
   # Infrastructure
   - code: AF-INF-001
+    planned: true
     area: INF
     message: "The cloud API returned a quota error for {quota} in {region}."
     next_step: "Request more {quota} in {region}, then run the command again."
@@ -584,6 +614,7 @@ errors:
 
   # Enterprise
   - code: AF-EE-001
+    planned: true
     area: EE
     message: "The enterprise license could not be verified."
     next_step: "Reinstall the license with 'af license install'; the token may have been truncated in transit."
@@ -591,6 +622,7 @@ errors:
     retryable: false
     exit_code: 4
   - code: AF-EE-002
+    planned: true
     area: EE
     message: "The system clock is {skew} behind the last time this license was seen."
     next_step: "Correct the system clock. Enterprise features resume once it passes the recorded time."
@@ -598,6 +630,7 @@ errors:
     retryable: true
     exit_code: 4
   - code: AF-EE-003
+    planned: true
     area: EE
     message: "This license was issued for organization {issued_for} and this instance is {actual}."
     next_step: "Install the license issued for {actual}."
@@ -605,6 +638,7 @@ errors:
     retryable: false
     exit_code: 4
   - code: AF-EE-004
+    planned: true
     area: EE
     message: "The license covers {seats} seats and they are all in use."
     next_step: "Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed."
@@ -612,6 +646,7 @@ errors:
     retryable: false
     exit_code: 6
   - code: AF-EE-010
+    planned: true
     area: EE
     message: "Organization policy {policy} refuses this environment: {detail}"
     next_step: "Ask an organization administrator to review {policy}, or bring the repository into compliance."
@@ -621,6 +656,7 @@ errors:
 
   # Scheduling
   - code: AF-SCH-001
+    planned: true
     area: SCH
     message: "No runtime satisfies the placement requirement {requirement}."
     next_step: "Register a runtime that meets it, or relax the requirement in the placement rules."
@@ -628,6 +664,7 @@ errors:
     retryable: false
     exit_code: 5
   - code: AF-SCH-002
+    planned: true
     area: SCH
     message: "The organization is at its concurrent environment limit ({limit}); this run is queued at position {position}."
     next_step: "It will start automatically. Tear down an unused environment to start sooner."
@@ -651,6 +688,7 @@ errors:
     retryable: false
     exit_code: 4
   - code: AF-CPL-003
+    planned: true
     area: CPL
     message: "The control plane could not be reached: {detail}"
     next_step: "Environments keep working without it; events are buffered and sent when it returns. Check AF_CONTROL_PLANE_URL and the network."
