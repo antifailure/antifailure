@@ -44,6 +44,10 @@ af webhook trigger       one signed callback into the environment
 af test        agents drive the workflows and return verdicts with a
                trace, a video, and steps to reproduce a failure
 
+af load        traffic shaped like production's, with the worst
+               regression first
+af load smoke  a short burst, to check it answers under any load at all
+
 af doctor      ten checks, each with a remediation
 af init        reads a repository, writes a manifest, explains what it assumed
 af explain     the effective configuration with every default resolved
@@ -229,7 +233,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/load` safety | proven | every route unsafe until named; a method pattern does not cover another method |
 | `internal/load` run | proven | measured against a real server; achieved rate reported, not the target |
 | `internal/load` access log | proven | paths normalised, or the mix collapses into a list |
-| `af load` | planned | the engine is done; the command is not wired yet |
+| `af load` and `af load smoke` | proven | run against a live environment; a route with no baseline is never a breach |
 
 ## Continuous integration
 

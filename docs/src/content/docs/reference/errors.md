@@ -490,6 +490,30 @@ The load run was aborted after the error rate exceeded {threshold} for {duration
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/load](/docs/concepts/load/) |
 
+### AF-LOD-010
+
+Load could not be generated: {detail}
+
+**What to do.** Bring the environment up with 'af up', and check the load section of the manifest.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
+### AF-LOD-011
+
+Load exceeded {count} thresholds the manifest sets.
+
+**What to do.** The breaches are listed above, worst first. Raise the threshold or fix the regression.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
 ## Manifest
 
 ### AF-MAN-001

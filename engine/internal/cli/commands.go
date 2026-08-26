@@ -18,26 +18,6 @@ import (
 // user think they have the wrong version, and a command that silently does
 // nothing is the failure this product exists to prevent.
 
-func newLoadCommand(env *Env) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "load",
-		Short: "Generate traffic shaped like production and compare against the base branch",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af load")
-		},
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "smoke",
-		Short: "Run a short load check with the safety caps at their defaults",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af load smoke")
-		},
-	})
-	return cmd
-}
-
 func newInsightsCommand(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "insights",

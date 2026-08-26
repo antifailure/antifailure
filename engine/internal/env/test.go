@@ -13,6 +13,7 @@ import (
 	"time"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -247,4 +248,109 @@ func (o *Orchestrator) personaDocs() []personaDoc {
 func personaPassword(envID, persona string) string {
 	sum := sha256.Sum256([]byte("antifailure/persona/v1\x00" + envID + "\x00" + persona))
 	return "Af-" + hex.EncodeToString(sum[:8]) + "!1"
+}
+
+// LoadOptions configure a load run.
+type LoadOptions struct {
+	Duration time.Duration
+	Scale    float64
+	Seed     int64
+	Progress func(load.Progress)
+}
+
+// Load sends traffic shaped like production's at the environment.
+//
+// The shape comes from the manifest's source when one is configured, and from
+// a default otherwise. The default says so in the report, because a shape that
+// is a guess and a shape that is production's should never be mistaken for
+// each other.
+func (o *Orchestrator) Load(ctx context.Context, opts LoadOptions) (*load.Result, []load.Route, error) {
+	status, err := o.Status(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if status.URL == "" {
+		return nil, nil, aferrors.Coded(aferrors.AFLOD010,
+			"detail", "nothing is running for this branch; bring it up with 'af up' first")
+	}
+
+	shape, err := o.trafficShape()
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg := o.opts.Manifest.Load
+	var safe, unsafe []string
+	if cfg != nil {
+		safe, unsafe = cfg.SafeRoutes, cfg.UnsafeRoutes
+	}
+	if len(safe) == 0 {
+		// Reads under the root, which is what a smoke test wants and is the
+		// only thing that can be assumed safe without being told.
+		safe = []string{"GET /**"}
+	}
+	sendable, refused := shape.Safe(safe, unsafe)
+	if len(sendable.Routes) == 0 {
+		return nil, refused, aferrors.Coded(aferrors.AFLOD010,
+			"detail", "every route in the shape is unsafe to send; add safe_routes to the manifest")
+	}
+
+	duration := opts.Duration
+	if duration <= 0 && cfg != nil && cfg.Duration != "" {
+		if d, parseErr := time.ParseDuration(cfg.Duration); parseErr == nil {
+			duration = d
+		}
+	}
+	scale := opts.Scale
+	if scale <= 0 && cfg != nil && cfg.Scale > 0 {
+		scale = cfg.Scale
+	}
+
+	res, err := load.Run(ctx, load.Options{
+		BaseURL: status.URL, Shape: sendable, Scale: scale, Duration: duration,
+		Seed: opts.Seed, Clock: o.opts.Clock, Progress: opts.Progress,
+	})
+	return res, refused, err
+}
+
+// Thresholds returns the limits a load run is judged against.
+func (o *Orchestrator) Thresholds() (p95Increase, errorRate float64) {
+	if o.opts.Manifest.Load == nil || o.opts.Manifest.Load.Thresholds == nil {
+		return 0, 0
+	}
+	t := o.opts.Manifest.Load.Thresholds
+	return t.P95Increase, t.ErrorRate
+}
+
+// trafficShape reads the mix from whatever source is configured.
+func (o *Orchestrator) trafficShape() (load.Shape, error) {
+	cfg := o.opts.Manifest.Load
+	if cfg == nil || cfg.Source == "" || cfg.Source == schema.LoadNone {
+		return load.DefaultShape(), nil
+	}
+	switch cfg.Source {
+	case schema.LoadAccessLog:
+		path := cfg.SourceConfig["path"]
+		if path == "" {
+			return load.Shape{}, aferrors.Coded(aferrors.AFLOD010,
+				"detail", "the load source is access_log and no path is configured")
+		}
+		body, err := os.ReadFile(filepath.Join(o.opts.Root, filepath.FromSlash(path)))
+		if err != nil {
+			return load.Shape{}, aferrors.Wrap(err, aferrors.AFLOD010, "detail", err.Error())
+		}
+		shape := load.FromAccessLog(strings.Split(string(body), "\n"))
+		if len(shape.Routes) == 0 {
+			return load.Shape{}, aferrors.Coded(aferrors.AFLOD010,
+				"detail", "no requests could be read from "+path)
+		}
+		if shape.RequestsPerSecond == 0 {
+			shape.RequestsPerSecond = 10
+		}
+		return shape, nil
+	default:
+		// A source that needs an account nobody has connected. Saying so beats
+		// silently sending the default and calling it production's shape.
+		return load.Shape{}, aferrors.Coded(aferrors.AFLOD010,
+			"detail", string(cfg.Source)+" is not connected in this build; use access_log or none")
+	}
 }

@@ -1,0 +1,163 @@
+package cli
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/antifailure/antifailure/engine/internal/env"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/load"
+)
+
+// LoadJSON is the machine readable result of a load run.
+type LoadJSON struct {
+	Sent      int                `json:"sent"`
+	Rate      float64            `json:"rate"`
+	Duration  string             `json:"duration"`
+	ErrorRate float64            `json:"error_rate"`
+	Overall   load.Latency       `json:"overall"`
+	Routes    []load.RouteResult `json:"routes"`
+	Errors    map[string]int     `json:"errors,omitempty"`
+	Refused   []string           `json:"refused_as_unsafe,omitempty"`
+	Breaches  []load.Breach      `json:"breaches,omitempty"`
+}
+
+func newLoadCommand(e *Env) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "load",
+		Short: "Send traffic shaped like production's at the environment",
+		Long: strings.TrimSpace(`
+A weighted mix rather than one endpoint at a fixed rate. Hammering one endpoint
+proves that endpoint is fast, which nobody doubted; what breaks under real
+traffic is the mix, and the page nobody thinks about that is nine percent of
+requests.
+
+Every route is treated as unsafe until the manifest names it safe. A generator
+that finds POST /checkout in an access log and exercises it four hundred times
+is a generator that charges four hundred cards.`),
+	}
+	cmd.AddCommand(newLoadRunCommand(e, false))
+	cmd.AddCommand(newLoadRunCommand(e, true))
+	return cmd
+}
+
+func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
+	use, short := "run", "Run the full load profile"
+	defaultDuration := 60 * time.Second
+	defaultScale := 1.0
+	if smoke {
+		use, short = "smoke", "Send a short burst, to check the environment answers under any load at all"
+		defaultDuration = 10 * time.Second
+		defaultScale = 0.1
+	}
+
+	var branch string
+	var duration time.Duration
+	var scale float64
+	var seed int64
+	cmd := &cobra.Command{
+		Use:   use,
+		Short: short,
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			o, err := orchestrator(e, branch, false)
+			if err != nil {
+				return err
+			}
+			e.Out.Section("Generating load")
+
+			res, refused, err := o.Load(cmd.Context(), env.LoadOptions{
+				Duration: duration, Scale: scale, Seed: seed,
+				Progress: func(p load.Progress) {
+					e.Out.Printf("  %s  %d sent, %d errors, p95 %.0fms, %d in flight\n",
+						p.Elapsed, p.Sent, p.Errors, p.P95Ms, p.Inflight)
+				},
+			})
+			if err != nil {
+				return err
+			}
+
+			p95Increase, errorRate := o.Thresholds()
+			breaches := res.Breaches(p95Increase, errorRate)
+
+			if e.Out.Format == FormatJSON {
+				doc := LoadJSON{
+					Sent: res.Sent, Rate: res.Rate,
+					Duration:  res.Duration.Round(time.Millisecond).String(),
+					ErrorRate: res.ErrorRate, Overall: res.Overall,
+					Routes: res.Routes, Errors: res.Errors, Breaches: breaches,
+				}
+				for _, r := range refused {
+					doc.Refused = append(doc.Refused, r.String())
+				}
+				if err := e.Out.JSON(doc); err != nil {
+					return err
+				}
+				if len(breaches) > 0 {
+					return silent(aferrors.Coded(aferrors.AFLOD011, "count", fmt.Sprint(len(breaches))))
+				}
+				return nil
+			}
+
+			e.Out.Println("")
+			e.Out.Printf("  %d requests in %s at %.0f a second, %.1f percent failed.\n",
+				res.Sent, res.Duration.Round(time.Second), res.Rate, res.ErrorRate*100)
+			e.Out.Printf("  Overall p50 %.0fms, p95 %.0fms, p99 %.0fms.\n\n",
+				res.Overall.P50Ms, res.Overall.P95Ms, res.Overall.P99Ms)
+
+			rows := make([][]string, 0, len(res.Routes))
+			for _, r := range res.Routes {
+				change := e.Out.S(StyleDim, "no baseline")
+				if r.HasBaseline {
+					change = fmt.Sprintf("%+.0f%%", r.P95Increase*100)
+					if r.P95Increase > 0.25 {
+						change = e.Out.S(StyleWarn, change)
+					}
+				}
+				rows = append(rows, []string{
+					r.Route, fmt.Sprint(r.Sent), fmt.Sprintf("%.0fms", r.Latency.P95Ms),
+					change, fmt.Sprint(r.Errors),
+				})
+			}
+			e.Out.Table([]string{"ROUTE", "SENT", "P95", "VS BASELINE", "ERRORS"}, rows)
+
+			if len(refused) > 0 {
+				e.Out.Println("")
+				e.Out.Printf("  %d routes were not sent because nothing named them safe: %s\n",
+					len(refused), describeRoutes(refused, 4))
+			}
+			for reason, n := range res.Errors {
+				e.Out.Printf("  %s %d responses: %s\n", e.Out.S(StyleWarn, SymbolWarn), n, reason)
+			}
+
+			if len(breaches) > 0 {
+				e.Out.Println("")
+				e.Out.Section("Thresholds exceeded")
+				for _, b := range breaches {
+					e.Out.Printf("  %s %s: %s\n", e.Out.S(StyleBad, SymbolFail), b.What, b.Detail)
+				}
+				return silent(aferrors.Coded(aferrors.AFLOD011, "count", fmt.Sprint(len(breaches))))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().DurationVar(&duration, "duration", defaultDuration, "How long to send for")
+	cmd.Flags().Float64Var(&scale, "scale", defaultScale, "Multiplier on production's rate")
+	cmd.Flags().Int64Var(&seed, "seed", 1, "Makes two runs send the same sequence")
+	cmd.Flags().StringVar(&branch, "branch", "", "Branch to send at, defaulting to the checked out one")
+	return cmd
+}
+
+func describeRoutes(routes []load.Route, limit int) string {
+	names := make([]string, 0, len(routes))
+	for _, r := range routes {
+		names = append(names, r.String())
+	}
+	if len(names) <= limit {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(names[:limit], ", "), len(names)-limit)
+}

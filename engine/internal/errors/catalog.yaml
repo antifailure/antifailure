@@ -505,6 +505,20 @@ errors:
     exit_code: 3
 
   # Load
+  - code: AF-LOD-010
+    area: LOD
+    message: "Load could not be generated: {detail}"
+    next_step: "Bring the environment up with 'af up', and check the load section of the manifest."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
+  - code: AF-LOD-011
+    area: LOD
+    message: "Load exceeded {count} thresholds the manifest sets."
+    next_step: "The breaches are listed above, worst first. Raise the threshold or fix the regression."
+    docs: concepts/load
+    retryable: false
+    exit_code: 8
   - code: AF-LOD-001
     area: LOD
     message: "The load target {target} is not an environment this engine created."

@@ -106,6 +106,10 @@ const (
 	// The load run was aborted after the error rate exceeded {threshold}
 	// for {duration}.
 	AFLOD002 Code = "AF-LOD-002"
+	// Load could not be generated: {detail}
+	AFLOD010 Code = "AF-LOD-010"
+	// Load exceeded {count} thresholds the manifest sets.
+	AFLOD011 Code = "AF-LOD-011"
 
 	// Manifest
 	// No antifailure.yaml was found in {path} or any parent directory.
@@ -557,6 +561,24 @@ var catalog = map[Code]Entry{
 		Area:      "LOD",
 		Message:   "The load run was aborted after the error rate exceeded {threshold} for {duration}.",
 		NextStep:  "The service is failing under this load. The report above shows the first failing endpoint.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
+	},
+	AFLOD010: {
+		Code:      AFLOD010,
+		Area:      "LOD",
+		Message:   "Load could not be generated: {detail}",
+		NextStep:  "Bring the environment up with 'af up', and check the load section of the manifest.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFLOD011: {
+		Code:      AFLOD011,
+		Area:      "LOD",
+		Message:   "Load exceeded {count} thresholds the manifest sets.",
+		NextStep:  "The breaches are listed above, worst first. Raise the threshold or fix the regression.",
 		Docs:      "concepts/load",
 		Retryable: false,
 		ExitCode:  ExitTestFailure,
