@@ -166,7 +166,7 @@ func TestRoot_DirectoryFlagRejectsANonDirectory(t *testing.T) {
 func TestUnimplementedCommands_SayNotYetAvailableRatherThanPretending(t *testing.T) {
 	t.Parallel()
 	commands := [][]string{
-		{"logs"}, {"test"}, {"load"}, {"load", "smoke"},
+		{"test"}, {"load"}, {"load", "smoke"},
 		{"golden", "refresh"}, {"golden", "list"}, {"golden", "verify"}, {"golden", "gc"},
 		{"mask", "plan"}, {"mask", "preview"}, {"mask", "apply"}, {"mask", "verify"},
 

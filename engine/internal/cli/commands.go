@@ -18,22 +18,6 @@ import (
 // user think they have the wrong version, and a command that silently does
 // nothing is the failure this product exists to prevent.
 
-func newLogsCommand(env *Env) *cobra.Command {
-	var follow bool
-	var service string
-	cmd := &cobra.Command{
-		Use:   "logs",
-		Short: "Replay or follow the environment's event stream",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af logs")
-		},
-	}
-	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Keep printing as new events arrive")
-	cmd.Flags().StringVar(&service, "service", "", "Show only this service's output")
-	return cmd
-}
-
 func newTestCommand(env *Env) *cobra.Command {
 	var workflow string
 	cmd := &cobra.Command{

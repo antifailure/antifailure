@@ -864,3 +864,13 @@ func (o *Orchestrator) DeliverWebhook(
 	defer func() { _ = rt.Close() }()
 	return rt.Deliver(ctx, o.envID, service, path, body, headers)
 }
+
+// Logs returns recent output from the environment's services.
+func (o *Orchestrator) Logs(ctx context.Context, service string, tail int) ([]local.LogLine, error) {
+	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rt.Close() }()
+	return rt.Logs(ctx, o.envID, service, tail)
+}

@@ -18,7 +18,9 @@ package local
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"sort"
@@ -416,5 +418,61 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// LogLine is one line of a service's output.
+type LogLine struct {
+	// Service is which service wrote it.
+	Service string
+	// Stream is "stdout" or "stderr".
+	Stream string
+	// Text is the line, already redacted.
+	Text string
+}
+
+// Logs returns recent output from an environment's services.
+//
+// Redacted on the way out rather than at the call site. A service's own log is
+// the second likeliest place for a secret to surface after a build log, and
+// redacting at the writer means a missed call site cannot leak.
+func (r *Runtime) Logs(ctx context.Context, envID, service string, tail int) ([]LogLine, error) {
+	if tail <= 0 {
+		tail = 200
+	}
+	containers, err := r.cli.ContainerList(ctx, container.ListOptions{
+		All: true, Filters: dockerutil.EnvFilter(envID),
+	})
+	if err != nil {
+		return nil, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", dockerutil.Host())
+	}
+
+	var out []LogLine
+	for _, c := range containers {
+		if c.Labels[dockerutil.LabelKind] != dockerutil.KindService {
+			continue
+		}
+		name := c.Labels[dockerutil.LabelService]
+		if service != "" && name != service {
+			continue
+		}
+		rc, logErr := r.cli.ContainerLogs(ctx, c.ID, container.LogsOptions{
+			ShowStdout: true, ShowStderr: true, Tail: strconv.Itoa(tail),
+		})
+		if logErr != nil {
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(rc, 8<<20))
+		_ = rc.Close()
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			continue
+		}
+		for _, line := range strings.Split(stripDockerLogFraming(string(body)), "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			out = append(out, LogLine{Service: name, Text: r.redactor.String(line)})
+		}
+	}
 	return out, nil
 }
