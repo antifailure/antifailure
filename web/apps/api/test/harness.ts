@@ -31,6 +31,9 @@ export async function available(): Promise<boolean> {
 }
 
 export interface ApiHarness {
+  /** The Hono app itself, so a test can read the routes it actually serves
+   *  rather than a list of the routes somebody remembered to write down. */
+  app: ReturnType<typeof createServer>['app']
   admin: postgres.Sql
   pool: Pool
   clock: FakeClock
@@ -58,6 +61,7 @@ export async function startApi(): Promise<ApiHarness> {
   })
 
   return {
+    app,
     admin,
     pool,
     clock,

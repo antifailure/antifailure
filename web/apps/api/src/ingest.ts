@@ -88,6 +88,29 @@ export interface AuthenticatedEngine {
   tokenName: string
 }
 
+/**
+ * The reason an organization is stopped, or null.
+ *
+ * A separate call from authentication, and the reason is a rule this codebase
+ * has now learned five times: a query that runs before the tenant is known
+ * cannot read a tenant-scoped table. Folding this into authenticateEngine looked
+ * tidier and returned undefined every time, because the organizations table is
+ * only visible to a transaction that has already declared which organization it
+ * is. The suspension is read here, scoped, where the ordinary policy covers it.
+ */
+export async function suspensionReason(pool: Pool, orgId: string): Promise<string | null> {
+  return pool.withTenant({ orgId }, async (db) => {
+    const rows = await db.execute<{ suspended_reason: string | null }>(sql`
+      SELECT suspended_reason FROM organizations
+      WHERE id = ${orgId} AND suspended_at IS NOT NULL`)
+    if (rows.length === 0) return null
+    // A suspension with no recorded reason is still a suspension. Returning
+    // null for it would silently un-suspend an organization somebody stopped in
+    // a hurry.
+    return rows[0]!.suspended_reason ?? 'no reason was recorded'
+  })
+}
+
 /** The most events one request may carry. A larger batch is refused with a
  *  number rather than truncated, because truncation looks like success. */
 export const MAX_BATCH = 500

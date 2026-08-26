@@ -24,6 +24,7 @@ import { RateLimiter } from './ratelimit.ts'
 import {
   authenticateEngine,
   ingest,
+  suspensionReason,
   IngestRefused,
   type IncomingEvent,
 } from './ingest.ts'
@@ -41,6 +42,7 @@ import {
   sessionCookie,
 } from './auth/session.ts'
 import { openApiDocument } from './openapi.ts'
+import { limitFor, bucketFor, type EndpointLimit } from './limits.ts'
 
 export interface ServerOptions {
   pool: Pool
@@ -65,6 +67,63 @@ export function createServer(options: ServerOptions) {
   // stolen-cookie or code-guessing attempt shows up.
   const ingestLimiter = new RateLimiter(clock, options.ingestLimit ?? { rate: 200, burst: 2000 })
   const authLimiter = new RateLimiter(clock, options.authLimit ?? { rate: 1, burst: 20 })
+
+  // -------------------------------------------------------------------------
+  // Rate limiting, before anything else does work.
+  //
+  // Applied from the declared list rather than per route, so that an endpoint
+  // added without a limit is refused outright instead of being unbounded. That
+  // is the safe direction: an endpoint nobody remembered to limit is exactly
+  // the one that has never been load tested, and answering 500 to it is a bug
+  // report while leaving it open is an outage.
+  // -------------------------------------------------------------------------
+  const buckets = new Map<string, RateLimiter>()
+  function limiterFor(limit: EndpointLimit): RateLimiter {
+    const signature = `${limit.key}:${limit.rate}:${limit.burst}`
+    let limiter = buckets.get(signature)
+    if (!limiter) {
+      limiter = new RateLimiter(clock, { rate: limit.rate, burst: limit.burst })
+      buckets.set(signature, limiter)
+    }
+    return limiter
+  }
+
+  app.use('*', async (c, next) => {
+    const limit = limitFor(c.req.method, new URL(c.req.url).pathname)
+    if (!limit) {
+      // Deliberately loud. The alternative is a quiet default, and a quiet
+      // default means nobody ever notices the endpoint is unbounded.
+      return c.json(
+        {
+          error:
+            'This endpoint has no declared rate limit, so the server refuses to serve it. ' +
+            'Add it to ENDPOINT_LIMITS with the reason for the number.',
+        },
+        500,
+      )
+    }
+
+    const auth = c.req.header('authorization') ?? ''
+    const verdict = limiterFor(limit).take(
+      bucketFor(limit, {
+        ip: clientIP(c.req.header('x-forwarded-for')),
+        token: auth.startsWith('Bearer ') ? auth.slice(7, 39) : null,
+        // The organization is not known before the session resolves, so the
+        // org-keyed limits fall back to the address for an unauthenticated
+        // request. That is the conservative direction: it bounds somebody with
+        // no session rather than letting them share one anonymous bucket.
+        org: null,
+      }),
+    )
+    if (!verdict.allowed) {
+      c.header('retry-after', String(verdict.retryAfterSeconds))
+      return c.json(
+        { error: 'Too many requests.', retryAfterSeconds: verdict.retryAfterSeconds },
+        429,
+      )
+    }
+    return next()
+  })
 
   // -------------------------------------------------------------------------
   // Headers every response carries.
@@ -172,6 +231,24 @@ export function createServer(options: ServerOptions) {
       // an engine with a made-up token get the same answer.
       return c.json({ error: 'This token is not valid.' }, 401)
     }
+    const suspended = await suspensionReason(options.pool, engine.orgId)
+    if (suspended !== null) {
+      // A different answer from an invalid token, and deliberately so. The
+      // token is fine and the organization is stopped, and somebody debugging
+      // at two in the morning needs to know which.
+      //
+      // Events are refused rather than silently dropped, so the engine keeps
+      // them buffered and sends them when the suspension lifts. Accepting and
+      // discarding them would lose exactly the record of what happened during
+      // the incident the suspension was for.
+      return c.json(
+        {
+          error: `This organization is suspended: ${suspended}`,
+          retryAfterSeconds: 300,
+        },
+        403,
+      )
+    }
 
     let body: unknown
     try {
@@ -211,6 +288,9 @@ export function createServer(options: ServerOptions) {
   app.get('/v1/environments/:envId', async (c) => {
     const engine = await engineFrom(c.req.header('authorization'))
     if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+    // Reading is deliberately still permitted while suspended. A suspension
+    // stops new work; taking away the ability to see what is already running is
+    // the opposite of what an incident needs.
 
     const envId = c.req.param('envId')
     const rows = await options.pool.withTenant({ orgId: engine.orgId }, async (db) =>
@@ -305,10 +385,15 @@ export function createServer(options: ServerOptions) {
 }
 
 function clientKey(forwardedFor: string | undefined, userAgent: string | undefined): string {
-  // The first entry in X-Forwarded-For is the client as the closest trusted
-  // proxy saw it. Later entries are attacker-controlled and must not be used.
-  const ip = (forwardedFor ?? '').split(',')[0]?.trim() || 'unknown'
-  return `${ip}|${(userAgent ?? '').slice(0, 64)}`
+  return `${clientIP(forwardedFor)}|${(userAgent ?? '').slice(0, 64)}`
+}
+
+// The first entry in X-Forwarded-For is the client as the closest trusted proxy
+// saw it. Later entries were supplied by the caller and must never be used: a
+// limiter keyed on an attacker-chosen value is a limiter with unlimited
+// buckets.
+function clientIP(forwardedFor: string | undefined): string {
+  return (forwardedFor ?? '').split(',')[0]?.trim() || 'unknown'
 }
 
 function tooMany(c: { header: (k: string, v: string) => void; json: (b: unknown, s: 429) => Response }, seconds: number) {

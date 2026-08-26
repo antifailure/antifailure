@@ -11,6 +11,7 @@ import { verifyAuditChain, type Db } from '@antifailure/db'
 import { PolicyEngine, type Egress, type EgressRule, type Mode } from '@antifailure/policy'
 import { router, publicProcedure, orgProcedure, audit, registerRouter, type OrgContext } from '../trpc.ts'
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLES, ROLE_PERMISSIONS, rolesWith } from '../permissions.ts'
+import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
 
 const uuid = z.string().uuid()
 
@@ -516,6 +517,91 @@ const membersRouter = router({
     }),
 })
 
+// ---------------------------------------------------------------------------
+// The kill switch
+// ---------------------------------------------------------------------------
+
+const orgRouter = router({
+  status: orgProcedure('environments.view').query(async ({ ctx }) => {
+    const c = ctx as OrgContext
+    return c.pool.withTenant(c.tenant, async (db) => {
+      const rows = await db.execute<{
+        slug: string
+        plan: string
+        suspended_at: Date | string | null
+        suspended_reason: string | null
+        environments: string
+        goldens: string
+      }>(sql`
+        SELECT o.slug, o.plan, o.suspended_at, o.suspended_reason,
+               (SELECT count(*) FROM environments e
+                 WHERE e.org_id = o.id AND e.state <> 'torn_down') AS environments,
+               (SELECT count(*) FROM golden_versions g WHERE g.org_id = o.id) AS goldens
+        FROM organizations o WHERE o.id = ${c.actor.orgId}`)
+      const row = rows[0]
+      if (!row) throw notFound('organization', c.actor.orgId)
+
+      const plan = row.plan || DEFAULT_PLAN
+      return {
+        slug: row.slug,
+        plan,
+        suspended: row.suspended_at !== null,
+        suspendedReason: row.suspended_reason,
+        quotas: {
+          environments: checkQuota(plan, 'environments', Number(row.environments)),
+          goldens: checkQuota(plan, 'goldens', Number(row.goldens)),
+        },
+      }
+    })
+  }),
+
+  /**
+   * Stops this organization creating anything new.
+   *
+   * Deliberately does not tear anything down. An incident is the worst possible
+   * moment to discover that the mitigation destroyed the evidence, so what is
+   * running keeps running and can still be read.
+   */
+  suspend: orgProcedure('members.manage')
+    .input(z.object({ reason: z.string().min(1).max(500) }))
+    .mutation(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      return c.pool.withTenant(c.tenant, async (db) => {
+        await db.execute(sql`
+          UPDATE organizations
+          SET suspended_at = ${c.clock.now().toISOString()},
+              suspended_reason = ${input.reason},
+              suspended_by = ${c.actor.label},
+              updated_at = ${c.clock.now().toISOString()}
+          WHERE id = ${c.actor.orgId}`)
+        await audit(db, c, {
+          action: 'organization.suspended',
+          targetType: 'organization',
+          targetId: c.actor.orgId,
+          detail: { reason: input.reason },
+        })
+        return { suspended: true, running: 'environments already running are untouched' }
+      })
+    }),
+
+  resume: orgProcedure('members.manage').mutation(async ({ ctx }) => {
+    const c = ctx as OrgContext
+    return c.pool.withTenant(c.tenant, async (db) => {
+      await db.execute(sql`
+        UPDATE organizations
+        SET suspended_at = NULL, suspended_reason = NULL, suspended_by = NULL,
+            updated_at = ${c.clock.now().toISOString()}
+        WHERE id = ${c.actor.orgId}`)
+      await audit(db, c, {
+        action: 'organization.resumed',
+        targetType: 'organization',
+        targetId: c.actor.orgId,
+      })
+      return { suspended: false }
+    })
+  }),
+})
+
 const tokensRouter = router({
   list: orgProcedure('tokens.manage').query(async ({ ctx }) => {
     const c = ctx as OrgContext
@@ -569,6 +655,7 @@ export const appRouter = router({
   audit: auditRouter,
   members: membersRouter,
   tokens: tokensRouter,
+  org: orgRouter,
 })
 
 export type AppRouter = typeof appRouter

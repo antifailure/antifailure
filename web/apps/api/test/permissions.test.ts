@@ -58,6 +58,9 @@ function inputsFor(org: Org): Record<string, unknown> {
     'members.setRole': { githubLogin: 'nobody-here', role: 'member' },
     'tokens.list': {},
     'tokens.revoke': { id: '00000000-0000-0000-0000-000000000000' },
+    'org.status': {},
+    'org.suspend': { reason: 'testing the matrix' },
+    'org.resume': {},
   }
 }
 

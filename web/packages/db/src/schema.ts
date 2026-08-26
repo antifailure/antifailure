@@ -66,6 +66,12 @@ export const organizations = pgTable('organizations', {
   slug: text('slug').notNull(),
   name: text('name').notNull(),
   githubLogin: text('github_login'),
+  plan: text('plan').notNull().default('free'),
+  // Set during an incident to stop this organization creating anything new.
+  // What is already running keeps running and can still be read.
+  suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+  suspendedReason: text('suspended_reason'),
+  suspendedBy: text('suspended_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex('organizations_slug_key').on(t.slug)])
