@@ -461,6 +461,13 @@ errors:
     docs: guides/inbox
     retryable: true
     exit_code: 8
+  - code: AF-NET-012
+    area: NET
+    message: "The webhook could not be delivered to {service}: {detail}"
+    next_step: "Run 'af status' to check the service is up, and check the path against the manifest's webhook_path."
+    docs: guides/webhooks
+    retryable: true
+    exit_code: 1
   - code: AF-AGT-010
     area: AGT
     message: "Invariant {invariant} did not finish within {timeout}."

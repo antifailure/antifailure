@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -51,6 +52,9 @@ type Config struct {
 	Internal []string `json:"internal"`
 	// EnvID identifies the environment in the decision log.
 	EnvID string `json:"env_id"`
+	// MockPacks are extra packs supplied by the manifest, as raw JSON. The
+	// built in ones are compiled into the sidecar and always available.
+	MockPacks []string `json:"mock_packs,omitempty"`
 	// Credentials maps a rule's credential name to the sandbox value the
 	// sidecar substitutes. Values never appear in a log line.
 	Credentials map[string]string `json:"credentials,omitempty"`
@@ -89,6 +93,22 @@ func main() {
 			TLSHandshakeTimeout: 20 * time.Second,
 		},
 	}
+	packs, err := mockpack.Builtin()
+	if err != nil {
+		log.Fatalf("af-proxy: %v", err)
+	}
+	for _, raw := range cfg.MockPacks {
+		pack, parseErr := mockpack.Parse([]byte(raw))
+		if parseErr != nil {
+			// Refused rather than skipped. A pack that silently did not load
+			// would leave its host answering nothing, and the failure would
+			// look like a missing route rather than a broken file.
+			log.Fatalf("af-proxy: %v", parseErr)
+		}
+		packs = append(packs, pack)
+	}
+	p.mocks = mockpack.New(packs)
+
 	if cfg.CACert != "" {
 		ca, caErr := newCertAuthority(cfg.CACert, cfg.CAKey)
 		if caErr != nil {
@@ -240,6 +260,11 @@ type record struct {
 	Substituted bool `json:"substituted,omitempty"`
 	// Credentials counts the sandbox values loaded, on the ready line.
 	Credentials int `json:"credentials,omitempty"`
+	// Pack and Fixture name what answered a mocked request. A mock that
+	// cannot say which fixture produced a response is a mock nobody can
+	// debug.
+	Pack    string `json:"pack,omitempty"`
+	Fixture string `json:"fixture,omitempty"`
 	// HostOnly marks a decision made without seeing the path or the method,
 	// which is every HTTPS request until the environment certificate lands.
 	// Recorded rather than assumed away, so a reader can tell the difference
@@ -259,7 +284,9 @@ type proxy struct {
 	transport *http.Transport
 	// credentials are the sandbox values, by the name a rule refers to.
 	credentials map[string]string
-	seq         atomic.Uint64
+	// mocks answers requests for hosts set to mock.
+	mocks *mockpack.Engine
+	seq   atomic.Uint64
 	// mu serialises writes to the encoder. A JSON encoder is not safe for
 	// concurrent use, and every request writes a line, so without it a busy
 	// environment produces a decision log with interleaved bytes: the one

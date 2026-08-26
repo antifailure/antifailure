@@ -850,3 +850,74 @@ func TestSandbox_SubstitutesTheCredentialOnTheWayOut(t *testing.T) {
 	}
 	require.True(t, seen, "no sandbox decision was recorded")
 }
+
+func TestMock_RunsAStripeBillingFlowWithNoNetwork(t *testing.T) {
+	r := requireRuntime(t)
+	img := curlImage(t)
+	id := envID(t, r, "mock1")
+
+	ca, err := envcert.Generate("test-mock", time.Now())
+	require.NoError(t, err)
+
+	// No requireInternet: the point of mock mode is that this works with the
+	// network unplugged. api.stripe.com is never contacted.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Create a customer, read it back, subscribe, cancel. Each step writes its
+	// status so the whole flow can be asserted from one exit code.
+	script := strings.Join([]string{
+		`set -e`,
+		// Whitespace is stripped first, because the response is pretty printed
+		// and sed works a line at a time.
+		`CUS=$(curl -sS --max-time 20 -X POST https://api.stripe.com/v1/customers ` +
+			`-d 'email=buyer@example.test' | tr -d ' \n' | sed 's/.*"id":"\([^"]*\)".*/\1/')`,
+		`echo "customer=$CUS"`,
+		`case "$CUS" in cus_*) ;; *) echo "no customer id"; exit 21;; esac`,
+		`curl -sS --max-time 20 https://api.stripe.com/v1/customers/$CUS | grep -q "$CUS" || exit 22`,
+		`SUB=$(curl -sS --max-time 20 -X POST https://api.stripe.com/v1/subscriptions ` +
+			`-d "customer=$CUS" | tr -d ' \n' | sed 's/.*"id":"\([^"]*\)".*/\1/')`,
+		`case "$SUB" in sub_*) ;; *) echo "no subscription id"; exit 23;; esac`,
+		`curl -sS --max-time 20 https://api.stripe.com/v1/subscriptions/$SUB | grep -q '"active"' || exit 24`,
+		`curl -sS --max-time 20 -X DELETE https://api.stripe.com/v1/subscriptions/$SUB | grep -q '"canceled"' || exit 25`,
+		`curl -sS --max-time 20 https://api.stripe.com/v1/subscriptions/$SUB | grep -q '"canceled"' || exit 26`,
+		`exit 0`,
+	}, "; ")
+
+	code := probeInspected(t, r, id, &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules:   []schema.EgressRule{{Host: "api.stripe.com", Mode: schema.ModeMock}},
+	}, ca, img, script)
+	require.Equal(t, 0, code, "the billing flow did not complete against the mock pack")
+
+	decisions, err := r.Decisions(ctx, id, 100)
+	require.NoError(t, err)
+	var mocked int
+	for _, d := range decisions {
+		if d.Mode == "mock" && d.Via == "inspect" {
+			mocked++
+			require.False(t, d.Allowed, "a mocked request is answered here and must not count as reaching out")
+		}
+	}
+	require.GreaterOrEqual(t, mocked, 5, "every step of the flow is recorded")
+}
+
+func TestMock_AMissSaysWhatToAddRatherThanAnsweringEmptily(t *testing.T) {
+	r := requireRuntime(t)
+	img := curlImage(t)
+	id := envID(t, r, "mock2")
+
+	ca, err := envcert.Generate("test-mock2", time.Now())
+	require.NoError(t, err)
+
+	// An application that receives an empty 200 usually carries on and fails
+	// somewhere unrelated, which is the failure this mode exists to avoid
+	// rather than cause.
+	code := probeInspected(t, r, id, &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules:   []schema.EgressRule{{Host: "api.stripe.com", Mode: schema.ModeMock}},
+	}, ca, img,
+		`curl -sS --max-time 20 -o /tmp/b -w '%{http_code}' https://api.stripe.com/v1/nothing_like_this > /tmp/c; `+
+			`grep -q 404 /tmp/c || exit 31; grep -q "no fixture" /tmp/b || exit 32; exit 0`)
+	require.Equal(t, 0, code, "a mock miss must be a 404 that says what to add")
+}

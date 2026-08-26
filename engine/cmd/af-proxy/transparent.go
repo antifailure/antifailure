@@ -77,6 +77,13 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 		p.capture(conn, req, host)
 		return
 	}
+
+	if d.Mode == schema.ModeMock {
+		p.serveMock(conn, req, host, &rec)
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		return
+	}
 	if !d.Allowed() {
 		rec.Status = http.StatusForbidden
 		rec.Duration = time.Since(started).String()

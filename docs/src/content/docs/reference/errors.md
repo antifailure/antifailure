@@ -700,6 +700,18 @@ No message matching {match} arrived within {timeout}.
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/inbox](/docs/guides/inbox/) |
 
+### AF-NET-012
+
+The webhook could not be delivered to {service}: {detail}
+
+**What to do.** Run 'af status' to check the service is up, and check the path against the manifest's webhook_path.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/webhooks](/docs/guides/webhooks/) |
+
 ### AF-NET-020
 
 {host} rejected the environment certificate, which usually means the client pins its own.

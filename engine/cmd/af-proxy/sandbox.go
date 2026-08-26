@@ -1,10 +1,13 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/antifailure/antifailure/engine/internal/livekey"
+	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 )
 
@@ -96,4 +99,55 @@ func applySandbox(req *http.Request, host, credential string) {
 			req.Header.Set("X-Api-Key", credential)
 		}
 	}
+}
+
+// serveMock answers a request from a fixture pack, and reports whether it did.
+//
+// A miss is a refusal that names the request and hands back a route to paste
+// in, rather than an empty 200. An application that receives nothing usually
+// carries on and fails somewhere unrelated, which is the failure this mode
+// exists to avoid rather than cause.
+func (p *proxy) serveMock(w io.Writer, req *http.Request, host string, rec *record) bool {
+	body, _ := io.ReadAll(io.LimitReader(req.Body, 1<<20))
+	_ = req.Body.Close()
+
+	resp, ok := p.mocks.Answer(host, req.Method, req.URL.Path, body)
+	if !ok {
+		rec.Status = http.StatusNotFound
+		rec.Allowed = false
+		rec.Reason = "No fixture matched this request, and mock mode answers only from fixtures."
+		writeRawStatus(w, http.StatusNotFound, "text/plain; charset=utf-8",
+			mockMissBody(host, req))
+		return true
+	}
+	rec.Status = resp.Status
+	rec.Pack = resp.Pack
+	rec.Fixture = resp.Route
+	rec.Bytes = int64(len(resp.Body))
+
+	contentType := "application/json"
+	if resp.Headers["Content-Type"] != "" {
+		contentType = resp.Headers["Content-Type"]
+	}
+	writeRawStatus(w, resp.Status, contentType, string(resp.Body))
+	return true
+}
+
+func mockMissBody(host string, req *http.Request) string {
+	var b strings.Builder
+	b.WriteString("Antifailure has no fixture for this request.\n\n")
+	b.WriteString("  " + req.Method + " https://" + host + req.URL.Path + "\n\n")
+	b.WriteString("This host is set to mock, which answers only from fixtures, so nothing was\n")
+	b.WriteString("sent and nothing was invented. Add a route like this one to a pack and point\n")
+	b.WriteString("the rule's fixtures field at it:\n\n")
+	b.WriteString(mockpack.Skeleton(host, req.Method, req.URL.Path))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func writeRawStatus(w io.Writer, status int, contentType, body string) {
+	fmt.Fprintf(w,
+		"HTTP/1.1 %d %s\r\nContent-Type: %s\r\nX-Antifailure-Mock: true\r\n"+
+			"Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+		status, http.StatusText(status), contentType, len(body), body)
 }

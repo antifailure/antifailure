@@ -154,6 +154,8 @@ const (
 	AFNET010 Code = "AF-NET-010"
 	// No message matching {match} arrived within {timeout}.
 	AFNET011 Code = "AF-NET-011"
+	// The webhook could not be delivered to {service}: {detail}
+	AFNET012 Code = "AF-NET-012"
 	// {host} rejected the environment certificate, which usually means the
 	// client pins its own.
 	AFNET020 Code = "AF-NET-020"
@@ -705,6 +707,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/inbox",
 		Retryable: true,
 		ExitCode:  ExitTestFailure,
+	},
+	AFNET012: {
+		Code:      AFNET012,
+		Area:      "NET",
+		Message:   "The webhook could not be delivered to {service}: {detail}",
+		NextStep:  "Run 'af status' to check the service is up, and check the path against the manifest's webhook_path.",
+		Docs:      "guides/webhooks",
+		Retryable: true,
+		ExitCode:  ExitFailure,
 	},
 	AFNET020: {
 		Code:      AFNET020,

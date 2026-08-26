@@ -169,7 +169,7 @@ func TestUnimplementedCommands_SayNotYetAvailableRatherThanPretending(t *testing
 		{"logs"}, {"test"}, {"load"}, {"load", "smoke"},
 		{"golden", "refresh"}, {"golden", "list"}, {"golden", "verify"}, {"golden", "gc"},
 		{"mask", "plan"}, {"mask", "preview"}, {"mask", "apply"}, {"mask", "verify"},
-		{"webhook", "list"},
+
 		{"insights"},
 		{"env", "list"}, {"env", "pull"}, {"support", "bundle"},
 	}

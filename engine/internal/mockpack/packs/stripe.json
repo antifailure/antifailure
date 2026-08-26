@@ -1,0 +1,141 @@
+{
+  "name": "stripe",
+  "description": "Customers, payment methods, checkout, subscriptions, and invoices, with state, so a billing flow runs end to end offline.",
+  "hosts": ["api.stripe.com", "files.stripe.com", "checkout.stripe.com"],
+  "routes": [
+    {
+      "method": "POST", "path": "/v1/customers", "store": "customers",
+      "body": {
+        "id": "{id:cus_}", "object": "customer", "created": "{now}",
+        "email": "{request.email}", "name": "{request.name}",
+        "description": "{request.description}", "livemode": false,
+        "currency": null, "default_source": null, "delinquent": false,
+        "invoice_prefix": "AFMOCK", "balance": 0,
+        "metadata": {}, "subscriptions": {"object": "list", "data": [], "has_more": false}
+      }
+    },
+    {
+      "method": "GET", "path": "/v1/customers/{id}", "load": "customers",
+      "not_found": {
+        "error": {
+          "type": "invalid_request_error", "code": "resource_missing",
+          "param": "id",
+          "message": "No such customer. This environment answers Stripe from a mock pack, so only objects created in this environment exist."
+        }
+      }
+    },
+    {
+      "method": "GET", "path": "/v1/customers", "list": "customers",
+      "body": {"object": "list", "url": "/v1/customers", "has_more": false, "data": "{items}"}
+    },
+    {
+      "method": "POST", "path": "/v1/payment_methods", "store": "payment_methods",
+      "body": {
+        "id": "{id:pm_}", "object": "payment_method", "created": "{now}",
+        "type": "card", "livemode": false, "customer": null,
+        "card": {
+          "brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2034,
+          "funding": "credit", "country": "US",
+          "checks": {"cvc_check": "pass", "address_line1_check": null, "address_postal_code_check": null}
+        },
+        "billing_details": {"name": "{request.billing_details.name}", "email": "{request.billing_details.email}"}
+      }
+    },
+    {
+      "method": "POST", "path": "/v1/payment_intents", "store": "payment_intents",
+      "body": {
+        "id": "{id:pi_}", "object": "payment_intent", "created": "{now}",
+        "amount": "{request.amount}", "currency": "{request.currency}",
+        "status": "succeeded", "livemode": false, "customer": "{request.customer}",
+        "client_secret": "{id:pi_}_secret_afmock",
+        "charges": {"object": "list", "has_more": false, "data": []}
+      }
+    },
+    {
+      "method": "POST", "path": "/v1/checkout/sessions", "store": "checkout_sessions",
+      "body": {
+        "id": "{id:cs_}", "object": "checkout.session", "created": "{now}",
+        "mode": "{request.mode}", "status": "open", "livemode": false,
+        "customer": "{request.customer}", "customer_email": "{request.customer_email}",
+        "payment_status": "unpaid", "currency": "usd", "amount_total": 0,
+        "success_url": "{request.success_url}", "cancel_url": "{request.cancel_url}",
+        "url": "https://checkout.stripe.com/c/pay/{id:cs_}"
+      }
+    },
+    {
+      "method": "GET", "path": "/v1/checkout/sessions/{id}", "load": "checkout_sessions",
+      "not_found": {
+        "error": {
+          "type": "invalid_request_error", "code": "resource_missing",
+          "message": "No such checkout session in this environment's mock pack."
+        }
+      }
+    },
+    {
+      "method": "POST", "path": "/v1/subscriptions", "store": "subscriptions",
+      "body": {
+        "id": "{id:sub_}", "object": "subscription", "created": "{now}",
+        "customer": "{request.customer}", "status": "active", "livemode": false,
+        "current_period_start": "{now}", "current_period_end": 1769904000,
+        "cancel_at_period_end": false, "canceled_at": null,
+        "items": {"object": "list", "has_more": false, "data": []},
+        "latest_invoice": "{id:in_}"
+      }
+    },
+    {
+      "method": "GET", "path": "/v1/subscriptions/{id}", "load": "subscriptions",
+      "not_found": {
+        "error": {
+          "type": "invalid_request_error", "code": "resource_missing",
+          "message": "No such subscription in this environment's mock pack."
+        }
+      }
+    },
+    {
+      "method": "DELETE", "path": "/v1/subscriptions/{id}", "store": "subscriptions",
+      "body": {
+        "id": "{id}", "object": "subscription", "status": "canceled",
+        "canceled_at": "{now}", "cancel_at_period_end": false, "livemode": false
+      }
+    },
+    {
+      "method": "GET", "path": "/v1/subscriptions", "list": "subscriptions",
+      "body": {"object": "list", "url": "/v1/subscriptions", "has_more": false, "data": "{items}"}
+    },
+    {
+      "method": "POST", "path": "/v1/invoices", "store": "invoices",
+      "body": {
+        "id": "{id:in_}", "object": "invoice", "created": "{now}",
+        "customer": "{request.customer}", "status": "paid", "paid": true,
+        "livemode": false, "amount_due": 0, "amount_paid": 0, "currency": "usd",
+        "hosted_invoice_url": "https://invoice.stripe.com/i/afmock",
+        "number": "AFMOCK-0001"
+      }
+    },
+    {
+      "method": "GET", "path": "/v1/invoices/{id}", "load": "invoices"
+    },
+    {
+      "method": "GET", "path": "/v1/prices", "list": "prices",
+      "body": {"object": "list", "url": "/v1/prices", "has_more": false, "data": "{items}"}
+    },
+    {
+      "method": "POST", "path": "/v1/prices", "store": "prices",
+      "body": {
+        "id": "{id:price_}", "object": "price", "created": "{now}", "active": true,
+        "currency": "{request.currency}", "unit_amount": "{request.unit_amount}",
+        "livemode": false, "type": "recurring",
+        "recurring": {"interval": "month", "interval_count": 1}
+      }
+    },
+    {
+      "method": "POST", "path": "/v1/billing_portal/sessions",
+      "body": {
+        "id": "{id:bps_}", "object": "billing_portal.session", "created": "{now}",
+        "customer": "{request.customer}", "livemode": false,
+        "return_url": "{request.return_url}",
+        "url": "https://billing.stripe.com/p/session/afmock"
+      }
+    }
+  ]
+}

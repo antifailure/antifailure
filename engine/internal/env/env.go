@@ -34,11 +34,13 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/livekey"
 	"github.com/antifailure/antifailure/engine/internal/lock"
+	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/state"
+	"github.com/antifailure/antifailure/engine/internal/webhook"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -288,6 +290,100 @@ func (o *Orchestrator) sandboxCredentials() (map[string]secrets.Value, error) {
 	return out, nil
 }
 
+// WebhookSecrets returns the signing secrets this environment uses, by the
+// variable name the application reads.
+//
+// A value already set in this shell wins, because somebody who set one has a
+// reason and is probably matching a fixture recorded elsewhere. Otherwise the
+// secret is derived from the environment identifier, so a preview environment
+// needs no configuration at all to have working signature verification.
+func (o *Orchestrator) WebhookSecrets() map[string]string {
+	if o.opts.Manifest.Egress == nil {
+		return nil
+	}
+	getenv := o.opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+
+	out := map[string]string{}
+	for _, r := range o.opts.Manifest.Egress.Rules {
+		if r.WebhookPath == "" {
+			continue
+		}
+		provider := webhook.ForHost(r.Host)
+		if provider == "" {
+			continue
+		}
+		name := webhook.SecretEnvFor(provider)
+		if _, done := out[name]; done {
+			continue
+		}
+		if value := getenv(name); value != "" {
+			out[name] = value
+			continue
+		}
+		out[name] = webhook.SecretFor(o.envID, provider)
+	}
+	return out
+}
+
+// WebhookSecretFor returns the secret used for one provider.
+func (o *Orchestrator) WebhookSecretFor(provider string) string {
+	name := webhook.SecretEnvFor(provider)
+	if name == "" {
+		return ""
+	}
+	if v, ok := o.WebhookSecrets()[name]; ok {
+		return v
+	}
+	getenv := o.opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if v := getenv(name); v != "" {
+		return v
+	}
+	return webhook.SecretFor(o.envID, provider)
+}
+
+// mockPacks reads the fixture packs the manifest points at.
+//
+// The packs that ship with the engine are compiled into the sidecar and are
+// always available, so a manifest names one only to add a provider or to
+// override a built in route.
+//
+// A pack that will not parse is refused here rather than in the sidecar. A
+// broken file that reached the sidecar would leave its host answering nothing,
+// and the failure would look like a missing route rather than a bad file.
+func (o *Orchestrator) mockPacks() ([]string, error) {
+	if o.opts.Manifest.Egress == nil {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range o.opts.Manifest.Egress.Rules {
+		if r.Fixtures == "" || seen[r.Fixtures] {
+			continue
+		}
+		seen[r.Fixtures] = true
+
+		rel := filepath.FromSlash(strings.TrimPrefix(r.Fixtures, "./"))
+		body, err := os.ReadFile(filepath.Join(o.opts.Root, rel))
+		if err != nil {
+			return nil, aferrors.Wrap(err, aferrors.AFNET010,
+				"method", "any", "path", "any", "host", r.Host,
+				"suggestion", r.Fixtures)
+		}
+		if _, err := mockpack.Parse(body); err != nil {
+			return nil, aferrors.Wrap(err, aferrors.AFMAN002,
+				"path", r.Fixtures, "detail", err.Error())
+		}
+		out = append(out, string(body))
+	}
+	return out, nil
+}
+
 // needsInspection reports whether any rule requires reading inside TLS.
 //
 // Asked here rather than in the runtime because it decides whether to issue a
@@ -378,6 +474,28 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 		return res, err
 	}
 	spec.SandboxCredentials = creds
+
+	packs, err := o.mockPacks()
+	if err != nil {
+		return res, err
+	}
+	spec.MockPacks = packs
+
+	// Every service receives the signing secrets for the providers whose
+	// callbacks this environment will send, so that af webhook trigger and the
+	// application's own verification agree without anybody configuring the
+	// same value twice.
+	for name, value := range o.WebhookSecrets() {
+		for i := range spec.Services {
+			if spec.Services[i].Env == nil {
+				spec.Services[i].Env = map[string]secrets.Value{}
+			}
+			if _, set := spec.Services[i].Env[name]; !set {
+				spec.Services[i].Env[name] = secrets.New(value)
+			}
+		}
+		o.opts.Redactor.Register(value)
+	}
 
 	if needsInspection(o.opts.Manifest.Egress) {
 		ca, caErr := envcert.Generate(o.envID, o.opts.Clock.Now())
@@ -733,4 +851,16 @@ func (o *Orchestrator) WaitForMessage(
 		}
 		return true
 	}, timeout)
+}
+
+// DeliverWebhook sends a signed event into the environment.
+func (o *Orchestrator) DeliverWebhook(
+	ctx context.Context, service, path string, body []byte, headers map[string]string,
+) (local.Delivery, error) {
+	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	if err != nil {
+		return local.Delivery{}, err
+	}
+	defer func() { _ = rt.Close() }()
+	return rt.Deliver(ctx, o.envID, service, path, body, headers)
 }

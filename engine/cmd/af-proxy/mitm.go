@@ -258,6 +258,13 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 		p.capture(w, req, host)
 		return false
 	}
+
+	if d.Mode == schema.ModeMock {
+		p.serveMock(w, req, host, &rec)
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		return false
+	}
 	if !d.Allowed() {
 		rec.Status = http.StatusForbidden
 		rec.Duration = time.Since(started).String()

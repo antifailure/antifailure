@@ -69,6 +69,9 @@ type EnvSpec struct {
 	// it hands the policy to the sidecar, which shares the decision code with
 	// af net explain, so the two cannot disagree.
 	Egress *schema.Egress
+	// MockPacks are fixture packs from the repository, as raw JSON. The packs
+	// that ship with the engine are always available and are not listed here.
+	MockPacks []string
 	// SandboxCredentials are the values the sidecar substitutes for a rule in
 	// sandbox mode, keyed by the name the rule refers to.
 	SandboxCredentials map[string]secrets.Value

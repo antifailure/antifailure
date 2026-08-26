@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
@@ -50,6 +53,7 @@ type sidecarConfig struct {
 	Subnet      string            `json:"subnet"`
 	Internal    []string          `json:"internal"`
 	EnvID       string            `json:"env_id"`
+	MockPacks   []string          `json:"mock_packs,omitempty"`
 	Credentials map[string]string `json:"credentials,omitempty"`
 	CACert      string            `json:"ca_cert,omitempty"`
 	CAKey       string            `json:"ca_key,omitempty"`
@@ -70,6 +74,7 @@ func (r *Runtime) startProxy(
 	serviceNames []string,
 	ca *envcert.Authority,
 	credentials map[string]secrets.Value,
+	mockPacks []string,
 	nets networks,
 	journal func(string, string) error,
 	progress func(string),
@@ -138,6 +143,7 @@ func (r *Runtime) startProxy(
 	if ca != nil {
 		cfg.CACert, cfg.CAKey = ca.CertPEM, ca.KeyPEM.Reveal()
 	}
+	cfg.MockPacks = mockPacks
 	if len(credentials) > 0 {
 		cfg.Credentials = make(map[string]string, len(credentials))
 		for name, value := range credentials {
@@ -585,4 +591,83 @@ func (r *Runtime) WaitForMessage(
 				"match", "the filter", "timeout", timeout.Round(time.Second).String())
 		}
 	}
+}
+
+// Delivery is the result of sending a webhook into the environment.
+type Delivery struct {
+	// Service is the service that received it.
+	Service string
+	// URL is where it was delivered.
+	URL string
+	// Status is what the application answered.
+	Status int
+	// Body is the start of the response, which is where an application puts
+	// the reason it rejected an event.
+	Body string
+	// Duration is how long the application took.
+	Duration time.Duration
+}
+
+// Deliver posts a signed event to a service inside the environment.
+//
+// It goes through the service's published address rather than into the
+// network, because that is the same path the provider's own callback would
+// take and it exercises whatever sits in front of the handler.
+func (r *Runtime) Deliver(
+	ctx context.Context, envID, service, path string, body []byte, headers map[string]string,
+) (Delivery, error) {
+	env, err := r.Status(ctx, envID)
+	if err != nil {
+		return Delivery{}, err
+	}
+	var target provider.RunningService
+	for _, s := range env.Services {
+		if s.URL == "" {
+			continue
+		}
+		if service == "" || s.Name == service {
+			target = s
+			break
+		}
+	}
+	if target.URL == "" {
+		return Delivery{}, aferrors.Coded(aferrors.AFNET012,
+			"service", orAny(service), "detail", "no service in this environment is reachable")
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	started := r.clock.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.URL+path, bytes.NewReader(body))
+	if err != nil {
+		return Delivery{}, aferrors.Wrap(err, aferrors.AFNET012,
+			"service", target.Name, "detail", err.Error())
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	if err != nil {
+		return Delivery{}, aferrors.Wrap(err, aferrors.AFNET012,
+			"service", target.Name, "detail", err.Error())
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Bounded, because the interesting part of a rejection is the first line
+	// and an application that answers with a whole HTML page should not fill
+	// somebody's terminal with it.
+	preview, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	return Delivery{
+		Service: target.Name, URL: target.URL + path, Status: resp.StatusCode,
+		Body:     strings.TrimSpace(r.redactor.String(string(preview))),
+		Duration: r.clock.Since(started),
+	}, nil
+}
+
+func orAny(s string) string {
+	if s == "" {
+		return "any"
+	}
+	return s
 }

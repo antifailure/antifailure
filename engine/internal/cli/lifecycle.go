@@ -12,6 +12,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // UpJSON is the machine readable form of af up.
@@ -61,13 +62,24 @@ type PendingJSON struct {
 
 // orchestrator loads the manifest and prepares the lifecycle for this repo.
 func orchestrator(env2 *Env, branch string, rebuild bool) (*env.Orchestrator, error) {
+	o, _, err := orchestratorWithManifest2(env2, branch, rebuild)
+	return o, err
+}
+
+// orchestratorWithManifest also returns the manifest, for commands that read
+// it directly rather than through the lifecycle.
+func orchestratorWithManifest(env2 *Env, branch string) (*env.Orchestrator, *schema.Manifest, error) {
+	return orchestratorWithManifest2(env2, branch, false)
+}
+
+func orchestratorWithManifest2(env2 *Env, branch string, rebuild bool) (*env.Orchestrator, *schema.Manifest, error) {
 	path, err := manifest.Find(env2.WorkDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	m, err := manifest.Load(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	root := repoRoot(path)
 	if branch == "" {
@@ -75,7 +87,7 @@ func orchestrator(env2 *Env, branch string, rebuild bool) (*env.Orchestrator, er
 	}
 
 	r := redact.New()
-	return env.New(env.Options{
+	o, err := env.New(env.Options{
 		Root: root, Manifest: m, Branch: branch, Clock: env2.Clock,
 		Rebuild: rebuild, Redactor: r, Verbose: env2.Out.Verbose, Getenv: env2.Getenv,
 		Progress: func(line string) {
@@ -84,6 +96,7 @@ func orchestrator(env2 *Env, branch string, rebuild bool) (*env.Orchestrator, er
 			env2.Out.Printf("  %s\n", r.String(line))
 		},
 	})
+	return o, m, err
 }
 
 // repoRoot is the directory holding the manifest.

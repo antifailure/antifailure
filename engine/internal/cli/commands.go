@@ -134,34 +134,6 @@ only way to look at the result without the result leaving your machine.`),
 	return cmd
 }
 
-func newWebhookCommand(env *Env) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "webhook",
-		Short: "Trigger and inspect inbound webhooks",
-		Long: strings.TrimSpace(`
-Inbound events are what most flows are waiting on, and they are the thing a
-preview environment normally cannot receive. The webhook bus delivers them in
-order, signed the way the provider signs them, so a subscription flow actually
-completes.`),
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "trigger <provider> <event>",
-		Short: "Deliver one provider event to the application",
-		Args:  cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af webhook trigger")
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "Show queued and delivered webhooks",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af webhook list")
-		},
-	})
-	return cmd
-}
-
 func newInsightsCommand(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "insights",

@@ -42,6 +42,9 @@ var sources = []string{
 	"cmd/af-proxy/capture.go",
 	"cmd/af-proxy/sandbox.go",
 	"internal/livekey/livekey.go",
+	"internal/mockpack/mockpack.go",
+	"internal/mockpack/builtin.go",
+	"internal/mockpack/packs/stripe.json",
 }
 
 // modulePath is the module the generated files declare.
