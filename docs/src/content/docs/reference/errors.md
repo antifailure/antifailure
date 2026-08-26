@@ -774,6 +774,18 @@ Service {service} exited with code {code} during startup.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/local-runtime](/docs/guides/local-runtime/) |
 
+### AF-RUN-009
+
+No free port was found in the range {range} to publish the environment on.
+
+**What to do.** Free a port in that range, or set runtime.port_from in the manifest to a range that is clear.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+
 ### AF-RUN-010
 
 Writing to {path} failed because the disk is full; {needed} is required.

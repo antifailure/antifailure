@@ -16,15 +16,10 @@ package docker
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
-	"net"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -34,6 +29,7 @@ import (
 	"github.com/docker/go-connections/nat"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -46,12 +42,16 @@ import (
 // found and cleaned up. A resource with no label is not ours and is never
 // touched, which is what keeps the provider from deleting a developer's own
 // Postgres container.
+// They are aliases rather than copies. Three components create Docker
+// resources and the leak detector finds them all by these labels; if each
+// declared its own, the one the detector did not know about would be the one
+// that leaked.
 const (
-	LabelManaged = "dev.antifailure.managed"
-	LabelKind    = "dev.antifailure.kind"
-	LabelEnv     = "dev.antifailure.env"
-	LabelGolden  = "dev.antifailure.golden"
-	LabelCreated = "dev.antifailure.created"
+	LabelManaged = dockerutil.LabelManaged
+	LabelKind    = dockerutil.LabelKind
+	LabelEnv     = dockerutil.LabelEnv
+	LabelGolden  = dockerutil.LabelGolden
+	LabelCreated = dockerutil.LabelCreated
 )
 
 // ImageRepo is where golden versions are committed. Using one repository with
@@ -81,11 +81,10 @@ type Provider struct {
 	// database, which is the case for a project that has not connected one yet.
 	seedSQL string
 
-	mu sync.Mutex
 	// ports remembers what this process allocated, so two branches created in
 	// the same run cannot be handed the same port between the probe and the
 	// bind.
-	ports map[int]bool
+	ports *dockerutil.PortAllocator
 }
 
 // Options configure the provider.
@@ -102,7 +101,7 @@ type Options struct {
 
 // DefaultPortFrom is high enough to sit above the ephemeral range on every
 // platform, so an allocation does not collide with an outbound connection.
-const DefaultPortFrom = 43000
+const DefaultPortFrom = dockerutil.DefaultPortFrom
 
 // New returns a provider talking to the local Docker daemon.
 func New(opts Options) (*Provider, error) {
@@ -115,22 +114,15 @@ func New(opts Options) (*Provider, error) {
 	if opts.Clock == nil {
 		opts.Clock = clock.New()
 	}
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := dockerutil.Client()
 	if err != nil {
-		return nil, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", dockerHost())
+		return nil, err
 	}
 	return &Provider{
 		cli: cli, clock: opts.Clock, version: opts.Version,
 		portFrom: opts.PortFrom, seedSQL: opts.SeedSQL,
-		ports: map[int]bool{},
+		ports: dockerutil.NewPortAllocator(opts.PortFrom),
 	}, nil
-}
-
-func dockerHost() string {
-	if h := os.Getenv("DOCKER_HOST"); h != "" {
-		return h
-	}
-	return "unix:///var/run/docker.sock"
 }
 
 // Name identifies the provider.
@@ -246,7 +238,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	if _, err := p.cli.ContainerCommit(ctx, c.id, container.CommitOptions{
 		Reference: tag,
 		Comment:   "Antifailure golden " + version,
-		Changes:   []string{`LABEL ` + LabelManaged + `=true`, `LABEL ` + LabelKind + `=golden`},
+		Changes:   []string{`LABEL ` + LabelManaged + `=` + dockerutil.ManagedValue, `LABEL ` + LabelKind + `=golden`},
 	}); err != nil {
 		return provider.GoldenVersion{}, fmt.Errorf("db.docker: commit the golden image: %w", err)
 	}
@@ -490,7 +482,7 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 			EnvID:     c.Labels[LabelEnv],
 			CreatedAt: time.Unix(c.Created, 0).UTC(),
 			Labels: map[string]string{
-				"name":   strings.TrimPrefix(firstName(c.Names), "/"),
+				"name":   strings.TrimPrefix(dockerutil.FirstName(c.Names), "/"),
 				"golden": c.Labels[LabelGolden],
 				"state":  c.State,
 			},
@@ -530,13 +522,6 @@ func (p *Provider) Health(ctx context.Context, b provider.Branch) (provider.Heal
 // a crash finds the same container without needing the journal to be intact.
 func branchName(envID string) string { return "af-db-" + envID }
 
-func firstName(names []string) string {
-	if len(names) == 0 {
-		return ""
-	}
-	return names[0]
-}
-
 func joinInts(v []int) string {
 	parts := make([]string, len(v))
 	for i, n := range v {
@@ -556,42 +541,9 @@ func publishedPort(ports nat.PortMap) (int, error) {
 	return 0, fmt.Errorf("db.docker: the branch container publishes no port")
 }
 
-// discard drains a reader so that a daemon stream is fully consumed, which the
-// API requires before the operation is considered finished.
-func discard(r io.ReadCloser) {
-	if r == nil {
-		return
-	}
-	_, _ = io.Copy(io.Discard, r)
-	_ = r.Close()
-}
+// freePort delegates to the shared allocator, which remembers what this
+// process handed out so that two branches created in one run cannot be given
+// the same port between the probe and the bind.
+func (p *Provider) freePort() (int, error) { return p.ports.Free() }
 
-// freePort finds a port nothing is listening on and nothing in this process
-// has already claimed.
-//
-// Binding to port zero and reading back what the kernel chose is the usual
-// trick, but it does not work here: the port has to be handed to the daemon,
-// which binds it afterwards, so the socket must be closed first and the
-// interval between is a race. Remembering what this process allocated closes
-// the half of that race that matters in practice, which is two branches
-// created in the same run.
-func (p *Provider) freePort() (int, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for port := p.portFrom; port < p.portFrom+2000; port++ {
-		if p.ports[port] {
-			continue
-		}
-		l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
-		if err != nil {
-			continue
-		}
-		_ = l.Close()
-		p.ports[port] = true
-		return port, nil
-	}
-	return 0, aferrors.Coded(aferrors.AFRUN020,
-		"detail", fmt.Sprintf("no free port was found between %d and %d", p.portFrom, p.portFrom+2000))
-}
-
-var errNotOurs = errors.New("db.docker: the resource is not managed by Antifailure")
+var errNotOurs = dockerutil.ErrNotOurs

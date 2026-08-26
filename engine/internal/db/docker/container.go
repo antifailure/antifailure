@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 
+	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -73,7 +73,7 @@ func (p *Provider) start(ctx context.Context, name, img string, labels map[strin
 	}
 
 	all := map[string]string{
-		LabelManaged: "true",
+		LabelManaged: dockerutil.ManagedValue,
 		LabelCreated: p.clock.Now().UTC().Format(time.RFC3339),
 	}
 	for k, v := range labels {
@@ -147,7 +147,7 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	}
 	// The stream has to be drained before the pull is finished, or the image
 	// is only partly present when the next call inspects it.
-	discard(rc)
+	dockerutil.Discard(rc)
 	if _, _, err := p.cli.ImageInspectWithRaw(ctx, ref); err != nil {
 		return fmt.Errorf("db.docker: %s is not present after pulling it: %w", ref, err)
 	}
@@ -194,7 +194,7 @@ func (p *Provider) remove(ctx context.Context, ref string) error {
 // listContainers returns the containers this provider manages, optionally of
 // one kind.
 func (p *Provider) listContainers(ctx context.Context, kind string) ([]container.Summary, error) {
-	args := filters.NewArgs(filters.Arg("label", LabelManaged+"=true"))
+	args := dockerutil.Filter()
 	if kind != "" {
 		args.Add("label", LabelKind+"="+kind)
 	}

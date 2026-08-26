@@ -296,6 +296,13 @@ errors:
     docs: concepts/journal
     retryable: true
     exit_code: 1
+  - code: AF-RUN-009
+    area: RUN
+    message: "No free port was found in the range {range} to publish the environment on."
+    next_step: "Free a port in that range, or set runtime.port_from in the manifest to a range that is clear."
+    docs: guides/local-runtime
+    retryable: true
+    exit_code: 1
   - code: AF-RUN-004
     area: RUN
     message: "Service {service} did not become ready within {timeout}."

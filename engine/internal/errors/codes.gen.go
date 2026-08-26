@@ -169,6 +169,9 @@ const (
 	AFRUN004 Code = "AF-RUN-004"
 	// Service {service} exited with code {code} during startup.
 	AFRUN005 Code = "AF-RUN-005"
+	// No free port was found in the range {range} to publish the
+	// environment on.
+	AFRUN009 Code = "AF-RUN-009"
 	// Writing to {path} failed because the disk is full; {needed} is
 	// required.
 	AFRUN010 Code = "AF-RUN-010"
@@ -741,6 +744,15 @@ var catalog = map[Code]Entry{
 		NextStep:  "The last log lines are above. Run 'af logs {service}' for the full output.",
 		Docs:      "guides/local-runtime",
 		Retryable: false,
+		ExitCode:  ExitFailure,
+	},
+	AFRUN009: {
+		Code:      AFRUN009,
+		Area:      "RUN",
+		Message:   "No free port was found in the range {range} to publish the environment on.",
+		NextStep:  "Free a port in that range, or set runtime.port_from in the manifest to a range that is clear.",
+		Docs:      "guides/local-runtime",
+		Retryable: true,
 		ExitCode:  ExitFailure,
 	},
 	AFRUN010: {
