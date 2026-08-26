@@ -194,10 +194,54 @@ jobs:
 
       - name: No engine package imports ee
         run: |
-          if grep -rn --include='*.go' 'antifailure/engine/ee' engine tools; then
+          if grep -rn --include='*.go' 'antifailure/antifailure/ee' engine tools; then
             echo "an engine package imports ee, which the community build does not have"
             exit 1
           fi
+
+      - name: The community binary carries no enterprise symbols
+        # The proof that ships, rather than the proof that compiles. The
+        # boundary being a separate Go module already makes a stray import a
+        # compile error, and this checks the artifact anyway, because the thing
+        # a customer runs is the binary and not the source tree.
+        run: |
+          git checkout -- . 2>/dev/null || true
+          cd engine
+          CGO_ENABLED=0 go build -o /tmp/af-community ./cmd/af
+          if strings /tmp/af-community | grep -E 'antifailure/(antifailure/)?ee/'; then
+            echo "the community binary contains enterprise package paths"
+            exit 1
+          fi
+          echo "no enterprise symbols in the community binary"
+
+  enterprise:
+    name: enterprise
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+
+      - name: Build and test the enterprise module
+        # Its own module, deliberately outside the workspace, so GOWORK is off.
+        # The community build cannot resolve these import paths at all, which is
+        # a stronger boundary than a lint rule: a mistaken import fails to
+        # compile on the machine that wrote it.
+        run: |
+          cd ee/engine
+          GOWORK=off go build ./...
+          GOWORK=off go vet ./...
+          GOWORK=off go test ./... -race -timeout 15m
+
+      - name: The license parser survives arbitrary input
+        # It reads a value a customer pastes in, so the only property that
+        # matters is that no input makes it panic or accept something unsigned.
+        run: |
+          cd ee/engine
+          GOWORK=off go test ./license -run FuzzParse -fuzz FuzzParse -fuzztime 60s
 
   secrets:
     name: no credentials in the tree

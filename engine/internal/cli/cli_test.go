@@ -453,3 +453,40 @@ func writeManifest(t *testing.T, dir, body string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"), []byte(body), 0o600))
 }
+
+// The community edition answers af license rather than saying the command does
+// not exist. "Unknown command" reads as a broken install and sends somebody to
+// the issue tracker; an answer reads as a product decision, which it is.
+func TestLicense_TheCommunityEditionSaysItNeedsNoLicense(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, t.TempDir(), nil, "license", "status")
+	require.Zero(t, got.code, "asking about the license is not an error")
+	require.Contains(t, got.stdout, "community edition")
+	require.Contains(t, got.stdout, "needs none")
+	// It must not read as a trial or a crippled version, because it is neither.
+	lower := strings.ToLower(got.stdout)
+	require.NotContains(t, lower, "trial")
+	require.NotContains(t, lower, "upgrade to unlock")
+	require.Contains(t, lower, "does not expire")
+}
+
+func TestLicense_InstallRefusesRatherThanStoringAKeyItCannotUse(t *testing.T) {
+	t.Parallel()
+	// Storing a key this binary can never act on would leave somebody believing
+	// their enterprise features are on, and they would find out during the
+	// rollout they bought it for.
+	got := runCLI(t, t.TempDir(), nil, "license", "install", "aflic_whatever.signature")
+	require.Contains(t, got.stdout, "Nothing was stored")
+	require.Contains(t, got.stdout, "enterprise binary")
+	require.NotContains(t, got.stdout, "installed successfully")
+}
+
+func TestLicense_StatusInJSONNamesTheEdition(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, t.TempDir(), nil, "license", "status", "-o", "json")
+	var doc cli.LicenseJSON
+	require.NoError(t, json.Unmarshal([]byte(got.stdout), &doc))
+	require.Equal(t, "community", doc.Edition)
+	require.Equal(t, "none", doc.State)
+	require.Empty(t, doc.Extensions, "the stock build has nothing registered at the extension points")
+}
