@@ -1,0 +1,29 @@
+#!/bin/sh
+# Refuse a commit authored by an address that belongs to somebody else.
+#
+# A local git config once sent 62 commits in this repository to a GitHub
+# account that was not the author's. The config was corrected, and a config is
+# exactly the kind of thing the next machine, the next clone, or a helpful tool
+# quietly sets again. CI checks this too; this is here so the answer arrives
+# before the push rather than after it.
+#
+# Enable it once per clone:
+#   git config core.hooksPath .githooks
+
+wrong='potatogreenbean204@gmail.com'
+email=$(git config user.email)
+
+case "$email" in
+  "$wrong")
+    echo "refusing: this commit would be authored by $email," >&2
+    echo "which GitHub links to a different account." >&2
+    echo >&2
+    echo "  git config user.email 67278851+VirSanghavi@users.noreply.github.com" >&2
+    exit 1
+    ;;
+  "")
+    echo "refusing: git has no user.email, so this commit would be attributed to nobody." >&2
+    exit 1
+    ;;
+esac
+exit 0

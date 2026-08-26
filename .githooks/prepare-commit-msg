@@ -1,0 +1,24 @@
+#!/bin/sh
+# Add the Developer Certificate of Origin sign-off if it is missing.
+#
+# CONTRIBUTING.md says every commit needs one. It said that while 65 of 80
+# commits had none and nothing checked, which is how a rule in a document
+# quietly stops being a rule. CI checks new commits now; this puts the trailer
+# there so the check has nothing to complain about.
+#
+# Only for a message being written normally. A merge, a squash, or an amend
+# that already carries the trailer is left alone.
+file="$1"
+source="$2"
+
+case "$source" in
+  merge|squash) exit 0 ;;
+esac
+
+grep -q '^Signed-off-by: ' "$file" && exit 0
+
+name=$(git config user.name)
+email=$(git config user.email)
+[ -n "$name" ] && [ -n "$email" ] || exit 0
+
+printf '\nSigned-off-by: %s <%s>\n' "$name" "$email" >> "$file"

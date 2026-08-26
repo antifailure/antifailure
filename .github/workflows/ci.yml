@@ -306,3 +306,109 @@ jobs:
         # cannot disagree about what a credential looks like. Its own tests
         # assemble fake keys at runtime for exactly this reason.
         run: cd engine && go run ../tools/scanrepo ..
+
+  authorship:
+    name: commits are attributed to their author
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Enough history to see the range this push added, and no more.
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: No commit is authored by an identity that belongs to somebody else
+        # A local git config sent 62 commits to a GitHub account that is not
+        # the author's. The config was fixed, and a config is exactly the kind
+        # of thing that gets overwritten by the next machine, the next clone,
+        # or a tool that helpfully sets one.
+        #
+        # This blocks the known-wrong address rather than allow-listing the
+        # right ones, on purpose. An allow-list would refuse a new contributor
+        # for the crime of being new, and would then be widened until it meant
+        # nothing. Naming the address that was wrong keeps the check specific
+        # and keeps it true.
+        #
+        # Only the commits this push or pull request added are checked. The
+        # history before the fix is left as it is, deliberately: rewriting it
+        # would break every existing clone to change an avatar.
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          # Addresses that reached this repository by mistake. Add to this list
+          # rather than removing it: each line is a thing that actually
+          # happened.
+          wrong='potatogreenbean204@gmail.com'
+
+          if [ -n "${BASE:-}" ]; then
+            range="$BASE..HEAD"
+          elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..HEAD"
+          else
+            # A new branch, or a force push that removed the old tip. Nothing
+            # to compare against, so check only the commit at hand rather than
+            # the whole history, which is known to contain the old address.
+            range="HEAD~0..HEAD"
+          fi
+
+          echo "checking $range"
+          bad=$(git log --format='%H %an <%ae>' "$range" | grep -F "$wrong" || true)
+          if [ -n "$bad" ]; then
+            echo "These commits are authored by an address that belongs to a different GitHub account:"
+            echo "$bad"
+            echo
+            echo "Set the right one and amend:"
+            echo "  git config user.email 67278851+VirSanghavi@users.noreply.github.com"
+            echo "  git commit --amend --reset-author --no-edit"
+            exit 1
+          fi
+          echo "every commit in $range is attributed to its author"
+
+      - name: Every commit carries a Developer Certificate of Origin sign-off
+        # CONTRIBUTING.md has always said this is required. Nothing checked,
+        # and 65 of the first 80 commits had no trailer, which is how a rule in
+        # a document stops being a rule.
+        #
+        # New commits only, for the same reason as above: the history before
+        # this cannot be signed retroactively without rewriting it, and
+        # rewriting it would break every existing clone.
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${BASE:-}" ]; then
+            range="$BASE..HEAD"
+          elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..HEAD"
+          else
+            range="HEAD~0..HEAD"
+          fi
+
+          missing=0
+          for sha in $(git rev-list "$range"); do
+            # A merge commit is not a contribution and has nothing to certify.
+            if [ "$(git rev-list --no-walk --count --merges "$sha")" = "1" ]; then
+              continue
+            fi
+            if ! git log -1 --format='%B' "$sha" | grep -q '^Signed-off-by: '; then
+              echo "no sign-off: $(git log -1 --format='%h %s' "$sha")"
+              missing=$((missing + 1))
+            fi
+          done
+
+          if [ "$missing" -gt 0 ]; then
+            echo
+            echo "$missing commits have no Developer Certificate of Origin sign-off."
+            echo "Add one with 'git commit -s', or let the repository's hook do it:"
+            echo "  git config core.hooksPath .githooks"
+            echo
+            echo "The DCO text is at https://developercertificate.org. There is no CLA."
+            exit 1
+          fi
+          echo "every commit in $range is signed off"

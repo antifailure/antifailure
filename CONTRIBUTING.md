@@ -18,10 +18,17 @@ report under `.gate-reports/` names the file and the line.
 ```
 git clone https://github.com/antifailure/antifailure
 cd antifailure
+git config core.hooksPath .githooks   # see below
 just setup     # installs pinned tool versions into .tools/
 just build     # builds the af binary into bin/af
 just test      # unit and property tests
 ```
+
+The hooks line is worth the ten seconds. It adds the sign-off trailer for you
+and refuses a commit authored by an address that is known to belong to somebody
+else's GitHub account, which is a mistake this repository has actually made.
+CI checks both, so the hooks only decide whether you find out before the push
+or after it.
 
 You need Go 1.25, Node 22 or newer with pnpm 10, and a working Docker daemon.
 `just setup` reports anything missing with the command that installs it.
