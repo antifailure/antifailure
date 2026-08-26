@@ -40,6 +40,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/state"
 	"github.com/antifailure/antifailure/engine/internal/webhook"
+	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/livekey"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -75,6 +76,15 @@ type Options struct {
 	// Getenv reads the environment this command is running in, for sandbox
 	// credentials. Nil uses the process environment.
 	Getenv func(string) string
+	// Extensions is consulted before an environment is created. Nil uses the
+	// process-wide registry, which in the community build is empty, so the
+	// check costs one function call that returns nil.
+	//
+	// It can only refuse. There is no way for a hook to permit something the
+	// manifest does not, because a hook that could widen an egress rule would
+	// be a way to change what an environment reaches without changing the
+	// repository, and that is the thing this system exists to prevent.
+	Extensions *extension.Registry
 }
 
 // Orchestrator runs the lifecycle for one environment.
@@ -452,6 +462,48 @@ func databaseVersion(m *schema.Manifest) int {
 	return 17
 }
 
+// checkPolicy asks the registered hooks whether this environment may exist.
+//
+// The community build registers nothing, so this returns nil after one call
+// over an empty slice. It is here rather than in the enterprise edition because
+// the socket has to be in the thing being extended, and because a hook that
+// only exists in a build nobody runs is a hook nobody has tested.
+func (o *Orchestrator) checkPolicy(ctx context.Context) error {
+	registry := o.opts.Extensions
+	if registry == nil {
+		registry = extension.Default
+	}
+	if registry.Empty() {
+		return nil
+	}
+
+	m := o.opts.Manifest
+	req := extension.EnvironmentRequest{
+		Repository: m.Name,
+		Branch:     o.opts.Branch,
+		EnvID:      o.envID,
+		Provider:   "docker",
+	}
+	if m.Database != nil && m.Database.Provider != "" {
+		req.Provider = string(m.Database.Provider)
+	}
+	if m.Egress != nil {
+		req.EgressModes = make(map[string]string, len(m.Egress.Rules))
+		for _, rule := range m.Egress.Rules {
+			req.EgressHosts = append(req.EgressHosts, rule.Host)
+			req.EgressModes[rule.Host] = string(rule.Mode)
+		}
+	}
+
+	if err := registry.CheckPolicy(ctx, req); err != nil {
+		// Returned as it came. A policy hook's message names the policy and
+		// what would satisfy it, and wrapping it in "environment creation
+		// failed" would bury the only sentence that helps.
+		return err
+	}
+	return nil
+}
+
 // Up brings the environment up.
 func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	started := o.opts.Clock.Now()
@@ -462,6 +514,24 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	defer s.close()
 
 	res := &Result{EnvID: o.envID}
+
+	// Before anything is created, so that a refusal costs nothing. Checking
+	// after the database branch exists would leave a branch behind every time a
+	// policy refused, which is how a policy control becomes a resource leak.
+	if err := o.checkPolicy(ctx); err != nil {
+		return res, err
+	}
+	defer func() {
+		// Reported whether the environment came up or not, because a failed
+		// creation still consumed capacity and a meter that only counts
+		// successes undercounts exactly the runs that cost the most.
+		o.observe(ctx, extension.LifecycleEvent{
+			Repository: o.opts.Manifest.Name,
+			EnvID:      o.envID,
+			Kind:       "environment.created",
+			Seconds:    o.opts.Clock.Since(started).Seconds(),
+		})
+	}()
 
 	golden, branch, dbURL, err := o.database(ctx, s)
 	if err != nil {
@@ -817,7 +887,32 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 		td.Removed++
 		o.progress("removed the database branch")
 	}
+
+	o.observe(ctx, extension.LifecycleEvent{
+		Repository: o.opts.Manifest.Name,
+		EnvID:      o.envID,
+		Kind:       "environment.torn_down",
+	})
 	return td, nil
+}
+
+// observe reports a lifecycle event to whatever is registered.
+//
+// Failures are reported through progress and never returned. A metering
+// pipeline that is down must not prevent a teardown, or a billing outage
+// becomes a resource leak, which is a strictly worse problem than a missing
+// meter reading.
+func (o *Orchestrator) observe(ctx context.Context, event extension.LifecycleEvent) {
+	registry := o.opts.Extensions
+	if registry == nil {
+		registry = extension.Default
+	}
+	if registry.Empty() {
+		return
+	}
+	for _, problem := range registry.Observe(ctx, event) {
+		o.progress(fmt.Sprintf("lifecycle hook: %v", problem))
+	}
 }
 
 // Status reports what is currently running.

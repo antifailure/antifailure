@@ -18,6 +18,9 @@ go 1.25.0
 // published version, because the two are released from one tag.
 replace github.com/antifailure/antifailure/engine => ../../engine
 
-require github.com/stretchr/testify v1.12.1
+require (
+	github.com/antifailure/antifailure/engine v0.0.0-00010101000000-000000000000
+	github.com/stretchr/testify v1.12.1
+)
 
 require go.yaml.in/yaml/v3 v3.0.5 // indirect
