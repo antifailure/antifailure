@@ -477,6 +477,17 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		return nil, err
 	}
 	for _, c := range containers {
+		switch c.Labels[LabelKind] {
+		case "golden", "candidate", "branch":
+		default:
+			// Only what this provider owns. The label set is shared with the
+			// runtime, so listing every managed container would report the
+			// environment's own services as database resources, and a leak
+			// check comparing before and after would blame this provider for
+			// containers another one created. That is exactly what happened
+			// the first time the suites ran in parallel.
+			continue
+		}
 		out = append(out, provider.Resource{
 			Kind:      "container/" + c.Labels[LabelKind],
 			ID:        c.ID,
