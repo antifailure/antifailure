@@ -288,6 +288,7 @@ recoverable by replay.`),
 		newSupportCommand(env),
 		newCICommand(env),
 		newRunnerCommand(env),
+		newSecretCommand(env),
 		newLicenseCommand(env),
 		newVersionCommand(env),
 	)

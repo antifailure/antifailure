@@ -685,6 +685,69 @@ af runner install [flags]
 | `--from` | - | Copy from this directory rather than the one beside the engine. |
 | `--skip-browser` | `false` | Do not download the browser. |
 
+### `af secret`
+
+Store values in the encrypted local store.
+
+The last place the engine looks for a declared variable, after this shell's
+environment and after .env.
+
+The file is encrypted with a key derived from a passphrase, and it lives under
+.antifailure, which 'af init' adds to .gitignore. It is a convenience for a
+workstation and it is not a secret manager for a team: a value here is as safe
+as the passphrase and the disk it is on.
+
+Set AF_SECRET_PASSPHRASE before using it. There is deliberately no default:
+a store encrypted with a passphrase everybody knows is a store that only looks
+encrypted.
+
+```
+af secret
+```
+
+Subcommands:
+
+- [`af secret list`](#af-secret-list) List the names in the store.
+- [`af secret rm`](#af-secret-rm) Remove a value from the store.
+- [`af secret set`](#af-secret-set) Store a value, read without echo.
+
+### `af secret list`
+
+List the names in the store.
+
+Names only. There is no command that prints a stored value: a store that can
+print its contents is one screenshot away from not being a store.
+
+```
+af secret list
+```
+
+### `af secret rm`
+
+Remove a value from the store.
+
+```
+af secret rm <name>
+```
+
+### `af secret set`
+
+Store a value, read without echo.
+
+Reads the value from the terminal without echoing it, or from stdin when there
+is no terminal.
+
+It is never taken as an argument. An argument is in the shell history, in the
+process list, and in the CI log of whatever ran it.
+
+```
+af secret set <name> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--stdin` | `false` | Read the value from stdin rather than prompting. |
+
 ### `af status`
 
 Show what is running for this branch.

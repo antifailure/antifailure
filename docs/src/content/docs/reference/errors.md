@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-38 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+37 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -615,6 +615,18 @@ The value supplied for {name} carries a live credential prefix, and {name} is co
 | | |
 | --- | --- |
 | Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/secrets](/docs/guides/secrets/) |
+
+### AF-SEC-004
+
+The encrypted local store has no passphrase: no system keyring answered and AF_SECRET_PASSPHRASE is not set.
+
+**What to do.** Set AF_SECRET_PASSPHRASE, or store the passphrase in the system keyring on a platform that has one. There is deliberately no default: a store encrypted with a passphrase everybody knows only looks encrypted.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/secrets](/docs/guides/secrets/) |
 

@@ -231,8 +231,8 @@ const (
 	// The value supplied for {name} carries a live credential prefix, and
 	// {name} is configured for sandbox use.
 	AFSEC003 Code = "AF-SEC-003"
-	// No operating system keyring is available and no fallback passphrase
-	// is set.
+	// The encrypted local store has no passphrase: no system keyring
+	// answered and AF_SECRET_PASSPHRASE is not set.
 	AFSEC004 Code = "AF-SEC-004"
 	// The environment certificate could not be created: {detail}
 	AFSEC010 Code = "AF-SEC-010"
@@ -352,7 +352,7 @@ var catalog = map[Code]Entry{
 		Code:      AFCP002,
 		Area:      "CP",
 		Message:   "The control plane rejected this engine's token.",
-		NextStep:  "Run 'af login' to obtain a new token.",
+		NextStep:  "Create a new engine token in the control plane and set AF_CONTROL_PLANE_TOKEN to it. The old one was revoked, expired, or belongs to a different control plane.",
 		Docs:      "self-hosting/control-plane",
 		Retryable: false,
 		ExitCode:  ExitAuth,
@@ -999,8 +999,8 @@ var catalog = map[Code]Entry{
 	AFSEC004: {
 		Code:      AFSEC004,
 		Area:      "SEC",
-		Message:   "No operating system keyring is available and no fallback passphrase is set.",
-		NextStep:  "Set AF_KEYRING_PASSPHRASE to use the encrypted file fallback, or install a Secret Service provider.",
+		Message:   "The encrypted local store has no passphrase: no system keyring answered and AF_SECRET_PASSPHRASE is not set.",
+		NextStep:  "Set AF_SECRET_PASSPHRASE, or store the passphrase in the system keyring on a platform that has one. There is deliberately no default: a store encrypted with a passphrase everybody knows only looks encrypted.",
 		Docs:      "guides/secrets",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

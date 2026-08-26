@@ -275,8 +275,12 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 		secrets.NewDotEnvSource(filepath.Join(o.opts.Root, ".env")),
 		secrets.NewFileStore(
 			filepath.Join(o.opts.Root, ".antifailure", "secrets.enc"),
-			getenv("AF_SECRET_PASSPHRASE"),
+			secrets.StorePassphrase(getenv),
 		),
+		// Last, and only where the platform has one. A keyring entry is the
+		// long lived default on a workstation; everything above it is a way to
+		// override that for one run.
+		secrets.NewKeyringSource(secrets.NewSystemKeyring(), secrets.DefaultKeyringService),
 	)
 }
 

@@ -147,8 +147,12 @@ func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string
 		secrets.NewDotEnvSource(filepath.Join(root, ".env")),
 		secrets.NewFileStore(
 			filepath.Join(root, ".antifailure", "secrets.enc"),
-			e.Getenv("AF_SECRET_PASSPHRASE"),
+			secrets.StorePassphrase(e.Getenv),
 		),
+		// Last, and only where the platform has one. A keyring entry is the
+		// long lived default on a workstation; everything above it is a way to
+		// override that for one run.
+		secrets.NewKeyringSource(secrets.NewSystemKeyring(), secrets.DefaultKeyringService),
 	)
 
 	resolved, err := secrets.Resolve(ctx, chain, secrets.Request{

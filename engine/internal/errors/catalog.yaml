@@ -125,10 +125,9 @@ errors:
     retryable: true
     exit_code: 1
   - code: AF-SEC-004
-    planned: true
     area: SEC
-    message: "No operating system keyring is available and no fallback passphrase is set."
-    next_step: "Set AF_KEYRING_PASSPHRASE to use the encrypted file fallback, or install a Secret Service provider."
+    message: "The encrypted local store has no passphrase: no system keyring answered and AF_SECRET_PASSPHRASE is not set."
+    next_step: "Set AF_SECRET_PASSPHRASE, or store the passphrase in the system keyring on a platform that has one. There is deliberately no default: a store encrypted with a passphrase everybody knows only looks encrypted."
     docs: guides/secrets
     retryable: false
     exit_code: 3
@@ -590,7 +589,7 @@ errors:
     planned: true
     area: CP
     message: "The control plane rejected this engine's token."
-    next_step: "Run 'af login' to obtain a new token."
+    next_step: "Create a new engine token in the control plane and set AF_CONTROL_PLANE_TOKEN to it. The old one was revoked, expired, or belongs to a different control plane."
     docs: self-hosting/control-plane
     retryable: false
     exit_code: 4

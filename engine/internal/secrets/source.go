@@ -418,6 +418,48 @@ type KeyringSource struct {
 	probed      bool
 }
 
+// NewSystemKeyring returns the platform's credential store, or nil where there
+// is not one yet. Nil is a valid ring: KeyringSource reports it as not
+// configured and the chain skips it.
+func NewSystemKeyring() Keyring { return newSystemKeyring() }
+
+// PassphraseKey is the entry a stored passphrase is kept under, so that the
+// encrypted file store can be unlocked without an environment variable.
+const PassphraseKey = "secret-store-passphrase"
+
+// PassphraseFromKeyring reads the file store's passphrase from the system
+// keyring, returning an empty string when there is none. Errors are not
+// reported: a missing or locked keyring means the caller falls back to the
+// environment, which is a normal path and not a failure.
+func PassphraseFromKeyring(service string) string {
+	ring := newSystemKeyring()
+	if ring == nil {
+		return ""
+	}
+	value, err := ring.Get(service, PassphraseKey)
+	if err != nil {
+		return ""
+	}
+	return value
+}
+
+// StorePassphrase finds the passphrase for the encrypted file store.
+//
+// The environment first, so that CI and a one off override work without a
+// keyring at all. Then the system keyring, which is where 'af secret set' puts
+// it on a machine that has one, so a workstation does not need the passphrase
+// exported in every shell.
+func StorePassphrase(getenv func(string) string) string {
+	if v := getenv("AF_SECRET_PASSPHRASE"); v != "" {
+		return v
+	}
+	return PassphraseFromKeyring(DefaultKeyringService)
+}
+
+// DefaultKeyringService namespaces entries so that two tools on one machine do
+// not overwrite each other's.
+const DefaultKeyringService = "antifailure"
+
 // NewKeyringSource wraps a credential store.
 func NewKeyringSource(ring Keyring, service string) *KeyringSource {
 	if service == "" {
