@@ -140,6 +140,8 @@ const (
 	// Egress
 	// The request to {host} was blocked by rule {rule}.
 	AFNET001 Code = "AF-NET-001"
+	// {request} is not a request that can be explained: {detail}
+	AFNET002 Code = "AF-NET-002"
 	// A request to {host} carried a live credential in the {header} header
 	// and was blocked.
 	AFNET004 Code = "AF-NET-004"
@@ -632,6 +634,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/egress",
 		Retryable: false,
 		ExitCode:  ExitPolicyDenied,
+	},
+	AFNET002: {
+		Code:      AFNET002,
+		Area:      "NET",
+		Message:   "{request} is not a request that can be explained: {detail}",
+		NextStep:  "Pass a method and a URL, as in 'af net explain GET https://api.stripe.com/v1/charges'.",
+		Docs:      "reference/cli/af_net_explain",
+		Retryable: false,
+		ExitCode:  ExitUsage,
 	},
 	AFNET004: {
 		Code:      AFNET004,

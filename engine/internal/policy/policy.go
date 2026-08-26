@@ -345,7 +345,11 @@ func specificityOf(c compiled) int {
 	score := anyHost
 	switch {
 	case c.hostExact != "":
-		score += exactHost + len(c.hostExact)
+		// No length term. Two exact hosts can never both match one request, so
+		// ranking them against each other decides nothing and only makes the
+		// printed order look arbitrary. They tie, and the manifest order
+		// breaks the tie, so a policy prints in the order it was written.
+		score += exactHost
 	case c.ip != nil:
 		score += ipHost
 	case c.hostSuffix != "":

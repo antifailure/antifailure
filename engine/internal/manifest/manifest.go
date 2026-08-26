@@ -102,6 +102,32 @@ type Errors struct {
 	Problems []Problem
 }
 
+// Unwrap gives the problem list an error code.
+//
+// Without it, a typo in somebody's manifest is reported as AF-GEN-000, whose
+// next step is "this is an unclassified failure, please report it". Telling a
+// user to file a bug for their own configuration mistake is worse than saying
+// nothing, and it is exactly the failure the error catalog exists to prevent.
+func (e *Errors) Unwrap() error {
+	return aferrors.Coded(aferrors.AFMAN002, "path", e.Path, "detail", e.detail())
+}
+
+func (e *Errors) detail() string {
+	switch len(e.Problems) {
+	case 0:
+		return "no problem was recorded, which is itself a bug"
+	case 1:
+		return e.Problems[0].String()
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d problems.", len(e.Problems))
+	for _, p := range e.Problems {
+		b.WriteString("\n  ")
+		b.WriteString(p.String())
+	}
+	return b.String()
+}
+
 func (e *Errors) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s is not valid (%d problem", e.Path, len(e.Problems))

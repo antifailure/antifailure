@@ -507,3 +507,20 @@ func TestEvaluate_ALeadingDotHostDoesNotSatisfyAWildcard(t *testing.T) {
 	e := engine(t, schema.ModeBlock, rule("*.example.com", schema.ModeAllow))
 	require.Equal(t, schema.ModeBlock, e.Evaluate(Request{Host: ".example.com"}).Mode)
 }
+
+func TestSpecificity_ExactHostsTieAndKeepManifestOrder(t *testing.T) {
+	t.Parallel()
+	// Two exact hosts never both match one request, so ranking them against
+	// each other decides nothing. They must tie, so that a printed policy
+	// reads in the order it was written rather than by name length.
+	e := engine(t, schema.ModeBlock,
+		rule("api.stripe.com", schema.ModeSandbox),
+		rule("checkout.stripe.com", schema.ModeSandbox),
+		rule("a.io", schema.ModeBlock),
+	)
+	var hosts []string
+	for _, r := range e.Rules() {
+		hosts = append(hosts, r.Host)
+	}
+	require.Equal(t, []string{"api.stripe.com", "checkout.stripe.com", "a.io"}, hosts)
+}

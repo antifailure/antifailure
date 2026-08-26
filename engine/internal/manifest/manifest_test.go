@@ -898,3 +898,64 @@ services:
     schedule: 0 6 * * *
 `)
 }
+
+func TestErrors_CarryTheManifestErrorCode(t *testing.T) {
+	t.Parallel()
+	// A typo in somebody's manifest must not be reported as an unclassified
+	// failure whose next step is "please report it". Telling a user to file a
+	// bug for their own configuration mistake is worse than saying nothing.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "antifailure.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`version: 1
+name: bad
+services:
+  - name: web
+    kind: web
+    command: node server.js
+    port: 3000
+database:
+  provider: docker
+  version: 17
+egress:
+  default: block
+  rules:
+    - host: api.example.com
+      mode: allow
+      credential: EXAMPLE_TOKEN
+`), 0o644))
+
+	_, err := manifest.Load(path)
+	require.Error(t, err)
+
+	var coded *aferrors.Error
+	require.True(t, aferrors.As(err, &coded), "a validation failure must carry a code")
+	require.Equal(t, aferrors.AFMAN002, coded.Code())
+	require.Equal(t, aferrors.ExitConfiguration, coded.ExitCode())
+	require.Contains(t, coded.Message(), "credential is only used in sandbox mode")
+	require.Contains(t, coded.NextStep(), "af doctor")
+}
+
+func TestErrors_CountsSeveralProblemsInTheMessage(t *testing.T) {
+	t.Parallel()
+	e := &manifest.Errors{Path: "x.yaml", Problems: []manifest.Problem{
+		{Path: "a", Message: "first thing."},
+		{Path: "b", Message: "second thing."},
+	}}
+	var coded *aferrors.Error
+	require.True(t, aferrors.As(e, &coded))
+	require.Contains(t, coded.Message(), "2 problems.")
+	require.Contains(t, coded.Message(), "first thing.")
+	require.Contains(t, coded.Message(), "second thing.")
+}
+
+func TestErrors_WithNoProblemsSaysSoRatherThanLying(t *testing.T) {
+	t.Parallel()
+	// Unreachable through Load, which never builds an empty problem list. If
+	// it ever became reachable, an error that renders as "is not valid: " with
+	// nothing after it would send somebody looking for a line that does not
+	// exist.
+	e := &manifest.Errors{Path: "x.yaml"}
+	var coded *aferrors.Error
+	require.True(t, aferrors.As(e, &coded))
+	require.Contains(t, coded.Message(), "itself a bug")
+}

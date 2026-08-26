@@ -192,36 +192,6 @@ only way to look at the result without the result leaving your machine.`),
 	return cmd
 }
 
-func newNetCommand(env *Env) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "net",
-		Short: "Inspect and explain the environment's network policy",
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "policy",
-		Short: "Show the effective policy, with organization rules merged in",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af net policy")
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "explain <method> <url>",
-		Short: "Say what would happen to one request, and which rule decides it",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af net explain")
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "log",
-		Short: "Show the decisions the proxy has made",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af net log")
-		},
-	})
-	return cmd
-}
-
 func newWebhookCommand(env *Env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "webhook",

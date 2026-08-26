@@ -628,6 +628,18 @@ The request to {host} was blocked by rule {rule}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/egress](/docs/concepts/egress/) |
 
+### AF-NET-002
+
+{request} is not a request that can be explained: {detail}
+
+**What to do.** Pass a method and a URL, as in 'af net explain GET https://api.stripe.com/v1/charges'.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/cli/af_net_explain](/docs/reference/cli/af_net_explain/) |
+
 ### AF-NET-004
 
 A request to {host} carried a live credential in the {header} header and was blocked.

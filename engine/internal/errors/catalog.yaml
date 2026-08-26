@@ -347,6 +347,13 @@ errors:
     docs: concepts/egress
     retryable: false
     exit_code: 6
+  - code: AF-NET-002
+    area: NET
+    message: "{request} is not a request that can be explained: {detail}"
+    next_step: "Pass a method and a URL, as in 'af net explain GET https://api.stripe.com/v1/charges'."
+    docs: reference/cli/af_net_explain
+    retryable: false
+    exit_code: 2
   - code: AF-NET-004
     area: NET
     message: "A request to {host} carried a live credential in the {header} header and was blocked."

@@ -306,3 +306,43 @@ func SortedKeys[V any](m map[string]V) []string {
 	sort.Strings(out)
 	return out
 }
+
+// Wrap breaks text to fit the terminal, indenting every line after the first.
+//
+// It wraps on spaces only and never splits a word, because a broken URL or a
+// broken host name in an explanation is worse than a line that runs long: one
+// is ugly, the other is wrong when somebody copies it.
+func (o *Output) Wrap(s string, indent int) string {
+	width := o.Width
+	if width < 40 {
+		width = 40
+	}
+	avail := width - indent
+	if avail < 20 {
+		avail = 20
+	}
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	pad := strings.Repeat(" ", indent)
+	line := 0
+	for i, w := range words {
+		switch {
+		case i == 0:
+			b.WriteString(w)
+			line = len(w)
+		case line+1+len(w) <= avail:
+			b.WriteByte(' ')
+			b.WriteString(w)
+			line += 1 + len(w)
+		default:
+			b.WriteByte('\n')
+			b.WriteString(pad)
+			b.WriteString(w)
+			line = len(w)
+		}
+	}
+	return b.String()
+}
