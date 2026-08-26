@@ -315,3 +315,68 @@ func toStringPtr(v any) *string {
 		return &s
 	}
 }
+
+// PreviewRow is one column's value before and after.
+type PreviewRow struct {
+	Column string
+	Before string
+	After  string
+}
+
+// Preview transforms a few rows in memory and writes nothing.
+//
+// Somebody iterating on rules has to see the output before committing to it,
+// and the alternative, applying and looking, is irreversible on a branch they
+// may want to keep.
+func Preview(
+	ctx context.Context, conn *pgx.Conn, tp TablePlan, key *Key, rows int,
+) ([][]PreviewRow, error) {
+	limited := tp
+	limited.ChunkSize = rows
+	selectSQL, args := limited.selectChunk("")
+
+	result, err := conn.Query(ctx, selectSQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("masking: reading %s: %w", tp.Table, err)
+	}
+	defer result.Close()
+
+	var out [][]PreviewRow
+	for result.Next() {
+		vals, scanErr := result.Values()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		var row []PreviewRow
+		for i, c := range tp.Columns {
+			before := toStringPtr(vals[1+i])
+			col := Column{
+				Schema: tp.Table.Schema, Table: tp.Table.Name,
+				Name: c.Column.Name, Link: c.Link,
+			}
+			transform, ok := Lookup(c.Transform)
+			if !ok {
+				continue
+			}
+			after, applyErr := transform.Apply(key, col, before)
+			if applyErr != nil {
+				return nil, fmt.Errorf("masking: %s.%s: %w", tp.Table, c.Column.Name, applyErr)
+			}
+			row = append(row, PreviewRow{
+				Column: c.Column.Name,
+				Before: orNull(before),
+				After:  orNull(after),
+			})
+		}
+		out = append(out, row)
+	}
+	return out, result.Err()
+}
+
+// orNull renders a value, distinguishing a missing one from an empty one.
+func orNull(v *string) string {
+	if v == nil {
+		return "(null)"
+	}
+	return *v
+}

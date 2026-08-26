@@ -89,24 +89,6 @@ one line answer.`),
 	}
 }
 
-func newSupportCommand(env *Env) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "support",
-		Short: "Collect a redacted diagnostic bundle",
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "bundle",
-		Short: "Write logs, events, the manifest, and doctor output, with the redactor applied",
-		Long: strings.TrimSpace(`
-The bundle carries a manifest of exactly what it included, so you can see what
-you are about to send before you send it.`),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af support bundle")
-		},
-	})
-	return cmd
-}
-
 // VersionInfo is the JSON form of af version.
 type VersionInfo struct {
 	Version   string `json:"version"`

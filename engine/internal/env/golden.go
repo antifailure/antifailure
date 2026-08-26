@@ -453,3 +453,111 @@ func (o *Orchestrator) DestroyGolden(ctx context.Context, version string) error 
 	defer s.close()
 	return s.dbProv.DestroyGolden(ctx, version)
 }
+
+// PreviewRow is one row before and after masking.
+type PreviewRow struct {
+	Column string
+	Before string
+	After  string
+}
+
+// MaskPreview shows what a few rows would look like after masking.
+//
+// It reads, transforms in memory, and writes nothing. Somebody iterating on
+// rules needs to see the output before committing to it, and the alternative,
+// applying and looking, is irreversible on a branch they may want to keep.
+func (o *Orchestrator) MaskPreview(ctx context.Context, table string, rows int) ([][]PreviewRow, error) {
+	if rows <= 0 {
+		rows = 3
+	}
+	s, err := o.open(ctx, "af mask preview")
+	if err != nil {
+		return nil, err
+	}
+	defer s.close()
+
+	key, err := o.MaskingKey(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	rules, hash, err := o.rules()
+	if err != nil {
+		return nil, err
+	}
+	conn, err := connectSession(ctx, o, s)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+
+	tables, err := masking.ReadCatalog(ctx, conn)
+	if err != nil {
+		return nil, aferrors.Wrap(err, aferrors.AFMSK010, "detail", err.Error())
+	}
+	plan := masking.BuildPlan(tables, rules.Assign(tables), hash)
+
+	for _, tp := range plan.Tables {
+		if table != "" && tp.Table.Name != table && tp.Table.String() != table {
+			continue
+		}
+		previewed, previewErr := masking.Preview(ctx, conn, tp, key, rows)
+		if previewErr != nil {
+			return nil, previewErr
+		}
+		out := make([][]PreviewRow, 0, len(previewed))
+		for _, row := range previewed {
+			converted := make([]PreviewRow, 0, len(row))
+			for _, cell := range row {
+				converted = append(converted, PreviewRow(cell))
+			}
+			out = append(out, converted)
+		}
+		return out, nil
+	}
+	if table != "" {
+		return nil, aferrors.Coded(aferrors.AFMSK010,
+			"detail", "no table called "+table+" is being masked; 'af mask plan' lists the ones that are")
+	}
+	return nil, nil
+}
+
+// VerifyGolden re-checks a published golden.
+//
+// Worth doing because a golden published under one set of rules is not
+// verified under another, and because an import path will eventually let a
+// golden arrive without ever having been checked here.
+func (o *Orchestrator) VerifyGolden(ctx context.Context, version string) (verify.Report, error) {
+	s, err := o.open(ctx, "af golden verify")
+	if err != nil {
+		return verify.Report{}, err
+	}
+	defer s.close()
+
+	branch, err := s.dbProv.Branch(ctx, version, o.envID+"-verify")
+	if err != nil {
+		return verify.Report{}, err
+	}
+	defer func() {
+		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		// Removed whether or not the check passed. A verification branch that
+		// outlives the check is a copy of the data nobody is watching.
+		_ = s.dbProv.Destroy(c, branch)
+	}()
+
+	url, err := s.dbProv.ConnString(ctx, branch, provider.ConnDirect)
+	if err != nil {
+		return verify.Report{}, err
+	}
+	o.opts.Redactor.Register(url.Reveal())
+
+	conn, err := pgx.Connect(ctx, url.Reveal())
+	if err != nil {
+		return verify.Report{}, aferrors.Wrap(err, aferrors.AFDB004, "env", version)
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+
+	return verify.Scan(ctx, conn, verify.Options{
+		Now: func() time.Time { return o.opts.Clock.Now() },
+	})
+}

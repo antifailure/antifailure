@@ -48,13 +48,22 @@ af load        traffic shaped like production's, with the worst
                regression first
 af load smoke  a short burst, to check it answers under any load at all
 
+af mask preview  a few rows before and after, written nowhere
+af golden verify re-check a published golden on a throwaway branch
+af support bundle logs, decisions, manifest, and doctor output, redacted,
+                 with a listing of exactly what it included
+
 af doctor      ten checks, each with a remediation
 af init        reads a repository, writes a manifest, explains what it assumed
 af explain     the effective configuration with every default resolved
 af version     version, commit, edition, platform
 ```
 
-Everything else in the command tree exists and returns AF-RUN-001.
+Every command in the tree now does something. The three that returned
+AF-RUN-001 inside otherwise working groups are wired: `af mask preview`,
+`af golden verify`, and `af support bundle`. What remains unimplemented is
+whole subsystems rather than gaps inside working ones: `af insights` and
+`af env` belong to the control plane, which is phase 8.
 
 Proved end to end against a real Docker daemon and a real Postgres:
 
@@ -271,4 +280,4 @@ rather than a skipped step. The masking key is generated once per machine and
 kept in local state unless AF_MASKING_KEY is set, so two machines produce
 different mappings until CI sets one. And `af mask preview`, `af golden
 verify`, and `af support bundle` are the three subcommands still returning
-AF-RUN-001 inside otherwise working command groups.
+whole subsystems: the control plane and the hosted edition.

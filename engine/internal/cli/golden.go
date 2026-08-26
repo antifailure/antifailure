@@ -53,14 +53,7 @@ than by remembering to check.`),
 	cmd.AddCommand(newGoldenRefreshCommand(env))
 	cmd.AddCommand(newGoldenListCommand(env))
 	cmd.AddCommand(newGoldenGCCommand(env))
-	cmd.AddCommand(&cobra.Command{
-		Use:   "verify <version>",
-		Short: "Re-check a published golden",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af golden verify")
-		},
-	})
+	cmd.AddCommand(newGoldenVerifyCommand(env))
 	return cmd
 }
 
@@ -236,6 +229,71 @@ breaks the environment rather than tidying it.`),
 		},
 	}
 	cmd.Flags().IntVar(&keep, "keep", 3, "How many of the newest goldens to keep")
+	cmd.Flags().StringVar(&branch, "branch", "", "Branch context to use, defaulting to the checked out one")
+	return cmd
+}
+
+func newGoldenVerifyCommand(env *Env) *cobra.Command {
+	var branch string
+	cmd := &cobra.Command{
+		Use:   "verify <version>",
+		Short: "Re-check a published golden",
+		Long: strings.TrimSpace(`
+Branches the golden, reads it back with the detectors, and removes the branch
+whether or not the check passed.
+
+Worth doing because a golden published under one set of rules is not verified
+under another, and because a golden that arrives by import was never checked
+here at all.`),
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			o, err := orchestrator(env, branch, false)
+			if err != nil {
+				return err
+			}
+			env.Out.Section("Verifying " + args[0])
+			report, err := o.VerifyGolden(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if env.Out.Format == FormatJSON {
+				doc := VerifyJSON{
+					Clean: report.Clean(), Tables: report.Tables, Columns: report.Columns,
+					RowsSampled: report.RowsSampled, SampleSize: report.SampleSize,
+					Skipped: report.Skipped,
+				}
+				for _, f := range report.Findings {
+					doc.Findings = append(doc.Findings, FindingJSON{
+						Table: f.Schema + "." + f.Table, Column: f.Column,
+						Detector: f.Detector, Example: f.Example, Rows: f.Rows,
+					})
+				}
+				if err := env.Out.JSON(doc); err != nil {
+					return err
+				}
+				if !report.Clean() {
+					return silent(aferrors.Coded(aferrors.AFMSK002,
+						"detector", report.Findings[0].Detector,
+						"table", report.Findings[0].Schema+"."+report.Findings[0].Table,
+						"column", report.Findings[0].Column))
+				}
+				return nil
+			}
+			if report.Clean() {
+				env.Out.Status(env.Out.S(StyleGood, SymbolOK), "clean",
+					fmt.Sprintf("%d columns across %d tables, %d rows sampled",
+						report.Columns, report.Tables, report.RowsSampled))
+				return nil
+			}
+			for _, f := range report.Findings {
+				env.Out.Printf("  %s %s\n", env.Out.S(StyleBad, SymbolFail), f)
+			}
+			return aferrors.Coded(aferrors.AFMSK002,
+				"detector", report.Findings[0].Detector,
+				"table", report.Findings[0].Schema+"."+report.Findings[0].Table,
+				"column", report.Findings[0].Column)
+		},
+	}
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch context to use, defaulting to the checked out one")
 	return cmd
 }

@@ -167,11 +167,8 @@ func TestUnimplementedCommands_SayNotYetAvailableRatherThanPretending(t *testing
 	t.Parallel()
 	commands := [][]string{
 
-		{"golden", "verify", "gv_x"},
-		{"mask", "preview"},
-
 		{"insights"},
-		{"env", "list"}, {"env", "pull"}, {"support", "bundle"},
+		{"env", "list"}, {"env", "pull"},
 	}
 	for _, args := range commands {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {

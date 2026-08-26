@@ -78,13 +78,7 @@ column called customer_notes, means the notes ship.`),
 	cmd.AddCommand(newMaskPlanCommand(env))
 	cmd.AddCommand(newMaskApplyCommand(env))
 	cmd.AddCommand(newMaskVerifyCommand(env))
-	cmd.AddCommand(&cobra.Command{
-		Use:   "preview",
-		Short: "Show what a few rows would look like after masking",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af mask preview")
-		},
-	})
+	cmd.AddCommand(newMaskPreviewCommand(env))
 	return cmd
 }
 
@@ -271,5 +265,50 @@ produces data that looks masked and is not, and none of them announces itself.`)
 		},
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to check, defaulting to the checked out one")
+	return cmd
+}
+
+func newMaskPreviewCommand(env *Env) *cobra.Command {
+	var branch, table string
+	var rows int
+	cmd := &cobra.Command{
+		Use:   "preview",
+		Short: "Show what a few rows would look like after masking",
+		Long: strings.TrimSpace(`
+Reads a few rows, transforms them in memory, and writes nothing.
+
+Somebody iterating on rules has to see the output before committing to it, and
+the alternative, applying and then looking, is irreversible on a branch they may
+want to keep.`),
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			o, err := orchestrator(env, branch, false)
+			if err != nil {
+				return err
+			}
+			preview, err := o.MaskPreview(cmd.Context(), table, rows)
+			if err != nil {
+				return err
+			}
+			if env.Out.Format == FormatJSON {
+				return env.Out.JSON(preview)
+			}
+			if len(preview) == 0 {
+				env.Out.Println("Nothing is being masked. Run 'af mask plan' to see why.")
+				return nil
+			}
+			for i, row := range preview {
+				env.Out.Printf("\n  Row %d\n", i+1)
+				for _, cell := range row {
+					env.Out.Printf("    %-20s %s\n", cell.Column, env.Out.S(StyleDim, cell.Before))
+					env.Out.Printf("    %-20s %s\n", "", env.Out.S(StyleGood, cell.After))
+				}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&table, "table", "", "Preview one table, defaulting to the first being masked")
+	cmd.Flags().IntVar(&rows, "rows", 3, "How many rows to show")
+	cmd.Flags().StringVar(&branch, "branch", "", "Branch to read, defaulting to the checked out one")
 	return cmd
 }
