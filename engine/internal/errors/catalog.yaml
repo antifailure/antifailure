@@ -50,7 +50,7 @@ errors:
     area: MAN
     message: "'af init' needs a terminal to ask questions, and this session has none."
     next_step: "Pass --non-interactive together with the flags listed by 'af init --help'."
-    docs: reference/cli/af_init
+    docs: reference/cli#af-init
     retryable: false
     exit_code: 2
   - code: AF-MAN-005
@@ -292,7 +292,7 @@ errors:
     area: BLD
     message: "The build context for {service} holds more than {count} files; {path} is where the count was reached."
     next_step: "Add the generated directories to .dockerignore; a build context should hold source, not output."
-    docs: guides/builds
+    docs: guides/build
     retryable: false
     exit_code: 3
   - code: AF-BLD-010
@@ -378,7 +378,7 @@ errors:
     planned: true
     area: RUN
     message: "The local state database at {path} is corrupt."
-    next_step: "A backup was written to {backup}. The database was rebuilt; run 'af down --all' to reconcile any resources it no longer tracks."
+    next_step: "A backup was written to {backup}. The database was rebuilt, so it now tracks nothing: run 'af env list' to see what is still running and 'af env prune --older-than 0' to remove all of it."
     docs: concepts/journal
     retryable: false
     exit_code: 1
@@ -416,7 +416,7 @@ errors:
     area: NET
     message: "{request} is not a request that can be explained: {detail}"
     next_step: "Pass a method and a URL, as in 'af net explain GET https://api.stripe.com/v1/charges'."
-    docs: reference/cli/af_net_explain
+    docs: reference/cli#af-net-explain
     retryable: false
     exit_code: 2
   - code: AF-NET-004

@@ -128,7 +128,7 @@ The build context for {service} holds more than {count} files; {path} is where t
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/builds](/docs/guides/builds/) |
+| More | [guides/build](/docs/guides/build/) |
 
 ### AF-BLD-010
 
@@ -332,7 +332,7 @@ The manifest at {path} declares schema version {found}, which this build does no
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/cli/af_init](/docs/reference/cli/af_init/) |
+| More | [reference/cli#af-init](/docs/reference/cli#af-init/) |
 
 ### AF-MAN-005
 
@@ -408,7 +408,7 @@ The request to {host} was blocked by rule {rule}.
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/cli/af_net_explain](/docs/reference/cli/af_net_explain/) |
+| More | [reference/cli#af-net-explain](/docs/reference/cli#af-net-explain/) |
 
 ### AF-NET-010
 

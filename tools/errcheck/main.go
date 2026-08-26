@@ -105,7 +105,99 @@ func run(root string) ([]string, int, error) {
 			catalog[code]))
 	}
 
+	// Every error prints "More: https://antifailure.dev/docs/<path>". A path
+	// with no page is a user following a link out of a failure into a 404,
+	// which is worse than printing no link at all: the link is a promise that
+	// there is something at the other end.
+	missing, err := missingDocs(root, filepath.Join(root, "engine", "internal", "errors", "catalog.yaml"))
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, m := range missing {
+		problems = append(problems, fmt.Sprintf(
+			"%s points at docs/%s and there is no page there. Every error prints that "+
+				"URL, so this one sends whoever hits it to a 404. Write the page, or "+
+				"point the entry at one that exists.", m.codes, m.path))
+	}
+
 	return problems, len(catalog), nil
+}
+
+type missingDoc struct {
+	path  string
+	codes string
+}
+
+// missingDocs reports catalog doc paths with no page under docs/.
+//
+// Read from the catalog rather than from the generated constants, for the same
+// reason plannedCodes is: the URL an error prints is built from the catalog,
+// so the catalog is the thing that has to be right.
+func missingDocs(root, catalogPath string) ([]missingDoc, error) {
+	body, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Which codes cite which path, so the failure names the errors that would
+	// break rather than a bare path somebody has to go looking for.
+	byPath := map[string][]string{}
+	code := ""
+	for _, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(trimmed, "- code: "); ok {
+			code = strings.TrimSpace(after)
+			continue
+		}
+		after, ok := strings.CutPrefix(trimmed, "docs: ")
+		if !ok {
+			continue
+		}
+		docPath := strings.Trim(strings.TrimSpace(after), `"'`)
+		// An entry may point at a section: reference/cli#af-init. The page is
+		// what has to exist; the anchor is the site generator's business.
+		docPath, _, _ = strings.Cut(docPath, "#")
+		if docPath == "" || code == "" {
+			continue
+		}
+		byPath[docPath] = append(byPath[docPath], code)
+	}
+	if len(byPath) == 0 {
+		return nil, fmt.Errorf("no docs paths found in the catalog; has its shape changed?")
+	}
+
+	contentDir := filepath.Join(root, "docs", "src", "content", "docs")
+	var out []missingDoc
+	for docPath, codes := range byPath {
+		if docExists(contentDir, docPath) {
+			continue
+		}
+		sort.Strings(codes)
+		shown := codes
+		if len(shown) > 4 {
+			shown = append(append([]string{}, shown[:4]...),
+				fmt.Sprintf("and %d more", len(codes)-4))
+		}
+		out = append(out, missingDoc{path: docPath, codes: strings.Join(shown, ", ")})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
+	return out, nil
+}
+
+// docExists reports whether a page is there, under either name the site
+// generator accepts.
+func docExists(contentDir, docPath string) bool {
+	for _, candidate := range []string{
+		filepath.FromSlash(docPath) + ".md",
+		filepath.FromSlash(docPath) + ".mdx",
+		filepath.Join(filepath.FromSlash(docPath), "index.md"),
+		filepath.Join(filepath.FromSlash(docPath), "index.mdx"),
+	} {
+		if info, err := os.Stat(filepath.Join(contentDir, candidate)); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }
 
 // plannedCodes reads which entries are reserved.
