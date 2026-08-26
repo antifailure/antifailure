@@ -18,29 +18,6 @@ import (
 // user think they have the wrong version, and a command that silently does
 // nothing is the failure this product exists to prevent.
 
-func newTestCommand(env *Env) *cobra.Command {
-	var workflow string
-	cmd := &cobra.Command{
-		Use:   "test",
-		Short: "Run the agent workflows against the environment",
-		Long: strings.TrimSpace(`
-Agents drive a real browser through the workflows in the manifest, logging in
-the way a person does, and return a verdict with a video, a trace, and
-reproduction steps.
-
-A verdict is one of pass, fail, flaky, blocked, or unverified. A failure caused
-by the runner rather than the application is classified as such and never
-counted against the application. Exit code 8 means at least one workflow
-failed.`),
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af test")
-		},
-	}
-	cmd.Flags().StringVar(&workflow, "workflow", "", "Run only this workflow")
-	return cmd
-}
-
 func newLoadCommand(env *Env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "load",

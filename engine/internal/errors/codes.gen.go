@@ -10,6 +10,10 @@ const (
 	// Workflow {workflow} exhausted its budget of {budget} before
 	// completing.
 	AFAGT002 Code = "AF-AGT-002"
+	// The agent runner produced no readable output: {detail}
+	AFAGT003 Code = "AF-AGT-003"
+	// The agent runner could not be found: {detail}
+	AFAGT004 Code = "AF-AGT-004"
 	// Invariant {invariant} did not finish within {timeout}.
 	AFAGT010 Code = "AF-AGT-010"
 	// Invariant {invariant} is not read only.
@@ -241,6 +245,24 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/workflows",
 		Retryable: false,
 		ExitCode:  ExitTestFailure,
+	},
+	AFAGT003: {
+		Code:      AFAGT003,
+		Area:      "AGT",
+		Message:   "The agent runner produced no readable output: {detail}",
+		NextStep:  "This is the runner's own failure and not the application's; the output above is what it printed.",
+		Docs:      "concepts/agents",
+		Retryable: true,
+		ExitCode:  ExitFailure,
+	},
+	AFAGT004: {
+		Code:      AFAGT004,
+		Area:      "AGT",
+		Message:   "The agent runner could not be found: {detail}",
+		NextStep:  "Install it with 'af runner install', or point at a checkout with --runner.",
+		Docs:      "concepts/agents",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFAGT010: {
 		Code:      AFAGT010,

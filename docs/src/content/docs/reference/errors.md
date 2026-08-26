@@ -54,6 +54,30 @@ Workflow {workflow} exhausted its budget of {budget} before completing.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/workflows](/docs/guides/workflows/) |
 
+### AF-AGT-003
+
+The agent runner produced no readable output: {detail}
+
+**What to do.** This is the runner's own failure and not the application's; the output above is what it printed.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/agents](/docs/concepts/agents/) |
+
+### AF-AGT-004
+
+The agent runner could not be found: {detail}
+
+**What to do.** Install it with 'af runner install', or point at a checkout with --runner.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/agents](/docs/concepts/agents/) |
+
 ### AF-AGT-010
 
 Invariant {invariant} did not finish within {timeout}.
