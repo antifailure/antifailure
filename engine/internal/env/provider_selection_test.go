@@ -124,3 +124,44 @@ func TestOnlyALocalProviderIsAttachable(t *testing.T) {
 	_, ok = cloud.(attachable)
 	require.False(t, ok, "a cloud provider must not be attachable; there is nothing to attach")
 }
+
+func TestARuntimeThisBuildDoesNotHaveIsRefusedRatherThanSubstituted(t *testing.T) {
+	// The same silent fallback as the database provider had, in the other
+	// half of the manifest. A repository configured for a cluster that quietly
+	// got containers on whichever laptop ran af is a difference nobody notices
+	// until they go looking for their environment in the cluster.
+	o, err := New(Options{
+		Root:     t.TempDir(),
+		Manifest: &schema.Manifest{Name: "app", Runtime: &schema.Runtime{Provider: schema.RuntimeKubernetes}},
+		Branch:   "main",
+		Clock:    clock.New(),
+	})
+	require.NoError(t, err)
+
+	_, err = o.newRuntime()
+	require.Error(t, err)
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002))
+	require.Contains(t, err.Error(), "kubernetes")
+	require.Contains(t, err.Error(), "local", "the message does not say what to do instead")
+}
+
+func TestAnUnsetRuntimeIsLocal(t *testing.T) {
+	for _, rt := range []*schema.Runtime{nil, {}, {Provider: schema.RuntimeLocal}} {
+		o, err := New(Options{
+			Root:     t.TempDir(),
+			Manifest: &schema.Manifest{Name: "app", Runtime: rt},
+			Branch:   "main",
+			Clock:    clock.New(),
+		})
+		require.NoError(t, err)
+		r, err := o.newRuntime()
+		if err != nil {
+			// No Docker daemon on this machine is a different failure from the
+			// manifest being refused, and only the second is under test here.
+			require.NotErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002))
+			continue
+		}
+		require.NotNil(t, r)
+		_ = r.Close()
+	}
+}

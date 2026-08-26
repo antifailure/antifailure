@@ -236,9 +236,7 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 		s.close()
 		return nil, err
 	}
-	if s.runtime, err = local.New(local.Options{
-		Clock: o.opts.Clock, Redactor: o.opts.Redactor,
-	}); err != nil {
+	if s.runtime, err = o.newRuntime(); err != nil {
 		s.close()
 		return nil, err
 	}
@@ -507,6 +505,32 @@ func needsInspection(e *schema.Egress) bool {
 		}
 	}
 	return eng.InspectsHost("probe.invalid", 443)
+}
+
+// newRuntime builds the runtime the manifest asked for.
+//
+// The same reason newDatabaseProvider exists. A manifest could say kubernetes,
+// pass validation, and get containers on the laptop that ran af, which is a
+// difference nobody would notice until they went looking for their environment
+// in a cluster.
+//
+// Only the local runtime ships today, so this returns a concrete type rather
+// than an interface. An interface with one implementation is scaffolding that
+// has to be maintained before anything needs it; the day a second runtime
+// exists is the day to introduce one, and this function is where it goes.
+func (o *Orchestrator) newRuntime() (*local.Runtime, error) {
+	kind := schema.RuntimeLocal
+	if m := o.opts.Manifest; m != nil && m.Runtime != nil && m.Runtime.Provider != "" {
+		kind = m.Runtime.Provider
+	}
+	if kind != schema.RuntimeLocal {
+		return nil, aferrors.Coded(aferrors.AFMAN002,
+			"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+			"detail", fmt.Sprintf(
+				"runtime.provider is %q, and this build has only the local runtime. "+
+					"Remove the field or set it to local", kind))
+	}
+	return local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
 }
 
 // newDatabaseProvider builds the provider the manifest asked for.

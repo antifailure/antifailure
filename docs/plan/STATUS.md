@@ -310,7 +310,7 @@ pushed. The first release is the test.
 | 8.7 Audit log | proven | Insert and select granted, nothing else, asserted against the grant table. Hash chain detects every field of every entry being altered in a 25-entry chain. |
 | 8.8 Agent live view | planned | Needs the streaming endpoint and the web application. |
 | 8.9 Design system | planned | The web application. |
-| 8.10 Deployment | planned | Terraform and Helm. Needs an Azure subscription with quota. |
+| 8.10 Deployment | planned | Terraform and Helm. The subscription now has quota (65 cores in eastus, no cluster limit), so this is a decision about spending rather than a missing prerequisite. |
 
 | Component | State | Coverage or notes |
 | --- | --- | --- |
@@ -369,7 +369,7 @@ indistinguishable from one that works until somebody relies on it.
 Everything remaining needs infrastructure that does not exist yet rather than
 code that has not been written:
 
-- **8.10, 14.1, 14.3, 14.10** need an Azure subscription with approved quota.
+- **8.10, 14.1, 14.3, 14.10** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. There is also no Kubernetes runtime yet. A manifest asking for one is now refused with a message rather than quietly given containers on the local machine.
 - **3.8 and 3.9** need Supabase and DBLab accounts. 3.7 no longer does.
 - **13.2, 13.3** need identity provider test tenants.
 - **13.9** needs a Stripe account.
