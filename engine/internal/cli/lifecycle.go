@@ -19,7 +19,7 @@ type UpJSON struct {
 	EnvID    string        `json:"env_id"`
 	URL      string        `json:"url,omitempty"`
 	Golden   string        `json:"golden,omitempty"`
-	Sealed   bool          `json:"sealed"`
+	Proxied  bool          `json:"proxied"`
 	Built    int           `json:"built"`
 	Cached   int           `json:"cached"`
 	Duration string        `json:"duration"`
@@ -41,7 +41,7 @@ type StatusJSON struct {
 	EnvID    string        `json:"env_id"`
 	Running  bool          `json:"running"`
 	URL      string        `json:"url,omitempty"`
-	Sealed   bool          `json:"sealed"`
+	Proxied  bool          `json:"proxied"`
 	Services []ServiceJSON `json:"services"`
 }
 
@@ -140,7 +140,7 @@ interrupt at any point leaves something af down can clean up.`),
 
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(UpJSON{
-					EnvID: res.EnvID, URL: res.URL, Golden: res.Golden, Sealed: res.Sealed,
+					EnvID: res.EnvID, URL: res.URL, Golden: res.Golden, Proxied: res.Proxied,
 					Built: res.Built, Cached: res.Cached,
 					Duration: res.Duration.Round(1e9).String(),
 					Services: servicesJSON(res.Services),
@@ -153,10 +153,11 @@ interrupt at any point leaves something af down can clean up.`),
 			if res.URL != "" {
 				e.Out.Printf("  %s  %s\n", e.Out.S(StyleBold, "Open"), e.Out.S(StyleAccent, res.URL))
 			}
-			if res.Sealed {
+			if res.Proxied {
 				e.Out.Printf("  %s\n", e.Out.Wrap(
-					"The environment has no route to the internet, so nothing in it can email a "+
-						"customer, charge a card, or write to production analytics.", 2))
+					"Every outbound request goes through the egress proxy, and anything the policy "+
+						"does not allow is refused with a decision you can read. Ask about one with "+
+						"'af net explain'.", 2))
 			}
 			e.Out.Printf("  Tear it down with %s\n", e.Out.S(StyleBold, "af down"))
 			return nil
@@ -282,7 +283,7 @@ func newStatusCommand(e *Env) *cobra.Command {
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(StatusJSON{
 					EnvID: res.EnvID, Running: len(res.Services) > 0, URL: res.URL,
-					Sealed: res.Sealed, Services: servicesJSON(res.Services),
+					Proxied: res.Proxied, Services: servicesJSON(res.Services),
 				})
 			}
 			e.Out.Section(res.EnvID)

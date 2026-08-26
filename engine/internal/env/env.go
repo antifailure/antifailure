@@ -142,8 +142,11 @@ type Result struct {
 	Built, Cached int
 	// Duration is how long the whole thing took.
 	Duration time.Duration
-	// Sealed reports whether the environment has no route to the internet.
-	Sealed bool
+	// Proxied reports whether the egress sidecar is deciding outbound traffic.
+	// When it is not, the environment has no route out at all.
+	Proxied bool
+	// Rules is how many egress rules the sidecar is enforcing.
+	Rules int
 }
 
 // session holds everything Up opens and must close.
@@ -242,7 +245,7 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	}
 	defer s.close()
 
-	res := &Result{EnvID: o.envID, Sealed: true}
+	res := &Result{EnvID: o.envID}
 
 	golden, branch, dbURL, err := o.database(ctx, s)
 	if err != nil {
@@ -279,7 +282,7 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 
 	env, err := s.runtime.Up(ctx, provider.EnvSpec{
 		EnvID: o.envID, Branch: o.opts.Branch, Services: specs,
-		AllowEgress: false,
+		Egress:      o.opts.Manifest.Egress,
 		DatabaseURL: insideURL,
 		Journal:     recordIntent,
 		Progress:    o.progress,
@@ -290,6 +293,7 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	}
 
 	res.URL = env.URL()
+	res.Proxied = env.ProxyReady
 	res.Duration = o.opts.Clock.Since(started)
 	return res, nil
 }
@@ -572,6 +576,18 @@ func (o *Orchestrator) Status(ctx context.Context) (*Result, error) {
 	}
 	return &Result{
 		EnvID: o.envID, URL: env.URL(), Services: env.Services,
-		Sealed: !env.EgressAllowed,
+		Proxied: env.ProxyReady,
 	}, nil
+}
+
+// Decisions returns what the environment's egress proxy has decided.
+func (o *Orchestrator) Decisions(ctx context.Context, limit int) ([]local.Decision, error) {
+	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rt.Close() }()
+	// No lock, for the same reason Status takes none: the moment somebody most
+	// wants to know what the environment reached is while it is doing it.
+	return rt.Decisions(ctx, o.envID, limit)
 }

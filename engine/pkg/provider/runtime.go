@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // Runtime creates and destroys environments.
@@ -62,13 +63,12 @@ type EnvSpec struct {
 	// because it is one, and because a runtime that took a plain string would
 	// eventually log it.
 	DatabaseURL secrets.Value
-	// Egress says whether the environment may reach the network at all.
+	// Egress is the policy the sidecar enforces.
 	//
-	// Until the policy sidecar exists this is the whole of the containment: a
-	// network with no route out. It is a blunt instrument and it is honest
-	// about being one, which is better than a selective control that does not
-	// work yet.
-	AllowEgress bool
+	// Nil means block everything. The runtime never decides what a rule means;
+	// it hands the policy to the sidecar, which shares the decision code with
+	// af net explain, so the two cannot disagree.
+	Egress *schema.Egress
 	// Journal records a resource before it is created. A runtime must call it
 	// and must respect an error from it, because a resource created before it
 	// was recorded is a resource teardown cannot find.
@@ -114,8 +114,9 @@ type Env struct {
 	NetworkID string
 	// CreatedAt is when it came up.
 	CreatedAt time.Time
-	// EgressAllowed reports whether the environment can reach the network.
-	EgressAllowed bool
+	// ProxyReady reports whether the egress sidecar is running. When it is
+	// not, the environment has no route out at all.
+	ProxyReady bool
 }
 
 // URL returns the address of the first web service, which is what af up

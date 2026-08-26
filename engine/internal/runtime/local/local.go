@@ -134,24 +134,35 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	if err != nil {
 		return provider.Env{}, err
 	}
-	progress(fmt.Sprintf("network ready, egress %s", egressWord(spec.AllowEgress)))
-
 	env := provider.Env{
-		EnvID: spec.EnvID, NetworkID: nets.inner,
-		CreatedAt: r.clock.Now().UTC(), EgressAllowed: spec.AllowEgress,
+		EnvID: spec.EnvID, NetworkID: nets.inner, CreatedAt: r.clock.Now().UTC(),
 	}
 
 	order, err := startOrder(spec.Services)
 	if err != nil {
 		return env, err
 	}
+	names := make([]string, 0, len(order))
+	for _, s := range order {
+		names = append(names, s.Name)
+	}
+	// The sidecar starts before any service, for two reasons. A service that
+	// makes an outbound call the instant it starts would otherwise get a
+	// connection refused that looks exactly like a blocked host and is not
+	// one. And every service is pointed at the sidecar for DNS, so its
+	// address has to exist before any of them are created.
+	proxyIP, err := r.startProxy(ctx, spec.EnvID, spec.Egress, names, nets, journal, progress)
+	if err != nil {
+		return env, err
+	}
+	env.ProxyReady = true
 	if needsIngress(order) {
 		if err := r.ensureIngressImage(ctx); err != nil {
 			return env, err
 		}
 	}
 	for _, s := range order {
-		running, err := r.startService(ctx, spec, s, nets, journal, progress)
+		running, err := r.startService(ctx, spec, s, nets, proxyIP, journal, progress)
 		env.Services = append(env.Services, running)
 		if err != nil {
 			// Returned with what came up so far, not with nothing. The
@@ -171,13 +182,6 @@ func needsIngress(services []provider.ServiceSpec) bool {
 		}
 	}
 	return false
-}
-
-func egressWord(allowed bool) string {
-	if allowed {
-		return "allowed"
-	}
-	return "sealed"
 }
 
 // AttachDatabase connects a branch container to the environment network and

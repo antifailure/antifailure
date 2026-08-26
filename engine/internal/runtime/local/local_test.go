@@ -22,6 +22,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
@@ -119,13 +120,14 @@ func TestUp_BringsAWebServiceUpAndReachable(t *testing.T) {
 	require.Len(t, env.Services, 1)
 	require.True(t, env.Services[0].Ready)
 	require.NotEmpty(t, env.URL())
-	require.False(t, env.EgressAllowed)
+	require.True(t, env.ProxyReady)
 
 	// Every resource was recorded before it was made, or teardown after a
 	// crash has nothing to find.
 	require.Contains(t, journaled, "network af-net-"+id)
 	require.Contains(t, journaled, "network af-edge-"+id)
 	require.Contains(t, journaled, "container af-ing-"+id+"-web")
+	require.Contains(t, journaled, "container af-proxy-"+id)
 	require.Contains(t, journaled, "container af-svc-"+id+"-web")
 	require.NotEmpty(t, progress)
 
@@ -230,44 +232,75 @@ func TestUp_StopsWhenAMigrationFails(t *testing.T) {
 	}
 }
 
-// probeCommand exits 0 if the internet is reachable and 9 if it is not, so the
-// result is an exit code rather than a judgement about how long to wait.
-const probeCommand = "wget -T 12 -q -O - http://1.1.1.1/ >/dev/null 2>&1 && exit 0 || exit 9"
+// The egress tests use a host that is reachable, a host that is not in any
+// policy, and a direct connection that bypasses the proxy entirely. Together
+// they answer the only question that matters about an egress control: does it
+// decide, and can it be walked around.
+const (
+	allowedHost = "example.com"
+	refusedHost = "www.iana.org"
+)
 
-// runProbe brings up a one service environment whose service exits as soon as
-// it knows the answer, and returns the code it exited with.
+// curlImage is alpine with curl, built once.
 //
-// Up reports an immediate exit as a startup failure, which is the right
-// behaviour for a real service and is also exactly the signal wanted here, so
-// the error is read rather than avoided.
-func runProbe(t *testing.T, r *local.Runtime, id string, allowEgress bool) int {
+// busybox wget cannot be used for the HTTPS tests: it reads https_proxy but
+// does not issue a CONNECT, so it fails against any proxy rather than against
+// this one. Every real client does issue one, which the manual check against
+// this proxy confirms, so the test uses a client that behaves like they do.
+func curlImage(t *testing.T) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	b, err := build.NewDockerBuilder(build.DockerOptions{Clock: clock.New()})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = b.Close() })
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(dir+"/Dockerfile",
+		[]byte("FROM alpine:3.20\nRUN apk add --no-cache curl\n"), 0o644))
+
+	c, err := build.NewContext(build.ContextOptions{Root: dir, Service: "curl"})
+	require.NoError(t, err)
+	req := build.Request{Service: "curl", Context: c, EnvID: "test-fixture"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	res, err := b.Build(ctx, req)
+	require.NoError(t, err)
+	return res.ImageRef
+}
+
+// probe runs one outbound attempt and returns its exit code.
+//
+// Exit 0 means the request completed. Anything else means it did not, and the
+// command is written so that the two are distinguishable without parsing
+// output, which busybox wget writes to stderr in a format that varies.
+func probe(t *testing.T, r *local.Runtime, id string, egress *schema.Egress, command string) int {
+	t.Helper()
+	return probeWith(t, r, id, egress, "alpine:3.20", command)
+}
+
+func probeWith(t *testing.T, r *local.Runtime, id string, egress *schema.Egress, image, command string) int {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
 	_, err := r.Up(ctx, provider.EnvSpec{
-		EnvID: id, AllowEgress: allowEgress,
+		EnvID: id, Egress: egress,
 		Services: []provider.ServiceSpec{{
-			Name: "prober", Image: "alpine:3.20", Kind: "worker", Command: probeCommand,
+			Name: "prober", Image: image, Kind: "worker", Command: command,
 		}},
 	})
-	// Two shapes, both legitimate. A sealed environment fails the connection
-	// instantly, so the probe has already exited by the time Up checks and Up
-	// reports a startup failure. An open one is still waiting on the request,
-	// so Up succeeds and the answer arrives a moment later.
 	if err != nil {
 		var coded *aferrors.Error
-		require.True(t, aferrors.As(err, &coded))
-		require.Equal(t, aferrors.AFRUN005, coded.Code())
+		require.True(t, aferrors.As(err, &coded), "unexpected failure: %v", err)
+		require.Equal(t, aferrors.AFRUN005, coded.Code(), coded.Message())
 		return parseInt(t, codeInMessage, coded.Message())
 	}
-
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		status, statusErr := r.Status(context.Background(), id)
 		require.NoError(t, statusErr)
 		require.Len(t, status.Services, 1)
-		if m := codeInStatus.FindStringSubmatch(status.Services[0].Detail); m != nil {
+		if codeInStatus.MatchString(status.Services[0].Detail) {
 			return parseInt(t, codeInStatus, status.Services[0].Detail)
 		}
 		time.Sleep(time.Second)
@@ -290,24 +323,116 @@ func parseInt(t *testing.T, re *regexp.Regexp, s string) int {
 	return n
 }
 
-func TestUp_SealedNetworkHasNoRouteOut(t *testing.T) {
-	r := requireRuntime(t)
-	// The containment claim, measured rather than asserted. Turning off IP
-	// masquerading looks like it should do this and does not: on Docker
-	// Desktop the traffic is translated again by the virtual machine's own
-	// gateway, and an environment built that way still reaches 1.1.1.1. This
-	// test is what caught that.
-	require.Equal(t, 9, runProbe(t, r, envID(t, r, "sealed1"), false),
-		"a sealed environment reached the internet")
+// requireInternet skips when the machine cannot reach the hosts these tests
+// decide about, so a laptop on a plane reports a skip rather than a failure
+// that looks like a broken egress control.
+func requireInternet(t *testing.T) {
+	t.Helper()
+	c := &http.Client{Timeout: 10 * time.Second}
+	resp, err := c.Get("http://" + allowedHost + "/")
+	if err != nil {
+		t.Skipf("skipped: %s is not reachable from this machine: %v", allowedHost, err)
+	}
+	_ = resp.Body.Close()
 }
 
-func TestUp_UnsealedNetworkDoesReachOut(t *testing.T) {
+func TestEgress_AllowedHostIsReached(t *testing.T) {
 	r := requireRuntime(t)
-	// The negative control. Without it the sealed test could pass for the
-	// wrong reason: because the probe never worked at all, rather than because
-	// the seal held.
-	require.Equal(t, 0, runProbe(t, r, envID(t, r, "open1"), true),
-		"an environment with egress allowed could not reach out, so the sealed test proves nothing")
+	requireInternet(t)
+	code := probe(t, r, envID(t, r, "egallow"), &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules:   []schema.EgressRule{{Host: allowedHost, Mode: schema.ModeAllow}},
+	}, "wget -T 20 -q -O - http://"+allowedHost+"/ >/dev/null 2>&1 && exit 0 || exit 9")
+	require.Equal(t, 0, code, "a host the policy allows was not reached through the proxy")
+}
+
+func TestEgress_HostWithNoRuleIsRefused(t *testing.T) {
+	r := requireRuntime(t)
+	requireInternet(t)
+	// The default is block, and the point of this test is that the refusal
+	// comes from the policy rather than from the host being unreachable, which
+	// is why the allowed host in the test above is a real one too.
+	code := probe(t, r, envID(t, r, "egblock"), &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules:   []schema.EgressRule{{Host: allowedHost, Mode: schema.ModeAllow}},
+	}, "wget -T 20 -q -O - http://"+refusedHost+"/ >/dev/null 2>&1 && exit 0 || exit 9")
+	require.Equal(t, 9, code, "a host with no rule was reached")
+}
+
+// noProxyVars strips the proxy variables, so the request that follows is what
+// a client with no proxy support makes.
+const noProxyVars = "env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY "
+
+func TestEgress_AppliesToAClientThatIgnoresProxyVariables(t *testing.T) {
+	r := requireRuntime(t)
+	requireInternet(t)
+	// The property the whole design rests on. Proxy variables are a request,
+	// and a great many clients ignore them: Node has no proxy support at all,
+	// and plenty of SDKs bundle a client that does the same. An egress control
+	// that only works for clients that agreed to it is not a control.
+	//
+	// So the decision does not depend on them. Every external name resolves to
+	// the sidecar, and the sidecar decides the connection that follows.
+	rules := &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules:   []schema.EgressRule{{Host: allowedHost, Mode: schema.ModeAllow}},
+	}
+	allowed := probe(t, r, envID(t, r, "egnovars1"), rules,
+		noProxyVars+"wget -T 20 -q -O - http://"+allowedHost+"/ >/dev/null 2>&1 && exit 0 || exit 9")
+	require.Equal(t, 0, allowed,
+		"a client with no proxy support could not reach a host the policy allows")
+
+	refused := probe(t, r, envID(t, r, "egnovars2"), rules,
+		noProxyVars+"wget -T 20 -q -O - http://"+refusedHost+"/ >/dev/null 2>&1 && exit 0 || exit 9")
+	require.Equal(t, 9, refused,
+		"a client with no proxy support reached a host the policy refuses")
+}
+
+func TestEgress_CannotBeBypassedByConnectingToAnAddress(t *testing.T) {
+	r := requireRuntime(t)
+	requireInternet(t)
+	// Interception happens through DNS, so the obvious way around it is to
+	// skip DNS. That has to fail, and it does for a reason that has nothing to
+	// do with DNS: the service's network has no route out, so a packet
+	// addressed straight at the internet has nowhere to go.
+	code := probe(t, r, envID(t, r, "egraw"), &schema.Egress{
+		Default: schema.ModeAllow,
+	}, noProxyVars+"wget -T 15 -q -O - http://1.1.1.1/ >/dev/null 2>&1 && exit 0 || exit 9")
+	require.Equal(t, 9, code,
+		"a service reached the internet by address, going around the sidecar entirely")
+}
+
+func TestEgress_HTTPSIsDecidedByHost(t *testing.T) {
+	r := requireRuntime(t)
+	requireInternet(t)
+	img := curlImage(t)
+	cmd := "curl -sS -o /dev/null --max-time 20 https://" + allowedHost + "/ && exit 0 || exit 9"
+
+	// An HTTPS request arrives as a CONNECT, so only the host and port are
+	// visible. That is enough for the decision that matters most, which is
+	// whether the connection happens at all. A rule that names paths or
+	// methods cannot be enforced on HTTPS until the environment certificate
+	// lands, and that limit is stated in the docs rather than papered over.
+	allowed := probeWith(t, r, envID(t, r, "eghttps1"), &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules:   []schema.EgressRule{{Host: allowedHost, Mode: schema.ModeAllow}},
+	}, img, cmd)
+	require.Equal(t, 0, allowed, "an allowed host was not reachable over HTTPS")
+
+	refused := probeWith(t, r, envID(t, r, "eghttps2"), &schema.Egress{
+		Default: schema.ModeBlock,
+	}, img, cmd)
+	require.Equal(t, 9, refused, "a host with no rule was reachable over HTTPS")
+}
+
+func TestEgress_NoPolicyMeansBlockEverything(t *testing.T) {
+	r := requireRuntime(t)
+	requireInternet(t)
+	// A manifest with no egress section is valid, and it must not mean the
+	// sidecar fails to parse its policy and the environment fails to start.
+	code := probe(t, r, envID(t, r, "egnone"), nil,
+		"wget -T 20 -q -O - http://"+allowedHost+"/ >/dev/null 2>&1 && exit 0 || exit 9")
+	require.Equal(t, 9, code)
 }
 
 func TestDown_RemovesEverythingAndSaysWhatItRemoved(t *testing.T) {
@@ -325,8 +450,8 @@ func TestDown_RemovesEverythingAndSaysWhatItRemoved(t *testing.T) {
 	td, err := r.Down(ctx, id)
 	require.NoError(t, err)
 	require.Empty(t, td.Pending, "nothing may be left pending")
-	require.GreaterOrEqual(t, td.Removed, 4,
-		"the service, its forwarder, and both networks")
+	require.GreaterOrEqual(t, td.Removed, 5,
+		"the service, its forwarder, the egress proxy, and both networks")
 
 	status, err := r.Status(ctx, id)
 	require.NoError(t, err)

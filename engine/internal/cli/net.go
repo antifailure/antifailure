@@ -2,16 +2,19 @@ package cli
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/policy"
+	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -95,13 +98,7 @@ needing an environment to be running.`),
 	}
 	cmd.AddCommand(newNetPolicyCommand(env))
 	cmd.AddCommand(newNetExplainCommand(env))
-	cmd.AddCommand(&cobra.Command{
-		Use:   "log",
-		Short: "Show the decisions the proxy has made",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af net log")
-		},
-	})
+	cmd.AddCommand(newNetLogCommand(env))
 	return cmd
 }
 
@@ -389,4 +386,129 @@ func parseRequest(method, raw string) (policy.Request, error) {
 		req.Port = n
 	}
 	return req, nil
+}
+
+// DecisionJSON is one line of af net log.
+type DecisionJSON struct {
+	At      string `json:"at"`
+	Request string `json:"request"`
+	Mode    string `json:"mode"`
+	Rule    string `json:"rule,omitempty"`
+	Allowed bool   `json:"allowed"`
+	Status  int    `json:"status,omitempty"`
+	Bytes   int64  `json:"bytes,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func newNetLogCommand(env *Env) *cobra.Command {
+	var limit int
+	var blockedOnly bool
+	var branch string
+	cmd := &cobra.Command{
+		Use:   "log",
+		Short: "Show what the environment tried to reach, and what happened",
+		Long: strings.TrimSpace(`
+Every outbound request the environment made, allowed or refused, with the rule
+that decided it.
+
+The allowed ones are the point. A log of refusals answers "why was this
+blocked"; a log of everything answers "did anything reach Stripe", which is the
+question somebody asks after an incident.`),
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			o, err := orchestrator(env, branch, false)
+			if err != nil {
+				return err
+			}
+			decisions, err := o.Decisions(cmd.Context(), limit)
+			if err != nil {
+				return err
+			}
+			if blockedOnly {
+				kept := decisions[:0]
+				for _, d := range decisions {
+					if !d.Allowed {
+						kept = append(kept, d)
+					}
+				}
+				decisions = kept
+			}
+
+			if env.Out.Format == FormatJSON {
+				docs := make([]DecisionJSON, 0, len(decisions))
+				for _, d := range decisions {
+					docs = append(docs, DecisionJSON{
+						At: d.AtRaw, Request: decisionRequest(d), Mode: d.Mode,
+						Rule: d.Rule, Allowed: d.Allowed, Status: d.Status,
+						Bytes: d.Bytes, Reason: d.Reason, Error: d.Error,
+					})
+				}
+				return env.Out.JSON(docs)
+			}
+
+			if len(decisions) == 0 {
+				env.Out.Println("Nothing has been decided yet. Bring the environment up with 'af up' and use it.")
+				return nil
+			}
+			rows := make([][]string, 0, len(decisions))
+			for _, d := range decisions {
+				mark := env.Out.S(StyleGood, "block")
+				if d.Allowed {
+					mark = env.Out.S(StyleWarn, d.Mode)
+				} else if d.Mode != "block" {
+					mark = env.Out.S(StyleAccent, d.Mode)
+				}
+				rule := d.Rule
+				if rule == "" {
+					rule = env.Out.S(StyleDim, "(default)")
+				}
+				rows = append(rows, []string{
+					shortTime(d.AtRaw), mark, decisionRequest(d), rule, outcomeOf(d),
+				})
+			}
+			env.Out.Table([]string{"TIME", "MODE", "REQUEST", "RULE", "OUTCOME"}, rows)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 200, "How many decisions to show, most recent last")
+	cmd.Flags().BoolVar(&blockedOnly, "blocked", false, "Show only requests that were refused")
+	cmd.Flags().StringVar(&branch, "branch", "", "Branch to read, defaulting to the checked out one")
+	return cmd
+}
+
+func decisionRequest(d local.Decision) string {
+	scheme := "http"
+	if d.TLS {
+		scheme = "https"
+	}
+	host := d.Host
+	if d.Port != 0 && !((d.TLS && d.Port == 443) || (!d.TLS && d.Port == 80)) {
+		host = net.JoinHostPort(host, strconv.Itoa(d.Port))
+	}
+	return fmt.Sprintf("%s %s://%s%s", d.Method, scheme, host, d.Path)
+}
+
+func outcomeOf(d local.Decision) string {
+	switch {
+	case d.Error != "":
+		return d.Error
+	case d.Status == 0:
+		return ""
+	case d.Bytes > 0:
+		return fmt.Sprintf("%d, %s", d.Status, humanBytes(uint64(d.Bytes)))
+	default:
+		return strconv.Itoa(d.Status)
+	}
+}
+
+// shortTime keeps the clock time and drops the date, because every line in one
+// run shares the date and repeating it in every row buries the part that
+// differs.
+func shortTime(raw string) string {
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return raw
+	}
+	return t.Local().Format("15:04:05")
 }

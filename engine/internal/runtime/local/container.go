@@ -33,6 +33,7 @@ func (r *Runtime) startService(
 	spec provider.EnvSpec,
 	s provider.ServiceSpec,
 	nets networks,
+	proxyIP string,
 	journal func(string, string) error,
 	progress func(string),
 ) (provider.RunningService, error) {
@@ -40,7 +41,7 @@ func (r *Runtime) startService(
 
 	if s.Migrate != "" {
 		progress(fmt.Sprintf("%s: running migrations", s.Name))
-		if err := r.runOnce(ctx, spec, s, nets, s.Migrate, journal); err != nil {
+		if err := r.runOnce(ctx, spec, s, nets, proxyIP, s.Migrate, journal); err != nil {
 			running.State = "migration failed"
 			running.Detail = err.Error()
 			return running, err
@@ -52,7 +53,7 @@ func (r *Runtime) startService(
 		return running, err
 	}
 
-	id, err := r.create(ctx, spec, s, nets, name, "")
+	id, err := r.create(ctx, spec, s, nets, proxyIP, name, "")
 	if err != nil {
 		return running, err
 	}
@@ -109,6 +110,7 @@ func (r *Runtime) create(
 	spec provider.EnvSpec,
 	s provider.ServiceSpec,
 	nets networks,
+	proxyIP string,
 	name string,
 	overrideCmd string,
 ) (string, error) {
@@ -133,6 +135,13 @@ func (r *Runtime) create(
 	}
 
 	host := &container.HostConfig{
+		// Every name this service looks up that is not inside the environment
+		// resolves to the sidecar, which then decides whether the connection
+		// that follows happens. This is what makes the policy apply to every
+		// client rather than to the ones that read their proxy variables:
+		// Node ignores them entirely, and a great many SDKs bundle a client
+		// that does the same.
+		DNS: []string{proxyIP},
 		// Restart is deliberately off. A service that crash loops must be
 		// visible as a crash loop, not hidden behind a runtime that keeps
 		// starting it until the readiness wait times out with no explanation.
@@ -154,16 +163,10 @@ func (r *Runtime) create(
 		return "", aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("creating %s: %v", s.Name, err))
 	}
-	if spec.AllowEgress {
-		// The only difference an unsealed environment makes: the service also
-		// joins the network that has a route out. Everything else about the
-		// placement is identical, so a sealed run and an open one differ in
-		// one attachment rather than in two code paths.
-		if err := r.cli.NetworkConnect(ctx, nets.edge, resp.ID, &network.EndpointSettings{}); err != nil {
-			return "", aferrors.Wrap(err, aferrors.AFRUN040,
-				"detail", fmt.Sprintf("opening egress for %s: %v", s.Name, err))
-		}
-	}
+	// A service is never attached to the outer network. The sidecar is the
+	// only container in the environment with a route out, which is what makes
+	// the policy an enforcement rather than a request: a service that ignores
+	// its proxy variables has nowhere to send the packet.
 	return resp.ID, nil
 }
 
@@ -281,12 +284,39 @@ func (r *Runtime) envList(spec provider.EnvSpec, s provider.ServiceSpec) []strin
 		// nothing.
 		vars["HOST"] = "0.0.0.0"
 	}
+	// Every outbound request goes through the sidecar. The variables are what
+	// a well behaved library reads; the network underneath is what makes it
+	// true for the others, since the inner network has no route out and a
+	// service that ignores these has nowhere to send the packet.
+	proxyURL := fmt.Sprintf("http://%s:%d", ProxyAlias, ProxyPort)
+	for _, k := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+		vars[k] = proxyURL
+	}
+	// Traffic inside the environment must not be sent to the proxy: a service
+	// calling another service, or the database, is not egress, and routing it
+	// through the sidecar would make every internal call a policy decision.
+	noProxy := strings.Join([]string{
+		"localhost", "127.0.0.1", "::1", DatabaseAlias, ProxyAlias,
+	}, ",")
+	vars["NO_PROXY"] = noProxy
+	vars["no_proxy"] = noProxy
+
 	vars["AF_ENV_ID"] = spec.EnvID
 	vars["AF_SERVICE"] = s.Name
 	// An application that behaves differently in a preview environment can
 	// read this. It is deliberately not NODE_ENV or anything a framework
 	// already means something by.
 	vars["ANTIFAILURE"] = "1"
+	// A service's own name resolves inside the environment, so a call from web
+	// to worker is internal and must not be proxied either.
+	for _, peer := range spec.Services {
+		vars["NO_PROXY"] += "," + peer.Name
+		vars["no_proxy"] += "," + peer.Name
+	}
+
+	// Last, so that a manifest can override anything above it. Somebody who
+	// sets HTTP_PROXY themselves has a reason, and silently winning over them
+	// would be the kind of surprise that costs an afternoon.
 	for k, v := range s.Env {
 		vars[k] = v.Reveal()
 	}
@@ -313,6 +343,7 @@ func (r *Runtime) runOnce(
 	spec provider.EnvSpec,
 	s provider.ServiceSpec,
 	nets networks,
+	proxyIP string,
 	command string,
 	journal func(string, string) error,
 ) error {
@@ -320,7 +351,7 @@ func (r *Runtime) runOnce(
 	if err := journal("container", name); err != nil {
 		return err
 	}
-	id, err := r.create(ctx, spec, s, nets, name, command)
+	id, err := r.create(ctx, spec, s, nets, proxyIP, name, command)
 	if err != nil {
 		return err
 	}
