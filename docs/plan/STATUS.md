@@ -70,8 +70,44 @@ Everything else in the command tree exists and returns AF-RUN-001.
 | `internal/detect` | proven | 81 percent |
 | `internal/cli` | proven | 73 percent |
 
-## Phases 3 to 14
+## Phase 3. Postgres data layer
 
-Not started. Phase 3, the Postgres data layer, is next: the provider interface
-and its conformance suite, the Docker provider, the masking engine, and the
-verification scanner that makes an unverified golden unbranchable.
+| Sub-phase | State | Notes |
+| --- | --- | --- |
+| 3.1 Provider interface | proven | `pkg/provider` declares `Database` and its capability model. The conformance suite is next. |
+| 3.2 Docker provider | planned | |
+| 3.3 Masking engine | partial | The 22 transforms and the key hierarchy are proven at 95 percent. The rules model, classifier, SQL compiler, and resumable executor are next. |
+| 3.4 Verification scanner | partial | The 9 detectors are proven at 94 percent. The streaming table scan and the signed attestation are next. |
+| 3.5 Subsetting | planned | |
+| 3.6 Authentication adapters | planned | |
+| 3.7 to 3.9 Neon, Supabase, DBLab | planned | Blocked on Q5: no accounts provisioned. |
+| 3.10 Golden lifecycle | planned | |
+| 3.11 Postgres Insights | planned | |
+
+## Supporting packages, phase 3
+
+| Package | State | Coverage |
+| --- | --- | --- |
+| `internal/masking` | proven | 95 percent |
+| `internal/verify` | proven | 94 percent |
+| `pkg/provider` | proven | interface only |
+
+## Phases 4 to 14
+
+Not started.
+
+## Where to pick up
+
+In order of what unblocks the most:
+
+1. `engine/conformance/db.go`, the database conformance suite, tested against a
+   deliberately buggy in-memory provider so that every subtest is proven able
+   to fail.
+2. `internal/db/docker`, the Docker provider, which is the reference
+   implementation and the one that needs no accounts.
+3. The masking rules model, SQL compiler, and resumable executor, so that
+   `af mask plan` and `af mask apply` work.
+4. `internal/verify`'s streaming scan and signed attestation, so that a golden
+   can be marked verified and `Branch` can refuse one that is not.
+5. `internal/policy` and `internal/proxy`, which are self-contained and are
+   what make `af up` worth running.
