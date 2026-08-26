@@ -1,0 +1,538 @@
+# The single source of truth for every user facing error.
+#
+# Go constants in codes.gen.go and the documentation pages under
+# reference/errors are generated from this file. A code returned anywhere in
+# the code with no entry here fails the build, and so does an entry that
+# nothing returns, so the catalog can neither drift nor rot.
+#
+# Fields:
+#   code       AF-<AREA>-<NNN>. Stable forever once released.
+#   area       MAN manifest, DET detection, SEC secrets, DB database,
+#              MSK masking, BLD build, RUN runtime, NET egress, AGT agent,
+#              LOD load, GH GitHub, CP control plane, INF infrastructure,
+#              EE enterprise, SCH scheduling.
+#   message    One sentence naming what failed. Second person. {placeholders}
+#              are filled at the call site.
+#   next_step  One sentence saying what to do. Never "contact support".
+#   docs       Slug under the documentation site, without a leading slash.
+#   retryable  Whether retrying the same operation unchanged could succeed.
+#   exit_code  Process exit code when this error reaches the command boundary.
+#
+# Exit codes: 0 success, 1 generic, 2 usage, 3 configuration, 4 auth,
+# 5 provider (retryable), 6 policy denial, 7 verification failure,
+# 8 test failure, 9 interrupted with clean teardown, 10 interrupted with
+# resources pending cleanup.
+
+errors:
+  # Manifest
+  - code: AF-MAN-001
+    area: MAN
+    message: "No antifailure.yaml was found in {path} or any parent directory."
+    next_step: "Run 'af init' in the repository root to create one."
+    docs: reference/manifest
+    retryable: false
+    exit_code: 3
+  - code: AF-MAN-002
+    area: MAN
+    message: "The manifest at {path} is not valid: {detail}"
+    next_step: "Fix the reported line, then run 'af doctor' to revalidate."
+    docs: reference/manifest
+    retryable: false
+    exit_code: 3
+  - code: AF-MAN-003
+    area: MAN
+    message: "The manifest at {path} declares schema version {found}, which this build does not understand."
+    next_step: "Upgrade with 'af version -check' and install the release that supports version {found}."
+    docs: reference/manifest
+    retryable: false
+    exit_code: 3
+  - code: AF-MAN-004
+    area: MAN
+    message: "'af init' needs a terminal to ask questions, and this session has none."
+    next_step: "Pass --non-interactive together with the flags listed by 'af init --help'."
+    docs: reference/cli/af_init
+    retryable: false
+    exit_code: 2
+  - code: AF-MAN-005
+    area: MAN
+    message: "The manifest at {path} is larger than the {limit} limit."
+    next_step: "Split the configuration or remove generated content; a manifest describes services, it does not contain them."
+    docs: reference/manifest
+    retryable: false
+    exit_code: 3
+  - code: AF-MAN-006
+    area: MAN
+    message: "The path {path} in the manifest resolves outside the repository."
+    next_step: "Use a path relative to the repository root, with no leading slash and no parent directory segments."
+    docs: reference/manifest
+    retryable: false
+    exit_code: 3
+
+  # Detection
+  - code: AF-DET-001
+    area: DET
+    message: "No application could be detected in {path}."
+    next_step: "Declare your services by hand in antifailure.yaml; the manifest reference lists the minimum fields."
+    docs: concepts/detection
+    retryable: false
+    exit_code: 3
+  - code: AF-DET-002
+    area: DET
+    message: "Detection stopped after {budget} with partial results."
+    next_step: "Add large directories to .gitignore or .dockerignore, or pass --detect-timeout to raise the budget."
+    docs: concepts/detection
+    retryable: true
+    exit_code: 3
+  - code: AF-DET-003
+    area: DET
+    message: "Services {first} and {second} both claim port {port}."
+    next_step: "Give one of them a different port in antifailure.yaml."
+    docs: concepts/detection
+    retryable: false
+    exit_code: 3
+
+  # Secrets
+  - code: AF-SEC-001
+    area: SEC
+    message: "The variables {names} are declared in the manifest but were not found in any configured source."
+    next_step: "Add them to one of the searched sources: {sources}."
+    docs: guides/secrets
+    retryable: false
+    exit_code: 3
+  - code: AF-SEC-002
+    area: SEC
+    message: "The credential for {source} was rejected after one refresh."
+    next_step: "Rotate the credential and store the new value where {source} reads it."
+    docs: guides/secrets
+    retryable: false
+    exit_code: 4
+  - code: AF-SEC-003
+    area: SEC
+    message: "The value supplied for {name} carries a live credential prefix, and {name} is configured for sandbox use."
+    next_step: "Point {name} at a sandbox credential; the environment must never hold a live key."
+    docs: guides/secrets
+    retryable: false
+    exit_code: 6
+  - code: AF-SEC-004
+    area: SEC
+    message: "No operating system keyring is available and no fallback passphrase is set."
+    next_step: "Set AF_KEYRING_PASSPHRASE to use the encrypted file fallback, or install a Secret Service provider."
+    docs: guides/secrets
+    retryable: false
+    exit_code: 3
+
+  # Database
+  - code: AF-DB-001
+    area: DB
+    message: "The database provider {provider} is not registered in this build."
+    next_step: "Set database.provider to one of: {available}."
+    docs: providers/overview
+    retryable: false
+    exit_code: 3
+  - code: AF-DB-002
+    area: DB
+    message: "The source database at {host} could not be reached."
+    next_step: "Check that the host is reachable from this machine and that the connection string names the right port."
+    docs: providers/overview
+    retryable: true
+    exit_code: 5
+  - code: AF-DB-003
+    area: DB
+    message: "The source database is Postgres {found}, and this provider supports {supported}."
+    next_step: "Use a provider that supports Postgres {found}, or upgrade the source."
+    docs: providers/overview
+    retryable: false
+    exit_code: 3
+  - code: AF-DB-004
+    area: DB
+    message: "The golden version {version} no longer exists."
+    next_step: "Run 'af golden list' to see the available versions, then 'af up --golden <version>'."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 5
+  - code: AF-DB-005
+    area: DB
+    message: "The golden version {version} is still referenced by {count} environments and cannot be collected."
+    next_step: "Run 'af down' on those environments first, or leave the version in place."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 6
+  - code: AF-DB-006
+    area: DB
+    message: "The provider's concurrent branch limit ({limit}) is reached."
+    next_step: "Run 'af down' on unused environments or raise the limit in the provider settings."
+    docs: providers/limits
+    retryable: false
+    exit_code: 5
+  - code: AF-DB-007
+    area: DB
+    message: "Extension {extension} is required by the golden and is not available on the target."
+    next_step: "Install {extension} on the target, or remove its use from the schema before refreshing."
+    docs: providers/overview
+    retryable: false
+    exit_code: 5
+  - code: AF-DB-010
+    area: DB
+    message: "The storage pool has {available} free and the operation needs {needed}."
+    next_step: "Run 'af golden gc' to reclaim unreferenced versions, or grow the pool."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 5
+  - code: AF-DB-020
+    area: DB
+    message: "Personas cannot be provisioned because {provider} creates users only through its own API."
+    next_step: "Configure SANDBOX mode for {provider} so that personas are created in its sandbox tenant."
+    docs: guides/personas
+    retryable: false
+    exit_code: 3
+  - code: AF-DB-030
+    area: DB
+    message: "Migrations failed on the branch: {detail}"
+    next_step: "Read the migration log at {location}, fix the migration, and push again."
+    docs: concepts/insights
+    retryable: false
+    exit_code: 5
+
+  # Masking
+  - code: AF-MSK-001
+    area: MSK
+    message: "The golden {version} has no valid verification attestation and cannot be branched."
+    next_step: "Run 'af golden verify {version}'; a golden is branchable only once verification has passed."
+    docs: concepts/verification
+    retryable: false
+    exit_code: 7
+  - code: AF-MSK-002
+    area: MSK
+    message: "Verification found data matching {detector} in {table}.{column}."
+    next_step: "Add a masking rule for {table}.{column} and refresh the golden. The value itself is never printed."
+    docs: concepts/verification
+    retryable: false
+    exit_code: 7
+  - code: AF-MSK-003
+    area: MSK
+    message: "The masking rule for {table}.{column} names a column that does not exist in the schema."
+    next_step: "Remove the rule or correct the name; 'af mask plan' lists the columns it found."
+    docs: concepts/masking
+    retryable: false
+    exit_code: 3
+  - code: AF-MSK-004
+    area: MSK
+    message: "Masking would violate the check constraint {constraint} on {table}.{column}."
+    next_step: "Choose a format preserving transform for {table}.{column} that satisfies {constraint}."
+    docs: reference/transforms
+    retryable: false
+    exit_code: 7
+  - code: AF-MSK-005
+    area: MSK
+    message: "Masking is only permitted on a golden candidate, and {target} is a source database."
+    next_step: "Run masking against a golden candidate; the engine never rewrites a source."
+    docs: concepts/masking
+    retryable: false
+    exit_code: 6
+  - code: AF-MSK-007
+    area: MSK
+    message: "The transform on {table}.{column} produced duplicate values under the unique constraint {constraint}."
+    next_step: "Use a transform that preserves uniqueness, such as email or uuid_remap, for {table}.{column}."
+    docs: reference/transforms
+    retryable: false
+    exit_code: 7
+  - code: AF-MSK-008
+    area: MSK
+    message: "The columns {columns} hold free text and have no masking rule."
+    next_step: "Give each column a rule, or allowlist it explicitly if it is known to hold no personal data."
+    docs: concepts/masking
+    retryable: false
+    exit_code: 7
+
+  # Build
+  - code: AF-BLD-001
+    area: BLD
+    message: "The build for service {service} failed after {duration}."
+    next_step: "Read the build log above; the first error line names the step that failed."
+    docs: guides/build
+    retryable: false
+    exit_code: 1
+  - code: AF-BLD-002
+    area: BLD
+    message: "The Dockerfile for {service} is not valid at line {line}: {detail}"
+    next_step: "Fix the line and run 'af up' again."
+    docs: guides/build
+    retryable: false
+    exit_code: 3
+  - code: AF-BLD-003
+    area: BLD
+    message: "The build context for {service} is {size}, above the {limit} limit."
+    next_step: "Add large directories to .dockerignore; the build does not need them."
+    docs: guides/build
+    retryable: false
+    exit_code: 3
+  - code: AF-BLD-010
+    area: BLD
+    message: "No build strategy could be detected for {service}."
+    next_step: "Add a Dockerfile to {path}, or set services.{service}.build to a strategy the reference lists."
+    docs: guides/build
+    retryable: false
+    exit_code: 3
+
+  # Runtime
+  - code: AF-RUN-001
+    area: RUN
+    message: "The command '{command}' is not available in this version."
+    next_step: "See the roadmap for when it lands; 'af version' reports the version you are running."
+    docs: reference/cli
+    retryable: false
+    exit_code: 2
+  - code: AF-RUN-002
+    area: RUN
+    message: "The Docker daemon at {endpoint} could not be reached."
+    next_step: "Start Docker and run 'af doctor' to confirm; on macOS that is Docker Desktop."
+    docs: guides/local-runtime
+    retryable: true
+    exit_code: 5
+  - code: AF-RUN-003
+    area: RUN
+    message: "Another Antifailure process holds the lock for this branch (process {pid}, since {since})."
+    next_step: "Wait for it to finish, or stop it and run 'af down' to clean up."
+    docs: concepts/journal
+    retryable: true
+    exit_code: 1
+  - code: AF-RUN-004
+    area: RUN
+    message: "Service {service} did not become ready within {timeout}."
+    next_step: "The last log lines are above. Check the health path {health} and the port the service binds."
+    docs: guides/local-runtime
+    retryable: true
+    exit_code: 1
+  - code: AF-RUN-005
+    area: RUN
+    message: "Service {service} exited with code {code} during startup."
+    next_step: "The last log lines are above. Run 'af logs {service}' for the full output."
+    docs: guides/local-runtime
+    retryable: false
+    exit_code: 1
+  - code: AF-RUN-010
+    area: RUN
+    message: "Writing to {path} failed because the disk is full; {needed} is required."
+    next_step: "Free space on the volume holding {path}, then run the command again."
+    docs: guides/local-runtime
+    retryable: true
+    exit_code: 1
+  - code: AF-RUN-011
+    area: RUN
+    message: "The local state database at {path} is corrupt."
+    next_step: "A backup was written to {backup}. The database was rebuilt; run 'af down --all' to reconcile any resources it no longer tracks."
+    docs: concepts/journal
+    retryable: false
+    exit_code: 1
+  - code: AF-RUN-020
+    area: RUN
+    message: "Docker has no room left for the environment: {detail}"
+    next_step: "Run 'docker system prune' or raise the disk limit in Docker's settings."
+    docs: guides/local-runtime
+    retryable: true
+    exit_code: 5
+  - code: AF-RUN-030
+    area: RUN
+    message: "The environment could not be torn down completely; {count} resources are still recorded."
+    next_step: "Run 'af down' again once the provider is reachable; the journal remembers what is left."
+    docs: concepts/journal
+    retryable: true
+    exit_code: 10
+
+  # Egress
+  - code: AF-NET-001
+    area: NET
+    message: "The request to {host} was blocked by rule {rule}."
+    next_step: "Add an egress rule for {host} with the mode you intend, or leave it blocked."
+    docs: concepts/egress
+    retryable: false
+    exit_code: 6
+  - code: AF-NET-004
+    area: NET
+    message: "A request to {host} carried a live credential in the {header} header and was blocked."
+    next_step: "Replace the credential with a sandbox key; an environment must never hold a live one."
+    docs: concepts/egress
+    retryable: false
+    exit_code: 6
+  - code: AF-NET-005
+    area: NET
+    message: "The sandbox credential for {host} was rejected: {detail}"
+    next_step: "Check the sandbox key's permissions at the provider."
+    docs: guides/sandbox
+    retryable: false
+    exit_code: 4
+  - code: AF-NET-010
+    area: NET
+    message: "No mock matched {method} {path} on {host}."
+    next_step: "A fixture skeleton was written to {suggestion}. Fill it in and run again."
+    docs: guides/mocking
+    retryable: false
+    exit_code: 6
+  - code: AF-NET-020
+    area: NET
+    message: "{host} rejected the environment certificate, which usually means the client pins its own."
+    next_step: "Set the host to ALLOW so that its traffic is not intercepted, or disable pinning in the client for previews."
+    docs: concepts/egress
+    retryable: false
+    exit_code: 6
+  - code: AF-NET-021
+    area: NET
+    message: "{host} resolves only to IPv6 and the environment has IPv6 disabled."
+    next_step: "Set egress.allow_ipv6 for this environment, or use a host with an IPv4 address."
+    docs: concepts/egress
+    retryable: false
+    exit_code: 6
+  - code: AF-NET-030
+    area: NET
+    message: "The synthesis model returned no usable response for {method} {path}."
+    next_step: "SYNTH is an escape hatch, not a pass. Write a fixture for this endpoint instead."
+    docs: guides/synth
+    retryable: true
+    exit_code: 5
+
+  # Agent
+  - code: AF-AGT-001
+    area: AGT
+    message: "The agent runner could not be started: {detail}"
+    next_step: "Run 'af doctor' to check that the runner and its browsers are installed."
+    docs: concepts/agents
+    retryable: true
+    exit_code: 1
+  - code: AF-AGT-002
+    area: AGT
+    message: "Workflow {workflow} exhausted its budget of {budget} before completing."
+    next_step: "Raise the budget for {workflow} in the manifest, or split it into smaller workflows."
+    docs: guides/workflows
+    retryable: false
+    exit_code: 8
+  - code: AF-AGT-010
+    area: AGT
+    message: "Invariant {invariant} did not finish within {timeout}."
+    next_step: "Make the invariant cheaper; it runs after every workflow and must be a quick read."
+    docs: guides/invariants
+    retryable: false
+    exit_code: 8
+  - code: AF-AGT-011
+    area: AGT
+    message: "Invariant {invariant} is not read only."
+    next_step: "Rewrite it as a single SELECT; invariants run inside a read only transaction."
+    docs: guides/invariants
+    retryable: false
+    exit_code: 3
+
+  # Load
+  - code: AF-LOD-001
+    area: LOD
+    message: "The load target {target} is not an environment this engine created."
+    next_step: "Point the load run at an environment from 'af status'. Load is never generated against an external host."
+    docs: concepts/load
+    retryable: false
+    exit_code: 6
+  - code: AF-LOD-002
+    area: LOD
+    message: "The load run was aborted after the error rate exceeded {threshold} for {duration}."
+    next_step: "The service is failing under this load. The report above shows the first failing endpoint."
+    docs: concepts/load
+    retryable: false
+    exit_code: 8
+
+  # GitHub
+  - code: AF-GH-001
+    area: GH
+    message: "The webhook signature did not verify."
+    next_step: "Confirm that the webhook secret stored for this installation matches the one configured in GitHub."
+    docs: guides/github
+    retryable: false
+    exit_code: 4
+  - code: AF-GH-002
+    area: GH
+    message: "The GitHub API rejected the request: {detail}"
+    next_step: "Check the App's permissions against the list on the GitHub integration page."
+    docs: guides/github
+    retryable: false
+    exit_code: 4
+
+  # Control plane
+  - code: AF-CP-001
+    area: CP
+    message: "The control plane at {url} could not be reached."
+    next_step: "Antifailure works without it. Unset control_plane.url to run fully locally."
+    docs: self-hosting/control-plane
+    retryable: true
+    exit_code: 5
+  - code: AF-CP-002
+    area: CP
+    message: "The control plane rejected this engine's token."
+    next_step: "Run 'af login' to obtain a new token."
+    docs: self-hosting/control-plane
+    retryable: false
+    exit_code: 4
+
+  # Infrastructure
+  - code: AF-INF-001
+    area: INF
+    message: "The cloud API returned a quota error for {quota} in {region}."
+    next_step: "Request more {quota} in {region}, then run the command again."
+    docs: self-hosting/azure
+    retryable: false
+    exit_code: 5
+  - code: AF-INF-002
+    area: INF
+    message: "The provider rate limited this operation and asked to wait {retry_after}."
+    next_step: "The engine retries automatically. If this persists, lower the concurrency in the manifest."
+    docs: providers/limits
+    retryable: true
+    exit_code: 5
+
+  # Enterprise
+  - code: AF-EE-001
+    area: EE
+    message: "The enterprise license could not be verified."
+    next_step: "Reinstall the license with 'af license install'; the token may have been truncated in transit."
+    docs: enterprise/licensing
+    retryable: false
+    exit_code: 4
+  - code: AF-EE-002
+    area: EE
+    message: "The system clock is {skew} behind the last time this license was seen."
+    next_step: "Correct the system clock. Enterprise features resume once it passes the recorded time."
+    docs: enterprise/licensing
+    retryable: true
+    exit_code: 4
+  - code: AF-EE-003
+    area: EE
+    message: "This license was issued for organization {issued_for} and this instance is {actual}."
+    next_step: "Install the license issued for {actual}."
+    docs: enterprise/licensing
+    retryable: false
+    exit_code: 4
+  - code: AF-EE-004
+    area: EE
+    message: "The license covers {seats} seats and they are all in use."
+    next_step: "Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed."
+    docs: enterprise/licensing
+    retryable: false
+    exit_code: 6
+  - code: AF-EE-010
+    area: EE
+    message: "Organization policy {policy} refuses this environment: {detail}"
+    next_step: "Ask an organization administrator to review {policy}, or bring the repository into compliance."
+    docs: enterprise/policy
+    retryable: false
+    exit_code: 6
+
+  # Scheduling
+  - code: AF-SCH-001
+    area: SCH
+    message: "No runtime satisfies the placement requirement {requirement}."
+    next_step: "Register a runtime that meets it, or relax the requirement in the placement rules."
+    docs: enterprise/runtimes
+    retryable: false
+    exit_code: 5
+  - code: AF-SCH-002
+    area: SCH
+    message: "The organization is at its concurrent environment limit ({limit}); this run is queued at position {position}."
+    next_step: "It will start automatically. Tear down an unused environment to start sooner."
+    docs: concepts/scheduling
+    retryable: true
+    exit_code: 5
