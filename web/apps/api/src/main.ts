@@ -13,6 +13,7 @@ import { createServer } from './server.ts'
 import { RealGitHubClient } from './auth/github.ts'
 import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
+import { retentionFromEnv, startMaintenance } from './maintenance.ts'
 
 function required(name: string): string {
   const value = process.env[name]
@@ -56,6 +57,29 @@ const { app, ingestLimiter, authLimiter } = createServer({
   secureCookies: process.env.AF_INSECURE_COOKIES !== '1',
   appBaseUrl: process.env.AF_APP_BASE_URL,
 })
+
+// Partitions, kept ahead of the writes. Skipped when this process is not the
+// one that owns the schema, because it is DDL and needs the migration role.
+// An installation that runs migrations from a separate job sets
+// AF_MAINTENANCE_DATABASE_URL here instead.
+const maintenanceUrl =
+  process.env.AF_MAINTENANCE_DATABASE_URL ?? process.env.AF_MIGRATION_DATABASE_URL
+if (maintenanceUrl) {
+  startMaintenance(
+    {
+      adminUrl: maintenanceUrl,
+      retentionMonths: retentionFromEnv(process.env),
+      archiveDir: process.env.AF_EVENT_ARCHIVE_DIR,
+      log: (line) => console.log(line),
+    },
+    systemClock,
+  )
+} else {
+  console.warn(
+    'no AF_MAINTENANCE_DATABASE_URL or AF_MIGRATION_DATABASE_URL: ' +
+      'events partitions will not be kept ahead by this process',
+  )
+}
 
 // Housekeeping, not enforcement: expiry is checked when a session is resolved,
 // so a sweeper that is late costs table size and nothing else.

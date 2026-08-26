@@ -74,10 +74,16 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       ['schema_migrations', "the schema's own bookkeeping, not tenant data"],
     ])
 
+    // Partitions are excluded because a partition is storage for its parent
+    // rather than a table anybody classifies: it holds the parent's rows and
+    // reading through the parent applies the parent's policy. They are not
+    // unchecked, though. The test below walks every one of them and demands
+    // the same isolation the parent has, which is stronger than letting them
+    // pass through this classification list.
     const all = await h.admin<{ table_name: string }[]>`
       SELECT c.relname AS table_name
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
       ORDER BY c.relname`
 
     const scoped = new Set(await orgScopedTables())
@@ -110,6 +116,52 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
         JOIN pg_class c ON c.oid = p.polrelid
         WHERE c.relname = ${table}`
       assert.ok(policies.length > 0, `${table} has row-level security on but no policy, so it denies everything`)
+    }
+  })
+
+  it('every partition of a tenant-scoped table is isolated in its own right', async () => {
+    // Reading through the parent applies the parent's policy and never a
+    // partition's, so on the application's path this is belt and braces. It
+    // matters for the path where somebody names a partition directly: a
+    // maintenance script, an archival job, a person at a psql prompt with the
+    // application role. A partition created without this is a copy of the
+    // table with no policy on it.
+    const parents = await orgScopedTables()
+
+    const partitions = await h.admin<{ name: string; parent: string }[]>`
+      SELECT c.relname AS name, p.relname AS parent
+      FROM pg_inherits i
+      JOIN pg_class c ON c.oid = i.inhrelid
+      JOIN pg_class p ON p.oid = i.inhparent
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND p.relname = ANY(${parents})
+      ORDER BY c.relname`
+
+    // A negative control on the query itself. Nothing here is partitioned
+    // unless events is, and if this suite ever finds zero partitions it is
+    // because the query stopped matching, not because the risk went away.
+    assert.ok(
+      partitions.length > 0,
+      'found no partitions at all; either events stopped being partitioned or this query no longer matches',
+    )
+
+    for (const { name, parent } of partitions) {
+      const [row] = await h.admin<{ relrowsecurity: boolean; relforcerowsecurity: boolean }[]>`
+        SELECT relrowsecurity, relforcerowsecurity FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = ${name}`
+      assert.equal(
+        row?.relrowsecurity,
+        true,
+        `${name}, a partition of ${parent}, does not have row-level security enabled`,
+      )
+      assert.equal(row?.relforcerowsecurity, true, `${name} does not force row-level security`)
+
+      const policies = await h.admin<{ polname: string }[]>`
+        SELECT polname FROM pg_policy p
+        JOIN pg_class c ON c.oid = p.polrelid
+        WHERE c.relname = ${name}`
+      assert.ok(policies.length > 0, `${name} has row-level security on but no policy`)
     }
   })
 

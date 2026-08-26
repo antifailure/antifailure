@@ -17,6 +17,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   customType,
@@ -250,8 +251,11 @@ export const engineTokens = pgTable('engine_tokens', {
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
 }, (t) => [index('engine_tokens_org_idx').on(t.orgId)])
 
+// Partitioned by month on occurred_at. Both keys carry the partition column
+// because Postgres requires it; see migrations/0011_partition_events.sql for
+// why the column is occurred_at and not received_at.
 export const events = pgTable('events', {
-  id: uuid('id').primaryKey().defaultRandom(),
+  id: uuid('id').notNull().defaultRandom(),
   orgId: uuid('org_id').notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
   envId: text('env_id'),
@@ -263,7 +267,8 @@ export const events = pgTable('events', {
   occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
   receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
-  uniqueIndex('events_idempotency_key').on(t.orgId, t.idempotencyKey),
+  primaryKey({ columns: [t.id, t.occurredAt] }),
+  uniqueIndex('events_idempotency_key').on(t.orgId, t.idempotencyKey, t.occurredAt),
   index('events_env_sequence_idx').on(t.orgId, t.envId, t.sequence),
   index('events_received_idx').on(t.orgId, t.receivedAt),
 ])

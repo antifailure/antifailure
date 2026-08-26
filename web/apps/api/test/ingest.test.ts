@@ -9,6 +9,7 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID, createHash } from 'node:crypto'
+import { applyPartitions } from '@antifailure/db'
 import { MAX_BATCH } from '../src/ingest.ts'
 import {
   available, startApi, seedOrg, dropOrg, type ApiHarness, type Org,
@@ -109,6 +110,74 @@ describe('event ingestion', { skip: hasDatabase ? false : 'no Postgres at AF_TES
       SELECT count(*) AS n FROM events
       WHERE org_id = ${org.orgId} AND idempotency_key = ${e.id as string}`
     assert.equal(Number(row!.n), 1)
+  })
+
+  it('drops a retry that arrives long after the first attempt, in a later month', async () => {
+    // This is the test the partitioning work exists to keep honest.
+    //
+    // events is partitioned on occurred_at, so the unique constraint carries
+    // occurred_at as well, and a retry only collides with its first attempt
+    // because the sender stamps occurred_at once and resends it unchanged.
+    // Partitioning on received_at instead, which is assigned here by the
+    // clock, would put a different value in the key on every attempt: the
+    // conflict would never fire and every retry would duplicate silently.
+    //
+    // So the clock is moved by two months between the attempts. That changes
+    // received_at, and changes which month is current, and neither may matter.
+    // The clock the suite runs on is not the calendar the migration ran
+    // against, so the month this event happens in has to be created first.
+    // Doing that through the manager rather than by hand also proves the
+    // manager makes a partition the writer can actually use.
+    await applyPartitions(h.admin, { now: h.clock.now(), monthsAhead: 3 })
+
+    const e = event({ sequence: 11 })
+    const first = await send([e])
+    assert.equal(first.body.accepted, 1)
+
+    h.clock.advance(62 * 24 * 60 * 60 * 1000)
+
+    const retry = await send([e])
+    assert.equal(retry.body.accepted, 0, 'a retry two months later was stored a second time')
+    assert.equal(retry.body.duplicates, 1)
+
+    const [row] = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM events
+      WHERE org_id = ${org.orgId} AND idempotency_key = ${e.id as string}`
+    assert.equal(Number(row?.n), 1, 'the retry left a second row behind')
+
+    // And it stayed in the month it happened in, not the month it arrived in.
+    const [where] = await h.admin<{ partition: string }[]>`
+      SELECT tableoid::regclass::text AS partition FROM events
+      WHERE org_id = ${org.orgId} AND idempotency_key = ${e.id as string}`
+    assert.equal(
+      where?.partition,
+      'events_2026_01',
+      'the row is not in the partition for the month it occurred in',
+    )
+  })
+
+  it('treats the same id at a different occurredAt as a different event, deliberately', async () => {
+    // The honest cost of partitioning on occurred_at. The idempotency key is
+    // (org_id, idempotency_key, occurred_at) rather than (org_id,
+    // idempotency_key), so a sender that reuses an id under a new timestamp
+    // gets two rows where it used to get one.
+    //
+    // No sender does this by accident: the engine mints the id and stamps the
+    // timestamp together, and a resend carries both unchanged, which is what
+    // the test above proves. This one pins what happens when a sender breaks
+    // that contract, so the behaviour is written down rather than discovered.
+    const id = randomUUID()
+    const first = await send([event({ id, sequence: 12 })])
+    assert.equal(first.body.accepted, 1)
+
+    h.clock.advance(60 * 60 * 1000)
+    const second = await send([event({ id, sequence: 13 })])
+    assert.equal(second.body.accepted, 1, 'a new timestamp under a reused id is a new row')
+
+    const [row] = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM events
+      WHERE org_id = ${org.orgId} AND idempotency_key = ${id}`
+    assert.equal(Number(row?.n), 2)
   })
 
   it('collapses duplicates inside one batch the same way', async () => {

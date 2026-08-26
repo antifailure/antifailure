@@ -75,7 +75,12 @@ describe('schema drift', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_D
     const rows = await h.admin<{ table_name: string }[]>`
       SELECT c.relname AS table_name FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') ORDER BY c.relname`
+      -- A partition is storage for its parent, not a relation the query
+      -- surface names. Typing events types every month of it, and a model per
+      -- partition would have to be written again every time the manager
+      -- creates one.
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+      ORDER BY c.relname`
     const typed = new Set(tables.map((t) => getTableConfig(t).name))
     const untyped = rows
       .map((r) => r.table_name)

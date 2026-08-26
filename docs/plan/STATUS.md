@@ -350,7 +350,7 @@ indistinguishable from one that works until somebody relies on it.
 | Sub-phase | State | Notes |
 | --- | --- | --- |
 | 14.2 Environment scheduler | proven | 98.6 percent. Ten thousand runs across fifty organizations plan in 12 ms against a one-second budget, with no limit exceeded and every organization served. |
-| 14.9 Retention and archival | blocked on a decision | Built and reverted. Partitioning by month and idempotency by identifier cannot both hold, because a unique constraint must include the partition key. See `docs/plan/14.9-partitioning.md`. |
+| 14.9 Retention and archival | proven | Events partitioned by month on `occurred_at`, kept ahead by a daily pass, archived to newline delimited JSON before a drop. Proven against a real Postgres, including the ordering where the job stopped and the writes went to the default partition. The negative control, partitioning on `received_at` instead, makes the retry test fail. See `docs/plan/14.9-partitioning.md`. |
 | 14.7 Rate limiting, quotas, kill switch | proven | Every public endpoint has a declared limit, checked against the server's own route table. An endpoint with none is refused rather than served unbounded. |
 | 14.1, 14.3 to 14.6, 14.8 to 14.10 | planned | Horizontal scaling, multi-cluster pools, incremental goldens, runner pools, observability, chaos, archival, disaster recovery. |
 
@@ -379,15 +379,8 @@ rather than `proven`. The distinction is the point of this file.
 
 ## Where to pick up
 
-1. 14.9 needs a design decision before it can be built, and it is written down
-   in `docs/plan/14.9-partitioning.md`: partitioning events by month and
-   enforcing idempotency by identifier are incompatible as specified, because
-   Postgres cannot enforce a unique constraint that omits the partition key.
-   The options and what each costs are in that file.
-2. 13.2 and 13.3 need identity provider test tenants.
-2. Phase 14.9, partitioning and archival, provable against the real Postgres
-   the control plane suites already use.
-3. Anything blocked above, as soon as the account or the quota exists.
+1. 13.2 and 13.3 need identity provider test tenants.
+2. Anything blocked above, as soon as the account or the quota exists.
 
 Notes for whoever picks this up. The conformance suite is not yet tested
 against a deliberately buggy provider, so it is not yet proved that every

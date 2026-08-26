@@ -213,7 +213,11 @@ export async function ingest(
         VALUES (${engine.orgId}, ${event.id}, ${event.envId ?? null}, ${event.sequence ?? 0},
                 ${event.type}, ${JSON.stringify(event.payload ?? {})}::jsonb,
                 ${event.occurredAt}, ${clock.now().toISOString()})
-        ON CONFLICT (org_id, idempotency_key) DO NOTHING
+        -- occurred_at is in the conflict target because events is partitioned on
+        -- it and Postgres requires the partition key in the unique constraint.
+        -- It costs nothing here: the sender stamps it once and resends it
+        -- unchanged, so a retry still collides with its first attempt.
+        ON CONFLICT (org_id, idempotency_key, occurred_at) DO NOTHING
         RETURNING id`)
 
       if (rows.length === 0) {
