@@ -196,7 +196,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/verify` detectors | proven | 9 detectors |
 | `internal/verify` scan | proven | catches unmasked data, not only passes masked data |
 | `internal/verify` attestation | proven | Ed25519; rejects a deleted finding |
-| Subsetting | planned | |
+| `internal/subset` | proven | dependency order, cycles named where they break, unreachable tables reported |
 | Neon, Supabase, DBLab providers | planned | blocked on accounts |
 
 ## Phase 4. Build and runtime
