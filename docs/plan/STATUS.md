@@ -134,7 +134,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 1.1 Repository and governance | proven | Governance files, templates, CODEOWNERS, ADRs 0001 and 0002. |
 | 1.2 Toolchain pinning and task runner | planned | |
 | 1.3 Schemas and code generation | proven | `schemas/manifest.v1.json` is the source of truth; Go types mirror it. TypeScript generation lands with the runner. |
-| 1.4 Continuous integration and gates | planned | |
+| 1.4 Continuous integration and gates | proven | Six jobs. The generated files, the policy vectors, the command reference, and the error catalog all fail the build when they drift. |
 | 1.5 Release pipeline | planned | |
 | 1.6 Security baseline | planned | |
 | 1.7 Documentation site skeleton | planned | |
@@ -151,7 +151,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 2.2 Manifest loader and validator | proven | Fuzzed. Unknown keys are errors with a line and a suggestion. |
 | 2.3 Detection engine | proven | Twelve analyzers. Deterministic, bounded, fuzzed, never executes repository code. |
 | 2.4 `af init` | proven | Validates its own output before writing. |
-| 2.5 Secrets subsystem | planned | `secrets.Value` exists and is proven. Sources and adapters are next. |
+| 2.5 Secrets subsystem | proven | Sources with precedence, a dotenv reader, an encrypted local store, and a resolution layer. A sandbox credential reaches the sidecar as a file and the service as a marker; proven against a running container. The OS keyring is an interface with a fake: no real credential store is wired yet. |
 | 2.6 `af doctor` | proven | |
 | 2.7 HUD | planned | |
 | 2.8 Event sinks | proven | NDJSON with rotation, JSON, memory, and a replay reader. |
@@ -329,7 +329,9 @@ environment ending at the right sequence, and `af env pull` reading it back.
 | Sub-phase | State | Notes |
 | --- | --- | --- |
 | 13.1 Edition foundation and licensing | proven | Licensing at 98.9 percent, parser fuzzed over 2.4 million executions, extension points at 100 percent, community binary proven free of enterprise symbols. |
-| 13.2 to 13.14 | planned | Single sign on, SCIM, roles, SIEM streaming, policy enforcement, multi-cluster, secrets, billing, dashboard, support tooling, compliance, deployment. |
+| 13.5 Audit hash chain | proven | Part of the control plane's audit log. The streaming sinks are not built. |
+| 13.6 Organization policy enforcement | proven | 100 percent. A property test over five hundred random policies proves a stricter policy never permits more. |
+| 13.2 to 13.4, 13.7 to 13.14 | planned | Single sign on, SCIM, custom roles, multi-cluster, secrets adapters, billing, dashboard, support tooling, compliance, deployment. |
 
 The boundary is a separate Go module rather than a build tag. The community
 build cannot resolve an enterprise import path at all, so a mistaken import is
@@ -337,18 +339,26 @@ a compile error rather than something a linter has to notice. CI deletes the
 directory and proves the community engine builds and passes without it, then
 scans the shipped binary for enterprise package paths.
 
+The extension points the enterprise edition plugs into are MIT and live in the
+community engine, and `af up` calls them. That matters: they shipped once with
+no call site anywhere, which is a socket nothing is plugged into and is
+indistinguishable from one that works until somebody relies on it.
+
 ## Phase 14. Scaling
 
 | Sub-phase | State | Notes |
 | --- | --- | --- |
 | 14.2 Environment scheduler | proven | 98.6 percent. Ten thousand runs across fifty organizations plan in 12 ms against a one-second budget, with no limit exceeded and every organization served. |
-| 14.1, 14.3 to 14.10 | planned | Horizontal scaling, multi-cluster pools, incremental goldens, runner pools, observability, quotas, chaos, archival, disaster recovery. |
+| 14.7 Rate limiting, quotas, kill switch | proven | Every public endpoint has a declared limit, checked against the server's own route table. An endpoint with none is refused rather than served unbounded. |
+| 14.1, 14.3 to 14.6, 14.8 to 14.10 | planned | Horizontal scaling, multi-cluster pools, incremental goldens, runner pools, observability, chaos, archival, disaster recovery. |
 
 ## Phase 11. Documentation site
 
 | Component | State | Notes |
 | --- | --- | --- |
-| 11.1 to 11.6 | planned | Assigned elsewhere. The generated references have their sources: the cobra tree, the schemas, `catalog.yaml`, and the transform registry. |
+| 11.2 Generated references | proven | The command reference is generated from the cobra tree and the error reference from the catalog. Both fail the build when they drift. |
+| 11.4 Error catalog completeness | proven | Every entry is either returned somewhere or marked reserved, and a reserved entry that something returns fails too. It found 38 entries documenting errors this version cannot produce. |
+| 11.1, 11.3, 11.5, 11.6 | planned | The site, the guides, and the examples. Assigned elsewhere. |
 
 ## What is not built, and why
 
@@ -367,10 +377,10 @@ rather than `proven`. The distinction is the point of this file.
 
 ## Where to pick up
 
-1. The remaining enterprise sub-phases, 13.2 onwards. Each one is independent
-   and each one lives entirely under `ee/`.
-2. Phase 14.7, rate limits and quotas, which is provable locally against the
-   control plane that now exists.
+1. The remaining enterprise sub-phases: 13.2 and 13.3 need identity provider
+   test tenants, but 13.4 custom roles and 13.5 streaming sinks do not.
+2. Phase 14.9, partitioning and archival, provable against the real Postgres
+   the control plane suites already use.
 3. Anything blocked above, as soon as the account or the quota exists.
 
 Notes for whoever picks this up. The conformance suite is not yet tested
