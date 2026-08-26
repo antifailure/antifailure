@@ -221,7 +221,28 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | Model driven planning | proven | Anthropic and OpenAI; refuses a control the page does not have; falls back when the model is unreachable |
 | Invariants and insights | planned | |
 
-## Phases 7 to 14
+## Phase 7. Load
+
+| Component | State | Notes |
+| --- | --- | --- |
+| `internal/load` shape | proven | weighted mix, Poisson arrivals, deterministic per seed |
+| `internal/load` safety | proven | every route unsafe until named; a method pattern does not cover another method |
+| `internal/load` run | proven | measured against a real server; achieved rate reported, not the target |
+| `internal/load` access log | proven | paths normalised, or the mix collapses into a list |
+| `af load` | planned | the engine is done; the command is not wired yet |
+
+## Continuous integration
+
+| Component | State | Notes |
+| --- | --- | --- |
+| `.github/workflows/ci.yml` | proven | engine with the race detector against a real daemon, runner with a real browser, edition boundary, credential scan |
+| `tools/scanrepo` | proven | uses the engine's own detector, so CI and the proxy cannot disagree |
+
+It found two real bugs on its first two runs: stale packaged sidecar
+sources, and a database provider that inventoried every managed container
+and so blamed itself for the runtime's.
+
+## Phases 8 to 14
 
 Not started.
 
