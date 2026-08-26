@@ -82,6 +82,38 @@ func TestNodeBuildpack_SaysSoWhenThereIsNoLockfile(t *testing.T) {
 	require.Contains(t, bp.Why, "versions production does not have")
 }
 
+func TestNodeBuildpack_WithoutALockfileUsesAnInstallThatCanRun(t *testing.T) {
+	// The version of this that shipped checked only the sentence above and
+	// never the command, so the Dockerfile said "npm ci" while the sentence
+	// said what "npm install" does. npm ci refuses to start without a
+	// lockfile, so every repository that had not committed one got a build
+	// that could not succeed, and the error it printed was npm's usage text.
+	//
+	// Testing the explanation and not the command is how that happened. This
+	// tests the command.
+	bp := detect(t, mapFS{"package.json": `{"scripts":{"start":"node s.js"}}`}, "", "", 0)
+	require.NotContains(t, bp.Dockerfile, "npm ci",
+		"npm ci cannot run without a lockfile, and there is no lockfile here")
+	require.Contains(t, bp.Dockerfile, "npm install")
+}
+
+func TestNodeBuildpack_WithALockfileStillUsesTheReproducibleInstall(t *testing.T) {
+	// The negative control for the change above. A lockfile is the whole
+	// reason to use a frozen install, and quietly loosening every build to
+	// npm install would swap a real guarantee for a convenience.
+	for lock, want := range map[string]string{
+		"package-lock.json": "npm ci",
+		"pnpm-lock.yaml":    "--frozen-lockfile",
+		"yarn.lock":         "--frozen-lockfile",
+	} {
+		bp := detect(t, mapFS{
+			"package.json": `{"scripts":{"start":"node s.js"}}`,
+			lock:           "x",
+		}, "", "", 0)
+		require.Contains(t, bp.Dockerfile, want, "with %s present", lock)
+	}
+}
+
 func TestNodeBuildpack_InstallsBeforeCopyingSource(t *testing.T) {
 	t.Parallel()
 	// The layer that makes a rebuild fast. If COPY . . came first, every

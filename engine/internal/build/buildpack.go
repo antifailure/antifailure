@@ -118,7 +118,12 @@ func nodeBuildpack(fs fileSet, dir, command string, port int) (*Buildpack, bool)
 	// worst rather than to the error that says what is wrong with their file.
 	_ = json.Unmarshal(raw, &pkg)
 
-	mgr := nodeManagers[len(nodeManagers)-1]
+	// The fallback when nothing is found. npm install rather than npm ci: ci
+	// refuses to run at all without a lockfile, so a Dockerfile that reaches
+	// for it here cannot succeed, and every repository without a lockfile
+	// would get a build that fails on a message about npm ci's usage rather
+	// than about anything the developer did.
+	mgr := nodeManager{name: "npm", installArgs: "npm install --no-audit --no-fund"}
 	found := false
 	// The lockfile at the repository root governs a monorepo package, so both
 	// places are checked and the nearer one wins.
@@ -195,8 +200,9 @@ func nodeBuildpack(fs fileSet, dir, command string, port int) (*Buildpack, bool)
 		"package.json and %s put this on Node %s with %s.", mgr.lockfile, major, mgr.name)
 	if !found {
 		why = fmt.Sprintf(
-			"package.json puts this on Node %s. No lockfile was found, so npm ci is used and "+
-				"the install may resolve versions production does not have.", major)
+			"package.json puts this on Node %s. No lockfile was found, so npm install is used "+
+				"and it may resolve versions production does not have. Commit a lockfile and "+
+				"the environment gets the versions production has.", major)
 	}
 	if hasBuild {
 		why += " The build script runs before the image is finished."
