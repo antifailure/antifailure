@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/antifailure/antifailure/engine/internal/livekey"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -59,6 +60,16 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 		Mode: string(d.Mode), Rule: d.RuleHost, Reason: d.Reason(),
 		Allowed: d.Allowed(), Via: "transparent",
 	}
+	if found := p.tripwire(req, host); len(found) > 0 {
+		rec.Status = http.StatusForbidden
+		rec.Allowed = false
+		rec.Reason = "This request carries a live credential: " + livekey.Describe(found)
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		writeRawForbidden(conn, refusalForLiveCredential(preq, found))
+		return
+	}
+
 	if d.Mode == schema.ModeCapture {
 		rec.Status = http.StatusOK
 		rec.Duration = time.Since(started).String()
@@ -297,6 +308,14 @@ func writeRefusalRaw(conn net.Conn, d policy.Decision, req policy.Request) {
 		"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\n"+
 			"Content-Length: %d\r\nX-Antifailure-Decision: %s\r\nConnection: close\r\n\r\n%s",
 		len(body), d.Mode, body)
+}
+
+// writeRawForbidden writes a refusal body onto a raw connection.
+func writeRawForbidden(conn io.Writer, body string) {
+	fmt.Fprintf(conn,
+		"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\n"+
+			"Content-Length: %d\r\nX-Antifailure-Decision: block\r\nConnection: close\r\n\r\n%s",
+		len(body), body)
 }
 
 func writeRawError(conn net.Conn, status int, message string) {

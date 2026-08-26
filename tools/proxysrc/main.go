@@ -40,6 +40,8 @@ var sources = []string{
 	"cmd/af-proxy/transparent.go",
 	"cmd/af-proxy/mitm.go",
 	"cmd/af-proxy/capture.go",
+	"cmd/af-proxy/sandbox.go",
+	"internal/livekey/livekey.go",
 }
 
 // modulePath is the module the generated files declare.

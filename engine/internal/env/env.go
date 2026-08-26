@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/journal"
+	"github.com/antifailure/antifailure/engine/internal/livekey"
 	"github.com/antifailure/antifailure/engine/internal/lock"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/redact"
@@ -68,6 +70,9 @@ type Options struct {
 	Verbose bool
 	// Redactor is applied to everything that reaches a log or an artifact.
 	Redactor *redact.Redactor
+	// Getenv reads the environment this command is running in, for sandbox
+	// credentials. Nil uses the process environment.
+	Getenv func(string) string
 }
 
 // Orchestrator runs the lifecycle for one environment.
@@ -231,6 +236,58 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 	return s, nil
 }
 
+// sandboxCredentials resolves the values the sidecar substitutes.
+//
+// They are read from the environment this command is running in, once, and
+// handed to the sidecar. They are never written to a file, never passed to a
+// service, and never logged, because the whole point of substituting them at
+// the boundary is that the application never holds one.
+//
+// A missing one is refused rather than defaulted. Forwarding a sandbox request
+// with whatever credential the application happened to send is how a preview
+// environment charges a real card.
+func (o *Orchestrator) sandboxCredentials() (map[string]secrets.Value, error) {
+	if o.opts.Manifest.Egress == nil {
+		return nil, nil
+	}
+	getenv := o.opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+
+	out := map[string]secrets.Value{}
+	var missing []string
+	for _, r := range o.opts.Manifest.Egress.Rules {
+		if r.Mode != schema.ModeSandbox || r.Credential == "" {
+			continue
+		}
+		if _, done := out[r.Credential]; done {
+			continue
+		}
+		value := getenv(r.Credential)
+		if value == "" {
+			missing = append(missing, r.Credential)
+			continue
+		}
+		if found := livekey.Scan(value, r.Credential); len(found) > 0 {
+			// The one check that has to happen before the environment exists.
+			// A live key handed to the sidecar would be substituted into
+			// every sandbox request, which is the opposite of what sandbox
+			// mode is for.
+			return nil, aferrors.Coded(aferrors.AFSEC003, "name", r.Credential)
+		}
+		out[r.Credential] = secrets.New(value)
+		o.opts.Redactor.Register(value)
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return nil, aferrors.Coded(aferrors.AFSEC001,
+			"names", strings.Join(missing, ", "),
+			"sources", "this shell's environment")
+	}
+	return out, nil
+}
+
 // needsInspection reports whether any rule requires reading inside TLS.
 //
 // Asked here rather than in the runtime because it decides whether to issue a
@@ -316,6 +373,12 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 		Journal:     recordIntent,
 		Progress:    o.progress,
 	}
+	creds, err := o.sandboxCredentials()
+	if err != nil {
+		return res, err
+	}
+	spec.SandboxCredentials = creds
+
 	if needsInspection(o.opts.Manifest.Egress) {
 		ca, caErr := envcert.Generate(o.envID, o.opts.Clock.Now())
 		if caErr != nil {

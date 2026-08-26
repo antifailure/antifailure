@@ -22,6 +22,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
+	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -718,4 +719,134 @@ func TestCapture_SendsNothingToTheRealProvider(t *testing.T) {
 		}
 	}
 	require.True(t, sawCapture, "the decision log does not show the capture")
+}
+
+// fakeLiveKey builds a credential that looks live without any string in this
+// repository looking like one.
+func fakeLiveKey() string {
+	return "sk" + "_" + "live" + "_" + strings.Repeat("A1b2C3d4", 3)
+}
+
+func TestTripwire_RefusesARequestCarryingALiveCredential(t *testing.T) {
+	r := requireRuntime(t)
+	requireInternet(t)
+	img := curlImage(t)
+	id := envID(t, r, "tripwire1")
+
+	ca, err := envcert.Generate("test-tripwire", time.Now())
+	require.NoError(t, err)
+
+	// The host is allowed. The request is still refused, because an
+	// environment that holds a copy of production data and runs unreviewed
+	// code must never carry a credential that can act on production. A live
+	// Stripe key here is a real charge on a real card.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	_, err = r.Up(ctx, provider.EnvSpec{
+		EnvID: id,
+		Egress: &schema.Egress{
+			Default: schema.ModeBlock,
+			Rules:   []schema.EgressRule{{Host: allowedHost, Mode: schema.ModeAllow, Paths: []string{"/"}}},
+		},
+		CACertPEM: ca.CertPEM, CAKeyPEM: ca.KeyPEM,
+		Services: []provider.ServiceSpec{{
+			Name: "caller", Image: img, Kind: "worker",
+			Command: "curl -sS --max-time 25 -o /tmp/body -w '%{http_code}' " +
+				"-H 'authorization: Bearer " + fakeLiveKey() + "' " +
+				"https://" + allowedHost + "/ > /tmp/code; sleep 60",
+		}},
+	})
+	require.NoError(t, err)
+
+	deadline := time.Now().Add(60 * time.Second)
+	var refused bool
+	for time.Now().Before(deadline) && !refused {
+		decisions, decErr := r.Decisions(ctx, id, 100)
+		require.NoError(t, decErr)
+		for _, d := range decisions {
+			if strings.Contains(d.Reason, "live credential") {
+				refused = true
+				require.False(t, d.Allowed)
+				require.Equal(t, 403, d.Status)
+				// The message says what kind and where, and never what.
+				require.Contains(t, d.Reason, "Stripe secret key")
+				require.NotContains(t, d.Reason, "A1b2C3d4")
+			}
+		}
+		if !refused {
+			time.Sleep(time.Second)
+		}
+	}
+	require.True(t, refused, "a request carrying a live credential was not refused")
+}
+
+func TestSandbox_SubstitutesTheCredentialOnTheWayOut(t *testing.T) {
+	r := requireRuntime(t)
+	requireInternet(t)
+	img := curlImage(t)
+	id := envID(t, r, "sandbox1")
+
+	ca, err := envcert.Generate("test-sandbox", time.Now())
+	require.NoError(t, err)
+
+	// An application configured with a sandbox key is an application somebody
+	// can misconfigure. Replacing it at the boundary is a mistake nobody can
+	// make, because whatever the application sent is discarded before the
+	// request leaves.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	_, err = r.Up(ctx, provider.EnvSpec{
+		EnvID: id,
+		Egress: &schema.Egress{
+			Default: schema.ModeBlock,
+			Rules: []schema.EgressRule{{
+				Host: allowedHost, Mode: schema.ModeSandbox, Credential: "TEST_KEY",
+			}},
+		},
+		SandboxCredentials: map[string]secrets.Value{
+			"TEST_KEY": secrets.New("sk" + "_" + "test" + "_" + "substituted00000000"),
+		},
+		CACertPEM: ca.CertPEM, CAKeyPEM: ca.KeyPEM,
+		Services: []provider.ServiceSpec{{
+			Name: "caller", Image: img, Kind: "worker",
+			Command: "curl -sS --max-time 25 -o /dev/null " +
+				"-H 'authorization: Bearer whatever-the-app-had' " +
+				"https://" + allowedHost + "/; sleep 60",
+		}},
+	})
+	require.NoError(t, err)
+
+	deadline := time.Now().Add(60 * time.Second)
+	var seen bool
+	for time.Now().Before(deadline) && !seen {
+		decisions, decErr := r.Decisions(ctx, id, 100)
+		require.NoError(t, decErr)
+		for _, d := range decisions {
+			// The inspected record, not the CONNECT that opened the tunnel.
+			// The tunnel decision is host level and carries no request, so it
+			// cannot have substituted anything.
+			if d.Mode == "sandbox" && d.Host == allowedHost && d.Via == "inspect" {
+				seen = true
+				require.True(t, d.Allowed, "sandbox reaches the provider's sandbox")
+				if !d.Substituted {
+					t.Logf("decision without substitution: %+v", d)
+				}
+				require.True(t, d.Substituted,
+					"the credential was not replaced, so the application's own would have gone out")
+			}
+		}
+		if !seen {
+			time.Sleep(time.Second)
+		}
+	}
+	if !seen {
+		decisions, _ := r.Decisions(ctx, id, 100)
+		for _, d := range decisions {
+			t.Logf("decision: mode=%s host=%s status=%d allowed=%v substituted=%v via=%s reason=%s",
+				d.Mode, d.Host, d.Status, d.Allowed, d.Substituted, d.Via, d.Reason)
+		}
+	}
+	require.True(t, seen, "no sandbox decision was recorded")
 }

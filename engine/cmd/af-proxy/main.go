@@ -51,6 +51,9 @@ type Config struct {
 	Internal []string `json:"internal"`
 	// EnvID identifies the environment in the decision log.
 	EnvID string `json:"env_id"`
+	// Credentials maps a rule's credential name to the sandbox value the
+	// sidecar substitutes. Values never appear in a log line.
+	Credentials map[string]string `json:"credentials,omitempty"`
 	// CACert and CAKey are the environment's certificate authority, in PEM.
 	//
 	// Present only when something in the policy needs to read inside TLS. An
@@ -75,6 +78,7 @@ func main() {
 
 	p := &proxy{
 		engine: engine, envID: cfg.EnvID, out: json.NewEncoder(os.Stdout),
+		credentials: cfg.Credentials,
 		transport: &http.Transport{
 			MaxIdleConnsPerHost: 16,
 			IdleConnTimeout:     60 * time.Second,
@@ -131,6 +135,10 @@ func main() {
 	p.emit(record{
 		Event: "ready", Rules: len(engine.Rules()), Default: string(engine.Default()),
 		Reason: describeDNS(self, cfg.Internal),
+		// The count, never the values. A sandbox rule whose credential never
+		// arrived forwards whatever the application sent, and the only way to
+		// notice is a number that says zero.
+		Credentials: len(cfg.Credentials),
 	})
 
 	log.Fatalf("af-proxy: %v", <-errs)
@@ -227,6 +235,11 @@ type record struct {
 	// Via says how the request arrived: as a proxy request from a client that
 	// read its proxy variables, or transparently from one that did not.
 	Via string `json:"via,omitempty"`
+	// Substituted marks a request whose credential was replaced on the way
+	// out, so a reader can tell a sandbox call from a live one.
+	Substituted bool `json:"substituted,omitempty"`
+	// Credentials counts the sandbox values loaded, on the ready line.
+	Credentials int `json:"credentials,omitempty"`
 	// HostOnly marks a decision made without seeing the path or the method,
 	// which is every HTTPS request until the environment certificate lands.
 	// Recorded rather than assumed away, so a reader can tell the difference
@@ -244,7 +257,9 @@ type proxy struct {
 	ca *certAuthority
 	// transport re-originates inspected requests.
 	transport *http.Transport
-	seq       atomic.Uint64
+	// credentials are the sandbox values, by the name a rule refers to.
+	credentials map[string]string
+	seq         atomic.Uint64
 	// mu serialises writes to the encoder. A JSON encoder is not safe for
 	// concurrent use, and every request writes a line, so without it a busy
 	// environment produces a decision log with interleaved bytes: the one

@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/antifailure/antifailure/engine/internal/livekey"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -237,6 +238,19 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 		TLS: true, Mode: string(d.Mode), Rule: d.RuleHost, Reason: d.Reason(),
 		Allowed: d.Allowed(), Via: "inspect",
 	}
+	// The tripwire runs before anything is forwarded, in every mode. A
+	// credential that can act on production must not reach an environment
+	// running unreviewed code against a copy of production data.
+	if found := p.tripwire(req, host); len(found) > 0 {
+		rec.Status = http.StatusForbidden
+		rec.Allowed = false
+		rec.Reason = "This request carries a live credential: " + livekey.Describe(found)
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		writeRawForbidden(w, refusalForLiveCredential(preq, found))
+		return false
+	}
+
 	if d.Mode == schema.ModeCapture {
 		rec.Status = http.StatusOK
 		rec.Duration = time.Since(started).String()
@@ -261,6 +275,14 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 	outbound.URL.Host = host
 	for _, h := range hopByHop {
 		outbound.Header.Del(h)
+	}
+	if d.Mode == schema.ModeSandbox {
+		// An application configured with a sandbox key is an application
+		// somebody can misconfigure. Replacing it here is a mistake nobody
+		// can make, because whatever the application sent is discarded before
+		// the request leaves.
+		applySandbox(outbound, host, p.credentials[d.Credential])
+		rec.Substituted = p.credentials[d.Credential] != ""
 	}
 
 	resp, err := p.transport.RoundTrip(outbound)

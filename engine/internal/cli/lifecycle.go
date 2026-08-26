@@ -77,7 +77,7 @@ func orchestrator(env2 *Env, branch string, rebuild bool) (*env.Orchestrator, er
 	r := redact.New()
 	return env.New(env.Options{
 		Root: root, Manifest: m, Branch: branch, Clock: env2.Clock,
-		Rebuild: rebuild, Redactor: r, Verbose: env2.Out.Verbose,
+		Rebuild: rebuild, Redactor: r, Verbose: env2.Out.Verbose, Getenv: env2.Getenv,
 		Progress: func(line string) {
 			// Progress is prose, not data, so it is suppressed in JSON mode
 			// rather than interleaved into a document a script is parsing.

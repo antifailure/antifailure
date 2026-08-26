@@ -22,6 +22,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/proxyimage"
+	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -45,12 +46,13 @@ const configPath = "/etc/antifailure/proxy.json"
 // carried in this binary, so a mismatch fails its own test rather than a
 // build.
 type sidecarConfig struct {
-	Egress   schema.Egress `json:"egress"`
-	Subnet   string        `json:"subnet"`
-	Internal []string      `json:"internal"`
-	EnvID    string        `json:"env_id"`
-	CACert   string        `json:"ca_cert,omitempty"`
-	CAKey    string        `json:"ca_key,omitempty"`
+	Egress      schema.Egress     `json:"egress"`
+	Subnet      string            `json:"subnet"`
+	Internal    []string          `json:"internal"`
+	EnvID       string            `json:"env_id"`
+	Credentials map[string]string `json:"credentials,omitempty"`
+	CACert      string            `json:"ca_cert,omitempty"`
+	CAKey       string            `json:"ca_key,omitempty"`
 }
 
 // startProxy builds, places, and starts the egress sidecar.
@@ -67,6 +69,7 @@ func (r *Runtime) startProxy(
 	egress *schema.Egress,
 	serviceNames []string,
 	ca *envcert.Authority,
+	credentials map[string]secrets.Value,
 	nets networks,
 	journal func(string, string) error,
 	progress func(string),
@@ -134,6 +137,12 @@ func (r *Runtime) startProxy(
 	}
 	if ca != nil {
 		cfg.CACert, cfg.CAKey = ca.CertPEM, ca.KeyPEM.Reveal()
+	}
+	if len(credentials) > 0 {
+		cfg.Credentials = make(map[string]string, len(credentials))
+		for name, value := range credentials {
+			cfg.Credentials[name] = value.Reveal()
+		}
 	}
 	compiled, err := json.Marshal(cfg)
 	if err != nil {
@@ -368,6 +377,11 @@ type Decision struct {
 	Duration string    `json:"duration"`
 	Error    string    `json:"error"`
 	Seq      uint64    `json:"seq"`
+	Via      string    `json:"via"`
+	HostOnly bool      `json:"host_only"`
+	// Substituted marks a request whose credential the sidecar replaced on
+	// the way out, so a reader can tell a sandbox call from a live one.
+	Substituted bool `json:"substituted"`
 }
 
 // Decisions reads the sidecar's decision log for an environment.
