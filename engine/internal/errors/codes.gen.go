@@ -185,6 +185,13 @@ const (
 	// The environment could not be torn down completely; {count} resources
 	// are still recorded.
 	AFRUN030 Code = "AF-RUN-030"
+	// The environment could not be placed: {detail}
+	AFRUN040 Code = "AF-RUN-040"
+	// The services depend on each other in a cycle: {cycle}
+	AFRUN041 Code = "AF-RUN-041"
+	// Service {service} depends on {missing}, which the manifest does not
+	// declare.
+	AFRUN042 Code = "AF-RUN-042"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -802,6 +809,33 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/journal",
 		Retryable: true,
 		ExitCode:  ExitInterruptedDirty,
+	},
+	AFRUN040: {
+		Code:      AFRUN040,
+		Area:      "RUN",
+		Message:   "The environment could not be placed: {detail}",
+		NextStep:  "Run 'af doctor' to check the runtime, then 'af down' to clear anything left behind.",
+		Docs:      "guides/local-runtime",
+		Retryable: true,
+		ExitCode:  ExitFailure,
+	},
+	AFRUN041: {
+		Code:      AFRUN041,
+		Area:      "RUN",
+		Message:   "The services depend on each other in a cycle: {cycle}",
+		NextStep:  "Remove one of the depends_on entries; a cycle has no order that can start.",
+		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN042: {
+		Code:      AFRUN042,
+		Area:      "RUN",
+		Message:   "Service {service} depends on {missing}, which the manifest does not declare.",
+		NextStep:  "Add a service called {missing}, or correct the depends_on entry.",
+		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFSCH001: {
 		Code:      AFSCH001,

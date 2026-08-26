@@ -25,6 +25,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 
@@ -547,3 +548,45 @@ func publishedPort(ports nat.PortMap) (int, error) {
 func (p *Provider) freePort() (int, error) { return p.ports.Free() }
 
 var errNotOurs = dockerutil.ErrNotOurs
+
+// AttachToNetwork connects a branch's container to a network under an alias.
+//
+// It exists because the connection string this provider hands out points at
+// the host's loopback address, and a service running in a container is not on
+// the host's loopback. Rather than teach the provider about environments, the
+// runtime asks it to join a network and says what to call it there.
+//
+// Idempotent: a container already on the network is left alone, because Up
+// runs again on every push and reconnecting would be an error every time
+// after the first.
+func (p *Provider) AttachToNetwork(ctx context.Context, ref, networkID, alias string) (int, error) {
+	insp, err := p.cli.ContainerInspect(ctx, ref)
+	if err != nil {
+		return 0, aferrors.Wrap(err, aferrors.AFDB004, "env", ref)
+	}
+	if insp.Config == nil || !dockerutil.IsOurs(insp.Config.Labels) {
+		return 0, fmt.Errorf("%w: container %s", dockerutil.ErrNotOurs, dockerutil.ShortID(ref))
+	}
+
+	already := false
+	if insp.NetworkSettings != nil {
+		for id, ep := range insp.NetworkSettings.Networks {
+			if id == networkID || (ep != nil && ep.NetworkID == networkID) {
+				already = true
+				break
+			}
+		}
+	}
+	if !already {
+		err = p.cli.NetworkConnect(ctx, networkID, ref, &network.EndpointSettings{
+			Aliases: []string{alias},
+		})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return 0, aferrors.Wrap(err, aferrors.AFDB004, "env", ref)
+		}
+	}
+	// The port inside the network, which is Postgres's own rather than the
+	// published one. Two branches publish on different host ports and both
+	// listen on 5432 inside, and a service is talking to the inside.
+	return 5432, nil
+}

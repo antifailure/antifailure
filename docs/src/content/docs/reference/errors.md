@@ -846,6 +846,42 @@ The environment could not be torn down completely; {count} resources are still r
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [concepts/journal](/docs/concepts/journal/) |
 
+### AF-RUN-040
+
+The environment could not be placed: {detail}
+
+**What to do.** Run 'af doctor' to check the runtime, then 'af down' to clear anything left behind.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+
+### AF-RUN-041
+
+The services depend on each other in a cycle: {cycle}
+
+**What to do.** Remove one of the depends_on entries; a cycle has no order that can start.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/manifest](/docs/reference/manifest/) |
+
+### AF-RUN-042
+
+Service {service} depends on {missing}, which the manifest does not declare.
+
+**What to do.** Add a service called {missing}, or correct the depends_on entry.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/manifest](/docs/reference/manifest/) |
+
 ## Scheduling
 
 ### AF-SCH-001

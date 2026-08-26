@@ -303,6 +303,27 @@ errors:
     docs: concepts/journal
     retryable: true
     exit_code: 1
+  - code: AF-RUN-040
+    area: RUN
+    message: "The environment could not be placed: {detail}"
+    next_step: "Run 'af doctor' to check the runtime, then 'af down' to clear anything left behind."
+    docs: guides/local-runtime
+    retryable: true
+    exit_code: 1
+  - code: AF-RUN-041
+    area: RUN
+    message: "The services depend on each other in a cycle: {cycle}"
+    next_step: "Remove one of the depends_on entries; a cycle has no order that can start."
+    docs: reference/manifest
+    retryable: false
+    exit_code: 3
+  - code: AF-RUN-042
+    area: RUN
+    message: "Service {service} depends on {missing}, which the manifest does not declare."
+    next_step: "Add a service called {missing}, or correct the depends_on entry."
+    docs: reference/manifest
+    retryable: false
+    exit_code: 3
   - code: AF-RUN-009
     area: RUN
     message: "No free port was found in the range {range} to publish the environment on."
