@@ -63,18 +63,19 @@ af env list / prune   what this machine is holding, and a cutoff to clear it
 af insights    what the database noticed: the N+1, the index that stopped
                being used, the scan on a table that grew
 
+af env pull    what the control plane recorded for one environment
+
+af license     what this installation is licensed for, in both editions
+
 af doctor      ten checks, each with a remediation
 af init        reads a repository, writes a manifest, explains what it assumed
 af explain     the effective configuration with every default resolved
 af version     version, commit, edition, platform
 ```
 
-Every command in the tree does something except `af env pull`, which needs
-the control plane. The three that returned
-AF-RUN-001 inside otherwise working groups are wired: `af mask preview`,
-`af golden verify`, and `af support bundle`. What remains unimplemented is
-whole subsystems rather than gaps inside working ones: `af insights` and
-`af env` belong to the control plane, which is phase 8.
+Every command in the tree does something. The list of placeholders in the CLI
+test is empty, and it is kept rather than deleted with its last entry, because
+an empty list is the assertion.
 
 Proved end to end against a real Docker daemon and a real Postgres:
 
@@ -93,6 +94,13 @@ Proved end to end against a real Docker daemon and a real Postgres:
   environment. Given an expectation the page neither confirms nor
   contradicts, it reports unverified with every step it took rather than
   guessing a pass or a failure.
+- A second tenant is refused a read, an unqualified read, an update, a delete,
+  and an insert on every table in the control plane, by Postgres rather than
+  by the application. Turning one policy off makes the suite say which table
+  leaked and how many rows.
+- An engine sends four events over HTTP in the order 3, 1, 3, 2. Three are
+  stored, the repeat is dropped, and the environment ends at sequence 3 in the
+  right state, with the late event changing nothing.
 
 ### What the containment is, exactly
 
@@ -287,18 +295,83 @@ and so blamed itself for the runtime's.
 Written rather than proven for the workflow itself, because no tag has been
 pushed. The first release is the test.
 
-## Phases 8, 11 to 14
+## Phase 8. Control plane
 
-Not started. Phase 8 is the control plane, 11 is the docs site, and the rest
-are the Kubernetes runtime and hosted scale.
+| Sub-phase | State | Notes |
+| --- | --- | --- |
+| 8.1 API and data model | proven | Tenancy is row-level security, not a WHERE clause. The cross-tenant suite asks the database which tables exist rather than carrying a list, and attacks every one from a second tenant: read, unqualified read, update, delete, insert. |
+| 8.2 Authentication and organizations | proven | Permission matrix green for every route by every role, with the route list read out of the router. GitHub OAuth against a fake that enforces what GitHub enforces: single-use codes, expiry, verified addresses only. |
+| 8.3 Environment matrix | written | The API is proven; the view is the web application. |
+| 8.4 Run history and artifact viewer | written | Same: the endpoints exist and the timeline is the web application. |
+| 8.5 Masking policy center | partial | The rules and attestation endpoints are proven. Writing rules back as a pull request needs the GitHub App. |
+| 8.6 Network policy center | proven | The TypeScript engine reproduces the Go engine's decisions across the shared corpus, including the wording of every reason. |
+| 8.7 Audit log | proven | Insert and select granted, nothing else, asserted against the grant table. Hash chain detects every field of every entry being altered in a 25-entry chain. |
+| 8.8 Agent live view | planned | Needs the streaming endpoint and the web application. |
+| 8.9 Design system | planned | The web application. |
+| 8.10 Deployment | planned | Terraform and Helm. Needs an Azure subscription with quota. |
+
+| Component | State | Coverage or notes |
+| --- | --- | --- |
+| `web/packages/db` schema and migrations | proven | 25 tests against a real Postgres |
+| `web/packages/db` row-level security | proven | disabling one policy makes the suite name the table and the row count |
+| `web/packages/db` audit chain | proven | every field of every entry altered in turn, each detected |
+| `web/packages/policy` | proven | 43 vectors; a one-bit change to a specificity weight breaks six |
+| `web/apps/api` | proven | 127 tests: matrix, sign-in, sessions, ingestion, membership sync |
+| `engine/internal/controlplane` | proven | 79 percent; sends, buffers, drops the oldest, obeys a throttle |
+| `af env pull` | proven | against the real server: four events sent out of order with a repeat, three stored, the late one changing nothing |
+
+The whole loop is proven end to end rather than against a fake: the real
+control plane on real Postgres, the Go engine sending over HTTP, the
+environment ending at the right sequence, and `af env pull` reading it back.
+
+## Phase 13. Enterprise edition
+
+| Sub-phase | State | Notes |
+| --- | --- | --- |
+| 13.1 Edition foundation and licensing | proven | Licensing at 98.9 percent, parser fuzzed over 2.4 million executions, extension points at 100 percent, community binary proven free of enterprise symbols. |
+| 13.2 to 13.14 | planned | Single sign on, SCIM, roles, SIEM streaming, policy enforcement, multi-cluster, secrets, billing, dashboard, support tooling, compliance, deployment. |
+
+The boundary is a separate Go module rather than a build tag. The community
+build cannot resolve an enterprise import path at all, so a mistaken import is
+a compile error rather than something a linter has to notice. CI deletes the
+directory and proves the community engine builds and passes without it, then
+scans the shipped binary for enterprise package paths.
+
+## Phase 14. Scaling
+
+| Sub-phase | State | Notes |
+| --- | --- | --- |
+| 14.2 Environment scheduler | proven | 98.6 percent. Ten thousand runs across fifty organizations plan in 12 ms against a one-second budget, with no limit exceeded and every organization served. |
+| 14.1, 14.3 to 14.10 | planned | Horizontal scaling, multi-cluster pools, incremental goldens, runner pools, observability, quotas, chaos, archival, disaster recovery. |
+
+## Phase 11. Documentation site
+
+| Component | State | Notes |
+| --- | --- | --- |
+| 11.1 to 11.6 | planned | Assigned elsewhere. The generated references have their sources: the cobra tree, the schemas, `catalog.yaml`, and the transform registry. |
+
+## What is not built, and why
+
+Everything remaining needs infrastructure that does not exist yet rather than
+code that has not been written:
+
+- **8.10, 14.1, 14.3, 14.10** need an Azure subscription with approved quota.
+- **3.7 to 3.9** need Neon, Supabase, and DBLab accounts.
+- **13.2, 13.3** need identity provider test tenants.
+- **13.9** needs a Stripe account.
+- **8.3, 8.4, 8.8, 8.9, and Phase 11** are the web application and the docs
+  site, which are somebody else's work. The API they consume is proven.
+
+Where a phase could be built against a fake, it was, and it says `written`
+rather than `proven`. The distinction is the point of this file.
 
 ## Where to pick up
 
-In order of what unblocks the most:
-
-1. Phase 7, load generation shaped like production traffic.
-3. Synth mode and rate limiting, the two egress modes still unimplemented.
-5. Phase 8, the control plane, and Phase 11, the docs site.
+1. The remaining enterprise sub-phases, 13.2 onwards. Each one is independent
+   and each one lives entirely under `ee/`.
+2. Phase 14.7, rate limits and quotas, which is provable locally against the
+   control plane that now exists.
+3. Anything blocked above, as soon as the account or the quota exists.
 
 Notes for whoever picks this up. The conformance suite is not yet tested
 against a deliberately buggy provider, so it is not yet proved that every
@@ -311,6 +384,12 @@ arrives with the migrations rather than from production; masking and
 verification run and trivially pass on no rows, which is the honest answer
 rather than a skipped step. The masking key is generated once per machine and
 kept in local state unless AF_MASKING_KEY is set, so two machines produce
-different mappings until CI sets one. And `af mask preview`, `af golden
-verify`, and `af support bundle` are the three subcommands still returning
-whole subsystems: the control plane and the hosted edition.
+different mappings until CI sets one.
+
+The control plane's row-level security has a pattern worth understanding
+before adding a table to it. A lookup that determines the tenant cannot itself
+be tenant-scoped, and the tempting fix is a policy that opens up when nothing
+is set. The request with nothing set is the unauthenticated one, so that is a
+hole rather than a fix. Sessions, engine tokens, installations, and user
+upserts each declare the single value they already hold, and the policy
+returns that row and nothing else. Four separate bugs, one shape.
