@@ -194,6 +194,12 @@ func (o *Orchestrator) findRunner(override string) (string, error) {
 			candidates = append(candidates,
 				filepath.Join(home, ".antifailure", "runner", "src", "main.ts"))
 		}
+		if self, err := os.Executable(); err == nil {
+			// Beside the binary, for an installed release that ships the
+			// runner next to it rather than fetching it separately.
+			candidates = append(candidates,
+				filepath.Join(filepath.Dir(self), "runner", "src", "main.ts"))
+		}
 	}
 	for _, c := range candidates {
 		if c == "" {
