@@ -159,7 +159,7 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		ca = &envcert.Authority{CertPEM: spec.CACertPEM, KeyPEM: spec.CAKeyPEM}
 	}
 	proxyIP, err := r.startProxy(ctx, spec.EnvID, spec.Egress, names, ca,
-		spec.SandboxCredentials, spec.MockPacks, nets, journal, progress)
+		spec.SandboxCredentials, spec.MockPacks, spec.ModelEnv, nets, journal, progress)
 	if err != nil {
 		return env, err
 	}

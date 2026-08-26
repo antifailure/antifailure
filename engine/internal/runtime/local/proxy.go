@@ -75,6 +75,7 @@ func (r *Runtime) startProxy(
 	ca *envcert.Authority,
 	credentials map[string]secrets.Value,
 	mockPacks []string,
+	modelEnv []string,
 	nets networks,
 	journal func(string, string) error,
 	progress func(string),
@@ -104,6 +105,11 @@ func (r *Runtime) startProxy(
 			Image:  proxyimage.Tag(),
 			Labels: labels,
 			Cmd:    []string{"-config", configPath},
+			// Passed as an environment variable rather than written into the
+			// configuration file, so a model key never lands on disk. Only a
+			// rule in synth mode uses it, and an environment with none is
+			// given none.
+			Env: modelEnv,
 		},
 		&container.HostConfig{
 			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},

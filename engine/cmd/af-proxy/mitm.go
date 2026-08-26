@@ -259,6 +259,13 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 		return false
 	}
 
+	if d.Mode == schema.ModeSynth {
+		p.serveSynth(w, req, host, &rec)
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		return false
+	}
+
 	if d.Mode == schema.ModeMock {
 		p.serveMock(w, req, host, &rec)
 		rec.Duration = time.Since(started).String()
@@ -290,6 +297,15 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 		// the request leaves.
 		applySandbox(outbound, host, p.credentials[d.Credential])
 		rec.Substituted = p.credentials[d.Credential] != ""
+	}
+
+	if d.RateLimit != "" {
+		// Shaped before the request leaves, not after. Waiting here is
+		// truthful; refusing would look to the application exactly like the
+		// host being down.
+		if waited := p.limits.wait(d.RuleHost, d.RateLimit); waited > 0 {
+			rec.WaitedMs = waited.Milliseconds()
+		}
 	}
 
 	resp, err := p.transport.RoundTrip(outbound)

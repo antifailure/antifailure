@@ -223,8 +223,8 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | Capture and the inbox | proven | Resend, SendGrid, Postmark, Mailgun, Twilio |
 | `internal/mockpack` | proven | stateful packs; built in Stripe pack runs a billing flow offline |
 | `internal/webhook` | proven | Stripe, GitHub, Svix signing, verified independently |
-| Synth mode | planned | |
-| Rate limiting | planned | |
+| Synth mode | proven | invents a response, marks it synthesized, refuses readably with no key |
+| Rate limiting | proven | per rule, shapes rather than refuses, burst lets startup through |
 
 ## Phase 6. Agents
 

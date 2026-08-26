@@ -83,6 +83,11 @@ func main() {
 	p := &proxy{
 		engine: engine, envID: cfg.EnvID, out: json.NewEncoder(os.Stdout),
 		credentials: cfg.Credentials,
+		limits:      newLimiter(),
+		// Read from this process's environment rather than from the
+		// configuration file, so a key never passes through something the
+		// engine wrote to disk.
+		synth: synthFromEnvironment(os.Getenv),
 		transport: &http.Transport{
 			MaxIdleConnsPerHost: 16,
 			IdleConnTimeout:     60 * time.Second,
@@ -258,6 +263,13 @@ type record struct {
 	// Substituted marks a request whose credential was replaced on the way
 	// out, so a reader can tell a sandbox call from a live one.
 	Substituted bool `json:"substituted,omitempty"`
+	// Synthesized marks a response a model invented, so a workflow that
+	// touched one reports unverified rather than passed.
+	Synthesized bool `json:"synthesized,omitempty"`
+	// WaitedMs is how long a rate limit held this request. Recorded because a
+	// request that took a second is a request somebody will otherwise blame
+	// on the application.
+	WaitedMs int64 `json:"waited_ms,omitempty"`
 	// Credentials counts the sandbox values loaded, on the ready line.
 	Credentials int `json:"credentials,omitempty"`
 	// Pack and Fixture name what answered a mocked request. A mock that
@@ -286,6 +298,12 @@ type proxy struct {
 	credentials map[string]string
 	// mocks answers requests for hosts set to mock.
 	mocks *mockpack.Engine
+	// limits shape traffic to a rule's declared rate, so a load run does not
+	// get somebody's sandbox account throttled.
+	limits *limiter
+	// synth invents a response when a rule asks for one. Nil when no model
+	// key is available, in which case a synth rule refuses and says so.
+	synth *synthConfig
 	seq   atomic.Uint64
 	// mu serialises writes to the encoder. A JSON encoder is not safe for
 	// concurrent use, and every request writes a line, so without it a busy

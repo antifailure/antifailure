@@ -384,6 +384,45 @@ func (o *Orchestrator) mockPacks() ([]string, error) {
 	return out, nil
 }
 
+// modelEnv carries a model key to the sidecar, for a rule in synth mode.
+//
+// Only when a rule actually asks for one. An environment with no synth rule
+// gets no key, because handing a credential to a container that has no use for
+// it is a credential in one more place for no reason.
+func (o *Orchestrator) modelEnv() []string {
+	if o.opts.Manifest.Egress == nil {
+		return nil
+	}
+	wanted := false
+	for _, r := range o.opts.Manifest.Egress.Rules {
+		if r.Mode == schema.ModeSynth {
+			wanted = true
+			break
+		}
+	}
+	if !wanted && o.opts.Manifest.Egress.Default != schema.ModeSynth {
+		return nil
+	}
+
+	getenv := o.opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	var out []string
+	for _, name := range []string{
+		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AF_MODEL",
+		"ANTHROPIC_BASE_URL", "OPENAI_BASE_URL",
+	} {
+		if v := getenv(name); v != "" {
+			out = append(out, name+"="+v)
+			if strings.HasSuffix(name, "_API_KEY") {
+				o.opts.Redactor.Register(v)
+			}
+		}
+	}
+	return out
+}
+
 // needsInspection reports whether any rule requires reading inside TLS.
 //
 // Asked here rather than in the runtime because it decides whether to issue a
@@ -474,6 +513,7 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 		return res, err
 	}
 	spec.SandboxCredentials = creds
+	spec.ModelEnv = o.modelEnv()
 
 	packs, err := o.mockPacks()
 	if err != nil {

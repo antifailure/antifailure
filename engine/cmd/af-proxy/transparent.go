@@ -78,6 +78,13 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 		return
 	}
 
+	if d.Mode == schema.ModeSynth {
+		p.serveSynth(conn, req, host, &rec)
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		return
+	}
+
 	if d.Mode == schema.ModeMock {
 		p.serveMock(conn, req, host, &rec)
 		rec.Duration = time.Since(started).String()
@@ -90,6 +97,12 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 		p.emit(rec)
 		writeRefusalRaw(conn, d, preq)
 		return
+	}
+
+	if d.RateLimit != "" {
+		if waited := p.limits.wait(d.RuleHost, d.RateLimit); waited > 0 {
+			rec.WaitedMs = waited.Milliseconds()
+		}
 	}
 
 	upstream, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 30*time.Second)
