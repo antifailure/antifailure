@@ -1,0 +1,63 @@
+name: Bug report
+description: Something behaves differently than documented.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a security problem, stop and email security@antifailure.dev instead.
+
+        `af support bundle` collects logs, events, the manifest, and doctor output
+        with the redactor applied, and prints a manifest of exactly what it included.
+        Attaching one answers most of the questions below at once.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The smallest sequence of commands that shows it.
+      placeholder: |
+        1. af init --non-interactive
+        2. af up
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of "af doctor -o json"
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The full first line of "af version".
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      options: [Local Docker, Kubernetes, GitHub Actions, Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: dbprovider
+    attributes:
+      label: Database provider
+      options: [Docker, Neon, Supabase, DBLab, Not reached yet, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Logs, screenshots, or the environment identifier. Redact nothing by hand; the bundle already did it.

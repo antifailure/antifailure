@@ -1,0 +1,36 @@
+name: Provider request
+description: Ask for support for a database, build, runtime, secrets, or APM provider.
+labels: ["provider", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Providers are a published interface with a conformance suite, so you can
+        also write one yourself without forking. See the provider authoring guide.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Interface
+      options: [Database, Build, Runtime, Secrets, APM]
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      placeholder: For example, PlanetScale for Postgres
+    validations:
+      required: true
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Capabilities
+      description: Does it support branching, reset, copy on write, or provider side masking? Link the API documentation.
+    validations:
+      required: true
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to implement this against the conformance suite.

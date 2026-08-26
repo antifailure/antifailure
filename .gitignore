@@ -1,36 +1,65 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Antifailure local state. Never commit this; it holds journals and handles.
+.antifailure/
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# local env files
-.env*.local
+# Secrets and credentials. The deny list from the repository hygiene policy.
 .env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+kubeconfig
+*.kubeconfig
+credentials.json
+service-account*.json
 
-# vercel
-.vercel
+# Build output
+bin/
+dist/
+.tools/
+.gate-reports/
+coverage/
+*.out
+*.test
+*.prof
 
-# typescript
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl.local
+crash.log
+
+# Node
+node_modules/
+.next/
+.turbo/
+out/
 *.tsbuildinfo
 next-env.d.ts
+.astro/
+playwright-report/
+test-results/
+blob-report/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Local artifacts produced by test runs
+engine/**/testdata/tmp/
+runner/artifacts/

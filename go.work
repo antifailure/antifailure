@@ -1,0 +1,11 @@
+// The repository holds more than one Go module: the engine, which ships, and
+// the tools that generate and gate it, which do not. A workspace lets local
+// development and CI build them together without the tools' dependencies
+// entering the engine's module graph, which is what keeps the shipped binary's
+// dependency set small and auditable.
+go 1.25
+
+use (
+	./engine
+	./tools
+)

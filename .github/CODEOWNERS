@@ -1,0 +1,20 @@
+# Default owner for anything not matched below.
+*                                   @VirSanghavi
+
+# Security sensitive paths. Changes here require review before merge, per the
+# operating protocol. These are the five areas where a mistake is a real world
+# failure rather than a cosmetic one.
+/engine/internal/proxy/             @VirSanghavi
+/engine/internal/masking/           @VirSanghavi
+/engine/internal/verify/            @VirSanghavi
+/engine/internal/secrets/           @VirSanghavi
+/engine/internal/redact/            @VirSanghavi
+/infra/                             @VirSanghavi
+/.github/workflows/                 @VirSanghavi
+
+# The commercial boundary.
+/ee/                                @VirSanghavi
+/LICENSE                            @VirSanghavi
+/ee/LICENSE.md                      @VirSanghavi
+/SECURITY.md                        @VirSanghavi
+/CODE_OF_CONDUCT.md                 @VirSanghavi

@@ -1,0 +1,16 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+
+engine/pkg/schema/*.gen.go linguist-generated=true
+web/packages/schema/src/*.gen.ts linguist-generated=true
+runner/src/schema/*.gen.ts linguist-generated=true
+engine/internal/errors/codes.gen.go linguist-generated=true
+docs/src/content/docs/reference/** linguist-generated=true
+**/testdata/** linguist-vendored=true
