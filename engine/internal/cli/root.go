@@ -120,6 +120,15 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	}
 
 	root := newRootCommand(env)
+	// Never nil. Cobra treats a nil slice as "take the process's arguments",
+	// which for a function that was handed an argument list is a surprising
+	// thing to do and, inside a test binary, means the test runner's own flags
+	// reach the command tree. That produced a failure that appeared only when
+	// somebody added a flag to the test binary, which is a long way from the
+	// cause.
+	if args == nil {
+		args = []string{}
+	}
 	root.SetArgs(args)
 	root.SetOut(opts.Stdout)
 	root.SetErr(opts.Stderr)

@@ -580,3 +580,23 @@ services:
 	require.Zero(t, got.code)
 	require.NotContains(t, got.stdout, "Secrets")
 }
+
+// Execute uses the arguments it was given and never the process's own.
+//
+// Cobra falls back to os.Args when handed a nil slice, which for a function
+// that takes an argument list is surprising, and inside a test binary means the
+// test runner's flags reach the command tree. It cost a red build that pointed
+// nowhere near the cause: adding a flag to this package's tests made an
+// unrelated test start failing.
+func TestExecute_IgnoresTheProcessArguments(t *testing.T) {
+	t.Parallel()
+	var out, errW bytes.Buffer
+	code := cli.Execute(context.Background(), nil, cli.Options{
+		Stdout: &out, Stderr: &errW, Stdin: strings.NewReader(""),
+		Getenv: func(string) string { return "" },
+		Clock:  clock.NewFake(epoch), WorkDir: t.TempDir(),
+	})
+	require.Zero(t, code,
+		"a nil argument list picked up this test binary's flags instead of meaning none")
+	require.Contains(t, out.String(), "af")
+}
