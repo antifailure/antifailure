@@ -234,8 +234,8 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
   it('a session is readable only by the user who owns it, or by presenting its token', async () => {
     const token = Buffer.from('a'.repeat(64), 'hex')
     await h.admin`
-      INSERT INTO sessions (token_hash, user_id, org_id, csrf_secret, expires_at)
-      VALUES (${token}, ${alice.userId}, ${alice.orgId}, ${Buffer.from('bb', 'hex')}, now() + interval '1 day')`
+      INSERT INTO sessions (token_hash, user_id, org_id, expires_at)
+      VALUES (${token}, ${alice.userId}, ${alice.orgId}, now() + interval '1 day')`
 
     // Bob, authenticated, cannot see it.
     const asBob = await h.pool.withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) =>

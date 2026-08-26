@@ -1,0 +1,31 @@
+{
+  "name": "@antifailure/api",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/server.ts"
+  },
+  "bin": {
+    "af-control-plane": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test --test-concurrency=1 test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@antifailure/db": "*",
+    "@antifailure/policy": "*",
+    "@hono/node-server": "^2.1.1",
+    "@hono/trpc-server": "^0.4.0",
+    "@trpc/server": "^11.18.0",
+    "hono": "^4.13.5",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

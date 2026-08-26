@@ -1,0 +1,113 @@
+// The permission catalog.
+//
+// One list, read by three things: the middleware that enforces a permission on
+// a request, the test that proves every route declares one, and the
+// documentation that tells a customer what a role can do. Three lists would
+// disagree, and the one that would be wrong is the documentation, which is the
+// one a security review reads.
+//
+// Deny by default. A permission not granted to a role is refused, and a route
+// with no declared permission does not run at all rather than running
+// unguarded. That second rule is the one worth stating twice: the way access
+// control fails in practice is not a wrong grant, it is a new endpoint that
+// nobody remembered to guard, and a wrong grant is visible in a table while an
+// unguarded endpoint is visible nowhere.
+
+export const PERMISSIONS = [
+  'environments.view',
+  'environments.create',
+  'environments.teardown',
+  'masking.edit',
+  'masking.approve',
+  'network.edit',
+  'network.approve',
+  'agents.run',
+  'load.run',
+  'members.manage',
+  'billing.manage',
+  'audit.read',
+  'audit.export',
+  'runtimes.manage',
+  'tokens.manage',
+] as const
+
+export type Permission = (typeof PERMISSIONS)[number]
+
+export const ROLES = ['owner', 'admin', 'member', 'viewer'] as const
+export type Role = (typeof ROLES)[number]
+
+/**
+ * What each permission means, in the words a customer's security team reads.
+ * The documentation page is generated from this, so a permission cannot be
+ * added without describing it.
+ */
+export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
+  'environments.view': 'See environments, their state, and their preview URLs.',
+  'environments.create': 'Bring an environment up for a branch or pull request.',
+  'environments.teardown': 'Tear an environment down, or put it to sleep.',
+  'masking.edit': 'Propose a change to a repository’s masking rules.',
+  'masking.approve': 'Approve a masking rule change so that it can be opened as a pull request.',
+  'network.edit': 'Propose a change to the egress policy.',
+  'network.approve': 'Approve an egress policy change, including one that loosens it.',
+  'agents.run': 'Start an agent run against an environment.',
+  'load.run': 'Start a load run against an environment.',
+  'members.manage': 'Invite, remove, and change the role of members.',
+  'billing.manage': 'See and change the plan, payment method, and spending caps.',
+  'audit.read': 'Read the audit log.',
+  'audit.export': 'Export the audit log, and verify its hash chain.',
+  'runtimes.manage': 'Register, tag, and remove runtimes.',
+  'tokens.manage': 'Create and revoke the tokens engines use to send events.',
+}
+
+/**
+ * The built-in roles.
+ *
+ * Written out per role rather than as "admin gets everything member gets, plus
+ * these". Inheritance reads well and hides exactly the thing a reviewer is
+ * checking, which is whether viewer can do something it should not. The table
+ * below can be read straight down a column.
+ *
+ * Two decisions worth defending:
+ *
+ * A member can propose a policy change and cannot approve one. Masking rules
+ * and egress rules are the two settings where a mistake is a data incident
+ * rather than an inconvenience, so proposing and approving are separate
+ * permissions even in the community edition, where the same person usually
+ * holds both.
+ *
+ * A viewer can read the audit log but not export it. Reading is oversight;
+ * exporting produces a file of who did what that leaves the system.
+ */
+export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
+  owner: [...PERMISSIONS],
+  admin: [
+    'environments.view', 'environments.create', 'environments.teardown',
+    'masking.edit', 'masking.approve', 'network.edit', 'network.approve',
+    'agents.run', 'load.run', 'members.manage',
+    'audit.read', 'audit.export', 'runtimes.manage', 'tokens.manage',
+  ],
+  member: [
+    'environments.view', 'environments.create', 'environments.teardown',
+    'masking.edit', 'network.edit', 'agents.run', 'load.run',
+    'audit.read',
+  ],
+  viewer: ['environments.view', 'audit.read'],
+}
+
+export function roleHas(role: Role, permission: Permission): boolean {
+  return ROLE_PERMISSIONS[role].includes(permission)
+}
+
+/** Every role that holds a permission, for the documentation table. */
+export function rolesWith(permission: Permission): Role[] {
+  return ROLES.filter((r) => roleHas(r, permission))
+}
+
+/**
+ * Roles ordered from most to least privileged, for display only.
+ *
+ * Never used to decide access. Ordering roles and comparing ranks is how a
+ * permission model stops being a table and starts being an assumption, and the
+ * assumption breaks the first time a custom role does not fit the line.
+ */
+export const ROLE_ORDER: readonly Role[] = ['owner', 'admin', 'member', 'viewer']

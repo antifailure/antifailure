@@ -42,14 +42,36 @@ export interface PoolOptions {
   onNotice?: (notice: unknown) => void
 }
 
+/** What a transaction declares it is asking about, for the policies that key
+ *  on a value the caller has to already hold. */
+export interface UnscopedOptions {
+  /** The hash of a session token, for resolving a cookie. */
+  sessionHash?: Buffer
+  /** The hash of an engine token, for resolving a bearer token. */
+  engineTokenHash?: Buffer
+  /** GitHub numeric ids being upserted, so their rows can be read back. */
+  githubIds?: number[]
+  /** The user sign-in has just established, so their memberships can be read
+   *  and written before any tenant is chosen. */
+  signinUserId?: string
+  /** The GitHub organization logins the user belongs to, so the installations
+   *  for those organizations can be found. */
+  githubLogins?: string[]
+}
+
 export interface Pool {
   /** Runs fn inside a transaction scoped to one tenant. */
-  withTenant<T>(tenant: Tenant, fn: (db: Db) => Promise<T>): Promise<T>
-  /** Runs fn with no tenant set, for the handful of statements that happen
-   *  before one is known: resolving a session cookie, completing an OAuth
-   *  exchange, creating the first organization. Each of those is covered by a
-   *  policy that does not depend on the tenant, and there are no others. */
-  withoutTenant<T>(fn: (db: Db) => Promise<T>, opts?: { sessionHash?: Buffer }): Promise<T>
+  withTenant<T>(tenant: Tenant, fn: (db: Db) => Promise<T>, opts?: UnscopedOptions): Promise<T>
+  /** Runs fn with no tenant set, for the statements that happen before one is
+   *  known: resolving a session cookie, resolving an engine token, completing
+   *  an OAuth exchange. Each of those is covered by a policy that does not
+   *  depend on the tenant, and there are no others.
+   *
+   *  Two of them are covered by policies keyed on a secret the caller declares
+   *  here. That is what makes them safe: the connection can reach the one row
+   *  whose secret it already holds, and nothing else. Passing a hash it did not
+   *  receive from a client returns nothing. */
+  withoutTenant<T>(fn: (db: Db) => Promise<T>, opts?: UnscopedOptions): Promise<T>
   /** The raw client, for migrations and tests only. */
   sql: postgres.Sql
   close(): Promise<void>
@@ -93,7 +115,7 @@ export function createPool(options: PoolOptions): Pool {
 
   return {
     sql,
-    withTenant(tenant, fn) {
+    withTenant(tenant, fn, opts) {
       if (!tenant.orgId) {
         // An empty setting would make every policy deny, which reads as an
         // empty database rather than as a bug. Failing here names the mistake.
@@ -107,6 +129,10 @@ export function createPool(options: PoolOptions): Pool {
           // local and reverts on its own; clearing it makes the invariant
           // checkable by reading this function instead of trusting callers.
           'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': (opts?.githubIds ?? []).join(','),
+          'antifailure.signin_user_id': opts?.signinUserId ?? '',
+          'antifailure.github_logins': (opts?.githubLogins ?? []).join(','),
         },
         fn,
       )
@@ -117,6 +143,12 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.org_id': '',
           'antifailure.user_id': '',
           'antifailure.session_hash': opts?.sessionHash ? opts.sessionHash.toString('hex') : '',
+          'antifailure.engine_token_hash': opts?.engineTokenHash
+            ? opts.engineTokenHash.toString('hex')
+            : '',
+          'antifailure.github_ids': (opts?.githubIds ?? []).join(','),
+          'antifailure.signin_user_id': opts?.signinUserId ?? '',
+          'antifailure.github_logins': (opts?.githubLogins ?? []).join(','),
         },
         fn,
       )

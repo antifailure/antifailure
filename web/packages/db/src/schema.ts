@@ -85,7 +85,6 @@ export const sessions = pgTable('sessions', {
   tokenHash: bytea('token_hash').notNull(),
   userId: uuid('user_id').notNull(),
   orgId: uuid('org_id'),
-  csrfSecret: bytea('csrf_secret').notNull(),
   userAgent: text('user_agent'),
   ip: inet('ip'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
