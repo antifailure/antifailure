@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -147,6 +148,7 @@ func RunDatabase(t *testing.T, factory Factory, opts Options) {
 	// a shared daemon carries goldens from other work, and failing on those
 	// would make the check something people learn to ignore.
 	before := inventorySnapshot(t, factory)
+	created := newCreatedSet()
 
 	for _, b := range databaseBehaviors {
 		b := b
@@ -159,7 +161,7 @@ func RunDatabase(t *testing.T, factory Factory, opts Options) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
 			defer cancel()
-			runBehavior(ctx, t, b.Name, factory, opts)
+			runBehavior(ctx, t, b.Name, factory, opts, created)
 		})
 	}
 
@@ -172,8 +174,21 @@ func RunDatabase(t *testing.T, factory Factory, opts Options) {
 		// inspection, and reporting that as a second failure buries the first.
 		return
 	}
+	// Only what this suite created. Go runs test packages in parallel, and
+	// another package bringing an environment up mid-run creates a golden that
+	// legitimately outlives it: goldens are shared and reused, which is the
+	// whole point of them. Reporting those as leaks made this suite fail for
+	// something it neither did nor should care about, twice, on CI only,
+	// because a laptop runs fewer packages at once.
 	for r := range inventorySnapshot(t, factory) {
 		if before[r] {
+			continue
+		}
+		id := r
+		if i := strings.IndexByte(r, ' '); i >= 0 {
+			id = r[i+1:]
+		}
+		if !created.matches(id) {
 			continue
 		}
 		t.Errorf("the suite left %s behind; every resource a behavior creates must be removed "+
@@ -239,6 +254,10 @@ type harness struct {
 	t    *testing.T
 	p    provider.Database
 	opts Options
+	// created records every resource this suite made, so that the leak check
+	// at the end can tell the suite's own leftovers from anything another test
+	// package happened to create while it was running.
+	created *createdSet
 	// masked and verified record what the refresh callbacks were asked to do,
 	// which is how the suite proves a provider actually called them rather
 	// than publishing a version it never checked.
@@ -247,8 +266,51 @@ type harness struct {
 	failVerify bool
 }
 
-func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory, opts Options) {
-	h := &harness{t: t, p: factory(t), opts: opts}
+// createdSet records the resources one run of the suite made.
+//
+// Behaviors run in parallel and Go runs test packages in parallel, so this is
+// written from several goroutines and read once at the end.
+type createdSet struct {
+	mu  sync.Mutex
+	ids map[string]bool
+}
+
+func newCreatedSet() *createdSet { return &createdSet{ids: map[string]bool{}} }
+
+func (c *createdSet) add(id string) {
+	if id == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ids[id] = true
+}
+
+// matches reports whether an inventory entry names something this suite made.
+//
+// Containment rather than equality, because the two forms differ: a golden is
+// tracked by its version, gv_20260101000000_abc, and inventoried by whatever
+// the provider calls the underlying resource, which for the Docker provider is
+// antifailure/golden:gv_20260101000000_abc. Comparing them for equality
+// silently matched nothing, which turned this filter into a switch that
+// disabled the leak detector entirely. A negative control caught that: with
+// cleanup deliberately removed, the suite still passed.
+//
+// The tracked identifiers are timestamped and suffixed, so containment cannot
+// collide with another package's resources by accident.
+func (c *createdSet) matches(inventoryID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id := range c.ids {
+		if id != "" && strings.Contains(inventoryID, id) {
+			return true
+		}
+	}
+	return false
+}
+
+func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory, opts Options, created *createdSet) {
+	h := &harness{t: t, p: factory(t), opts: opts, created: created}
 	t.Cleanup(func() { _ = h.p.Close() })
 
 	switch name {
@@ -339,6 +401,7 @@ func (h *harness) trackGolden(id string) {
 	if id == "" {
 		return
 	}
+	h.created.add(id)
 	h.t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -373,6 +436,10 @@ func (h *harness) branch(ctx context.Context, version, env string) provider.Bran
 	if err != nil {
 		h.t.Fatalf("Branch(%s, %s): %v", version, env, err)
 	}
+	// Recorded before the cleanup is registered, so that the leak check can
+	// tell this suite's branch from one another test package is using.
+	h.created.add(b.ProviderRef)
+	h.created.add(b.EnvID)
 	h.t.Cleanup(func() {
 		// Teardown runs even when the behavior failed, so that one failing
 		// behavior does not leave resources that make the next one fail too.

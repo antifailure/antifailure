@@ -36,6 +36,8 @@ services:
     kind: web
     command: node server.js
     port: 3000
+    env:
+      - name: NEVER_SUPPLIED
 egress:
   default: block
   rules:
@@ -56,6 +58,13 @@ func (h *refusingHook) Check(_ context.Context, req extension.EnvironmentRequest
 	return h.err
 }
 
+// newOrchestrator builds one over a manifest that declares a variable nothing
+// supplies, so Up stops at secret resolution.
+//
+// That is deliberate. These tests are about the hooks, and the hooks all run
+// before the database, so reaching a Docker daemon would only make them slow
+// and leave a golden image behind for every run. Stopping early keeps them
+// honest about what they are testing and lets them pass with no daemon at all.
 func newOrchestrator(t *testing.T, registry *extension.Registry) *env.Orchestrator {
 	t.Helper()
 	dir := t.TempDir()
@@ -150,16 +159,14 @@ func TestUp_WithNothingRegisteredDoesNotChangeBehaviour(t *testing.T) {
 	registry := extension.NewRegistry()
 	require.True(t, registry.Empty())
 
-	o := newOrchestrator(t, registry)
-	_, err := o.Up(context.Background())
+	_, err := newOrchestrator(t, registry).Up(context.Background())
 
-	// It will fail for want of a Docker daemon in a sandbox, or succeed with
-	// one. What it must never do is fail with a policy refusal, because there
-	// is no policy.
-	if err != nil {
-		require.NotContains(t, err.Error(), "policy",
-			"an empty registry refused an environment")
-	}
+	// It stops at the missing variable, which is the next thing that happens
+	// after the hooks. What it must never do is refuse for a policy, because
+	// there is no policy.
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "AF-SEC-001")
+	require.NotContains(t, err.Error(), "policy")
 }
 
 type recordingLifecycle struct {
@@ -182,7 +189,8 @@ func TestUp_ReportsALifecycleEventEvenWhenItFails(t *testing.T) {
 	meter := &recordingLifecycle{}
 	registry.AddLifecycle(meter)
 
-	_, _ = newOrchestrator(t, registry).Up(context.Background())
+	_, err := newOrchestrator(t, registry).Up(context.Background())
+	require.Error(t, err, "the fixture should stop at the missing variable")
 
 	require.NotEmpty(t, meter.events, "no lifecycle event was reported, so nothing is calling the hook")
 	require.Equal(t, "environment.created", meter.events[0].Kind)
@@ -218,10 +226,9 @@ func TestUp_IsNotStoppedByALifecycleHookThatFails(t *testing.T) {
 	})
 
 	_, upErr := o.Up(context.Background())
-	if upErr != nil {
-		require.NotContains(t, upErr.Error(), "meter is unreachable",
-			"a failing lifecycle hook was returned as the reason the environment failed")
-	}
+	require.Error(t, upErr)
+	require.NotContains(t, upErr.Error(), "meter is unreachable",
+		"a failing lifecycle hook was returned as the reason the environment failed")
 
 	var mentioned bool
 	for _, line := range progress {
@@ -259,7 +266,9 @@ egress:
       credential: STRIPE_SECRET_KEY
 `
 
-func orchestratorWithEnv(t *testing.T, dotenv string, shell map[string]string) (*env.Orchestrator, string) {
+func orchestratorWithEnv(
+	t *testing.T, dotenv string, shell map[string]string,
+) (*env.Orchestrator, *[]string) {
 	t.Helper()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"),
@@ -272,10 +281,11 @@ func orchestratorWithEnv(t *testing.T, dotenv string, shell map[string]string) (
 	m, err := manifest.Load(filepath.Join(dir, "antifailure.yaml"))
 	require.NoError(t, err)
 
+	var progress []string
 	o, err := env.New(env.Options{
 		Root: dir, Manifest: m, Branch: "main",
 		Clock: clock.New(), Redactor: redact.New(),
-		Progress: func(string) {},
+		Progress: func(line string) { progress = append(progress, line) },
 		Getenv:   func(k string) string { return shell[k] },
 	})
 	require.NoError(t, err)
@@ -284,7 +294,7 @@ func orchestratorWithEnv(t *testing.T, dotenv string, shell map[string]string) (
 		defer cancel()
 		_, _ = o.Down(ctx)
 	})
-	return o, dir
+	return o, &progress
 }
 
 func TestUp_RefusesBeforeAnythingExistsWhenAVariableIsMissing(t *testing.T) {
@@ -316,29 +326,32 @@ func TestUp_ReadsAVariableFromADotEnvFile(t *testing.T) {
 	// Most repositories that need secrets already have one, and asking somebody
 	// to duplicate it into a keyring before they can try the product is how a
 	// first run fails.
-	o, _ := orchestratorWithEnv(t,
-		"DATABASE_URL=postgres://from-dotenv\nSTRIPE_SECRET_KEY=sk_test_from_dotenv",
-		map[string]string{})
+	//
+	// DATABASE_URL is deliberately left out, so the run stops at resolution
+	// rather than going on to build anything. What is asserted is the line that
+	// says where the value came from.
+	o, progress := orchestratorWithEnv(t,
+		"STRIPE_SECRET_KEY=sk_test_from_dotenv", map[string]string{})
 
 	_, err := o.Up(context.Background())
-	// It gets past resolution. Whether it then reaches a daemon is not what
-	// this is testing, so only the configuration error is excluded.
-	if err != nil {
-		require.NotContains(t, err.Error(), "AF-SEC-001",
-			"a variable in .env was reported as missing")
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "DATABASE_URL")
+
+	require.Contains(t, strings.Join(*progress, "\n"), "STRIPE_SECRET_KEY from .env")
+	// And the value itself is never in the output.
+	require.NotContains(t, strings.Join(*progress, "\n"), "sk_test_from_dotenv")
 }
 
 func TestUp_TheShellBeatsTheFile(t *testing.T) {
 	// Somebody who typed an export meant it and is usually debugging.
-	o, _ := orchestratorWithEnv(t,
-		"DATABASE_URL=postgres://from-dotenv\nSTRIPE_SECRET_KEY=sk_test_a",
-		map[string]string{"DATABASE_URL": "postgres://from-shell"})
+	o, progress := orchestratorWithEnv(t,
+		"STRIPE_SECRET_KEY=sk_test_from_dotenv",
+		map[string]string{"STRIPE_SECRET_KEY": "sk_test_from_shell"})
 
-	_, err := o.Up(context.Background())
-	if err != nil {
-		require.NotContains(t, err.Error(), "AF-SEC-001")
-	}
+	_, _ = o.Up(context.Background())
+	joined := strings.Join(*progress, "\n")
+	require.Contains(t, joined, "STRIPE_SECRET_KEY from this shell's environment")
+	require.NotContains(t, joined, "STRIPE_SECRET_KEY from .env")
 }
 
 func TestUp_RefusesALiveCredentialInASandboxSlot(t *testing.T) {

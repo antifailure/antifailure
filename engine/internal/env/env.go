@@ -316,6 +316,18 @@ func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, e
 		return nil, err
 	}
 
+	// What was found, before what was not. Somebody whose run has just failed
+	// wants to see that four of five variables resolved and which one did not,
+	// rather than only the failure: the four that worked are how they work out
+	// where the fifth should go. Names and sources, never values, because this
+	// is what a support bundle carries.
+	for _, r := range resolved.Resolutions {
+		o.progress(fmt.Sprintf("  %s from %s", r.Name, r.Source))
+	}
+	for _, m := range resolved.Optional {
+		o.progress(fmt.Sprintf("  %s was not found and is not required", m.Name))
+	}
+
 	if len(resolved.Missing) > 0 {
 		names := make([]string, 0, len(resolved.Missing))
 		for _, m := range resolved.Missing {
@@ -326,10 +338,9 @@ func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, e
 		// there. The place to put a value is very often the .env file that does
 		// not exist yet, and a list of only the usable sources would never
 		// mention it.
-		searched := chain.Considered(ctx)
 		return nil, aferrors.Coded(aferrors.AFSEC001,
 			"names", strings.Join(names, ", "),
-			"sources", strings.Join(searched, ", "))
+			"sources", strings.Join(chain.Considered(ctx), ", "))
 	}
 
 	// Registered before anything is built, so a value cannot reach a log line
@@ -341,14 +352,6 @@ func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, e
 		o.opts.Redactor.Register(value.Reveal())
 	}
 
-	// Names and sources, never values. This is what a support bundle carries,
-	// so it has to be safe to show to somebody who should not see the secrets.
-	for _, r := range resolved.Resolutions {
-		o.progress(fmt.Sprintf("  %s from %s", r.Name, r.Source))
-	}
-	for _, m := range resolved.Optional {
-		o.progress(fmt.Sprintf("  %s was not found and is not required", m.Name))
-	}
 	return resolved, nil
 }
 
