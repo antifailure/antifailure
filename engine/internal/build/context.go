@@ -260,6 +260,32 @@ func (c *Context) Has(p string) bool {
 	return i < len(c.Files) && c.Files[i] == p
 }
 
+// Read returns the content of a file in the context.
+//
+// It refuses anything the context does not contain, which is the point: a file
+// excluded by .dockerignore must not be able to decide how the build works and
+// then be missing when the build runs. Reading the directory directly would
+// allow exactly that.
+func (c *Context) Read(p string) ([]byte, bool) {
+	if !c.Has(p) {
+		return nil, false
+	}
+	// Bounded, because this reads configuration files and a caller asking for
+	// a hundred megabyte one has made a mistake worth failing on rather than
+	// absorbing.
+	const maxRead = 4 << 20
+	f, err := os.Open(filepath.Join(c.Root, filepath.FromSlash(p)))
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = f.Close() }()
+	body, err := io.ReadAll(io.LimitReader(f, maxRead))
+	if err != nil {
+		return nil, false
+	}
+	return body, true
+}
+
 // normalizeMode reduces a file mode to the only distinction that matters
 // inside an image, which is whether it is executable.
 //

@@ -142,6 +142,12 @@ func RunDatabase(t *testing.T, factory Factory, opts Options) {
 	caps := probe.Capabilities()
 	_ = probe.Close()
 
+	// What the daemon already held before the suite ran. The assertion at the
+	// end is that the suite left nothing new, not that the machine is empty:
+	// a shared daemon carries goldens from other work, and failing on those
+	// would make the check something people learn to ignore.
+	before := inventorySnapshot(t, factory)
+
 	for _, b := range databaseBehaviors {
 		b := b
 		t.Run(b.Name, func(t *testing.T) {
@@ -156,6 +162,42 @@ func RunDatabase(t *testing.T, factory Factory, opts Options) {
 			runBehavior(ctx, t, b.Name, factory, opts)
 		})
 	}
+
+	// A conformance suite for a product whose whole promise is that nothing
+	// outlives its environment must not itself leak. This has caught a
+	// provider leaving a golden per refresh, which on an image backed provider
+	// is half a gigabyte a run.
+	if t.Failed() {
+		// A failing behavior legitimately leaves things behind for
+		// inspection, and reporting that as a second failure buries the first.
+		return
+	}
+	for r := range inventorySnapshot(t, factory) {
+		if before[r] {
+			continue
+		}
+		t.Errorf("the suite left %s behind; every resource a behavior creates must be removed "+
+			"when it finishes, whether it passed or not", r)
+	}
+}
+
+// inventorySnapshot records what the provider owns, as comparable strings.
+func inventorySnapshot(t *testing.T, factory Factory) map[string]bool {
+	t.Helper()
+	p := factory(t)
+	defer func() { _ = p.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	items, err := p.Inventory(ctx)
+	if err != nil {
+		t.Fatalf("Inventory: %v", err)
+	}
+	out := make(map[string]bool, len(items))
+	for _, r := range items {
+		out[r.Kind+" "+r.ID] = true
+	}
+	return out
 }
 
 func nameOf(p provider.Database) string {
@@ -287,9 +329,31 @@ func (h *harness) spec() provider.GoldenSpec {
 	}
 }
 
+// trackGolden schedules a golden for removal when the behavior finishes.
+//
+// Without it the suite leaves one golden per refresh behind, and a provider
+// whose goldens are images leaks half a gigabyte per run. A conformance suite
+// for a product whose whole promise is that nothing outlives its environment
+// must not be the thing leaking.
+func (h *harness) trackGolden(id string) {
+	if id == "" {
+		return
+	}
+	h.t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		// Best effort: a behavior that deliberately destroyed it already, or
+		// left it referenced by a branch this cleanup has not reached yet,
+		// must not turn a passing test into a failing one. The leak check at
+		// the end of the run is what proves the cleanup worked.
+		_ = h.p.DestroyGolden(ctx, id)
+	})
+}
+
 func (h *harness) refresh(ctx context.Context) provider.GoldenVersion {
 	h.t.Helper()
 	gv, err := h.p.RefreshGolden(ctx, h.spec())
+	h.trackGolden(gv.ID)
 	if err != nil {
 		h.t.Fatalf("RefreshGolden: %v", err)
 	}
@@ -369,6 +433,7 @@ func (h *harness) refreshCallsMaskThenVerify(ctx context.Context) {
 func (h *harness) refreshRefusesWhenVerificationFails(ctx context.Context) {
 	h.failVerify = true
 	gv, err := h.p.RefreshGolden(ctx, h.spec())
+	h.trackGolden(gv.ID)
 	if err == nil && gv.Verified {
 		h.t.Fatal("the provider published a verified version even though verification failed; " +
 			"this is the one guarantee the product cannot bend")
@@ -436,6 +501,7 @@ func (h *harness) branchIsIdempotent(ctx context.Context) {
 func (h *harness) branchRefusesUnverified(ctx context.Context) {
 	h.failVerify = true
 	gv, err := h.p.RefreshGolden(ctx, h.spec())
+	h.trackGolden(gv.ID)
 	if err == nil && gv.ID != "" {
 		_, branchErr := h.p.Branch(ctx, gv.ID, "env_conformance00003")
 		if branchErr == nil {
