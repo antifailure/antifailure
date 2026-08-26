@@ -111,3 +111,79 @@ export function rolesWith(permission: Permission): Role[] {
  * assumption breaks the first time a custom role does not fit the line.
  */
 export const ROLE_ORDER: readonly Role[] = ['owner', 'admin', 'member', 'viewer']
+
+// ---------------------------------------------------------------------------
+// The extension point
+// ---------------------------------------------------------------------------
+
+/**
+ * What a request is asking to do, for a resolver that decides more finely than
+ * a built-in role can.
+ *
+ * The scope is here because a permission is rarely global in a large
+ * organization: somebody administers two repositories and reads the rest. The
+ * community edition ignores it, which is correct for the built-in roles, and
+ * the shape has to exist here or the enterprise resolver would need a different
+ * call site and the two would drift.
+ */
+export interface PermissionRequest {
+  orgId: string
+  userId: string
+  role: Role
+  permission: Permission
+  /** The repository the request concerns, when it concerns one. */
+  repository?: string | null
+  /** The environment, when it concerns one. */
+  envId?: string | null
+}
+
+/**
+ * Decides whether a request is permitted.
+ *
+ * Returning undefined means "no opinion", and the built-in role table decides.
+ * That is what lets a resolver widen nothing by accident: a resolver that only
+ * knows about two repositories returns undefined for everything else rather
+ * than having to reproduce the whole table correctly.
+ */
+export type PermissionResolver = (req: PermissionRequest) => boolean | undefined
+
+let resolver: PermissionResolver | null = null
+
+/**
+ * Installs a resolver. The community edition installs none.
+ *
+ * One at a time rather than a list. Two resolvers would need a rule for
+ * combining their answers, and every such rule is either "any may grant", which
+ * lets a narrow resolver widen access by accident, or "all must agree", which
+ * makes adding one break the others.
+ */
+export function setPermissionResolver(next: PermissionResolver | null): void {
+  resolver = next
+}
+
+export function hasPermissionResolver(): boolean {
+  return resolver !== null
+}
+
+/**
+ * The decision for one request.
+ *
+ * Deny by default, and the resolver can only be asked after the built-in table
+ * has had its say, so a resolver that throws or returns nonsense degrades to
+ * the community behaviour rather than to permitting everything.
+ */
+export function permits(req: PermissionRequest): boolean {
+  const builtin = roleHas(req.role, req.permission)
+  if (!resolver) return builtin
+
+  let answer: boolean | undefined
+  try {
+    answer = resolver(req)
+  } catch {
+    // A resolver that fails must not open anything up. Falling back to the
+    // built-in table is the conservative direction, and the failure surfaces
+    // through the resolver's own reporting rather than by granting access.
+    return builtin
+  }
+  return answer === undefined ? builtin : answer
+}

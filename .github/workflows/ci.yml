@@ -244,6 +244,29 @@ jobs:
           GOWORK=off go vet ./...
           GOWORK=off go test ./... -race -timeout 15m
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build and test the enterprise web packages
+        # Its own npm workspace, outside the community one, so a community
+        # install cannot pull enterprise code in by accident. It depends on the
+        # community API for the permission catalog and the community API
+        # depends on nothing here, which the boundary check below asserts.
+        run: |
+          npm --prefix web ci --no-audit --no-fund
+          npm --prefix ee/web install --no-audit --no-fund
+          npx --prefix ee/web tsc --noEmit -p ee/web/rbac/tsconfig.json
+          node --test ee/web/rbac/test/*.test.ts
+
+      - name: Nothing in the community web depends on the enterprise one
+        run: |
+          if grep -rn --include='*.ts' --include='*.json' \
+              -e 'antifailure-ee' -e 'ee/web' web/apps web/packages; then
+            echo "the community web references enterprise code"
+            exit 1
+          fi
+
       - name: The license parser survives arbitrary input
         # It reads a value a customer pastes in, so the only property that
         # matters is that no input makes it panic or accept something unsigned.

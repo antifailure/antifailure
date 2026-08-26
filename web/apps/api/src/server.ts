@@ -400,3 +400,22 @@ function tooMany(c: { header: (k: string, v: string) => void; json: (b: unknown,
   c.header('retry-after', String(seconds))
   return c.json({ error: 'Too many attempts. Try again shortly.', retryAfterSeconds: seconds }, 429)
 }
+
+// Re-exported so that an edition built on top of this can import the permission
+// model from one place. The types are the contract between the two, and a
+// second copy of them is a second thing that drifts.
+export {
+  PERMISSIONS,
+  ROLES,
+  ROLE_PERMISSIONS,
+  PERMISSION_DESCRIPTIONS,
+  roleHas,
+  rolesWith,
+  permits,
+  setPermissionResolver,
+  hasPermissionResolver,
+  type Permission,
+  type Role,
+  type PermissionRequest,
+  type PermissionResolver,
+} from './permissions.ts'

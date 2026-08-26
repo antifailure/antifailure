@@ -1,0 +1,16 @@
+{
+  "name": "@antifailure-ee/web",
+  "private": true,
+  "license": "SEE LICENSE IN ../LICENSE.md",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "workspaces": ["rbac"],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -14,7 +14,7 @@ import { initTRPC, TRPCError } from '@trpc/server'
 import type { Pool, Tenant } from '@antifailure/db'
 import { appendAudit, type AuditInput } from '@antifailure/db'
 import type { Permission, Role } from './permissions.ts'
-import { roleHas } from './permissions.ts'
+import { permits } from './permissions.ts'
 import type { Clock } from './clock.ts'
 
 /** Who is making the request, once the session cookie has been resolved. */
@@ -117,9 +117,20 @@ const requireActor = t.middleware(({ ctx, next }) => {
  */
 export function orgProcedure(permission: Permission) {
   return publicProcedure.meta({ permission }).use(requireActor).use(
-    t.middleware(async ({ ctx, next }) => {
+    t.middleware(async ({ ctx, next, input }) => {
       const octx = ctx as OrgContext
-      if (!roleHas(octx.actor.role, permission)) {
+      // permits, not roleHas. The built-in table decides unless a resolver has
+      // been installed, and the community edition installs none, so this is the
+      // same answer with a socket in it.
+      const allowed = permits({
+        orgId: octx.actor.orgId,
+        userId: octx.actor.userId,
+        role: octx.actor.role,
+        permission,
+        repository: repositoryOf(input),
+        envId: envOf(input),
+      })
+      if (!allowed) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           // Naming the permission rather than the role, because the useful
@@ -154,4 +165,22 @@ export async function audit(
     origin: ctx.origin,
     occurredAt: entry.occurredAt ?? ctx.clock.now(),
   })
+}
+
+
+// The scope a request concerns, read off its input.
+//
+// Read here rather than declared per route, because every route that concerns a
+// repository already takes it under the same name, and a second declaration is
+// a second thing to keep in step. A route that concerns no repository passes
+// null, and a resolver scoped to repositories then has no opinion about it,
+// which is the right answer rather than a refusal.
+function repositoryOf(input: unknown): string | null {
+  const i = input as { repository?: unknown } | null
+  return typeof i?.repository === 'string' ? i.repository : null
+}
+
+function envOf(input: unknown): string | null {
+  const i = input as { envId?: unknown } | null
+  return typeof i?.envId === 'string' ? i.envId : null
 }
