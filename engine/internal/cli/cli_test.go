@@ -168,7 +168,7 @@ func TestUnimplementedCommands_SayNotYetAvailableRatherThanPretending(t *testing
 	commands := [][]string{
 
 		{"insights"},
-		{"env", "list"}, {"env", "pull"},
+		{"env", "pull"},
 	}
 	for _, args := range commands {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {

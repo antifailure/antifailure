@@ -34,34 +34,6 @@ that stopped being used.`),
 	}
 }
 
-func newEnvCommand(env *Env) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "env",
-		Short: "Inspect the variables an environment resolves",
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "List the variables each service needs and where each resolves from",
-		Long: strings.TrimSpace(`
-Names and sources only. A value is never printed, because a command that can
-print a secret becomes the command someone runs with output redirected to a
-file.`),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af env list")
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "pull",
-		Short: "Fetch variable names from a configured secrets adapter",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af env pull")
-		},
-	})
-	return cmd
-}
-
-// newExplainCommand renders the effective manifest. It works today, because
-// everything it needs is the manifest package.
 func newExplainCommand(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "explain",

@@ -58,6 +58,8 @@ af ci          the whole pull request check in one command: up, test,
 
 af runner install / check   put the runner where af test finds it
 
+af env list / prune   what this machine is holding, and a cutoff to clear it
+
 af doctor      ten checks, each with a remediation
 af init        reads a repository, writes a manifest, explains what it assumed
 af explain     the effective configuration with every default resolved
