@@ -257,7 +257,8 @@ jobs:
           npm --prefix web ci --no-audit --no-fund
           npm --prefix ee/web install --no-audit --no-fund
           npx --prefix ee/web tsc --noEmit -p ee/web/rbac/tsconfig.json
-          node --test ee/web/rbac/test/*.test.ts
+          node --test ee/web/rbac/test/*.test.ts ee/web/audit/test/*.test.ts
+          npx --prefix ee/web tsc --noEmit -p ee/web/audit/tsconfig.json
 
       - name: Nothing in the community web depends on the enterprise one
         run: |
