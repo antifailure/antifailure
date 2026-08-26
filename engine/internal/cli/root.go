@@ -133,9 +133,9 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	// non zero without a second message. Printing one would either duplicate
 	// the report or, in JSON mode, emit a second document into a stream a
 	// script is parsing.
-	var silent *silentError
-	if aferrors.As(err, &silent) {
-		return int(aferrors.ExitFailure)
+	var quiet *silentError
+	if aferrors.As(err, &quiet) {
+		return int(quiet.ExitCode())
 	}
 
 	// A usage error is cobra's, and it has already printed the usage. Anything

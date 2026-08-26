@@ -626,6 +626,18 @@ The columns {columns} hold free text and have no masking rule.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/masking](/docs/concepts/masking/) |
 
+### AF-MSK-010
+
+Masking could not run: {detail}
+
+**What to do.** Run 'af mask plan' to see what was decided for each column.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/masking](/docs/concepts/masking/) |
+
 ## Egress
 
 ### AF-NET-001

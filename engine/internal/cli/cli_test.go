@@ -167,8 +167,8 @@ func TestUnimplementedCommands_SayNotYetAvailableRatherThanPretending(t *testing
 	t.Parallel()
 	commands := [][]string{
 		{"test"}, {"load"}, {"load", "smoke"},
-		{"golden", "refresh"}, {"golden", "list"}, {"golden", "verify"}, {"golden", "gc"},
-		{"mask", "plan"}, {"mask", "preview"}, {"mask", "apply"}, {"mask", "verify"},
+		{"golden", "verify", "gv_x"},
+		{"mask", "preview"},
 
 		{"insights"},
 		{"env", "list"}, {"env", "pull"}, {"support", "bundle"},

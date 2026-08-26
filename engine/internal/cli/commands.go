@@ -61,63 +61,6 @@ func newLoadCommand(env *Env) *cobra.Command {
 	return cmd
 }
 
-func newGoldenCommand(env *Env) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "golden",
-		Short: "Manage the masked copies environments branch from",
-		Long: strings.TrimSpace(`
-A golden is a masked, verified copy of production. Every environment branches
-from one, and an unverified golden cannot be branched at all: that rule is
-enforced in code rather than in a checklist.`),
-	}
-	for _, sub := range []struct{ use, short string }{
-		{"refresh", "Build a new golden version from the source database"},
-		{"list", "List golden versions and what references them"},
-		{"verify", "Scan a golden for anything that still parses as personal data"},
-		{"gc", "Delete unreferenced golden versions past their retention"},
-	} {
-		s := sub
-		cmd.AddCommand(&cobra.Command{
-			Use:   s.use,
-			Short: s.short,
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				return notYetAvailable("af golden " + s.use)
-			},
-		})
-	}
-	return cmd
-}
-
-func newMaskCommand(env *Env) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "mask",
-		Short: "Plan, preview, apply, and verify data masking",
-		Long: strings.TrimSpace(`
-Masking is deterministic: the same customer maps to the same fake customer
-across every table and every refresh, so foreign keys still join and unique
-constraints still hold.
-
-af mask preview renders masked rows locally and uploads nothing, which is the
-only way to look at the result without the result leaving your machine.`),
-	}
-	for _, sub := range []struct{ use, short string }{
-		{"plan", "Show the rules that would run and the rows they affect"},
-		{"preview", "Render masked rows locally, uploading nothing"},
-		{"apply", "Run masking against a golden candidate"},
-		{"verify", "Scan the result for anything that still parses as personal data"},
-	} {
-		s := sub
-		cmd.AddCommand(&cobra.Command{
-			Use:   s.use,
-			Short: s.short,
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				return notYetAvailable("af mask " + s.use)
-			},
-		})
-	}
-	return cmd
-}
-
 func newInsightsCommand(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "insights",

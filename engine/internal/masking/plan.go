@@ -209,3 +209,27 @@ func (p Plan) Explain() string {
 	}
 	return b.String()
 }
+
+// DescribeProblems renders the reasons a plan will not run.
+func DescribeProblems(problems []Assignment) string {
+	parts := make([]string, 0, len(problems))
+	for _, p := range problems {
+		parts = append(parts, fmt.Sprintf("%s.%s: %s", p.Table, p.Column.Name, p.Problem))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// DescribeColumns names a few columns, and says how many more there are.
+//
+// A list of forty column names in an error message is a list nobody reads, and
+// a count with no examples is one nobody can act on.
+func DescribeColumns(assignments []Assignment, limit int) string {
+	names := make([]string, 0, len(assignments))
+	for _, a := range assignments {
+		names = append(names, a.Table.String()+"."+a.Column.Name)
+	}
+	if len(names) <= limit {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(names[:limit], ", "), len(names)-limit)
+}

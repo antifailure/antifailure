@@ -139,6 +139,8 @@ const (
 	AFMSK007 Code = "AF-MSK-007"
 	// The columns {columns} hold free text and have no masking rule.
 	AFMSK008 Code = "AF-MSK-008"
+	// Masking could not run: {detail}
+	AFMSK010 Code = "AF-MSK-010"
 
 	// Egress
 	// The request to {host} was blocked by rule {rule}.
@@ -653,6 +655,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/masking",
 		Retryable: false,
 		ExitCode:  ExitVerification,
+	},
+	AFMSK010: {
+		Code:      AFMSK010,
+		Area:      "MSK",
+		Message:   "Masking could not run: {detail}",
+		NextStep:  "Run 'af mask plan' to see what was decided for each column.",
+		Docs:      "concepts/masking",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFNET001: {
 		Code:      AFNET001,

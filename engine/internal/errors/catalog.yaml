@@ -382,6 +382,13 @@ errors:
     exit_code: 10
 
   # Egress
+  - code: AF-MSK-010
+    area: MSK
+    message: "Masking could not run: {detail}"
+    next_step: "Run 'af mask plan' to see what was decided for each column."
+    docs: concepts/masking
+    retryable: false
+    exit_code: 3
   - code: AF-NET-001
     area: NET
     message: "The request to {host} was blocked by rule {rule}."

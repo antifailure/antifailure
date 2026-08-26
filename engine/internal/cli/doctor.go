@@ -16,6 +16,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/antifailure/antifailure/engine/internal/state"
+
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
 // CheckStatus is the outcome of one doctor check.
@@ -189,9 +191,36 @@ func symbolFor(s CheckStatus) string {
 // second error message; the report itself already said what is wrong.
 var errDoctorFailed = &silentError{}
 
-type silentError struct{}
+// silentError exits non zero without printing anything more.
+//
+// It exists for commands whose own output already said what is wrong. Printing
+// a second message would either duplicate the report or, in JSON mode, emit a
+// second document into a stream a script is parsing.
+type silentError struct {
+	// code is the exit code to use. Zero means a plain failure.
+	code aferrors.ExitCode
+}
 
 func (*silentError) Error() string { return "one or more checks failed" }
+
+// ExitCode lets a silent failure still say which kind it was, so a script can
+// tell a verification failure from a configuration one.
+func (e *silentError) ExitCode() aferrors.ExitCode {
+	if e.code == 0 {
+		return aferrors.ExitFailure
+	}
+	return e.code
+}
+
+// silent wraps a coded error so its exit code survives but its message is not
+// printed again.
+func silent(err error) error {
+	var coded *aferrors.Error
+	if aferrors.As(err, &coded) {
+		return &silentError{code: coded.ExitCode()}
+	}
+	return &silentError{}
+}
 
 // RunDoctor executes every check. It is exported so that af up can run the
 // subset it depends on before doing any work, rather than failing halfway
