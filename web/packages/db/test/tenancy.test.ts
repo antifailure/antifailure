@@ -43,13 +43,17 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     ['sessions', 'belongs to a user, not an organization; covered by its own test below'],
   ])
 
+  // relkind r and p. A partitioned table's parent is p, not r, so a filter on
+  // r alone would drop it out of this suite entirely the moment any table here
+  // is partitioned, and nothing would say so. Nothing is partitioned today;
+  // this is here so that the day one is, it stays covered.
   async function withOrgIdColumn(): Promise<string[]> {
     const rows = await h.admin<{ table_name: string }[]>`
       SELECT c.relname AS table_name
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
       JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'org_id' AND a.attnum > 0
-      WHERE n.nspname = 'public' AND c.relkind = 'r'
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
       ORDER BY c.relname`
     return rows.map((r) => r.table_name)
   }
@@ -73,7 +77,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     const all = await h.admin<{ table_name: string }[]>`
       SELECT c.relname AS table_name
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public' AND c.relkind = 'r'
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
       ORDER BY c.relname`
 
     const scoped = new Set(await orgScopedTables())

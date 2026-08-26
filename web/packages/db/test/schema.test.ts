@@ -75,7 +75,7 @@ describe('schema drift', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_D
     const rows = await h.admin<{ table_name: string }[]>`
       SELECT c.relname AS table_name FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname`
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') ORDER BY c.relname`
     const typed = new Set(tables.map((t) => getTableConfig(t).name))
     const untyped = rows
       .map((r) => r.table_name)
