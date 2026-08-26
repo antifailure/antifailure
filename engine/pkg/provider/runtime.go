@@ -69,6 +69,14 @@ type EnvSpec struct {
 	// it hands the policy to the sidecar, which shares the decision code with
 	// af net explain, so the two cannot disagree.
 	Egress *schema.Egress
+	// CACertPEM is the environment certificate every service is told to trust.
+	//
+	// Empty when nothing in the policy needs to read inside TLS, in which case
+	// no connection is ever terminated and no service needs to trust anything
+	// it would not otherwise.
+	CACertPEM string
+	// CAKeyPEM is the matching private key, which goes to the sidecar alone.
+	CAKeyPEM secrets.Value
 	// Journal records a resource before it is created. A runtime must call it
 	// and must respect an error from it, because a resource created before it
 	// was recorded is a resource teardown cannot find.

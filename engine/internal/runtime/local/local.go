@@ -32,6 +32,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
+	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -151,7 +152,11 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	// connection refused that looks exactly like a blocked host and is not
 	// one. And every service is pointed at the sidecar for DNS, so its
 	// address has to exist before any of them are created.
-	proxyIP, err := r.startProxy(ctx, spec.EnvID, spec.Egress, names, nets, journal, progress)
+	var ca *envcert.Authority
+	if spec.CACertPEM != "" {
+		ca = &envcert.Authority{CertPEM: spec.CACertPEM, KeyPEM: spec.CAKeyPEM}
+	}
+	proxyIP, err := r.startProxy(ctx, spec.EnvID, spec.Egress, names, ca, nets, journal, progress)
 	if err != nil {
 		return env, err
 	}

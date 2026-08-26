@@ -524,3 +524,73 @@ func TestSpecificity_ExactHostsTieAndKeepManifestOrder(t *testing.T) {
 	}
 	require.Equal(t, []string{"api.stripe.com", "checkout.stripe.com", "a.io"}, hosts)
 }
+
+func TestInspectsHost_OnlyWhenTheDecisionNeedsTheRequest(t *testing.T) {
+	t.Parallel()
+	// Terminating TLS is a choice made at the handshake, before the path is
+	// visible, so it has to be decided from the host alone. Deciding it wrong
+	// in the safe direction costs a tunnel that could have been inspected;
+	// deciding it wrong the other way silently applies a host rule where a
+	// path rule was written.
+	cases := []struct {
+		name  string
+		rules []schema.EgressRule
+		def   schema.Mode
+		host  string
+		want  bool
+	}{
+		{"plain allow needs nothing", []schema.EgressRule{
+			rule("api.example.com", schema.ModeAllow)}, schema.ModeBlock, "api.example.com", false},
+		{"plain block needs nothing", []schema.EgressRule{
+			rule("api.example.com", schema.ModeBlock)}, schema.ModeBlock, "api.example.com", false},
+		{"a path rule needs the path", []schema.EgressRule{
+			rule("api.example.com", schema.ModeAllow, paths("/v1"))}, schema.ModeBlock, "api.example.com", true},
+		{"a method rule needs the method", []schema.EgressRule{
+			rule("api.example.com", schema.ModeAllow, methods("GET"))}, schema.ModeBlock, "api.example.com", true},
+		{"capture must read the request", []schema.EgressRule{
+			rule("api.resend.com", schema.ModeCapture)}, schema.ModeBlock, "api.resend.com", true},
+		{"mock must answer the request", []schema.EgressRule{
+			rule("api.stripe.com", schema.ModeMock)}, schema.ModeBlock, "api.stripe.com", true},
+		{"sandbox must rewrite the request", []schema.EgressRule{
+			rule("api.stripe.com", schema.ModeSandbox)}, schema.ModeBlock, "api.stripe.com", true},
+		{"synth must answer the request", []schema.EgressRule{
+			rule("api.example.com", schema.ModeSynth)}, schema.ModeBlock, "api.example.com", true},
+		{"a wildcard that captures covers its subdomains", []schema.EgressRule{
+			rule("*.resend.com", schema.ModeCapture)}, schema.ModeBlock, "api.resend.com", true},
+		{"a rule for another host does not", []schema.EgressRule{
+			rule("api.resend.com", schema.ModeCapture)}, schema.ModeBlock, "api.stripe.com", false},
+		{"a default that captures covers everything", nil, schema.ModeCapture, "anything.test", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := engine(t, tc.def, tc.rules...)
+			require.Equal(t, tc.want, e.InspectsHost(tc.host, 443))
+		})
+	}
+}
+
+func TestInspectsHost_NormalizesLikeEvaluateDoes(t *testing.T) {
+	t.Parallel()
+	// The two must agree about what a host is, or a request is tunnelled by
+	// one spelling and inspected by another.
+	e := engine(t, schema.ModeBlock, rule("api.example.com", schema.ModeCapture))
+	for _, h := range []string{"api.example.com", "API.Example.COM", "api.example.com."} {
+		require.True(t, e.InspectsHost(h, 0), "host %q", h)
+	}
+	require.False(t, e.InspectsHost("other.example.com", 0))
+}
+
+func TestInspectsHost_RespectsAPortRestriction(t *testing.T) {
+	t.Parallel()
+	e := engine(t, schema.ModeBlock, rule("api.example.com:8443", schema.ModeCapture))
+	require.True(t, e.InspectsHost("api.example.com", 8443))
+	require.False(t, e.InspectsHost("api.example.com", 443))
+}
+
+func TestInspectsHost_MatchesAnAddressRule(t *testing.T) {
+	t.Parallel()
+	e := engine(t, schema.ModeBlock, rule("10.0.0.5", schema.ModeCapture))
+	require.True(t, e.InspectsHost("10.0.0.5", 443))
+	require.False(t, e.InspectsHost("10.0.0.6", 443))
+	require.False(t, e.InspectsHost("not-an-address", 443))
+}

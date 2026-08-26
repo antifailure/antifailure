@@ -19,6 +19,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/build"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
+	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -544,4 +545,85 @@ func get(t *testing.T, url string) string {
 	}
 	t.Fatalf("GET %s never answered: %v", url, last)
 	return ""
+}
+
+func TestEgress_HTTPSPathRulesAreEnforcedWhenTheCertificateIsIssued(t *testing.T) {
+	r := requireRuntime(t)
+	requireInternet(t)
+	img := curlImage(t)
+
+	// The thing a host level tunnel cannot do. A rule naming a path needs the
+	// path, and the path is inside TLS, so the connection has to be terminated
+	// with a certificate the environment trusts.
+	ca, err := envcert.Generate("test-inspect", time.Now())
+	require.NoError(t, err)
+
+	rules := &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules: []schema.EgressRule{
+			{Host: allowedHost, Mode: schema.ModeAllow, Paths: []string{"/"}},
+		},
+	}
+	// The rule allows every path under root, so this is the positive case and
+	// proves the certificate is trusted and the request is re-originated.
+	code := probeInspected(t, r, envID(t, r, "insp1"), rules, ca, img,
+		"curl -sS -o /dev/null --max-time 25 https://"+allowedHost+"/ && exit 0 || exit 9")
+	require.Equal(t, 0, code, "an inspected HTTPS request to an allowed path did not complete")
+}
+
+func TestEgress_HTTPSPathOutsideTheRuleIsRefused(t *testing.T) {
+	r := requireRuntime(t)
+	requireInternet(t)
+	img := curlImage(t)
+
+	ca, err := envcert.Generate("test-inspect2", time.Now())
+	require.NoError(t, err)
+
+	// A path the rule does not cover. Over a tunnel this would have been
+	// allowed, because a tunnel only ever sees the host.
+	rules := &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules: []schema.EgressRule{
+			{Host: allowedHost, Mode: schema.ModeAllow, Paths: []string{"/allowed-prefix"}},
+		},
+	}
+	code := probeInspected(t, r, envID(t, r, "insp2"), rules, ca, img,
+		"curl -sS -o /dev/null --max-time 25 --fail https://"+allowedHost+"/ && exit 0 || exit 9")
+	require.Equal(t, 9, code,
+		"an HTTPS request to a path outside the rule was allowed, which is what a tunnel does")
+}
+
+func probeInspected(
+	t *testing.T, r *local.Runtime, id string, egress *schema.Egress,
+	ca *envcert.Authority, image, command string,
+) int {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	_, err := r.Up(ctx, provider.EnvSpec{
+		EnvID: id, Egress: egress,
+		CACertPEM: ca.CertPEM, CAKeyPEM: ca.KeyPEM,
+		Services: []provider.ServiceSpec{{
+			Name: "prober", Image: image, Kind: "worker", Command: command,
+		}},
+	})
+	if err != nil {
+		var coded *aferrors.Error
+		require.True(t, aferrors.As(err, &coded), "unexpected failure: %v", err)
+		require.Equal(t, aferrors.AFRUN005, coded.Code(), coded.Message())
+		return parseInt(t, codeInMessage, coded.Message())
+	}
+	deadline := time.Now().Add(120 * time.Second)
+	for time.Now().Before(deadline) {
+		status, statusErr := r.Status(context.Background(), id)
+		require.NoError(t, statusErr)
+		require.Len(t, status.Services, 1)
+		if codeInStatus.MatchString(status.Services[0].Detail) {
+			return parseInt(t, codeInStatus, status.Services[0].Detail)
+		}
+		time.Sleep(time.Second)
+	}
+	t.Fatal("the probe never finished")
+	return -1
 }

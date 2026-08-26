@@ -17,6 +17,7 @@ import (
 	"github.com/docker/go-connections/nat"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
+	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
@@ -58,6 +59,10 @@ func (r *Runtime) startService(
 		return running, err
 	}
 	running.ContainerID = id
+
+	if err := r.installCA(ctx, id, spec); err != nil {
+		return running, err
+	}
 
 	if err := r.cli.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
 		running.State = "failed to start"
@@ -301,6 +306,17 @@ func (r *Runtime) envList(spec provider.EnvSpec, s provider.ServiceSpec) []strin
 	vars["NO_PROXY"] = noProxy
 	vars["no_proxy"] = noProxy
 
+	if spec.CACertPEM != "" {
+		// There is no single way to point a runtime at a certificate, which is
+		// the whole problem: Node reads one variable, Python's requests reads
+		// another, Go reads a third, and each ignores the rest. Setting only
+		// one is invisible until a request fails for a reason that looks
+		// nothing like a certificate.
+		for k, v := range envcert.TrustEnv() {
+			vars[k] = v
+		}
+	}
+
 	vars["AF_ENV_ID"] = spec.EnvID
 	vars["AF_SERVICE"] = s.Name
 	// An application that behaves differently in a preview environment can
@@ -333,6 +349,15 @@ func (r *Runtime) envList(spec provider.EnvSpec, s provider.ServiceSpec) []strin
 	return out
 }
 
+// installCA writes the environment certificate into a container before it
+// starts, so that the runtime finds it at the path the variables name.
+func (r *Runtime) installCA(ctx context.Context, id string, spec provider.EnvSpec) error {
+	if spec.CACertPEM == "" {
+		return nil
+	}
+	return r.copyInto(ctx, id, envcert.BundlePath, []byte(spec.CACertPEM))
+}
+
 // runOnce runs a command to completion in a throwaway container.
 //
 // Migrations use it. The container is removed whether the command succeeded or
@@ -353,6 +378,9 @@ func (r *Runtime) runOnce(
 	}
 	id, err := r.create(ctx, spec, s, nets, proxyIP, name, command)
 	if err != nil {
+		return err
+	}
+	if err := r.installCA(ctx, id, spec); err != nil {
 		return err
 	}
 	var output string

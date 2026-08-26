@@ -113,6 +113,13 @@ errors:
     docs: guides/secrets
     retryable: false
     exit_code: 6
+  - code: AF-SEC-010
+    area: SEC
+    message: "The environment certificate could not be created: {detail}"
+    next_step: "Run 'af doctor' to check the runtime, then bring the environment up again."
+    docs: concepts/egress
+    retryable: true
+    exit_code: 1
   - code: AF-SEC-004
     area: SEC
     message: "No operating system keyring is available and no fallback passphrase is set."

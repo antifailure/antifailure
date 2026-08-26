@@ -27,10 +27,12 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/build"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
+	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/lock"
+	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -229,6 +231,28 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 	return s, nil
 }
 
+// needsInspection reports whether any rule requires reading inside TLS.
+//
+// Asked here rather than in the runtime because it decides whether to issue a
+// certificate at all, and issuing one that is never used still means every
+// service in the environment trusts a key that exists.
+func needsInspection(e *schema.Egress) bool {
+	eng, err := policy.New(e)
+	if err != nil {
+		// A policy that does not compile fails later with a better message.
+		// Answering yes here is the conservative direction: a certificate
+		// nobody uses costs nothing, and refusing to issue one that was needed
+		// silently downgrades the policy to host rules.
+		return true
+	}
+	for _, r := range eng.Rules() {
+		if eng.InspectsHost(strings.TrimPrefix(r.Host, "*."), 443) {
+			return true
+		}
+	}
+	return eng.InspectsHost("probe.invalid", 443)
+}
+
 func databaseVersion(m *schema.Manifest) int {
 	if m.Database != nil && m.Database.Version > 0 {
 		return m.Database.Version
@@ -280,13 +304,29 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	}
 	o.opts.Redactor.Register(insideURL.Reveal())
 
-	env, err := s.runtime.Up(ctx, provider.EnvSpec{
+	// An authority is generated only when something in the policy needs the
+	// sidecar to read inside TLS. An environment whose rules are all plain
+	// allow or block never terminates a connection, and asking its services to
+	// trust a certificate they will never see is a change to their trust store
+	// for no reason.
+	spec := provider.EnvSpec{
 		EnvID: o.envID, Branch: o.opts.Branch, Services: specs,
 		Egress:      o.opts.Manifest.Egress,
 		DatabaseURL: insideURL,
 		Journal:     recordIntent,
 		Progress:    o.progress,
-	})
+	}
+	if needsInspection(o.opts.Manifest.Egress) {
+		ca, caErr := envcert.Generate(o.envID, o.opts.Clock.Now())
+		if caErr != nil {
+			return res, caErr
+		}
+		spec.CACertPEM, spec.CAKeyPEM = ca.CertPEM, ca.KeyPEM
+		o.opts.Redactor.Register(ca.KeyPEM.Reveal())
+		o.progress("issued an environment certificate so the proxy can read inside TLS where the policy needs it")
+	}
+
+	env, err := s.runtime.Up(ctx, spec)
 	res.Services = env.Services
 	if err != nil {
 		return res, err

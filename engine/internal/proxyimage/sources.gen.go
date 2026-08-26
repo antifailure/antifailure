@@ -319,7 +319,312 @@ func describeDNS(self net.IP, internal []string) string {
 		self, strings.Join(internal, ", "))
 }
 `,
-	"cmd/af-proxy/main.go": "// Command af-proxy is the sidecar that decides what an environment may reach.\n//\n// It runs inside the environment on both networks: the inner one, which has no\n// route to the internet, and the outer one, which does. Services are told to\n// use it through the standard proxy variables. The thing that makes that\n// trustworthy is not the variables, which any library is free to ignore, but\n// the network: a service that ignores them has nowhere to send the packet. The\n// failure mode of a badly behaved SDK is a connection error, not silent\n// egress.\n//\n// It imports the same policy package the command line uses, so af net explain\n// and this program cannot disagree about what a rule means. That is the whole\n// reason the policy package has no dependencies beyond the standard library.\npackage main\n\nimport (\n\t\"encoding/json\"\n\t\"flag\"\n\t\"fmt\"\n\t\"io\"\n\t\"log\"\n\t\"net\"\n\t\"net/http\"\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n\t\"sync\"\n\t\"sync/atomic\"\n\t\"time\"\n\n\t\"github.com/antifailure/antifailure/engine/internal/policy\"\n\t\"github.com/antifailure/antifailure/engine/pkg/schema\"\n)\n\n// Config is what the runtime writes into the sidecar before it starts.\n//\n// A file rather than flags, because the sidecar's own address on the\n// environment's network is only known after the container is created and\n// attached, which is after its command line is fixed.\ntype Config struct {\n\t// Egress is the policy to enforce.\n\tEgress schema.Egress `json:\"egress\"`\n\t// Subnet is the environment's inner network in CIDR form.\n\t//\n\t// The sidecar finds its own address inside it rather than being told the\n\t// address, because Docker does not assign one until the container starts,\n\t// which is after the moment this file has to be written.\n\tSubnet string `json:\"subnet\"`\n\t// Internal are the names that must resolve normally rather than to this\n\t// sidecar: other services, the database, and the sidecar itself.\n\tInternal []string `json:\"internal\"`\n\t// EnvID identifies the environment in the decision log.\n\tEnvID string `json:\"env_id\"`\n}\n\nfunc main() {\n\tconfigPath := flag.String(\"config\", \"/etc/antifailure/proxy.json\", \"path to the sidecar configuration\")\n\tflag.Parse()\n\n\tcfg, err := loadConfig(*configPath)\n\tif err != nil {\n\t\tlog.Fatalf(\"af-proxy: %v\", err)\n\t}\n\tengine, err := policy.New(&cfg.Egress)\n\tif err != nil {\n\t\tlog.Fatalf(\"af-proxy: %v\", err)\n\t}\n\n\tp := &proxy{engine: engine, envID: cfg.EnvID, out: json.NewEncoder(os.Stdout)}\n\n\tself, err := addressInside(cfg.Subnet)\n\tif err != nil {\n\t\tlog.Fatalf(\"af-proxy: %v\", err)\n\t}\n\tdns := newDNSServer(self, cfg.Internal, dockerResolver, p.emit)\n\n\t// Every listener is started before anything is announced as ready, so a\n\t// service that begins its first outbound call the instant it starts finds\n\t// a decision rather than a closed port.\n\terrs := make(chan error, 4)\n\tudp, err := net.ListenPacket(\"udp\", \":53\")\n\tif err != nil {\n\t\tlog.Fatalf(\"af-proxy: %v\", err)\n\t}\n\tgo func() { errs <- dns.serve(udp) }()\n\n\tgo func() { errs <- p.listen(\":80\", p.serveTransparentHTTP) }()\n\tgo func() { errs <- p.listen(\":443\", p.serveTransparentTLS) }()\n\n\t// The explicit proxy port stays, for clients that do read their proxy\n\t// variables. It is the same policy either way; this one can see the full\n\t// request on an HTTPS call's CONNECT line, which the transparent path\n\t// cannot, so a client that opts in gets a slightly better decision.\n\tgo func() {\n\t\tsrv := &http.Server{\n\t\t\tAddr:    \":\" + strconv.Itoa(3128),\n\t\t\tHandler: p,\n\t\t\t// A request that is never finished must not hold a connection\n\t\t\t// forever, and an environment under load will have thousands.\n\t\t\tReadHeaderTimeout: 20 * time.Second,\n\t\t\tIdleTimeout:       90 * time.Second,\n\t\t}\n\t\terrs <- srv.ListenAndServe()\n\t}()\n\n\tp.emit(record{\n\t\tEvent: \"ready\", Rules: len(engine.Rules()), Default: string(engine.Default()),\n\t\tReason: describeDNS(self, cfg.Internal),\n\t})\n\n\tlog.Fatalf(\"af-proxy: %v\", <-errs)\n}\n\n// addressInside finds this container's address on a given network.\n//\n// A sidecar with no address on the environment's network cannot intercept\n// anything, and starting anyway would produce an environment that looks\n// contained and is not, so this is fatal rather than a warning.\nfunc addressInside(cidr string) (net.IP, error) {\n\tif cidr == \"\" {\n\t\treturn nil, fmt.Errorf(\"no network was named for this sidecar to answer on\")\n\t}\n\t_, subnet, err := net.ParseCIDR(cidr)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"%q is not a network: %w\", cidr, err)\n\t}\n\taddrs, err := net.InterfaceAddrs()\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tfor _, a := range addrs {\n\t\tipnet, ok := a.(*net.IPNet)\n\t\tif !ok {\n\t\t\tcontinue\n\t\t}\n\t\tif v4 := ipnet.IP.To4(); v4 != nil && subnet.Contains(v4) {\n\t\t\treturn v4, nil\n\t\t}\n\t}\n\treturn nil, fmt.Errorf(\"this sidecar has no address on %s\", cidr)\n}\n\n// listen accepts connections and hands each to a handler.\nfunc (p *proxy) listen(addr string, handle func(net.Conn)) error {\n\tln, err := net.Listen(\"tcp\", addr)\n\tif err != nil {\n\t\treturn err\n\t}\n\tfor {\n\t\tconn, err := ln.Accept()\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tgo handle(conn)\n\t}\n}\n\nfunc loadConfig(path string) (*Config, error) {\n\tbody, err := os.ReadFile(path)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"reading the configuration: %w\", err)\n\t}\n\tvar c Config\n\tif err := json.Unmarshal(body, &c); err != nil {\n\t\treturn nil, fmt.Errorf(\"parsing the configuration: %w\", err)\n\t}\n\tif c.Egress.Default == \"\" {\n\t\t// An absent default is block, the same as everywhere else. Defaulting\n\t\t// to allow here would make a malformed configuration open rather than\n\t\t// closed, which is the wrong direction for the one component whose\n\t\t// job is to refuse things.\n\t\tc.Egress.Default = schema.ModeBlock\n\t}\n\treturn &c, nil\n}\n\n// record is one line of the decision log.\n//\n// Every request produces one, allowed or not. A log that only records refusals\n// answers \"why was this blocked\" and not \"did anything reach Stripe\", and the\n// second question is the one somebody asks after an incident.\ntype record struct {\n\tEvent    string `json:\"event\"`\n\tEnv      string `json:\"env,omitempty\"`\n\tAt       string `json:\"at,omitempty\"`\n\tMethod   string `json:\"method,omitempty\"`\n\tHost     string `json:\"host,omitempty\"`\n\tPort     int    `json:\"port,omitempty\"`\n\tPath     string `json:\"path,omitempty\"`\n\tTLS      bool   `json:\"tls,omitempty\"`\n\tMode     string `json:\"mode,omitempty\"`\n\tRule     string `json:\"rule,omitempty\"`\n\tReason   string `json:\"reason,omitempty\"`\n\tAllowed  bool   `json:\"allowed\"`\n\tStatus   int    `json:\"status,omitempty\"`\n\tBytes    int64  `json:\"bytes,omitempty\"`\n\tDuration string `json:\"duration,omitempty\"`\n\tError    string `json:\"error,omitempty\"`\n\tRules    int    `json:\"rules,omitempty\"`\n\tDefault  string `json:\"default,omitempty\"`\n\tSeq      uint64 `json:\"seq,omitempty\"`\n\t// Via says how the request arrived: as a proxy request from a client that\n\t// read its proxy variables, or transparently from one that did not.\n\tVia string `json:\"via,omitempty\"`\n\t// HostOnly marks a decision made without seeing the path or the method,\n\t// which is every HTTPS request until the environment certificate lands.\n\t// Recorded rather than assumed away, so a reader can tell the difference\n\t// between a rule that matched and a rule that could only half apply.\n\tHostOnly bool `json:\"host_only,omitempty\"`\n}\n\ntype proxy struct {\n\tengine *policy.Engine\n\tenvID  string\n\tout    *json.Encoder\n\tseq    atomic.Uint64\n\t// mu serialises writes to the encoder. A JSON encoder is not safe for\n\t// concurrent use, and every request writes a line, so without it a busy\n\t// environment produces a decision log with interleaved bytes: the one\n\t// artifact whose whole value is that it can be trusted after the fact.\n\tmu sync.Mutex\n}\n\nfunc (p *proxy) emit(r record) {\n\tr.Env = p.envID\n\tif r.At == \"\" {\n\t\tr.At = time.Now().UTC().Format(time.RFC3339Nano)\n\t}\n\tr.Seq = p.seq.Add(1)\n\tp.mu.Lock()\n\tdefer p.mu.Unlock()\n\t_ = p.out.Encode(r)\n}\n\nfunc (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n\tif r.Method == http.MethodConnect {\n\t\tp.serveConnect(w, r)\n\t\treturn\n\t}\n\tp.serveHTTP(w, r)\n}\n\n// serveConnect handles the tunnel every HTTPS request opens.\n//\n// Only the host and port are visible here, which is a real limitation and is\n// stated rather than hidden: a rule that names paths or methods cannot be\n// enforced on an HTTPS request until the environment certificate lands, so\n// such a rule is evaluated on its host alone. A rule that would have matched\n// on the path is reported in the decision log as host-only, so the difference\n// is visible to whoever reads it rather than silently assumed away.\nfunc (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {\n\tstarted := time.Now()\n\thost, port := splitHostPort(r.Host, 443)\n\n\treq := policy.Request{Host: host, Port: port, Method: http.MethodConnect, Path: \"/\", TLS: true}\n\td := p.engine.Evaluate(req)\n\n\trec := record{\n\t\tEvent: \"decision\", Method: http.MethodConnect, Host: host, Port: port,\n\t\tTLS: true, Mode: string(d.Mode), Rule: d.RuleHost,\n\t\tReason: d.Reason(), Allowed: d.Allowed(),\n\t}\n\tif !d.Allowed() {\n\t\trec.Status = http.StatusForbidden\n\t\trec.Duration = time.Since(started).String()\n\t\tp.emit(rec)\n\t\t// A refused CONNECT gets a body even though most clients discard it,\n\t\t// because the ones that show it turn a mystifying failure into a\n\t\t// readable one at no cost.\n\t\twriteRefusal(w, d, req)\n\t\treturn\n\t}\n\n\tupstream, err := net.DialTimeout(\"tcp\", net.JoinHostPort(host, strconv.Itoa(port)), 30*time.Second)\n\tif err != nil {\n\t\trec.Error = err.Error()\n\t\trec.Status = http.StatusBadGateway\n\t\trec.Duration = time.Since(started).String()\n\t\tp.emit(rec)\n\t\thttp.Error(w, \"af-proxy: \"+err.Error(), http.StatusBadGateway)\n\t\treturn\n\t}\n\tdefer func() { _ = upstream.Close() }()\n\n\thijacker, ok := w.(http.Hijacker)\n\tif !ok {\n\t\trec.Error = \"the connection cannot be hijacked\"\n\t\tp.emit(rec)\n\t\thttp.Error(w, \"af-proxy: cannot tunnel\", http.StatusInternalServerError)\n\t\treturn\n\t}\n\tclient, _, err := hijacker.Hijack()\n\tif err != nil {\n\t\trec.Error = err.Error()\n\t\tp.emit(rec)\n\t\treturn\n\t}\n\tdefer func() { _ = client.Close() }()\n\n\tif _, err := io.WriteString(client, \"HTTP/1.1 200 Connection Established\\r\\n\\r\\n\"); err != nil {\n\t\trec.Error = err.Error()\n\t\tp.emit(rec)\n\t\treturn\n\t}\n\n\trec.Status = http.StatusOK\n\trec.Bytes = pipe(client, upstream)\n\trec.Duration = time.Since(started).String()\n\tp.emit(rec)\n}\n\n// pipe copies in both directions and returns the bytes sent upstream.\nfunc pipe(client, upstream net.Conn) int64 {\n\tdone := make(chan struct{})\n\tgo func() {\n\t\t_, _ = io.Copy(client, upstream)\n\t\t// Closing the write side rather than the whole connection lets the\n\t\t// other direction finish, which is what a half closed TCP stream is\n\t\t// for and what a plain Close would cut off mid response.\n\t\tif c, ok := client.(*net.TCPConn); ok {\n\t\t\t_ = c.CloseWrite()\n\t\t}\n\t\tclose(done)\n\t}()\n\tsent, _ := io.Copy(upstream, client)\n\tif c, ok := upstream.(*net.TCPConn); ok {\n\t\t_ = c.CloseWrite()\n\t}\n\t<-done\n\treturn sent\n}\n\n// serveHTTP handles a plain request, where the whole thing is visible.\nfunc (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {\n\tstarted := time.Now()\n\tif !r.URL.IsAbs() {\n\t\t// A request that is not in absolute form was sent to the proxy as if\n\t\t// it were an origin server, which means something is pointed at the\n\t\t// wrong address rather than proxying through it.\n\t\thttp.Error(w,\n\t\t\t\"af-proxy: this is a proxy, not an origin server. Set HTTP_PROXY and HTTPS_PROXY to reach it.\",\n\t\t\thttp.StatusBadRequest)\n\t\treturn\n\t}\n\thost, port := splitHostPort(r.URL.Host, 80)\n\n\treq := policy.Request{Host: host, Port: port, Method: r.Method, Path: r.URL.Path, TLS: false}\n\td := p.engine.Evaluate(req)\n\n\trec := record{\n\t\tEvent: \"decision\", Method: r.Method, Host: host, Port: port, Path: r.URL.Path,\n\t\tMode: string(d.Mode), Rule: d.RuleHost, Reason: d.Reason(), Allowed: d.Allowed(),\n\t}\n\tif !d.Allowed() {\n\t\trec.Status = http.StatusForbidden\n\t\trec.Duration = time.Since(started).String()\n\t\tp.emit(rec)\n\t\twriteRefusal(w, d, req)\n\t\treturn\n\t}\n\n\toutbound := r.Clone(r.Context())\n\toutbound.RequestURI = \"\"\n\t// Hop by hop headers are ours, not the origin's, and forwarding them is\n\t// how a proxy ends up asking an upstream to keep a connection alive that\n\t// only makes sense between the client and the proxy.\n\tfor _, h := range []string{\n\t\t\"Connection\", \"Proxy-Connection\", \"Keep-Alive\", \"Proxy-Authenticate\",\n\t\t\"Proxy-Authorization\", \"Te\", \"Trailer\", \"Transfer-Encoding\", \"Upgrade\",\n\t} {\n\t\toutbound.Header.Del(h)\n\t}\n\n\tresp, err := http.DefaultTransport.RoundTrip(outbound)\n\tif err != nil {\n\t\trec.Error = err.Error()\n\t\trec.Status = http.StatusBadGateway\n\t\trec.Duration = time.Since(started).String()\n\t\tp.emit(rec)\n\t\thttp.Error(w, \"af-proxy: \"+err.Error(), http.StatusBadGateway)\n\t\treturn\n\t}\n\tdefer func() { _ = resp.Body.Close() }()\n\n\tfor k, vs := range resp.Header {\n\t\tfor _, v := range vs {\n\t\t\tw.Header().Add(k, v)\n\t\t}\n\t}\n\tw.WriteHeader(resp.StatusCode)\n\tn, _ := io.Copy(w, resp.Body)\n\n\trec.Status = resp.StatusCode\n\trec.Bytes = n\n\trec.Duration = time.Since(started).String()\n\tp.emit(rec)\n}\n\n// writeRefusal explains a refusal in the response body.\n//\n// The audience is a developer reading a stack trace at three in the afternoon,\n// so it says what was refused, which rule refused it, and what to change. A\n// bare 403 sends them to the wrong place every time.\nfunc writeRefusal(w http.ResponseWriter, d policy.Decision, req policy.Request) {\n\tw.Header().Set(\"Content-Type\", \"text/plain; charset=utf-8\")\n\tw.Header().Set(\"X-Antifailure-Decision\", string(d.Mode))\n\tif d.RuleHost != \"\" {\n\t\tw.Header().Set(\"X-Antifailure-Rule\", d.RuleHost)\n\t}\n\tw.WriteHeader(http.StatusForbidden)\n\t_, _ = io.WriteString(w, refusalBody(d, req))\n}\n\n// refusalBody is what a developer reads in a stack trace at three in the\n// afternoon: what was refused, which rule refused it, and what to change. A\n// bare 403 sends them to the wrong place every time.\nfunc refusalBody(d policy.Decision, req policy.Request) string {\n\tvar b strings.Builder\n\tfmt.Fprintf(&b, \"Antifailure refused this request.\\n\\n\")\n\tfmt.Fprintf(&b, \"  %s\\n\\n\", req.String())\n\tfmt.Fprintf(&b, \"%s\\n\\n\", d.Reason())\n\tswitch d.Mode {\n\tcase schema.ModeCapture:\n\t\tb.WriteString(\"This host is set to capture, which is not wired up yet in this build.\\n\")\n\tcase schema.ModeMock:\n\t\tb.WriteString(\"This host is set to mock, which is not wired up yet in this build.\\n\")\n\tdefault:\n\t\tfmt.Fprintf(&b, \"Ask about it with:\\n\\n  af net explain %s %s\\n\",\n\t\t\treq.Method, schemeOf(req)+\"://\"+req.Host+req.Path)\n\t}\n\treturn b.String()\n}\n\nfunc schemeOf(r policy.Request) string {\n\tif r.TLS {\n\t\treturn \"https\"\n\t}\n\treturn \"http\"\n}\n\nfunc splitHostPort(hostport string, fallback int) (string, int) {\n\tif h, p, err := net.SplitHostPort(hostport); err == nil {\n\t\tif n, convErr := strconv.Atoi(p); convErr == nil {\n\t\t\treturn h, n\n\t\t}\n\t\treturn h, fallback\n\t}\n\treturn hostport, fallback\n}\n",
+	"cmd/af-proxy/main.go": "// Command af-proxy is the sidecar that decides what an environment may reach.\n//\n// It runs inside the environment on both networks: the inner one, which has no\n// route to the internet, and the outer one, which does. Services are told to\n// use it through the standard proxy variables. The thing that makes that\n// trustworthy is not the variables, which any library is free to ignore, but\n// the network: a service that ignores them has nowhere to send the packet. The\n// failure mode of a badly behaved SDK is a connection error, not silent\n// egress.\n//\n// It imports the same policy package the command line uses, so af net explain\n// and this program cannot disagree about what a rule means. That is the whole\n// reason the policy package has no dependencies beyond the standard library.\npackage main\n\nimport (\n\t\"encoding/json\"\n\t\"flag\"\n\t\"fmt\"\n\t\"io\"\n\t\"log\"\n\t\"net\"\n\t\"net/http\"\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n\t\"sync\"\n\t\"sync/atomic\"\n\t\"time\"\n\n\t\"github.com/antifailure/antifailure/engine/internal/policy\"\n\t\"github.com/antifailure/antifailure/engine/pkg/schema\"\n)\n\n// Config is what the runtime writes into the sidecar before it starts.\n//\n// A file rather than flags, because the sidecar's own address on the\n// environment's network is only known after the container is created and\n// attached, which is after its command line is fixed.\ntype Config struct {\n\t// Egress is the policy to enforce.\n\tEgress schema.Egress `json:\"egress\"`\n\t// Subnet is the environment's inner network in CIDR form.\n\t//\n\t// The sidecar finds its own address inside it rather than being told the\n\t// address, because Docker does not assign one until the container starts,\n\t// which is after the moment this file has to be written.\n\tSubnet string `json:\"subnet\"`\n\t// Internal are the names that must resolve normally rather than to this\n\t// sidecar: other services, the database, and the sidecar itself.\n\tInternal []string `json:\"internal\"`\n\t// EnvID identifies the environment in the decision log.\n\tEnvID string `json:\"env_id\"`\n\t// CACert and CAKey are the environment's certificate authority, in PEM.\n\t//\n\t// Present only when something in the policy needs to read inside TLS. An\n\t// environment whose rules are all plain allow or block never terminates a\n\t// connection and never needs one.\n\tCACert string `json:\"ca_cert,omitempty\"`\n\tCAKey  string `json:\"ca_key,omitempty\"`\n}\n\nfunc main() {\n\tconfigPath := flag.String(\"config\", \"/etc/antifailure/proxy.json\", \"path to the sidecar configuration\")\n\tflag.Parse()\n\n\tcfg, err := loadConfig(*configPath)\n\tif err != nil {\n\t\tlog.Fatalf(\"af-proxy: %v\", err)\n\t}\n\tengine, err := policy.New(&cfg.Egress)\n\tif err != nil {\n\t\tlog.Fatalf(\"af-proxy: %v\", err)\n\t}\n\n\tp := &proxy{\n\t\tengine: engine, envID: cfg.EnvID, out: json.NewEncoder(os.Stdout),\n\t\ttransport: &http.Transport{\n\t\t\tMaxIdleConnsPerHost: 16,\n\t\t\tIdleConnTimeout:     60 * time.Second,\n\t\t\t// The origin's certificate is verified normally. Reading inside a\n\t\t\t// connection is not a licence to stop checking who is on the other\n\t\t\t// end of it; if anything it makes the check more important,\n\t\t\t// because the client can no longer do it itself.\n\t\t\tTLSHandshakeTimeout: 20 * time.Second,\n\t\t},\n\t}\n\tif cfg.CACert != \"\" {\n\t\tca, caErr := newCertAuthority(cfg.CACert, cfg.CAKey)\n\t\tif caErr != nil {\n\t\t\tlog.Fatalf(\"af-proxy: %v\", caErr)\n\t\t}\n\t\tp.ca = ca\n\t}\n\n\tself, err := addressInside(cfg.Subnet)\n\tif err != nil {\n\t\tlog.Fatalf(\"af-proxy: %v\", err)\n\t}\n\tdns := newDNSServer(self, cfg.Internal, dockerResolver, p.emit)\n\n\t// Every listener is started before anything is announced as ready, so a\n\t// service that begins its first outbound call the instant it starts finds\n\t// a decision rather than a closed port.\n\terrs := make(chan error, 4)\n\tudp, err := net.ListenPacket(\"udp\", \":53\")\n\tif err != nil {\n\t\tlog.Fatalf(\"af-proxy: %v\", err)\n\t}\n\tgo func() { errs <- dns.serve(udp) }()\n\n\tgo func() { errs <- p.listen(\":80\", p.serveTransparentHTTP) }()\n\tgo func() { errs <- p.listen(\":443\", p.serveTransparentTLS) }()\n\n\t// The explicit proxy port stays, for clients that do read their proxy\n\t// variables. It is the same policy either way; this one can see the full\n\t// request on an HTTPS call's CONNECT line, which the transparent path\n\t// cannot, so a client that opts in gets a slightly better decision.\n\tgo func() {\n\t\tsrv := &http.Server{\n\t\t\tAddr:    \":\" + strconv.Itoa(3128),\n\t\t\tHandler: p,\n\t\t\t// A request that is never finished must not hold a connection\n\t\t\t// forever, and an environment under load will have thousands.\n\t\t\tReadHeaderTimeout: 20 * time.Second,\n\t\t\tIdleTimeout:       90 * time.Second,\n\t\t}\n\t\terrs <- srv.ListenAndServe()\n\t}()\n\n\tp.emit(record{\n\t\tEvent: \"ready\", Rules: len(engine.Rules()), Default: string(engine.Default()),\n\t\tReason: describeDNS(self, cfg.Internal),\n\t})\n\n\tlog.Fatalf(\"af-proxy: %v\", <-errs)\n}\n\n// addressInside finds this container's address on a given network.\n//\n// A sidecar with no address on the environment's network cannot intercept\n// anything, and starting anyway would produce an environment that looks\n// contained and is not, so this is fatal rather than a warning.\nfunc addressInside(cidr string) (net.IP, error) {\n\tif cidr == \"\" {\n\t\treturn nil, fmt.Errorf(\"no network was named for this sidecar to answer on\")\n\t}\n\t_, subnet, err := net.ParseCIDR(cidr)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"%q is not a network: %w\", cidr, err)\n\t}\n\taddrs, err := net.InterfaceAddrs()\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tfor _, a := range addrs {\n\t\tipnet, ok := a.(*net.IPNet)\n\t\tif !ok {\n\t\t\tcontinue\n\t\t}\n\t\tif v4 := ipnet.IP.To4(); v4 != nil && subnet.Contains(v4) {\n\t\t\treturn v4, nil\n\t\t}\n\t}\n\treturn nil, fmt.Errorf(\"this sidecar has no address on %s\", cidr)\n}\n\n// listen accepts connections and hands each to a handler.\nfunc (p *proxy) listen(addr string, handle func(net.Conn)) error {\n\tln, err := net.Listen(\"tcp\", addr)\n\tif err != nil {\n\t\treturn err\n\t}\n\tfor {\n\t\tconn, err := ln.Accept()\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tgo handle(conn)\n\t}\n}\n\nfunc loadConfig(path string) (*Config, error) {\n\tbody, err := os.ReadFile(path)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"reading the configuration: %w\", err)\n\t}\n\tvar c Config\n\tif err := json.Unmarshal(body, &c); err != nil {\n\t\treturn nil, fmt.Errorf(\"parsing the configuration: %w\", err)\n\t}\n\tif c.Egress.Default == \"\" {\n\t\t// An absent default is block, the same as everywhere else. Defaulting\n\t\t// to allow here would make a malformed configuration open rather than\n\t\t// closed, which is the wrong direction for the one component whose\n\t\t// job is to refuse things.\n\t\tc.Egress.Default = schema.ModeBlock\n\t}\n\treturn &c, nil\n}\n\n// record is one line of the decision log.\n//\n// Every request produces one, allowed or not. A log that only records refusals\n// answers \"why was this blocked\" and not \"did anything reach Stripe\", and the\n// second question is the one somebody asks after an incident.\ntype record struct {\n\tEvent    string `json:\"event\"`\n\tEnv      string `json:\"env,omitempty\"`\n\tAt       string `json:\"at,omitempty\"`\n\tMethod   string `json:\"method,omitempty\"`\n\tHost     string `json:\"host,omitempty\"`\n\tPort     int    `json:\"port,omitempty\"`\n\tPath     string `json:\"path,omitempty\"`\n\tTLS      bool   `json:\"tls,omitempty\"`\n\tMode     string `json:\"mode,omitempty\"`\n\tRule     string `json:\"rule,omitempty\"`\n\tReason   string `json:\"reason,omitempty\"`\n\tAllowed  bool   `json:\"allowed\"`\n\tStatus   int    `json:\"status,omitempty\"`\n\tBytes    int64  `json:\"bytes,omitempty\"`\n\tDuration string `json:\"duration,omitempty\"`\n\tError    string `json:\"error,omitempty\"`\n\tRules    int    `json:\"rules,omitempty\"`\n\tDefault  string `json:\"default,omitempty\"`\n\tSeq      uint64 `json:\"seq,omitempty\"`\n\t// Via says how the request arrived: as a proxy request from a client that\n\t// read its proxy variables, or transparently from one that did not.\n\tVia string `json:\"via,omitempty\"`\n\t// HostOnly marks a decision made without seeing the path or the method,\n\t// which is every HTTPS request until the environment certificate lands.\n\t// Recorded rather than assumed away, so a reader can tell the difference\n\t// between a rule that matched and a rule that could only half apply.\n\tHostOnly bool `json:\"host_only,omitempty\"`\n}\n\ntype proxy struct {\n\tengine *policy.Engine\n\tenvID  string\n\tout    *json.Encoder\n\t// ca signs a certificate per host, for the connections the policy needs\n\t// to read inside. Nil when the environment has no authority, in which\n\t// case every TLS connection is tunnelled.\n\tca *certAuthority\n\t// transport re-originates inspected requests.\n\ttransport *http.Transport\n\tseq       atomic.Uint64\n\t// mu serialises writes to the encoder. A JSON encoder is not safe for\n\t// concurrent use, and every request writes a line, so without it a busy\n\t// environment produces a decision log with interleaved bytes: the one\n\t// artifact whose whole value is that it can be trusted after the fact.\n\tmu sync.Mutex\n}\n\nfunc (p *proxy) emit(r record) {\n\tr.Env = p.envID\n\tif r.At == \"\" {\n\t\tr.At = time.Now().UTC().Format(time.RFC3339Nano)\n\t}\n\tr.Seq = p.seq.Add(1)\n\tp.mu.Lock()\n\tdefer p.mu.Unlock()\n\t_ = p.out.Encode(r)\n}\n\nfunc (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n\tif r.Method == http.MethodConnect {\n\t\tp.serveConnect(w, r)\n\t\treturn\n\t}\n\tp.serveHTTP(w, r)\n}\n\n// serveConnect handles the tunnel every HTTPS request opens.\n//\n// Only the host and port are visible here, which is a real limitation and is\n// stated rather than hidden: a rule that names paths or methods cannot be\n// enforced on an HTTPS request until the environment certificate lands, so\n// such a rule is evaluated on its host alone. A rule that would have matched\n// on the path is reported in the decision log as host-only, so the difference\n// is visible to whoever reads it rather than silently assumed away.\nfunc (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {\n\tstarted := time.Now()\n\thost, port := splitHostPort(r.Host, 443)\n\n\treq := policy.Request{Host: host, Port: port, Method: http.MethodConnect, Path: \"/\", TLS: true}\n\td := p.engine.Evaluate(req)\n\n\trec := record{\n\t\tEvent: \"decision\", Method: http.MethodConnect, Host: host, Port: port,\n\t\tTLS: true, Mode: string(d.Mode), Rule: d.RuleHost,\n\t\tReason: d.Reason(), Allowed: d.Allowed(),\n\t}\n\tif !d.Allowed() {\n\t\trec.Status = http.StatusForbidden\n\t\trec.Duration = time.Since(started).String()\n\t\tp.emit(rec)\n\t\t// A refused CONNECT gets a body even though most clients discard it,\n\t\t// because the ones that show it turn a mystifying failure into a\n\t\t// readable one at no cost.\n\t\twriteRefusal(w, d, req)\n\t\treturn\n\t}\n\n\thijacker, ok := w.(http.Hijacker)\n\tif !ok {\n\t\trec.Error = \"the connection cannot be hijacked\"\n\t\tp.emit(rec)\n\t\thttp.Error(w, \"af-proxy: cannot tunnel\", http.StatusInternalServerError)\n\t\treturn\n\t}\n\tclient, buffered, err := hijacker.Hijack()\n\tif err != nil {\n\t\trec.Error = err.Error()\n\t\tp.emit(rec)\n\t\treturn\n\t}\n\tdefer func() { _ = client.Close() }()\n\n\tif _, err := io.WriteString(client, \"HTTP/1.1 200 Connection Established\\r\\n\\r\\n\"); err != nil {\n\t\trec.Error = err.Error()\n\t\tp.emit(rec)\n\t\treturn\n\t}\n\n\t// A client that opted into the proxy still gets its request read when the\n\t// policy needs it read. The tunnel it just opened carries a TLS handshake\n\t// like any other, and the same rule decides what happens to it.\n\tif p.ca != nil && p.engine.InspectsHost(host, port) {\n\t\trec.Status = http.StatusOK\n\t\trec.Duration = time.Since(started).String()\n\t\tp.emit(rec)\n\t\tp.inspectTLS(client, buffered.Reader, host)\n\t\treturn\n\t}\n\n\tupstream, err := net.DialTimeout(\"tcp\", net.JoinHostPort(host, strconv.Itoa(port)), 30*time.Second)\n\tif err != nil {\n\t\trec.Error = err.Error()\n\t\trec.Status = http.StatusBadGateway\n\t\trec.Duration = time.Since(started).String()\n\t\tp.emit(rec)\n\t\treturn\n\t}\n\tdefer func() { _ = upstream.Close() }()\n\n\trec.Status = http.StatusOK\n\trec.Bytes = pipe(client, upstream)\n\trec.Duration = time.Since(started).String()\n\tp.emit(rec)\n}\n\n// pipe copies in both directions and returns the bytes sent upstream.\nfunc pipe(client, upstream net.Conn) int64 {\n\tdone := make(chan struct{})\n\tgo func() {\n\t\t_, _ = io.Copy(client, upstream)\n\t\t// Closing the write side rather than the whole connection lets the\n\t\t// other direction finish, which is what a half closed TCP stream is\n\t\t// for and what a plain Close would cut off mid response.\n\t\tif c, ok := client.(*net.TCPConn); ok {\n\t\t\t_ = c.CloseWrite()\n\t\t}\n\t\tclose(done)\n\t}()\n\tsent, _ := io.Copy(upstream, client)\n\tif c, ok := upstream.(*net.TCPConn); ok {\n\t\t_ = c.CloseWrite()\n\t}\n\t<-done\n\treturn sent\n}\n\n// serveHTTP handles a plain request, where the whole thing is visible.\nfunc (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {\n\tstarted := time.Now()\n\tif !r.URL.IsAbs() {\n\t\t// A request that is not in absolute form was sent to the proxy as if\n\t\t// it were an origin server, which means something is pointed at the\n\t\t// wrong address rather than proxying through it.\n\t\thttp.Error(w,\n\t\t\t\"af-proxy: this is a proxy, not an origin server. Set HTTP_PROXY and HTTPS_PROXY to reach it.\",\n\t\t\thttp.StatusBadRequest)\n\t\treturn\n\t}\n\thost, port := splitHostPort(r.URL.Host, 80)\n\n\treq := policy.Request{Host: host, Port: port, Method: r.Method, Path: r.URL.Path, TLS: false}\n\td := p.engine.Evaluate(req)\n\n\trec := record{\n\t\tEvent: \"decision\", Method: r.Method, Host: host, Port: port, Path: r.URL.Path,\n\t\tMode: string(d.Mode), Rule: d.RuleHost, Reason: d.Reason(), Allowed: d.Allowed(),\n\t}\n\tif !d.Allowed() {\n\t\trec.Status = http.StatusForbidden\n\t\trec.Duration = time.Since(started).String()\n\t\tp.emit(rec)\n\t\twriteRefusal(w, d, req)\n\t\treturn\n\t}\n\n\toutbound := r.Clone(r.Context())\n\toutbound.RequestURI = \"\"\n\t// Hop by hop headers are ours, not the origin's, and forwarding them is\n\t// how a proxy ends up asking an upstream to keep a connection alive that\n\t// only makes sense between the client and the proxy.\n\tfor _, h := range hopByHop {\n\t\toutbound.Header.Del(h)\n\t}\n\n\tresp, err := http.DefaultTransport.RoundTrip(outbound)\n\tif err != nil {\n\t\trec.Error = err.Error()\n\t\trec.Status = http.StatusBadGateway\n\t\trec.Duration = time.Since(started).String()\n\t\tp.emit(rec)\n\t\thttp.Error(w, \"af-proxy: \"+err.Error(), http.StatusBadGateway)\n\t\treturn\n\t}\n\tdefer func() { _ = resp.Body.Close() }()\n\n\tfor k, vs := range resp.Header {\n\t\tfor _, v := range vs {\n\t\t\tw.Header().Add(k, v)\n\t\t}\n\t}\n\tw.WriteHeader(resp.StatusCode)\n\tn, _ := io.Copy(w, resp.Body)\n\n\trec.Status = resp.StatusCode\n\trec.Bytes = n\n\trec.Duration = time.Since(started).String()\n\tp.emit(rec)\n}\n\n// writeRefusal explains a refusal in the response body.\n//\n// The audience is a developer reading a stack trace at three in the afternoon,\n// so it says what was refused, which rule refused it, and what to change. A\n// bare 403 sends them to the wrong place every time.\nfunc writeRefusal(w http.ResponseWriter, d policy.Decision, req policy.Request) {\n\tw.Header().Set(\"Content-Type\", \"text/plain; charset=utf-8\")\n\tw.Header().Set(\"X-Antifailure-Decision\", string(d.Mode))\n\tif d.RuleHost != \"\" {\n\t\tw.Header().Set(\"X-Antifailure-Rule\", d.RuleHost)\n\t}\n\tw.WriteHeader(http.StatusForbidden)\n\t_, _ = io.WriteString(w, refusalBody(d, req))\n}\n\n// refusalBody is what a developer reads in a stack trace at three in the\n// afternoon: what was refused, which rule refused it, and what to change. A\n// bare 403 sends them to the wrong place every time.\nfunc refusalBody(d policy.Decision, req policy.Request) string {\n\tvar b strings.Builder\n\tfmt.Fprintf(&b, \"Antifailure refused this request.\\n\\n\")\n\tfmt.Fprintf(&b, \"  %s\\n\\n\", req.String())\n\tfmt.Fprintf(&b, \"%s\\n\\n\", d.Reason())\n\tswitch d.Mode {\n\tcase schema.ModeCapture:\n\t\tb.WriteString(\"This host is set to capture, which is not wired up yet in this build.\\n\")\n\tcase schema.ModeMock:\n\t\tb.WriteString(\"This host is set to mock, which is not wired up yet in this build.\\n\")\n\tdefault:\n\t\tfmt.Fprintf(&b, \"Ask about it with:\\n\\n  af net explain %s %s\\n\",\n\t\t\treq.Method, schemeOf(req)+\"://\"+req.Host+req.Path)\n\t}\n\treturn b.String()\n}\n\nfunc schemeOf(r policy.Request) string {\n\tif r.TLS {\n\t\treturn \"https\"\n\t}\n\treturn \"http\"\n}\n\nfunc splitHostPort(hostport string, fallback int) (string, int) {\n\tif h, p, err := net.SplitHostPort(hostport); err == nil {\n\t\tif n, convErr := strconv.Atoi(p); convErr == nil {\n\t\t\treturn h, n\n\t\t}\n\t\treturn h, fallback\n\t}\n\treturn hostport, fallback\n}\n",
+	"cmd/af-proxy/mitm.go": `package main
+
+import (
+	"bufio"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"math/big"
+	"net"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/antifailure/antifailure/engine/internal/policy"
+)
+
+// Reading inside TLS is what capture, mock, sandbox, and any rule naming a
+// path require, and it is done only where one of those applies.
+//
+// The rest is tunnelled untouched. That is not laziness: terminating a
+// connection means presenting a certificate, and a client that pins its own
+// will refuse it. A tunnel works for every client; inspection works for the
+// ones that trust the environment's certificate, which is every client in the
+// environment because the certificate is injected into it. Doing it only where
+// the policy needs it keeps the blast radius of that difference small, and
+// makes the failure mode of a pinning client a rule the user can change rather
+// than a mystery.
+//
+// The authority is generated per environment and lives as long as it does.
+// A shared one would mean a certificate that outlives the thing it was for,
+// sitting in a trust store on somebody's laptop.
+
+// certAuthority signs a certificate per host, on demand.
+type certAuthority struct {
+	cert *x509.Certificate
+	key  *ecdsa.PrivateKey
+
+	mu    sync.Mutex
+	cache map[string]*tls.Certificate
+}
+
+func newCertAuthority(certPEM, keyPEM string) (*certAuthority, error) {
+	if certPEM == "" || keyPEM == "" {
+		return nil, errors.New("no environment certificate was provided")
+	}
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil {
+		return nil, errors.New("the environment certificate is not PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing the environment certificate: %w", err)
+	}
+	keyBlock, _ := pem.Decode([]byte(keyPEM))
+	if keyBlock == nil {
+		return nil, errors.New("the environment key is not PEM")
+	}
+	key, err := x509.ParseECPrivateKey(keyBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing the environment key: %w", err)
+	}
+	return &certAuthority{cert: cert, key: key, cache: map[string]*tls.Certificate{}}, nil
+}
+
+// leaf returns a certificate for one host, signing it the first time.
+func (a *certAuthority) leaf(host string) (*tls.Certificate, error) {
+	a.mu.Lock()
+	if c, ok := a.cache[host]; ok {
+		a.mu.Unlock()
+		return c, nil
+	}
+	a.mu.Unlock()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: host, Organization: []string{"Antifailure environment"}},
+		// Backdated by an hour so that a container whose clock is behind the
+		// host's does not reject a certificate issued a moment ago, which is
+		// a genuinely common failure and an utterly baffling one.
+		NotBefore:   now.Add(-time.Hour),
+		NotAfter:    now.Add(30 * 24 * time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		tmpl.IPAddresses = []net.IP{ip}
+	} else {
+		tmpl.DNSNames = []string{host}
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, a.cert, &key.PublicKey, a.key)
+	if err != nil {
+		return nil, err
+	}
+	out := &tls.Certificate{
+		Certificate: [][]byte{der, a.cert.Raw},
+		PrivateKey:  key,
+		Leaf:        tmpl,
+	}
+	a.mu.Lock()
+	a.cache[host] = out
+	a.mu.Unlock()
+	return out, nil
+}
+
+// GenerateAuthority makes a new environment authority.
+//
+// Exported so the engine can call it: the authority is created on the host,
+// written into the sidecar, and injected into every service's trust store, and
+// having one implementation means the certificate the sidecar signs with and
+// the certificate the services trust cannot drift apart.
+func GenerateAuthority(envID string, now time.Time) (certPEM, keyPEM string, err error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return "", "", err
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			// Named for the environment, so somebody who finds one in a trust
+			// store knows exactly what it was for and that it should not be
+			// there any more.
+			CommonName:   "Antifailure " + envID,
+			Organization: []string{"Antifailure environment authority"},
+		},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(30 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		// One level. This signs leaves and nothing else, so it cannot be used
+		// to mint another authority.
+		MaxPathLen:     0,
+		MaxPathLenZero: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return "", "", err
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return "", "", err
+	}
+	certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+	return certPEM, keyPEM, nil
+}
+
+// inspectTLS terminates a connection, applies the policy to each request
+// inside it, and forwards what is allowed.
+func (p *proxy) inspectTLS(conn net.Conn, br *bufio.Reader, sni string) {
+	leaf, err := p.ca.leaf(sni)
+	if err != nil {
+		p.emit(record{
+			Event: "decision", Method: http.MethodConnect, Host: sni, Port: 443, TLS: true,
+			Mode: "block", Allowed: false, Via: "inspect",
+			Reason: "The environment certificate could not be issued for this host.",
+			Error:  err.Error(),
+		})
+		return
+	}
+
+	server := tls.Server(&prefixedConn{Conn: conn, r: br}, &tls.Config{
+		Certificates: []tls.Certificate{*leaf},
+		MinVersion:   tls.VersionTLS12,
+	})
+	_ = server.SetDeadline(time.Now().Add(30 * time.Second))
+	if err := server.Handshake(); err != nil {
+		// A client that pins its own certificate lands here. It is reported as
+		// its own thing rather than as a policy refusal, because the fix is a
+		// rule change and not a code change, and calling it blocked would send
+		// somebody to the wrong line of the manifest.
+		p.emit(record{
+			Event: "decision", Method: http.MethodConnect, Host: sni, Port: 443, TLS: true,
+			Mode: "block", Allowed: false, Via: "inspect",
+			Reason: "This client refused the environment certificate, which usually means it pins " +
+				"its own. Set this host to allow so that its traffic is tunnelled rather than inspected.",
+			Error: err.Error(),
+		})
+		return
+	}
+	_ = server.SetDeadline(time.Time{})
+	defer func() { _ = server.Close() }()
+
+	// One connection can carry many requests, and each is decided on its own.
+	// A client that keeps a connection open to an allowed path and then asks
+	// for a refused one must be refused for the second, which is exactly what
+	// a host level tunnel cannot do.
+	reader := bufio.NewReader(server)
+	for {
+		_ = server.SetReadDeadline(time.Now().Add(120 * time.Second))
+		req, err := http.ReadRequest(reader)
+		if err != nil {
+			return
+		}
+		_ = server.SetReadDeadline(time.Time{})
+
+		host := sni
+		if req.Host != "" {
+			host, _ = splitHostPort(req.Host, 443)
+		}
+		if !p.serveInspected(server, req, host) {
+			return
+		}
+	}
+}
+
+// serveInspected decides one request read from inside a terminated connection
+// and reports whether the connection should stay open.
+func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool {
+	started := time.Now()
+	preq := policy.Request{Host: host, Port: 443, Method: req.Method, Path: req.URL.Path, TLS: true}
+	d := p.engine.Evaluate(preq)
+
+	rec := record{
+		Event: "decision", Method: req.Method, Host: host, Port: 443, Path: req.URL.Path,
+		TLS: true, Mode: string(d.Mode), Rule: d.RuleHost, Reason: d.Reason(),
+		Allowed: d.Allowed(), Via: "inspect",
+	}
+	if !d.Allowed() {
+		rec.Status = http.StatusForbidden
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		writeRefusalRaw(w, d, preq)
+		// Closed rather than kept open. A refusal is the end of what this
+		// connection was for, and leaving it open invites the client to retry
+		// on it forever.
+		return false
+	}
+
+	outbound := req.Clone(req.Context())
+	outbound.RequestURI = ""
+	outbound.URL.Scheme = "https"
+	outbound.URL.Host = host
+	for _, h := range hopByHop {
+		outbound.Header.Del(h)
+	}
+
+	resp, err := p.transport.RoundTrip(outbound)
+	if err != nil {
+		rec.Error = err.Error()
+		rec.Status = http.StatusBadGateway
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		writeRawError(w, http.StatusBadGateway, "Antifailure could not reach "+host+": "+err.Error())
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	rec.Status = resp.StatusCode
+	// Written with Write rather than by hand, so that chunked encoding,
+	// trailers, and connection semantics are the standard library's problem
+	// and not a source of subtle corruption in somebody's API response.
+	if err := resp.Write(w); err != nil {
+		rec.Error = err.Error()
+		p.emit(rec)
+		return false
+	}
+	rec.Bytes = resp.ContentLength
+	if rec.Bytes < 0 {
+		rec.Bytes = 0
+	}
+	rec.Duration = time.Since(started).String()
+	p.emit(rec)
+	return resp.Close == false && req.Close == false
+}
+
+// hopByHop are the headers that belong between two endpoints of a connection
+// rather than to the request, and forwarding them is how a proxy ends up
+// asking an origin to keep alive a connection that only makes sense here.
+var hopByHop = []string{
+	"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
+	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+}
+
+// prefixedConn replays bytes already read from a connection.
+//
+// The TLS handshake was peeked at to find the server name, so those bytes are
+// buffered and the real handshake has to see them again.
+type prefixedConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *prefixedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
+`,
 	"cmd/af-proxy/transparent.go": `package main
 
 import (
@@ -431,6 +736,17 @@ func (p *proxy) serveTransparentTLS(conn net.Conn) {
 			Reason: "The connection carried no server name, so no rule could apply to it.",
 			Error:  err.Error(),
 		})
+		return
+	}
+
+	// Whether to read inside is decided from the host alone, because that is
+	// all a handshake shows and the choice has to be made before it completes.
+	// A rule naming a path, or any mode that has to read or replace the
+	// request, needs the inside; plain allow and plain block do not, and
+	// tunnelling those keeps the environment working for clients that pin
+	// their own certificates.
+	if p.ca != nil && p.engine.InspectsHost(sni, 443) {
+		p.inspectTLS(conn, br, sni)
 		return
 	}
 
@@ -1170,6 +1486,70 @@ func (e *Engine) Hosts() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// InspectsHost reports whether decisions for a host need to see inside TLS.
+//
+// A host reached over HTTPS arrives as a tunnel, and a tunnel shows only the
+// name. That is enough when the answer is the same for every request to that
+// host, and not enough otherwise: a rule that names paths or methods cannot be
+// applied without the path, and capture, mock, sandbox, and synth all have to
+// read or replace the request itself.
+//
+// This is asked before the connection is decided rather than after, because
+// terminating TLS is a choice that has to be made at the handshake. Getting it
+// wrong in the safe direction costs a tunnel that could have been inspected;
+// getting it wrong the other way silently applies a host rule where a path
+// rule was written.
+func (e *Engine) InspectsHost(host string, port int) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if port == 0 {
+		port = 443
+	}
+	if inspectMode(e.fallback) {
+		return true
+	}
+	for i := range e.rules {
+		c := &e.rules[i]
+		if !c.matchesHost(host, port) {
+			continue
+		}
+		if len(c.paths) > 0 || c.methods != nil || inspectMode(c.rule.Mode) {
+			return true
+		}
+	}
+	return false
+}
+
+// inspectMode reports whether a mode can be served without reading the
+// request. Only block and allow can: one refuses everything to the host and
+// the other forwards everything to it.
+func inspectMode(m schema.Mode) bool {
+	switch m {
+	case schema.ModeCapture, schema.ModeMock, schema.ModeSandbox, schema.ModeSynth:
+		return true
+	}
+	return false
+}
+
+// matchesHost reports whether a rule could apply to a host, ignoring the path
+// and the method.
+func (c *compiled) matchesHost(host string, port int) bool {
+	if c.port != 0 && c.port != port {
+		return false
+	}
+	switch {
+	case c.matchAll:
+		return true
+	case c.hostExact != "":
+		return c.hostExact == host
+	case c.ip != nil:
+		ip := net.ParseIP(host)
+		return ip != nil && ip.Equal(c.ip)
+	case c.hostSuffix != "":
+		return strings.HasSuffix(host, c.hostSuffix) && len(host) > len(c.hostSuffix)
+	}
+	return false
 }
 `,
 	"pkg/schema/manifest.go": "// Package schema holds the types that cross a language boundary.\n//\n// The JSON Schema documents under schemas/ are the source of truth. These Go\n// types mirror them, and a test validates real manifests against both so the\n// two cannot drift: a field added to the schema and not here, or here and not\n// there, fails the build.\n//\n// Field order follows the schema, and every field carries both a JSON and a\n// YAML tag, because the manifest is written as YAML and transmitted as JSON.\npackage schema\n\n// ManifestVersion is the schema version this build understands.\nconst ManifestVersion = 1\n\n// Manifest is antifailure.yaml.\ntype Manifest struct {\n\tVersion    int         `json:\"version\" yaml:\"version\"`\n\tName       string      `json:\"name,omitempty\" yaml:\"name,omitempty\"`\n\tServices   []Service   `json:\"services,omitempty\" yaml:\"services,omitempty\"`\n\tDatabase   *Database   `json:\"database,omitempty\" yaml:\"database,omitempty\"`\n\tEgress     *Egress     `json:\"egress,omitempty\" yaml:\"egress,omitempty\"`\n\tPersonas   []Persona   `json:\"personas,omitempty\" yaml:\"personas,omitempty\"`\n\tWorkflows  []Workflow  `json:\"workflows,omitempty\" yaml:\"workflows,omitempty\"`\n\tInvariants []Invariant `json:\"invariants,omitempty\" yaml:\"invariants,omitempty\"`\n\tInsights   *Insights   `json:\"insights,omitempty\" yaml:\"insights,omitempty\"`\n\tLoad       *Load       `json:\"load,omitempty\" yaml:\"load,omitempty\"`\n\tRuntime    *Runtime    `json:\"runtime,omitempty\" yaml:\"runtime,omitempty\"`\n\tGitHub     *GitHub     `json:\"github,omitempty\" yaml:\"github,omitempty\"`\n}\n\n// ServiceKind is what a service is.\ntype ServiceKind string\n\nconst (\n\t// ServiceWeb gets a hostname and a readiness check.\n\tServiceWeb ServiceKind = \"web\"\n\t// ServiceWorker runs continuously with neither.\n\tServiceWorker ServiceKind = \"worker\"\n\t// ServiceCron is invoked on a schedule rather than run continuously.\n\tServiceCron ServiceKind = \"cron\"\n)\n\n// Service is one process the environment runs.\ntype Service struct {\n\tName          string      `json:\"name\" yaml:\"name\"`\n\tPath          string      `json:\"path,omitempty\" yaml:\"path,omitempty\"`\n\tKind          ServiceKind `json:\"kind,omitempty\" yaml:\"kind,omitempty\"`\n\tBuild         *Build      `json:\"build,omitempty\" yaml:\"build,omitempty\"`\n\tCommand       string      `json:\"command,omitempty\" yaml:\"command,omitempty\"`\n\tPort          int         `json:\"port,omitempty\" yaml:\"port,omitempty\"`\n\tHealthPath    string      `json:\"health_path,omitempty\" yaml:\"health_path,omitempty\"`\n\tHealthTimeout string      `json:\"health_timeout,omitempty\" yaml:\"health_timeout,omitempty\"`\n\tEnv           []EnvVar    `json:\"env,omitempty\" yaml:\"env,omitempty\"`\n\tReplicas      int         `json:\"replicas,omitempty\" yaml:\"replicas,omitempty\"`\n\tResources     *Resources  `json:\"resources,omitempty\" yaml:\"resources,omitempty\"`\n\tSchedule      string      `json:\"schedule,omitempty\" yaml:\"schedule,omitempty\"`\n\tMigrate       string      `json:\"migrate,omitempty\" yaml:\"migrate,omitempty\"`\n\tDependsOn     []string    `json:\"depends_on,omitempty\" yaml:\"depends_on,omitempty\"`\n}\n\n// BuildStrategy is how a service becomes an image.\ntype BuildStrategy string\n\nconst (\n\t// BuildAuto picks a Dockerfile if there is one and a buildpack otherwise.\n\tBuildAuto BuildStrategy = \"auto\"\n\t// BuildDockerfile uses the service's Dockerfile.\n\tBuildDockerfile BuildStrategy = \"dockerfile\"\n\t// BuildBuildpack infers the build from the language and lockfile.\n\tBuildBuildpack BuildStrategy = \"buildpack\"\n\t// BuildImage uses a prebuilt image and does not build at all.\n\tBuildImage BuildStrategy = \"image\"\n)\n\n// Build describes how to produce a service's image.\ntype Build struct {\n\tStrategy   BuildStrategy     `json:\"strategy,omitempty\" yaml:\"strategy,omitempty\"`\n\tDockerfile string            `json:\"dockerfile,omitempty\" yaml:\"dockerfile,omitempty\"`\n\tTarget     string            `json:\"target,omitempty\" yaml:\"target,omitempty\"`\n\tContext    string            `json:\"context,omitempty\" yaml:\"context,omitempty\"`\n\tImage      string            `json:\"image,omitempty\" yaml:\"image,omitempty\"`\n\tArgs       map[string]string `json:\"args,omitempty\" yaml:\"args,omitempty\"`\n\tAllowHosts []string          `json:\"allow_hosts,omitempty\" yaml:\"allow_hosts,omitempty\"`\n}\n\n// EnvVar names a variable a service needs. It holds a name, never a secret.\ntype EnvVar struct {\n\tName string `json:\"name\" yaml:\"name\"`\n\t// Required defaults to true. The pointer distinguishes \"not set, so use\n\t// the default\" from \"explicitly set to false\", which a bare bool cannot.\n\tRequired *bool  `json:\"required,omitempty\" yaml:\"required,omitempty\"`\n\tSandbox  bool   `json:\"sandbox,omitempty\" yaml:\"sandbox,omitempty\"`\n\tValue    string `json:\"value,omitempty\" yaml:\"value,omitempty\"`\n\tFrom     string `json:\"from,omitempty\" yaml:\"from,omitempty\"`\n}\n\n// IsRequired reports the effective value of Required.\nfunc (e EnvVar) IsRequired() bool { return e.Required == nil || *e.Required }\n\n// Resources caps a service's CPU and memory.\ntype Resources struct {\n\tCPU    string `json:\"cpu,omitempty\" yaml:\"cpu,omitempty\"`\n\tMemory string `json:\"memory,omitempty\" yaml:\"memory,omitempty\"`\n}\n\n// DBProvider names the database provider.\ntype DBProvider string\n\nconst (\n\tDBDocker   DBProvider = \"docker\"\n\tDBNeon     DBProvider = \"neon\"\n\tDBSupabase DBProvider = \"supabase\"\n\tDBDBLab    DBProvider = \"dblab\"\n)\n\n// Database says where the environment's Postgres comes from.\ntype Database struct {\n\tProvider     DBProvider `json:\"provider,omitempty\" yaml:\"provider,omitempty\"`\n\tVersion      int        `json:\"version,omitempty\" yaml:\"version,omitempty\"`\n\tSourceURLEnv string     `json:\"source_url_env,omitempty\" yaml:\"source_url_env,omitempty\"`\n\tURLEnv       string     `json:\"url_env,omitempty\" yaml:\"url_env,omitempty\"`\n\tMaskingRules string     `json:\"masking_rules,omitempty\" yaml:\"masking_rules,omitempty\"`\n\tGolden       *Golden    `json:\"golden,omitempty\" yaml:\"golden,omitempty\"`\n\tSubset       *Subset    `json:\"subset,omitempty\" yaml:\"subset,omitempty\"`\n\tSeed         string     `json:\"seed,omitempty\" yaml:\"seed,omitempty\"`\n}\n\n// GoldenStorage names where dumps and attestations live.\ntype GoldenStorage string\n\nconst (\n\tStorageLocal     GoldenStorage = \"local\"\n\tStorageAzureBlob GoldenStorage = \"azure_blob\"\n\tStorageS3        GoldenStorage = \"s3\"\n)\n\n// Golden configures the masked, verified copy environments branch from.\ntype Golden struct {\n\tSchedule   string        `json:\"schedule,omitempty\" yaml:\"schedule,omitempty\"`\n\tMaxAge     string        `json:\"max_age,omitempty\" yaml:\"max_age,omitempty\"`\n\tRetain     int           `json:\"retain,omitempty\" yaml:\"retain,omitempty\"`\n\tStorage    GoldenStorage `json:\"storage,omitempty\" yaml:\"storage,omitempty\"`\n\tStorageURL string        `json:\"storage_url,omitempty\" yaml:\"storage_url,omitempty\"`\n}\n\n// Subset configures taking a production shaped slice.\ntype Subset struct {\n\tEnabled              bool                  `json:\"enabled,omitempty\" yaml:\"enabled,omitempty\"`\n\tSeedTable            string                `json:\"seed_table,omitempty\" yaml:\"seed_table,omitempty\"`\n\tSeedWhere            string                `json:\"seed_where,omitempty\" yaml:\"seed_where,omitempty\"`\n\tMaxRows              int                   `json:\"max_rows,omitempty\" yaml:\"max_rows,omitempty\"`\n\tFollowDependents     *int                  `json:\"follow_dependents,omitempty\" yaml:\"follow_dependents,omitempty\"`\n\tVirtualRelationships []VirtualRelationship `json:\"virtual_relationships,omitempty\" yaml:\"virtual_relationships,omitempty\"`\n}\n\n// VirtualRelationship declares a link the schema does not.\ntype VirtualRelationship struct {\n\tFrom string `json:\"from\" yaml:\"from\"`\n\tTo   string `json:\"to\" yaml:\"to\"`\n}\n\n// Mode is what happens to an outbound request.\ntype Mode string\n\nconst (\n\t// ModeBlock refuses with a readable decision.\n\tModeBlock Mode = \"block\"\n\t// ModeAllow passes through, with an optional rate limit.\n\tModeAllow Mode = \"allow\"\n\t// ModeCapture records the message into the inbox and returns the\n\t// provider's documented success shape.\n\tModeCapture Mode = \"capture\"\n\t// ModeMock answers from a fixture pack or an offline provider pack.\n\tModeMock Mode = \"mock\"\n\t// ModeSandbox substitutes test credentials and forwards to the provider's\n\t// sandbox.\n\tModeSandbox Mode = \"sandbox\"\n\t// ModeSynth asks a model to invent a response, and marks every result that\n\t// touched it as unverified rather than passed.\n\tModeSynth Mode = \"synth\"\n)\n\n// AllModes returns every mode, in the order they appear in the documentation.\nfunc AllModes() []Mode {\n\treturn []Mode{ModeBlock, ModeAllow, ModeCapture, ModeMock, ModeSandbox, ModeSynth}\n}\n\n// Egress says what the environment may reach.\ntype Egress struct {\n\tDefault   Mode         `json:\"default,omitempty\" yaml:\"default,omitempty\"`\n\tAllowIPv6 bool         `json:\"allow_ipv6,omitempty\" yaml:\"allow_ipv6,omitempty\"`\n\tRules     []EgressRule `json:\"rules,omitempty\" yaml:\"rules,omitempty\"`\n}\n\n// EgressRule matches a host and says what to do with it.\ntype EgressRule struct {\n\tHost        string   `json:\"host\" yaml:\"host\"`\n\tMode        Mode     `json:\"mode\" yaml:\"mode\"`\n\tPaths       []string `json:\"paths,omitempty\" yaml:\"paths,omitempty\"`\n\tMethods     []string `json:\"methods,omitempty\" yaml:\"methods,omitempty\"`\n\tRateLimit   string   `json:\"rate_limit,omitempty\" yaml:\"rate_limit,omitempty\"`\n\tCredential  string   `json:\"credential,omitempty\" yaml:\"credential,omitempty\"`\n\tFixtures    string   `json:\"fixtures,omitempty\" yaml:\"fixtures,omitempty\"`\n\tWebhookPath string   `json:\"webhook_path,omitempty\" yaml:\"webhook_path,omitempty\"`\n\tNote        string   `json:\"note,omitempty\" yaml:\"note,omitempty\"`\n}\n\n// LoginStrategy is how a persona signs in.\ntype LoginStrategy string\n\nconst (\n\tLoginPassword  LoginStrategy = \"password\"\n\tLoginMagicLink LoginStrategy = \"magic_link\"\n\tLoginEmailCode LoginStrategy = \"email_code\"\n\tLoginSMSCode   LoginStrategy = \"sms_code\"\n\tLoginTOTP      LoginStrategy = \"totp\"\n\tLoginSession   LoginStrategy = \"session\"\n)\n\n// Persona is an account an agent logs in as.\ntype Persona struct {\n\tName       string            `json:\"name\" yaml:\"name\"`\n\tEmail      string            `json:\"email,omitempty\" yaml:\"email,omitempty\"`\n\tRole       string            `json:\"role,omitempty\" yaml:\"role,omitempty\"`\n\tLogin      LoginStrategy     `json:\"login,omitempty\" yaml:\"login,omitempty\"`\n\tMFA        bool              `json:\"mfa,omitempty\" yaml:\"mfa,omitempty\"`\n\tAttributes map[string]string `json:\"attributes,omitempty\" yaml:\"attributes,omitempty\"`\n}\n\n// Workflow is something an agent does.\ntype Workflow struct {\n\tName        string   `json:\"name\" yaml:\"name\"`\n\tDescription string   `json:\"description\" yaml:\"description\"`\n\tPersona     string   `json:\"persona,omitempty\" yaml:\"persona,omitempty\"`\n\tStartPath   string   `json:\"start_path,omitempty\" yaml:\"start_path,omitempty\"`\n\tIndependent bool     `json:\"independent,omitempty\" yaml:\"independent,omitempty\"`\n\tBudget      *Budget  `json:\"budget,omitempty\" yaml:\"budget,omitempty\"`\n\tExpect      []string `json:\"expect,omitempty\" yaml:\"expect,omitempty\"`\n\tTags        []string `json:\"tags,omitempty\" yaml:\"tags,omitempty\"`\n}\n\n// Budget caps what one workflow may consume.\ntype Budget struct {\n\tSteps    int     `json:\"steps,omitempty\" yaml:\"steps,omitempty\"`\n\tUSD      float64 `json:\"usd,omitempty\" yaml:\"usd,omitempty\"`\n\tDuration string  `json:\"duration,omitempty\" yaml:\"duration,omitempty\"`\n}\n\n// Invariant is a read only statement that must return no rows.\ntype Invariant struct {\n\tName        string `json:\"name\" yaml:\"name\"`\n\tSQL         string `json:\"sql\" yaml:\"sql\"`\n\tDescription string `json:\"description,omitempty\" yaml:\"description,omitempty\"`\n}\n\n// Insights configures the Postgres native checks.\ntype Insights struct {\n\tEnabled            *bool   `json:\"enabled,omitempty\" yaml:\"enabled,omitempty\"`\n\tMigrationRehearsal *bool   `json:\"migration_rehearsal,omitempty\" yaml:\"migration_rehearsal,omitempty\"`\n\tQueryRegression    *bool   `json:\"query_regression,omitempty\" yaml:\"query_regression,omitempty\"`\n\tPlanDiff           *bool   `json:\"plan_diff,omitempty\" yaml:\"plan_diff,omitempty\"`\n\tRegressionFactor   float64 `json:\"regression_factor,omitempty\" yaml:\"regression_factor,omitempty\"`\n\tRegressionMinMS    float64 `json:\"regression_min_ms,omitempty\" yaml:\"regression_min_ms,omitempty\"`\n\tLargeTableRows     int     `json:\"large_table_rows,omitempty\" yaml:\"large_table_rows,omitempty\"`\n}\n\n// LoadSource names where the endpoint mix comes from.\ntype LoadSource string\n\nconst (\n\tLoadNone      LoadSource = \"none\"\n\tLoadDatadog   LoadSource = \"datadog\"\n\tLoadNewRelic  LoadSource = \"newrelic\"\n\tLoadOTel      LoadSource = \"otel\"\n\tLoadAccessLog LoadSource = \"access_log\"\n)\n\n// Load configures production shaped traffic.\ntype Load struct {\n\tEnabled      bool              `json:\"enabled,omitempty\" yaml:\"enabled,omitempty\"`\n\tSource       LoadSource        `json:\"source,omitempty\" yaml:\"source,omitempty\"`\n\tSourceConfig map[string]string `json:\"source_config,omitempty\" yaml:\"source_config,omitempty\"`\n\tScale        float64           `json:\"scale,omitempty\" yaml:\"scale,omitempty\"`\n\tDuration     string            `json:\"duration,omitempty\" yaml:\"duration,omitempty\"`\n\tSafeRoutes   []string          `json:\"safe_routes,omitempty\" yaml:\"safe_routes,omitempty\"`\n\tUnsafeRoutes []string          `json:\"unsafe_routes,omitempty\" yaml:\"unsafe_routes,omitempty\"`\n\tThresholds   *LoadThresholds   `json:\"thresholds,omitempty\" yaml:\"thresholds,omitempty\"`\n}\n\n// LoadThresholds are the deltas that fail a run.\ntype LoadThresholds struct {\n\tP95Increase        float64 `json:\"p95_increase,omitempty\" yaml:\"p95_increase,omitempty\"`\n\tErrorRate          float64 `json:\"error_rate,omitempty\" yaml:\"error_rate,omitempty\"`\n\tQueryCountIncrease float64 `json:\"query_count_increase,omitempty\" yaml:\"query_count_increase,omitempty\"`\n}\n\n// RuntimeProvider names where environments run.\ntype RuntimeProvider string\n\nconst (\n\tRuntimeLocal      RuntimeProvider = \"local\"\n\tRuntimeKubernetes RuntimeProvider = \"kubernetes\"\n)\n\n// Runtime configures where and how long environments run.\ntype Runtime struct {\n\tProvider          RuntimeProvider `json:\"provider,omitempty\" yaml:\"provider,omitempty\"`\n\tTTL               string          `json:\"ttl,omitempty\" yaml:\"ttl,omitempty\"`\n\tIdleSleep         string          `json:\"idle_sleep,omitempty\" yaml:\"idle_sleep,omitempty\"`\n\tDomain            string          `json:\"domain,omitempty\" yaml:\"domain,omitempty\"`\n\tNamespacePrefix   string          `json:\"namespace_prefix,omitempty\" yaml:\"namespace_prefix,omitempty\"`\n\tKubeconfigContext string          `json:\"kubeconfig_context,omitempty\" yaml:\"kubeconfig_context,omitempty\"`\n}\n\n// GitHubMode is how the GitHub integration runs.\ntype GitHubMode string\n\nconst (\n\t// GitHubActions runs everything inside a workflow, with no server.\n\tGitHubActions GitHubMode = \"actions\"\n\t// GitHubApp uses the GitHub App and the control plane.\n\tGitHubApp GitHubMode = \"app\"\n\t// GitHubOff disables the integration.\n\tGitHubOff GitHubMode = \"off\"\n)\n\n// ForkPolicy is what to do with a pull request from a fork.\ntype ForkPolicy string\n\nconst (\n\tForkNever  ForkPolicy = \"never\"\n\tForkLabel  ForkPolicy = \"label\"\n\tForkAlways ForkPolicy = \"always\"\n)\n\n// GitHub configures the pull request integration.\ntype GitHub struct {\n\tMode       GitHubMode `json:\"mode,omitempty\" yaml:\"mode,omitempty\"`\n\tComment    *bool      `json:\"comment,omitempty\" yaml:\"comment,omitempty\"`\n\tForkPolicy ForkPolicy `json:\"fork_policy,omitempty\" yaml:\"fork_policy,omitempty\"`\n\tTeardownOn []string   `json:\"teardown_on,omitempty\" yaml:\"teardown_on,omitempty\"`\n}\n",

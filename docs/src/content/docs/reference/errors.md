@@ -958,3 +958,15 @@ No operating system keyring is available and no fallback passphrase is set.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/secrets](/docs/guides/secrets/) |
 
+### AF-SEC-010
+
+The environment certificate could not be created: {detail}
+
+**What to do.** Run 'af doctor' to check the runtime, then bring the environment up again.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/egress](/docs/concepts/egress/) |
+

@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/client"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
+	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/proxyimage"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -48,6 +49,8 @@ type sidecarConfig struct {
 	Subnet   string        `json:"subnet"`
 	Internal []string      `json:"internal"`
 	EnvID    string        `json:"env_id"`
+	CACert   string        `json:"ca_cert,omitempty"`
+	CAKey    string        `json:"ca_key,omitempty"`
 }
 
 // startProxy builds, places, and starts the egress sidecar.
@@ -63,6 +66,7 @@ func (r *Runtime) startProxy(
 	envID string,
 	egress *schema.Egress,
 	serviceNames []string,
+	ca *envcert.Authority,
 	nets networks,
 	journal func(string, string) error,
 	progress func(string),
@@ -122,12 +126,16 @@ func (r *Runtime) startProxy(
 	// The subnet is passed rather than the address, because Docker does not
 	// assign an address until the container starts, which is after this file
 	// has to exist. The sidecar finds its own inside it.
-	compiled, err := json.Marshal(sidecarConfig{
+	cfg := sidecarConfig{
 		Egress:   orEmptyEgress(egress),
 		Subnet:   subnet,
 		Internal: append([]string{DatabaseAlias, ProxyAlias}, serviceNames...),
 		EnvID:    envID,
-	})
+	}
+	if ca != nil {
+		cfg.CACert, cfg.CAKey = ca.CertPEM, ca.KeyPEM.Reveal()
+	}
+	compiled, err := json.Marshal(cfg)
 	if err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN040, "detail", "compiling the policy: "+err.Error())
 	}

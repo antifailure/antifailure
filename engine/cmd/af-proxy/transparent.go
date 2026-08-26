@@ -112,6 +112,17 @@ func (p *proxy) serveTransparentTLS(conn net.Conn) {
 		return
 	}
 
+	// Whether to read inside is decided from the host alone, because that is
+	// all a handshake shows and the choice has to be made before it completes.
+	// A rule naming a path, or any mode that has to read or replace the
+	// request, needs the inside; plain allow and plain block do not, and
+	// tunnelling those keeps the environment working for clients that pin
+	// their own certificates.
+	if p.ca != nil && p.engine.InspectsHost(sni, 443) {
+		p.inspectTLS(conn, br, sni)
+		return
+	}
+
 	started := time.Now()
 	preq := policy.Request{Host: sni, Port: 443, Method: http.MethodConnect, Path: "/", TLS: true}
 	d := p.engine.Evaluate(preq)

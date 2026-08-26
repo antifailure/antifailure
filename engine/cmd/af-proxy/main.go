@@ -51,6 +51,13 @@ type Config struct {
 	Internal []string `json:"internal"`
 	// EnvID identifies the environment in the decision log.
 	EnvID string `json:"env_id"`
+	// CACert and CAKey are the environment's certificate authority, in PEM.
+	//
+	// Present only when something in the policy needs to read inside TLS. An
+	// environment whose rules are all plain allow or block never terminates a
+	// connection and never needs one.
+	CACert string `json:"ca_cert,omitempty"`
+	CAKey  string `json:"ca_key,omitempty"`
 }
 
 func main() {
@@ -66,7 +73,25 @@ func main() {
 		log.Fatalf("af-proxy: %v", err)
 	}
 
-	p := &proxy{engine: engine, envID: cfg.EnvID, out: json.NewEncoder(os.Stdout)}
+	p := &proxy{
+		engine: engine, envID: cfg.EnvID, out: json.NewEncoder(os.Stdout),
+		transport: &http.Transport{
+			MaxIdleConnsPerHost: 16,
+			IdleConnTimeout:     60 * time.Second,
+			// The origin's certificate is verified normally. Reading inside a
+			// connection is not a licence to stop checking who is on the other
+			// end of it; if anything it makes the check more important,
+			// because the client can no longer do it itself.
+			TLSHandshakeTimeout: 20 * time.Second,
+		},
+	}
+	if cfg.CACert != "" {
+		ca, caErr := newCertAuthority(cfg.CACert, cfg.CAKey)
+		if caErr != nil {
+			log.Fatalf("af-proxy: %v", caErr)
+		}
+		p.ca = ca
+	}
 
 	self, err := addressInside(cfg.Subnet)
 	if err != nil {
@@ -213,7 +238,13 @@ type proxy struct {
 	engine *policy.Engine
 	envID  string
 	out    *json.Encoder
-	seq    atomic.Uint64
+	// ca signs a certificate per host, for the connections the policy needs
+	// to read inside. Nil when the environment has no authority, in which
+	// case every TLS connection is tunnelled.
+	ca *certAuthority
+	// transport re-originates inspected requests.
+	transport *http.Transport
+	seq       atomic.Uint64
 	// mu serialises writes to the encoder. A JSON encoder is not safe for
 	// concurrent use, and every request writes a line, so without it a busy
 	// environment produces a decision log with interleaved bytes: the one
@@ -271,17 +302,6 @@ func (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstream, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 30*time.Second)
-	if err != nil {
-		rec.Error = err.Error()
-		rec.Status = http.StatusBadGateway
-		rec.Duration = time.Since(started).String()
-		p.emit(rec)
-		http.Error(w, "af-proxy: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer func() { _ = upstream.Close() }()
-
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		rec.Error = "the connection cannot be hijacked"
@@ -289,7 +309,7 @@ func (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "af-proxy: cannot tunnel", http.StatusInternalServerError)
 		return
 	}
-	client, _, err := hijacker.Hijack()
+	client, buffered, err := hijacker.Hijack()
 	if err != nil {
 		rec.Error = err.Error()
 		p.emit(rec)
@@ -302,6 +322,27 @@ func (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 		p.emit(rec)
 		return
 	}
+
+	// A client that opted into the proxy still gets its request read when the
+	// policy needs it read. The tunnel it just opened carries a TLS handshake
+	// like any other, and the same rule decides what happens to it.
+	if p.ca != nil && p.engine.InspectsHost(host, port) {
+		rec.Status = http.StatusOK
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		p.inspectTLS(client, buffered.Reader, host)
+		return
+	}
+
+	upstream, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 30*time.Second)
+	if err != nil {
+		rec.Error = err.Error()
+		rec.Status = http.StatusBadGateway
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		return
+	}
+	defer func() { _ = upstream.Close() }()
 
 	rec.Status = http.StatusOK
 	rec.Bytes = pipe(client, upstream)
@@ -364,10 +405,7 @@ func (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	// Hop by hop headers are ours, not the origin's, and forwarding them is
 	// how a proxy ends up asking an upstream to keep a connection alive that
 	// only makes sense between the client and the proxy.
-	for _, h := range []string{
-		"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
-		"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
-	} {
+	for _, h := range hopByHop {
 		outbound.Header.Del(h)
 	}
 

@@ -212,6 +212,8 @@ const (
 	// No operating system keyring is available and no fallback passphrase
 	// is set.
 	AFSEC004 Code = "AF-SEC-004"
+	// The environment certificate could not be created: {detail}
+	AFSEC010 Code = "AF-SEC-010"
 )
 
 // catalog is the generated lookup table.
@@ -890,5 +892,14 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/secrets",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFSEC010: {
+		Code:      AFSEC010,
+		Area:      "SEC",
+		Message:   "The environment certificate could not be created: {detail}",
+		NextStep:  "Run 'af doctor' to check the runtime, then bring the environment up again.",
+		Docs:      "concepts/egress",
+		Retryable: true,
+		ExitCode:  ExitFailure,
 	},
 }

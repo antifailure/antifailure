@@ -556,3 +556,67 @@ func (e *Engine) Hosts() []string {
 	sort.Strings(out)
 	return out
 }
+
+// InspectsHost reports whether decisions for a host need to see inside TLS.
+//
+// A host reached over HTTPS arrives as a tunnel, and a tunnel shows only the
+// name. That is enough when the answer is the same for every request to that
+// host, and not enough otherwise: a rule that names paths or methods cannot be
+// applied without the path, and capture, mock, sandbox, and synth all have to
+// read or replace the request itself.
+//
+// This is asked before the connection is decided rather than after, because
+// terminating TLS is a choice that has to be made at the handshake. Getting it
+// wrong in the safe direction costs a tunnel that could have been inspected;
+// getting it wrong the other way silently applies a host rule where a path
+// rule was written.
+func (e *Engine) InspectsHost(host string, port int) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if port == 0 {
+		port = 443
+	}
+	if inspectMode(e.fallback) {
+		return true
+	}
+	for i := range e.rules {
+		c := &e.rules[i]
+		if !c.matchesHost(host, port) {
+			continue
+		}
+		if len(c.paths) > 0 || c.methods != nil || inspectMode(c.rule.Mode) {
+			return true
+		}
+	}
+	return false
+}
+
+// inspectMode reports whether a mode can be served without reading the
+// request. Only block and allow can: one refuses everything to the host and
+// the other forwards everything to it.
+func inspectMode(m schema.Mode) bool {
+	switch m {
+	case schema.ModeCapture, schema.ModeMock, schema.ModeSandbox, schema.ModeSynth:
+		return true
+	}
+	return false
+}
+
+// matchesHost reports whether a rule could apply to a host, ignoring the path
+// and the method.
+func (c *compiled) matchesHost(host string, port int) bool {
+	if c.port != 0 && c.port != port {
+		return false
+	}
+	switch {
+	case c.matchAll:
+		return true
+	case c.hostExact != "":
+		return c.hostExact == host
+	case c.ip != nil:
+		ip := net.ParseIP(host)
+		return ip != nil && ip.Equal(c.ip)
+	case c.hostSuffix != "":
+		return strings.HasSuffix(host, c.hostSuffix) && len(host) > len(c.hostSuffix)
+	}
+	return false
+}

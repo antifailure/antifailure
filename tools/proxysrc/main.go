@@ -38,6 +38,7 @@ var sources = []string{
 	"cmd/af-proxy/main.go",
 	"cmd/af-proxy/dns.go",
 	"cmd/af-proxy/transparent.go",
+	"cmd/af-proxy/mitm.go",
 }
 
 // modulePath is the module the generated files declare.
