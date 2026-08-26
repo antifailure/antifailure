@@ -325,6 +325,21 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 	if err != nil {
 		return env, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", dockerutil.Host())
 	}
+	// The service does not publish its own port; its forwarder does. Reading
+	// the port off the service container would report every web service as
+	// having no address, which is the one thing status exists to tell you.
+	published := map[string]int{}
+	for _, c := range containers {
+		if c.Labels[dockerutil.LabelKind] != dockerutil.KindSidecar {
+			continue
+		}
+		for _, p := range c.Ports {
+			if p.PublicPort != 0 {
+				published[c.Labels[dockerutil.LabelService]] = int(p.PublicPort)
+				break
+			}
+		}
+	}
 	for _, c := range containers {
 		if c.Labels[dockerutil.LabelKind] != dockerutil.KindService {
 			continue
@@ -338,12 +353,9 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 		if c.Status != "" {
 			rs.Detail = c.Status
 		}
-		for _, p := range c.Ports {
-			if p.PublicPort != 0 {
-				rs.Kind = "web"
-				rs.URL = fmt.Sprintf("http://127.0.0.1:%d", p.PublicPort)
-				break
-			}
+		if port, ok := published[rs.Name]; ok {
+			rs.Kind = "web"
+			rs.URL = fmt.Sprintf("http://127.0.0.1:%d", port)
 		}
 		env.Services = append(env.Services, rs)
 	}

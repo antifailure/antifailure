@@ -60,6 +60,21 @@ type networks struct {
 	edge  string
 }
 
+// EnsureNetworks creates an environment's networks and returns the inner one.
+//
+// It is exported because the database has to join the network before any
+// service starts. A service receives its connection string in its environment
+// at creation time, and that string names the database by its alias on this
+// network, so the alias has to exist first. Doing it after Up would hand every
+// service an address that did not resolve when it read it.
+func (r *Runtime) EnsureNetworks(ctx context.Context, envID string, journal func(string, string) error) (string, error) {
+	if journal == nil {
+		journal = func(string, string) error { return nil }
+	}
+	n, err := r.ensureNetworks(ctx, envID, journal)
+	return n.inner, err
+}
+
 func (r *Runtime) ensureNetworks(ctx context.Context, envID string, journal func(string, string) error) (networks, error) {
 	var n networks
 	var err error

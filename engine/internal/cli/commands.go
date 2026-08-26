@@ -18,64 +18,6 @@ import (
 // user think they have the wrong version, and a command that silently does
 // nothing is the failure this product exists to prevent.
 
-func newUpCommand(env *Env) *cobra.Command {
-	var branch, golden string
-	var wait bool
-	cmd := &cobra.Command{
-		Use:   "up",
-		Short: "Create an environment for the current branch",
-		Long: strings.TrimSpace(`
-Build every service, branch the database from its masked golden, seal the
-network, and bring the environment up.
-
-The environment is created under a lock for this branch, so two invocations
-cannot fight over it, and every resource is journaled before it is made, so an
-interrupt at any point leaves something af down can clean up.`),
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af up")
-		},
-	}
-	cmd.Flags().StringVar(&branch, "branch", "", "Branch to create the environment for, defaulting to the checked out one")
-	cmd.Flags().StringVar(&golden, "golden", "", "Golden version to branch from, defaulting to the newest verified one")
-	cmd.Flags().BoolVar(&wait, "wait", true, "Wait until every service is ready")
-	return cmd
-}
-
-func newDownCommand(env *Env) *cobra.Command {
-	var all bool
-	cmd := &cobra.Command{
-		Use:   "down",
-		Short: "Remove the environment and everything it created",
-		Long: strings.TrimSpace(`
-Replay the journal in reverse and delete every resource the environment
-created: database branches, containers, volumes, networks, DNS records, and
-storage objects.
-
-Teardown never stops at the first failure. A provider that is unreachable must
-not strand the other resources, so each is attempted and anything that could
-not be removed stays recorded for the next run. Exit code 10 means resources
-are still pending.`),
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af down")
-		},
-	}
-	cmd.Flags().BoolVar(&all, "all", false, "Tear down every environment this machine created, not just this branch")
-	return cmd
-}
-
-func newStatusCommand(env *Env) *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "Show the environments this machine has created",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af status")
-		},
-	}
-}
-
 func newLogsCommand(env *Env) *cobra.Command {
 	var follow bool
 	var service string
