@@ -33,9 +33,15 @@ jobs:
         # The error catalog and the sidecar's packaged source are generated and
         # checked in. A drift between the generator and what is committed is
         # invisible until somebody wonders why their change did nothing.
+        #
+        # The policy vectors belong here for the same reason. The control plane
+        # reimplements the egress decision in TypeScript and proves it matches
+        # this engine against that corpus, so a stale corpus means the two have
+        # quietly stopped being compared.
         run: |
           go run ./tools/errgen
           go run ./tools/proxysrc
+          (cd engine && go test ./internal/policy -update-vectors)
           git diff --exit-code
 
       - name: Vet
@@ -101,6 +107,68 @@ jobs:
       - name: Test
         run: node --experimental-strip-types --test test/*.test.ts
         working-directory: runner
+
+  control-plane:
+    name: control plane
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # A real Postgres, because the thing under test is what Postgres enforces.
+    # Row-level security cannot be tested against a fake: the whole property is
+    # that the database refuses what the application asks for, and a fake would
+    # only prove the application asks nicely.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: antifailure
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/antifailure
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+
+      - name: Typecheck
+        # There is no build step, so this is the only thing between a type
+        # error and a running server.
+        run: |
+          for p in packages/db packages/policy apps/api; do
+            npx tsc --noEmit -p "$p/tsconfig.json"
+          done
+        working-directory: web
+
+      - name: The suites did not skip
+        # Every suite here skips itself when there is no database, which is
+        # right locally and wrong in CI: a green run that proved nothing is
+        # worse than a red one. This fails if the database is not reachable,
+        # before any test gets the chance to quietly skip.
+        run: |
+          node -e "
+            const c = require('net').connect(5432, '127.0.0.1');
+            c.on('connect', () => { console.log('postgres is up'); process.exit(0) });
+            c.on('error', (e) => { console.error('no postgres:', e.message); process.exit(1) });
+          "
+
+      - name: Test
+        run: npm test --workspaces --if-present
+        working-directory: web
 
   edition-boundary:
     name: edition boundary
