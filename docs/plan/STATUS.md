@@ -56,6 +56,8 @@ af support bundle logs, decisions, manifest, and doctor output, redacted,
 af ci          the whole pull request check in one command: up, test,
                report, tear down, whatever happens
 
+af runner install / check   put the runner where af test finds it
+
 af doctor      ten checks, each with a remediation
 af init        reads a repository, writes a manifest, explains what it assumed
 af explain     the effective configuration with every default resolved
@@ -267,10 +269,22 @@ and so blamed itself for the runtime's.
 | `examples/github-workflow.yml` | written | a template to copy; the comment is updated rather than added |
 | GitHub App mode | planned | belongs to the control plane, phase 8 |
 
-## Phases 8, 10 to 14
+## Phase 10. Release
+
+| Component | State | Notes |
+| --- | --- | --- |
+| `.github/workflows/release.yml` | written | four platforms, static, the runner travels with the binary |
+| `install.sh` | proven | POSIX sh, checksum verified, fails readably; the failure path is tested |
+| `tools/notices` | proven | generated from what is actually linked, so it cannot go stale |
+| `af runner install` | proven | af ci now needs no flags at all |
+
+Written rather than proven for the workflow itself, because no tag has been
+pushed. The first release is the test.
+
+## Phases 8, 11 to 14
 
 Not started. Phase 8 is the control plane, 11 is the docs site, and the rest
-are release packaging, the Kubernetes runtime, and hosted scale.
+are the Kubernetes runtime and hosted scale.
 
 ## Where to pick up
 

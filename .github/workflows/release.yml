@@ -1,0 +1,93 @@
+name: Release
+
+# Tags only. A release built from a branch is a release nobody can reproduce.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { os: darwin, arch: arm64 }
+          - { os: darwin, arch: amd64 }
+          - { os: linux,  arch: amd64 }
+          - { os: linux,  arch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Build
+        working-directory: engine
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          # Static, so the binary runs on a distroless image and on a
+          # distribution whose libc is older than the builder's.
+          CGO_ENABLED: '0'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=$version -X main.commit=$GITHUB_SHA -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o "../dist/af" ./cmd/af
+
+      - name: Package
+        # The runner travels with the binary rather than being fetched later,
+        # so the source a release was tested with is the source it runs.
+        run: |
+          name="antifailure_${GITHUB_REF_NAME#v}_${{ matrix.os }}_${{ matrix.arch }}"
+          mkdir -p "stage/$name/runner"
+          cp dist/af "stage/$name/af"
+          cp -R runner/src runner/package.json runner/tsconfig.json runner/README.md "stage/$name/runner/"
+          cp LICENSE README.md "stage/$name/"
+          tar -C stage -czf "dist/$name.tar.gz" "$name"
+          (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*.tar.gz*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+
+      - name: Third party notices
+        # Generated from what is actually linked rather than maintained by
+        # hand. MIT does not require a NOTICE file, but the Apache licensed
+        # dependencies still require attribution, and a stale list attributes
+        # the wrong people.
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - run: go run ./tools/notices > THIRD_PARTY_NOTICES.md
+
+      - name: Checksums
+        run: |
+          cd dist
+          cat *.sha256 > checksums.txt
+          rm -f *.sha256
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt
+            THIRD_PARTY_NOTICES.md
+          generate_release_notes: true
