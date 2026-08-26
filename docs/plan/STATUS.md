@@ -218,7 +218,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `runner` planner | proven | deterministic, no model key needed; three way expectation check |
 | `runner` browser | proven | Playwright, accessibility tree, three tests against a real browser |
 | `internal/env` test | proven | `af test` end to end |
-| Model driven planning | planned | the Planner interface exists; this is where bring your own key lands |
+| Model driven planning | proven | Anthropic and OpenAI; refuses a control the page does not have; falls back when the model is unreachable |
 | Invariants and insights | planned | |
 
 ## Phases 7 to 14
@@ -229,13 +229,8 @@ Not started.
 
 In order of what unblocks the most:
 
-1. Model driven planning, which is where bring your own model key lands. The
-   Planner interface is the seam and the deterministic planner is the
-   fallback, so this is one implementation rather than a rework. It is what
-   turns an unverified result into a real one.
-2. Phase 7, load generation shaped like production traffic.
-3. Subsetting, so a golden can be a slice of production rather than all of it.
-4. Synth mode and rate limiting, the two egress modes still unimplemented.
+1. Phase 7, load generation shaped like production traffic.
+3. Synth mode and rate limiting, the two egress modes still unimplemented.
 5. Phase 8, the control plane, and Phase 11, the docs site.
 
 Notes for whoever picks this up. The conformance suite is not yet tested

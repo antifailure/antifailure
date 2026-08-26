@@ -15,6 +15,7 @@ import { promisify } from 'node:util';
 import { run, type Job, type WorkflowResult } from './execute.ts';
 import { CommandInbox } from './inbox.ts';
 import { exitCodeFor } from './verdict.ts';
+import { fromEnvironment } from './model.ts';
 import type { Persona } from './login.ts';
 import type { Workflow } from './workflow.ts';
 
@@ -54,12 +55,23 @@ async function main(): Promise<number> {
   const doc = JSON.parse(raw) as JobDocument;
   mkdirSync(doc.artifacts, { recursive: true });
 
+  const model = fromEnvironment(process.env);
+  if (model) {
+    process.stderr.write(
+      `af-runner: reading pages with ${model.provider}/${model.model}\n`,
+    );
+  }
+
   const job: Job = {
     baseURL: doc.base_url,
     artifacts: doc.artifacts,
     workflows: doc.workflows,
     personas: doc.personas,
     ...(doc.attempts === undefined ? {} : { attempts: doc.attempts }),
+    // Read from this process's environment rather than sent in the job, so a
+    // key never passes through a file the engine wrote or a document anybody
+    // logged.
+    ...(model ? { model } : {}),
     ...(doc.headless === undefined ? {} : { headless: doc.headless }),
     ...(doc.af
       ? {

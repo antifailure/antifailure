@@ -59,7 +59,11 @@ test('a persona with no password is blocked, not failed', async () => {
   // A manifest that has not finished is not a broken application, and
   // reporting it as a failing test points at the wrong file.
   const page = new FakePage(/dashboard/i);
-  const result = await signIn(page, { ...owner, password: undefined }, { baseURL: 'https://app.test' });
+  // Written out rather than spread with undefined, because
+  // exactOptionalPropertyTypes makes an absent field and an undefined one
+  // different types, and the case under test is the absent one.
+  const noPassword: Persona = { name: owner.name, email: owner.email, login: 'password' };
+  const result = await signIn(page, noPassword, { baseURL: 'https://app.test' });
   assert.equal(result.ok, false);
   assert.equal(result.blocked, true);
   assert.match(result.detail, /has none set/);

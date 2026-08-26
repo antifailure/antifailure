@@ -2,13 +2,26 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { matches, waitFor, InboxTimeout, type Message, type InboxSource } from '../src/inbox.ts';
 
-function message(over: Partial<Message> = {}): Message {
-  return {
+// Partial with undefined allowed, because exactOptionalPropertyTypes makes
+// "absent" and "explicitly undefined" different types and the tests need to
+// say a field is missing.
+type Over = { [K in keyof Message]?: Message[K] | undefined };
+
+function message(over: Over = {}): Message {
+  const base: Message = {
     seq: 1, at: '2026-06-01T12:00:00Z', provider: 'resend', kind: 'email',
     to: ['owner@example.test'], subject: 'Confirm your email',
     link: 'https://app.test/verify?token=abc', code: '481920',
-    ...over,
   };
+  // Assigned rather than spread, so a key set to undefined removes the field
+  // instead of setting it to undefined, which exactOptionalPropertyTypes
+  // treats as a different thing.
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(over)) {
+    if (value === undefined) delete out[key];
+    else out[key] = value;
+  }
+  return out as unknown as Message;
 }
 
 class Fake implements InboxSource {

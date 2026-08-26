@@ -32,3 +32,29 @@ Without a model key the expectations are checked by matching the words that
 carry meaning. That is honest about its limits: a page saying the opposite is
 `fail`, a page the checker cannot read is `unverified`, and it never guesses a
 pass. A result that rests on a guess is not a result.
+
+## Bring your own key
+
+With `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` set, a model reads the page and
+decides what a person would do next. Without one, the deterministic planner
+runs and the workflows that depend on reading a page come back `unverified`
+rather than guessed at.
+
+The key is yours. Nothing here ships one, the engine never stores one, and the
+key is read from the runner's own environment rather than sent in the job
+document, so it never passes through a file the engine wrote or a document
+anybody logged. `AF_MODEL` pins a model; `ANTHROPIC_BASE_URL` and
+`OPENAI_BASE_URL` point at a gateway.
+
+Two properties matter more than the prompt. The model chooses from a fixed set
+of actions against names that are actually on the page, so it cannot invent a
+button: anything it names that is not there is refused rather than
+approximated, because a click on the wrong control produces a result that looks
+like an application failure and is not one. And it never sees the page's HTML,
+only the accessibility snapshot, which is what a person navigating with a
+screen reader gets and keeps whatever is in the DOM out of somebody else's
+logs.
+
+A model that cannot be reached mid run falls back to the deterministic planner
+rather than ending the workflow, because a model being down is not evidence
+about the application.

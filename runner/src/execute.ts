@@ -14,6 +14,7 @@ import {
   type Action, type Planner, type Snapshot, type Workflow,
 } from './workflow.ts';
 import { classify, type Attempt, type Cause, type Outcome } from './verdict.ts';
+import { ModelPlanner } from './model.ts';
 
 /** Everything one run needs. */
 export interface Job {
@@ -23,6 +24,9 @@ export interface Job {
   readonly personas: readonly Persona[];
   readonly inbox?: InboxSource;
   readonly planner?: Planner;
+  /** model, when set, lets a model read the page and decide. The key is the
+   *  user's: nothing here ships one and the engine never stores one. */
+  readonly model?: import('./model.ts').ModelConfig;
   /** attempts is how many times a workflow is retried before being called
    *  flaky or failed. Two is the useful number: one retry distinguishes a
    *  genuine failure from a fluke, and more just makes a slow suite slower. */
@@ -148,8 +152,15 @@ async function attemptOnce(
 
   // A fresh identity per attempt, so a retry of a sign up is a sign up rather
   // than a duplicate address the application rightly refuses.
+  const deterministic = new DeterministicPlanner(
+    freshIdentity(`${workflow.name}-${attempt}-${Date.now()}`),
+  );
+  // A model reads the page when a key is available, and the deterministic
+  // planner is its fallback rather than its replacement: a model that is
+  // unreachable mid run should not end the workflow, and the shapes every
+  // application shares do not need one.
   const planner = job.planner
-    ?? new DeterministicPlanner(freshIdentity(`${workflow.name}-${attempt}-${Date.now()}`));
+    ?? (job.model ? new ModelPlanner(job.model, undefined, deterministic) : deterministic);
 
   const history: Action[] = [];
   const limit = workflow.maxSteps ?? MAX_STEPS;
