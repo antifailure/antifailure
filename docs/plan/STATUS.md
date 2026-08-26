@@ -329,7 +329,7 @@ environment ending at the right sequence, and `af env pull` reading it back.
 | Sub-phase | State | Notes |
 | --- | --- | --- |
 | 13.1 Edition foundation and licensing | proven | Licensing at 98.9 percent, parser fuzzed over 2.4 million executions, extension points at 100 percent, community binary proven free of enterprise symbols. |
-| 13.5 Audit hash chain | proven | Part of the control plane's audit log. The streaming sinks are not built. |
+| 13.5 Audit export and SIEM streaming | proven | The hash chain is in the control plane's audit log. Forwarding is a bounded queue that cannot fail or slow the action it audits, with signed batch manifests carrying the chain head so a batch in an object store verifies on its own. The concrete sinks for Event Hubs, Splunk, and S3 are adapters over one interface and are not written. |
 | 13.6 Organization policy enforcement | proven | 100 percent. A property test over five hundred random policies proves a stricter policy never permits more. |
 | 13.4 Advanced access control and approvals | proven | 42 tests. The role model and scopes, approval policies that one person cannot complete alone, and the model as a reviewable file with a dry run that refuses a file leaving a required approval unreachable. |
 | 13.2, 13.3, 13.7 to 13.14 | planned | Single sign on, SCIM, multi-cluster, secrets adapters, billing, dashboard, support tooling, compliance, deployment. |
@@ -378,9 +378,9 @@ rather than `proven`. The distinction is the point of this file.
 
 ## Where to pick up
 
-1. 13.5's streaming sinks and 14.9's partitioning and archival. Neither needs
-   anything this machine does not have. 13.2 and 13.3 need identity provider
-   test tenants.
+1. 14.9's partitioning and archival, which is provable against the real
+   Postgres the control plane suites already use, and the concrete sink
+   adapters for 13.5. 13.2 and 13.3 need identity provider test tenants.
 2. Phase 14.9, partitioning and archival, provable against the real Postgres
    the control plane suites already use.
 3. Anything blocked above, as soon as the account or the quota exists.
