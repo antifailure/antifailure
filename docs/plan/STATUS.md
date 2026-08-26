@@ -331,7 +331,7 @@ environment ending at the right sequence, and `af env pull` reading it back.
 | 13.1 Edition foundation and licensing | proven | Licensing at 98.9 percent, parser fuzzed over 2.4 million executions, extension points at 100 percent, community binary proven free of enterprise symbols. |
 | 13.5 Audit hash chain | proven | Part of the control plane's audit log. The streaming sinks are not built. |
 | 13.6 Organization policy enforcement | proven | 100 percent. A property test over five hundred random policies proves a stricter policy never permits more. |
-| 13.4 Custom roles and scopes | partial | The role model, scopes, and the resolver are proven at 20 tests. Approval policies and the policy-as-code import and export are not built. |
+| 13.4 Advanced access control and approvals | proven | 42 tests. The role model and scopes, approval policies that one person cannot complete alone, and the model as a reviewable file with a dry run that refuses a file leaving a required approval unreachable. |
 | 13.2, 13.3, 13.7 to 13.14 | planned | Single sign on, SCIM, multi-cluster, secrets adapters, billing, dashboard, support tooling, compliance, deployment. |
 
 The boundary is a separate Go module rather than a build tag. The community
@@ -378,8 +378,7 @@ rather than `proven`. The distinction is the point of this file.
 
 ## Where to pick up
 
-1. The rest of 13.4, which is approval policies and the policy-as-code import
-   and export with a dry-run diff, and 13.5's streaming sinks. Neither needs
+1. 13.5's streaming sinks and 14.9's partitioning and archival. Neither needs
    anything this machine does not have. 13.2 and 13.3 need identity provider
    test tenants.
 2. Phase 14.9, partitioning and archival, provable against the real Postgres
