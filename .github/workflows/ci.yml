@@ -1,0 +1,150 @@
+name: CI
+
+# Every push and every pull request. A check that only runs on main is a check
+# that tells you after the fact.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push cancels the first run on the same branch, because the answer
+# about the older commit stopped mattering the moment the newer one arrived.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    name: engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Generated files are current
+        # The error catalog and the sidecar's packaged source are generated and
+        # checked in. A drift between the generator and what is committed is
+        # invisible until somebody wonders why their change did nothing.
+        run: |
+          go run ./tools/errgen
+          go run ./tools/proxysrc
+          git diff --exit-code
+
+      - name: Vet
+        run: cd engine && go vet ./...
+
+      - name: Format
+        # gofmt rather than a linter with opinions. The point is that nobody
+        # argues about it in review.
+        run: |
+          unformatted=$(gofmt -l engine tools)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not formatted:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Test
+        # The race detector always. A data race that only shows up under load
+        # is the kind of bug this product exists to find, and shipping one
+        # would be embarrassing.
+        run: cd engine && go test ./... -race -timeout 30m
+        env:
+          # Docker is available on this runner, so the provider and runtime
+          # suites run for real rather than skipping.
+          GOTOOLCHAIN: local
+
+      - name: Nothing was left behind
+        # The suites assert this themselves, and this catches the case where a
+        # suite crashed before its own assertion ran.
+        run: |
+          left=$(docker ps -aq --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
+          nets=$(docker network ls -q --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
+          echo "containers: $left, networks: $nets"
+          if [ "$left" != "0" ] || [ "$nets" != "0" ]; then
+            docker ps -a --filter label=dev.antifailure.managed
+            echo "the test run leaked resources"; exit 1
+          fi
+
+  runner:
+    name: runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: runner/package.json
+
+      - run: npm install --no-audit --no-fund
+        working-directory: runner
+
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+        working-directory: runner
+
+      - name: Typecheck
+        # Strict, with exactOptionalPropertyTypes. There is no build step, so
+        # this is the only thing standing between a type error and a run.
+        run: npx tsc --noEmit
+        working-directory: runner
+
+      - name: Test
+        run: node --experimental-strip-types --test test/*.test.ts
+        working-directory: runner
+
+  edition-boundary:
+    name: edition boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: The community build does not need ee
+        # The proof rather than the assertion. ee is deleted and everything
+        # still builds and passes, which is what the community binary is built
+        # from. A comment saying the boundary holds is not evidence.
+        run: |
+          rm -rf ee
+          cd engine
+          go build ./...
+          go test ./internal/... -short -timeout 15m
+
+      - name: No engine package imports ee
+        run: |
+          if grep -rn --include='*.go' 'antifailure/engine/ee' engine tools; then
+            echo "an engine package imports ee, which the community build does not have"
+            exit 1
+          fi
+
+  secrets:
+    name: no credentials in the tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Nothing in the repository looks like a live credential
+        # Uses the engine's own detector, so the check and the runtime refusal
+        # cannot disagree about what a credential looks like. Its own tests
+        # assemble fake keys at runtime for exactly this reason.
+        run: cd engine && go run ../tools/scanrepo ..

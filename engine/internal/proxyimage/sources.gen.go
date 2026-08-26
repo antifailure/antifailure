@@ -340,8 +340,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/antifailure/antifailure/engine/internal/livekey"
 	"github.com/antifailure/antifailure/engine/internal/policy"
+	"github.com/antifailure/antifailure/engine/pkg/livekey"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -671,9 +671,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/antifailure/antifailure/engine/internal/livekey"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
+	"github.com/antifailure/antifailure/engine/pkg/livekey"
 )
 
 // Sandbox mode swaps the credential and lets the request through to the
@@ -830,8 +830,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/antifailure/antifailure/engine/internal/livekey"
 	"github.com/antifailure/antifailure/engine/internal/policy"
+	"github.com/antifailure/antifailure/engine/pkg/livekey"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -1154,180 +1154,6 @@ func writeRawError(conn net.Conn, status int, message string) {
 	"go.mod": `module github.com/antifailure/antifailure/engine
 
 go 1.25.0
-`,
-	"internal/livekey/livekey.go": `// Package livekey recognises credentials that work against production.
-//
-// An environment holds a copy of production data and runs unreviewed code. The
-// one thing it must never hold is a key that can act on production, because
-// the whole point of the sandbox is that a mistake inside it stays inside it.
-// A live Stripe key in a preview environment is a real charge on a real card.
-//
-// So this is not a redaction problem, it is a refusal problem: a request
-// carrying one of these is stopped and reported, rather than forwarded with
-// the key hidden in the logs. Redaction protects the logs; this protects the
-// customer.
-//
-// The distinction it draws is between live and test, not between secret and
-// not. sk_test_ is a secret and belongs in an environment; sk_live_ is a
-// secret and does not. A detector that could not tell them apart would refuse
-// every sandbox request and be turned off within a day.
-//
-// Everything here is the standard library, because this runs inside the
-// sidecar, whose image is built with no module downloads.
-package livekey
-
-import (
-	"strings"
-)
-
-// Finding is one live credential that was recognised.
-type Finding struct {
-	// Provider is who the credential belongs to, for the message.
-	Provider string
-	// Prefix is the marker that identified it, never the credential.
-	Prefix string
-	// Where says which part of the request carried it: a header name, or the
-	// body.
-	Where string
-}
-
-// String renders a finding for a message, and deliberately never carries the
-// credential itself. A refusal that echoed the key back would put it in the
-// logs of the thing refusing it.
-func (f Finding) String() string {
-	return f.Provider + " (" + f.Prefix + ") in " + f.Where
-}
-
-// pattern is one credential shape.
-type pattern struct {
-	provider string
-	prefix   string
-	// minTail is how many characters must follow the prefix. It exists to
-	// keep prose from matching: the word "akia" in a sentence is not a key,
-	// and refusing a request because somebody wrote about one would make this
-	// the first thing a user disables.
-	minTail int
-	// tail says what those characters may be.
-	tail func(rune) bool
-}
-
-func alnum(r rune) bool {
-	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
-}
-
-func base62(r rune) bool { return alnum(r) || r == '_' || r == '-' }
-
-func hexish(r rune) bool {
-	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
-}
-
-// patterns are live credentials only.
-//
-// Every entry here has a test mode counterpart that is deliberately absent:
-// sk_test_, pk_test_, rk_test_, and the sandbox keys of the others are exactly
-// what an environment is supposed to carry.
-var patterns = []pattern{
-	{provider: "Stripe secret key", prefix: "sk_live_", minTail: 16, tail: base62},
-	{provider: "Stripe restricted key", prefix: "rk_live_", minTail: 16, tail: base62},
-	{provider: "Stripe publishable key", prefix: "pk_live_", minTail: 16, tail: base62},
-	{provider: "GitHub personal token", prefix: "ghp_", minTail: 30, tail: base62},
-	{provider: "GitHub app token", prefix: "ghs_", minTail: 30, tail: base62},
-	{provider: "GitHub fine grained token", prefix: "github_pat_", minTail: 30, tail: base62},
-	{provider: "AWS access key", prefix: "AKIA", minTail: 16, tail: func(r rune) bool {
-		return (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
-	}},
-	{provider: "Slack bot token", prefix: "xoxb-", minTail: 20, tail: base62},
-	{provider: "Slack user token", prefix: "xoxp-", minTail: 20, tail: base62},
-	{provider: "SendGrid key", prefix: "SG.", minTail: 30, tail: base62},
-	{provider: "Anthropic key", prefix: "sk-ant-api", minTail: 20, tail: base62},
-	{provider: "OpenAI project key", prefix: "sk-proj-", minTail: 20, tail: base62},
-	{provider: "Supabase service key", prefix: "sbp_", minTail: 30, tail: hexish},
-	{provider: "Neon key", prefix: "napi_", minTail: 20, tail: base62},
-	{provider: "npm token", prefix: "npm_", minTail: 30, tail: base62},
-	{provider: "Twilio account", prefix: "AC", minTail: 32, tail: hexish},
-	{provider: "Postmark server token", prefix: "POSTMARK_API_TEST", minTail: 0, tail: base62},
-}
-
-// Scan reports every live credential in a piece of text.
-//
-// Case sensitive on purpose. Every prefix here is emitted in a fixed case by
-// the provider that issues it, and folding case turns "AC" into a match for
-// the word "ac" in a URL.
-func Scan(text, where string) []Finding {
-	var out []Finding
-	seen := map[string]bool{}
-	for _, p := range patterns {
-		// Postmark's test token is the one entry that is a literal rather
-		// than a prefix, and it means the opposite: its presence is proof the
-		// caller is in test mode, so it is never a finding.
-		if p.provider == "Postmark server token" {
-			continue
-		}
-		for i := 0; ; {
-			idx := strings.Index(text[i:], p.prefix)
-			if idx < 0 {
-				break
-			}
-			at := i + idx
-			i = at + len(p.prefix)
-			if !hasTail(text[i:], p.minTail, p.tail) {
-				continue
-			}
-			if seen[p.prefix] {
-				continue
-			}
-			seen[p.prefix] = true
-			out = append(out, Finding{Provider: p.provider, Prefix: p.prefix, Where: where})
-			break
-		}
-	}
-	return out
-}
-
-func hasTail(s string, min int, ok func(rune) bool) bool {
-	n := 0
-	for _, r := range s {
-		if !ok(r) {
-			break
-		}
-		n++
-		if n >= min {
-			return true
-		}
-	}
-	return n >= min
-}
-
-// ScanHeaders looks through a header map, naming the header that carried it.
-//
-// Headers are where credentials actually travel, and naming the one that
-// carried it is the difference between a user fixing it in a minute and
-// hunting for it.
-func ScanHeaders(headers map[string][]string) []Finding {
-	var out []Finding
-	seen := map[string]bool{}
-	for name, values := range headers {
-		for _, v := range values {
-			for _, f := range Scan(v, "the "+name+" header") {
-				if seen[f.Prefix] {
-					continue
-				}
-				seen[f.Prefix] = true
-				out = append(out, f)
-			}
-		}
-	}
-	return out
-}
-
-// Describe renders findings for a message.
-func Describe(findings []Finding) string {
-	parts := make([]string, 0, len(findings))
-	for _, f := range findings {
-		parts = append(parts, f.String())
-	}
-	return strings.Join(parts, ", ")
-}
 `,
 	"internal/mockpack/builtin.go": `package mockpack
 
@@ -2162,6 +1988,185 @@ func (c *compiled) matchesHost(host string, port int) bool {
 		return strings.HasSuffix(host, c.hostSuffix) && len(host) > len(c.hostSuffix)
 	}
 	return false
+}
+`,
+	"pkg/livekey/livekey.go": `// Package livekey recognises credentials that work against production.
+//
+// An environment holds a copy of production data and runs unreviewed code. The
+// one thing it must never hold is a key that can act on production, because
+// the whole point of the sandbox is that a mistake inside it stays inside it.
+// A live Stripe key in a preview environment is a real charge on a real card.
+//
+// So this is not a redaction problem, it is a refusal problem: a request
+// carrying one of these is stopped and reported, rather than forwarded with
+// the key hidden in the logs. Redaction protects the logs; this protects the
+// customer.
+//
+// The distinction it draws is between live and test, not between secret and
+// not. sk_test_ is a secret and belongs in an environment; sk_live_ is a
+// secret and does not. A detector that could not tell them apart would refuse
+// every sandbox request and be turned off within a day.
+//
+// It is a published package rather than an internal one for two reasons: the
+// repository scan in CI has to use the same detector the proxy uses, or the
+// two disagree about what a credential is, and anybody writing a provider has
+// the same question to answer.
+//
+// Everything here is the standard library, because this also runs inside the
+// sidecar, whose image is built with no module downloads.
+package livekey
+
+import (
+	"strings"
+)
+
+// Finding is one live credential that was recognised.
+type Finding struct {
+	// Provider is who the credential belongs to, for the message.
+	Provider string
+	// Prefix is the marker that identified it, never the credential.
+	Prefix string
+	// Where says which part of the request carried it: a header name, or the
+	// body.
+	Where string
+}
+
+// String renders a finding for a message, and deliberately never carries the
+// credential itself. A refusal that echoed the key back would put it in the
+// logs of the thing refusing it.
+func (f Finding) String() string {
+	return f.Provider + " (" + f.Prefix + ") in " + f.Where
+}
+
+// pattern is one credential shape.
+type pattern struct {
+	provider string
+	prefix   string
+	// minTail is how many characters must follow the prefix. It exists to
+	// keep prose from matching: the word "akia" in a sentence is not a key,
+	// and refusing a request because somebody wrote about one would make this
+	// the first thing a user disables.
+	minTail int
+	// tail says what those characters may be.
+	tail func(rune) bool
+}
+
+func alnum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+func base62(r rune) bool { return alnum(r) || r == '_' || r == '-' }
+
+func hexish(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+}
+
+// patterns are live credentials only.
+//
+// Every entry here has a test mode counterpart that is deliberately absent:
+// sk_test_, pk_test_, rk_test_, and the sandbox keys of the others are exactly
+// what an environment is supposed to carry.
+var patterns = []pattern{
+	{provider: "Stripe secret key", prefix: "sk_live_", minTail: 16, tail: base62},
+	{provider: "Stripe restricted key", prefix: "rk_live_", minTail: 16, tail: base62},
+	{provider: "Stripe publishable key", prefix: "pk_live_", minTail: 16, tail: base62},
+	{provider: "GitHub personal token", prefix: "ghp_", minTail: 30, tail: base62},
+	{provider: "GitHub app token", prefix: "ghs_", minTail: 30, tail: base62},
+	{provider: "GitHub fine grained token", prefix: "github_pat_", minTail: 30, tail: base62},
+	{provider: "AWS access key", prefix: "AKIA", minTail: 16, tail: func(r rune) bool {
+		return (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+	}},
+	{provider: "Slack bot token", prefix: "xoxb-", minTail: 20, tail: base62},
+	{provider: "Slack user token", prefix: "xoxp-", minTail: 20, tail: base62},
+	{provider: "SendGrid key", prefix: "SG.", minTail: 30, tail: base62},
+	{provider: "Anthropic key", prefix: "sk-ant-api", minTail: 20, tail: base62},
+	{provider: "OpenAI project key", prefix: "sk-proj-", minTail: 20, tail: base62},
+	{provider: "Supabase service key", prefix: "sbp_", minTail: 30, tail: hexish},
+	{provider: "Neon key", prefix: "napi_", minTail: 20, tail: base62},
+	{provider: "npm token", prefix: "npm_", minTail: 30, tail: base62},
+	{provider: "Twilio account", prefix: "AC", minTail: 32, tail: hexish},
+	{provider: "Postmark server token", prefix: "POSTMARK_API_TEST", minTail: 0, tail: base62},
+}
+
+// Scan reports every live credential in a piece of text.
+//
+// Case sensitive on purpose. Every prefix here is emitted in a fixed case by
+// the provider that issues it, and folding case turns "AC" into a match for
+// the word "ac" in a URL.
+func Scan(text, where string) []Finding {
+	var out []Finding
+	seen := map[string]bool{}
+	for _, p := range patterns {
+		// Postmark's test token is the one entry that is a literal rather
+		// than a prefix, and it means the opposite: its presence is proof the
+		// caller is in test mode, so it is never a finding.
+		if p.provider == "Postmark server token" {
+			continue
+		}
+		for i := 0; ; {
+			idx := strings.Index(text[i:], p.prefix)
+			if idx < 0 {
+				break
+			}
+			at := i + idx
+			i = at + len(p.prefix)
+			if !hasTail(text[i:], p.minTail, p.tail) {
+				continue
+			}
+			if seen[p.prefix] {
+				continue
+			}
+			seen[p.prefix] = true
+			out = append(out, Finding{Provider: p.provider, Prefix: p.prefix, Where: where})
+			break
+		}
+	}
+	return out
+}
+
+func hasTail(s string, min int, ok func(rune) bool) bool {
+	n := 0
+	for _, r := range s {
+		if !ok(r) {
+			break
+		}
+		n++
+		if n >= min {
+			return true
+		}
+	}
+	return n >= min
+}
+
+// ScanHeaders looks through a header map, naming the header that carried it.
+//
+// Headers are where credentials actually travel, and naming the one that
+// carried it is the difference between a user fixing it in a minute and
+// hunting for it.
+func ScanHeaders(headers map[string][]string) []Finding {
+	var out []Finding
+	seen := map[string]bool{}
+	for name, values := range headers {
+		for _, v := range values {
+			for _, f := range Scan(v, "the "+name+" header") {
+				if seen[f.Prefix] {
+					continue
+				}
+				seen[f.Prefix] = true
+				out = append(out, f)
+			}
+		}
+	}
+	return out
+}
+
+// Describe renders findings for a message.
+func Describe(findings []Finding) string {
+	parts := make([]string, 0, len(findings))
+	for _, f := range findings {
+		parts = append(parts, f.String())
+	}
+	return strings.Join(parts, ", ")
 }
 `,
 	"pkg/schema/manifest.go": "// Package schema holds the types that cross a language boundary.\n//\n// The JSON Schema documents under schemas/ are the source of truth. These Go\n// types mirror them, and a test validates real manifests against both so the\n// two cannot drift: a field added to the schema and not here, or here and not\n// there, fails the build.\n//\n// Field order follows the schema, and every field carries both a JSON and a\n// YAML tag, because the manifest is written as YAML and transmitted as JSON.\npackage schema\n\n// ManifestVersion is the schema version this build understands.\nconst ManifestVersion = 1\n\n// Manifest is antifailure.yaml.\ntype Manifest struct {\n\tVersion    int         `json:\"version\" yaml:\"version\"`\n\tName       string      `json:\"name,omitempty\" yaml:\"name,omitempty\"`\n\tServices   []Service   `json:\"services,omitempty\" yaml:\"services,omitempty\"`\n\tDatabase   *Database   `json:\"database,omitempty\" yaml:\"database,omitempty\"`\n\tEgress     *Egress     `json:\"egress,omitempty\" yaml:\"egress,omitempty\"`\n\tPersonas   []Persona   `json:\"personas,omitempty\" yaml:\"personas,omitempty\"`\n\tWorkflows  []Workflow  `json:\"workflows,omitempty\" yaml:\"workflows,omitempty\"`\n\tInvariants []Invariant `json:\"invariants,omitempty\" yaml:\"invariants,omitempty\"`\n\tInsights   *Insights   `json:\"insights,omitempty\" yaml:\"insights,omitempty\"`\n\tLoad       *Load       `json:\"load,omitempty\" yaml:\"load,omitempty\"`\n\tRuntime    *Runtime    `json:\"runtime,omitempty\" yaml:\"runtime,omitempty\"`\n\tGitHub     *GitHub     `json:\"github,omitempty\" yaml:\"github,omitempty\"`\n}\n\n// ServiceKind is what a service is.\ntype ServiceKind string\n\nconst (\n\t// ServiceWeb gets a hostname and a readiness check.\n\tServiceWeb ServiceKind = \"web\"\n\t// ServiceWorker runs continuously with neither.\n\tServiceWorker ServiceKind = \"worker\"\n\t// ServiceCron is invoked on a schedule rather than run continuously.\n\tServiceCron ServiceKind = \"cron\"\n)\n\n// Service is one process the environment runs.\ntype Service struct {\n\tName          string      `json:\"name\" yaml:\"name\"`\n\tPath          string      `json:\"path,omitempty\" yaml:\"path,omitempty\"`\n\tKind          ServiceKind `json:\"kind,omitempty\" yaml:\"kind,omitempty\"`\n\tBuild         *Build      `json:\"build,omitempty\" yaml:\"build,omitempty\"`\n\tCommand       string      `json:\"command,omitempty\" yaml:\"command,omitempty\"`\n\tPort          int         `json:\"port,omitempty\" yaml:\"port,omitempty\"`\n\tHealthPath    string      `json:\"health_path,omitempty\" yaml:\"health_path,omitempty\"`\n\tHealthTimeout string      `json:\"health_timeout,omitempty\" yaml:\"health_timeout,omitempty\"`\n\tEnv           []EnvVar    `json:\"env,omitempty\" yaml:\"env,omitempty\"`\n\tReplicas      int         `json:\"replicas,omitempty\" yaml:\"replicas,omitempty\"`\n\tResources     *Resources  `json:\"resources,omitempty\" yaml:\"resources,omitempty\"`\n\tSchedule      string      `json:\"schedule,omitempty\" yaml:\"schedule,omitempty\"`\n\tMigrate       string      `json:\"migrate,omitempty\" yaml:\"migrate,omitempty\"`\n\tDependsOn     []string    `json:\"depends_on,omitempty\" yaml:\"depends_on,omitempty\"`\n}\n\n// BuildStrategy is how a service becomes an image.\ntype BuildStrategy string\n\nconst (\n\t// BuildAuto picks a Dockerfile if there is one and a buildpack otherwise.\n\tBuildAuto BuildStrategy = \"auto\"\n\t// BuildDockerfile uses the service's Dockerfile.\n\tBuildDockerfile BuildStrategy = \"dockerfile\"\n\t// BuildBuildpack infers the build from the language and lockfile.\n\tBuildBuildpack BuildStrategy = \"buildpack\"\n\t// BuildImage uses a prebuilt image and does not build at all.\n\tBuildImage BuildStrategy = \"image\"\n)\n\n// Build describes how to produce a service's image.\ntype Build struct {\n\tStrategy   BuildStrategy     `json:\"strategy,omitempty\" yaml:\"strategy,omitempty\"`\n\tDockerfile string            `json:\"dockerfile,omitempty\" yaml:\"dockerfile,omitempty\"`\n\tTarget     string            `json:\"target,omitempty\" yaml:\"target,omitempty\"`\n\tContext    string            `json:\"context,omitempty\" yaml:\"context,omitempty\"`\n\tImage      string            `json:\"image,omitempty\" yaml:\"image,omitempty\"`\n\tArgs       map[string]string `json:\"args,omitempty\" yaml:\"args,omitempty\"`\n\tAllowHosts []string          `json:\"allow_hosts,omitempty\" yaml:\"allow_hosts,omitempty\"`\n}\n\n// EnvVar names a variable a service needs. It holds a name, never a secret.\ntype EnvVar struct {\n\tName string `json:\"name\" yaml:\"name\"`\n\t// Required defaults to true. The pointer distinguishes \"not set, so use\n\t// the default\" from \"explicitly set to false\", which a bare bool cannot.\n\tRequired *bool  `json:\"required,omitempty\" yaml:\"required,omitempty\"`\n\tSandbox  bool   `json:\"sandbox,omitempty\" yaml:\"sandbox,omitempty\"`\n\tValue    string `json:\"value,omitempty\" yaml:\"value,omitempty\"`\n\tFrom     string `json:\"from,omitempty\" yaml:\"from,omitempty\"`\n}\n\n// IsRequired reports the effective value of Required.\nfunc (e EnvVar) IsRequired() bool { return e.Required == nil || *e.Required }\n\n// Resources caps a service's CPU and memory.\ntype Resources struct {\n\tCPU    string `json:\"cpu,omitempty\" yaml:\"cpu,omitempty\"`\n\tMemory string `json:\"memory,omitempty\" yaml:\"memory,omitempty\"`\n}\n\n// DBProvider names the database provider.\ntype DBProvider string\n\nconst (\n\tDBDocker   DBProvider = \"docker\"\n\tDBNeon     DBProvider = \"neon\"\n\tDBSupabase DBProvider = \"supabase\"\n\tDBDBLab    DBProvider = \"dblab\"\n)\n\n// Database says where the environment's Postgres comes from.\ntype Database struct {\n\tProvider     DBProvider `json:\"provider,omitempty\" yaml:\"provider,omitempty\"`\n\tVersion      int        `json:\"version,omitempty\" yaml:\"version,omitempty\"`\n\tSourceURLEnv string     `json:\"source_url_env,omitempty\" yaml:\"source_url_env,omitempty\"`\n\tURLEnv       string     `json:\"url_env,omitempty\" yaml:\"url_env,omitempty\"`\n\tMaskingRules string     `json:\"masking_rules,omitempty\" yaml:\"masking_rules,omitempty\"`\n\tGolden       *Golden    `json:\"golden,omitempty\" yaml:\"golden,omitempty\"`\n\tSubset       *Subset    `json:\"subset,omitempty\" yaml:\"subset,omitempty\"`\n\tSeed         string     `json:\"seed,omitempty\" yaml:\"seed,omitempty\"`\n}\n\n// GoldenStorage names where dumps and attestations live.\ntype GoldenStorage string\n\nconst (\n\tStorageLocal     GoldenStorage = \"local\"\n\tStorageAzureBlob GoldenStorage = \"azure_blob\"\n\tStorageS3        GoldenStorage = \"s3\"\n)\n\n// Golden configures the masked, verified copy environments branch from.\ntype Golden struct {\n\tSchedule   string        `json:\"schedule,omitempty\" yaml:\"schedule,omitempty\"`\n\tMaxAge     string        `json:\"max_age,omitempty\" yaml:\"max_age,omitempty\"`\n\tRetain     int           `json:\"retain,omitempty\" yaml:\"retain,omitempty\"`\n\tStorage    GoldenStorage `json:\"storage,omitempty\" yaml:\"storage,omitempty\"`\n\tStorageURL string        `json:\"storage_url,omitempty\" yaml:\"storage_url,omitempty\"`\n}\n\n// Subset configures taking a production shaped slice.\ntype Subset struct {\n\tEnabled              bool                  `json:\"enabled,omitempty\" yaml:\"enabled,omitempty\"`\n\tSeedTable            string                `json:\"seed_table,omitempty\" yaml:\"seed_table,omitempty\"`\n\tSeedWhere            string                `json:\"seed_where,omitempty\" yaml:\"seed_where,omitempty\"`\n\tMaxRows              int                   `json:\"max_rows,omitempty\" yaml:\"max_rows,omitempty\"`\n\tFollowDependents     *int                  `json:\"follow_dependents,omitempty\" yaml:\"follow_dependents,omitempty\"`\n\tVirtualRelationships []VirtualRelationship `json:\"virtual_relationships,omitempty\" yaml:\"virtual_relationships,omitempty\"`\n}\n\n// VirtualRelationship declares a link the schema does not.\ntype VirtualRelationship struct {\n\tFrom string `json:\"from\" yaml:\"from\"`\n\tTo   string `json:\"to\" yaml:\"to\"`\n}\n\n// Mode is what happens to an outbound request.\ntype Mode string\n\nconst (\n\t// ModeBlock refuses with a readable decision.\n\tModeBlock Mode = \"block\"\n\t// ModeAllow passes through, with an optional rate limit.\n\tModeAllow Mode = \"allow\"\n\t// ModeCapture records the message into the inbox and returns the\n\t// provider's documented success shape.\n\tModeCapture Mode = \"capture\"\n\t// ModeMock answers from a fixture pack or an offline provider pack.\n\tModeMock Mode = \"mock\"\n\t// ModeSandbox substitutes test credentials and forwards to the provider's\n\t// sandbox.\n\tModeSandbox Mode = \"sandbox\"\n\t// ModeSynth asks a model to invent a response, and marks every result that\n\t// touched it as unverified rather than passed.\n\tModeSynth Mode = \"synth\"\n)\n\n// AllModes returns every mode, in the order they appear in the documentation.\nfunc AllModes() []Mode {\n\treturn []Mode{ModeBlock, ModeAllow, ModeCapture, ModeMock, ModeSandbox, ModeSynth}\n}\n\n// Egress says what the environment may reach.\ntype Egress struct {\n\tDefault   Mode         `json:\"default,omitempty\" yaml:\"default,omitempty\"`\n\tAllowIPv6 bool         `json:\"allow_ipv6,omitempty\" yaml:\"allow_ipv6,omitempty\"`\n\tRules     []EgressRule `json:\"rules,omitempty\" yaml:\"rules,omitempty\"`\n}\n\n// EgressRule matches a host and says what to do with it.\ntype EgressRule struct {\n\tHost        string   `json:\"host\" yaml:\"host\"`\n\tMode        Mode     `json:\"mode\" yaml:\"mode\"`\n\tPaths       []string `json:\"paths,omitempty\" yaml:\"paths,omitempty\"`\n\tMethods     []string `json:\"methods,omitempty\" yaml:\"methods,omitempty\"`\n\tRateLimit   string   `json:\"rate_limit,omitempty\" yaml:\"rate_limit,omitempty\"`\n\tCredential  string   `json:\"credential,omitempty\" yaml:\"credential,omitempty\"`\n\tFixtures    string   `json:\"fixtures,omitempty\" yaml:\"fixtures,omitempty\"`\n\tWebhookPath string   `json:\"webhook_path,omitempty\" yaml:\"webhook_path,omitempty\"`\n\tNote        string   `json:\"note,omitempty\" yaml:\"note,omitempty\"`\n}\n\n// LoginStrategy is how a persona signs in.\ntype LoginStrategy string\n\nconst (\n\tLoginPassword  LoginStrategy = \"password\"\n\tLoginMagicLink LoginStrategy = \"magic_link\"\n\tLoginEmailCode LoginStrategy = \"email_code\"\n\tLoginSMSCode   LoginStrategy = \"sms_code\"\n\tLoginTOTP      LoginStrategy = \"totp\"\n\tLoginSession   LoginStrategy = \"session\"\n)\n\n// Persona is an account an agent logs in as.\ntype Persona struct {\n\tName       string            `json:\"name\" yaml:\"name\"`\n\tEmail      string            `json:\"email,omitempty\" yaml:\"email,omitempty\"`\n\tRole       string            `json:\"role,omitempty\" yaml:\"role,omitempty\"`\n\tLogin      LoginStrategy     `json:\"login,omitempty\" yaml:\"login,omitempty\"`\n\tMFA        bool              `json:\"mfa,omitempty\" yaml:\"mfa,omitempty\"`\n\tAttributes map[string]string `json:\"attributes,omitempty\" yaml:\"attributes,omitempty\"`\n}\n\n// Workflow is something an agent does.\ntype Workflow struct {\n\tName        string   `json:\"name\" yaml:\"name\"`\n\tDescription string   `json:\"description\" yaml:\"description\"`\n\tPersona     string   `json:\"persona,omitempty\" yaml:\"persona,omitempty\"`\n\tStartPath   string   `json:\"start_path,omitempty\" yaml:\"start_path,omitempty\"`\n\tIndependent bool     `json:\"independent,omitempty\" yaml:\"independent,omitempty\"`\n\tBudget      *Budget  `json:\"budget,omitempty\" yaml:\"budget,omitempty\"`\n\tExpect      []string `json:\"expect,omitempty\" yaml:\"expect,omitempty\"`\n\tTags        []string `json:\"tags,omitempty\" yaml:\"tags,omitempty\"`\n}\n\n// Budget caps what one workflow may consume.\ntype Budget struct {\n\tSteps    int     `json:\"steps,omitempty\" yaml:\"steps,omitempty\"`\n\tUSD      float64 `json:\"usd,omitempty\" yaml:\"usd,omitempty\"`\n\tDuration string  `json:\"duration,omitempty\" yaml:\"duration,omitempty\"`\n}\n\n// Invariant is a read only statement that must return no rows.\ntype Invariant struct {\n\tName        string `json:\"name\" yaml:\"name\"`\n\tSQL         string `json:\"sql\" yaml:\"sql\"`\n\tDescription string `json:\"description,omitempty\" yaml:\"description,omitempty\"`\n}\n\n// Insights configures the Postgres native checks.\ntype Insights struct {\n\tEnabled            *bool   `json:\"enabled,omitempty\" yaml:\"enabled,omitempty\"`\n\tMigrationRehearsal *bool   `json:\"migration_rehearsal,omitempty\" yaml:\"migration_rehearsal,omitempty\"`\n\tQueryRegression    *bool   `json:\"query_regression,omitempty\" yaml:\"query_regression,omitempty\"`\n\tPlanDiff           *bool   `json:\"plan_diff,omitempty\" yaml:\"plan_diff,omitempty\"`\n\tRegressionFactor   float64 `json:\"regression_factor,omitempty\" yaml:\"regression_factor,omitempty\"`\n\tRegressionMinMS    float64 `json:\"regression_min_ms,omitempty\" yaml:\"regression_min_ms,omitempty\"`\n\tLargeTableRows     int     `json:\"large_table_rows,omitempty\" yaml:\"large_table_rows,omitempty\"`\n}\n\n// LoadSource names where the endpoint mix comes from.\ntype LoadSource string\n\nconst (\n\tLoadNone      LoadSource = \"none\"\n\tLoadDatadog   LoadSource = \"datadog\"\n\tLoadNewRelic  LoadSource = \"newrelic\"\n\tLoadOTel      LoadSource = \"otel\"\n\tLoadAccessLog LoadSource = \"access_log\"\n)\n\n// Load configures production shaped traffic.\ntype Load struct {\n\tEnabled      bool              `json:\"enabled,omitempty\" yaml:\"enabled,omitempty\"`\n\tSource       LoadSource        `json:\"source,omitempty\" yaml:\"source,omitempty\"`\n\tSourceConfig map[string]string `json:\"source_config,omitempty\" yaml:\"source_config,omitempty\"`\n\tScale        float64           `json:\"scale,omitempty\" yaml:\"scale,omitempty\"`\n\tDuration     string            `json:\"duration,omitempty\" yaml:\"duration,omitempty\"`\n\tSafeRoutes   []string          `json:\"safe_routes,omitempty\" yaml:\"safe_routes,omitempty\"`\n\tUnsafeRoutes []string          `json:\"unsafe_routes,omitempty\" yaml:\"unsafe_routes,omitempty\"`\n\tThresholds   *LoadThresholds   `json:\"thresholds,omitempty\" yaml:\"thresholds,omitempty\"`\n}\n\n// LoadThresholds are the deltas that fail a run.\ntype LoadThresholds struct {\n\tP95Increase        float64 `json:\"p95_increase,omitempty\" yaml:\"p95_increase,omitempty\"`\n\tErrorRate          float64 `json:\"error_rate,omitempty\" yaml:\"error_rate,omitempty\"`\n\tQueryCountIncrease float64 `json:\"query_count_increase,omitempty\" yaml:\"query_count_increase,omitempty\"`\n}\n\n// RuntimeProvider names where environments run.\ntype RuntimeProvider string\n\nconst (\n\tRuntimeLocal      RuntimeProvider = \"local\"\n\tRuntimeKubernetes RuntimeProvider = \"kubernetes\"\n)\n\n// Runtime configures where and how long environments run.\ntype Runtime struct {\n\tProvider          RuntimeProvider `json:\"provider,omitempty\" yaml:\"provider,omitempty\"`\n\tTTL               string          `json:\"ttl,omitempty\" yaml:\"ttl,omitempty\"`\n\tIdleSleep         string          `json:\"idle_sleep,omitempty\" yaml:\"idle_sleep,omitempty\"`\n\tDomain            string          `json:\"domain,omitempty\" yaml:\"domain,omitempty\"`\n\tNamespacePrefix   string          `json:\"namespace_prefix,omitempty\" yaml:\"namespace_prefix,omitempty\"`\n\tKubeconfigContext string          `json:\"kubeconfig_context,omitempty\" yaml:\"kubeconfig_context,omitempty\"`\n}\n\n// GitHubMode is how the GitHub integration runs.\ntype GitHubMode string\n\nconst (\n\t// GitHubActions runs everything inside a workflow, with no server.\n\tGitHubActions GitHubMode = \"actions\"\n\t// GitHubApp uses the GitHub App and the control plane.\n\tGitHubApp GitHubMode = \"app\"\n\t// GitHubOff disables the integration.\n\tGitHubOff GitHubMode = \"off\"\n)\n\n// ForkPolicy is what to do with a pull request from a fork.\ntype ForkPolicy string\n\nconst (\n\tForkNever  ForkPolicy = \"never\"\n\tForkLabel  ForkPolicy = \"label\"\n\tForkAlways ForkPolicy = \"always\"\n)\n\n// GitHub configures the pull request integration.\ntype GitHub struct {\n\tMode       GitHubMode `json:\"mode,omitempty\" yaml:\"mode,omitempty\"`\n\tComment    *bool      `json:\"comment,omitempty\" yaml:\"comment,omitempty\"`\n\tForkPolicy ForkPolicy `json:\"fork_policy,omitempty\" yaml:\"fork_policy,omitempty\"`\n\tTeardownOn []string   `json:\"teardown_on,omitempty\" yaml:\"teardown_on,omitempty\"`\n}\n",

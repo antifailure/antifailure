@@ -32,7 +32,6 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/journal"
-	"github.com/antifailure/antifailure/engine/internal/livekey"
 	"github.com/antifailure/antifailure/engine/internal/lock"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
@@ -41,6 +40,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/state"
 	"github.com/antifailure/antifailure/engine/internal/webhook"
+	"github.com/antifailure/antifailure/engine/pkg/livekey"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )

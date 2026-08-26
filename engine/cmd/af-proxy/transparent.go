@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/antifailure/antifailure/engine/internal/livekey"
 	"github.com/antifailure/antifailure/engine/internal/policy"
+	"github.com/antifailure/antifailure/engine/pkg/livekey"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 

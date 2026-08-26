@@ -15,7 +15,12 @@
 // secret and does not. A detector that could not tell them apart would refuse
 // every sandbox request and be turned off within a day.
 //
-// Everything here is the standard library, because this runs inside the
+// It is a published package rather than an internal one for two reasons: the
+// repository scan in CI has to use the same detector the proxy uses, or the
+// two disagree about what a credential is, and anybody writing a provider has
+// the same question to answer.
+//
+// Everything here is the standard library, because this also runs inside the
 // sidecar, whose image is built with no module downloads.
 package livekey
 

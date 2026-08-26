@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/antifailure/antifailure/engine/internal/livekey"
+	"github.com/antifailure/antifailure/engine/pkg/livekey"
 )
 
 // The credentials below are assembled at runtime rather than written out, so

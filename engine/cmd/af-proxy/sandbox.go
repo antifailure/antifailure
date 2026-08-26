@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/antifailure/antifailure/engine/internal/livekey"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
+	"github.com/antifailure/antifailure/engine/pkg/livekey"
 )
 
 // Sandbox mode swaps the credential and lets the request through to the
