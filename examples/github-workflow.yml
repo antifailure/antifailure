@@ -1,0 +1,71 @@
+# Copy this to .github/workflows/antifailure.yml.
+#
+# One command rather than five, because a workflow file that threads five
+# commands together is a file every user edits slightly and gets subtly wrong.
+# af ci brings the environment up, runs the agents, writes the report, and
+# tears down whatever happens, including on a failure and including on a
+# cancelled job.
+name: Antifailure
+
+on:
+  pull_request:
+
+# One environment per branch. A second push replaces the first rather than
+# running beside it and fighting it for container names.
+concurrency:
+  group: antifailure-${{ github.head_ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Only to leave the report. Nothing here needs write access to the code.
+  pull-requests: write
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Antifailure
+        run: curl -fsSL https://antifailure.dev/install.sh | sh
+
+      - name: Run the check
+        run: af ci --output report.md
+        env:
+          # Bring your own key. Without one the agents still run; workflows
+          # that need a page read come back unverified rather than guessed at.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Only needed if the manifest sets a host to sandbox mode. It must be
+          # a test credential; a live one is refused before anything starts.
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          # Set this so every runner produces the same masking, and two
+          # goldens can be compared. Left unset, each machine generates its own.
+          AF_MASKING_KEY: ${{ secrets.AF_MASKING_KEY }}
+
+      - name: Leave the report on the pull request
+        # Always, because the report of a failing run is the one worth reading.
+        if: always() && hashFiles('report.md') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('report.md', 'utf8');
+            const marker = '<!-- antifailure:report -->';
+
+            // Updated rather than added, or a pull request with twelve pushes
+            // gets twelve comments and the twelfth is the only one that is true.
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: context.issue.number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: context.issue.number, body,
+              });
+            }

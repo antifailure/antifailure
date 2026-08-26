@@ -1,0 +1,153 @@
+package report_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/antifailure/antifailure/engine/internal/report"
+)
+
+func run(workflows ...report.Workflow) report.Run {
+	return report.Run{
+		Environment: "shop-feature-x-9f0e", URL: "http://127.0.0.1:46000",
+		Branch: "feature/x", Commit: "9f0edc1234567", Workflows: workflows,
+	}
+}
+
+func TestVerdict_AFailureOutranksEverything(t *testing.T) {
+	t.Parallel()
+	r := run(
+		report.Workflow{Name: "a", Verdict: "pass"},
+		report.Workflow{Name: "b", Verdict: "blocked"},
+		report.Workflow{Name: "c", Verdict: "fail"},
+	)
+	require.Equal(t, "fail", r.Verdict())
+}
+
+func TestVerdict_FlakyOutranksBlocked(t *testing.T) {
+	t.Parallel()
+	// A flaky workflow is a real signal about the application; a blocked one
+	// is a signal about us, and burying the first under the second is how the
+	// comment stops being useful.
+	r := run(
+		report.Workflow{Name: "a", Verdict: "blocked"},
+		report.Workflow{Name: "b", Verdict: "flaky"},
+	)
+	require.Equal(t, "flaky", r.Verdict())
+}
+
+func TestVerdict_NothingRanIsBlocked(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "blocked", run().Verdict())
+	require.Equal(t, "Nothing ran.", run().Headline())
+}
+
+func TestMarkdown_FailuresComeFirst(t *testing.T) {
+	t.Parallel()
+	// Somebody scrolling to find the failure is the same as somebody not
+	// seeing it.
+	body := run(
+		report.Workflow{Name: "passing", Verdict: "pass"},
+		report.Workflow{Name: "blocked-one", Verdict: "blocked", Detail: "no fixture"},
+		report.Workflow{Name: "broken", Verdict: "fail", Detail: "still the free plan"},
+	).Markdown()
+
+	require.Less(t, strings.Index(body, "`broken`"), strings.Index(body, "`blocked-one`"))
+	require.Less(t, strings.Index(body, "`blocked-one`"), strings.Index(body, "`passing`"))
+	require.Contains(t, body, "1 workflow failed.")
+}
+
+func TestMarkdown_ABlockedRunSaysItDoesNotCount(t *testing.T) {
+	t.Parallel()
+	// A comment that reads as a wall of red on a pull request that is fine is
+	// a comment people mute, and a muted comment is a check everybody believes
+	// is running.
+	body := run(report.Workflow{Name: "a", Verdict: "blocked", Detail: "the browser closed"}).Markdown()
+	require.Contains(t, body, "Nothing here counts against the change.")
+	require.Contains(t, body, "not counted against this change")
+}
+
+func TestMarkdown_StepsAreFoldedAndOnlyForFailures(t *testing.T) {
+	t.Parallel()
+	body := run(
+		report.Workflow{Name: "passing", Verdict: "pass", Steps: []string{"1. do a thing"}},
+		report.Workflow{Name: "broken", Verdict: "fail", Steps: []string{"1. open /", "2. press Buy"},
+			Trace: "/tmp/broken.trace.zip"},
+	).Markdown()
+
+	require.Contains(t, body, "<details><summary>How to see <code>broken</code> yourself")
+	require.Contains(t, body, "2. press Buy")
+	require.Contains(t, body, "/tmp/broken.trace.zip")
+	require.NotContains(t, body, "<code>passing</code> yourself",
+		"a passing workflow needs no reproduction steps")
+}
+
+func TestMarkdown_ATableCellStaysACell(t *testing.T) {
+	t.Parallel()
+	// A detail with a newline or a pipe in it breaks the table, and a broken
+	// table is unreadable rather than merely ugly.
+	body := run(report.Workflow{
+		Name: "broken", Verdict: "fail",
+		Detail: "line one\nline two | with a pipe",
+	}).Markdown()
+
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "| `broken`") {
+			require.Equal(t, 4, strings.Count(line, "|")-strings.Count(line, "\\|"),
+				"the row has exactly the cells it should: %s", line)
+			require.Contains(t, line, "line one line two")
+		}
+	}
+}
+
+func TestMarkdown_ReportsUnverifiedMasking(t *testing.T) {
+	t.Parallel()
+	r := run(report.Workflow{Name: "a", Verdict: "pass"})
+	r.Verification = &report.Verification{
+		Clean: false, Findings: []string{"public.customers.email holds email."},
+	}
+	body := r.Markdown()
+	require.Contains(t, body, "**Masking did not verify.**")
+	require.Contains(t, body, "customers.email")
+}
+
+func TestMarkdown_NamesRefusedHostsNothingMentions(t *testing.T) {
+	t.Parallel()
+	// Usually a dependency somebody added without noticing, which is the one
+	// line in the whole comment that teaches somebody something.
+	r := run(report.Workflow{Name: "a", Verdict: "pass"})
+	r.Egress = &report.Egress{Allowed: 12, Refused: 3, Surprises: []string{"api.newthing.com"}}
+	body := r.Markdown()
+	require.Contains(t, body, "api.newthing.com")
+	require.Contains(t, body, "add a rule")
+}
+
+func TestComment_CarriesAMarkerSoAnUpdateReplacesIt(t *testing.T) {
+	t.Parallel()
+	// A check that adds a comment per push turns a pull request with twelve
+	// pushes into one with twelve comments, and the twelfth is the only one
+	// that is true.
+	body := run(report.Workflow{Name: "a", Verdict: "pass"}).Comment()
+	require.True(t, strings.HasPrefix(body, report.Marker))
+}
+
+func TestMarkdown_DocsLinkCanPointAtASelfHostedCopy(t *testing.T) {
+	t.Parallel()
+	r := run(report.Workflow{Name: "a", Verdict: "blocked"})
+	r.DocsBase = "https://docs.internal.example"
+	require.Contains(t, r.Markdown(), "https://docs.internal.example/concepts/verdicts")
+	require.NotContains(t, r.Markdown(), "antifailure.dev")
+}
+
+func TestMarkdown_FooterCarriesWhatWasTested(t *testing.T) {
+	t.Parallel()
+	r := run(report.Workflow{Name: "a", Verdict: "pass"})
+	r.Duration, r.Golden = "2m14s", "gv_20260826"
+	body := r.Markdown()
+	require.Contains(t, body, "feature/x")
+	require.Contains(t, body, "`9f0edc1`", "the commit is short, the way everybody writes it")
+	require.Contains(t, body, "2m14s")
+	require.Contains(t, body, "gv_20260826")
+}

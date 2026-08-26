@@ -277,6 +277,7 @@ recoverable by replay.`),
 		newExplainCommand(env),
 		newDoctorCommand(env),
 		newSupportCommand(env),
+		newCICommand(env),
 		newVersionCommand(env),
 	)
 	root.SetHelpTemplate(helpTemplate)
