@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -10,6 +12,8 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
+	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // The command tree is declared in full from the first release, including
@@ -40,6 +44,7 @@ one line answer.`),
 				return env.Out.JSON(m)
 			}
 			env.Out.Raw(manifest.Explain(m))
+			env.Out.Raw(explainSecrets(cmd.Context(), env, m, filepath.Dir(path)))
 			return nil
 		},
 	}
@@ -112,3 +117,78 @@ func commandNames(root *cobra.Command) []string {
 
 // ensure the errors import stays used as commands land.
 var _ = aferrors.ExitSuccess
+
+// explainSecrets says where each declared variable would come from.
+//
+// The section exists because of one question: somebody sees AF-SEC-001 and
+// needs to know where to put the value. Listing the variables a service wants,
+// which this already did through the manifest, does not answer that. Saying
+// which source would answer for each one, and which would not, does.
+//
+// Names, sources, and a fingerprint. Never a value. This is printed on a
+// terminal somebody may be sharing and goes into support bundles, and a
+// fingerprint is enough to answer the other common question, which is whether
+// two machines have the same value without either person reading theirs out.
+func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string) string {
+	declared := secrets.DeclaredVars(m)
+	sandbox := secrets.SandboxNames(m)
+	if len(declared) == 0 && len(sandbox) == 0 {
+		return ""
+	}
+
+	chain := secrets.NewChain(
+		&secrets.EnvSource{
+			Label: "this shell's environment",
+			Getenv: func(name string) (string, bool) {
+				v := e.Getenv(name)
+				return v, v != ""
+			},
+		},
+		secrets.NewDotEnvSource(filepath.Join(root, ".env")),
+		secrets.NewFileStore(
+			filepath.Join(root, ".antifailure", "secrets.enc"),
+			e.Getenv("AF_SECRET_PASSPHRASE"),
+		),
+	)
+
+	resolved, err := secrets.Resolve(ctx, chain, secrets.Request{
+		Declared: declared, Sandbox: sandbox, EnvID: "explain",
+	})
+	if err != nil {
+		// A live credential in a sandbox slot stops af up, and explain is
+		// exactly where somebody would look to find out why, so it is reported
+		// here rather than swallowed.
+		return fmt.Sprintf("\nSecrets\n  %v\n", err)
+	}
+
+	var b strings.Builder
+	b.WriteString("\nSecrets\n")
+
+	isSandbox := map[string]bool{}
+	for _, name := range sandbox {
+		isSandbox[name] = true
+	}
+
+	for _, r := range resolved.Resolutions {
+		note := ""
+		if isSandbox[strings.Fields(r.Name)[0]] {
+			// Worth saying every time. The value going to the sidecar and a
+			// marker going to the service is the single most surprising thing
+			// about how this works, and somebody who does not know it will
+			// spend an hour wondering why their application sees a placeholder.
+			note = "  (to the proxy; the service gets a marker)"
+		}
+		fmt.Fprintf(&b, "  %-28s %s%s\n", r.Name, r.Source, note)
+	}
+	for _, mi := range resolved.Optional {
+		fmt.Fprintf(&b, "  %-28s not set, and not required\n", mi.Name)
+	}
+	for _, mi := range resolved.Missing {
+		fmt.Fprintf(&b, "  %-28s not found\n", mi.Name)
+	}
+
+	if len(resolved.Missing) > 0 {
+		fmt.Fprintf(&b, "\n  Looked in: %s\n", strings.Join(chain.Considered(ctx), ", "))
+	}
+	return b.String()
+}

@@ -490,3 +490,93 @@ func TestLicense_StatusInJSONNamesTheEdition(t *testing.T) {
 	require.Equal(t, "none", doc.State)
 	require.Empty(t, doc.Extensions, "the stock build has nothing registered at the extension points")
 }
+
+// af explain answers the question somebody has right after AF-SEC-001, which is
+// not "which variables does this need" but "where would each one come from".
+func TestExplain_SaysWhereEachSecretWouldComeFrom(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeManifest(t, dir, `
+version: 1
+name: shop
+services:
+  - name: web
+    kind: web
+    command: npm start
+    port: 3000
+    env:
+      - name: DATABASE_URL
+      - name: STRIPE_SECRET_KEY
+      - name: SENTRY_DSN
+        required: false
+      - name: NODE_ENV
+        value: preview
+egress:
+  default: block
+  rules:
+    - host: api.stripe.com
+      mode: sandbox
+      credential: STRIPE_SECRET_KEY
+`)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"),
+		[]byte("STRIPE_SECRET_KEY=sk_test_from_the_file\n"), 0o600))
+
+	got := runCLI(t, dir, map[string]string{"DATABASE_URL": "postgres://from-shell"}, "explain")
+	require.Zero(t, got.code)
+
+	require.Contains(t, got.stdout, "DATABASE_URL")
+	require.Contains(t, got.stdout, "this shell's environment")
+	require.Contains(t, got.stdout, ".env")
+	// A literal in the manifest is not a secret and says so.
+	require.Contains(t, got.stdout, "the manifest")
+	// Optional and missing read differently, or a warning looks like an error.
+	require.Contains(t, got.stdout, "not set, and not required")
+	// The single most surprising thing about how this works, said every time.
+	require.Contains(t, got.stdout, "the service gets a marker")
+
+	// And never a value, because this is printed on a terminal somebody may be
+	// sharing and it goes into support bundles.
+	require.NotContains(t, got.stdout, "sk_test_from_the_file")
+	require.NotContains(t, got.stdout, "postgres://from-shell")
+}
+
+func TestExplain_SaysWhereItLookedWhenSomethingIsMissing(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeManifest(t, dir, `
+version: 1
+name: shop
+services:
+  - name: web
+    kind: web
+    command: npm start
+    port: 3000
+    env:
+      - name: DATABASE_URL
+`)
+	got := runCLI(t, dir, nil, "explain")
+	require.Zero(t, got.code, "explain reports; it does not fail on a missing variable")
+	require.Contains(t, got.stdout, "not found")
+	// Including the file that does not exist yet, which is very often where the
+	// value belongs.
+	require.Contains(t, got.stdout, ".env (not present)")
+}
+
+func TestExplain_WithNoDeclaredVariablesSaysNothingAboutSecrets(t *testing.T) {
+	t.Parallel()
+	// A section that is always there and always empty is noise, and noise in
+	// the output of a command whose whole job is clarity is a bug.
+	dir := t.TempDir()
+	writeManifest(t, dir, `
+version: 1
+name: shop
+services:
+  - name: web
+    kind: web
+    command: npm start
+    port: 3000
+`)
+	got := runCLI(t, dir, nil, "explain")
+	require.Zero(t, got.code)
+	require.NotContains(t, got.stdout, "Secrets")
+}
