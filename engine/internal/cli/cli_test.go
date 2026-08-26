@@ -161,14 +161,16 @@ func TestRoot_DirectoryFlagRejectsANonDirectory(t *testing.T) {
 
 // Every command in the tree exists from the first release, including the ones
 // whose engines have not landed. A command that says "not yet available" is
-// honest; a missing one makes a user think they have the wrong version, and a
-// silently doing nothing one is the failure this product exists to prevent.
+// honest; a missing one makes a user think they have the wrong version, and one
+// that silently does nothing is the failure this product exists to prevent.
+//
+// The list is empty. It is kept, rather than deleted with the last entry,
+// because the next command added is the next candidate for it, and because an
+// empty list is the assertion: nothing in the tree is a placeholder.
 func TestUnimplementedCommands_SayNotYetAvailableRatherThanPretending(t *testing.T) {
 	t.Parallel()
-	commands := [][]string{
+	commands := [][]string{}
 
-		{"env", "pull"},
-	}
 	for _, args := range commands {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			t.Parallel()
@@ -180,6 +182,36 @@ func TestUnimplementedCommands_SayNotYetAvailableRatherThanPretending(t *testing
 			require.NotContains(t, strings.ToLower(got.stdout), "success")
 		})
 	}
+
+	require.Empty(t, commands,
+		"a command in this list is a placeholder; when the list empties, every command does something")
+}
+
+// af env pull is the one command that needs a control plane, so it is also the
+// one that has to explain its absence rather than failing with a network error.
+func TestEnvPull_SaysWhatIsMissingRatherThanFailingToConnect(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, t.TempDir(), nil, "env", "pull", "af-example")
+	require.Equal(t, int(aferrors.ExitConfiguration), got.code)
+	require.Contains(t, got.stderr, "AF-CPL-001")
+	// The next step is to create a token, not to check the network.
+	require.Contains(t, got.stderr, "AF_CONTROL_PLANE_TOKEN")
+	// And it has to say that this is the only thing that needs one, so nobody
+	// concludes the product requires a hosted service.
+	require.Contains(t, strings.ToLower(got.stderr), "without one")
+}
+
+// A token must never be sent to a plain HTTP host that is not this machine.
+func TestEnvPull_RefusesToSendATokenInTheClear(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{
+		"AF_CONTROL_PLANE_TOKEN": "aft_" + strings.Repeat("a", 40),
+		"AF_CONTROL_PLANE_URL":   "http://control.example.com",
+	}
+	got := runCLI(t, t.TempDir(), env, "env", "pull", "af-example")
+	require.NotZero(t, got.code)
+	require.Contains(t, got.stderr, "not https")
+	require.NotContains(t, got.stderr, "aaaaaaaa")
 }
 
 // An error message that names the problem and stops is the difference between

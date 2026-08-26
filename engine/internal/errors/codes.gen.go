@@ -38,6 +38,14 @@ const (
 	// The control plane rejected this engine's token.
 	AFCP002 Code = "AF-CP-002"
 
+	// Control plane
+	// No control plane token is configured.
+	AFCPL001 Code = "AF-CPL-001"
+	// The control plane has no environment called {env}.
+	AFCPL002 Code = "AF-CPL-002"
+	// The control plane could not be reached: {detail}
+	AFCPL003 Code = "AF-CPL-003"
+
 	// Database
 	// The database provider {provider} is not registered in this build.
 	AFDB001 Code = "AF-DB-001"
@@ -348,6 +356,33 @@ var catalog = map[Code]Entry{
 		Docs:      "self-hosting/control-plane",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFCPL001: {
+		Code:      AFCPL001,
+		Area:      "CPL",
+		Message:   "No control plane token is configured.",
+		NextStep:  "Create an engine token in the control plane, then set AF_CONTROL_PLANE_TOKEN. Everything except this command works without one.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFCPL002: {
+		Code:      AFCPL002,
+		Area:      "CPL",
+		Message:   "The control plane has no environment called {env}.",
+		NextStep:  "Check the identifier with 'af env list', or confirm the engine that created it was sending events to this control plane.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFCPL003: {
+		Code:      AFCPL003,
+		Area:      "CPL",
+		Message:   "The control plane could not be reached: {detail}",
+		NextStep:  "Environments keep working without it; events are buffered and sent when it returns. Check AF_CONTROL_PLANE_URL and the network.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: true,
+		ExitCode:  ExitProvider,
 	},
 	AFDB001: {
 		Code:      AFDB001,

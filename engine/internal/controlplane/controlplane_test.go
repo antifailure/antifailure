@@ -1,0 +1,586 @@
+package controlplane_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"go.uber.org/goleak"
+
+	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/internal/controlplane"
+	"github.com/antifailure/antifailure/engine/internal/events"
+	"github.com/antifailure/antifailure/engine/internal/redact"
+)
+
+func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
+
+// newClient points a client at a test server. httptest serves plain HTTP on
+// 127.0.0.1, which the client permits precisely because it is the local
+// machine; anywhere else it refuses to send a token in the clear, and there is
+// a test for that below.
+func newClient(t *testing.T, h http.Handler) (*controlplane.Client, *httptest.Server) {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	c, err := controlplane.New(controlplane.Options{
+		BaseURL: srv.URL,
+		Token:   "aft_" + strings.Repeat("a", 40),
+		HTTP:    srv.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, srv
+}
+
+func TestNew_RefusesToSendATokenInTheClear(t *testing.T) {
+	_, err := controlplane.New(controlplane.Options{
+		BaseURL: "http://control.example.com",
+		Token:   "aft_secret",
+	})
+	if err == nil {
+		t.Fatal("a token was allowed over plain HTTP to a remote host")
+	}
+	if !strings.Contains(err.Error(), "not https") {
+		t.Fatalf("the error should say why: %v", err)
+	}
+	// And it must not quote the token while explaining.
+	if strings.Contains(err.Error(), "aft_secret") {
+		t.Fatal("the error message contains the token")
+	}
+}
+
+func TestNew_AllowsPlainHTTPToTheLocalMachine(t *testing.T) {
+	// Local development runs the control plane on localhost without a
+	// certificate. Refusing that would mean nobody can try it.
+	for _, host := range []string{"http://localhost:8080", "http://127.0.0.1:8080"} {
+		if _, err := controlplane.New(controlplane.Options{BaseURL: host, Token: "aft_x"}); err != nil {
+			t.Errorf("%s: %v", host, err)
+		}
+	}
+}
+
+func TestNew_SaysWhenNoTokenIsConfigured(t *testing.T) {
+	_, err := controlplane.New(controlplane.Options{BaseURL: "https://app.test"})
+	if !errors.Is(err, controlplane.ErrNotConfigured) {
+		t.Fatalf("want ErrNotConfigured, got %v", err)
+	}
+}
+
+func TestSend_CarriesTheTokenAndTheBatch(t *testing.T) {
+	var gotAuth string
+	var gotBody struct {
+		Events []controlplane.Event `json:"events"`
+	}
+	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("authorization")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{"accepted": len(gotBody.Events)})
+	}))
+
+	res, err := c.Send(t.Context(), []controlplane.Event{
+		{ID: "a", Type: "environment.ready", EnvID: "env-1", Sequence: 3, OccurredAt: time.Unix(0, 0).UTC()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Accepted != 1 {
+		t.Fatalf("accepted = %d", res.Accepted)
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer aft_") {
+		t.Fatalf("authorization header = %q", gotAuth)
+	}
+	if len(gotBody.Events) != 1 || gotBody.Events[0].Sequence != 3 {
+		t.Fatalf("body did not round trip: %+v", gotBody.Events)
+	}
+}
+
+func TestSend_TreatsAPartlyRejectedBatchAsAnAnswerRatherThanAFailure(t *testing.T) {
+	// 207 means some events were rejected. A caller that treated it as an error
+	// would resend the accepted ones forever.
+	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`{"accepted":1,"rejected":1,"outcomes":[
+			{"id":"a","status":"accepted"},
+			{"id":"b","status":"rejected","reason":"the event has no type"}]}`))
+	}))
+
+	res, err := c.Send(t.Context(), []controlplane.Event{
+		{ID: "a", Type: "environment.ready", OccurredAt: time.Now()},
+		{ID: "b", OccurredAt: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("207 was reported as an error: %v", err)
+	}
+	if res.Accepted != 1 || res.Rejected != 1 {
+		t.Fatalf("res = %+v", res)
+	}
+	if res.Outcomes[1].Reason == "" {
+		t.Fatal("the rejection reason was dropped, so nobody can fix the event")
+	}
+}
+
+func TestSend_ReportsAThrottleWithItsDelay(t *testing.T) {
+	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("retry-after", "42")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+
+	_, err := c.Send(t.Context(), []controlplane.Event{{ID: "a", Type: "x", OccurredAt: time.Now()}})
+	var throttled *controlplane.Throttled
+	if !errors.As(err, &throttled) {
+		t.Fatalf("want a Throttled error, got %v", err)
+	}
+	if throttled.RetryAfter != 42*time.Second {
+		t.Fatalf("RetryAfter = %s", throttled.RetryAfter)
+	}
+}
+
+func TestSend_UsesAFallbackDelayWhenTheHeaderIsMissingOrJunk(t *testing.T) {
+	// A 429 with no usable Retry-After must still produce a delay. Zero would
+	// mean retry immediately, which is what turns a busy service into a
+	// dead one.
+	for _, header := range []string{"", "soon", "-1"} {
+		t.Run(fmt.Sprintf("header=%q", header), func(t *testing.T) {
+			c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if header != "" {
+					w.Header().Set("retry-after", header)
+				}
+				w.WriteHeader(http.StatusTooManyRequests)
+			}))
+			_, err := c.Send(t.Context(), []controlplane.Event{{ID: "a", Type: "x", OccurredAt: time.Now()}})
+			var throttled *controlplane.Throttled
+			if !errors.As(err, &throttled) {
+				t.Fatalf("want Throttled, got %v", err)
+			}
+			if throttled.RetryAfter <= 0 {
+				t.Fatalf("RetryAfter = %s, which means retry at once", throttled.RetryAfter)
+			}
+		})
+	}
+}
+
+func TestSend_RefusesABatchLargerThanTheLimitWithoutSendingIt(t *testing.T) {
+	var called bool
+	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusAccepted)
+	}))
+
+	oversized := make([]controlplane.Event, controlplane.MaxBatch+1)
+	for i := range oversized {
+		oversized[i] = controlplane.Event{ID: fmt.Sprint(i), Type: "x", OccurredAt: time.Now()}
+	}
+	if _, err := c.Send(t.Context(), oversized); err == nil {
+		t.Fatal("an oversized batch was accepted")
+	}
+	if called {
+		t.Fatal("an oversized batch was sent anyway, which wastes a round trip to be refused")
+	}
+}
+
+func TestSend_ExplainsARefusedToken(t *testing.T) {
+	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"This token is not valid."}`))
+	}))
+
+	_, err := c.Send(t.Context(), []controlplane.Event{{ID: "a", Type: "x", OccurredAt: time.Now()}})
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	// The next step has to be in the message. "401" sends somebody looking at
+	// permissions; the actual fix is a new token.
+	if !strings.Contains(err.Error(), "AF_CONTROL_PLANE_TOKEN") {
+		t.Fatalf("the error does not say what to do: %v", err)
+	}
+}
+
+func TestErrors_DoNotQuoteTheToken(t *testing.T) {
+	// A control plane that echoes the request in its error body would otherwise
+	// put the token in a log line.
+	secret := "aft_" + strings.Repeat("s", 40)
+	r := redact.New()
+	r.Register(secret)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprintf(w, "failed to handle request with authorization: %s", r.Header.Get("authorization"))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := controlplane.New(controlplane.Options{
+		BaseURL: srv.URL, Token: secret, HTTP: srv.Client(), Redactor: r,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = c.Send(t.Context(), []controlplane.Event{{ID: "a", Type: "x", OccurredAt: time.Now()}})
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("the token was echoed into an error message: %v", err)
+	}
+}
+
+func TestPull_ReadsTheEngineEndpointRatherThanTheApplicationAPI(t *testing.T) {
+	// The application API is authenticated by a session cookie, and an engine on
+	// a CI runner has no browser to get one from. An earlier version called it
+	// with a bearer token and was refused every time: code that compiled, looked
+	// finished, and could never have worked. This asserts the path.
+	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/environments/env-1" {
+			t.Errorf("asked for %s, want the engine endpoint", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{
+			"env_id":"env-1","repository":"acme/app","branch":"main","state":"running",
+			"preview_url":"http://preview.test","golden_version":"2026-01-01T00-00-00Z",
+			"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}`))
+	}))
+
+	env, err := c.Pull(t.Context(), "env-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Repository != "acme/app" || env.State != "running" {
+		t.Fatalf("env = %+v", env)
+	}
+}
+
+func TestPull_ReportsAnEnvironmentThatIsNotThere(t *testing.T) {
+	for name, handler := range map[string]http.HandlerFunc{
+		"a not found status": func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		},
+		"an empty body": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{}`))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, _ := newClient(t, handler)
+			_, err := c.Pull(t.Context(), "env-9")
+			var missing *controlplane.NotFound
+			if !errors.As(err, &missing) {
+				t.Fatalf("want NotFound, got %v", err)
+			}
+		})
+	}
+}
+
+func TestPull_EscapesTheEnvironmentIdentifierIntoThePath(t *testing.T) {
+	// An identifier arrives from a user and goes into a URL path. Without
+	// escaping, one containing a slash reaches a different endpoint entirely.
+	var gotPath string
+	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	_, _ = c.Pull(t.Context(), "env/../../v1/events")
+	if strings.Contains(gotPath, "/v1/events") {
+		t.Fatalf("the identifier escaped its path segment: %s", gotPath)
+	}
+}
+
+func TestTokenFromEnvironment_PrefersTheDocumentedNameAndIgnoresBlanks(t *testing.T) {
+	env := map[string]string{"AF_CONTROL_PLANE_TOKEN": "  ", "ANTIFAILURE_TOKEN": "aft_second"}
+	got := controlplane.TokenFromEnvironment(func(k string) (string, bool) {
+		v, ok := env[k]
+		return v, ok
+	})
+	if got != "aft_second" {
+		t.Fatalf("got %q; a whitespace-only value must not count as configured", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The sink
+// ---------------------------------------------------------------------------
+
+type recorder struct {
+	mu       sync.Mutex
+	batches  [][]controlplane.Event
+	failures int
+	status   int
+}
+
+func (r *recorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.failures > 0 {
+		r.failures--
+		if r.status != 0 {
+			w.WriteHeader(r.status)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	var body struct {
+		Events []controlplane.Event `json:"events"`
+	}
+	_ = json.NewDecoder(req.Body).Decode(&body)
+	r.batches = append(r.batches, body.Events)
+	w.WriteHeader(http.StatusAccepted)
+	_, _ = w.Write([]byte(`{"accepted":0}`))
+}
+
+func (r *recorder) sent() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, b := range r.batches {
+		n += len(b)
+	}
+	return n
+}
+
+func newSink(t *testing.T, rec *recorder, capacity int) (*controlplane.Sink, *clock.Fake) {
+	t.Helper()
+	c, _ := newClient(t, rec)
+	fake := clock.NewFake(time.Unix(1700000000, 0).UTC())
+	s := controlplane.NewSink(controlplane.SinkOptions{
+		Client: c, Clock: fake, Capacity: capacity, BatchSize: 10,
+		FlushEvery: time.Hour, // Flushed by hand, so the test is not timing dependent.
+	})
+	t.Cleanup(func() { _ = s.Close() })
+	return s, fake
+}
+
+func event(id string, seq uint64) events.Event {
+	return events.Event{
+		ID: id, Env: "env-1", Seq: seq, Type: "env.up.ready",
+		Level: "info", TS: time.Unix(1700000000, 0).UTC(),
+	}
+}
+
+func TestSink_BatchesAndSends(t *testing.T) {
+	rec := &recorder{}
+	s, _ := newSink(t, rec, 100)
+
+	for i := range 25 {
+		if err := s.Deliver(t.Context(), event(fmt.Sprint(i), uint64(i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if rec.sent() != 25 {
+		t.Fatalf("sent %d of 25", rec.sent())
+	}
+	if len(rec.batches) != 3 {
+		t.Fatalf("25 events with a batch size of 10 should be 3 requests, got %d", len(rec.batches))
+	}
+}
+
+func TestSink_TranslatesTheEngineVocabulary(t *testing.T) {
+	rec := &recorder{}
+	s, _ := newSink(t, rec, 10)
+
+	_ = s.Deliver(t.Context(), event("a", 1))
+	if err := s.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	got := rec.batches[0][0]
+	if got.Type != "environment.ready" {
+		t.Fatalf("type = %q, want the control plane's name for it", got.Type)
+	}
+	if got.ID != "a" || got.Sequence != 1 || got.EnvID != "env-1" {
+		t.Fatalf("event did not carry through: %+v", got)
+	}
+	// The engine's own identifier is the idempotency key, so a resend after a
+	// timeout is dropped by the control plane rather than duplicated.
+	if got.ID != "a" {
+		t.Fatal("the idempotency key is not the engine's event identifier")
+	}
+}
+
+func TestSink_PassesThroughATypeItDoesNotKnow(t *testing.T) {
+	// An older engine and a newer control plane, or the reverse. Neither should
+	// need the other to be upgraded first.
+	rec := &recorder{}
+	s, _ := newSink(t, rec, 10)
+
+	e := event("a", 1)
+	e.Type = "something.invented.later"
+	_ = s.Deliver(t.Context(), e)
+	if err := s.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if rec.batches[0][0].Type != "something.invented.later" {
+		t.Fatalf("type = %q", rec.batches[0][0].Type)
+	}
+}
+
+func TestSink_KeepsEventsWhenAFlushFails(t *testing.T) {
+	rec := &recorder{failures: 1}
+	s, _ := newSink(t, rec, 100)
+
+	for i := range 5 {
+		_ = s.Deliver(t.Context(), event(fmt.Sprint(i), uint64(i)))
+	}
+	if err := s.Flush(t.Context()); err == nil {
+		t.Fatal("a failed flush was reported as success")
+	}
+	if s.Pending() != 5 {
+		t.Fatalf("pending = %d; a failed flush must not discard the events", s.Pending())
+	}
+
+	// The control plane comes back.
+	if err := s.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if rec.sent() != 5 {
+		t.Fatalf("sent %d of 5 after recovery", rec.sent())
+	}
+}
+
+func TestSink_DropsTheOldestWhenFullAndSaysSo(t *testing.T) {
+	rec := &recorder{}
+	s, _ := newSink(t, rec, 5)
+
+	for i := range 12 {
+		_ = s.Deliver(t.Context(), event(fmt.Sprint(i), uint64(i)))
+	}
+	if s.Dropped() != 7 {
+		t.Fatalf("dropped = %d, want 7", s.Dropped())
+	}
+	if err := s.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// The newest survive. When something has gone wrong the recent events are
+	// the ones that explain it, so a buffer that keeps the first five and
+	// discards the rest keeps the least useful events it could.
+	kept := rec.batches[0]
+	if len(kept) != 5 || kept[0].ID != "7" || kept[4].ID != "11" {
+		ids := make([]string, len(kept))
+		for i, e := range kept {
+			ids[i] = e.ID
+		}
+		t.Fatalf("kept %v, want the last five", ids)
+	}
+}
+
+func TestSink_ObeysAThrottleInsteadOfRetrying(t *testing.T) {
+	rec := &recorder{failures: 1, status: http.StatusTooManyRequests}
+	s, fake := newSink(t, rec, 100)
+
+	for i := range 3 {
+		_ = s.Deliver(t.Context(), event(fmt.Sprint(i), uint64(i)))
+	}
+	if err := s.Flush(t.Context()); err == nil {
+		t.Fatal("a throttle was reported as success")
+	}
+
+	// Still buffered, and deliberately not retried: retrying straight after a
+	// 429 is how a busy control plane becomes an unreachable one.
+	if err := s.Flush(t.Context()); err != nil {
+		t.Fatalf("the second flush should be a quiet no-op while throttled: %v", err)
+	}
+	if rec.sent() != 0 {
+		t.Fatalf("sent %d events while throttled", rec.sent())
+	}
+	if s.Pending() != 3 {
+		t.Fatalf("pending = %d; throttled events must not be discarded", s.Pending())
+	}
+
+	// After the delay it goes.
+	fake.Advance(31 * time.Second)
+	if err := s.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if rec.sent() != 3 {
+		t.Fatalf("sent %d of 3 after the pause", rec.sent())
+	}
+}
+
+func TestSink_DeliverNeverBlocksOrFails(t *testing.T) {
+	// The property the engine depends on: a control plane that is down must not
+	// stall a build. The server here never answers, and Deliver still returns.
+	blocked := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		<-blocked
+	}))
+	c, err := controlplane.New(controlplane.Options{
+		BaseURL: srv.URL, Token: "aft_" + strings.Repeat("a", 40), HTTP: srv.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := controlplane.NewSink(controlplane.SinkOptions{
+		Client: c, Clock: clock.NewFake(time.Unix(0, 0)), Capacity: 10,
+		FlushEvery: time.Hour,
+	})
+	// Ordered by hand rather than with t.Cleanup, because the ordering is the
+	// point: httptest.Server.Close waits for its handlers to return, so the
+	// handler has to be released before anything closes the server. Getting it
+	// wrong deadlocks the whole package rather than failing one test.
+	defer func() {
+		close(blocked)
+		_ = s.Close()
+		srv.Close()
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 1000 {
+			_ = s.Deliver(context.Background(), event(fmt.Sprint(i), uint64(i)))
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Deliver blocked while the control plane was unreachable")
+	}
+	if s.Dropped() == 0 {
+		t.Fatal("1000 events into a buffer of 10 should have dropped some")
+	}
+}
+
+func TestSink_ReportsDroppedEventsAtClose(t *testing.T) {
+	rec := &recorder{}
+	c, _ := newClient(t, rec)
+	s := controlplane.NewSink(controlplane.SinkOptions{
+		Client: c, Clock: clock.NewFake(time.Unix(0, 0)), Capacity: 2, FlushEvery: time.Hour,
+	})
+	for i := range 5 {
+		_ = s.Deliver(t.Context(), event(fmt.Sprint(i), uint64(i)))
+	}
+	err := s.Close()
+	if err == nil {
+		t.Fatal("dropped events were not reported at close")
+	}
+	if !strings.Contains(err.Error(), "dropped") {
+		t.Fatalf("the message should say what happened: %v", err)
+	}
+}
+
+func TestSink_CloseIsIdempotent(t *testing.T) {
+	rec := &recorder{}
+	s, _ := newSink(t, rec, 10)
+	_ = s.Close()
+	// A second close must not panic on an already closed channel, because
+	// teardown paths call Close more than once when something else has failed.
+	_ = s.Close()
+}
+
+func TestSink_SatisfiesTheBusSinkInterface(t *testing.T) {
+	// Compile-time proof that the sink can actually be attached to the bus.
+	// A sink that does not fit is a feature that exists and is never called.
+	rec := &recorder{}
+	s, _ := newSink(t, rec, 10)
+	var _ events.Sink = s
+}

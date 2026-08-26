@@ -1,0 +1,342 @@
+// Package controlplane talks to a self-hosted or hosted control plane.
+//
+// It is optional. Everything the engine does works with no control plane at
+// all, and that is deliberate: a preview environment must not stop working
+// because a web application somewhere is down. So every call here fails soft,
+// and the failure is reported rather than propagated.
+//
+// The client is deliberately small. It sends events and it pulls an
+// environment's configuration, and it does nothing else. Anything that decides
+// what an environment should look like happens in the engine, on the machine
+// the environment is on, from a manifest that is in the repository. A control
+// plane that could change what an environment does would be a control plane
+// that could change what an environment masks, and there is no version of that
+// which is acceptable.
+package controlplane
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/internal/redact"
+)
+
+// DefaultBaseURL is the hosted instance.
+const DefaultBaseURL = "https://app.antifailure.dev"
+
+// Client is a connection to one control plane.
+type Client struct {
+	baseURL *url.URL
+	token   string
+	http    *http.Client
+	clock   clock.Clock
+	// redactor scrubs anything before it is written to a log line here. The
+	// control plane's own error bodies are quoted in diagnostics, and a body
+	// that echoes a request header would otherwise print a token.
+	redactor *redact.Redactor
+}
+
+// Options configures a client.
+type Options struct {
+	// BaseURL is the control plane's root. Empty means the hosted instance.
+	BaseURL string
+	// Token authenticates this engine. It is never logged and never written to
+	// disk by this package.
+	Token string
+	Clock clock.Clock
+	// HTTP is the transport, for tests.
+	HTTP *http.Client
+	// Redactor scrubs strings before they appear in an error.
+	Redactor *redact.Redactor
+}
+
+// ErrNotConfigured is returned when no token is available.
+//
+// It is a distinct error rather than a generic one because the right response
+// is different: the user has to create a token, and telling them "unauthorized"
+// would send them looking for a permissions problem that does not exist.
+var ErrNotConfigured = errors.New("no control plane token is configured")
+
+// New builds a client.
+func New(opts Options) (*Client, error) {
+	raw := strings.TrimSpace(opts.BaseURL)
+	if raw == "" {
+		raw = DefaultBaseURL
+	}
+	base, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: %q is not a URL: %w", raw, err)
+	}
+	if base.Scheme != "https" && base.Hostname() != "localhost" && base.Hostname() != "127.0.0.1" {
+		// A token sent over plain HTTP to anywhere but the local machine is a
+		// token on the wire. Refused rather than warned about, because a
+		// warning during a CI run is a warning nobody reads.
+		return nil, fmt.Errorf(
+			"controlplane: %s is not https, and a token must not be sent in the clear", raw)
+	}
+	if strings.TrimSpace(opts.Token) == "" {
+		return nil, ErrNotConfigured
+	}
+
+	c := opts.Clock
+	if c == nil {
+		c = clock.New()
+	}
+	httpClient := opts.HTTP
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	return &Client{
+		baseURL:  base,
+		token:    opts.Token,
+		http:     httpClient,
+		clock:    c,
+		redactor: opts.Redactor,
+	}, nil
+}
+
+// Event is one event in the wire form the control plane accepts.
+//
+// Deliberately not the engine's own Event type. The two are allowed to differ:
+// the engine's carries a level and a message for display, and the control plane
+// wants an idempotency key and a sequence. Sharing one struct would mean a
+// field added for the dashboard changes the ingestion contract.
+type Event struct {
+	ID         string         `json:"id"`
+	Type       string         `json:"type"`
+	EnvID      string         `json:"envId,omitempty"`
+	Sequence   uint64         `json:"sequence,omitempty"`
+	OccurredAt time.Time      `json:"occurredAt"`
+	Payload    map[string]any `json:"payload,omitempty"`
+}
+
+// SendResult reports what the control plane did with a batch.
+type SendResult struct {
+	Accepted   int `json:"accepted"`
+	Duplicates int `json:"duplicates"`
+	Rejected   int `json:"rejected"`
+	Outcomes   []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Reason string `json:"reason,omitempty"`
+	} `json:"outcomes"`
+}
+
+// Throttled is returned when the control plane asks for a pause.
+//
+// It carries the delay so that a caller can obey it. A caller that retries
+// immediately after a 429 turns a busy control plane into an unreachable one,
+// which is why this is a typed error rather than a status code somebody has to
+// remember to check.
+type Throttled struct {
+	RetryAfter time.Duration
+}
+
+func (t *Throttled) Error() string {
+	return fmt.Sprintf("the control plane asked for a pause of %s before the same batch is sent again",
+		t.RetryAfter)
+}
+
+// MaxBatch is the most events one request may carry. It matches the control
+// plane's limit; sending more is refused there rather than truncated.
+const MaxBatch = 500
+
+// Send delivers a batch of events.
+//
+// Events are idempotent by ID, so a caller that is unsure whether a previous
+// attempt landed should send the same batch again rather than trying to work
+// out which half to resend.
+func (c *Client) Send(ctx context.Context, events []Event) (SendResult, error) {
+	var zero SendResult
+	if len(events) == 0 {
+		return zero, nil
+	}
+	if len(events) > MaxBatch {
+		return zero, fmt.Errorf(
+			"controlplane: a batch carries at most %d events and this one carries %d",
+			MaxBatch, len(events))
+	}
+
+	body, err := json.Marshal(map[string]any{"events": events})
+	if err != nil {
+		return zero, fmt.Errorf("controlplane: %w", err)
+	}
+
+	res, err := c.do(ctx, http.MethodPost, "/v1/events", bytes.NewReader(body))
+	if err != nil {
+		return zero, err
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode == http.StatusTooManyRequests {
+		return zero, &Throttled{RetryAfter: retryAfter(res, 30*time.Second)}
+	}
+	// 202 for a clean batch, 207 when some events were rejected. Both are
+	// answers rather than failures: the rejected ones are named in the body,
+	// and a caller that treats 207 as an error would resend the accepted ones
+	// forever.
+	if res.StatusCode != http.StatusAccepted && res.StatusCode != http.StatusMultiStatus {
+		return zero, c.statusError(res)
+	}
+
+	var out SendResult
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		return zero, fmt.Errorf("controlplane: the response was not the expected shape: %w", err)
+	}
+	return out, nil
+}
+
+// Environment is what the control plane knows about one environment.
+type Environment struct {
+	EnvID         string    `json:"env_id"`
+	Repository    string    `json:"repository"`
+	Branch        string    `json:"branch"`
+	PullRequest   *int      `json:"pull_request"`
+	State         string    `json:"state"`
+	PreviewURL    string    `json:"preview_url"`
+	Runtime       string    `json:"runtime"`
+	GoldenVersion string    `json:"golden_version"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// NotFound reports that the control plane has no such environment.
+type NotFound struct{ EnvID string }
+
+func (e *NotFound) Error() string {
+	return fmt.Sprintf("the control plane has no environment called %q for this organization", e.EnvID)
+}
+
+// Pull fetches one environment's record.
+func (c *Client) Pull(ctx context.Context, envID string) (Environment, error) {
+	var zero Environment
+	if strings.TrimSpace(envID) == "" {
+		return zero, errors.New("controlplane: an environment identifier is required")
+	}
+
+	// The engine's own endpoint, not the one the web application uses. That one
+	// is authenticated by a session cookie, and an engine on a CI runner has no
+	// browser to get one from. An earlier version of this called the web API
+	// with a bearer token and was refused every time, which is the failure mode
+	// worth naming: the code existed, compiled, and could never have worked.
+	res, err := c.do(ctx, http.MethodGet, "/v1/environments/"+url.PathEscape(envID), nil)
+	if err != nil {
+		return zero, err
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode == http.StatusNotFound {
+		return zero, &NotFound{EnvID: envID}
+	}
+	if res.StatusCode != http.StatusOK {
+		return zero, c.statusError(res)
+	}
+
+	var env Environment
+	if err := json.NewDecoder(res.Body).Decode(&env); err != nil {
+		return zero, fmt.Errorf("controlplane: the response was not the expected shape: %w", err)
+	}
+	if env.EnvID == "" {
+		return zero, &NotFound{EnvID: envID}
+	}
+	return env, nil
+}
+
+// Ping checks that the control plane is reachable and the token works.
+//
+// Used by af doctor, which wants to distinguish three states that look alike
+// from the outside: unreachable, reachable but unauthenticated, and working.
+func (c *Client) Ping(ctx context.Context) error {
+	res, err := c.do(ctx, http.MethodGet, "/health", nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		return c.statusError(res)
+	}
+	return nil
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	target := *c.baseURL
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		target.Path = strings.TrimRight(target.Path, "/") + path[:i]
+		target.RawQuery = path[i+1:]
+	} else {
+		target.Path = strings.TrimRight(target.Path, "/") + path
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, target.String(), body)
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: %w", err)
+	}
+	req.Header.Set("authorization", "Bearer "+c.token)
+	req.Header.Set("accept", "application/json")
+	if body != nil {
+		req.Header.Set("content-type", "application/json")
+	}
+
+	res, err := c.http.Do(req)
+	if err != nil {
+		// The URL is included and the token is not. A transport error names the
+		// host, which is what somebody needs to see, and nothing else about the
+		// request.
+		return nil, fmt.Errorf("controlplane: could not reach %s: %w", c.baseURL.Host, err)
+	}
+	return res, nil
+}
+
+func (c *Client) statusError(res *http.Response) error {
+	// Bounded, because an error path must not read an unbounded body from a
+	// server that may not be the one intended.
+	snippet, _ := io.ReadAll(io.LimitReader(res.Body, 2048))
+	detail := c.scrub(strings.TrimSpace(string(snippet)))
+
+	switch res.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf(
+			"controlplane: the token was refused. Create a new one in the control plane " +
+				"and set AF_CONTROL_PLANE_TOKEN, or run 'af login' again")
+	case http.StatusForbidden:
+		return fmt.Errorf("controlplane: this token does not have permission to do that")
+	}
+	if detail == "" {
+		return fmt.Errorf("controlplane: %s answered %d", c.baseURL.Host, res.StatusCode)
+	}
+	return fmt.Errorf("controlplane: %s answered %d: %s", c.baseURL.Host, res.StatusCode, detail)
+}
+
+// scrub removes anything sensitive from text that is about to be shown.
+func (c *Client) scrub(s string) string {
+	if c.redactor == nil {
+		return s
+	}
+	return c.redactor.String(s)
+}
+
+func retryAfter(res *http.Response, fallback time.Duration) time.Duration {
+	raw := res.Header.Get("retry-after")
+	if raw == "" {
+		return fallback
+	}
+	if seconds, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if at, err := http.ParseTime(raw); err == nil {
+		if d := time.Until(at); d > 0 {
+			return d
+		}
+	}
+	return fallback
+}

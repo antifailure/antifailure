@@ -55,6 +55,7 @@ var areaNames = map[string]string{
 	"INF": "Infrastructure",
 	"EE":  "Enterprise",
 	"SCH": "Scheduling",
+	"CPL": "Control plane",
 }
 
 func main() {

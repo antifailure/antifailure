@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/controlplane"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 )
@@ -41,14 +43,98 @@ does not, and a list that disagrees with reality is worse than no list.`),
 	}
 	cmd.AddCommand(newEnvListCommand(e))
 	cmd.AddCommand(newEnvPruneCommand(e))
-	cmd.AddCommand(&cobra.Command{
-		Use:   "pull",
-		Short: "Pull an environment's configuration from the control plane",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notYetAvailable("af env pull")
-		},
-	})
+	cmd.AddCommand(newEnvPullCommand(e))
 	return cmd
+}
+
+// af env pull answers "what does the control plane think is running", which is
+// a different question from "what is running on this machine" and worth being
+// able to ask separately. When they disagree, that disagreement is the finding.
+func newEnvPullCommand(e *Env) *cobra.Command {
+	var baseURL string
+	cmd := &cobra.Command{
+		Use:   "pull <environment>",
+		Short: "Read an environment's record from the control plane",
+		Long: strings.TrimSpace(`
+Reads what the control plane holds for one environment: its branch, its state,
+its preview URL, and the golden version it was built from.
+
+This never changes anything locally. The control plane is a record of what
+happened, not a source of configuration: what an environment does comes from
+the manifest in the repository, on the machine the environment is on. A control
+plane that could change what an environment runs would be a control plane that
+could change what it masks.
+
+Needs a token in AF_CONTROL_PLANE_TOKEN. Create one in the control plane under
+engine tokens.`),
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := controlPlaneClient(e, baseURL)
+			if err != nil {
+				return err
+			}
+
+			env, err := client.Pull(cmd.Context(), args[0])
+			if err != nil {
+				var missing *controlplane.NotFound
+				if errors.As(err, &missing) {
+					return aferrors.Coded(aferrors.AFCPL002, "env", args[0])
+				}
+				return err
+			}
+
+			if e.Out.Format == FormatJSON {
+				return e.Out.JSON(env)
+			}
+			e.Out.Printf("  %s\n", env.EnvID)
+			e.Out.Printf("  repository     %s\n", env.Repository)
+			e.Out.Printf("  branch         %s\n", env.Branch)
+			if env.PullRequest != nil {
+				e.Out.Printf("  pull request   #%d\n", *env.PullRequest)
+			}
+			e.Out.Printf("  state          %s\n", env.State)
+			if env.PreviewURL != "" {
+				e.Out.Printf("  preview        %s\n", env.PreviewURL)
+			}
+			if env.Runtime != "" {
+				e.Out.Printf("  runtime        %s\n", env.Runtime)
+			}
+			if env.GoldenVersion != "" {
+				e.Out.Printf("  golden         %s\n", env.GoldenVersion)
+			}
+			e.Out.Printf("  created        %s\n", env.CreatedAt.UTC().Format(time.RFC3339))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&baseURL, "control-plane", "",
+		"The control plane to read from (default: AF_CONTROL_PLANE_URL, or the hosted instance)")
+	return cmd
+}
+
+// controlPlaneClient builds a client, or explains what is missing.
+//
+// The token comes from the environment and nowhere else. A token in a
+// configuration file is a token that ends up committed, and a token this
+// process could write is a token it could put in a support bundle.
+func controlPlaneClient(e *Env, baseURL string) (*controlplane.Client, error) {
+	if baseURL == "" {
+		baseURL = e.Getenv("AF_CONTROL_PLANE_URL")
+	}
+	token := controlplane.TokenFromEnvironment(func(k string) (string, bool) {
+		v := e.Getenv(k)
+		return v, v != ""
+	})
+
+	client, err := controlplane.New(controlplane.Options{
+		BaseURL:  baseURL,
+		Token:    token,
+		Clock:    e.Clock,
+		Redactor: e.Redactor,
+	})
+	if errors.Is(err, controlplane.ErrNotConfigured) {
+		return nil, aferrors.Coded(aferrors.AFCPL001)
+	}
+	return client, err
 }
 
 // environments groups what the daemon holds by environment.

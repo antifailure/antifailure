@@ -190,6 +190,44 @@ The control plane rejected this engine's token.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
 
+## Control plane
+
+### AF-CPL-001
+
+No control plane token is configured.
+
+**What to do.** Create an engine token in the control plane, then set AF_CONTROL_PLANE_TOKEN. Everything except this command works without one.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
+
+### AF-CPL-002
+
+The control plane has no environment called {env}.
+
+**What to do.** Check the identifier with 'af env list', or confirm the engine that created it was sending events to this control plane.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
+
+### AF-CPL-003
+
+The control plane could not be reached: {detail}
+
+**What to do.** Environments keep working without it; events are buffered and sent when it returns. Check AF_CONTROL_PLANE_URL and the network.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
+
 ## Database
 
 ### AF-DB-001

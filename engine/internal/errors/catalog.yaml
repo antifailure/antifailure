@@ -634,3 +634,26 @@ errors:
     docs: concepts/scheduling
     retryable: true
     exit_code: 5
+
+  # Control plane
+  - code: AF-CPL-001
+    area: CPL
+    message: "No control plane token is configured."
+    next_step: "Create an engine token in the control plane, then set AF_CONTROL_PLANE_TOKEN. Everything except this command works without one."
+    docs: self-hosting/control-plane
+    retryable: false
+    exit_code: 3
+  - code: AF-CPL-002
+    area: CPL
+    message: "The control plane has no environment called {env}."
+    next_step: "Check the identifier with 'af env list', or confirm the engine that created it was sending events to this control plane."
+    docs: self-hosting/control-plane
+    retryable: false
+    exit_code: 4
+  - code: AF-CPL-003
+    area: CPL
+    message: "The control plane could not be reached: {detail}"
+    next_step: "Environments keep working without it; events are buffered and sent when it returns. Check AF_CONTROL_PLANE_URL and the network."
+    docs: self-hosting/control-plane
+    retryable: true
+    exit_code: 5

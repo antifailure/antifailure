@@ -13,6 +13,7 @@
 // /auth/* is the sign-in exchange, which by definition has no session yet.
 
 import { Hono } from 'hono'
+import { sql as rawSql } from 'drizzle-orm'
 import { trpcServer } from '@hono/trpc-server'
 import type { Pool } from '@antifailure/db'
 import { appRouter } from './routers/index.ts'
@@ -158,10 +159,14 @@ export function createServer(options: ServerOptions) {
   // Ingestion
   // -------------------------------------------------------------------------
 
-  app.post('/v1/events', async (c) => {
-    const auth = c.req.header('authorization') ?? ''
+  async function engineFrom(header: string | undefined) {
+    const auth = header ?? ''
     const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
-    const engine = await authenticateEngine(options.pool, clock, token)
+    return authenticateEngine(options.pool, clock, token)
+  }
+
+  app.post('/v1/events', async (c) => {
+    const engine = await engineFrom(c.req.header('authorization'))
     if (!engine) {
       // No detail about which part failed. An engine with a revoked token and
       // an engine with a made-up token get the same answer.
@@ -191,6 +196,44 @@ export function createServer(options: ServerOptions) {
       }
       throw err
     }
+  })
+
+  // An engine holding a token can read back what the control plane recorded for
+  // one of its environments. This exists because the application API is
+  // authenticated by a session cookie, and an engine on a CI runner has no
+  // browser, no cookie, and no way to obtain one. Without it a token could
+  // write and never read, which is exactly the shape of a feature that looks
+  // finished and does nothing.
+  //
+  // Scoped to the token's organization by the same tenant transaction every
+  // other read uses, so a token cannot be pointed at somebody else's
+  // environment by changing the path.
+  app.get('/v1/environments/:envId', async (c) => {
+    const engine = await engineFrom(c.req.header('authorization'))
+    if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+
+    const envId = c.req.param('envId')
+    const rows = await options.pool.withTenant({ orgId: engine.orgId }, async (db) =>
+      db.execute<Record<string, unknown>>(rawSql`
+        SELECT e.env_id, r.full_name AS repository, e.branch, e.pull_request,
+               e.state::text AS state, e.preview_url, e.runtime, e.golden_version,
+               -- Formatted in SQL rather than left to the driver. A raw query
+               -- returns whatever text Postgres emits, which is
+               -- "2026-08-26 07:31:48.683911+00": valid, and not RFC 3339, so
+               -- every strict parser on the other side rejects it. The wire
+               -- format is part of the contract, so it is stated here.
+               to_char(e.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+               to_char(e.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+        FROM environments e JOIN repositories r ON r.id = e.repository_id
+        WHERE e.env_id = ${envId}`),
+    )
+    if (rows.length === 0) {
+      // The same answer whether it belongs to another organization or does not
+      // exist. Telling them apart turns this into a way to ask whether another
+      // organization has an environment by that name.
+      return c.json({ error: `No environment named ${envId} in this organization.` }, 404)
+    }
+    return c.json(rows[0])
   })
 
   // -------------------------------------------------------------------------
