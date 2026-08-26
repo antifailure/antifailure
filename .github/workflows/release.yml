@@ -36,8 +36,20 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           version="${GITHUB_REF_NAME#v}"
+          # Full import paths, not bare main. The variables live in
+          # internal/cli, and the linker accepts a -X for a symbol it cannot
+          # find without saying anything: this said main.version for one
+          # release, every flag was a no-op, and the published binary reported
+          # itself as "dev". tools/ldcheck runs in CI to keep that from
+          # recurring.
+          # Written out in full rather than through a shell variable, so that
+          # tools/ldcheck can read them. A check a one line change can defeat
+          # is not worth having.
           go build -trimpath \
-            -ldflags "-s -w -X main.version=$version -X main.commit=$GITHUB_SHA -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -ldflags "-s -w \
+              -X github.com/antifailure/antifailure/engine/internal/cli.Version=$version \
+              -X github.com/antifailure/antifailure/engine/internal/cli.Commit=$GITHUB_SHA \
+              -X github.com/antifailure/antifailure/engine/internal/cli.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o "../dist/af" ./cmd/af
 
       - name: Package

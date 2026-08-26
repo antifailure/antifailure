@@ -45,6 +45,14 @@ jobs:
           (cd engine && go test ./internal/cli -update-reference)
           git diff --exit-code
 
+      - name: The release stamps a version that exists
+        # The linker accepts -X for a symbol it cannot find and says nothing.
+        # v0.1.0 shipped with every version flag pointing at main, where the
+        # variables are not, so four platforms built green and every one of
+        # them reported itself as "dev". No stage of the pipeline could have
+        # caught it: each did exactly what it was asked.
+        run: go run ./tools/ldcheck .
+
       - name: The error catalog and the code agree
         # The reference page promises that a code with no entry fails the build
         # and an entry nothing returns fails it too. It promised that for a
@@ -54,6 +62,12 @@ jobs:
 
       - name: Vet
         run: cd engine && go vet ./...
+
+      - name: The gates themselves
+        # errcheck, ldcheck and the generators decide whether a build is
+        # allowed to ship, and their own tests were never run here. A gate
+        # nobody tests is a gate that passes everything the day it breaks.
+        run: cd tools && go test ./... -timeout 5m
 
       - name: Format
         # gofmt rather than a linter with opinions. The point is that nobody
