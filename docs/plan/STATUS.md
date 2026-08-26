@@ -74,8 +74,8 @@ Everything else in the command tree exists and returns AF-RUN-001.
 
 | Sub-phase | State | Notes |
 | --- | --- | --- |
-| 3.1 Provider interface | proven | `pkg/provider` declares `Database` and its capability model. The conformance suite is next. |
-| 3.2 Docker provider | planned | |
+| 3.1 Provider interface and conformance suite | proven | 23 behaviors in `engine/conformance`. A behavior a provider cannot support is skipped explicitly, naming the capability. |
+| 3.2 Docker provider | proven | 21 behaviors pass against a real daemon, 2 skip with named reasons, zero resources left behind across repeated runs. |
 | 3.3 Masking engine | partial | The 22 transforms and the key hierarchy are proven at 95 percent. The rules model, classifier, SQL compiler, and resumable executor are next. |
 | 3.4 Verification scanner | partial | The 9 detectors are proven at 94 percent. The streaming table scan and the signed attestation are next. |
 | 3.5 Subsetting | planned | |
@@ -91,6 +91,8 @@ Everything else in the command tree exists and returns AF-RUN-001.
 | `internal/masking` | proven | 95 percent |
 | `internal/verify` | proven | 94 percent |
 | `pkg/provider` | proven | interface only |
+| `engine/conformance` | proven | 23 behaviors |
+| `internal/db/docker` | proven | full suite green against a real daemon |
 
 ## Phases 4 to 14
 
@@ -100,14 +102,24 @@ Not started.
 
 In order of what unblocks the most:
 
-1. `engine/conformance/db.go`, the database conformance suite, tested against a
-   deliberately buggy in-memory provider so that every subtest is proven able
-   to fail.
-2. `internal/db/docker`, the Docker provider, which is the reference
-   implementation and the one that needs no accounts.
-3. The masking rules model, SQL compiler, and resumable executor, so that
-   `af mask plan` and `af mask apply` work.
-4. `internal/verify`'s streaming scan and signed attestation, so that a golden
-   can be marked verified and `Branch` can refuse one that is not.
-5. `internal/policy` and `internal/proxy`, which are self-contained and are
-   what make `af up` worth running.
+1. The masking rules model, SQL compiler, and resumable executor, so that
+   `af mask plan` and `af mask apply` work against a real database. The
+   transforms and the key hierarchy are done; what is missing is reading the
+   Postgres catalog, compiling chunked UPDATE statements in dependency order,
+   and checkpointing per chunk.
+2. `internal/verify`'s streaming table scan and signed attestation, so that a
+   golden can be marked verified for real rather than by the Docker provider's
+   current assumption that a committed image was verified.
+3. `internal/policy`, the egress decision function, which is pure and
+   self-contained and is the input to everything in phase 5.
+4. `internal/build` and `internal/runtime/local`, so that `af up` has services
+   to run alongside the database branch it can already create.
+5. Wiring `af up` and `af down` to the journal, the lock, and the Docker
+   provider, which is the first moment the product does the thing it promises.
+
+Two notes for whoever picks this up. The conformance suite is not yet tested
+against a deliberately buggy provider, so it is not yet proved that every
+subtest can fail; that is worth doing before a second provider is written
+against it. And the Docker provider reports every committed image as verified,
+which is true by construction today because the commit is the last step of a
+refresh, but will stop being true once goldens can be imported.
