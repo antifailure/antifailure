@@ -53,6 +53,9 @@ af golden verify re-check a published golden on a throwaway branch
 af support bundle logs, decisions, manifest, and doctor output, redacted,
                  with a listing of exactly what it included
 
+af ci          the whole pull request check in one command: up, test,
+               report, tear down, whatever happens
+
 af doctor      ten checks, each with a remediation
 af init        reads a repository, writes a manifest, explains what it assumed
 af explain     the effective configuration with every default resolved
@@ -255,9 +258,19 @@ It found two real bugs on its first two runs: stale packaged sidecar
 sources, and a database provider that inventoried every managed container
 and so blamed itself for the runtime's.
 
-## Phases 8 to 14
+## Phase 9. GitHub
 
-Not started.
+| Component | State | Notes |
+| --- | --- | --- |
+| `internal/report` | proven | written for somebody who did not ask for it and has thirty seconds |
+| `af ci` | proven | run end to end; tears down on success, on failure, and on a missing runner |
+| `examples/github-workflow.yml` | written | a template to copy; the comment is updated rather than added |
+| GitHub App mode | planned | belongs to the control plane, phase 8 |
+
+## Phases 8, 10 to 14
+
+Not started. Phase 8 is the control plane, 11 is the docs site, and the rest
+are release packaging, the Kubernetes runtime, and hosted scale.
 
 ## Where to pick up
 
