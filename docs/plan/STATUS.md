@@ -41,6 +41,9 @@ af inbox list/get/wait   mail and SMS captured instead of sent, with the
 af webhook list          providers and events that can be sent
 af webhook trigger       one signed callback into the environment
 
+af test        agents drive the workflows and return verdicts with a
+               trace, a video, and steps to reproduce a failure
+
 af doctor      ten checks, each with a remediation
 af init        reads a repository, writes a manifest, explains what it assumed
 af explain     the effective configuration with every default resolved
@@ -61,6 +64,11 @@ Proved end to end against a real Docker daemon and a real Postgres:
   verification link and code come back out of it.
 - A branch holding real looking data fails `af mask verify`, passes after
   `af mask apply`, and the card number in a free text column is gone.
+- An agent finds the email and password fields by their labels, presses
+  Create account by its name, and passes with a trace, inside the sealed
+  environment. Given an expectation the page neither confirms nor
+  contradicts, it reports unverified with every step it took rather than
+  guessing a pass or a failure.
 
 ### What the containment is, exactly
 
@@ -200,7 +208,20 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | Synth mode | planned | |
 | Rate limiting | planned | |
 
-## Phases 6 to 14
+## Phase 6. Agents
+
+| Component | State | Notes |
+| --- | --- | --- |
+| `runner` verdict model | proven | five verdicts; a runner failure never counts against the application |
+| `runner` inbox client | proven | checks what already arrived before waiting |
+| `runner` login strategies | proven | password, magic link, email code, SMS code |
+| `runner` planner | proven | deterministic, no model key needed; three way expectation check |
+| `runner` browser | proven | Playwright, accessibility tree, three tests against a real browser |
+| `internal/env` test | proven | `af test` end to end |
+| Model driven planning | planned | the Planner interface exists; this is where bring your own key lands |
+| Invariants and insights | planned | |
+
+## Phases 7 to 14
 
 Not started.
 
@@ -208,10 +229,10 @@ Not started.
 
 In order of what unblocks the most:
 
-1. The agent runner, Phase 6. It is the largest remaining piece and the one
-   the product is named for: workflows written as sentences, driven through a
-   real browser, returning pass, fail, flaky, blocked, or unverified with
-   evidence. It is also where bring your own model key lands.
+1. Model driven planning, which is where bring your own model key lands. The
+   Planner interface is the seam and the deterministic planner is the
+   fallback, so this is one implementation rather than a rework. It is what
+   turns an unverified result into a real one.
 2. Phase 7, load generation shaped like production traffic.
 3. Subsetting, so a golden can be a slice of production rather than all of it.
 4. Synth mode and rate limiting, the two egress modes still unimplemented.
