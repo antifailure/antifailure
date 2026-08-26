@@ -186,6 +186,18 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 			"supported", joinInts(p.Capabilities().SupportedVersions))
 	}
 
+	// Sweep orphaned candidates first.
+	//
+	// A candidate is ephemeral by definition: it exists only for the minutes
+	// between starting a Postgres container and committing it, and nothing
+	// ever branches from one. The deferred removal below handles the ordinary
+	// paths, but a killed process, a machine that slept, or a daemon restart
+	// leaves one behind, and a leaked Postgres container holds a port and a
+	// few hundred megabytes forever. Because a candidate is never referenced,
+	// removing an old one is unconditionally safe, which is what lets the
+	// provider heal itself rather than wait for a leak report.
+	p.sweepCandidates(ctx)
+
 	candidate := fmt.Sprintf("af-candidate-%d", p.clock.Now().UnixNano())
 	c, err := p.start(ctx, candidate, p.imageFor(spec.Version), map[string]string{
 		LabelKind: "candidate",
@@ -247,6 +259,25 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		gv.SizeBytes = info.Size
 	}
 	return gv, nil
+}
+
+// sweepCandidates removes candidate containers older than the age at which one
+// can only be an orphan.
+func (p *Provider) sweepCandidates(ctx context.Context) {
+	list, err := p.listContainers(ctx, "candidate")
+	if err != nil {
+		return // sweeping is opportunistic; a refresh must not fail because of it
+	}
+	// Fifteen minutes is far longer than any refresh this provider performs
+	// and far shorter than a human would tolerate a stray container, so it
+	// cannot remove a candidate another process is still using.
+	cutoff := p.clock.Now().Add(-15 * time.Minute)
+	for _, c := range list {
+		created, parseErr := time.Parse(time.RFC3339, c.Labels[LabelCreated])
+		if parseErr != nil || created.Before(cutoff) {
+			_ = p.remove(ctx, c.ID)
+		}
+	}
 }
 
 // loadSource fills a candidate from the source database, or from the seed when
@@ -368,27 +399,31 @@ func (p *Provider) Reset(ctx context.Context, b provider.Branch) error {
 }
 
 // Destroy removes a branch. Removing one that is already gone succeeds.
+//
+// Both the recorded reference and the deterministic name are removed, and that
+// is not belt and braces. Reset replaces the container, so a caller holding a
+// branch from before a reset has a reference to something already gone while
+// the replacement is still running. Teardown by the stale reference alone
+// would report success and leave a Postgres container behind, which is exactly
+// the leak the whole journal exists to prevent.
 func (p *Provider) Destroy(ctx context.Context, b provider.Branch) error {
-	ref := b.ProviderRef
-	if ref == "" {
-		ref = branchName(b.EnvID)
+	refs := map[string]bool{}
+	if b.ProviderRef != "" {
+		refs[b.ProviderRef] = true
 	}
-	if err := p.remove(ctx, ref); err != nil {
-		return err
+	if b.EnvID != "" {
+		refs[branchName(b.EnvID)] = true
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	// The port returns to the pool. Without this a long lived process leaks
-	// its allocation set until it runs out of range.
-	for port, taken := range p.ports {
-		if taken && p.portOwner(port) == ref {
-			delete(p.ports, port)
+	if len(refs) == 0 {
+		return fmt.Errorf("db.docker: the branch has neither an identifier nor an environment")
+	}
+	for ref := range refs {
+		if err := p.remove(ctx, ref); err != nil {
+			return err
 		}
 	}
 	return nil
 }
-
-func (p *Provider) portOwner(int) string { return "" }
 
 // ConnString returns a connection string for a branch.
 func (p *Provider) ConnString(ctx context.Context, b provider.Branch, mode provider.ConnMode) (secrets.Value, error) {
