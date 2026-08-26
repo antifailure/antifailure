@@ -17,37 +17,75 @@ This file is updated in the same pull request as the code it describes.
 ## What works today
 
 ```
-af up          builds every service, branches a Postgres golden, seals the
-               network, and prints where the app is
+af up          builds every service, branches a masked Postgres golden,
+               places the egress sidecar, and prints where the app is
 af down        removes every container, network, and database branch it made
 af status      what is running for this branch, and where
-af net policy   the effective egress policy, in the order that decides
-af net explain  what would happen to one request, and which rule decides it
+af logs        service output, redacted
+
+af golden refresh   copy, mask, verify, publish; a golden that fails
+                    verification is never published and cannot be branched
+af golden list      what exists, and which are verified
+af golden gc        remove old ones, never one still branched from
+
+af mask plan     a decision per column, with the reason for it
+af mask apply    rewrite this environment's data
+af mask verify   read it back with the detectors that would find a leak
+
+af net policy    the effective egress policy, in the order that decides
+af net explain   what happens to one request, and which rule decides it
+af net log       every outbound request, allowed ones included
+
+af inbox list/get/wait   mail and SMS captured instead of sent, with the
+                         magic link and one time code extracted
+af webhook list          providers and events that can be sent
+af webhook trigger       one signed callback into the environment
+
 af doctor      ten checks, each with a remediation
 af init        reads a repository, writes a manifest, explains what it assumed
-af explain     shows the effective configuration with every default resolved
+af explain     the effective configuration with every default resolved
 af version     version, commit, edition, platform
 ```
 
 Everything else in the command tree exists and returns AF-RUN-001.
 
-Proved end to end on a Node repository with no Dockerfile: a generated
-build, a Postgres branch reachable at `db:5432` from inside the environment,
-the app serving on localhost, and nothing left on the daemon after `af down`.
+Proved end to end against a real Docker daemon and a real Postgres:
+
+- A Node repository with no Dockerfile gets a generated build, a Postgres
+  branch reachable at `db:5432`, and an app serving on localhost.
+- A whole Stripe billing flow (customer, checkout, subscribe, read, cancel)
+  runs against the built in mock pack with the network unplugged.
+- Signed webhooks are accepted by the application's own HMAC verification,
+  with no secret configured anywhere.
+- Mail sent through the Resend API is captured, never delivered, and the
+  verification link and code come back out of it.
+- A branch holding real looking data fails `af mask verify`, passes after
+  `af mask apply`, and the card number in a free text column is gone.
 
 ### What the containment is, exactly
 
-Today an environment has **no route to the internet at all**. That is not the
-per host policy the manifest describes; the policy engine decides correctly and
-nothing enforces it per host yet, because the proxy sidecar is Phase 5.
+Every environment sits on a network with no route to the internet. The only
+thing on both networks is the egress sidecar, so the policy is an enforcement
+rather than a request: a client that ignores its proxy variables has nowhere
+to send the packet.
 
-The seal itself is real and measured. The first implementation disabled IP
-masquerading, which looks like it removes a container's route out and does not:
-on Docker Desktop the traffic is translated again by the virtual machine's own
-gateway, and a supposedly sealed service still reached 1.1.1.1. What works is an
-internal network, with a small forwarder per web service publishing it back to
-the host. There is a test for the seal and a negative control beside it, so the
-seal cannot pass because the probe was broken.
+Interception is by DNS. Every name a service looks up that is not inside the
+environment resolves to the sidecar, which recovers the destination from the
+Host header or the TLS server name and decides. That is what makes it work for
+Node, which has no proxy support at all, and for every SDK that bundles its own
+client. Connecting to a raw address does not get around it, because the network
+still has no route out, and there is a test for that.
+
+Where a rule names a path, or the mode is capture, mock, sandbox, or synth, the
+sidecar terminates TLS with a certificate signed by an authority generated for
+the environment. Everything else is tunnelled untouched, so a client that pins
+its own certificate keeps working. A rule naming paths on an HTTPS host that is
+only tunnelled is recorded in the decision log as host_only rather than assumed
+away.
+
+The first containment design was wrong and a test caught it: disabling IP
+masquerading looks like it removes a container's route out and does not, because
+Docker Desktop translates the traffic again at the virtual machine's gateway.
 
 ## Phase 1. Foundation
 
@@ -118,59 +156,78 @@ seal cannot pass because the probe was broken.
 | `engine/conformance` | proven | 23 behaviors |
 | `internal/db/docker` | proven | full suite green against a real daemon |
 
+## Phase 3. Data
+
+| Component | State | Notes |
+| --- | --- | --- |
+| `pkg/provider` database interface | proven | |
+| `engine/conformance` | proven | 23 behaviors; now asserts it left nothing behind |
+| `internal/db/docker` | proven | full suite green against a real daemon |
+| `internal/masking` transforms | proven | 22 transforms |
+| `internal/masking` catalog | proven | reads the live schema, keys, unique constraints, generated columns |
+| `internal/masking` rules | proven | specificity decides, not order; defaults link by transform |
+| `internal/masking` executor | proven | chunked, resumable, ctid for unkeyed tables |
+| `internal/verify` detectors | proven | 9 detectors |
+| `internal/verify` scan | proven | catches unmasked data, not only passes masked data |
+| `internal/verify` attestation | proven | Ed25519; rejects a deleted finding |
+| Subsetting | planned | |
+| Neon, Supabase, DBLab providers | planned | blocked on accounts |
+
 ## Phase 4. Build and runtime
 
 | Component | State | Notes |
 | --- | --- | --- |
-| `internal/dockerutil` | proven | one label scheme for every component that creates Docker resources; filters match on the label being present, not its value, so a resource an older release stamped differently is still found |
-| `internal/build` context | proven | deterministic tar, content digest as the cache key, symlinks out of the root dropped |
+| `internal/dockerutil` | proven | one label scheme; filters match on presence, not value |
+| `internal/build` context | proven | deterministic tar, digest as cache key |
 | `internal/build` ignore | proven | `.dockerignore` implemented here rather than added as a dependency |
-| `internal/build` buildpacks | proven | Go, Node, Python, Ruby; the first three are built against a real daemon in CI, so a generated Dockerfile that does not build fails the suite |
-| `internal/build` docker | proven | image tag derived from context, Dockerfile, target, and args; build output redacted at the writer |
-| `internal/runtime/local` | proven | 12 behaviors against a real daemon, seal measured with a negative control |
+| `internal/build` buildpacks | proven | Go, Node, Python, Ruby; three are built for real in the suite |
+| `internal/build` docker | proven | output redacted at the writer |
+| `internal/runtime/local` | proven | 20 behaviors against a real daemon |
 | `internal/env` | proven | lock, state, journal, database, build, runtime, in the one order that works |
-| `internal/policy` | proven | 100 percent, 48ns per decision, zero allocations |
 
 ## Phase 5. Egress control
 
-| Sub-phase | State | Notes |
+| Component | State | Notes |
 | --- | --- | --- |
-| Policy decision function | proven | `internal/policy`, and `af net policy` and `af net explain` run off it |
-| Proxy sidecar | planned | until it lands, an environment has no route out at all rather than a per host one |
-| Capture, mock, sandbox, synth | planned | |
-| Inbox and webhooks | planned | |
+| `internal/policy` | proven | 100 percent, 48ns per decision, zero allocations |
+| `cmd/af-proxy` | proven | DNS interception, transparent HTTP and TLS, explicit proxy |
+| `internal/proxyimage` | proven | sidecar built from source carried in the binary, no registry |
+| `internal/envcert` | proven | per environment authority, one level, thirty days |
+| `internal/livekey` | proven | refuses a live credential anywhere, distinguishes live from test |
+| Capture and the inbox | proven | Resend, SendGrid, Postmark, Mailgun, Twilio |
+| `internal/mockpack` | proven | stateful packs; built in Stripe pack runs a billing flow offline |
+| `internal/webhook` | proven | Stripe, GitHub, Svix signing, verified independently |
+| Synth mode | planned | |
+| Rate limiting | planned | |
 
 ## Phases 6 to 14
 
 Not started.
+
 ## Where to pick up
 
 In order of what unblocks the most:
 
-1. The proxy sidecar, so that egress becomes the per host policy the manifest
-   already describes and `af net explain` already answers about. The decision
-   function is done and proven; what is missing is the thing that consults it
-   on a real connection. This is also what turns the ingress forwarder into
-   the component it was designed to become.
-2. The masking rules model, SQL compiler, and resumable executor, so that
-   `af mask plan` and `af mask apply` work against a real database. The
-   transforms and the key hierarchy are done; what is missing is reading the
-   Postgres catalog, compiling chunked UPDATE statements in dependency order,
-   and checkpointing per chunk.
-3. `internal/verify`'s streaming table scan and signed attestation, so that a
-   golden can be marked verified for real rather than by the Docker provider's
-   current assumption that a committed image was verified.
-4. `af logs`, which is a small amount of work over what the runtime already
-   does and is the first thing anybody asks for when a service does not start.
-5. The agent runner, Phase 6, which is where bring your own model key lands.
+1. The agent runner, Phase 6. It is the largest remaining piece and the one
+   the product is named for: workflows written as sentences, driven through a
+   real browser, returning pass, fail, flaky, blocked, or unverified with
+   evidence. It is also where bring your own model key lands.
+2. Phase 7, load generation shaped like production traffic.
+3. Subsetting, so a golden can be a slice of production rather than all of it.
+4. Synth mode and rate limiting, the two egress modes still unimplemented.
+5. Phase 8, the control plane, and Phase 11, the docs site.
 
-Three notes for whoever picks this up. The conformance suite is not yet tested
+Notes for whoever picks this up. The conformance suite is not yet tested
 against a deliberately buggy provider, so it is not yet proved that every
 subtest can fail; that is worth doing before a second provider is written
 against it. And the Docker provider reports every committed image as verified,
 which is true by construction today because the commit is the last step of a
-refresh, but will stop being true once goldens can be imported. And `af up`
+refresh, but will stop being true once goldens can be imported. `af up`
 creates an empty golden when no source database is configured, so the schema
 arrives with the migrations rather than from production; masking and
 verification run and trivially pass on no rows, which is the honest answer
-rather than a skipped step.
+rather than a skipped step. The masking key is generated once per machine and
+kept in local state unless AF_MASKING_KEY is set, so two machines produce
+different mappings until CI sets one. And `af mask preview`, `af golden
+verify`, and `af support bundle` are the three subcommands still returning
+AF-RUN-001 inside otherwise working command groups.
