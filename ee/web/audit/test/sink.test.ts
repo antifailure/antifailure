@@ -2,7 +2,10 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { Queue, PermanentError, sign, verify, type Batch, type Entry, type Sink } from '../src/index.ts'
+import {
+  Queue, PermanentError, sign, verify,
+  type Batch, type Entry, type QueueOptions, type Sink,
+} from '../src/index.ts'
 
 const clock = { now: () => new Date('2026-01-01T00:00:00Z') }
 const KEY = 'a-signing-key'
@@ -30,7 +33,7 @@ class Recorder implements Sink {
   }
 }
 
-function queue(sink: Sink, over: Partial<Parameters<typeof Queue.prototype.constructor>[0]> = {}) {
+function queue(sink: Sink, over: Partial<QueueOptions> = {}): Queue {
   return new Queue({ sink, clock, key: KEY, batchSize: 2, capacity: 5, ...over })
 }
 
