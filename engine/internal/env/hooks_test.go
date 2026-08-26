@@ -13,6 +13,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/env"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
@@ -229,4 +230,130 @@ func TestUp_IsNotStoppedByALifecycleHookThatFails(t *testing.T) {
 		}
 	}
 	require.True(t, mentioned, "the hook's failure was swallowed entirely rather than reported")
+}
+
+// ---------------------------------------------------------------------------
+// Secrets reach the environment, and sandbox credentials do not reach services
+// ---------------------------------------------------------------------------
+
+const secretManifest = `
+version: 1
+name: secrets
+services:
+  - name: web
+    kind: web
+    command: node server.js
+    port: 3000
+    env:
+      - name: DATABASE_URL
+      - name: STRIPE_SECRET_KEY
+      - name: FEATURE_FLAG
+        value: preview
+      - name: OPTIONAL_THING
+        required: false
+egress:
+  default: block
+  rules:
+    - host: api.stripe.com
+      mode: sandbox
+      credential: STRIPE_SECRET_KEY
+`
+
+func orchestratorWithEnv(t *testing.T, dotenv string, shell map[string]string) (*env.Orchestrator, string) {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"),
+		[]byte(strings.TrimSpace(secretManifest)+"\n"), 0o644))
+	if dotenv != "" {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"),
+			[]byte(strings.TrimSpace(dotenv)+"\n"), 0o600))
+	}
+
+	m, err := manifest.Load(filepath.Join(dir, "antifailure.yaml"))
+	require.NoError(t, err)
+
+	o, err := env.New(env.Options{
+		Root: dir, Manifest: m, Branch: "main",
+		Clock: clock.New(), Redactor: redact.New(),
+		Progress: func(string) {},
+		Getenv:   func(k string) string { return shell[k] },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		_, _ = o.Down(ctx)
+	})
+	return o, dir
+}
+
+func TestUp_RefusesBeforeAnythingExistsWhenAVariableIsMissing(t *testing.T) {
+	// A variable that is absent produces a failure ten seconds later inside a
+	// container, in a log nobody is watching, and it looks like the application
+	// is broken rather than the configuration. So it is checked first, and this
+	// test needs no Docker daemon to prove the ordering.
+	o, _ := orchestratorWithEnv(t, "", map[string]string{})
+	_, err := o.Up(context.Background())
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "AF-SEC-001")
+	// Both missing names, not just the first. Somebody with two to set wants to
+	// be told both rather than running the command twice.
+	require.Contains(t, err.Error(), "DATABASE_URL")
+	require.Contains(t, err.Error(), "STRIPE_SECRET_KEY")
+	// The optional one is not reported as missing.
+	require.NotContains(t, err.Error(), "OPTIONAL_THING")
+
+	// And the next step names where to put them, including the .env that does
+	// not exist yet, which is very often the answer.
+	var coded *aferrors.Error
+	require.ErrorAs(t, err, &coded)
+	require.Contains(t, coded.NextStep(), ".env")
+	require.Contains(t, coded.NextStep(), "shell")
+}
+
+func TestUp_ReadsAVariableFromADotEnvFile(t *testing.T) {
+	// Most repositories that need secrets already have one, and asking somebody
+	// to duplicate it into a keyring before they can try the product is how a
+	// first run fails.
+	o, _ := orchestratorWithEnv(t,
+		"DATABASE_URL=postgres://from-dotenv\nSTRIPE_SECRET_KEY=sk_test_from_dotenv",
+		map[string]string{})
+
+	_, err := o.Up(context.Background())
+	// It gets past resolution. Whether it then reaches a daemon is not what
+	// this is testing, so only the configuration error is excluded.
+	if err != nil {
+		require.NotContains(t, err.Error(), "AF-SEC-001",
+			"a variable in .env was reported as missing")
+	}
+}
+
+func TestUp_TheShellBeatsTheFile(t *testing.T) {
+	// Somebody who typed an export meant it and is usually debugging.
+	o, _ := orchestratorWithEnv(t,
+		"DATABASE_URL=postgres://from-dotenv\nSTRIPE_SECRET_KEY=sk_test_a",
+		map[string]string{"DATABASE_URL": "postgres://from-shell"})
+
+	_, err := o.Up(context.Background())
+	if err != nil {
+		require.NotContains(t, err.Error(), "AF-SEC-001")
+	}
+}
+
+func TestUp_RefusesALiveCredentialInASandboxSlot(t *testing.T) {
+	// It would be substituted into every request to that provider, which is the
+	// opposite of what sandbox mode is for, and it would charge real cards.
+	live := "sk_live_" + strings.Repeat("a", 24)
+	o, _ := orchestratorWithEnv(t, "", map[string]string{
+		"DATABASE_URL":      "postgres://x",
+		"STRIPE_SECRET_KEY": live,
+	})
+
+	_, err := o.Up(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "AF-SEC-003")
+	require.Contains(t, err.Error(), "STRIPE_SECRET_KEY")
+	// The refusal must not quote the credential it is refusing.
+	require.NotContains(t, err.Error(), live)
 }

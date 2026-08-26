@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,7 +42,6 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/state"
 	"github.com/antifailure/antifailure/engine/internal/webhook"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
-	"github.com/antifailure/antifailure/engine/pkg/livekey"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -76,6 +76,10 @@ type Options struct {
 	// Getenv reads the environment this command is running in, for sandbox
 	// credentials. Nil uses the process environment.
 	Getenv func(string) string
+	// Secrets is where declared variables are looked up. Nil builds the
+	// default chain: this process's environment, then a .env beside the
+	// manifest, then the encrypted local store.
+	Secrets *secrets.Chain
 	// Extensions is consulted before an environment is created. Nil uses the
 	// process-wide registry, which in the community build is empty, so the
 	// check costs one function call that returns nil.
@@ -248,56 +252,104 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 	return s, nil
 }
 
-// sandboxCredentials resolves the values the sidecar substitutes.
+// secretChain is where declared variables are looked up.
 //
-// They are read from the environment this command is running in, once, and
-// handed to the sidecar. They are never written to a file, never passed to a
-// service, and never logged, because the whole point of substituting them at
-// the boundary is that the application never holds one.
-//
-// A missing one is refused rather than defaulted. Forwarding a sandbox request
-// with whatever credential the application happened to send is how a preview
-// environment charges a real card.
-func (o *Orchestrator) sandboxCredentials() (map[string]secrets.Value, error) {
-	if o.opts.Manifest.Egress == nil {
-		return nil, nil
+// The order is most specific first, and each step is where somebody would
+// reasonably have put the value. An explicit export beats a file, because
+// somebody who typed it meant it and is usually debugging. A file beats the
+// local store, because a repository's .env is checked out with the branch. The
+// store is last because it is the long-lived default.
+func (o *Orchestrator) secretChain() *secrets.Chain {
+	if o.opts.Secrets != nil {
+		return o.opts.Secrets
 	}
 	getenv := o.opts.Getenv
 	if getenv == nil {
 		getenv = os.Getenv
 	}
+	return secrets.NewChain(
+		&secrets.EnvSource{
+			Label: "this shell's environment",
+			Getenv: func(name string) (string, bool) {
+				v := getenv(name)
+				return v, v != ""
+			},
+		},
+		secrets.NewDotEnvSource(filepath.Join(o.opts.Root, ".env")),
+		secrets.NewFileStore(
+			filepath.Join(o.opts.Root, ".antifailure", "secrets.enc"),
+			getenv("AF_SECRET_PASSPHRASE"),
+		),
+	)
+}
 
-	out := map[string]secrets.Value{}
-	var missing []string
-	for _, r := range o.opts.Manifest.Egress.Rules {
-		if r.Mode != schema.ModeSandbox || r.Credential == "" {
-			continue
+// resolveSecrets looks up everything the manifest declares.
+//
+// Two things happen here that decide what a service actually receives.
+//
+// A service gets what the manifest declares and nothing else. The engine's own
+// environment is not passed through, because a preview environment that
+// inherited the shell it was started from would inherit AWS credentials, a
+// production database URL, and whatever else is exported on a laptop.
+//
+// A sandbox credential goes to the sidecar and never to a service. The whole
+// point of substituting it at the boundary is that the application never holds
+// one, so the service receives an obvious marker instead. A service handed
+// nothing at all usually crashes on startup with a message about
+// configuration, which reads as a bug in the tool.
+func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, error) {
+	chain := o.secretChain()
+	resolved, err := secrets.Resolve(ctx, chain, secrets.Request{
+		Declared: secrets.DeclaredVars(o.opts.Manifest),
+		Sandbox:  secrets.SandboxNames(o.opts.Manifest),
+		EnvID:    o.envID,
+	})
+	if err != nil {
+		var live *secrets.LiveCredentialError
+		if errors.As(err, &live) {
+			// The one check that has to happen before the environment exists. A
+			// live key handed to the sidecar is substituted into every request
+			// to that provider, which is the opposite of what sandbox mode is
+			// for and charges real cards.
+			return nil, aferrors.Coded(aferrors.AFSEC003, "name", live.Name)
 		}
-		if _, done := out[r.Credential]; done {
-			continue
-		}
-		value := getenv(r.Credential)
-		if value == "" {
-			missing = append(missing, r.Credential)
-			continue
-		}
-		if found := livekey.Scan(value, r.Credential); len(found) > 0 {
-			// The one check that has to happen before the environment exists.
-			// A live key handed to the sidecar would be substituted into
-			// every sandbox request, which is the opposite of what sandbox
-			// mode is for.
-			return nil, aferrors.Coded(aferrors.AFSEC003, "name", r.Credential)
-		}
-		out[r.Credential] = secrets.New(value)
-		o.opts.Redactor.Register(value)
+		return nil, err
 	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
+
+	if len(resolved.Missing) > 0 {
+		names := make([]string, 0, len(resolved.Missing))
+		for _, m := range resolved.Missing {
+			names = append(names, m.Name)
+		}
+		sort.Strings(names)
+		// Every source that was considered, including the ones that are not
+		// there. The place to put a value is very often the .env file that does
+		// not exist yet, and a list of only the usable sources would never
+		// mention it.
+		searched := chain.Considered(ctx)
 		return nil, aferrors.Coded(aferrors.AFSEC001,
-			"names", strings.Join(missing, ", "),
-			"sources", "this shell's environment")
+			"names", strings.Join(names, ", "),
+			"sources", strings.Join(searched, ", "))
 	}
-	return out, nil
+
+	// Registered before anything is built, so a value cannot reach a log line
+	// between being read and being registered.
+	for _, value := range resolved.Service {
+		o.opts.Redactor.Register(value.Reveal())
+	}
+	for _, value := range resolved.Sidecar {
+		o.opts.Redactor.Register(value.Reveal())
+	}
+
+	// Names and sources, never values. This is what a support bundle carries,
+	// so it has to be safe to show to somebody who should not see the secrets.
+	for _, r := range resolved.Resolutions {
+		o.progress(fmt.Sprintf("  %s from %s", r.Name, r.Source))
+	}
+	for _, m := range resolved.Optional {
+		o.progress(fmt.Sprintf("  %s was not found and is not required", m.Name))
+	}
+	return resolved, nil
 }
 
 // WebhookSecrets returns the signing secrets this environment uses, by the
@@ -533,6 +585,15 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 		})
 	}()
 
+	// Before the database and before anything is built. A variable that is
+	// missing produces a failure ten seconds later inside a container, in a log
+	// nobody is watching, and it looks like the application is broken rather
+	// than the configuration.
+	resolved, err := o.resolveSecrets(ctx)
+	if err != nil {
+		return res, err
+	}
+
 	golden, branch, dbURL, err := o.database(ctx, s)
 	if err != nil {
 		return res, err
@@ -578,12 +639,20 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 		Journal:     recordIntent,
 		Progress:    o.progress,
 	}
-	creds, err := o.sandboxCredentials()
-	if err != nil {
-		return res, err
-	}
-	spec.SandboxCredentials = creds
+	spec.SandboxCredentials = resolved.Sidecar
 	spec.ModelEnv = o.modelEnv()
+
+	// The resolved values reach the services here rather than in the spec
+	// builder, because the lookup is per environment and the builder runs per
+	// service. Each service still receives only the names it declared, so one
+	// service's variable does not travel to another's.
+	for i := range spec.Services {
+		for name := range spec.Services[i].Env {
+			if value, ok := resolved.Service[name]; ok {
+				spec.Services[i].Env[name] = value
+			}
+		}
+	}
 
 	packs, err := o.mockPacks()
 	if err != nil {
