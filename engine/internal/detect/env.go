@@ -406,6 +406,34 @@ func (a *MigrationAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, erro
 
 var prismaProviderRe = regexp.MustCompile(`(?s)datasource\s+\w+\s*\{[^}]*provider\s*=\s*["'](\w+)["']`)
 
+// cronNameFromPath names a scheduled job after the meaningful part of its
+// route.
+//
+// A route is usually a prefix nobody cares about followed by the job's actual
+// name: /api/cron/dunning is one job called dunning, not a job called
+// api-cron-dunning. The last segment carries the meaning, and the segment
+// before it is kept only when the last one is too generic to stand alone.
+func cronNameFromPath(p string) string {
+	segments := []string{}
+	for _, s := range strings.Split(p, "/") {
+		if s == "" || s == "api" || s == "cron" || s == "crons" || s == "jobs" || s == "tasks" {
+			continue
+		}
+		segments = append(segments, s)
+	}
+	if len(segments) == 0 {
+		return "cron"
+	}
+	last := segments[len(segments)-1]
+	switch last {
+	case "run", "index", "route", "handler":
+		if len(segments) > 1 {
+			last = segments[len(segments)-2] + "-" + last
+		}
+	}
+	return sanitizeServiceName("cron-" + last)
+}
+
 func prismaProvider(body string) string {
 	if m := prismaProviderRe.FindStringSubmatch(body); m != nil {
 		switch m[1] {
@@ -443,7 +471,7 @@ func (a *ScheduleAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error
 					continue
 				}
 				out = append(out, Finding{
-					Kind: KindCron, Subject: sanitizeServiceName("cron" + strings.ReplaceAll(c.Path, "/", "-")),
+					Kind: KindCron, Subject: cronNameFromPath(c.Path),
 					Value: c.Schedule, Confidence: High, Evidence: "vercel.json",
 					Detail: fmt.Sprintf("vercel.json runs %s on the schedule %s.", c.Path, c.Schedule),
 					Extra:  map[string]string{"path": c.Path},

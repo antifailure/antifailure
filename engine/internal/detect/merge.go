@@ -31,6 +31,14 @@ func Merge(findings []Finding, root string) (*schema.Manifest, []Question) {
 	services := mergeServices(findings, &questions)
 	m.Services = services
 
+	// The checkout directory is whatever the developer happened to clone into,
+	// and it is often not the application's name at all. A framework backed
+	// service name comes from the package itself, so it is what a reader will
+	// recognise.
+	if name := primaryServiceName(findings, services); name != "" {
+		m.Name = name
+	}
+
 	m.Database = mergeDatabase(findings, services, &questions)
 	m.Egress = mergeEgress(findings)
 	m.Personas = defaultPersonas()
@@ -46,6 +54,27 @@ func Merge(findings []Finding, root string) (*schema.Manifest, []Question) {
 	})
 	sort.SliceStable(questions, func(i, j int) bool { return questions[i].ID < questions[j].ID })
 	return m, questions
+}
+
+// primaryServiceName picks the name the application should carry: the first
+// web service that a framework analyzer recognised, since that is the one
+// whose package name a person would use.
+func primaryServiceName(findings []Finding, services []schema.Service) string {
+	framework := map[string]bool{}
+	for _, f := range OfKind(findings, KindFramework) {
+		framework[f.Subject] = true
+	}
+	for _, s := range services {
+		if s.Kind == schema.ServiceWeb && framework[s.Name] {
+			return s.Name
+		}
+	}
+	for _, s := range services {
+		if s.Kind == schema.ServiceWeb {
+			return s.Name
+		}
+	}
+	return ""
 }
 
 // candidate accumulates every finding about one service before it becomes one.
@@ -367,6 +396,11 @@ func isDatabaseURLName(name string) bool {
 func mergeEgress(findings []Finding) *schema.Egress {
 	e := &schema.Egress{Default: schema.ModeBlock}
 	seen := map[string]bool{}
+	// A provider's webhook path belongs on the host that serves its API, not
+	// on every host it happens to use. Repeating it on a CDN host would
+	// register three forwarders for one provider and deliver every event
+	// three times.
+	webhookClaimed := map[string]bool{}
 
 	for _, f := range OfKind(findings, KindThirdParty) {
 		if seen[f.Subject] {
@@ -390,7 +424,11 @@ func mergeEgress(findings []Finding) *schema.Egress {
 			}
 		}
 		if wp := f.Extra["webhook_path"]; wp != "" {
-			rule.WebhookPath = wp
+			provider := f.Extra["provider"]
+			if !webhookClaimed[provider] {
+				webhookClaimed[provider] = true
+				rule.WebhookPath = wp
+			}
 		}
 		e.Rules = append(e.Rules, rule)
 	}

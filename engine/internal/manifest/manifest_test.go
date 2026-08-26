@@ -115,7 +115,7 @@ services:
 	require.Contains(t, all, "no port")
 	require.Contains(t, all, `Two services are both named "web"`)
 	require.Contains(t, all, "no schedule")
-	require.Contains(t, all, "no command")
+	require.Contains(t, all, "neither a command nor a path")
 }
 
 func TestParse_ProblemsAreOrderedByLine(t *testing.T) {
@@ -879,4 +879,22 @@ func TestParse_ReportsAtMostAFixedNumberOfProblems(t *testing.T) {
 	ps := problems(t, err)
 	require.LessOrEqual(t, len(ps), 41)
 	require.Contains(t, messages(ps), "more problems, not listed")
+}
+
+// A platform cron, such as the ones vercel.json declares, calls an HTTP path
+// on a schedule and has no command at all. Demanding one would make af init
+// generate a manifest that af up then refuses.
+func TestParse_AcceptsACronServiceThatCallsAPathInsteadOfACommand(t *testing.T) {
+	t.Parallel()
+	mustParse(t, `
+version: 1
+name: shop
+services:
+  - name: web
+    port: 3000
+  - name: cron-dunning
+    kind: cron
+    health_path: /api/cron/dunning
+    schedule: 0 6 * * *
+`)
 }

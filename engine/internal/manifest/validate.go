@@ -128,10 +128,10 @@ func (v *validator) services(m *schema.Manifest) {
 					fmt.Sprintf("The schedule for %q is not valid: %s", s.Name, err),
 					"A cron expression has five fields: minute, hour, day of month, month, day of week.")
 			}
-			if s.Command == "" {
+			if s.Command == "" && s.HealthPath == "" {
 				v.add(base+".command",
-					fmt.Sprintf("Service %q is a cron service and declares no command.", s.Name),
-					"A cron service needs a command to run, or a health_path to call.")
+					fmt.Sprintf("Service %q is a cron service and declares neither a command nor a path.", s.Name),
+					"A cron service either runs a command or calls an HTTP path on the schedule. Platform crons, such as the ones declared in vercel.json, are the second kind.")
 			}
 		case schema.ServiceWorker:
 			if s.Port != 0 {
