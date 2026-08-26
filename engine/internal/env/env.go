@@ -29,6 +29,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/build"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
+	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
@@ -178,7 +179,7 @@ type session struct {
 	db      *state.DB
 	bus     *events.Bus
 	journal *journal.Journal
-	dbProv  *dockerdb.Provider
+	dbProv  provider.Database
 	runtime *local.Runtime
 	builder *build.DockerBuilder
 }
@@ -231,9 +232,7 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 	s.bus = events.NewBus(o.opts.Clock)
 	s.journal = journal.New(s.db, o.opts.Clock, s.bus)
 
-	if s.dbProv, err = dockerdb.New(dockerdb.Options{
-		Version: databaseVersion(o.opts.Manifest), Clock: o.opts.Clock,
-	}); err != nil {
+	if s.dbProv, err = o.newDatabaseProvider(ctx); err != nil {
 		s.close()
 		return nil, err
 	}
@@ -510,6 +509,64 @@ func needsInspection(e *schema.Egress) bool {
 	return eng.InspectsHost("probe.invalid", 443)
 }
 
+// newDatabaseProvider builds the provider the manifest asked for.
+//
+// The manifest names a provider and the engine builds it here. Without this
+// the constants in the schema are a list of intentions: a manifest could say
+// neon, pass validation, and silently get Docker, which is the kind of gap
+// that only shows up when somebody wonders why their preview has no production
+// data in it.
+func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Database, error) {
+	m := o.opts.Manifest
+	kind := schema.DBDocker
+	if m != nil && m.Database != nil && m.Database.Provider != "" {
+		kind = m.Database.Provider
+	}
+
+	switch kind {
+	case schema.DBDocker:
+		return dockerdb.New(dockerdb.Options{
+			Version: databaseVersion(m), Clock: o.opts.Clock,
+		})
+
+	case schema.DBNeon:
+		db := m.Database
+		if db.Project == "" {
+			return nil, aferrors.Coded(aferrors.AFMAN002,
+				"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+				"detail", "database.provider is neon and database.project is empty; "+
+					"the provider needs the Neon project to create branches in")
+		}
+		name := db.APIKeyEnv
+		if name == "" {
+			name = "NEON_API_KEY"
+		}
+		key, _, found, err := o.secretChain().Lookup(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || key.IsZero() {
+			return nil, aferrors.Coded(aferrors.AFSEC001,
+				"names", name,
+				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
+		}
+		return neondb.New(neondb.Options{
+			APIKey:      key,
+			ProjectID:   db.Project,
+			Clock:       o.opts.Clock,
+			MaxBranches: db.MaxBranches,
+		})
+
+	default:
+		// Named in the schema and not built here. Saying so is better than
+		// quietly falling back to Docker, which would hand somebody an empty
+		// preview and no reason for it.
+		return nil, aferrors.Coded(aferrors.AFMAN002,
+			"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+			"detail", fmt.Sprintf("database.provider is %q, which this build does not have", kind))
+	}
+}
+
 func databaseVersion(m *schema.Manifest) int {
 	if m.Database != nil && m.Database.Version > 0 {
 		return m.Database.Version
@@ -597,7 +654,7 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 		return res, err
 	}
 
-	golden, branch, dbURL, err := o.database(ctx, s)
+	golden, branch, dbURL, migrateURL, err := o.database(ctx, s)
 	if err != nil {
 		return res, err
 	}
@@ -624,11 +681,21 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	if err != nil {
 		return res, err
 	}
-	insideURL, err := s.runtime.AttachDatabase(ctx, s.dbProv, branch.ProviderRef, networkID, dbURL)
-	if err != nil {
-		return res, err
+	// Only a provider whose branches are local containers has anything to
+	// attach. A cloud provider's connection string already works from inside a
+	// container, so the URL handed to the services is the one it gave us. The
+	// interface says as much; this is where that becomes true rather than a
+	// comment.
+	insideURL, insideMigrateURL := dbURL, migrateURL
+	if attachable, ok := s.dbProv.(local.Attachable); ok {
+		insideURL, err = s.runtime.AttachDatabase(ctx, attachable, branch.ProviderRef, networkID, dbURL)
+		if err != nil {
+			return res, err
+		}
+		insideMigrateURL = insideURL
 	}
 	o.opts.Redactor.Register(insideURL.Reveal())
+	o.opts.Redactor.Register(insideMigrateURL.Reveal())
 
 	// An authority is generated only when something in the policy needs the
 	// sidecar to read inside TLS. An environment whose rules are all plain
@@ -637,10 +704,11 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	// for no reason.
 	spec := provider.EnvSpec{
 		EnvID: o.envID, Branch: o.opts.Branch, Services: specs,
-		Egress:      o.opts.Manifest.Egress,
-		DatabaseURL: insideURL,
-		Journal:     recordIntent,
-		Progress:    o.progress,
+		Egress:               o.opts.Manifest.Egress,
+		DatabaseURL:          insideURL,
+		MigrationDatabaseURL: insideMigrateURL,
+		Journal:              recordIntent,
+		Progress:             o.progress,
 	}
 	spec.SandboxCredentials = resolved.Sidecar
 	spec.ModelEnv = o.modelEnv()
@@ -702,12 +770,20 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 }
 
 // database makes sure a verified golden exists and branches it.
-func (o *Orchestrator) database(ctx context.Context, s *session) (string, provider.Branch, secrets.Value, error) {
+// database branches the golden and returns the two connection strings that
+// come out of it.
+//
+// Two, because they are for different things. An application should use the
+// pooled endpoint where the provider has one; a migration must not, because a
+// transaction pooler does not support the session level features migrations
+// use. A provider with no pool returns the same string twice, which is the
+// honest answer for it.
+func (o *Orchestrator) database(ctx context.Context, s *session) (string, provider.Branch, secrets.Value, secrets.Value, error) {
 	var zero provider.Branch
 
 	goldens, err := s.dbProv.ListGoldens(ctx)
 	if err != nil {
-		return "", zero, secrets.Value{}, err
+		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
 	var version string
 	for _, g := range goldens {
@@ -729,28 +805,41 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
 		})
 		if refreshErr != nil {
-			return "", zero, secrets.Value{}, refreshErr
+			return "", zero, secrets.Value{}, secrets.Value{}, refreshErr
 		}
 		version = gv.ID
 	}
 	o.progress("branching the database from " + version)
 
 	if _, err := s.journal.Intent(ctx, o.envID, "docker", journal.Kind("database"), o.envID, nil); err != nil {
-		return "", zero, secrets.Value{}, err
+		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
 	branch, err := s.dbProv.Branch(ctx, version, o.envID)
 	if err != nil {
-		return "", zero, secrets.Value{}, err
+		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
-	url, err := s.dbProv.ConnString(ctx, branch, provider.ConnDirect)
+	direct, err := s.dbProv.ConnString(ctx, branch, provider.ConnDirect)
 	if err != nil {
-		return "", zero, secrets.Value{}, err
+		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
 	// Every value that reaches a log goes through the redactor, and the
 	// connection string is registered so that it is redacted wherever it
 	// appears rather than wherever somebody remembered to.
-	o.opts.Redactor.Register(url.Reveal())
-	return version, branch, url, nil
+	o.opts.Redactor.Register(direct.Reveal())
+
+	pooled := direct
+	if s.dbProv.Capabilities().PooledEndpoints {
+		p, err := s.dbProv.ConnString(ctx, branch, provider.ConnPooled)
+		if err != nil {
+			// Declared and not delivered. Falling back would hand every
+			// service a direct connection and hide the fact, so it is an
+			// error: the provider said it had a pool.
+			return "", zero, secrets.Value{}, secrets.Value{}, err
+		}
+		pooled = p
+		o.opts.Redactor.Register(pooled.Reveal())
+	}
+	return version, branch, pooled, direct, nil
 }
 
 // buildServices builds an image for every service in the manifest.

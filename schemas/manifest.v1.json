@@ -321,6 +321,19 @@
           "default": "masking.yaml",
           "description": "Path to the masking rules file, relative to the repository root."
         },
+        "project": {
+          "type": "string",
+          "description": "The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not."
+        },
+        "api_key_env": {
+          "type": "string",
+          "description": "The name of the variable holding the provider's API key. Named rather than carried: a manifest is committed and a key is not. Defaults to NEON_API_KEY for the neon provider."
+        },
+        "max_branches": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging."
+        },
         "golden": {
           "$ref": "#/$defs/golden"
         },

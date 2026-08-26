@@ -42,7 +42,15 @@ func (r *Runtime) startService(
 
 	if s.Migrate != "" {
 		progress(fmt.Sprintf("%s: running migrations", s.Name))
-		if err := r.runOnce(ctx, spec, s, nets, proxyIP, s.Migrate, journal); err != nil {
+		// The migration gets its own connection string when the provider
+		// offers a pooled one, because a migration must not go through a
+		// transaction pooler. Everything else about the container is the same,
+		// so this is the spec with one field swapped rather than a second path.
+		migrateSpec := spec
+		if !spec.MigrationDatabaseURL.IsZero() {
+			migrateSpec.DatabaseURL = spec.MigrationDatabaseURL
+		}
+		if err := r.runOnce(ctx, migrateSpec, s, nets, proxyIP, s.Migrate, journal); err != nil {
 			running.State = "migration failed"
 			running.Detail = err.Error()
 			return running, err

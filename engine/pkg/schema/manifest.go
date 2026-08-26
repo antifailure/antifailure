@@ -120,9 +120,20 @@ type Database struct {
 	SourceURLEnv string     `json:"source_url_env,omitempty" yaml:"source_url_env,omitempty"`
 	URLEnv       string     `json:"url_env,omitempty" yaml:"url_env,omitempty"`
 	MaskingRules string     `json:"masking_rules,omitempty" yaml:"masking_rules,omitempty"`
-	Golden       *Golden    `json:"golden,omitempty" yaml:"golden,omitempty"`
-	Subset       *Subset    `json:"subset,omitempty" yaml:"subset,omitempty"`
-	Seed         string     `json:"seed,omitempty" yaml:"seed,omitempty"`
+	// Project identifies the account-side project for a hosted provider, such
+	// as a Neon project. It is not a secret and belongs in the manifest; the
+	// credential that reaches it does not, which is what APIKeyEnv is for.
+	Project string `json:"project,omitempty" yaml:"project,omitempty"`
+	// APIKeyEnv names the variable holding the provider's API key. Named
+	// rather than carried, for the same reason source_url_env is: a manifest is
+	// committed and a key is not.
+	APIKeyEnv string `json:"api_key_env,omitempty" yaml:"api_key_env,omitempty"`
+	// MaxBranches is the plan's concurrent branch limit, where the provider
+	// has one it cannot read from its own API.
+	MaxBranches int     `json:"max_branches,omitempty" yaml:"max_branches,omitempty"`
+	Golden      *Golden `json:"golden,omitempty" yaml:"golden,omitempty"`
+	Subset      *Subset `json:"subset,omitempty" yaml:"subset,omitempty"`
+	Seed        string  `json:"seed,omitempty" yaml:"seed,omitempty"`
 }
 
 // GoldenStorage names where dumps and attestations live.

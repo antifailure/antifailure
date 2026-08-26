@@ -959,3 +959,44 @@ func TestErrors_WithNoProblemsSaysSoRatherThanLying(t *testing.T) {
 	require.True(t, aferrors.As(e, &coded))
 	require.Contains(t, coded.Message(), "itself a bug")
 }
+
+// A hosted provider needs two things the manifest did not have a place for:
+// which project to create branches in, and which variable holds the key that
+// reaches it. The second is named rather than carried, for the same reason
+// source_url_env is: a manifest is committed and a key is not.
+//
+// The JSON Schema refuses a field it does not know about, so the Go type and
+// the schema have to agree before a manifest like this loads at all. That is
+// what this proves.
+func TestParse_AcceptsAHostedDatabaseProvider(t *testing.T) {
+	t.Parallel()
+	m := mustParse(t, `
+version: 1
+name: shopfront
+services:
+  - name: web
+    kind: web
+    command: npm start
+    port: 3000
+database:
+  provider: neon
+  version: 17
+  project: dawn-river-12345678
+  api_key_env: MY_NEON_KEY
+  max_branches: 5
+`)
+	require.Equal(t, schema.DBNeon, m.Database.Provider)
+	require.Equal(t, "dawn-river-12345678", m.Database.Project)
+	require.Equal(t, "MY_NEON_KEY", m.Database.APIKeyEnv)
+	require.Equal(t, 5, m.Database.MaxBranches)
+}
+
+func TestParse_LeavesTheHostedFieldsEmptyForDocker(t *testing.T) {
+	t.Parallel()
+	// Nothing invents a project for the local provider, which does not have
+	// one. A default here would be a value somebody has to notice is wrong.
+	m := mustParse(t, minimal)
+	require.Empty(t, m.Database.Project)
+	require.Empty(t, m.Database.APIKeyEnv)
+	require.Zero(t, m.Database.MaxBranches)
+}

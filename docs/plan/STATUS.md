@@ -182,7 +182,8 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 3.4 Verification scanner | partial | The 9 detectors are proven at 94 percent. The streaming table scan and the signed attestation are next. |
 | 3.5 Subsetting | planned | |
 | 3.6 Authentication adapters | planned | |
-| 3.7 to 3.9 Neon, Supabase, DBLab | planned | Blocked on Q5: no accounts provisioned. |
+| 3.7 Neon | proven | The full database conformance suite, all 23 behaviours, against the real Neon API. Found three bugs a fake would not have: `pooled` omitted means pooled, so `ConnDirect` was returning a pooled connection; a 200 with an empty body broke destroy-twice; and Neon's own branch ceiling arrived as an unexplained 422. |
+| 3.8, 3.9 Supabase, DBLab | planned | Blocked on Q5: no accounts provisioned. |
 | 3.10 Golden lifecycle | planned | |
 | 3.11 Postgres Insights | planned | |
 
@@ -211,7 +212,8 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/verify` scan | proven | catches unmasked data, not only passes masked data |
 | `internal/verify` attestation | proven | Ed25519; rejects a deleted finding |
 | `internal/subset` | proven | dependency order, cycles named where they break, unreachable tables reported |
-| Neon, Supabase, DBLab providers | planned | blocked on accounts |
+| Neon provider | proven | against the real service |
+| Supabase, DBLab providers | planned | blocked on accounts |
 
 ## Phase 4. Build and runtime
 
@@ -368,7 +370,7 @@ Everything remaining needs infrastructure that does not exist yet rather than
 code that has not been written:
 
 - **8.10, 14.1, 14.3, 14.10** need an Azure subscription with approved quota.
-- **3.7 to 3.9** need Neon, Supabase, and DBLab accounts.
+- **3.8 and 3.9** need Supabase and DBLab accounts. 3.7 no longer does.
 - **13.2, 13.3** need identity provider test tenants.
 - **13.9** needs a Stripe account.
 - **8.3, 8.4, 8.8, 8.9, and Phase 11** are the web application and the docs

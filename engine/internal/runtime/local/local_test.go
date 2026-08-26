@@ -206,6 +206,74 @@ func TestUp_RunsMigrationsBeforeTheService(t *testing.T) {
 	require.Contains(t, strings.Join(progress, "\n"), "running migrations")
 }
 
+func TestUp_GivesTheMigrationItsOwnConnectionString(t *testing.T) {
+	// An application should use a pooled endpoint; a migration must not,
+	// because a transaction pooler does not support the session level features
+	// migrations use, and the failure is a migration that half applies rather
+	// than one that refuses.
+	//
+	// The interface documented that split from the start and nothing
+	// implemented it: every service, and every migration, got the direct
+	// string. This is where that becomes true rather than a comment.
+	//
+	// The migration exits non-zero on purpose. A migration container is
+	// removed as soon as it finishes, so the only place its output survives is
+	// the error a failure produces, and that is what this reads.
+	r := requireRuntime(t)
+	id := envID(t, r, "migrate-url")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	// Not real connection strings. What matters is which one arrives where.
+	const forServices = "postgres://u:p@pooled.example/db"
+	const forMigrations = "postgres://u:p@direct.example/db"
+
+	_, err := r.Up(ctx, provider.EnvSpec{
+		EnvID:                id,
+		DatabaseURL:          secrets.New(forServices),
+		MigrationDatabaseURL: secrets.New(forMigrations),
+		Services: []provider.ServiceSpec{{
+			Name: "worker", Image: "alpine:3.20", Kind: "worker",
+			Migrate: `echo "migrate saw $DATABASE_URL" >&2; exit 7`,
+			Command: "sleep 60",
+		}},
+	})
+	require.Error(t, err)
+	// The password is gone by the time this reaches an error, because the
+	// redactor runs on the way out. The host is the part under test.
+	require.Contains(t, err.Error(), "migrate saw postgres://u:")
+	require.Contains(t, err.Error(), "@direct.example/db")
+	require.NotContains(t, err.Error(), "pooled.example",
+		"the migration was given the pooled connection string")
+	require.NotContains(t, err.Error(), ":p@", "the password reached an error message")
+}
+
+func TestUp_UsesOneConnectionStringWhenTheProviderHasNoPool(t *testing.T) {
+	// The negative control for the split. A provider with no pooled endpoint
+	// leaves MigrationDatabaseURL zero, and the migration must then get
+	// DatabaseURL. Handing it an empty DATABASE_URL is the failure this
+	// prevents, and an empty one would make the assertion below match a
+	// prefix of nothing, so the value is checked and not just its presence.
+	r := requireRuntime(t)
+	id := envID(t, r, "migrate-url-one")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	const only = "postgres://u:p@only.example/db"
+	_, err := r.Up(ctx, provider.EnvSpec{
+		EnvID:       id,
+		DatabaseURL: secrets.New(only),
+		Services: []provider.ServiceSpec{{
+			Name: "worker", Image: "alpine:3.20", Kind: "worker",
+			Migrate: `echo "migrate saw [$DATABASE_URL]" >&2; exit 7`,
+			Command: "sleep 60",
+		}},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "@only.example/db]",
+		"the migration was given an empty DATABASE_URL")
+}
+
 func TestUp_StopsWhenAMigrationFails(t *testing.T) {
 	r := requireRuntime(t)
 	id := envID(t, r, "migrate2")

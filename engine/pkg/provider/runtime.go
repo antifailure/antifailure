@@ -63,6 +63,16 @@ type EnvSpec struct {
 	// because it is one, and because a runtime that took a plain string would
 	// eventually log it.
 	DatabaseURL secrets.Value
+	// MigrationDatabaseURL is the connection string a service's migrate command
+	// receives, where it differs from the one the service itself gets.
+	//
+	// It differs whenever the provider offers a pooled endpoint. An
+	// application should use the pool; a migration must not, because a
+	// transaction pooler does not support the session level features
+	// migrations use, and the failure is a migration that half applies rather
+	// than one that refuses. Zero means use DatabaseURL for both, which is
+	// correct for a provider with no pool.
+	MigrationDatabaseURL secrets.Value
 	// Egress is the policy the sidecar enforces.
 	//
 	// Nil means block everything. The runtime never decides what a rule means;
