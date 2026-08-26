@@ -1,0 +1,21 @@
+{
+  "name": "@antifailure/runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Drives an application the way a person does, and returns a verdict with evidence.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.6" },
+  "bin": { "af-runner": "./src/main.ts" },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
