@@ -1,0 +1,255 @@
+# The control plane image, and a Helm chart proved against a real cluster.
+#
+# docs/self-hosting/control-plane.md tells operators to run
+# ghcr.io/antifailure/control-plane:<version>. This is what makes that
+# instruction followable.
+#
+# On a pull request the image is BUILT and never pushed, and the chart is
+# installed on a real kind cluster using that freshly built image. kind is not
+# AKS, which is the point: the chart has to work on any conformant cluster.
+name: control-plane-image
+
+on:
+  pull_request:
+    paths:
+      - 'web/**'
+      - 'deploy/**'
+      - '.github/workflows/control-plane-image.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'deploy/**'
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/control-plane
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Work out the tag
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            tag="main-$(git rev-parse --short HEAD)"
+          else
+            tag="pr-${{ github.event.number }}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "building $tag"
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          docker build \
+            -f deploy/docker/control-plane.Dockerfile \
+            -t "${IMAGE}:${{ steps.meta.outputs.tag }}" \
+            --build-arg AF_VERSION="${{ steps.meta.outputs.tag }}" \
+            --build-arg AF_COMMIT="$(git rev-parse HEAD)" \
+            --build-arg AF_BUILD_DATE="$(git show -s --format=%cI HEAD)" \
+            .
+          docker save "${IMAGE}:${{ steps.meta.outputs.tag }}" -o /tmp/image.tar
+
+      # The image has to be able to do the two things the deployment depends on
+      # before it is allowed anywhere near a registry.
+      - name: The entrypoints exist and refuse cleanly
+        run: |
+          set -euo pipefail
+          img="${IMAGE}:${{ steps.meta.outputs.tag }}"
+          test "$(docker run --rm --entrypoint sh "$img" -c 'ls bootstrap.mjs maintenance.mjs | wc -l')" = "2"
+
+          # With no credential each entrypoint must exit non-zero AND name the
+          # variable it wanted. Both halves are asserted: an exit code with a
+          # useless message sends somebody to read the source at 3am, and a good
+          # message with a zero exit is a job that silently did nothing.
+          check_refusal() {
+            local script="$1" want="$2" out rc
+            out=$(docker run --rm "$img" node "$script" 2>&1) && rc=0 || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "FAIL: $script exited 0 with no credential configured"; exit 1
+            fi
+            case "$out" in
+              *"$want"*) echo "$script refuses and names $want" ;;
+              *) echo "FAIL: $script did not mention $want. It said: $out"; exit 1 ;;
+            esac
+          }
+          check_refusal maintenance.mjs AF_MAINTENANCE_DATABASE_URL
+          check_refusal bootstrap.mjs AF_MIGRATION_DATABASE_URL
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: control-plane-image
+          path: /tmp/image.tar
+          retention-days: 1
+
+      # Only after everything above, and never from a pull request: a fork must
+      # not be able to publish under this repository's name.
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          docker push "${IMAGE}:${{ steps.meta.outputs.tag }}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            docker tag "${IMAGE}:${{ steps.meta.outputs.tag }}" "${IMAGE}:latest"
+            docker push "${IMAGE}:latest"
+          fi
+          echo "### Published" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:${{ steps.meta.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # The chart, installed for real, on a cluster that is not AKS.
+  #
+  # This is the difference between "the templates render" and "it works".
+  # `helm template` has never caught a bad probe, a missing grant, or a job that
+  # runs in the wrong order. An install does.
+  # ---------------------------------------------------------------------------
+  chart:
+    name: helm install on kind
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: control-plane-image
+          path: /tmp
+
+      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: af-chart
+
+      - name: Load the image we just built
+        run: |
+          set -euo pipefail
+          docker load -i /tmp/image.tar
+          kind load docker-image "${IMAGE}:${{ needs.build.outputs.tag }}" --name af-chart
+
+      - name: helm lint
+        run: |
+          helm lint deploy/helm/antifailure-control-plane \
+            --set database.url=postgres://a:b@h:5432/c \
+            --set database.migrationUrl=postgres://m:n@h:5432/c \
+            --set github.clientId=i --set github.clientSecret=s \
+            --set github.redirectUri=https://x/cb
+
+      # The guards must be able to REFUSE. A validation nobody has watched fail
+      # is a validation that may not work.
+      - name: The value guards refuse bad input
+        run: |
+          set -euo pipefail
+          refuse() {
+            if helm template t deploy/helm/antifailure-control-plane "$@" >/dev/null 2>&1; then
+              echo "FAIL: rendered when it should have refused: $*"; exit 1
+            fi
+            echo "refused as it should: $*"
+          }
+          refuse --set github.clientId=i --set github.clientSecret=s --set github.redirectUri=u
+          refuse --set database.url=x --set github.clientId=i --set github.clientSecret=s --set github.redirectUri=u
+          refuse --set database.url=x --set database.migrationUrl=y --set github.clientId=i \
+                 --set github.clientSecret=s --set github.redirectUri=u --set maintenance.mode=weekly
+
+      - name: A Postgres for the chart to talk to
+        run: |
+          set -euo pipefail
+          kubectl create namespace cp
+          kubectl -n cp create secret generic pg --from-literal=POSTGRES_PASSWORD=devpassword
+          kubectl -n cp apply -f - <<'YAML'
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: { name: pg }
+          spec:
+            replicas: 1
+            selector: { matchLabels: { app: pg } }
+            template:
+              metadata: { labels: { app: pg } }
+              spec:
+                containers:
+                  - name: pg
+                    image: postgres:17-alpine
+                    env:
+                      - { name: POSTGRES_USER, value: af_migrator }
+                      - { name: POSTGRES_DB, value: antifailure }
+                      - name: POSTGRES_PASSWORD
+                        valueFrom: { secretKeyRef: { name: pg, key: POSTGRES_PASSWORD } }
+                    ports: [{ containerPort: 5432 }]
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata: { name: pg }
+          spec:
+            selector: { app: pg }
+            ports: [{ port: 5432, targetPort: 5432 }]
+          YAML
+          kubectl -n cp rollout status deploy/pg --timeout=180s
+
+      - name: helm install
+        run: |
+          set -euo pipefail
+          helm install cp deploy/helm/antifailure-control-plane -n cp --wait --timeout 8m \
+            --set image.repository="${IMAGE}" \
+            --set image.tag="${{ needs.build.outputs.tag }}" \
+            --set image.pullPolicy=Never \
+            --set replicaCount=1 \
+            --set podDisruptionBudget.enabled=false \
+            --set database.url="postgres://af_app:apppassword@pg:5432/antifailure" \
+            --set database.migrationUrl="postgres://af_migrator:devpassword@pg:5432/antifailure" \
+            --set github.clientId=test --set github.clientSecret=test \
+            --set github.redirectUri=http://localhost/auth/callback \
+            --set config.insecureCookies=true
+
+      # The bootstrap did the thing nothing else does. Without the membership
+      # grant the pods come up healthy and cannot read one table, so this is the
+      # assertion that matters most in the whole workflow.
+      - name: The application role can actually see its tables
+        run: |
+          set -euo pipefail
+          kubectl -n cp logs job -l app.kubernetes.io/component=bootstrap --tail=-1 || true
+          kubectl -n cp exec deploy/pg -- env PGPASSWORD=devpassword \
+            psql -U af_migrator -d antifailure -tAc \
+            "SELECT pg_has_role('af_app','antifailure_app','MEMBER')" | grep -qx t
+          echo "af_app is a member of antifailure_app"
+          kubectl -n cp exec deploy/pg -- env PGPASSWORD=apppassword \
+            psql -h 127.0.0.1 -U af_app -d antifailure -tAc "SELECT count(*) FROM organizations" | grep -qx 0
+          echo "af_app can read organizations, and sees no other tenant's rows"
+
+      - name: helm test
+        run: helm test cp -n cp --timeout 3m
+
+      - name: What went wrong
+        if: failure()
+        run: |
+          kubectl -n cp get all
+          kubectl -n cp describe pods
+          kubectl -n cp logs -l app.kubernetes.io/name=antifailure-control-plane --tail=100 --all-containers || true
+          kubectl -n cp logs -l app.kubernetes.io/component=bootstrap --tail=100 || true
+
+      - name: helm uninstall leaves nothing behind
+        run: |
+          set -euo pipefail
+          helm uninstall cp -n cp --wait
+          left=$(kubectl -n cp get deploy,svc,secret,cronjob -l app.kubernetes.io/name=antifailure-control-plane -o name | wc -l)
+          test "$left" -eq 0 || { kubectl -n cp get all; echo "uninstall left $left object(s)"; exit 1; }
+          echo "clean"

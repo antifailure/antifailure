@@ -28,33 +28,77 @@ Antifailure and none of them is ever touched.
 
 ## How the boundary is enforced
 
-1. **Terraform state is scoped.** Each group is a separate workspace with its
-   own state file. A plan cannot reference a resource outside its workspace, so
-   an accidental import or a copied resource block fails at plan time rather
-   than at apply time.
+Each mechanism below says plainly whether it exists today. This document
+previously described all of it in the present tense while none of it was built,
+which is the same bug as a manifest key that reads as configuration and behaves
+as decoration, just written in prose.
 
-2. **Identity is scoped.** The agent workstation identity and the CI federated
-   identity hold Contributor on the three working groups and nothing at
-   subscription scope. An operation against another group fails with an
-   authorization error, which is the correct outcome: a permission that does
-   not exist cannot be misused.
+1. **Terraform refuses the name.** *Built.* `resource_group_name` carries a
+   variable validation, and the `foundation` module carries a matching
+   precondition, so a plan naming a group that is not prefixed `af-` fails
+   before it touches Azure. Proved against `Ravioli` and `postiz-rg`, both of
+   which are refused at plan time.
 
-3. **A guard runs before every apply and every destructive command.**
-   `tools/azguard` resolves the target of the operation and exits non zero
-   unless the target resource group starts with `af-` and carries
-   `project=antifailure`. It is wired into the Terraform wrapper, the leak
-   detector, and the cost estimator, so there is no path that skips it.
+2. **A guard refuses the command.** *Built.* `tools/azguard` reads the target
+   out of an `az` or `terraform` command line and exits non-zero unless every
+   resource group named is ours. It works offline, needs no credential, and so
+   cannot be skipped for want of one. With `--tags` it additionally requires
+   the group to exist and carry `project=antifailure`, and it **fails closed**:
+   an error reading Azure is a refusal, not an assumption that the target was
+   fine. A command naming no group at all is also refused, because the
+   alternative is guessing about `az group delete`.
+
+   ```sh
+   go run ./tools/azguard check --tags af-cp-scus
+   go run ./tools/azguard guard -- terraform apply -var resource_group_name=af-cp-scus
+   ```
+
+   Its tests assert that all five foreign groups in this subscription are
+   refused, in either case, along with the near-misses (`prod-af-cp`, `afcp`)
+   that a substring check would wave through.
+
+3. **Identity is scoped.** *Not built.* The intent is that the workstation
+   identity and the CI federated identity hold Contributor on the working
+   groups and nothing at subscription scope, so that an operation elsewhere
+   fails with an authorization error. There is no Entra app registration yet
+   and no federated credential, so today this rests on 1 and 2 alone. Until it
+   exists, the CI plan job skips rather than passes, and says so.
+
+4. **Terraform state is scoped.** *Partly built.* The stacks are separate, each
+   with its own state key, so one cannot reference the other's resources.
+   The remote state account itself is created by `stacks/tfstate` and does not
+   exist yet, so state is local until somebody runs it.
 
 ## Cost
 
-Budgets with alerts at 50, 80, and 100 percent are applied to each group by the
-`foundation` module. Preview environments run on a spot node pool with a
-30 minute idle sleep. `tools/cost estimate` reads a Terraform plan against
-`infra/pricing.yaml` and refuses to apply anything whose projected monthly cost
-exceeds the group's budget.
+Budgets with alerts at 50, 80 and 100 percent are applied by the `foundation`
+module, on **forecast as well as actual**, because a forecast crossing 100
+percent on the fourth of the month is the one worth acting on.
+
+`tools/cost estimate` reads a Terraform plan against `infra/pricing.yaml` and
+prints a projected monthly bill; `--budget N` makes it refuse. Every price in
+that file was read from the Azure retail prices API on the date recorded there.
+The control plane stack currently projects **32.49 USD a month**.
+
+A resource the estimator cannot price is reported `UNKNOWN` and suppresses the
+total. This is deliberate: an estimator that silently prices what it does not
+recognise at zero produces a confident, small, wrong number, which is worse
+than no number. Things that genuinely cost nothing are listed as free with a
+reason, so "this is free" and "I have never heard of this" cannot be confused.
+
+Preview environments on a spot node pool with an idle sleep are *not built*;
+they belong to the environment pool, which does not exist.
 
 ## Teardown
 
-`terraform destroy` per workspace removes everything Antifailure created. The
-leak detector then inventories the four groups and reports anything left, which
-is how "we removed it" becomes a checked claim rather than an assumption.
+`terraform destroy` per stack removes everything Antifailure created. Confirm
+it rather than assume it:
+
+```sh
+az resource list -g af-cp-scus -o table
+```
+
+Key Vaults are soft-deleted rather than purged on destroy, so the name is
+unavailable for seven days afterwards. That is on purpose: a vault that can be
+destroyed and immediately recreated is a vault whose secrets can be replaced by
+somebody holding only delete.
