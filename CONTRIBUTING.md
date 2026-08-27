@@ -15,9 +15,26 @@ which gates failed and the last lines of each, and the full output of every
 gate is under `.gate-reports/`.
 
 That promise is checked rather than trusted: `tools/gatecheck` compares the
-`gate` recipe against `.github/workflows/ci.yml` and fails the build when they
-disagree, because a promise like this rots silently. It has already caught two
-gates CI ran that the justfile did not.
+`gate` recipe against every workflow that runs on a pull request and fails the
+build when they disagree, because a promise like this rots silently. It has
+already caught two gates CI ran that the justfile did not.
+
+**When a gate you did not touch goes red, check a clean copy of `main` before
+you look at your own diff.** Three people arrived at this independently in one
+evening and one of them lost two hours to it. A branch that has been open for a
+while is being tested against its merge with `main`, so a failure can belong to
+somebody else's commit entirely, and it will still be printed underneath your
+change.
+
+```
+git worktree add /tmp/main-check origin/main && cd /tmp/main-check && just gate
+```
+
+The same move catches the opposite mistake, which is a gate that passes for you
+and fails everywhere else. Your machine is not clean: it has the directory a
+tool created, the image docker already pulled, the binary you built. All three
+have produced a green local run and a red CI run here. `git clone --depth 1
+file://$PWD /tmp/fresh` is a clean machine for the length of one command.
 
 ## Getting set up
 
