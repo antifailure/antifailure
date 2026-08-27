@@ -98,6 +98,20 @@ func newFakeRuntime(state *fakeState, flaw, allowedHost string) *fakeRuntime {
 
 func (f *fakeRuntime) is(flaw string) bool { return f.flaw == flaw }
 
+// lock and unlock guard the shared state, and journalling releases it so the
+// caller's callback can ask this runtime what exists.
+func (f *fakeRuntime) lock()   { f.state.mu.Lock() }
+func (f *fakeRuntime) unlock() { f.state.mu.Unlock() }
+
+// journalling calls the caller's journal callback with the state lock
+// released, and takes it back before returning.
+func (f *fakeRuntime) journalling(journal func(string, string) error, kind, name string) error {
+	f.unlock()
+	err := journal(kind, name)
+	f.lock()
+	return err
+}
+
 func (f *fakeRuntime) Name() string {
 	if f.is(flawNoName) {
 		return ""
@@ -120,8 +134,17 @@ func (f *fakeRuntime) Capabilities() provider.RuntimeCaps {
 func (f *fakeRuntime) Close() error { return nil }
 
 func (f *fakeRuntime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, error) {
-	f.state.mu.Lock()
-	defer f.state.mu.Unlock()
+	// Deliberately NOT holding the state lock across the whole of Up.
+	//
+	// The journal callback is the caller's code and it is entitled to ask this
+	// runtime questions: Up_JournalsBeforeCreating calls Inventory from inside
+	// it, which is the only moment that question can be asked. Holding a lock
+	// across a callback into the caller is a deadlock waiting for someone to
+	// use the callback for something, and this fake deadlocked the moment
+	// somebody did. No real runtime here holds one, so the fake should not
+	// either.
+	f.lock()
+	defer f.unlock()
 
 	if spec.EnvID == "" && !f.is(flawAcceptsEmptyEnvID) {
 		return provider.Env{}, aferrors.Coded(aferrors.AFRUN040,
@@ -146,12 +169,12 @@ func (f *fakeRuntime) Up(ctx context.Context, spec provider.EnvSpec) (provider.E
 		// teardown can do nothing with.
 		netName = "some-other-thing"
 	}
-	if err := journal("network", netName); err != nil {
+	if err := f.journalling(journal, "network", netName); err != nil {
 		if !f.is(flawIgnoresJournalRefusal) {
 			return provider.Env{EnvID: spec.EnvID}, err
 		}
 	}
-	if err := journal("container", spec.EnvID+"-proxy"); err != nil {
+	if err := f.journalling(journal, "container", spec.EnvID+"-proxy"); err != nil {
 		if !f.is(flawIgnoresJournalRefusal) {
 			return provider.Env{EnvID: spec.EnvID}, err
 		}
@@ -165,12 +188,21 @@ func (f *fakeRuntime) Up(ctx context.Context, spec provider.EnvSpec) (provider.E
 	env.egress = spec.Egress
 	env.proxy = !f.is(flawNoProxy)
 
+	// Creating the services before recording them, which leaves exactly the
+	// same environment behind as doing it the right way round and is
+	// therefore invisible to anything that looks at the result.
+	if f.is(flawJournalsAfterCreating) {
+		for _, s := range order {
+			f.place(env, s)
+		}
+	}
+
 	out := provider.Env{
 		EnvID: spec.EnvID, NetworkID: spec.EnvID + "-net",
 		CreatedAt: time.Now().UTC(), ProxyReady: env.proxy,
 	}
 	for _, s := range order {
-		if err := journal("container", spec.EnvID+"-"+s.Name); err != nil {
+		if err := f.journalling(journal, "container", spec.EnvID+"-"+s.Name); err != nil {
 			if !f.is(flawIgnoresJournalRefusal) {
 				return out, err
 			}

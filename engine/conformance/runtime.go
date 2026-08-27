@@ -97,6 +97,7 @@ var runtimeBehaviors = []Behavior{
 	{"Up_LeavesAFailedServiceFindable", "A service that exits immediately is still reported, so teardown can remove it and logs can explain it.", ""},
 	{"Up_CreatesNothingTheJournalRefused", "When the journal refuses, Up fails and the environment holds no resources.", ""},
 	{"Up_JournalsResourcesTeardownCanFind", "Every name the runtime journals identifies a resource the inventory reports.", ""},
+	{"Up_JournalsBeforeCreating", "A resource is recorded before it exists, not after.", ""},
 
 	{"Status_ReportsRunningServices", "Status names what is running and reports it ready.", ""},
 	{"Status_ReportsAnExitCode", "A service that has finished carries the code it exited with.", ""},
@@ -351,6 +352,8 @@ func runRuntimeBehavior(
 		h.upCreatesNothingTheJournalRefused(ctx)
 	case "Up_JournalsResourcesTeardownCanFind":
 		h.upJournalsResourcesTeardownCanFind(ctx)
+	case "Up_JournalsBeforeCreating":
+		h.upJournalsBeforeCreating(ctx)
 
 	case "Status_ReportsRunningServices":
 		h.statusReportsRunningServices(ctx)
@@ -852,6 +855,36 @@ func (h *rtHarness) upJournalsResourcesTeardownCanFind(ctx context.Context) {
 	}
 }
 
+func (h *rtHarness) upJournalsBeforeCreating(ctx context.Context) {
+	id := h.envID("jrn3")
+	var late []string
+	h.mustUp(ctx, provider.EnvSpec{
+		EnvID:    id,
+		Services: []provider.ServiceSpec{h.worker("w", "sleep 120")},
+		Journal: func(_, resource string) error {
+			// The question is asked at the only moment it can be: a resource
+			// that already exists when it is recorded was created first.
+			//
+			// This has to be checked here rather than afterwards, and that is
+			// the whole point of the behaviour. Both orders leave exactly the
+			// same environment behind, so no assertion about the end state can
+			// tell them apart, and the difference between them is a window in
+			// which an interrupt strands a resource nothing can ever find
+			// again. Asserting on a sequence needs the sequence.
+			if mentions(h.resourcesFor(ctx, id), resource) {
+				late = append(late, resource)
+			}
+			return nil
+		},
+	})
+	if len(late) > 0 {
+		h.t.Errorf("%v already existed when they were journalled, so they were created "+
+			"first. An interrupt between creating and recording leaves a resource no "+
+			"teardown and no leak detector can find, which is the one failure the "+
+			"journal exists to prevent", late)
+	}
+}
+
 // mentions reports whether any resource is identifiable by a journalled name.
 //
 // Loose on purpose. A runtime journals the name it is about to create and the
@@ -1273,6 +1306,20 @@ func (h *rtHarness) logsReturnWhatAServiceWrote(ctx context.Context) {
 	}
 }
 
+// shortLivedClient is an HTTP client that leaves nothing running.
+//
+// Keep-alive is off and idle connections are closed by the caller, because the
+// default transport parks a reader goroutine per idle connection and the
+// package this suite runs inside checks for leaked goroutines at exit. Every
+// behaviour passed and the package still failed, which is a confusing way to
+// learn that a test helper left a socket open.
+func shortLivedClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
+}
+
 // requireInternet skips when this machine cannot reach the host the egress
 // behaviors decide about.
 //
@@ -1283,7 +1330,8 @@ func (h *rtHarness) logsReturnWhatAServiceWrote(ctx context.Context) {
 // question the behavior itself exists to answer.
 func (h *rtHarness) requireInternet(ctx context.Context) {
 	h.t.Helper()
-	c := &http.Client{Timeout: 10 * time.Second}
+	c := shortLivedClient(10 * time.Second)
+	defer c.CloseIdleConnections()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+h.opts.AllowedHost+"/", nil)
 	if err != nil {
 		h.t.Fatalf("building the reachability request: %v", err)
@@ -1298,7 +1346,8 @@ func (h *rtHarness) requireInternet(ctx context.Context) {
 // httpGet reads a URL and returns its body.
 func httpGet(t *testing.T, ctx context.Context, url string) string {
 	t.Helper()
-	c := &http.Client{Timeout: 15 * time.Second}
+	c := shortLivedClient(15 * time.Second)
+	defer c.CloseIdleConnections()
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {

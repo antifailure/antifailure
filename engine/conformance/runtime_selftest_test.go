@@ -30,6 +30,7 @@ const (
 	flawRollsBackFailedService     = "rolls-back-failed-service"
 	flawIgnoresJournalRefusal      = "ignores-journal-refusal"
 	flawJournalsUnfindableNames    = "journals-unfindable-names"
+	flawJournalsAfterCreating      = "journals-after-creating"
 	flawLosesServiceKind           = "loses-service-kind"
 	flawNoExitCode                 = "no-exit-code"
 	flawExitCodeWhileRunning       = "exit-code-while-running"
@@ -76,6 +77,7 @@ var negativeControls = []struct {
 	{flawRollsBackFailedService, "--- FAIL: TestRuntimeSuiteChild/Up_LeavesAFailedServiceFindable"},
 	{flawIgnoresJournalRefusal, "--- FAIL: TestRuntimeSuiteChild/Up_CreatesNothingTheJournalRefused"},
 	{flawJournalsUnfindableNames, "--- FAIL: TestRuntimeSuiteChild/Up_JournalsResourcesTeardownCanFind"},
+	{flawJournalsAfterCreating, "--- FAIL: TestRuntimeSuiteChild/Up_JournalsBeforeCreating"},
 	{flawLosesServiceKind, "--- FAIL: TestRuntimeSuiteChild/Status_ReportsRunningServices"},
 	{flawNoExitCode, "--- FAIL: TestRuntimeSuiteChild/Status_ReportsAnExitCode"},
 	{flawExitCodeWhileRunning, "--- FAIL: TestRuntimeSuiteChild/Status_ReportsAnExitCode"},
