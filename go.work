@@ -5,6 +5,8 @@
 // dependency set small and auditable.
 go 1.25.0
 
+toolchain go1.25.14
+
 use (
 	./engine
 	./tools

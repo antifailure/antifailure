@@ -43,12 +43,30 @@ gate: _reports
       fi
     }
 
+    # Several gates assert a wall clock budget: a manifest parses in under
+    # 250ms, ten thousand runs plan in under a second, a container build
+    # finishes inside its deadline. Those are real guards and they are worth
+    # keeping, but they measure the machine as much as the code. On a box that
+    # is oversubscribed they fail while nothing is wrong, and the failure reads
+    # exactly like a regression, so say so before the run rather than after.
+    cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+    load=$(uptime | sed 's/.*averages*: *//' | awk '{print $1}' | tr -d ',')
+    busy=$(awk -v l="$load" -v c="$cores" 'BEGIN { print (l > c * 1.5) ? 1 : 0 }')
+    if [ "$busy" = "1" ]; then
+      echo "Load average is $load on $cores cores."
+      echo "Timing gates can fail here while nothing is wrong. Re-run a failure on"
+      echo "its own before believing it."
+      echo
+    fi
+
     echo "Gates"
     run "generated files are current" just _generated
     run "release stamps a real version"  just ldcheck
     run "error catalog and code agree"   just errcheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
+    run "documented paths exist"         just claimcheck
+    run "prose reads like a person"      just prosecheck
     run "gate matches CI"                just gatecheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
@@ -146,12 +164,34 @@ setup:
     fi
 
 # Start the Postgres the control plane suites need.
+#
+# pg_stat_statements is preloaded because the query regression work needs it and
+# because of how it fails without it: `CREATE EXTENSION pg_stat_statements`
+# succeeds on a server that never loaded the library, the view exists, and it
+# records nothing. The tests then skip rather than fail, and a suite that skips
+# reports ok. Preloading costs nothing for anybody who does not use it, and
+# `track=all` counts statements inside functions and procedures, which is where
+# an N+1 usually hides.
+#
+# The readiness loop below waits for a query to succeed rather than for the port
+# to open. An open port is not an accepting database: the postgres image runs
+# initdb against a temporary server and shuts it down before starting the real
+# one, so both `nc -z` and `pg_isready` answer yes during a window when the next
+# query fails with "the database system is shutting down". Getting this wrong is
+# how a suite ends up skipping and reporting ok.
 db:
     @docker rm -f af-cp-test > /dev/null 2>&1 || true
     docker run -d --name af-cp-test -p 55432:5432 \
-      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine
+      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine \
+      -c shared_preload_libraries=pg_stat_statements \
+      -c pg_stat_statements.track=all
     @echo "waiting for postgres"
-    @for i in $(seq 1 60); do nc -z 127.0.0.1 55432 && break || sleep 1; done
+    @for i in $(seq 1 90); do \
+      docker exec af-cp-test psql -U postgres -d antifailure -tAc 'select 1' > /dev/null 2>&1 && break; \
+      sleep 1; \
+    done
+    @docker exec af-cp-test psql -U postgres -d antifailure -tAc 'select 1' > /dev/null 2>&1 \
+      || { echo "postgres never accepted a query"; exit 1; }
     @echo "up on 55432"
 
 # Remove it again.
@@ -249,6 +289,14 @@ scanrepo:
 # Every af command shown in the docs is a command that exists.
 docexamples:
     cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists
+
+# The punctuation this project does not use.
+prosecheck:
+    go run ./tools/prosecheck .
+
+# Every repository path our documents point at exists.
+claimcheck:
+    go run ./tools/claimcheck .
 
 # This justfile runs what CI runs.
 gatecheck:
@@ -358,3 +406,31 @@ leaks:
 clean:
     rm -rf bin {{reports}}
     @echo "clean"
+
+# Known vulnerabilities that our code can actually reach.
+#
+# Not part of `just gate`, and that is deliberate rather than an oversight. The
+# answer comes from the Go vulnerability database, so it is not a function of
+# this tree: the same commit is clean today and not clean tomorrow. `just gate`
+# promises that green here means green in CI, and a scan whose input moves under
+# it cannot keep that promise in either direction. It also needs the network.
+#
+# security.yml runs it on every pull request and again every morning, which is
+# where a check like this belongs. Run it here whenever you change a dependency.
+vuln:
+    go run ./tools/vulncheck .
+
+# The linter set CONTRIBUTING describes.
+#
+# Not part of `just gate`. There are findings that predate the config, in
+# packages several people are editing at once, and a gate that fails every
+# branch for something none of them did is a gate people learn to route around.
+# It goes into `gate` when the count reaches zero.
+lint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v golangci-lint > /dev/null; then
+      echo "golangci-lint is not installed. brew install golangci-lint"
+      exit 1
+    fi
+    cd engine && golangci-lint run --timeout 15m ./...

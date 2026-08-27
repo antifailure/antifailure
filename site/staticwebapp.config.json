@@ -1,0 +1,51 @@
+{
+  "trailingSlash": "auto",
+  "routes": [
+    {
+      "route": "/install.sh",
+      "headers": {
+        "content-type": "text/x-shellscript; charset=utf-8",
+        "cache-control": "public, max-age=300"
+      }
+    },
+    {
+      "route": "/schemas/*",
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "public, max-age=3600"
+      }
+    },
+    {
+      "route": "/docs/_astro/*",
+      "headers": {
+        "cache-control": "public, max-age=31536000, immutable"
+      }
+    },
+    {
+      "route": "/_next/static/*",
+      "headers": {
+        "cache-control": "public, max-age=31536000, immutable"
+      }
+    },
+    {
+      "route": "/api/*",
+      "allowedRoles": [
+        "anonymous"
+      ]
+    }
+  ],
+  "responseOverrides": {
+    "404": {
+      "rewrite": "/404.html"
+    }
+  },
+  "globalHeaders": {
+    "strict-transport-security": "max-age=63072000; includeSubDomains; preload",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin"
+  },
+  "mimeTypes": {
+    ".sh": "text/x-shellscript",
+    ".json": "application/json"
+  }
+}

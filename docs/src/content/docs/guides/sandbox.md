@@ -58,9 +58,9 @@ different account than the webhook signing secret, or one that was rotated.
 
 ## Providers with no sandbox
 
-Use [`mock`](/guides/mocking/) with a fixture pack, or [`synth`](/guides/synth/)
+Use [`mock`](/docs/guides/mocking/) with a fixture pack, or [`synth`](/docs/guides/synth/)
 where a fixture would have to be invented anyway. `block` is also an answer:
 an environment that cannot reach a service is an environment that tells you
 what your application does when that service is down.
 
-Related: [egress](/concepts/egress/), [secrets](/guides/secrets/).
+Related: [egress](/docs/concepts/egress/), [secrets](/docs/guides/secrets/).
