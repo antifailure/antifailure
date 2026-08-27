@@ -50,6 +50,20 @@ var (
 const (
 	credTypeGeneric         = 1
 	credPersistLocalMachine = 2
+	// maxBlob is CRED_MAX_CREDENTIAL_BLOB_SIZE, the largest secret Windows will
+	// store: five times 512 bytes.
+	//
+	// It is a real limit and a low one. The blob is UTF-16, so it is 1280
+	// characters, and a PEM private key or a connection string carrying a
+	// certificate chain goes past it. Enforced here rather than left to
+	// advapi32, which refuses with ERROR_INVALID_PARAMETER rendered as "The
+	// stub received bad data": true, unactionable, and about a stub the caller
+	// has never heard of.
+	//
+	// Found by running the tests on a real Windows runner. Nothing about the
+	// API documentation for CredWriteW says this, and no stand-in for advapi32
+	// would have refused the write.
+	maxBlob = 5 * 512
 	// The error advapi32 reports for a target name that is not stored. Named
 	// rather than inlined, because the whole chain depends on telling a miss
 	// apart from a failure and a bare 1168 in a comparison is not readable.
@@ -135,6 +149,15 @@ func (SystemKeyring) Set(service, name, value string) error {
 	// would round trip through this code correctly and show as mojibake to
 	// anybody who looked, and to any other tool that read it.
 	blob := encodeUTF16(value)
+	if len(blob) > maxBlob {
+		// Refused with the numbers, because the useful part is how far over it
+		// is and that the limit is the platform's rather than ours.
+		return fmt.Errorf(
+			"the Windows Credential Manager cannot store %s: it is %d characters and the "+
+				"limit is %d, because a credential blob may hold %d bytes and this is UTF-16. "+
+				"Put a value this long in the encrypted local store instead, with 'af secret set'",
+			target(service, name), len(blob)/2, maxBlob/2, maxBlob)
+	}
 
 	cred := credentialW{
 		Type:               credTypeGeneric,

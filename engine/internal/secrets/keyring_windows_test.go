@@ -119,15 +119,56 @@ func TestAMultiLineValueAndTrailingNewlineSurvive(t *testing.T) {
 	require.True(t, strings.HasSuffix(got, "\n"), "the trailing newline was eaten")
 }
 
-// A long value, because the blob is length delimited by a uint32 and a
-// connection string with a base64 certificate in it is the realistic large one.
-func TestALargeValueSurvives(t *testing.T) {
+// The limit, from both sides.
+//
+// Windows will not store a credential blob larger than
+// CRED_MAX_CREDENTIAL_BLOB_SIZE, which is 2560 bytes, and the blob is UTF-16,
+// so that is 1280 characters. Nothing in the documentation for CredWriteW says
+// so and no stand-in for advapi32 would have refused: this was found by running
+// these tests on a real Windows runner, where a 2000 character value came back
+// as "The stub received bad data".
+//
+// Both sides are pinned. A value at the limit has to work, or a later
+// off-by-one would quietly shrink what can be stored. A value past it has to be
+// refused with a message that says how far over and what to do instead, rather
+// than passing the blob to advapi32 and returning a sentence about a stub the
+// user has never heard of.
+func TestAValueAtTheLimitWorksAndOneOverItIsRefused(t *testing.T) {
 	ring := requireKeyring(t)
 	const service = "antifailure-test"
-	const name = "large"
+	t.Cleanup(func() {
+		_ = ring.Delete(service, "at-limit")
+		_ = ring.Delete(service, "over-limit")
+	})
+
+	// 1280 characters is 2560 bytes of UTF-16, exactly the limit.
+	atLimit := strings.Repeat("a", 1280)
+	require.NoError(t, ring.Set(service, "at-limit", atLimit),
+		"a value exactly at the documented limit was refused")
+	got, err := ring.Get(service, "at-limit")
+	require.NoError(t, err)
+	require.Equal(t, atLimit, got)
+
+	overLimit := strings.Repeat("a", 1281)
+	err = ring.Set(service, "over-limit", overLimit)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "1281 characters")
+	require.Contains(t, err.Error(), "af secret set",
+		"the message has to say where a value this long can go instead")
+	require.NotContains(t, err.Error(), "stub",
+		"advapi32's own message reached the user")
+	t.Logf("reports: %s", err)
+}
+
+// A value long enough to be realistic and short enough to store: a connection
+// string with a certificate fragment in it.
+func TestARealisticallyLongValueSurvives(t *testing.T) {
+	ring := requireKeyring(t)
+	const service = "antifailure-test"
+	const name = "long"
 	t.Cleanup(func() { _ = ring.Delete(service, name) })
 
-	value := strings.Repeat("abcdefghij", 200)
+	value := "postgres://u:p@host:5432/db?sslrootcert=" + strings.Repeat("abcdefghij", 100)
 	require.NoError(t, ring.Set(service, name, value))
 	got, err := ring.Get(service, name)
 	require.NoError(t, err)
