@@ -150,6 +150,20 @@ INSERT INTO invoices (region, tenant_no, cents) VALUES
 INSERT INTO audit_log (who) VALUES ('ada@eu.example'),('katherine@us.example');
 `
 
+// testPostgresMajor is the server version these suites ask for.
+//
+// Deliberately not the newest. pg_dump REFUSES to read a server newer than
+// itself, and Debian, Ubuntu and the GitHub runners all still ship a 16 client
+// by default, so a suite that copies a schema out of a 17 server fails on a
+// correctly set up machine. 16 is readable by every client this is likely to
+// meet, and nothing being tested here is version specific: the catalogue
+// queries, COPY, generated and identity columns, composite keys, materialized
+// common table expressions and session_replication_role are all the same on 16
+// and 17. The version skew itself is the product's problem rather than the
+// test's, and pgcopy handles it by finding a client new enough for the server
+// and saying which package supplies one when there is none.
+const testPostgresMajor = 16
+
 // pair is a source database and an empty candidate, both real.
 type pair struct {
 	SourceURL string
@@ -177,7 +191,7 @@ func TestMain(m *testing.M) {
 			shared.skip = "AF_SKIP_DOCKER is set"
 			return m.Run()
 		}
-		p, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: 46700})
+		p, err := dockerdb.New(dockerdb.Options{Version: testPostgresMajor, Clock: clock.New(), PortFrom: 46700})
 		if err != nil {
 			shared.skip = fmt.Sprintf("no Docker daemon is reachable: %v", err)
 			return m.Run()
@@ -186,7 +200,7 @@ func TestMain(m *testing.M) {
 		defer cancel()
 
 		gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
-			Version: 17, RulesHash: "subset-test",
+			Version: testPostgresMajor, RulesHash: "subset-test",
 			Mask:   func(context.Context, secrets.Value) error { return nil },
 			Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
 		})

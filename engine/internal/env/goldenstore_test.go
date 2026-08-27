@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
 	"github.com/antifailure/antifailure/engine/internal/golden"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -28,6 +29,20 @@ import (
 // piece of it has its own tests elsewhere; what nothing else checks is that a
 // dump written by the publish is a dump the pull can restore, and that what
 // comes out the far end is the same data.
+
+// testPostgresMajor is the server version this suite asks for.
+//
+// Deliberately not the newest. pg_dump REFUSES to read a server newer than
+// itself, and Debian, Ubuntu and the GitHub runners all still ship a 16 client
+// by default, so a suite that copies a schema out of a 17 server fails on a
+// correctly set up machine. 16 is readable by every client this is likely to
+// meet, and nothing being tested here is version specific: the catalogue
+// queries, COPY, generated and identity columns, composite keys, materialized
+// common table expressions and session_replication_role are all the same on 16
+// and 17. The version skew itself is the product's problem rather than the
+// test's, and pgcopy handles it by finding a client new enough for the server
+// and saying which package supplies one when there is none.
+const testPostgresMajor = 16
 
 // sourceSchema is small and has a foreign key, so that the subset has
 // something to close over and the restore has something to get wrong.
@@ -162,28 +177,32 @@ func TestPull_RefusesAVersionWhosePublishDidNotFinish(t *testing.T) {
 	require.Contains(t, err.Error(), "no complete versions")
 }
 
-// requireSourceDatabase makes a database on the project's test Postgres to
-// play production.
+// requireSourceDatabase produces a real Postgres to play production.
 //
-// The standing test server rather than a container of its own, because this
-// test already asks the Docker provider to build two goldens and branch them,
-// and every one of those is an initdb. On a busy machine a sixth initdb is the
-// one that misses the provider's readiness window, and what that produces is a
-// SKIP: the suite reports ok and nothing ran. A skip that reads as a pass is
-// worse than a failure, so the cheapest container is the one not created.
+// Two paths, and the reason for each. When AF_TEST_POSTGRES names a server
+// that is already running, a database on it is used: this test already asks
+// the Docker provider for two candidates, each of which is an initdb, and on a
+// busy machine a third is the one that misses the provider's readiness window.
+// What that produces is a t.Skipf, so the suite prints ok and nothing ran,
+// which is worse than a failure. The cheapest container is the one not created.
+//
+// With no such server, one is started here, because continuous integration has
+// no standing Postgres for the engine job and a test that quietly skips there
+// is a test that exists to be green rather than to check anything.
 func requireSourceDatabase(t *testing.T, ctx context.Context) (string, func()) {
 	t.Helper()
-	base := os.Getenv("AF_TEST_POSTGRES")
-	if base == "" {
-		base = "postgres://postgres:test@127.0.0.1:55432/antifailure?sslmode=disable"
+	if base := os.Getenv("AF_TEST_POSTGRES"); base != "" {
+		return sourceOnStandingServer(t, ctx, base)
 	}
+	return sourceInItsOwnContainer(t, ctx)
+}
+
+func sourceOnStandingServer(t *testing.T, ctx context.Context, base string) (string, func()) {
+	t.Helper()
 	admin, err := pgx.Connect(ctx, base)
-	if err != nil {
-		t.Skipf("skipped: no test Postgres at %s. Start one with: "+
-			"docker run -d --name af-cp-test -p 55432:5432 -e POSTGRES_PASSWORD=test "+
-			"-e POSTGRES_DB=antifailure postgres:17-alpine",
-			redactHost(base))
-	}
+	require.NoError(t, err, "AF_TEST_POSTGRES is set, so an unreachable server is a failure "+
+		"rather than a reason to skip: setting it is a statement that a database is meant to be there")
+
 	name := fmt.Sprintf("af_store_source_%d", time.Now().UnixNano())
 	_, err = admin.Exec(ctx, "CREATE DATABASE "+name)
 	require.NoError(t, err)
@@ -199,6 +218,37 @@ func requireSourceDatabase(t *testing.T, ctx context.Context) (string, func()) {
 	}
 }
 
+func sourceInItsOwnContainer(t *testing.T, ctx context.Context) (string, func()) {
+	t.Helper()
+	p, err := dockerdb.New(dockerdb.Options{
+		Version: testPostgresMajor, Clock: clock.New(), PortFrom: 46900,
+	})
+	if err != nil {
+		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+	}
+	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
+		Version: testPostgresMajor, RulesHash: "store-test",
+		Mask:   func(context.Context, secrets.Value) error { return nil },
+		Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
+	})
+	require.NoError(t, err, "Docker is here, so a source that will not start is a failure "+
+		"rather than a reason to skip")
+
+	branch, err := p.Branch(ctx, gv.ID, "storesource")
+	require.NoError(t, err)
+	url, err := p.ConnString(ctx, branch, provider.ConnDirect)
+	require.NoError(t, err)
+	require.NoError(t, pgcopy.Exec(ctx, url, sourceSchema))
+
+	return url.Reveal(), func() {
+		c, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		_ = p.Destroy(c, branch)
+		_ = p.DestroyGolden(c, gv.ID)
+		_ = p.Close()
+	}
+}
+
 // replaceDatabase swaps the database in a connection string.
 func replaceDatabase(url, name string) string {
 	at := strings.LastIndex(url, "@")
@@ -211,14 +261,6 @@ func replaceDatabase(url, name string) string {
 	return url[:at+1] + rest[:slash+1] + name + suffix
 }
 
-// redactHost keeps a connection string out of a message.
-func redactHost(url string) string {
-	if at := strings.LastIndex(url, "@"); at >= 0 {
-		return url[at+1:]
-	}
-	return url
-}
-
 // requireOrchestrator builds one machine's engine: its own state directory,
 // its own Docker provider namespace, and a manifest pointing at the store.
 func requireOrchestrator(t *testing.T, name, sourceURL, storeDir string) (*Orchestrator, func()) {
@@ -226,7 +268,7 @@ func requireOrchestrator(t *testing.T, name, sourceURL, storeDir string) (*Orche
 	env := map[string]string{"AF_GOLDEN_STORE": storeDir}
 	db := &schema.Database{
 		Provider: schema.DBDocker,
-		Version:  17,
+		Version:  testPostgresMajor,
 		Golden: &schema.Golden{
 			Retain:     3,
 			Storage:    schema.StorageLocal,
