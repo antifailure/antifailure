@@ -143,6 +143,32 @@ jobs:
         run: node --experimental-strip-types --test test/*.test.ts
         working-directory: runner
 
+  www:
+    name: www
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: www
+
+      - name: Build
+        # The site is the thing we ship to antifailure.dev. A type error or a
+        # broken import is a 404, not a failed unit test, so the proof is a
+        # production build with no OAuth secrets configured.
+        run: npm run build
+        working-directory: www
+        env:
+          AUTH_SECRET: AF_FAKE_ci-build-placeholder
+          AUTH_URL: http://127.0.0.1:3000
+
   control-plane:
     name: control plane
     runs-on: ubuntu-latest
