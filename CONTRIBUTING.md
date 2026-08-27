@@ -95,8 +95,15 @@ failure path listed in a design note has a test that exercises it.
   from an injected `clock.Clock`; the fakes in `engine/internal/testutil/fakes`
   cover every external dependency and can inject faults.
 
-New tests run twenty times in CI before a pull request can merge. A test that
-fails once out of twenty is a bug in the test or the code, not noise.
+Tests run with the race detector in CI, always. A test that fails once in
+twenty runs is a bug in the test or the code, not noise, so re-running until
+green is not a fix; find the ordering that broke it.
+
+One local caveat that is not flakiness: several tests assert a wall clock
+budget, and those measure the machine as much as the code. On a loaded machine
+they fail while nothing is wrong. `just gate` says so when the load average is
+above one and a half times the core count, and the remedy is to re-run the
+failure on its own before believing it.
 
 ## Writing a provider
 
@@ -119,8 +126,18 @@ from the subtest names, so it can never drift from what actually runs.
 
 ## Style
 
-Go is `gofmt` and `goimports` clean with the linter set in `.golangci.yml`, all
-rules as errors. TypeScript is strict, no `any`, formatted by Biome. Prose in
+Go is `gofmt` and `goimports` clean. `just lint` runs the linter set in
+`.golangci.yml`, which is chosen for signal rather than length: every rule in
+it catches a bug that has actually shipped somewhere, and `unused` in
+particular catches the failure this repository keeps producing, where something
+is declared, documented, and never called, and reads as a working feature.
+
+It is not a merge gate yet, and saying so is the point of this sentence. There
+are 81 findings that predate the config, spread across packages several people
+are editing at once, and turning the gate on before they are cleared would fail
+every branch for something none of them did. `gofmt` and `go vet` are gates
+today. If you are clearing findings in a package you own, that is welcome, and
+the gate goes on when the count reaches zero. TypeScript is strict, no `any`, formatted by Biome. Prose in
 comments, docs, commit messages, and user-facing strings does not use em dashes
 or double hyphens as punctuation. Error messages are written in the second
 person, name the thing that failed, and say what to do next.

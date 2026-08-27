@@ -1,0 +1,59 @@
+# The linter set CONTRIBUTING promises, with every rule an error.
+#
+# Chosen for signal rather than for length. A linter that reports style
+# opinions teaches people to run it with their eyes closed, and a rule everyone
+# has learned to ignore is worse than one that was never enabled: it makes the
+# green run mean less without anybody deciding that it should.
+#
+# Every linter below catches a bug that has actually shipped somewhere, and
+# several of them catch the exact classes this repository keeps producing.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    # The compiler's own suspicions.
+    - govet
+    # Unchecked errors. The single highest yield rule in Go: an ignored error
+    # is how a failed write becomes a silent success.
+    - errcheck
+    # Obvious mistakes: impossible conditions, self-assignment, bad printf.
+    - staticcheck
+    # Unused declarations. This repository has found six cases of something
+    # declared, documented, and never called, each of which read as a working
+    # feature. This is the rule that would have caught them.
+    - unused
+    # Ineffectual assignments, which usually mean a shadowed error.
+    - ineffassign
+    # Misspellings in comments and strings, including user-facing ones.
+    - misspell
+    # Context passed but never used, and contexts stored in structs.
+    - containedctx
+    # A loop variable captured by a goroutine. Fixed by the language in 1.22,
+    # still worth refusing in code that may be read as an example.
+    - bodyclose
+    # errors.Is and errors.As rather than == and type assertions, so that a
+    # wrapped error still matches.
+    - errorlint
+
+  settings:
+    errcheck:
+      # Deferred Close on a read-only handle is the one place ignoring an
+      # error is conventional and correct.
+      exclude-functions:
+        - (io.Closer).Close
+    misspell:
+      locale: US
+
+  exclusions:
+    rules:
+      # Test files may ignore errors in setup that a failure would surface
+      # anyway, and they legitimately declare helpers used by one test.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

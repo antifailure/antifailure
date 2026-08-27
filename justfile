@@ -65,6 +65,7 @@ gate: _reports
     run "error catalog and code agree"   just errcheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
+    run "documented paths exist"         just claimcheck
     run "gate matches CI"                just gatecheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
@@ -288,6 +289,10 @@ scanrepo:
 docexamples:
     cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists
 
+# Every repository path our documents point at exists.
+claimcheck:
+    go run ./tools/claimcheck .
+
 # This justfile runs what CI runs.
 gatecheck:
     go run ./tools/gatecheck .
@@ -409,3 +414,18 @@ clean:
 # where a check like this belongs. Run it here whenever you change a dependency.
 vuln:
     go run ./tools/vulncheck .
+
+# The linter set CONTRIBUTING describes.
+#
+# Not part of `just gate`. There are findings that predate the config, in
+# packages several people are editing at once, and a gate that fails every
+# branch for something none of them did is a gate people learn to route around.
+# It goes into `gate` when the count reaches zero.
+lint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v golangci-lint > /dev/null; then
+      echo "golangci-lint is not installed. brew install golangci-lint"
+      exit 1
+    fi
+    cd engine && golangci-lint run --timeout 15m ./...

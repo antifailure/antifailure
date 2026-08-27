@@ -276,6 +276,11 @@ func uncalledByGate(just string) []string {
 	// it is out of `gate` for the reason recorded in exemptFromGate.
 	exemptRecipes := map[string]bool{
 		"vuln": true,
+		// The linter has findings that predate its config, in packages several
+		// people are editing at once. It goes into `gate` when that count
+		// reaches zero; until then a gate that fails every branch for
+		// something none of them did is one people learn to route around.
+		"lint": true,
 	}
 
 	// Recipes that are gates rather than conveniences. A recipe that mutates
