@@ -44,10 +44,6 @@ func TestConformance(t *testing.T) {
 			Token:    token,
 			Clock:    clock.New(),
 			SeedSQL:  conformance.DefaultSeedSQL,
-			// The engine's own retrieval decides which Postgres the pool
-			// holds, and the suite refreshes at 17 because that is what the
-			// other providers run.
-			SupportedVersions: []int{13, 14, 15, 16, 17},
 		})
 		require.NoError(t, err)
 		return p

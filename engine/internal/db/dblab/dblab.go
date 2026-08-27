@@ -135,10 +135,14 @@ type Options struct {
 }
 
 // DefaultSupportedVersions is what a Database Lab Engine handles when nothing
-// says otherwise. The engine itself is version agnostic; what decides is the
-// Postgres image its pool was built with, so this is a default rather than a
-// fact and it is overridable.
-func DefaultSupportedVersions() []int { return []int{13, 14, 15, 16, 17} }
+// says otherwise.
+//
+// The engine itself is version agnostic; what decides is the Postgres image
+// its pool was built with, so this is a default rather than a fact and
+// Options.SupportedVersions overrides it. The set matches what the manifest
+// schema permits for database.version, because declaring a major no manifest
+// can ask for is a capability nobody can reach.
+func DefaultSupportedVersions() []int { return []int{14, 15, 16, 17} }
 
 // DefaultDependentTeardownWait is how long collecting a golden waits for a
 // deleted clone's storage to be released.
