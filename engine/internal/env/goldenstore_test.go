@@ -179,7 +179,7 @@ func TestPull_RefusesAVersionWhosePublishDidNotFinish(t *testing.T) {
 
 // requireSourceDatabase produces a real Postgres to play production.
 //
-// Two paths, and the reason for each. When AF_TEST_POSTGRES names a server
+// Two paths, and the reason for each. When AF_TEST_DATABASE_URL names a server
 // that is already running, a database on it is used: this test already asks
 // the Docker provider for two candidates, each of which is an initdb, and on a
 // busy machine a third is the one that misses the provider's readiness window.
@@ -191,7 +191,7 @@ func TestPull_RefusesAVersionWhosePublishDidNotFinish(t *testing.T) {
 // is a test that exists to be green rather than to check anything.
 func requireSourceDatabase(t *testing.T, ctx context.Context) (string, func()) {
 	t.Helper()
-	if base := os.Getenv("AF_TEST_POSTGRES"); base != "" {
+	if base := os.Getenv("AF_TEST_DATABASE_URL"); base != "" {
 		return sourceOnStandingServer(t, ctx, base)
 	}
 	return sourceInItsOwnContainer(t, ctx)
@@ -200,7 +200,7 @@ func requireSourceDatabase(t *testing.T, ctx context.Context) (string, func()) {
 func sourceOnStandingServer(t *testing.T, ctx context.Context, base string) (string, func()) {
 	t.Helper()
 	admin, err := pgx.Connect(ctx, base)
-	require.NoError(t, err, "AF_TEST_POSTGRES is set, so an unreachable server is a failure "+
+	require.NoError(t, err, "AF_TEST_DATABASE_URL is set, so an unreachable server is a failure "+
 		"rather than a reason to skip: setting it is a statement that a database is meant to be there")
 
 	name := fmt.Sprintf("af_store_source_%d", time.Now().UnixNano())

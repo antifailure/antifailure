@@ -236,16 +236,23 @@ func TestMain(m *testing.M) {
 		// tooOld, but it is a property of the server you chose rather than of
 		// anything this suite did.
 		//
-		// Setting AF_TEST_POSTGRES is a statement that a database is meant to
+		// Setting AF_TEST_DATABASE_URL is a statement that a database is meant to
 		// be there, so an unreachable one is a failure rather than a reason to
 		// excuse the suite. That asymmetry is the whole point: the variable
 		// buys a faster run, never a quieter one.
-		if base := os.Getenv("AF_TEST_POSTGRES"); base != "" {
+		//
+		// The name is the repository's, not this suite's: ci.yml sets it for
+		// the control plane job and seven suites under web read it. A second
+		// name for the same server would be the quiet version of the failure
+		// this whole path exists to fix, where somebody exports the one they
+		// saw, half the suites take it, the other half skip, and every one of
+		// them prints ok.
+		if base := os.Getenv("AF_TEST_DATABASE_URL"); base != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			admin, err := pgx.Connect(ctx, withDatabase(base, "postgres"))
 			if err != nil {
 				cancel()
-				shared.fatal = fmt.Sprintf("AF_TEST_POSTGRES is set and %s did not answer: %v", base, err)
+				shared.fatal = fmt.Sprintf("AF_TEST_DATABASE_URL is set and %s did not answer: %v", base, err)
 				return m.Run()
 			}
 			_ = admin.Close(ctx)
