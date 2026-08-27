@@ -11,7 +11,6 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -646,6 +645,13 @@ func (r *Runtime) countResources(ctx context.Context, namespace string) int {
 	if list, err := r.cli.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{}); err == nil {
 		n += len(list.Items)
 	}
+	// Migration Jobs count too. A service that declared migrate leaves one
+	// behind, and a teardown that did not count it would report fewer
+	// resources removed than the environment held, which is the number
+	// somebody compares against the leak detector.
+	if list, err := r.cli.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{}); err == nil {
+		n += len(list.Items)
+	}
 	return n
 }
 
@@ -812,14 +818,4 @@ func (r *Runtime) podLogs(ctx context.Context, namespace, pod string, tail int64
 		return "", err
 	}
 	return string(body), nil
-}
-
-// jobsFor is used by teardown counting and by tests that assert a migration
-// left nothing behind.
-func (r *Runtime) jobsFor(ctx context.Context, namespace string) ([]batchv1.Job, error) {
-	list, err := r.cli.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	return list.Items, nil
 }

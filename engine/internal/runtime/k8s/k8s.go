@@ -302,13 +302,6 @@ func managedSelector() metav1.ListOptions {
 	return metav1.ListOptions{LabelSelector: LabelManaged + "=true"}
 }
 
-// envSelector matches one environment's objects.
-func envSelector(envID string) metav1.ListOptions {
-	return metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=true,%s=%s", LabelManaged, LabelEnv, envID),
-	}
-}
-
 // clusterResolver finds the address internal names are forwarded to.
 //
 // Discovered rather than configured, because it is the one piece of cluster
