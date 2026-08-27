@@ -2,6 +2,7 @@ package dblab_test
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"strings"
 	"testing"
@@ -14,6 +15,8 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/db/dblab"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+
+	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
 )
 
 // The two variables that point the suite at a real Database Lab Engine.
@@ -159,4 +162,70 @@ func TestSweepLeftovers(t *testing.T) {
 	after, err := p.Inventory(ctx)
 	require.NoError(t, err)
 	require.Empty(t, after, "the sweep left resources behind")
+}
+
+// TestTheAttestationTravelsWithTheGolden proves the claim the provider page
+// makes: that anybody holding an environment can read what was scanned and
+// what was found, by querying the branch they already have.
+//
+// The conformance suite checks that a refresh returns an attestation, which is
+// a different claim: that value is in this process's memory and says nothing
+// about what a branch carries. Writing it into the golden's own data is what
+// makes it travel, and the only way to know it travelled is to read it back
+// through a branch's connection string.
+func TestTheAttestationTravelsWithTheGolden(t *testing.T) {
+	url, token := requireEngine(t)
+
+	p, err := dblab.New(dblab.Options{
+		Endpoint: url, Token: token, Clock: clock.New(),
+		SeedSQL: conformance.DefaultSeedSQL,
+	})
+	require.NoError(t, err)
+	defer func() { _ = p.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+
+	const attestation = `{"scanner":"attestation-travels","findings":0}`
+	masked := false
+	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
+		Version:   17,
+		RulesHash: "travels",
+		Mask:      func(context.Context, secrets.Value) error { masked = true; return nil },
+		Verify: func(context.Context, secrets.Value) (string, error) {
+			require.True(t, masked, "verification ran before masking, so it would attest to unmasked data")
+			return attestation, nil
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		clean, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		_ = p.DestroyGolden(clean, gv.ID)
+	})
+	require.Equal(t, attestation, gv.Attestation)
+
+	b, err := p.Branch(ctx, gv.ID, "env_attestation0001")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		clean, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		_ = p.Destroy(clean, b)
+	})
+
+	conn, err := p.ConnString(ctx, b, provider.ConnDirect)
+	require.NoError(t, err)
+	db, err := sql.Open("pgx", conn.Reveal())
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	var gotVersion, gotRules, gotAttestation string
+	err = db.QueryRowContext(ctx,
+		`SELECT version, rules_hash, attestation FROM `+dblab.MetaSchema+`.golden WHERE version = $1`,
+		gv.ID).Scan(&gotVersion, &gotRules, &gotAttestation)
+	require.NoError(t, err, "the branch carries no record of what was verified")
+
+	require.Equal(t, gv.ID, gotVersion)
+	require.Equal(t, "travels", gotRules)
+	require.Equal(t, attestation, gotAttestation)
 }
