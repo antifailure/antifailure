@@ -322,3 +322,61 @@ test('the comparison notices row level security that did not come back', { timeo
   }
 })
 
+
+// Every check in this file reads the public schema, where all of the control
+// plane's tables live today. That scope is an assumption, and the failure it
+// invites is the one lane 3 named: an assertion scoped to a collection that
+// excludes the casualty passes forever and discovers nothing.
+//
+// So the scope is reported rather than assumed. A table outside public is not
+// treated as a restore failure, because it may well have restored perfectly.
+// It is treated as something this verification cannot speak for, which is the
+// honest answer and the one that makes somebody widen the check.
+test('a table this check does not look at is named rather than ignored', async (t) => {
+  const admin = postgres(DR_URL, { max: 1, onnotice: () => {} })
+  t.after(async () => {
+    await admin.unsafe('DROP SCHEMA IF EXISTS ledger CASCADE').catch(() => {})
+    await admin.end({ timeout: 5 })
+  })
+
+  const before = await describeDatabase(admin)
+  assert.deepEqual(
+    before.unverifiedTables,
+    [],
+    'the control plane grew a table outside public and this suite has not been widened to check it',
+  )
+
+  await admin.unsafe('CREATE SCHEMA ledger')
+  await admin.unsafe('CREATE TABLE ledger.entries (id int primary key)')
+
+  const after = await describeDatabase(admin)
+  assert.deepEqual(after.unverifiedTables, ['ledger.entries'])
+
+  // Present in the restored database and absent from the backup: reported as
+  // something the check cannot account for.
+  const problems = compareRestored({ ...before, ...blankManifestFields() }, after)
+  assert.ok(
+    problems.some((p) => p.includes('ledger.entries') && p.includes('cannot account for')),
+    `a table outside public was not reported: ${problems.join('; ')}`,
+  )
+
+  // Present in the backup: reported as something never verified.
+  const reverse = compareRestored({ ...after, ...blankManifestFields() }, after)
+  assert.ok(
+    reverse.some((p) => p.includes('ledger.entries') && p.includes('never looked at it')),
+    `a table outside public in the backup was not reported: ${reverse.join('; ')}`,
+  )
+})
+
+/** The manifest fields describe() does not produce, for tests that build one
+ *  from a description rather than from a real backup. */
+function blankManifestFields() {
+  return {
+    createdAt: '',
+    database: '',
+    serverVersion: '',
+    clientVersion: '',
+    sha256: '',
+    bytes: 0,
+  }
+}

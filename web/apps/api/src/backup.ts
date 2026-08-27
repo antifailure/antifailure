@@ -74,6 +74,16 @@ export interface BackupManifest {
   grants: Record<string, string[]>
   /** Organization to audit chain head hash. */
   auditHeads: Record<string, string>
+  /** Tables this verification did NOT look at, as `schema.table`.
+   *
+   *  Everything above is scoped to the `public` schema, which is where all 21
+   *  of the control plane's tables live today. That scope is an assumption,
+   *  and an assumption that silently stops being true is how a verification
+   *  ends up checking a subset of the database and reporting success. So the
+   *  ones outside it are counted rather than ignored, and `compareRestored`
+   *  reports them as a problem: not because they failed to restore, but
+   *  because nobody can say whether they did. */
+  unverifiedTables: string[]
 }
 
 export interface BackupOptions {
@@ -263,6 +273,18 @@ export async function describe(sql: postgres.Sql): Promise<Omit<BackupManifest,
   const applied = await sql<{ version: number }[]>`
     SELECT COALESCE(count(*), 0)::int AS version FROM schema_migrations`
 
+  // Everything above reads the public schema. This asks what it did not read.
+  const outside = await sql<{ name: string }[]>`
+    SELECT n.nspname || '.' || c.relname AS name
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relkind IN ('r', 'p')
+       AND NOT c.relispartition
+       AND n.nspname NOT IN ('public', 'pg_catalog', 'information_schema')
+       AND n.nspname NOT LIKE 'pg_toast%'
+       AND n.nspname NOT LIKE 'pg_temp%'
+     ORDER BY 1`
+
   return {
     schemaVersion: Number(applied[0]?.version ?? 0),
     rowCounts,
@@ -271,6 +293,7 @@ export async function describe(sql: postgres.Sql): Promise<Omit<BackupManifest,
     rlsForced: rls.filter((r) => r.forced).map((r) => r.name),
     grants,
     auditHeads,
+    unverifiedTables: outside.map((r) => r.name),
   }
 }
 
@@ -536,6 +559,24 @@ export function compareRestored(
             `database it just restored`,
         )
       }
+    }
+  }
+
+  // Reported from both sides. A table outside public in the backup was never
+  // verified; one that appears only after the restore was never verified
+  // either, and is additionally a surprise.
+  for (const name of expected.unverifiedTables) {
+    problems.push(
+      `${name} is outside the public schema, so this check never looked at it and ` +
+        `cannot say whether it came back`,
+    )
+  }
+  for (const name of actual.unverifiedTables) {
+    if (!expected.unverifiedTables.includes(name)) {
+      problems.push(
+        `${name} is outside the public schema and was not in the backup, so the restored ` +
+          `database has a table this check cannot account for`,
+      )
     }
   }
 
