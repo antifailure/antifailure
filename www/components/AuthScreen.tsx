@@ -16,19 +16,18 @@ function writeWaitlist(email: string) {
 
 function AuthCover() {
   return (
-    <div className="relative hidden h-full overflow-hidden bg-[#050505] lg:block">
+    <div className="relative hidden h-full overflow-hidden bg-[#f7f7f5] lg:block">
       <div
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse 90% 70% at 6% 4%, rgba(32, 196, 180, 0.42) 0%, transparent 52%), radial-gradient(ellipse 85% 70% at 96% 98%, rgba(196, 96, 36, 0.55) 0%, transparent 54%)",
+            "radial-gradient(ellipse 90% 70% at 6% 4%, rgba(32, 196, 180, 0.22) 0%, transparent 52%), radial-gradient(ellipse 85% 70% at 96% 98%, rgba(196, 96, 36, 0.28) 0%, transparent 54%)",
         }}
       />
       <div className="auth-honeycomb absolute inset-0 opacity-80" />
-      <div className="absolute inset-0 bg-black/25" />
       <div className="relative z-10 flex h-full flex-col items-center justify-center px-16 text-center">
         <LogoMark className="h-14 w-14" />
-        <p className="mt-8 max-w-[320px] text-[32px] font-semibold leading-[1.15] tracking-[-0.035em] text-white">
+        <p className="mt-8 max-w-[320px] text-[32px] font-normal leading-dense tracking-tighter text-black">
           Know what happens before you deploy.
         </p>
       </div>
@@ -147,10 +146,10 @@ export function AuthScreen({
   };
 
   return (
-    <div className="grid h-dvh max-h-dvh w-full overflow-hidden bg-black lg:grid-cols-[2fr_3fr]">
+    <div className="grid h-dvh max-h-dvh w-full overflow-hidden bg-[#f7f7f5] lg:grid-cols-[2fr_3fr]">
       <AuthCover />
-      <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-black px-8 py-8 lg:px-16">
-        <a href="/" className="inline-flex shrink-0 items-center gap-2 text-[13px] text-white/45 hover:text-white">
+      <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[#f7f7f5] px-8 py-8 lg:px-16">
+        <a href="/" className="inline-flex shrink-0 items-center gap-2 text-[13px] text-black/45 hover:text-black">
           <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden>
             <path d="M10 3 5 8l5 5" stroke="currentColor" strokeWidth="1.4" />
           </svg>
@@ -161,25 +160,25 @@ export function AuthScreen({
           <div className="w-full max-w-[400px]">
             {done ? (
               <>
-                <h1 className="text-[32px] font-semibold tracking-[-0.035em] text-white">
+                <h1 className="text-[32px] font-normal tracking-tighter text-black">
                   You’re on the waitlist
                 </h1>
-                <p className="mt-3 text-[14px] leading-6 text-white/50">
+                <p className="mt-3 text-[14px] leading-6 text-black/50">
                   We’ll email {done} when the control plane can connect a repo.
                 </p>
                 <a
                   href="/"
-                  className="mt-8 flex h-12 w-full items-center justify-center rounded-md border border-white/20 text-[15px] text-white hover:bg-white/5"
+                  className="mt-8 flex h-12 w-full items-center justify-center rounded-md border border-black/20 text-[15px] text-black hover:bg-black/5"
                 >
                   Back to home
                 </a>
               </>
             ) : (
               <form onSubmit={submitWaitlist}>
-                <h1 className="text-[32px] font-semibold tracking-[-0.035em] text-white">
+                <h1 className="text-[32px] font-normal tracking-tighter text-black">
                   {mode === "signup" ? "Create your free account" : "Log in to your account"}
                 </h1>
-                <p className="mt-6 text-[13px] text-white/45">Connect to Antifailure with:</p>
+                <p className="mt-6 text-[13px] text-black/45">Connect to Antifailure with:</p>
 
                 <div className="mt-4 space-y-2.5">
                   {SOCIAL.map(({ id, authId, label, Icon }) => (
@@ -187,7 +186,7 @@ export function AuthScreen({
                       key={id}
                       type="button"
                       onClick={() => startOAuth(id, authId)}
-                      className="flex h-12 w-full items-center justify-center gap-2.5 rounded-md border border-white/15 bg-transparent text-[15px] text-white hover:bg-white/[0.06]"
+                      className="flex h-12 w-full items-center justify-center gap-2.5 rounded-md border border-black/15 bg-transparent text-[15px] text-black hover:bg-black/[0.06]"
                     >
                       <Icon />
                       {busy === id ? `${label}…` : label}
@@ -195,19 +194,19 @@ export function AuthScreen({
                   ))}
                 </div>
                 {unset ? (
-                  <p className="mt-3 text-[12px] text-white/45" role="status">
+                  <p className="mt-3 text-[12px] text-black/45" role="status">
                     {unset === "github" ? "GitHub" : unset === "google" ? "Google" : "Microsoft"} is
                     not set up yet. Add the app keys to .env.local — see .env.example.
                   </p>
                 ) : null}
 
                 <div className="my-7 flex items-center gap-3">
-                  <span className="h-px flex-1 bg-white/12" />
-                  <span className="text-[12px] text-white/40">Or continue with Email</span>
-                  <span className="h-px flex-1 bg-white/12" />
+                  <span className="h-px flex-1 bg-black/12" />
+                  <span className="text-[12px] text-black/40">Or continue with Email</span>
+                  <span className="h-px flex-1 bg-black/12" />
                 </div>
 
-                <label className="block text-[13px] text-white/55" htmlFor="email">
+                <label className="block text-[13px] text-black/55" htmlFor="email">
                   Email
                 </label>
                 <input
@@ -220,10 +219,10 @@ export function AuthScreen({
                     setEmail(e.target.value);
                     setError("");
                   }}
-                  className="mt-1.5 h-12 w-full rounded-md border border-white/15 bg-transparent px-3 text-[14px] text-white outline-none placeholder:text-white/30 focus:border-white/35"
+                  className="mt-1.5 h-12 w-full rounded-md border border-black/15 bg-white px-3 text-[14px] text-black outline-none placeholder:text-black/30 focus:border-black/35"
                 />
 
-                <label className="mt-4 block text-[13px] text-white/55" htmlFor="password">
+                <label className="mt-4 block text-[13px] text-black/55" htmlFor="password">
                   Password
                 </label>
                 <div className="relative mt-1.5">
@@ -234,11 +233,11 @@ export function AuthScreen({
                     placeholder="Enter a unique password"
                     autoComplete={mode === "signup" ? "new-password" : "current-password"}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="h-12 w-full rounded-md border border-white/15 bg-transparent px-3 pr-11 text-[14px] text-white outline-none placeholder:text-white/30 focus:border-white/35"
+                    className="h-12 w-full rounded-md border border-black/15 bg-white px-3 pr-11 text-[14px] text-black outline-none placeholder:text-black/30 focus:border-black/35"
                   />
                   <button
                     type="button"
-                    className="absolute inset-y-0 right-0 px-3 text-white/40 hover:text-white/70"
+                    className="absolute inset-y-0 right-0 px-3 text-black/40 hover:text-black/70"
                     onClick={() => setShowPassword((v) => !v)}
                     aria-label={showPassword ? "Hide password" : "Show password"}
                   >
@@ -271,17 +270,17 @@ export function AuthScreen({
 
                 <button
                   type="submit"
-                  className="mt-6 h-12 w-full rounded-md border border-white/20 text-[15px] text-white hover:bg-white/5"
+                  className="mt-6 h-12 w-full rounded-md bg-black text-[15px] text-white hover:bg-black/90"
                 >
                   Continue
                 </button>
 
                 {mode === "signup" ? (
-                  <p className="mt-5 text-[12px] leading-5 text-white/40">
+                  <p className="mt-5 text-[12px] leading-5 text-black/40">
                     By creating an account you agree to the{" "}
                     <button
                       type="button"
-                      className="text-white/70 underline decoration-white/20"
+                      className="text-black/70 underline decoration-black/20"
                       onClick={() => openSheet("terms")}
                     >
                       Terms of Service
@@ -289,7 +288,7 @@ export function AuthScreen({
                     and our{" "}
                     <button
                       type="button"
-                      className="text-white/70 underline decoration-white/20"
+                      className="text-black/70 underline decoration-black/20"
                       onClick={() => openSheet("privacy")}
                     >
                       Privacy Policy
@@ -299,7 +298,7 @@ export function AuthScreen({
                   </p>
                 ) : null}
 
-                <p className="mt-8 text-[14px] text-white/50">
+                <p className="mt-8 text-[14px] text-black/50">
                   {mode === "signup" ? (
                     <>
                       Already have an account?{" "}

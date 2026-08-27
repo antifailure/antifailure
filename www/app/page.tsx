@@ -1,35 +1,27 @@
-import { ChromeProvider } from "@/components/Chrome";
-import { DashboardHero } from "@/components/DashboardHero";
-import { FeatureCards } from "@/components/FeatureCards";
-import { FeatureShowcase } from "@/components/FeatureShowcase";
-import { FirewallSection } from "@/components/FirewallSection";
-import { FromPrIntro } from "@/components/FromPrIntro";
-import { HeroSection } from "@/components/HeroSection";
-import { IdeSection } from "@/components/IdeSection";
-import { MigrationSection } from "@/components/MigrationSection";
-import { ScaleFooter } from "@/components/ScaleFooter";
-import { SiteHeader } from "@/components/SiteHeader";
-import { TrustSplit } from "@/components/TrustSplit";
-import { TwinsSection } from "@/components/TwinsSection";
+import { Cta } from "@/components/home/Cta";
+import { Features } from "@/components/home/Features";
+import { Firewall } from "@/components/home/Firewall";
+import { Hero } from "@/components/home/Hero";
+import { Migrations } from "@/components/home/Migrations";
+import { TocWrapper } from "@/components/home/Toc";
+import { Trust } from "@/components/home/Trust";
+import { Twins } from "@/components/home/Twins";
+import { Workload } from "@/components/home/Workload";
+import { SiteLayout } from "@/components/layout/SiteLayout";
 
 export default function Page() {
   return (
-    <ChromeProvider>
-      <main className="bg-black">
-        <SiteHeader />
-        <HeroSection />
-        <FeatureCards />
-        <FeatureShowcase>
-          <FromPrIntro />
-          <IdeSection />
-          <MigrationSection />
-          <TwinsSection />
-          <FirewallSection />
-        </FeatureShowcase>
-        <TrustSplit />
-        <DashboardHero />
-        <ScaleFooter />
-      </main>
-    </ChromeProvider>
+    <SiteLayout>
+      <Hero />
+      <TocWrapper>
+        <Workload />
+        <Migrations />
+        <Twins />
+        <Firewall />
+        <Features />
+      </TocWrapper>
+      <Trust />
+      <Cta />
+    </SiteLayout>
   );
 }

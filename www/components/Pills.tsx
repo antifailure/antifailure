@@ -16,10 +16,10 @@ export function CopyCli({
     variant === "green"
       ? "h-11 rounded-full bg-[#33bf00] text-black"
       : variant === "mint"
-        ? "h-12 min-w-[248px] justify-between rounded-[10px] bg-[#e5f1ed] text-black"
+        ? "h-12 min-w-[248px] justify-between rounded-[10px] bg-[#d7efe8] text-black"
         : variant === "light"
           ? "h-11 rounded-full bg-[#ececec] text-black"
-          : "h-11 rounded-full border border-white/15 bg-white/5 text-white";
+          : "h-11 rounded-full border border-black/15 bg-black/5 text-black";
 
   return (
     <button
@@ -51,10 +51,10 @@ export function Pill({
 }) {
   const cls =
     variant === "solid"
-      ? "bg-white text-black"
+      ? "bg-black text-white"
       : variant === "green"
         ? "bg-[#33bf00] text-black"
-        : "border border-white text-white bg-transparent";
+        : "border border-black bg-transparent text-black";
   const className = `inline-flex h-11 items-center justify-center rounded-full px-6 text-[14.5px] font-medium ${cls}`;
   if (onClick) {
     return (

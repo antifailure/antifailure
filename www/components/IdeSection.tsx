@@ -34,19 +34,22 @@ const TREE: TreeItem[] = [
   { id: "api", name: "api", indent: 3, folder: true, parent: "routes", path: "src/routes/api" },
   { id: "index.tsx", name: "index.tsx", indent: 4, parent: "api", path: "src/routes/api/index.tsx" },
   { id: "app.tsx", name: "app.tsx", indent: 2, parent: "src", path: "src/app.tsx" },
+  { id: "scenarios", name: "scenarios", indent: 1, folder: true, parent: "root", path: "scenarios" },
+  { id: "impatient.ts", name: "impatient.ts", indent: 2, parent: "scenarios", path: "scenarios/impatient.ts" },
   { id: "wind-tunnel.yml", name: "wind-tunnel.yml", indent: 1, parent: "root", path: "wind-tunnel.yml" },
   { id: "seed.sql", name: "seed.sql", indent: 1, parent: "root", path: "seed.sql" },
+  { id: "tsconfig.json", name: "tsconfig.json", indent: 1, parent: "root", path: "tsconfig.json" },
   { id: "package.json", name: "package.json", indent: 1, parent: "root", path: "package.json" },
   { id: "README.md", name: "README.md", indent: 1, parent: "root", path: "README.md" },
 ];
 
-const KW = "text-[#569cd6]";
-const FN = "text-[#dcdcaa]";
-const VAR = "text-[#9cdcfe]";
-const STR = "text-[#ce9178]";
-const CM = "text-[#6a9955]";
-const DIM = "text-white/50";
-const TEAL = "text-[#4ec9b0]";
+const KW = "text-[#0550ae]";
+const FN = "text-[#6f42c1]";
+const VAR = "text-[#0550ae]";
+const STR = "text-[#a31515]";
+const CM = "text-[#22863a]";
+const DIM = "text-black/50";
+const TEAL = "text-[#116329]";
 
 const YML: Token[] = [
   { t: "# Generated — do not hand-author\n", cls: CM },
@@ -77,31 +80,48 @@ const FILE_TOKENS: Record<string, Token[]> = {
   "index.tsx": [
     { t: "import", cls: KW },
     { t: " { ", cls: VAR },
-    { t: "getSession", cls: TEAL },
-    { t: ", ", cls: VAR },
-    { t: "upgrade", cls: TEAL },
+    { t: "Workload", cls: TEAL },
     { t: " } ", cls: VAR },
     { t: "from", cls: KW },
     { t: " ", cls: VAR },
-    { t: '"@/lib/billing"', cls: STR },
-    { t: "\n\n", cls: VAR },
+    { t: "'@antifailure/studio'", cls: STR },
+    { t: ";\n\n", cls: VAR },
     { t: "export default async function", cls: KW },
     { t: " handler", cls: FN },
     { t: "(req, res) {\n  ", cls: VAR },
     { t: "const", cls: KW },
-    { t: " { ", cls: VAR },
-    { t: "session", cls: TEAL },
-    { t: " } = ", cls: VAR },
+    { t: " result = ", cls: VAR },
     { t: "await", cls: KW },
-    { t: " getSession", cls: FN },
-    { t: "(req)\n\n  ", cls: VAR },
+    { t: " Workload", cls: TEAL },
+    { t: ".run", cls: FN },
+    { t: "(", cls: VAR },
+    { t: "'impatient'", cls: STR },
+    { t: ");\n\n  ", cls: VAR },
     { t: "res", cls: VAR },
     { t: ".status", cls: FN },
     { t: "(", cls: VAR },
-    { t: "200", cls: "text-[#b5cea8]" },
+    { t: "200", cls: "text-[#116329]" },
     { t: ").", cls: VAR },
     { t: "json", cls: FN },
-    { t: "({ user: session })\n}", cls: VAR },
+    { t: "({ verdict: result });\n}", cls: VAR },
+  ],
+  "impatient.ts": [
+    { t: "import", cls: KW },
+    { t: " { ", cls: VAR },
+    { t: "Workload", cls: TEAL },
+    { t: " } ", cls: VAR },
+    { t: "from", cls: KW },
+    { t: " ", cls: VAR },
+    { t: '"@antifailure/studio"', cls: STR },
+    { t: "\n\n", cls: VAR },
+    { t: "export const", cls: KW },
+    { t: " impatientUpgrade", cls: FN },
+    { t: " = ", cls: VAR },
+    { t: "Workload", cls: TEAL },
+    { t: ".compile", cls: FN },
+    { t: "(\n  ", cls: VAR },
+    { t: '"crowdi:double_click_upgrade"', cls: STR },
+    { t: "\n)", cls: VAR },
   ],
   "app.tsx": [
     { t: "export default function", cls: KW },
@@ -121,6 +141,15 @@ const FILE_TOKENS: Record<string, Token[]> = {
     { t: "'user_00418@mask.local'", cls: STR },
     { t: ");", cls: VAR },
   ],
+  "tsconfig.json": [
+    { t: "{\n  ", cls: DIM },
+    { t: '"compilerOptions"', cls: STR },
+    { t: ": { ", cls: DIM },
+    { t: '"strict"', cls: STR },
+    { t: ": ", cls: DIM },
+    { t: "true", cls: KW },
+    { t: " }\n}", cls: DIM },
+  ],
   "package.json": [
     { t: "{\n  ", cls: DIM },
     { t: '"name"', cls: STR },
@@ -133,8 +162,8 @@ const FILE_TOKENS: Record<string, Token[]> = {
     { t: "\n}", cls: DIM },
   ],
   "README.md": [
-    { t: "# checkout-app\n", cls: "text-white" },
-    { t: "Create Wind Tunnel from the pull request.\nThe safety report attaches to the check.", cls: "text-white/70" },
+    { t: "# checkout-app\n", cls: "text-black" },
+    { t: "Create Wind Tunnel from the pull request.\nThe safety report attaches to the check.", cls: "text-black/70" },
   ],
 };
 
@@ -142,19 +171,17 @@ const CMD = "npx antifailure init";
 const HOME_FILE = "index.tsx";
 
 const CHECKS = [
-  "Isolated twin provisioned",
-  "Sanitized Postgres restored",
-  "Stripe + email contained",
-  "Pass / warning / block on the PR",
-  "Automatic destroy scheduled",
+  "Isolated twin provisioned: 'Checkout App'",
+  "Imported observed production patterns",
+  "Compiled scenarios/impatient.ts",
+  "Contained Stripe + email in the twin",
 ];
 
 const CHECK_DETAIL = [
   "Isolated twin of this PR. Destroyed when the TTL expires.",
-  "Sanitized, referentially consistent Postgres. Tokens deleted.",
+  "Redacted production-shaped traffic. Never diverted from live users.",
+  "Crowdi discoveries compiled to versioned IR. No LLM at scale.",
   "Stripe simulated in a clone-local ledger. Email captured, never delivered.",
-  "Baseline vs candidate. Verdict: pass, warning, or block.",
-  "Cleanup is a safety property: independent destroy path, recorded.",
 ];
 
 const BOTTOM_TABS: { id: BottomTab; label: string }[] = [
@@ -261,7 +288,7 @@ function TokenView({
             {tok.t}
           </span>
         ))}
-        {echo ? <span className="text-white/45">{echo}</span> : null}
+        {echo ? <span className="text-black/45">{echo}</span> : null}
         {caret ? <Caret /> : null}
       </pre>
     </div>
@@ -275,7 +302,7 @@ function CheckTick({ on }: { on: boolean }) {
         cx="8"
         cy="8"
         r="8"
-        fill={on ? "#22c55e" : "rgba(255,255,255,0.12)"}
+        fill={on ? "#22c55e" : "rgba(0,0,0,0.12)"}
         transition={{ duration: 0.25 }}
       />
       <motion.path
@@ -302,7 +329,7 @@ function isVisible(item: TreeItem, collapsed: Set<string>) {
   return true;
 }
 
-function IdePlay() {
+export function IdePlay() {
   const ref = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const { story, reduced, inView } = useInViewPlay(ref, 0.2);
@@ -347,16 +374,16 @@ function IdePlay() {
     if (reduced) {
       setCmdChars(CMD.length);
       setTerm(5);
-      setChecks(5);
+      setChecks(CHECKS.length);
       cmdRef.current = CMD.length;
       termRef.current = 5;
-      checksRef.current = 5;
+      checksRef.current = CHECKS.length;
     }
   }, [story, reduced]);
 
   useEffect(() => {
     if (!story || reduced || !inView) return;
-    if (termRef.current >= 5 && checksRef.current >= 5) return;
+    if (termRef.current >= 5 && checksRef.current >= CHECKS.length) return;
 
     let cancelled = false;
     const timers: number[] = [];
@@ -401,7 +428,7 @@ function IdePlay() {
         }
       });
     }
-    for (let i = 1; i <= 5; i += 1) {
+    for (let i = 1; i <= CHECKS.length; i += 1) {
       if (checksRef.current >= i) continue;
       later(3900 + i * 400, () => {
         if (cancelled) return;
@@ -423,13 +450,13 @@ function IdePlay() {
     }
     if (term >= 2) {
       lines.push({ text: "" });
-      lines.push({ text: "Wind Tunnel Initialization" });
-      lines.push({ text: "Step 1/3: GitHub + customer-hosted runner" });
+      lines.push({ text: "Antifailure Initialization" });
+      lines.push({ text: "Step 1/3: Connecting isolated twin..." });
     }
-    if (term >= 3) lines.push({ text: "Step 2/3: Sanitized snapshot + Stripe/email sinks" });
-    if (term >= 4) lines.push({ text: "Step 3/3: Baseline vs candidate migration" });
+    if (term >= 3) lines.push({ text: "Step 2/3: Importing observed patterns..." });
+    if (term >= 4) lines.push({ text: "Step 3/3: Compiling deterministic journeys..." });
     if (term >= 5) {
-      lines.push({ text: "Success! Safety report attached to the PR.", cls: "text-[#3ddc84]", success: true });
+      lines.push({ text: "Success! Workload Studio initialized.", cls: "text-[#16a34a]", success: true });
     }
     return lines;
   }, [term, cmdChars]);
@@ -516,7 +543,7 @@ function IdePlay() {
           {"  ACCESS EXCLUSIVE on subscriptions 27.4s"}
         </div>
       ) : (
-        <div className="text-white/45">No problems have been detected.</div>
+        <div className="text-black/45">No problems have been detected.</div>
       );
   } else if (bottomTab === "output") {
     bottomBody =
@@ -524,23 +551,23 @@ function IdePlay() {
         <div>{CHECK_DETAIL[inspectCheck]}</div>
       ) : (
         <div className="space-y-1">
-          <div>GitHub + customer-hosted runner</div>
-          <div>Sanitized snapshot + Stripe/email sinks</div>
-          <div>Baseline vs candidate migration</div>
-          {term >= 5 ? <div className="text-[#3ddc84]">Safety report attached to the PR.</div> : null}
+          <div>Connecting isolated twin</div>
+          <div>Importing observed patterns</div>
+          <div>Compiling deterministic journeys</div>
+          {term >= 5 ? <div className="text-[#16a34a]">Workload Studio initialized.</div> : null}
         </div>
       );
   } else if (bottomTab === "debug") {
     bottomBody = (
       <div>
-        <span className="text-white/40">{"> "}</span>
+        <span className="text-black/40">{"> "}</span>
         <Caret />
       </div>
     );
   } else if (bottomTab === "ports") {
     bottomBody = (
       <div>
-        <div className="text-white/45">Private</div>
+        <div className="text-black/45">Private</div>
         <div>fix-billing-184.preview.company.com</div>
       </div>
     );
@@ -551,13 +578,13 @@ function IdePlay() {
           <div key={i} className={l.cls}>
             {i === 0 ? (
               <>
-                <span className="text-white/40">$ </span>
+                <span className="text-black/40">$ </span>
                 {l.text}
                 {term < 1 && cmdChars < CMD.length && inView ? <Caret /> : null}
               </>
             ) : l.success ? (
               <span className="inline-flex items-center gap-1.5">
-                <span className="inline-block h-[7px] w-[7px] rounded-[1px] bg-[#3ddc84]" />
+                <span className="inline-block h-[7px] w-[7px] rounded-[1px] bg-[#16a34a]" />
                 {l.text}
               </span>
             ) : (
@@ -566,9 +593,9 @@ function IdePlay() {
           </div>
         ))}
         {spin ? (
-          <span className="mt-1 inline-flex items-center gap-1.5 text-white/40">
+          <span className="mt-1 inline-flex items-center gap-1.5 text-black/40">
             <span
-              className="wt-spin inline-block h-2.5 w-2.5 rounded-full border border-white/30 border-t-white/80"
+              className="wt-spin inline-block h-2.5 w-2.5 rounded-full border border-black/30 border-t-black/80"
               style={{ animation: "wt-spin 0.7s linear infinite" }}
             />
             running
@@ -581,9 +608,9 @@ function IdePlay() {
   return (
     <div
       ref={ref}
-      className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0c0c0c] shadow-[-48px_0_90px_rgba(26,212,192,0.18),48px_0_90px_rgba(232,148,64,0.22),0_40px_90px_rgba(0,0,0,0.62)]"
+      className="relative overflow-hidden rounded-2xl border border-black/10 bg-white shadow-[0_40px_90px_rgba(0,0,0,0.12)]"
     >
-      <div className="flex h-[42px] items-center border-b border-white/[0.07] px-3.5 text-[12px] text-white/40">
+      <div className="flex h-[42px] items-center border-b border-black/[0.07] px-3.5 text-[12px] text-black/40">
         <div className="flex gap-[6px]">
           <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
           <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
@@ -591,8 +618,8 @@ function IdePlay() {
         </div>
         <div className="flex-1 text-center tracking-[-0.01em]">Your Code Editor</div>
       </div>
-      <div className="grid grid-cols-[214px_1fr] lg:grid-cols-[214px_1fr_minmax(270px,312px)]">
-        <div className="relative border-r border-white/[0.07] bg-[#0b0b0b] py-2.5 text-[12.5px]">
+      <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] lg:grid-cols-[214px_1fr_minmax(270px,312px)]">
+        <div className="relative hidden border-r border-black/[0.07] bg-[#f4f4f2] py-2.5 text-[12.5px] sm:block">
           {TREE.map((f) => {
             if (!isVisible(f, collapsed)) return null;
             const isActive = !f.folder && f.id === activeFile;
@@ -602,8 +629,8 @@ function IdePlay() {
                 key={f.id}
                 type="button"
                 title={f.path}
-                className={`flex w-full items-center gap-1.5 py-[3px] pr-2 text-left hover:bg-white/[0.04] ${
-                  isActive ? "bg-white/[0.08] text-white" : "text-white/65"
+                className={`flex w-full items-center gap-1.5 py-[3px] pr-2 text-left hover:bg-black/[0.04] ${
+                  isActive ? "bg-black/[0.08] text-black" : "text-black/65"
                 }`}
                 style={{ paddingLeft: 10 + f.indent * 12 }}
                 onMouseEnter={() => setTip(f.path)}
@@ -614,7 +641,7 @@ function IdePlay() {
                 }}
               >
                 {f.folder ? (
-                  <span className="w-2.5 text-[9px] text-white/35">{open ? "▾" : "▸"}</span>
+                  <span className="w-2.5 text-[9px] text-black/35">{open ? "▾" : "▸"}</span>
                 ) : (
                   <span className="w-2.5" />
                 )}
@@ -624,13 +651,13 @@ function IdePlay() {
             );
           })}
           {tip ? (
-            <div className="pointer-events-none absolute bottom-2 left-2 right-2 truncate rounded bg-black/80 px-2 py-1 font-mono text-[10px] text-white/70">
+            <div className="pointer-events-none absolute bottom-2 left-2 right-2 truncate rounded bg-white px-2 py-1 font-mono text-[10px] text-black/70 shadow">
               {tip}
             </div>
           ) : null}
         </div>
-        <div className="min-w-0 bg-[#0a0a0a]">
-          <div className="flex overflow-x-auto border-b border-white/[0.07] px-1 text-[12.5px]">
+        <div className="min-w-0 bg-white">
+          <div className="flex overflow-x-auto border-b border-black/[0.07] px-1 text-[12.5px]">
             {openTabs.map((id) => {
               const on = id === activeFile;
               return (
@@ -638,12 +665,12 @@ function IdePlay() {
                   key={id}
                   className="flex shrink-0 items-center px-1"
                   style={{
-                    borderBottom: on ? "1px solid rgba(255,255,255,0.78)" : "1px solid transparent",
+                    borderBottom: on ? "1px solid rgba(0,0,0,0.78)" : "1px solid transparent",
                   }}
                 >
                   <button
                     type="button"
-                    className={`flex items-center gap-1.5 px-2 py-2 ${on ? "text-white" : "text-white/40 hover:text-white/70"}`}
+                    className={`flex items-center gap-1.5 px-2 py-2 ${on ? "text-black" : "text-black/40 hover:text-black/70"}`}
                     onClick={() => openFile(id)}
                   >
                     <FileGlyph name={id} />
@@ -652,7 +679,7 @@ function IdePlay() {
                   {id !== HOME_FILE ? (
                     <button
                       type="button"
-                      className="pr-1.5 text-[11px] text-white/30 hover:text-white/70"
+                      className="pr-1.5 text-[11px] text-black/30 hover:text-black/70"
                       aria-label={`Close ${id}`}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -662,7 +689,7 @@ function IdePlay() {
                       ×
                     </button>
                   ) : (
-                    <span className="pr-1.5 text-[11px] text-white/25">×</span>
+                    <span className="pr-1.5 text-[11px] text-black/25">×</span>
                   )}
                 </span>
               );
@@ -684,22 +711,22 @@ function IdePlay() {
           >
             <TokenView tokens={tokens} caret={caretOn} echo={caretOn ? echo : ""} />
           </div>
-          <div className="relative border-t border-white/[0.07]">
+          <div className="relative border-t border-black/[0.07]">
             {wash && bottomTab === "terminal" ? (
               <div
-                className="pointer-events-none absolute inset-0 bg-[#3ddc84]/8"
+                className="pointer-events-none absolute inset-0 bg-[#16a34a]/8"
                 style={{ animation: "wt-sheen 0.9s cubic-bezier(0.16,1,0.3,1) 1" }}
               />
             ) : null}
-            <div className="flex gap-5 px-3 text-[11.5px] text-white/35">
+            <div className="flex gap-5 px-3 text-[11.5px] text-black/35">
               {BOTTOM_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   className={`border-b py-1.5 ${
                     bottomTab === tab.id
-                      ? "border-white text-white"
-                      : "border-transparent hover:text-white/70"
+                      ? "border-black text-black"
+                      : "border-transparent hover:text-black/70"
                   }`}
                   onClick={() => setBottomTab(tab.id)}
                 >
@@ -707,57 +734,48 @@ function IdePlay() {
                 </button>
               ))}
             </div>
-            <pre className="min-h-[128px] px-4 pb-4 font-mono text-[12px] leading-[20px] text-white/72">{bottomBody}</pre>
+            <pre className="min-h-[128px] px-4 pb-4 font-mono text-[12px] leading-[20px] text-black/72">{bottomBody}</pre>
           </div>
         </div>
-        <div className="hidden bg-[#0c0c0c] p-2 lg:block">
-          <div className="flex h-full flex-col rounded-[12px] border border-white/[0.08] bg-[#161616] shadow-[0_16px_48px_rgba(0,0,0,0.45)]">
-            <div className="flex items-center justify-between px-3.5 pt-3.5 text-[13px] font-medium text-white">
-              Create Wind Tunnel
-              <span className="text-[15px] tracking-[0.2em] text-white/35">···</span>
+        <div className="hidden bg-[#f4f4f2] p-2 lg:block">
+          <div className="flex h-full flex-col rounded-[12px] border border-black/[0.08] bg-white shadow-[0_16px_48px_rgba(0,0,0,0.08)]">
+            <div className="flex items-center justify-between px-3.5 pt-3.5 text-[13px] font-medium text-black">
+              Getting started with Antifailure
+              <span className="text-[15px] tracking-[0.2em] text-black/35">···</span>
             </div>
-            <p className="mt-3 px-3.5 text-[12px] leading-[18px] text-white/55">
-              One click turns this pull request into a private, production-shaped environment with its own
-              safe database and integrations.
+            <p className="mt-3 px-3.5 text-[12px] leading-[18px] text-black/55">
+              Workload Studio compiles observed traffic, deterministic journeys, and Crowdi
+              exploration into a scenario that runs against an isolated twin.
             </p>
-            <pre className="mx-3.5 mt-3 overflow-hidden rounded-lg bg-[#0c0c0c] p-2.5 font-mono text-[10.5px] leading-[17px] text-[#9cdcfe]">
-              {`# Generated — do not hand-author
-on_pr: create_wind_tunnel
-contain:
-  - stripe
-  - email
-compare: baseline_vs_candidate`}
+            <pre className="mx-3.5 mt-3 overflow-hidden rounded-lg bg-[#f4f4f2] p-2.5 font-mono text-[10.5px] leading-[17px]">
+              <span className="mb-1 block text-[10px] text-black/35">workload.ts</span>
+              <span className={KW}>import</span>
+              <span className={VAR}>{" { "}</span>
+              <span className={TEAL}>Workload</span>
+              <span className={VAR}>{" } "}</span>
+              <span className={KW}>from</span>
+              <span className={STR}>{` "@antifailure/studio"`}</span>
+              <span className={VAR}>{";\n"}</span>
+              <span className={KW}>const</span>
+              <span className={VAR}> studio = </span>
+              <span className={TEAL}>Workload</span>
+              <span className={FN}>.connect</span>
+              <span className={VAR}>{"();\n"}</span>
+              <span className={CM}>{"// Observed, deterministic, Crowdi"}</span>
             </pre>
-            <div className="mx-3.5 mt-3 rounded-lg bg-[#0c0c0c] px-2.5 py-2">
-              <div className="flex items-center gap-2 text-[12px]">
-                {term >= 5 ? (
-                  <CheckTick on />
-                ) : (
-                  <span
-                    className="wt-spin inline-block h-3.5 w-3.5 rounded-full border border-white/25 border-t-white/80"
-                    style={{ animation: spin ? "wt-spin 0.7s linear infinite" : "none" }}
-                  />
-                )}
-                <span className="text-white/45">Run</span>
-                <span className="font-medium text-white">create_wind_tunnel</span>
-              </div>
-              <div className="mt-0.5 pl-6 text-[11px] text-white/40">
-                {term >= 5 ? "Isolated twin provisioned." : spin ? "Provisioning…" : "Waiting for init"}
-              </div>
-            </div>
             <ul className="mt-3 space-y-2 px-3.5 text-[12.5px]">
               {CHECKS.map((item, i) => (
                 <li key={item}>
                   <button
                     type="button"
-                    className="flex w-full items-start gap-2 text-left hover:text-white"
+                    className="flex w-full items-start gap-2 text-left hover:text-black"
                     style={{
                       color:
                         inspectCheck === i
-                          ? "rgba(255,255,255,0.95)"
+                          ? "rgba(0,0,0,0.95)"
                           : checks > i
-                            ? "rgba(255,255,255,0.82)"
-                            : "rgba(255,255,255,0.28)",
+                            ? "rgba(0,0,0,0.82)"
+                            : "rgba(0,0,0,0.28)",
                       transition: "color 0.35s cubic-bezier(0.16,1,0.3,1)",
                     }}
                     title={CHECK_DETAIL[i]}
@@ -772,20 +790,20 @@ compare: baseline_vs_candidate`}
             <div className="mt-auto p-2.5">
               <button
                 type="button"
-                className="flex w-full flex-col rounded-[12px] border border-white/10 bg-[#101010] px-3 py-2.5 text-left hover:border-white/18"
+                className="flex w-full flex-col rounded-[12px] border border-black/10 bg-[#f4f4f2] px-3 py-2.5 text-left hover:border-black/18"
                 onClick={replayRun}
               >
-                <span className="text-[12.5px] text-white/40">Plan, search, build anything...</span>
+                <span className="text-[12.5px] text-black/40">Plan, search, build anything...</span>
                 <span className="mt-2.5 flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-1.5 py-[3px] text-[11px] text-white/80">
-                    <Sparkle className="h-2.5 w-2.5 text-white/70" />
-                    + Agent
+                  <span className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white px-2 py-[3px] text-[11px] text-black/80">
+                    <Sparkle className="h-2.5 w-2.5 text-black/70" />
+                    Agent
                   </span>
-                  <span className="inline-flex items-center gap-1 text-[11px] text-white/55">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white px-2 py-[3px] text-[11px] text-black/55">
                     GPT-5
                     <span className="text-[8px]">▾</span>
                   </span>
-                  <span className="ml-auto flex h-6 w-6 items-center justify-center rounded-md bg-white/10 text-white">
+                  <span className="ml-auto flex h-6 w-6 items-center justify-center rounded-full bg-black text-white">
                     <svg viewBox="0 0 12 12" className="h-3 w-3" aria-hidden>
                       <path d="M6 9.5V2.5M3 5l3-3 3 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
@@ -805,59 +823,79 @@ export function IdeSection() {
   const { story } = useInViewPlay(glow, 0.15);
 
   return (
-    <section className="relative overflow-hidden bg-black px-6 pb-10 pt-6 lg:px-12" id="ide">
+    <section className="relative bg-[#f7f7f5] px-6 pb-24 pt-16 lg:px-12 lg:pt-20" id="ide">
       <div className="flex gap-6">
         <div className="hidden w-[200px] shrink-0 lg:block" />
-        <div className="relative mx-auto min-w-0 max-w-[1180px] flex-1 py-12 lg:py-16">
-          <div className="pointer-events-none absolute -inset-x-10 -inset-y-4 lg:-inset-x-24" aria-hidden>
-            <div className="ide-grid absolute inset-0 opacity-[0.28]" />
-            <div
-              className="absolute left-[-12%] top-[12%] h-[78%] w-[48%] rounded-full bg-[#1ad4c0] opacity-55 blur-[100px]"
-              style={{ opacity: story ? 0.58 : 0.32 }}
-            />
-            <div
-              className="absolute right-[-14%] top-[10%] h-[80%] w-[50%] rounded-full bg-[#e89440] opacity-60 blur-[100px]"
-              style={{ opacity: story ? 0.62 : 0.34 }}
-            />
-            <div
-              className="absolute inset-0"
-              style={{
-                background:
-                  "radial-gradient(ellipse 50% 82% at 0% 50%, rgba(26,212,192,0.7), transparent 68%), radial-gradient(ellipse 52% 84% at 100% 50%, rgba(232,148,64,0.78), transparent 68%)",
-                opacity: story ? 1 : 0.6,
-                transition: "opacity 0.8s ease",
-              }}
-            />
-            <div
-              ref={glow}
-              className="ide-dots absolute inset-0 mix-blend-soft-light"
-              style={{
-                WebkitMaskImage:
-                  "radial-gradient(ellipse 52% 86% at 0% 50%, black 0%, transparent 70%), radial-gradient(ellipse 54% 88% at 100% 50%, black 0%, transparent 70%)",
-                maskImage:
-                  "radial-gradient(ellipse 52% 86% at 0% 50%, black 0%, transparent 70%), radial-gradient(ellipse 54% 88% at 100% 50%, black 0%, transparent 70%)",
-                opacity: story ? 1 : 0.55,
-                transition: "opacity 0.8s ease",
-              }}
-            />
-            <div
-              className="auth-honeycomb absolute inset-0 mix-blend-screen"
-              style={{
-                WebkitMaskImage:
-                  "linear-gradient(90deg, rgba(0,0,0,0.85), transparent 36%, transparent 64%, rgba(0,0,0,0.85))",
-                maskImage:
-                  "linear-gradient(90deg, rgba(0,0,0,0.85), transparent 36%, transparent 64%, rgba(0,0,0,0.85))",
-                opacity: 0.55,
-              }}
-            />
-          </div>
-          <div className="pointer-events-none absolute inset-x-0 top-[42px] h-px bg-white/10" aria-hidden />
-          <div className="pointer-events-none absolute inset-y-12 left-0 w-px bg-white/10 lg:inset-y-16" aria-hidden />
-          <div className="pointer-events-none absolute inset-y-12 right-0 w-px bg-white/10 lg:inset-y-16" aria-hidden />
-          <div className="relative">
-            <IdePlay />
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-4 px-1">
-              <p className="text-[15px] tracking-[-0.01em] text-white">
+        <div className="relative mx-auto min-w-0 max-w-[1240px] flex-1">
+          <h2
+            id="from-pr"
+            className="max-w-[920px] scroll-mt-[88px] text-[36px] font-semibold leading-[1.12] tracking-[-0.035em] text-black md:text-[44px] lg:text-[48px]"
+          >
+            A disposable production twin for every risky change.{" "}
+            <span className="text-black/40">
+              Connect a repository and cloud environment. The platform proves whether it is safe to ship.
+            </span>
+          </h2>
+
+          <div className="relative mt-14 overflow-hidden border border-black/12 bg-[#f7f7f5]">
+            <div className="pointer-events-none absolute inset-0" aria-hidden>
+              <div
+                className="absolute inset-0"
+                style={{
+                  background:
+                    "radial-gradient(ellipse 58% 52% at 6% 100%, rgba(26,212,192,0.58), transparent 62%), radial-gradient(ellipse 58% 52% at 94% 100%, rgba(232,148,64,0.62), transparent 62%)",
+                  opacity: story ? 1 : 0.7,
+                  transition: "opacity 0.8s ease",
+                }}
+              />
+              <div
+                ref={glow}
+                className="ide-dots absolute inset-0"
+                style={{
+                  WebkitMaskImage:
+                    "radial-gradient(ellipse 60% 55% at 8% 100%, black 0%, transparent 70%), radial-gradient(ellipse 60% 55% at 92% 100%, black 0%, transparent 70%)",
+                  maskImage:
+                    "radial-gradient(ellipse 60% 55% at 8% 100%, black 0%, transparent 70%), radial-gradient(ellipse 60% 55% at 92% 100%, black 0%, transparent 70%)",
+                  opacity: story ? 0.85 : 0.5,
+                  transition: "opacity 0.8s ease",
+                }}
+              />
+              <div
+                className="auth-honeycomb absolute inset-0"
+                style={{
+                  WebkitMaskImage:
+                    "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 55%), linear-gradient(90deg, rgba(0,0,0,0.55), transparent 40%, transparent 60%, rgba(0,0,0,0.55))",
+                  maskImage:
+                    "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 55%), linear-gradient(90deg, rgba(0,0,0,0.55), transparent 40%, transparent 60%, rgba(0,0,0,0.55))",
+                  opacity: 0.4,
+                }}
+              />
+            </div>
+
+            <div className="relative px-6 pb-8 pt-[72px] sm:px-10 lg:px-14 lg:pb-10 lg:pt-[88px]">
+              <div
+                className="pointer-events-none absolute left-[16%] top-5 hidden items-start gap-2 lg:flex"
+                aria-hidden
+              >
+                <span className="h-[56px] w-px bg-black/25" />
+                <span className="pt-0.5 text-[12px] leading-4 text-black/45">
+                  Attaches the safety report to the PR
+                </span>
+              </div>
+              <div
+                className="pointer-events-none absolute right-[14%] top-5 hidden items-start gap-2 lg:flex"
+                aria-hidden
+              >
+                <span className="h-[56px] w-px bg-black/25" />
+                <span className="pt-0.5 text-[12px] leading-4 text-black/45">
+                  Provisions an isolated twin with contained integrations
+                </span>
+              </div>
+              <IdePlay />
+            </div>
+
+            <div className="relative flex flex-wrap items-center justify-between gap-4 border-t border-black/12 px-6 py-5 sm:px-10 lg:px-14">
+              <p className="text-[15px] tracking-[-0.01em] text-black">
                 Try for yourself, prove the next deploy before it ships.
               </p>
               <CopyCli variant="mint" />
@@ -868,3 +906,4 @@ export function IdeSection() {
     </section>
   );
 }
+

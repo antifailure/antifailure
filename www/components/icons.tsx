@@ -16,7 +16,7 @@ export function Wordmark({ compact = false }: { compact?: boolean }) {
     <a href="/" className="flex items-center gap-2.5 shrink-0">
       <LogoMark />
       <span
-        className="text-white font-semibold tracking-[0.08em] uppercase"
+        className="font-semibold uppercase tracking-[0.08em] text-black"
         style={{ fontSize: compact ? 13 : 14.5, letterSpacing: "0.12em" }}
       >
         Antifailure

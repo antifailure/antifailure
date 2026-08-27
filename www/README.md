@@ -10,4 +10,4 @@ npx auth secret   # writes AUTH_SECRET into .env.local
 npm run dev
 ```
 
-OAuth providers are optional. With no GitHub, Google, or Microsoft credentials, sign-in still renders and the rest of the site works. Callbacks are `{AUTH_URL}/api/auth/callback/{github,google,microsoft-entra-id}`.
+The home page is the product story. Product, solutions, company, security, pricing, docs, and legal pages live next to it. OAuth providers are optional. With no GitHub, Google, or Microsoft credentials, sign-in still renders and the rest of the site works. Callbacks are `{AUTH_URL}/api/auth/callback/{github,google,microsoft-entra-id}`.

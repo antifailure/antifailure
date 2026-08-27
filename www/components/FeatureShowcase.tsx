@@ -54,7 +54,7 @@ export function FeatureShowcase({ children }: { children: React.ReactNode }) {
         <div
           className={`absolute left-8 top-2 lg:left-16 ${showRail ? "pointer-events-auto" : "pointer-events-none"}`}
         >
-          <FeatureRail active={active} light={active === "migration"} />
+          <FeatureRail active={active} light={active === "migration" || active === "gate"} />
         </div>
       </div>
       {children}

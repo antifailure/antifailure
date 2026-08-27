@@ -45,18 +45,18 @@ function Menu({ label, items }: { label: string; items: MenuItem[] }) {
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
     >
-      <button type="button" className="flex items-center gap-1 text-[13.5px] text-white/90 hover:text-white">
+      <button type="button" className="flex items-center gap-1 text-[13.5px] text-black/80 hover:text-black">
         {label}
-        <Chevron className="h-2.5 w-2.5 text-white/70" />
+        <Chevron className="h-2.5 w-2.5 text-black/55" />
       </button>
       {open && (
-        <div className="absolute left-1/2 top-full z-50 mt-3 w-[320px] -translate-x-1/2 rounded-xl border border-white/10 bg-[#0b0b0b] p-2 shadow-2xl">
+        <div className="absolute left-1/2 top-full z-50 mt-3 w-[320px] -translate-x-1/2 rounded-xl border border-black/10 bg-white p-2 shadow-2xl">
           {items.map((item) => {
-            const className = "block w-full rounded-lg px-3 py-2.5 text-left hover:bg-white/5";
+            const className = "block w-full rounded-lg px-3 py-2.5 text-left hover:bg-black/5";
             const body = (
               <>
-                <div className="text-[13px] text-white">{item.title}</div>
-                <div className="text-[12px] text-[#a1a1aa]">{item.sub}</div>
+                <div className="text-[13px] text-black">{item.title}</div>
+                <div className="text-[12px] text-black/50">{item.sub}</div>
               </>
             );
             if (item.sheet) {
@@ -95,19 +95,19 @@ export function SiteHeader() {
   const { openSheet } = useChrome();
 
   return (
-    <header className="sticky top-0 z-50 bg-black">
+    <header className="sticky top-0 z-50 border-b border-black/8 bg-[#f7f7f5]">
       <div className="flex h-[58px] items-center justify-between px-5 lg:px-8">
         <Wordmark />
 
         <nav className="hidden items-center gap-7 md:flex">
           <Menu label="Product" items={productItems} />
           <Menu label="Solutions" items={solutionItems} />
-          <a href="/docs" className="text-[13.5px] text-white/90 hover:text-white">
+          <a href="/docs" className="text-[13.5px] text-black/80 hover:text-black">
             Docs
           </a>
           <button
             type="button"
-            className="text-[13.5px] text-white/90 hover:text-white"
+            className="text-[13.5px] text-black/80 hover:text-black"
             onClick={() => openSheet("pricing")}
           >
             Pricing
@@ -118,7 +118,7 @@ export function SiteHeader() {
         <div className="flex items-center gap-4">
           <button
             type="button"
-            className="hidden items-center gap-1.5 text-[13px] text-white/90 hover:text-white sm:flex"
+            className="hidden items-center gap-1.5 text-[13px] text-black/80 hover:text-black sm:flex"
             onClick={() => openSheet("community")}
           >
             <DiscordIcon />
@@ -128,20 +128,20 @@ export function SiteHeader() {
             href="https://github.com/antifailure"
             target="_blank"
             rel="noreferrer"
-            className="hidden items-center gap-1.5 text-[13px] text-white/90 hover:text-white sm:flex"
+            className="hidden items-center gap-1.5 text-[13px] text-black/80 hover:text-black sm:flex"
           >
             <GitHubIcon />
             GitHub
           </a>
           <a
             href="/signin"
-            className="inline-flex h-8 items-center rounded-full border border-white px-3.5 text-[13px] text-white"
+            className="inline-flex h-8 items-center rounded-full border border-black px-3.5 text-[13px] text-black"
           >
             Log in
           </a>
           <a
             href="/signup"
-            className="inline-flex h-8 items-center rounded-full bg-white px-3.5 text-[13px] font-medium text-black"
+            className="inline-flex h-8 items-center rounded-full bg-black px-3.5 text-[13px] font-medium text-white"
           >
             Sign up
           </a>

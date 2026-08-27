@@ -28,7 +28,7 @@ export function FeatureRail({
                       ? "text-black"
                       : "text-white"
                     : light
-                      ? "text-black/35"
+                      ? "text-black/50"
                       : "text-white/35"
                 }`}
               >

@@ -69,26 +69,26 @@ export function AuthModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[380px] rounded-2xl border border-white/10 bg-[#0a0a0a] p-6 shadow-2xl"
+        className="w-full max-w-[380px] rounded-2xl border border-black/10 bg-white p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {done ? (
           <>
             <div className="text-[15px] font-medium">You’re on the waitlist</div>
-            <p className="mt-1 text-[13px] text-[#a1a1aa]">
+            <p className="mt-1 text-[13px] text-black/50">
               We’ll email {done} when the control plane can connect a repo. Nothing is created on a
               server from this page.
             </p>
             <button
               type="button"
-              className="mt-5 h-10 w-full rounded-full bg-white text-[13px] font-medium text-black"
+              className="mt-5 h-10 w-full rounded-full bg-black text-[13px] font-medium text-white"
               onClick={jumpToStart}
             >
               See how it works
             </button>
             <button
               type="button"
-              className="mt-3 w-full text-center text-[12px] text-[#a1a1aa]"
+              className="mt-3 w-full text-center text-[12px] text-black/50"
               onClick={onClose}
             >
               Close
@@ -99,38 +99,38 @@ export function AuthModal({
             <div className="text-[15px] font-medium">
               {mode === "login" ? "Request access" : "Join waitlist"}
             </div>
-            <p className="mt-1 text-[13px] text-[#a1a1aa]">
+            <p className="mt-1 text-[13px] text-black/50">
               No account is created. This stores a waitlist email on this device until the product
               ships.
             </p>
-            <label className="mt-5 block text-[12px] text-[#a1a1aa]">Email</label>
+            <label className="mt-5 block text-[12px] text-black/50">Email</label>
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-black px-3 text-[13px] outline-none focus:border-white/30"
+              className="mt-1.5 h-10 w-full rounded-lg border border-black/10 bg-[#f7f7f5] px-3 text-[13px] text-black outline-none focus:border-black/30"
               placeholder="you@company.com"
               autoComplete="email"
               type="email"
             />
-            <label className="mt-3 block text-[12px] text-[#a1a1aa]">Password</label>
+            <label className="mt-3 block text-[12px] text-black/50">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-black px-3 text-[13px] outline-none focus:border-white/30"
+              className="mt-1.5 h-10 w-full rounded-lg border border-black/10 bg-[#f7f7f5] px-3 text-[13px] text-black outline-none focus:border-black/30"
               placeholder="••••••••"
               autoComplete="off"
             />
             {error ? <p className="mt-2 text-[12px] text-red-400">{error}</p> : null}
             <button
               type="submit"
-              className="mt-5 h-10 w-full rounded-full bg-white text-[13px] font-medium text-black"
+              className="mt-5 h-10 w-full rounded-full bg-black text-[13px] font-medium text-white"
             >
               {mode === "login" ? "Request access" : "Join waitlist"}
             </button>
             <button
               type="button"
-              className="mt-3 w-full text-center text-[12px] text-[#a1a1aa]"
+              className="mt-3 w-full text-center text-[12px] text-black/50"
               onClick={() => onMode(mode === "login" ? "signup" : "login")}
             >
               {mode === "login" ? "Join the waitlist instead" : "Request access instead"}
