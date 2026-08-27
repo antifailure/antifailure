@@ -64,9 +64,10 @@ delete the policy that is containing it.
 
 ## Why it refuses some clusters
 
-A NetworkPolicy is a request to whatever CNI the cluster runs, and several CNIs
-accept the object and enforce nothing. kind's default, kindnet, is one of them,
-and it is the CNI most people's first cluster has.
+A NetworkPolicy is a request to whatever CNI the cluster runs, and a CNI is
+free to accept the object and enforce nothing. The API gives you no signal
+either way: the policy is stored, it reads back correctly, and `kubectl get
+networkpolicy` lists it whether or not a single packet is being dropped.
 
 On such a cluster every object here is created successfully, every status reads
 green, and every environment can reach the internet, the metadata endpoint and
@@ -82,7 +83,18 @@ That check also fails when it cannot answer, and that is deliberate. A probe
 that could not run tells you nothing about whether the cluster contains
 anything, and an unanswered question about a security control is not a pass.
 
-Use a cluster whose CNI enforces NetworkPolicy. Calico, Cilium and k3s all do.
+Use a cluster whose CNI enforces NetworkPolicy. This page deliberately does not
+give you the list of which ones do, because that answer changes with their
+releases and a list in a document ages into a confident lie. The probe is the
+authority: it asks the cluster in front of it rather than the cluster a document
+remembers, and it asks before every environment. The one this runtime has been
+proved against is k3s, in the k3d cluster the conformance run below used.
+
+If you get **AF-RUN-043**, read it as a statement about the cluster and not
+about the runtime. The message names which of the four routes got out. No
+service image ran and no sidecar started, but the namespace and its policies
+were created before the probe, which is the point of doing it in that order, so
+`af down` on that environment is still what removes them.
 
 ## Images
 
@@ -178,10 +190,22 @@ cannot support is skipped by name, so the output tells you which guarantee this
 runtime did not make on that run. Nothing about containment can be skipped that
 way.
 
+To reproduce it, this is the cluster the passing run used: k3s v1.35.5 under
+k3d v5.9.0, with no ingress controller, which is why the ingress behaviour is
+the one that skips. The disable is written out rather than left to k3d's
+default so that the cluster is the same one whatever your k3d does.
+
 ```
-AF_KUBE_CONTEXT=k3d-mycluster go test ./engine/internal/runtime/k8s/ -run TestConformance
+k3d cluster create af-conformance --k3s-arg "--disable=traefik@server:0"
+AF_KUBE_CONTEXT=k3d-af-conformance go test ./engine/internal/runtime/k8s/ -run TestConformance -timeout 60m
+k3d cluster delete af-conformance
 ```
 
-The test skips unless that variable names a cluster. It creates namespaces,
+The test skips unless `AF_KUBE_CONTEXT` names a cluster. It creates namespaces,
 deletes namespaces, and runs pods that try to reach the internet, so it is never
 run against a cluster by accident.
+
+Give it the hour. The run that passed took 27m50s on a loaded machine, and most
+of that is waiting for real pods to schedule rather than anything this runtime
+computes. The default `go test` timeout of ten minutes will kill it partway and
+leave namespaces behind.

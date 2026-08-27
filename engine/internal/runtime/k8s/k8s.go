@@ -13,10 +13,12 @@
 //
 // There is one thing that is true here and is not true of the local runtime,
 // and it is the reason this package refuses to bring an environment up until
-// it has checked. A NetworkPolicy is a request to the CNI. Several CNIs, kind's
-// own kindnet among them, accept a NetworkPolicy object and enforce nothing at
-// all, which produces a cluster where every containment test passes while
-// nothing is contained. Applying policy and assuming enforcement would turn
+// it has checked. A NetworkPolicy is a request to the CNI, and a CNI is free to
+// accept the object and enforce nothing at all, which produces a cluster where
+// every containment test passes while nothing is contained. Which CNIs do
+// which is not written down here on purpose, because that answer changes with
+// their releases and a stale list is worse than no list; the probe asks the
+// cluster in front of it instead. Applying policy and assuming enforcement would turn
 // this product's central guarantee into a YAML file nobody validated, so
 // Up runs a probe that tries to escape and refuses to continue if it can.
 package k8s

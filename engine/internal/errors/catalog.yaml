@@ -348,7 +348,7 @@ errors:
   - code: AF-RUN-043
     area: RUN
     message: "This cluster is not containing the environment: {detail}"
-    next_step: "Use a cluster whose CNI enforces NetworkPolicy (Calico, Cilium, and k3s all do; kind's default kindnet does not), then run 'af up' again."
+    next_step: "Use a cluster whose CNI enforces NetworkPolicy rather than only accepting it, then run 'af up' again."
     docs: guides/kubernetes-runtime
     retryable: false
     exit_code: 3

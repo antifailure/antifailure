@@ -959,7 +959,7 @@ var catalog = map[Code]Entry{
 		Code:      AFRUN043,
 		Area:      "RUN",
 		Message:   "This cluster is not containing the environment: {detail}",
-		NextStep:  "Use a cluster whose CNI enforces NetworkPolicy (Calico, Cilium, and k3s all do; kind's default kindnet does not), then run 'af up' again.",
+		NextStep:  "Use a cluster whose CNI enforces NetworkPolicy rather than only accepting it, then run 'af up' again.",
 		Docs:      "guides/kubernetes-runtime",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

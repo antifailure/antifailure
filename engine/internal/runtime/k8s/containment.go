@@ -153,9 +153,8 @@ func (r *Runtime) verifyContainment(
 			"detail", fmt.Sprintf(
 				"a pod in this environment reached %s. The environment's NetworkPolicy "+
 					"objects were created and this cluster is not enforcing them, which "+
-					"almost always means its CNI does not implement NetworkPolicy at all "+
-					"(kind's default kindnet is the usual one). Nothing placed here would "+
-					"be contained, so no environment is started",
+					"almost always means its CNI does not implement NetworkPolicy at all. "+
+					"Nothing placed here would be contained, so no environment is started",
 				strings.ReplaceAll(routes, " ", ", ")))
 	}
 	progress("network policy is enforced: the probe could not reach anything")
