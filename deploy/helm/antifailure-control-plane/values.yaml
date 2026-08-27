@@ -1,0 +1,187 @@
+# The Antifailure control plane.
+#
+# Nothing here assumes AKS, or any cloud. The chart installs on any conformant
+# Kubernetes cluster; it is developed against kind.
+#
+# The one thing worth reading before you install: the control plane uses TWO
+# database roles on purpose. The application connects as a role that cannot run
+# DDL, because a role that can ALTER TABLE can drop the policies that isolate
+# tenants. The privileged role is used by the bootstrap job and by nothing else,
+# and never reaches the Deployment.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/antifailure/control-plane
+  # Empty means .Chart.AppVersion. Pin a digest in production: a tag can be
+  # moved and a digest cannot.
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+database:
+  # The connection string the application uses. Unprivileged: a member of the
+  # antifailure_app group role, owning nothing.
+  url: ""
+  # A connection string for a role that may run DDL. Read by the bootstrap job
+  # only. Deliberately absent from the Deployment's environment.
+  migrationUrl: ""
+  # Preferred over the two above: a Secret you created yourself, so no
+  # credential is ever written into a values file or a release manifest.
+  existingSecret: ""
+  secretKeys:
+    url: AF_DATABASE_URL
+    migrationUrl: AF_MIGRATION_DATABASE_URL
+
+github:
+  clientId: ""
+  clientSecret: ""
+  redirectUri: ""
+  existingSecret: ""
+  secretKeys:
+    clientId: AF_GITHUB_CLIENT_ID
+    clientSecret: AF_GITHUB_CLIENT_SECRET
+    redirectUri: AF_GITHUB_REDIRECT_URI
+
+# Applies the schema and grants the application role its membership, as a Job
+# that runs before the Deployment rolls. Turn it off only if something else
+# owns the schema; the application will not create it.
+bootstrap:
+  enabled: true
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+config:
+  # The public origin, used to build absolute links.
+  appBaseUrl: ""
+  port: 8080
+  poolMax: 10
+  # Drop event partitions older than this many whole months. Empty keeps
+  # everything, which is the default because retention is an operator's
+  # decision and not a chart's.
+  eventRetentionMonths: ""
+  eventArchiveDir: ""
+  # Only for local development over plain HTTP. Leaving this on behind a real
+  # ingress sends session cookies without the Secure attribute.
+  insecureCookies: false
+# Keeping event partitions ahead of the writes. A range-partitioned table with
+# no partition for an incoming row does not slow down, it fails, so this is not
+# optional housekeeping.
+#
+# It is DDL, so it needs the privileged role. The application can do it itself
+# on a timer, and if it does, every replica serving public traffic is holding a
+# credential that can ALTER TABLE. So the default is a CronJob, and the
+# Deployment gets no DDL credential at all.
+#
+#   cronjob    a Job on a schedule. The Deployment holds no DDL credential.
+#   inProcess  the application does it on its own timer. Simpler, one fewer
+#              object, and the serving pods hold a privileged connection.
+#   off        something outside this chart does it. Nothing will warn you if
+#              nothing does.
+maintenance:
+  mode: cronjob
+  schedule: "17 3 * * *"
+  # Kept so a failed pass is still readable tomorrow morning.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  activeDeadlineSeconds: 900
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: cp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { memory: 512Mi }
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 75
+
+# Refuses to start a container that wants to write to its own filesystem or run
+# as root. The image is built to run this way, so these are assertions rather
+# than aspirations.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Liveness only, and the reason is worth stating: /health is a static literal
+# in the application and never touches the database. It answers "is the process
+# up". It cannot answer "can this replica serve", so it is not allowed to gate
+# readiness on its own. Readiness here is a TCP check, which is exactly as much
+# as can honestly be claimed until the application grows a /ready that queries
+# the pool.
+probes:
+  liveness:
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 3
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  startup:
+    periodSeconds: 5
+    failureThreshold: 30
+
+# A rolling deploy that kills connections mid-request turns every deploy into a
+# handful of failed pull request checks. The application drains on SIGTERM;
+# this gives it room to.
+terminationGracePeriodSeconds: 40
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Egress is left alone by default because a control plane must reach GitHub and
+# its database, and a policy written blind would break one of them.
+networkPolicy:
+  enabled: false
+  ingressFrom: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
