@@ -39,6 +39,16 @@ func TestConformance(t *testing.T) {
 			"sidecar image cannot be copied into it", kubeContext)
 	}
 
+	// Copy the sidecar image in before the suite starts, not during it.
+	//
+	// Up copies every image an environment needs, bounded by the context it
+	// was given, which inside the suite is one behaviour's timeout. Copying
+	// an image into a cluster is an export and a load into the node's store
+	// and has nothing to do with how long a behaviour should take, so the
+	// first behaviour to run paid for it and timed out. The loader remembers
+	// what it has copied, so doing it here makes every Up cheap.
+	warmProxyImage(t, loader)
+
 	conformance.RunRuntime(t, func(t *testing.T) provider.Runtime {
 		r, err := k8s.New(k8s.Options{
 			Context: kubeContext,
@@ -101,6 +111,22 @@ func requireCluster(t *testing.T) string {
 		}
 		t.Logf("waiting for %s to answer: %s", kubeContext, strings.TrimSpace(string(out)))
 		time.Sleep(10 * time.Second)
+	}
+}
+
+// warmProxyImage builds the sidecar and copies it into the cluster once.
+func warmProxyImage(t *testing.T, loader *k8s.LocalClusterLoader) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	ref, err := proxyImage(ctx)
+	if err != nil {
+		t.Skipf("skipped: the sidecar image is built on the local Docker daemon and "+
+			"could not be: %v", err)
+	}
+	if _, err := loader.Ensure(ctx, ref); err != nil {
+		t.Fatalf("the sidecar image could not be copied into the cluster: %v", err)
 	}
 }
 

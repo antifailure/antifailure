@@ -559,12 +559,12 @@ func literalExit(cmd string) (int, bool) {
 
 // isServeCommand recognises the busybox web server the suite starts.
 func isServeCommand(command string) bool {
-	return strings.Contains(command, "nc -l -p 8080")
+	return strings.Contains(command, "httpd -f -p 8080")
 }
 
 // serveBody recovers the body that server was told to answer with.
 func serveBody(command string) string {
-	_, after, ok := strings.Cut(command, `\r\n\r\n`)
+	_, after, ok := strings.Cut(command, "printf '%s' '")
 	if !ok {
 		return ""
 	}

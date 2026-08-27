@@ -404,15 +404,23 @@ func (h *rtHarness) envID(name string) string {
 	return id
 }
 
-// serve is a command that answers one line of HTTP forever, using only
-// busybox, so that a behavior needing a web service does not need an image
-// built for it. An image built here would have to be built on the machine
-// running the test and then put wherever the runtime can reach it, which is
-// exactly the step that differs between a daemon and a cluster.
+// serve is a command that runs a real HTTP server, using only busybox, so that
+// a behavior needing a web service does not need an image built for it. An
+// image built here would have to be built on the machine running the test and
+// then put wherever the runtime can reach it, which is exactly the step that
+// differs between a daemon and a cluster.
+//
+// busybox httpd rather than a loop around nc, and the difference is not a
+// detail. A one shot listener serves exactly one connection and then has to be
+// restarted by the loop, so anything else that connects takes the only slot
+// there is: a runtime's readiness check polling every two seconds holds it
+// permanently, and a service that is up and answering the runtime is
+// unreachable by everything else. That is what Egress_NamesDoNotCrossEnvironments
+// hit, and it looked exactly like a name failing to resolve.
 func serve(body string) string {
 	return fmt.Sprintf(
-		`while true; do printf 'HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' `+
-			`| nc -l -p 8080 -s 0.0.0.0; done`, len(body), body)
+		`mkdir -p /afwww && printf '%%s' '%s' > /afwww/index.html && exec httpd -f -p 8080 -h /afwww`,
+		body)
 }
 
 // webService is a service that serves body on port 8080.
