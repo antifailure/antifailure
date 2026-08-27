@@ -18,12 +18,12 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
-	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 )
 
@@ -117,7 +117,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: cost estimate --plan plan.json --pricing infra/pricing.yaml [--budget N] [--allow-unknown]")
 		os.Exit(2)
 	}
-	fs := pflag.NewFlagSet("estimate", pflag.ExitOnError)
+	// The standard library rather than pflag: this needs four flags and the
+	// repository would rather not carry a dependency for that. `flag` accepts
+	// both -flag and --flag, so the usage above is unchanged.
+	fs := flag.NewFlagSet("estimate", flag.ExitOnError)
 	planPath := fs.String("plan", "", "terraform show -json output")
 	pricingPath := fs.String("pricing", "infra/pricing.yaml", "unit prices")
 	budget := fs.Float64("budget", 0, "refuse if the projection exceeds this many USD per month")

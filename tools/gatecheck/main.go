@@ -340,6 +340,20 @@ var exemptFromGate = map[string]string{
 		"It runs on every pull request and on a daily schedule in security.yml, " +
 		"which is where a scan whose input is a moving database belongs. Run it by " +
 		"hand with `just vuln`.",
+
+	"tool cost": "" +
+		"Its input is not in the tree. tools/cost reads a Terraform plan, and a " +
+		"plan only exists after authenticating to Azure and resolving every " +
+		"resource against a live subscription, so there is nothing for it to read " +
+		"on a laptop with no cloud account. The engine is meant to run without " +
+		"one, and `just gate` has to work on a plane. " +
+		"What IS a function of the tree is the estimator's own behaviour, and that " +
+		"is covered by `go test ./tools/cost`, which `just test-tools` runs inside " +
+		"`gate`: it asserts the pricing file parses, that a known SKU is priced " +
+		"from it, and that an unrecognised resource is reported UNKNOWN rather " +
+		"than silently costed at zero. " +
+		"It runs on every pull request touching infra/ in infra.yml, against the " +
+		"plan produced there, with --budget so an over-budget plan fails.",
 }
 
 // workflowSet is the workflows that run on a pull request, kept with their

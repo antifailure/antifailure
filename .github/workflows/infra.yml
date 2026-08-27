@@ -63,17 +63,12 @@ jobs:
             terraform -chdir="$dir" validate
           done
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: tools/go.mod
-          cache-dependency-path: tools/go.sum
-
-      # The boundary in infra/ISOLATION.md, exercised. These tests are the
-      # reason a resource group belonging to another project cannot be named in
-      # a Terraform variable or an az command.
-      - name: azguard and cost
-        working-directory: tools
-        run: GOTOOLCHAIN=local go test ./azguard/ ./cost/
+      # The azguard and cost tests are deliberately NOT run here. ci.yml already
+      # runs `cd tools && go test ./...` on every pull request and that covers
+      # both. A second, narrower invocation would be a gate with no matching
+      # `just gate` recipe, which gatecheck refuses, and it would be right to:
+      # the promise is that a green `just gate` means a green CI, and that only
+      # holds while the two run the same things.
 
       # tfsec reads the configuration and needs no credentials, so it runs on
       # every pull request including one from a fork.
