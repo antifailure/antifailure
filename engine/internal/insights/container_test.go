@@ -28,6 +28,22 @@ import (
 // into this repository's test suite. The image is real, the command is real,
 // the network is real and the database is real.
 
+// skipOrFail decides what a missing daemon means.
+//
+// On a laptop with no Docker it means skip: that machine has not found a bug.
+// On a machine that was SUPPOSED to have one it means fail, because `go test`
+// prints nothing for a skip and the package reports ok having examined
+// nothing. That state is invisible by default and it is the one worth being
+// loud about: this suite went green in CI for a run in which it had skipped
+// every assertion that needed a real server.
+func skipOrFail(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("AF_REQUIRE_DOCKER") != "" {
+		t.Fatalf("AF_REQUIRE_DOCKER is set, so this cannot be skipped: "+format, args...)
+	}
+	t.Skipf("skipped: "+format, args...)
+}
+
 // dockerBranch is a Postgres container standing in for a provider's branch.
 type dockerBranch struct {
 	cli  *client.Client
@@ -55,7 +71,7 @@ func requireBranchContainer(t *testing.T, name string) (*dockerBranch, func()) {
 	}
 	cli, err := dockerutil.Client()
 	if err != nil {
-		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+		skipOrFail(t, "no Docker daemon is reachable: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 
@@ -74,7 +90,7 @@ func requireBranchContainer(t *testing.T, name string) (*dockerBranch, func()) {
 	if err != nil {
 		cancel()
 		_ = cli.Close()
-		t.Skipf("skipped: the branch container could not be created: %v", err)
+		skipOrFail(t, "the branch container could not be created: %v", err)
 	}
 	stop := func() {
 		c, done := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -85,7 +101,7 @@ func requireBranchContainer(t *testing.T, name string) (*dockerBranch, func()) {
 	}
 	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
 		stop()
-		t.Skipf("skipped: the branch container could not be started: %v", err)
+		skipOrFail(t, "the branch container could not be started: %v", err)
 	}
 
 	b := &dockerBranch{cli: cli, id: created.ID, name: full}
@@ -127,11 +143,11 @@ func waitForBranch(t *testing.T, b *dockerBranch) string {
 		}
 		select {
 		case <-ctx.Done():
-			t.Skip("skipped: the branch container never became ready")
+			skipOrFail(t, "the branch container never became ready")
 		case <-time.After(3 * time.Second):
 		}
 	}
-	t.Skip("skipped: the branch container never became ready")
+	skipOrFail(t, "the branch container never became ready")
 	return ""
 }
 

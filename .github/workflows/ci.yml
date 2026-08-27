@@ -146,6 +146,11 @@ jobs:
           # And if that Postgres is not there, say so loudly rather than
           # skipping every test that needed it.
           AF_REQUIRE_DATABASE: '1'
+          # The comment above says the provider and runtime suites run for
+          # real on this runner. This is what makes that a gate rather than a
+          # claim: a suite that cannot reach the daemon now fails instead of
+          # reporting ok having skipped itself.
+          AF_REQUIRE_DOCKER: '1'
 
       - name: Nothing was left behind
         # The suites assert this themselves, and this catches the case where a

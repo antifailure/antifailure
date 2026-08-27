@@ -30,6 +30,22 @@ import (
 // copy of production's data nobody is watching, and nothing inside the
 // insights package can prove it was removed.
 
+// skipOrFail decides what a missing daemon means.
+//
+// On a laptop with no Docker it means skip: that machine has not found a bug.
+// On a machine that was SUPPOSED to have one it means fail, because `go test`
+// prints nothing for a skip and the package reports ok having examined
+// nothing. That state is invisible by default and it is the one worth being
+// loud about: this suite went green in CI for a run in which it had skipped
+// every assertion that needed a real server.
+func skipOrFail(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("AF_REQUIRE_DOCKER") != "" {
+		t.Fatalf("AF_REQUIRE_DOCKER is set, so this cannot be skipped: "+format, args...)
+	}
+	t.Skipf("skipped: "+format, args...)
+}
+
 // testBudget is how long this test may take, taken from the deadline the
 // caller gave rather than invented here.
 //
@@ -68,7 +84,7 @@ func TestRunInsightsRehearsesOnItsOwnBranchAndTakesItAway(t *testing.T) {
 	}
 	p, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: 46900})
 	if err != nil {
-		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+		skipOrFail(t, "no Docker daemon is reachable: %v", err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), testBudget(t, 20*time.Minute))
@@ -88,7 +104,7 @@ func TestRunInsightsRehearsesOnItsOwnBranchAndTakesItAway(t *testing.T) {
 		Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
 	})
 	if err != nil {
-		t.Skipf("skipped: no golden could be made: %v", err)
+		skipOrFail(t, "no golden could be made: %v", err)
 	}
 	t.Cleanup(func() {
 		c, done := context.WithTimeout(context.Background(), 3*time.Minute)
