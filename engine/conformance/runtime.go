@@ -171,9 +171,18 @@ func RunRuntime(t *testing.T, factory RuntimeFactory, opts RuntimeOptions) {
 	// be traced to the run that caused it.
 	runID := shortID()
 
+	// Counted inside each subtest, because that is the only place that knows
+	// the body actually ran. See the accounting below for why it is not
+	// enough to count the loop.
+	var mu sync.Mutex
+	reached := map[string]bool{}
+
 	for _, b := range runtimeBehaviors {
 		b := b
 		t.Run(b.Name, func(t *testing.T) {
+			mu.Lock()
+			reached[b.Name] = true
+			mu.Unlock()
 			if reason := runtimeSkipReason(b, caps, opts); reason != "" {
 				// Named, never silent. A reviewer reading the output has to be
 				// able to see exactly which guarantee this runtime does not
@@ -184,6 +193,33 @@ func RunRuntime(t *testing.T, factory RuntimeFactory, opts RuntimeOptions) {
 			defer cancel()
 			runRuntimeBehavior(ctx, t, b.Name, factory, opts, envs, runID)
 		})
+	}
+
+	// Every behavior has to have been reached, and a run that reached fewer
+	// has to say so rather than print ok.
+	//
+	// `go test` without -v discards a passing package's output, so the only
+	// thing a reader gets from a full run is the word ok and a duration. That
+	// is identical for 32 behaviors and for the six a -run filter left, which
+	// is how somebody reports a subset as a pass without meaning to. The
+	// author of that mistake is usually the person quoting the result at the
+	// end of a long day, which is to say me.
+	//
+	// The count is not the interesting half; the names are. A reader who gets
+	// this failure needs to know WHICH guarantee went unmeasured, because
+	// "26 of 32" is not something anybody can act on.
+	var missed []string
+	for _, b := range runtimeBehaviors {
+		if !reached[b.Name] {
+			missed = append(missed, b.Name)
+		}
+	}
+	if len(missed) > 0 {
+		t.Errorf("%d of %d behaviors did not run, so this run proves less than a full one "+
+			"and must not be reported as a pass. A -run filter is the usual cause. "+
+			"Unmeasured: %s",
+			len(missed), len(runtimeBehaviors), strings.Join(missed, ", "))
+		return
 	}
 
 	if t.Failed() {
