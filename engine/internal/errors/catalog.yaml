@@ -345,6 +345,20 @@ errors:
     docs: reference/manifest
     retryable: false
     exit_code: 3
+  - code: AF-RUN-043
+    area: RUN
+    message: "This cluster is not containing the environment: {detail}"
+    next_step: "Use a cluster whose CNI enforces NetworkPolicy (Calico, Cilium, and k3s all do; kind's default kindnet does not), then run 'af up' again."
+    docs: guides/kubernetes-runtime
+    retryable: false
+    exit_code: 3
+  - code: AF-RUN-044
+    area: RUN
+    message: "This runtime cannot do that: {detail}"
+    next_step: "Use the runtime that supports it, or run the command against an environment placed by one that does."
+    docs: guides/kubernetes-runtime
+    retryable: false
+    exit_code: 3
   - code: AF-RUN-009
     area: RUN
     message: "No free port was found in the range {range} to publish the environment on."

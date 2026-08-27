@@ -214,6 +214,10 @@ const (
 	// Service {service} depends on {missing}, which the manifest does not
 	// declare.
 	AFRUN042 Code = "AF-RUN-042"
+	// This cluster is not containing the environment: {detail}
+	AFRUN043 Code = "AF-RUN-043"
+	// This runtime cannot do that: {detail}
+	AFRUN044 Code = "AF-RUN-044"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -948,6 +952,24 @@ var catalog = map[Code]Entry{
 		Message:   "Service {service} depends on {missing}, which the manifest does not declare.",
 		NextStep:  "Add a service called {missing}, or correct the depends_on entry.",
 		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN043: {
+		Code:      AFRUN043,
+		Area:      "RUN",
+		Message:   "This cluster is not containing the environment: {detail}",
+		NextStep:  "Use a cluster whose CNI enforces NetworkPolicy (Calico, Cilium, and k3s all do; kind's default kindnet does not), then run 'af up' again.",
+		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN044: {
+		Code:      AFRUN044,
+		Area:      "RUN",
+		Message:   "This runtime cannot do that: {detail}",
+		NextStep:  "Use the runtime that supports it, or run the command against an environment placed by one that does.",
+		Docs:      "guides/kubernetes-runtime",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
