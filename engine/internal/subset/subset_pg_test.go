@@ -763,7 +763,20 @@ func TestExecute_MaskingStillJoinsAcrossTheReducedSet(t *testing.T) {
 
 	tables, err := masking.ReadCatalog(ctx, pr.Target)
 	require.NoError(t, err)
-	mplan := masking.BuildPlan(tables, rules.Assign(tables), "subset-test")
+	// Narrowed to the two tables whose link behaviour is the subject. The rest
+	// of this schema was built to make SUBSETTING hard, not to be maskable:
+	// feature_flags has a text primary key, which the classifier reads as a
+	// person's name and then refuses because that transform does not preserve
+	// uniqueness. Refusing is correct and is masking's own tested behaviour;
+	// dragging it into this test would only make this test about that.
+	var maskable []masking.Table
+	for _, t := range tables {
+		if t.Name == "employees" || t.Name == "contacts" {
+			maskable = append(maskable, t)
+		}
+	}
+	require.Len(t, maskable, 2)
+	mplan := masking.BuildPlan(maskable, rules.Assign(maskable), "subset-test")
 	require.True(t, mplan.Runnable(), masking.DescribeProblems(mplan.Problems))
 
 	exec, err := masking.NewExecutor(masking.ExecutorOptions{Key: key, Clock: clock.New()})
