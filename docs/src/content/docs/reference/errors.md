@@ -230,6 +230,18 @@ The provider's concurrent branch limit ({limit}) is reached.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/limits](/docs/providers/limits/) |
 
+### AF-DB-011
+
+The subset could not be taken: {detail}
+
+**What to do.** Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/subsetting](/docs/concepts/subsetting/) |
+
 ## Detection
 
 ### AF-DET-001

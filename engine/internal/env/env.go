@@ -820,6 +820,37 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			break
 		}
 	}
+
+	// A cron expression on a laptop has nothing to fire it, so the next
+	// command that would use a golden asks whether one was due since the last
+	// refresh. That is what makes database.golden.schedule and max_age
+	// settings rather than documentation: without this they parse, validate,
+	// take defaults, print under `af explain`, and change nothing.
+	//
+	// A refresh here reads production, which is slow and which the person
+	// running `af up` did not explicitly ask for, so the reason is printed
+	// before it starts rather than after.
+	if version != "" {
+		why, dueErr := o.RefreshDue(ctx, s, goldens)
+		if dueErr != nil {
+			return "", zero, secrets.Value{}, secrets.Value{}, dueErr
+		}
+		if why != "" {
+			o.progress("refreshing the golden first: " + why)
+			res, refreshErr := o.refreshWithin(ctx, s)
+			switch {
+			case refreshErr != nil:
+				// Not fatal. An environment branched from yesterday's golden
+				// is worth more than no environment at all, and the reason it
+				// could not be refreshed is said rather than swallowed.
+				o.progress("the refresh did not finish, so this environment " +
+					"branches the golden that is already there: " + refreshErr.Error())
+			case res.Version != "":
+				version = res.Version
+			}
+		}
+	}
+
 	if version == "" {
 		o.progress("no golden yet, creating one")
 		gv, refreshErr := s.dbProv.RefreshGolden(ctx, provider.GoldenSpec{

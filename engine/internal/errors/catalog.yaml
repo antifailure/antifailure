@@ -192,6 +192,13 @@ errors:
     docs: concepts/goldens
     retryable: false
     exit_code: 5
+  - code: AF-DB-011
+    area: DB
+    message: "The subset could not be taken: {detail}"
+    next_step: "Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has."
+    docs: concepts/subsetting
+    retryable: false
+    exit_code: 4
   - code: AF-DB-020
     planned: true
     area: DB

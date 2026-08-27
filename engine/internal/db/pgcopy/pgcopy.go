@@ -13,6 +13,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -99,6 +100,25 @@ func Exec(ctx context.Context, conn secrets.Value, script string) error {
 // with PGCONNECT_TIMEOUT set so that an unreachable source fails rather than
 // hangs.
 func Copy(ctx context.Context, source, target secrets.Value) error {
+	return copyWith(ctx, source, target)
+}
+
+// CopySchema copies a source database's structure and none of its rows.
+//
+// It is what subsetting needs: the tables, the keys, the sequences, the
+// indexes and the constraints have to be there before a slice of the rows can
+// be loaded into them, and copying the rows as well would be copying the thing
+// the subset exists to avoid copying.
+//
+// It is here rather than in the subsetting package for the reason in the
+// package comment. The flags below are the same ones Copy uses and they were
+// each chosen for a reason; a second invocation elsewhere would be a second
+// place for one of them to be forgotten.
+func CopySchema(ctx context.Context, source, target secrets.Value) error {
+	return copyWith(ctx, source, target, "--schema-only")
+}
+
+func copyWith(ctx context.Context, source, target secrets.Value, extra ...string) error {
 	dumpPath, err := exec.LookPath("pg_dump")
 	if err != nil {
 		return fmt.Errorf(
@@ -110,15 +130,18 @@ func Copy(ctx context.Context, source, target secrets.Value) error {
 		return fmt.Errorf("pgcopy: pg_restore is not on the path: %w", err)
 	}
 
-	dump := exec.CommandContext(ctx, dumpPath,
+	args := []string{
 		"--format=custom",
 		"--no-owner", "--no-privileges", "--no-acl",
 		// Row level security policies are preserved rather than dropped,
 		// because a Supabase schema depends on them and restoring without them
 		// produces a database where every query returns nothing.
 		"--quote-all-identifiers",
-		"--dbname="+source.Reveal(),
-	)
+	}
+	args = append(args, extra...)
+	args = append(args, "--dbname="+source.Reveal())
+
+	dump := exec.CommandContext(ctx, dumpPath, args...)
 	dump.Env = []string{"PGCONNECT_TIMEOUT=30"}
 
 	restore := exec.CommandContext(ctx, restorePath,
@@ -154,6 +177,64 @@ func Copy(ctx context.Context, source, target secrets.Value) error {
 	}
 	if err := restore.Wait(); err != nil {
 		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(restoreErr.String()))
+	}
+	return nil
+}
+
+// DumpTo writes a database's dump to a writer.
+//
+// The custom format, the same one Copy pipes, because it is the one pg_restore
+// can reorder: a plain SQL dump has to be replayed in the order it was written,
+// and the order that loads cleanly is not always the order that dumped.
+//
+// It exists so that a golden can be published somewhere other than the machine
+// that made it. The dump goes to an object store beside its attestation, and
+// RestoreFrom is the other half.
+func DumpTo(ctx context.Context, source secrets.Value, w io.Writer) error {
+	dumpPath, err := exec.LookPath("pg_dump")
+	if err != nil {
+		return fmt.Errorf(
+			"pgcopy: pg_dump is not on the path, and it is what publishes a golden. " +
+				"Install the Postgres client tools, or leave database.golden.storage_url unset")
+	}
+	cmd := exec.CommandContext(ctx, dumpPath,
+		"--format=custom",
+		"--no-owner", "--no-privileges", "--no-acl",
+		"--quote-all-identifiers",
+		"--dbname="+source.Reveal(),
+	)
+	cmd.Env = []string{"PGCONNECT_TIMEOUT=30"}
+	cmd.Stdout = w
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(stderr.String()))
+	}
+	return nil
+}
+
+// RestoreFrom loads a dump from a reader into a database.
+//
+// --exit-on-error for the reason Copy has it: a restore that stops at the
+// first error leaves a half loaded database that looks complete, and a golden
+// pulled from a store and silently half restored is the worst kind, because
+// everything downstream treats it as verified.
+func RestoreFrom(ctx context.Context, target secrets.Value, r io.Reader) error {
+	restorePath, err := exec.LookPath("pg_restore")
+	if err != nil {
+		return fmt.Errorf("pgcopy: pg_restore is not on the path: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, restorePath,
+		"--no-owner", "--no-privileges",
+		"--exit-on-error",
+		"--dbname="+target.Reveal(),
+	)
+	cmd.Env = []string{"PGCONNECT_TIMEOUT=30"}
+	cmd.Stdin = r
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(stderr.String()))
 	}
 	return nil
 }
