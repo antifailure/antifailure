@@ -161,12 +161,14 @@ const DefaultDependentTeardownWait = 3 * time.Minute
 // starts the container and then waits for Postgres by shelling out to docker
 // and psql in a loop.
 //
-// Two minutes is measured on the conformance dataset rather than hoped for:
-// one clone on an idle engine is about ninety seconds, and a second one
-// created while the first is still running is slower. Declaring the ninety
-// second figure would have been a claim about the best case, and this number
-// exists so that a provider getting slower fails a test rather than degrading
-// quietly.
+// Two minutes is measured on the conformance dataset rather than hoped for,
+// and the conditions are worth recording because they were not gentle: about
+// ninety seconds for a single clone on a machine running at a load average
+// near fifty, and longer for a second clone created while the first was still
+// up. A quiet machine will beat it comfortably. Declaring the best case
+// instead would defeat the point of the field, which exists so that a provider
+// getting slower fails a test rather than degrading quietly, and a bound that
+// only holds on idle hardware fails runs rather than catching regressions.
 const DefaultBranchLatency = 2 * time.Minute
 
 // New builds a provider.
