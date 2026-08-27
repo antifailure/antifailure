@@ -172,12 +172,14 @@ The number it prints is the **restore** time, not the whole run, because
 recovery starts from a backup that already exists. Counting the time to take one
 flatters the number by measuring work that has already happened when it matters.
 
-**Use your own number, not this one.** For scale only, both measured rather than
-estimated: on a continuous integration runner with nothing else on it, a control
-plane database holding a handful of organizations backed up in 0.3 seconds and
-restored in 1.8. On a development machine running a dozen other containers, the
-same restore took between 20 and 160 seconds. The spread between those two is
-the point. A recovery time is a property of the
+**Use your own number, not this one.** For scale only, all of it measured rather
+than estimated: on a continuous integration runner with nothing else on it, a
+control plane database holding a handful of organizations restored in under two
+seconds, and two consecutive runs of the same drill on the same runner reported
+1.8 seconds and 0.6. On a development machine running a dozen other containers,
+the same restore took between 20 and 160 seconds. A factor of three between two
+runs an hour apart, and a factor of a hundred between two machines, is the
+point. A recovery time is a property of the
 hardware, the size of the database and what else is happening, so the only
 figure worth putting in an incident plan is the one your own drill measured on
 the machine you would actually recover onto. The suite prints its measurement on
