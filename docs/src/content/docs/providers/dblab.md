@@ -208,9 +208,11 @@ export DOCKER_HOST=unix://$HOME/.colima/dblab/docker.sock
 ```
 :::
 
-**Architecture.** Every `postgresai/*` image is `linux/amd64` only, and
-emulating a Postgres cluster is slow enough to make the conformance suite time
-out. Build both pieces natively instead.
+**Architecture.** Both images this needs, `postgresai/dblab-server` and
+`postgresai/extended-postgres`, publish `linux/amd64` only, on every tag. A
+clone is a Postgres cluster starting and recovering, and emulating that is slow
+enough to make the conformance suite time out. Build both pieces natively
+instead.
 
 The engine itself builds from source:
 
@@ -253,9 +255,11 @@ su postgres -s /bin/bash -c "/usr/lib/postgresql/${PG_MAJOR}/bin/postgres -D ${P
 Postgres runs in the foreground for a clone; when it cannot start, the third
 line keeps the container alive for the engine to drive.
 
-What you lose relative to `extended-postgres` is its extra extensions. Set
-`shared_preload_libraries` to what the official image actually has, or the
-engine will start a Postgres that immediately exits:
+What you lose relative to `extended-postgres` is its extra extensions. The
+sample config preloads `pg_stat_kcache`, `auto_explain` and `logerrors`, none
+of which the official image ships, and Postgres refuses to start when
+`shared_preload_libraries` names a library it cannot find. Ask for what is
+actually there:
 
 ```yaml
 databaseConfigs: &db_configs
