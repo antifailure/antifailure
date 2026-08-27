@@ -42,6 +42,7 @@ import {
   sessionCookie,
 } from './auth/session.ts'
 import { openApiDocument } from './openapi.ts'
+import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { limitFor, bucketFor, type EndpointLimit } from './limits.ts'
 
 export interface ServerOptions {
@@ -138,8 +139,58 @@ export function createServer(options: ServerOptions) {
     c.header('x-frame-options', 'DENY')
   })
 
+  // Liveness. Deliberately a static answer: it says this process is running
+  // and answering, which is the question an orchestrator's restart policy is
+  // asking. Making it touch the database would mean a database blip restarts
+  // every replica, which turns a recoverable outage into a crash loop.
   app.get('/health', (c) => c.json({ ok: true }))
+
+  // Readiness, which is the different question: should this replica be sent
+  // traffic. Here the database does have to answer, because a replica that
+  // cannot reach it serves errors to everything, and a load balancer that
+  // cannot tell keeps sending it work.
+  //
+  // Added at lane 10's request while wiring probes for Helm and Container
+  // Apps, where /health was being used for both and a replica with an
+  // unreachable database still reported ready.
+  //
+  // withoutTenant, because this asks nothing about any tenant. The statement
+  // timeout the pool applies is what bounds it: a database that is up but too
+  // slow to answer SELECT 1 inside it is not ready either.
+  app.get('/ready', async (c) => {
+    try {
+      await options.pool.withoutTenant(async (db) => db.execute(rawSql`SELECT 1`))
+      return c.json({ ready: true })
+    } catch (err) {
+      // 503, not 500. A load balancer treats 503 as "take me out of rotation"
+      // and a 500 as an application error worth alerting on, and this is the
+      // former: nothing is wrong with this process.
+      return c.json(
+        { ready: false, reason: err instanceof Error ? err.message : 'the database did not answer' },
+        503,
+      )
+    }
+  })
+
   app.get('/openapi.json', (c) => c.json(openApiDocument()))
+
+  // -------------------------------------------------------------------------
+  // Routes another edition registered
+  //
+  // Mounted here, after the rate limiter and the headers and before anything
+  // that authenticates, because an extension route is by definition one that
+  // has its own idea of who the caller is: a single sign-on assertion arrives
+  // with no cookie, and a provisioning request arrives with a bearer token this
+  // server knows nothing about.
+  //
+  // What they do NOT get is a way around the two middlewares above. The limiter
+  // has already run and found their declared limit through limitFor, and the
+  // security headers are applied on the way out to every response including
+  // these. An extension that wanted to serve HTML would find the content
+  // security policy in its way, which is correct: nothing here renders.
+  for (const route of extensionRoutes()) {
+    app.on(route.method, route.path, (c) => route.handler(c))
+  }
 
   // -------------------------------------------------------------------------
   // Sign in
@@ -170,12 +221,24 @@ export function createServer(options: ServerOptions) {
 
     try {
       const result = await completeSignIn(options.pool, clock, options.github, { code, state })
+
+      // Another edition may have an opinion about this sign-in: an
+      // organization that requires single sign-on is one where arriving by
+      // GitHub must not land in that tenant. The policy returns which
+      // organization the session may be scoped to, and null means signed in
+      // with no tenant, which is a state this server already handles.
+      const decision = await decideSignIn({
+        userId: result.userId,
+        orgId: result.orgId,
+        method: 'github',
+      })
+
       // Rotation. Any session the browser already holds is destroyed, so a
       // cookie planted before sign-in cannot ride the login that follows it.
       const existing = readCookie(c.req.header('cookie'), SESSION_COOKIE)
       const issued = await issueSession(options.pool, clock, {
         userId: result.userId,
-        orgId: result.orgId,
+        orgId: decision.orgId,
         ip: c.req.header('x-forwarded-for') ?? undefined,
         userAgent: c.req.header('user-agent') ?? undefined,
         replacing: existing ?? undefined,
@@ -184,7 +247,12 @@ export function createServer(options: ServerOptions) {
       c.header('set-cookie', sessionCookie(issued.token, issued.expiresAt, secure))
       const base = options.appBaseUrl ?? '/'
       const target = safeRedirect(result.redirectTo) ?? '/'
-      return c.redirect(new URL(target, base.endsWith('/') ? base : `${base}/`).toString(), 302)
+      const landing = new URL(target, base.endsWith('/') ? base : `${base}/`)
+      // Why they landed with no organization, when a policy said so. The note
+      // is checked against a strict pattern before it reaches here, so it
+      // cannot carry anything but a short identifier.
+      if (decision.note) landing.searchParams.set('note', decision.note)
+      return c.redirect(landing.toString(), 302)
     } catch (err) {
       if (err instanceof SignInError) return c.json({ error: err.message }, 400)
       return c.json({ error: 'GitHub refused the sign in. Try again.' }, 400)
@@ -404,6 +472,61 @@ function tooMany(c: { header: (k: string, v: string) => void; json: (b: unknown,
 // Re-exported so that an edition built on top of this can import the permission
 // model from one place. The types are the contract between the two, and a
 // second copy of them is a second thing that drifts.
+// Re-exported for the same reason the permission model below is: an edition
+// built on top of this imports the contract from one place, and a second copy
+// of any of it is a second thing that drifts. Single sign-on needs all three
+// groups: the extension point to mount its routes, the limit types to declare
+// what bounds them, and the session helpers to issue a cookie once an assertion
+// has been verified. Issuing that cookie through issueSession rather than by
+// writing the row itself is what keeps rotation, expiry and the CSRF derivation
+// identical between signing in with GitHub and signing in through a provider.
+export {
+  registerExtension,
+  registeredExtensions,
+  extensionRoutes,
+  clearExtensions,
+  setSignInPolicy,
+  hasSignInPolicy,
+  decideSignIn,
+  ExtensionRefused,
+  type SignInAttempt,
+  type SignInDecision,
+  type SignInPolicy,
+  type Extension,
+  type ExtensionRoute,
+  type ExtensionMethod,
+} from './extensions.ts'
+
+export { type EndpointLimit, type LimitKey } from './limits.ts'
+
+export {
+  SESSION_COOKIE,
+  CSRF_HEADER,
+  IDLE_TIMEOUT_MS,
+  ABSOLUTE_LIFETIME_MS,
+  hashToken,
+  issueSession,
+  resolveSession,
+  revokeSession,
+  sessionCookie,
+  clearedCookie,
+  readCookie,
+  csrfTokenFor,
+  csrfMatches,
+  type IssuedSession,
+  type ResolvedSession,
+} from './auth/session.ts'
+
+export { safeRedirect } from './auth/signin.ts'
+
+export { type Clock, systemClock, FakeClock } from './clock.ts'
+
+// The router's request context, re-exported for the same reason the database
+// exports drizzle's sql tag: a package that imports hono itself gets a second
+// copy, and an extension handler typed against that copy does not satisfy the
+// ExtensionRoute type declared against this one.
+export type { Context } from 'hono'
+
 export {
   PERMISSIONS,
   ROLES,

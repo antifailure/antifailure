@@ -12,6 +12,8 @@
 // no account at all, which is the only key available on the sign-in path,
 // precisely because that is where an attacker without an account operates.
 
+import { extensionRoutes } from './extensions.ts'
+
 export type LimitKey = 'ip' | 'token' | 'org'
 
 export interface EndpointLimit {
@@ -36,6 +38,10 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   'GET /health': {
     rate: 50, burst: 200, key: 'ip',
     reason: 'A liveness probe from a load balancer, plus whatever else asks. Cheap, and refusing it looks like an outage.',
+  },
+  'GET /ready': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'A readiness probe from every replica of whatever is in front, at a few seconds each. It touches the database, so it is bounded more tightly than liveness.',
   },
   'GET /openapi.json': {
     rate: 2, burst: 10, key: 'ip',
@@ -133,13 +139,30 @@ export function limitFor(method: string, path: string): EndpointLimit | undefine
   for (const [endpoint, limit] of Object.entries(ENDPOINT_LIMITS)) {
     const space = endpoint.indexOf(' ')
     if (endpoint.slice(0, space) !== method) continue
-    const pattern = endpoint.slice(space + 1).split('/')
-    if (pattern.length !== segments.length) continue
-    if (pattern.every((part, i) => part.startsWith(':') || part === segments[i])) {
-      return limit
-    }
+    if (matches(endpoint.slice(space + 1), segments)) return limit
+  }
+
+  // Routes another edition registered. They are consulted after the catalog
+  // rather than merged into it, so an extension cannot change the limit on a
+  // path this server already declares: registerExtension refuses a reserved
+  // prefix outright, and this ordering means even a mistake there could not
+  // loosen a core endpoint.
+  //
+  // Every extension route carries its own limit and the field is not optional,
+  // so this loop cannot fail to find one for a route that is actually mounted.
+  for (const route of extensionRoutes()) {
+    if (route.method !== method) continue
+    if (matches(route.path, segments)) return route.limit
   }
   return undefined
+}
+
+/** One route pattern against one concrete path, by segment. `:name` matches
+ *  exactly one segment and nothing else. */
+function matches(pattern: string, segments: string[]): boolean {
+  const parts = pattern.split('/')
+  if (parts.length !== segments.length) return false
+  return parts.every((part, i) => part.startsWith(':') || part === segments[i])
 }
 
 // ---------------------------------------------------------------------------

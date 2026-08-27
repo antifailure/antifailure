@@ -9,7 +9,7 @@
 // than passing quietly, because a green run that proved nothing is worse than a
 // red one.
 
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import postgres from 'postgres'
 import { migrate } from '../src/migrate.ts'
 import { createPool, type Pool } from '../src/client.ts'
@@ -33,21 +33,64 @@ export interface Harness {
 
 let cached: Harness | null = null
 
+/** Seconds to wait for the probe. Three was right on an idle laptop and is
+ *  wrong on a loaded one; see below. */
+export const connectTimeoutSeconds = Number(process.env.AF_TEST_CONNECT_TIMEOUT ?? 30)
+
+/**
+ * Whether there is a database, and when "no" is an acceptable answer.
+ *
+ * The probe used to connect with a three second timeout and skip on failure.
+ * That is correct for somebody without Docker and dangerous on a busy machine:
+ * under load the PROBE times out, every suite in the file skips, and the run
+ * exits 0 having proved nothing. Measured on this machine while eleven agents
+ * were working: 8.3s, 29.9s, 2.0s for the same connection. So the failure the
+ * skip exists to prevent arrives through the skip, and it arrives precisely
+ * when tests are being run in bulk.
+ *
+ * That matters more here than anywhere else in the repository, because this is
+ * the suite that proves one tenant cannot read another's rows. It is the single
+ * test nobody can afford to have quietly optional.
+ *
+ * So: a generous timeout, three attempts, and two ways to say that "no
+ * database" is not an acceptable answer. AF_REQUIRE_DATABASE=1 is the explicit
+ * one and belongs in CI. Setting AF_TEST_DATABASE_URL is the implicit one:
+ * naming a database is a statement that one is supposed to be there.
+ */
 export async function available(): Promise<boolean> {
-  try {
-    const probe = postgres(adminUrl, { max: 1, connect_timeout: 3, onnotice: () => {} })
-    await probe`SELECT 1`
-    await probe.end({ timeout: 2 })
-    return true
-  } catch {
-    return false
+  let last: unknown = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const probe = postgres(adminUrl, {
+        max: 1,
+        connect_timeout: connectTimeoutSeconds,
+        onnotice: () => {},
+      })
+      await probe`SELECT 1`
+      await probe.end({ timeout: 5 })
+      return true
+    } catch (err) {
+      last = err
+    }
   }
+
+  if (process.env.AF_REQUIRE_DATABASE === '1' || process.env.AF_TEST_DATABASE_URL) {
+    throw new Error(
+      `no database at ${adminUrl} after three attempts of ${connectTimeoutSeconds}s.\n` +
+        `Refusing to skip: this suite proves cross-tenant isolation, and a green run that ` +
+        `proved nothing is worse than a red one.\n` +
+        `Underlying error: ${last instanceof Error ? last.message : String(last)}`,
+    )
+  }
+  return false
 }
 
 export async function setup(): Promise<Harness> {
   if (cached) return cached
 
-  const admin = postgres(adminUrl, { max: 4, connect_timeout: 10, onnotice: () => {} })
+  // The same timeout as the probe. A probe that succeeds and a pool that then
+  // times out on its first query is the same bug moved one line down.
+  const admin = postgres(adminUrl, { max: 4, connect_timeout: connectTimeoutSeconds, onnotice: () => {} })
   await migrate(admin)
   // The role is created NOLOGIN by the migration, because a self-hosted
   // installation supplies its own credential. The suite gives it one.
@@ -55,7 +98,7 @@ export async function setup(): Promise<Harness> {
     `ALTER ROLE antifailure_app LOGIN PASSWORD 'app-test-password'`,
   )
 
-  const pool = createPool({ url: appUrl(), max: 5, connectTimeoutSeconds: 10 })
+  const pool = createPool({ url: appUrl(), max: 5, connectTimeoutSeconds })
 
   cached = {
     admin,
@@ -76,6 +119,8 @@ export interface Fixture {
   envId: string
   runId: string
   slug: string
+  /** The seeded single sign-on connection, for suites that need one. */
+  connectionId: string
 }
 
 /**
@@ -140,7 +185,54 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
     INSERT INTO audit_entries (org_id, actor_label, action, target_type, origin, entry_hash)
     VALUES (${orgId}, ${label}, 'environment.created', 'environment', 'web', ${'seed-' + slug})`
 
-  return { orgId, userId, repoId, envId, runId, slug }
+  // Single sign-on and provisioning. Every one of these tables carries org_id,
+  // so the cross-tenant suite picks them up from the database and requires a
+  // row per tenant to prove against: a query that returns nothing because the
+  // fixture never inserted anything looks exactly like isolation working.
+  const [connection] = await admin<{ id: string }[]>`
+    INSERT INTO sso_connections (
+      org_id, handle, kind, display_name, enabled, default_role,
+      idp_entity_id, idp_sso_url, idp_certificates)
+    VALUES (${orgId}, ${randomBytes(32).toString('base64url')}, 'saml',
+            ${`${label} directory`}, true, 'member',
+            ${`https://idp.${slug}.test/metadata`},
+            ${`https://idp.${slug}.test/sso`},
+            ${admin.array([`seed-certificate-${slug}`])})
+    RETURNING id`
+  const connectionId = connection!.id
+
+  await admin`
+    INSERT INTO sso_connection_secrets (connection_id, org_id, oidc_client_secret)
+    VALUES (${connectionId}, ${orgId}, ${Buffer.from(`seed-secret-${slug}`)})`
+  await admin`
+    INSERT INTO sso_domains (org_id, connection_id, domain, verification_token, verified_at)
+    VALUES (${orgId}, ${connectionId}, ${`${slug}.test`}, ${`token-${slug}`}, now())`
+  await admin`
+    INSERT INTO sso_login_states (state, org_id, connection_id, expires_at)
+    VALUES (${`state-${slug}`}, ${orgId}, ${connectionId}, now() + interval '10 minutes')`
+  await admin`
+    INSERT INTO sso_assertions_seen (org_id, connection_id, assertion_id, expires_at)
+    VALUES (${orgId}, ${connectionId}, ${`assertion-${slug}`}, now() + interval '10 minutes')`
+  await admin`
+    INSERT INTO sso_break_glass_codes (org_id, code_hash)
+    VALUES (${orgId}, ${tokenHash(`break-glass-${slug}`)})`
+
+  await admin`
+    INSERT INTO scim_tokens (org_id, name, token_hash, prefix)
+    VALUES (${orgId}, 'directory', ${tokenHash(`scim-${slug}`)}, ${'afs_' + slug.slice(0, 6)})`
+  const [resource] = await admin<{ id: string }[]>`
+    INSERT INTO scim_resources (org_id, user_id, external_id, user_name, display_name)
+    VALUES (${orgId}, ${userId}, ${`ext-${slug}`}, ${`${slug}@example.test`}, ${label})
+    RETURNING id`
+  const [group] = await admin<{ id: string }[]>`
+    INSERT INTO scim_groups (org_id, external_id, display_name, role)
+    VALUES (${orgId}, ${`extgrp-${slug}`}, ${`${label} engineers`}, 'member')
+    RETURNING id`
+  await admin`
+    INSERT INTO scim_group_members (org_id, group_id, member_ref, resource_id)
+    VALUES (${orgId}, ${group!.id}, ${`ext-${slug}`}, ${resource!.id})`
+
+  return { orgId, userId, repoId, envId, runId, slug, connectionId }
 }
 
 export function tokenHash(value: string): Buffer {

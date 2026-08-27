@@ -334,7 +334,9 @@ environment ending at the right sequence, and `af env pull` reading it back.
 | 13.5 Audit export and SIEM streaming | proven | The hash chain is in the control plane's audit log. Forwarding is a bounded queue that cannot fail or slow the action it audits, with signed batch manifests carrying the chain head so a batch in an object store verifies on its own. Splunk, Event Hubs, an object store, and a signed webhook, at 31 tests. |
 | 13.6 Organization policy enforcement | proven | 100 percent. A property test over five hundred random policies proves a stricter policy never permits more. |
 | 13.4 Advanced access control and approvals | proven | 42 tests. The role model and scopes, approval policies that one person cannot complete alone, and the model as a reviewable file with a dry run that refuses a file leaving a required approval unreachable. |
-| 13.2, 13.3, 13.7 to 13.14 | planned | Single sign on, SCIM, multi-cluster, secrets adapters, billing, dashboard, support tooling, compliance, deployment. |
+| 13.2 Single sign-on (SAML 2.0 and OIDC) | written | 77 tests. Signature verification with the negative-vector suite green: a tampered assertion, a response signed by an unrelated key, that same key shipping its own certificate in KeyInfo, both classic signature-wrapping shapes, a stray signature, RSA-SHA1, a SHA-1 digest, an XPath transform, a DOCTYPE, and a connection with no certificate are all refused, with three positive controls so the file cannot pass vacuously. OIDC refuses `alg: none` and HS256 signed with the provider's own published public key. Audience, recipient, validity window with skew in both directions, replay, and all four InResponseTo orderings. Proven end to end through the real routes against a real Postgres: a new person signs in and becomes a member, a provider-initiated assertion cannot be replayed, a failed signature does not burn the login state, an unverified domain is refused, the seat limit refuses the addition and evicts nobody, and break-glass spends a code once and is audited. `written` and not `proven` because it has not yet run against a real identity provider: the conformance suite for one exists and is gated behind `AF_KEYCLOAK_URL`. |
+| 13.3 SCIM 2.0 provisioning | written | 24 tests, every one against the real server and real policies. One per ordering: created then updated, updated then created, deleted then re-added, deleted twice, and group membership arriving before the user (kept as a pending reference and resolved when they appear). All three provider deactivation shapes: Okta's pathless replace, Entra ID's capitalised op with the string `"False"`, and Entra ID's array-wrapped value. `members[value eq "id"]` removes one member and not all of them. Filters are parsed to a syntax tree and never concatenated into SQL, with a closed attribute list and escaped LIKE wildcards; an unanswerable filter is refused rather than ignored. Deprovisioning deletes the membership and revokes live sessions in the same transaction. `written` for the same reason as 13.2: no run against a hosted provider yet. |
+| 13.7 to 13.14 | planned | Multi-cluster, secrets adapters, billing, dashboard, support tooling, compliance, deployment. |
 
 The boundary is a separate Go module rather than a build tag. The community
 build cannot resolve an enterprise import path at all, so a mistaken import is
@@ -371,7 +373,7 @@ code that has not been written:
 
 - **8.10, 14.1, 14.3, 14.10** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. There is also no Kubernetes runtime yet. A manifest asking for one is now refused with a message rather than quietly given containers on the local machine.
 - **3.8 and 3.9** need Supabase and DBLab accounts. 3.7 no longer does.
-- **13.2, 13.3** need identity provider test tenants.
+- **13.2, 13.3** are built and green, and need an Entra ID test tenant and an Okta developer account (both free) to move from `written` to `proven`. Until then the conformance suite runs against a containerised Keycloak, gated behind `AF_KEYCLOAK_URL`.
 - **13.9** needs a Stripe account.
 - **8.3, 8.4, 8.8, 8.9, and Phase 11** are the web application and the docs
   site, which are somebody else's work. The API they consume is proven.
@@ -381,7 +383,7 @@ rather than `proven`. The distinction is the point of this file.
 
 ## Where to pick up
 
-1. 13.2 and 13.3 need identity provider test tenants.
+1. Run 13.2 and 13.3 against Entra ID and Okta, then change those two rows to `proven`. Everything else about them is done.
 2. Anything blocked above, as soon as the account or the quota exists.
 
 Notes for whoever picks this up. The conformance suite is not yet tested

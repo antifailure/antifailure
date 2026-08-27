@@ -8,7 +8,9 @@
   },
   "workspaces": [
     "rbac",
-    "audit"
+    "audit",
+    "sso",
+    "scim"
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",

@@ -204,11 +204,13 @@ test-web:
 test-runner:
     npm --prefix runner test
 
+# Fanned out over ee/web's workspaces rather than naming each package, so an
+# enterprise package added later is covered without editing this or CI. Naming
+# them by hand is how two of them ended up untested.
 test-ee:
     cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./... -race -timeout 15m
-    npx --prefix ee/web tsc --noEmit -p ee/web/rbac/tsconfig.json
-    npx --prefix ee/web tsc --noEmit -p ee/web/audit/tsconfig.json
-    node --test ee/web/rbac/test/*.test.ts ee/web/audit/test/*.test.ts
+    npm --prefix ee/web run typecheck
+    npm --prefix ee/web test
 
 # The fast ones, for a tight loop.
 test-short:
