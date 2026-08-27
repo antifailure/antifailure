@@ -198,10 +198,17 @@ func TestAProviderThatReportsADeleteAsCompleteHasActuallyReleasedIt(t *testing.T
 	// something still depends on it, and the failure arrives at whoever runs
 	// the retention sweep rather than at whoever wrote the provider.
 	require.NoError(t, p.Destroy(ctx, branch))
-	require.NoError(t, p.DestroyGolden(ctx, gv.ID),
-		"the golden could not be collected immediately after its only branch was destroyed, "+
-			"so the destroy returned before the storage was released and every retention "+
-			"sweep will race it")
+	if err := p.DestroyGolden(ctx, gv.ID); err != nil {
+		// The raw provider message, not only the coded error, on lane 3's
+		// advice from watching this exact failure against a real Database Lab
+		// Engine: when the two views disagree, the storage layer names the
+		// dependent dataset by its full path while the API reports no such
+		// clone. That disagreement is the diagnosis, and it is invisible if the
+		// test only asserts on the code.
+		t.Fatalf("the golden could not be collected immediately after its only branch was "+
+			"destroyed, so the destroy returned before the storage was released and every "+
+			"retention sweep will race it.\nprovider said: %v", err)
+	}
 
 	inventory, err := p.Inventory(ctx)
 	require.NoError(t, err)

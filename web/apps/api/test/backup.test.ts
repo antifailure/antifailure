@@ -229,8 +229,14 @@ test('the drill measures a recovery time and finds nothing wrong', { timeout: 60
   )
   assert.ok(drill.bytes > 0)
 
-  // Written where the operations page can quote it, so the documented recovery
-  // time is a measurement rather than an aspiration.
+  // Printed, so every run of this suite records a measurement rather than only
+  // asserting that one exists. A runbook that quotes a recovery time nobody
+  // measured is a runbook that will be wrong on the day, and the only way the
+  // number stays honest is if it is re-measured every time the test runs.
+  console.log(
+    `[drill] restore ${drill.restoreSeconds.toFixed(1)}s, backup ` +
+      `${drill.backupSeconds.toFixed(1)}s, ${drill.bytes} bytes`,
+  )
   await writeFile(
     path.join(workDir, 'last-drill.json'),
     JSON.stringify(drill, null, 2) + '\n',

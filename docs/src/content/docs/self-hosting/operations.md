@@ -172,6 +172,22 @@ The number it prints is the **restore** time, not the whole run, because
 recovery starts from a backup that already exists. Counting the time to take one
 flatters the number by measuring work that has already happened when it matters.
 
+**Use your own number, not this one.** For scale only: on a development machine
+running a dozen other containers, a control plane database holding a handful of
+organizations restored in between 20 and 160 seconds, and the same drill on a
+continuous integration runner with nothing else on it took a few seconds. The
+spread between those two is the point. A recovery time is a property of the
+hardware, the size of the database and what else is happening, so the only
+figure worth putting in an incident plan is the one your own drill measured on
+the machine you would actually recover onto. The suite prints its measurement on
+every run, so the number in front of you is never older than the last time
+anybody checked.
+
+The objective to hold it against is two hours, which is the recovery time this
+system is designed for. A drill that comes in well under it is not a reason to
+stop running the drill: what the drill really tests is whether the backup is
+one, and the timing is the part you get for free.
+
 ## What not to do
 
 **Do not restore over the live database.** The tool refuses; do not work around
