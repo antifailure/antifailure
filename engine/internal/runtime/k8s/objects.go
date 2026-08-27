@@ -530,11 +530,18 @@ func (r *Runtime) deploymentFor(
 		AutomountServiceAccountToken: falseRef(),
 		DNSPolicy:                    dnsPolicy,
 		DNSConfig:                    dnsConfig,
-		// Never restart. A service that crash loops has to be visible as a
-		// crash loop rather than hidden behind a runtime that keeps starting
-		// it until the readiness wait times out with no explanation, and it
-		// is also the only way an exit code survives long enough to be read.
-		RestartPolicy: corev1.RestartPolicyNever,
+		// Always, because a Deployment may not say anything else: Kubernetes
+		// rejects a Deployment whose pod template restarts on any other
+		// policy, and the rejection is a validation error on Up rather than
+		// anything visible later.
+		//
+		// The local runtime disables restarts so that a service which crash
+		// loops is visible as one instead of being hidden behind a runtime
+		// that keeps starting it. That intent survives here for a different
+		// reason: a pod that keeps failing lands in CrashLoopBackOff, which
+		// Status reports, and its exit code is kept in the container's last
+		// termination state rather than being lost on the restart.
+		RestartPolicy: corev1.RestartPolicyAlways,
 		Containers:    []corev1.Container{containerFor(spec, s, false)},
 	}
 	if spec.CACertPEM != "" {

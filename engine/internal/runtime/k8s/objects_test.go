@@ -271,3 +271,21 @@ func TestAServiceWithNoPortIsNotProbed(t *testing.T) {
 	// would restart it forever.
 	require.Nil(t, d.Spec.Template.Spec.Containers[0].ReadinessProbe)
 }
+
+func TestADeploymentUsesTheOnlyRestartPolicyItMay(t *testing.T) {
+	r := &Runtime{prefix: DefaultNamespacePrefix}
+	spec := provider.EnvSpec{EnvID: "e1", Services: []provider.ServiceSpec{{Name: "web", Port: 8080}}}
+	d := r.deploymentFor(spec, spec.Services[0], "af-env-e1", "10.43.0.9")
+
+	// Kubernetes rejects a Deployment whose pod template restarts on anything
+	// but Always, and it rejects it at Up. This started out as Never, copied
+	// from the local runtime where restarts are deliberately off, which would
+	// have failed every single environment with a validation error.
+	require.Equal(t, corev1.RestartPolicyAlways, d.Spec.Template.Spec.RestartPolicy)
+
+	// A Job is the opposite: Always is illegal there, and a migration that
+	// restarted forever would never be reported as failed.
+	spec.Services[0].Migrate = "migrate"
+	job := r.migrationJob(spec, spec.Services[0], "af-env-e1", "10.43.0.9")
+	require.Equal(t, corev1.RestartPolicyNever, job.Spec.Template.Spec.RestartPolicy)
+}
