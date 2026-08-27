@@ -55,8 +55,11 @@ func TestARegisteredSourceIsAskedLastAndTaggedByName(t *testing.T) {
 	})
 
 	local := &secrets.EnvSource{
-		Label:  "this shell's environment",
-		Getenv: func(name string) (string, bool) { v, ok := map[string]string{"SHARED": "from-shell"}[name]; return v, ok },
+		Label: "this shell's environment",
+		Getenv: func(name string) (string, bool) {
+			v, ok := map[string]string{"SHARED": "from-shell"}[name]
+			return v, ok
+		},
 	}
 	chain := secrets.NewChain(append([]secrets.Source{local}, secrets.Registered(reg)...)...)
 
