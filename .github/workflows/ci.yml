@@ -361,6 +361,14 @@ jobs:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
 
+      - name: Every path the documents point at exists
+        # README, CONTRIBUTING and SECURITY between them told readers about an
+        # adversarial test suite, a provider authoring page, a changelog
+        # directory and a linter config, none of which existed. Each one is a
+        # dead end somebody finds only after following our instructions, and
+        # the security one was a promise to researchers.
+        run: go run ./tools/claimcheck .
+
       - name: Nothing in the repository looks like a live credential
         # Uses the engine's own detector, so the check and the runtime refusal
         # cannot disagree about what a credential looks like. Its own tests
