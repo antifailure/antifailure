@@ -68,20 +68,34 @@ func main() {
 		*root = args[0]
 	}
 
-	ciPath := filepath.Join(*root, ".github", "workflows", "ci.yml")
 	justPath := filepath.Join(*root, "justfile")
 
-	ci, err := os.ReadFile(ciPath)
+	// Every workflow that runs on a pull request, not just ci.yml. The promise
+	// being kept is "a green `just gate` means a green CI", and that promise is
+	// about whatever runs against a contributor's branch. Reading one file by
+	// name would mean a second workflow could carry gates the justfile has
+	// never heard of, and nothing would say so.
+	//
+	// Workflows that do not run on pull requests are out of scope by the same
+	// reasoning rather than by an exception: release.yml runs on a tag, long
+	// after the gate had its say.
+	workflows, err := pullRequestWorkflows(filepath.Join(*root, ".github", "workflows"))
 	if err != nil {
-		fail("reading %s: %v", ciPath, err)
+		fail("reading workflows: %v", err)
 	}
+	if len(workflows.paths) == 0 {
+		fail("found no workflow that runs on pull requests. Either they stopped " +
+			"running on pull requests, or this check has stopped recognising them.")
+	}
+
 	just, err := os.ReadFile(justPath)
 	if err != nil {
 		fail("reading %s: %v\n\nCONTRIBUTING.md promises `just gate`. Without a "+
 			"justfile that promise is a lie in the first document a contributor reads.", justPath, err)
 	}
 
-	ciGates := collect(string(ci))
+	ciPath := strings.Join(workflows.names(), ", ")
+	ciGates := collect(workflows.text())
 	justGates := collect(string(just))
 
 	if len(ciGates) == 0 {
@@ -93,9 +107,29 @@ func main() {
 	}
 
 	var missing []string
+	var stale []string
+	usedExemption := map[string]bool{}
 	for _, g := range sortedKeys(ciGates) {
+		// Exemption first. Whether the justfile happens to carry a recipe for
+		// an exempt gate is beside the point: the exemption records that `gate`
+		// does not run it, and `just vuln` existing is what makes that bearable
+		// rather than what makes the exemption unnecessary. Checking justGates
+		// first would leave the exemption looking unused and report it stale.
+		if _, ok := exemptFromGate[g]; ok {
+			usedExemption[g] = true
+			continue
+		}
 		if _, ok := justGates[g]; !ok {
 			missing = append(missing, g)
+		}
+	}
+	// An exemption that no longer matches anything is dead code in a policy: it
+	// reads as a considered decision about a gate that is not there any more,
+	// and it would silently cover a future gate that happened to take the same
+	// name.
+	for _, g := range sortedExemptions() {
+		if !usedExemption[g] {
+			stale = append(stale, g)
 		}
 	}
 
@@ -103,7 +137,7 @@ func main() {
 	// justfile could define every gate and run none of them.
 	uncalled := uncalledByGate(string(just))
 
-	if len(missing) == 0 && len(uncalled) == 0 {
+	if len(missing) == 0 && len(uncalled) == 0 && len(stale) == 0 {
 		fmt.Printf("gatecheck: %d gates in CI, every one reachable from `just gate`\n", len(ciGates))
 		return
 	}
@@ -114,6 +148,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "  %s\n", m)
 		}
 		fmt.Fprintf(os.Stderr, "\nAdd a recipe for each, and call it from `gate`.\n")
+	}
+	if len(stale) > 0 {
+		fmt.Fprintf(os.Stderr, "\ngatecheck: these gates are exempt from `just gate` but no workflow runs them:\n")
+		for _, g := range stale {
+			fmt.Fprintf(os.Stderr, "  %s\n", g)
+		}
+		fmt.Fprintf(os.Stderr, "\nRemove the exemption. A reason to skip a gate that is gone "+
+			"describes nothing, and it would quietly cover the next gate to take that name.\n")
 	}
 	if len(uncalled) > 0 {
 		fmt.Fprintf(os.Stderr, "\ngatecheck: these recipes exist and `just gate` never calls them:\n")
@@ -227,6 +269,20 @@ func uncalledByGate(just string) []string {
 		}
 	}
 
+	// Recipes that `gate` does not call because the gate itself is exempt.
+	// Kept apart from the convenience list below on purpose: a convenience is
+	// something that is not a gate at all, and calling `vuln` one would be
+	// untrue in the direction that matters. It is a gate; it runs in a workflow;
+	// it is out of `gate` for the reason recorded in exemptFromGate.
+	exemptRecipes := map[string]bool{
+		"vuln": true,
+		// The linter has findings that predate its config, in packages several
+		// people are editing at once. It goes into `gate` when that count
+		// reaches zero; until then a gate that fails every branch for
+		// something none of them did is one people learn to route around.
+		"lint": true,
+	}
+
 	// Recipes that are gates rather than conveniences. A recipe that mutates
 	// (fmt, generate, db, build, clean) is not something `gate` should run.
 	convenience := map[string]bool{
@@ -243,7 +299,7 @@ func uncalledByGate(just string) []string {
 			continue
 		}
 		name := m[1]
-		if strings.HasPrefix(name, "_") || convenience[name] || called[name] {
+		if strings.HasPrefix(name, "_") || convenience[name] || exemptRecipes[name] || called[name] {
 			continue
 		}
 		uncalled = append(uncalled, name)
@@ -264,4 +320,86 @@ func sortedKeys(m map[string]struct{}) []string {
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "gatecheck: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// exemptFromGate lists gates that a pull request workflow runs and that
+// `just gate` deliberately does not, each with the reason.
+//
+// The bar for adding one is high, and "it is slow" is not on its own enough:
+// `just gate` is the promise a contributor reads first, and every exemption
+// makes it a slightly smaller promise. What qualifies is a gate whose answer is
+// not a function of the tree, because that is the case where running it locally
+// would not mean what the gate contract says it means.
+//
+// An exemption naming a gate no workflow runs fails the build. See the loop
+// that fills `stale`.
+var exemptFromGate = map[string]string{
+	"tool vulncheck": "" +
+		"Its answer does not come from this repository. tools/vulncheck asks the " +
+		"Go vulnerability database which known advisories are reachable from our " +
+		"code, so the same commit is clean today and not clean tomorrow when an " +
+		"advisory lands against a dependency it already had. A gate in `just gate` " +
+		"is supposed to mean that a green run here is a green run there, and this " +
+		"one cannot promise that in either direction. It also needs the network, " +
+		"and `just gate` has to work on a plane. " +
+		"It runs on every pull request and on a daily schedule in security.yml, " +
+		"which is where a scan whose input is a moving database belongs. Run it by " +
+		"hand with `just vuln`.",
+}
+
+// workflowSet is the workflows that run on a pull request, kept with their
+// names so a failure can say which file a gate came from.
+type workflowSet struct {
+	paths   []string
+	sources []string
+}
+
+func (w workflowSet) names() []string { return w.paths }
+
+// sortedExemptions keeps the failure output stable. sortedKeys works on the
+// gate sets, which are map[string]struct{}; this map carries reasons.
+func sortedExemptions() []string {
+	out := make([]string, 0, len(exemptFromGate))
+	for k := range exemptFromGate {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (w workflowSet) text() string { return strings.Join(w.sources, "\n") }
+
+// runsOnPullRequest matches a `pull_request` trigger at the top level of a
+// workflow's `on:` block.
+//
+// Deliberately approximate, in the same spirit as the rest of this file, but
+// approximate in the safe direction: a workflow this fails to recognise is one
+// whose gates go unchecked, so the match is loose rather than strict, and the
+// empty-set check in main catches the case where it stops matching anything.
+var pullRequestTrigger = regexp.MustCompile(`(?m)^\s{2,}pull_request:`)
+
+func pullRequestWorkflows(dir string) (workflowSet, error) {
+	var set workflowSet
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return set, err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || (!strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml")) {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return set, err
+		}
+		if !pullRequestTrigger.Match(body) {
+			continue
+		}
+		set.paths = append(set.paths, name)
+		set.sources = append(set.sources, string(body))
+	}
+	return set, nil
 }

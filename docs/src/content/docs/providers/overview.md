@@ -20,8 +20,8 @@ database:
 | Provider | Where the data lives | Branch time | Needs |
 | --- | --- | --- | --- |
 | `docker` | A container on the machine running `af` | Grows with the database | A Docker daemon |
-| [`neon`](/providers/neon/) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
-| [`supabase`](/providers/supabase/) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
+| [`neon`](/docs/providers/neon/) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
+| [`supabase`](/docs/providers/supabase/) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 
 `docker` is the default and needs nothing. It is the right choice for a
 repository whose database is small enough that copying it is not the slow part.

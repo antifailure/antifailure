@@ -114,9 +114,9 @@ matches nothing is an error rather than a shrug. Wildcards are exempt: `column:
 
 ## What masking does not decide
 
-Whether the result is safe. That is [verification](/concepts/verification/),
+Whether the result is safe. That is [verification](/docs/concepts/verification/),
 which runs afterwards, scans for anything that still looks like a person, and
 refuses to publish if it finds something. The rules are a claim; the scan is
 the check.
 
-Related: [transforms](/reference/transforms/), [goldens](/concepts/goldens/).
+Related: [transforms](/docs/reference/transforms/), [goldens](/docs/concepts/goldens/).

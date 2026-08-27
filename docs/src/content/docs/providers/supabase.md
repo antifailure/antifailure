@@ -11,7 +11,7 @@ other and from production, and it makes them empty. Supabase creates a branch
 with no data on purpose, so this provider copies the golden's rows into it.
 Branch time is therefore the time to copy your data, not a constant.
 
-That is the trade against [Neon](/providers/neon/), where branches share storage
+That is the trade against [Neon](/docs/providers/neon/), where branches share storage
 with their parent and branch time is flat. Choose Supabase when your application
 already lives there, because an environment that is a real Supabase project has
 the Auth, Storage and Realtime services your application is calling.
@@ -162,7 +162,7 @@ one through, and it refuses to hand out a read replica as the pool.
 Supabase owns `auth.users` through GoTrue, and a user written directly as a row
 is not an account that can sign in. A golden carries the rows so that foreign
 keys resolve; creating a persona that can actually log in is the job of the
-Supabase auth adapter, described in [Personas](/guides/personas/).
+Supabase auth adapter, described in [Personas](/docs/guides/personas/).
 
 ## Where the attestation lives
 

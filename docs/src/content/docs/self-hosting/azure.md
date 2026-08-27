@@ -56,5 +56,5 @@ the environment pool, which does not exist yet. Said plainly here because a
 self hosting page that described an architecture nobody can run would be worse
 than a short one.
 
-Related: [the control plane](/self-hosting/control-plane/),
-[configuration](/reference/control-plane/).
+Related: [the control plane](/docs/self-hosting/control-plane/),
+[configuration](/docs/reference/control-plane/).

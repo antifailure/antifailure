@@ -143,6 +143,53 @@ jobs:
         run: node --experimental-strip-types --test test/*.test.ts
         working-directory: runner
 
+  www:
+    name: www
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: www
+
+      - name: Build the marketing site
+        # The site is the thing we ship to antifailure.dev. A type error or a
+        # broken import is a blank page rather than a failed unit test, so the
+        # proof is the production export itself.
+        run: npm run build
+        working-directory: www
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: docs
+
+      - name: Build the documentation site
+        run: npm run build
+        working-directory: docs
+
+      - name: Every documented error path has a page at the URL the engine prints
+        # errors.go builds "https://antifailure.dev/docs/" + the catalog's docs
+        # field. errcheck proves the source file exists; this proves the built
+        # site actually serves it at that path, which is a different claim and
+        # the one users experience. A rename that keeps the file but moves the
+        # route would pass errcheck and 404 in production.
+        run: |
+          missing=0
+          for path in $(grep -oE '^[[:space:]]*docs:[[:space:]]*[a-z0-9/_-]+' \
+              engine/internal/errors/catalog.yaml | awk '{print $2}' | sort -u); do
+            if [ ! -f "docs/dist/$path/index.html" ]; then
+              echo "::error::no page built for https://antifailure.dev/docs/$path"
+              missing=1
+            fi
+          done
+          exit $missing
+
   control-plane:
     name: control plane
     runs-on: ubuntu-latest
@@ -313,6 +360,23 @@ jobs:
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
+
+      - name: Every path the documents point at exists
+        # README, CONTRIBUTING and SECURITY between them told readers about an
+        # adversarial test suite, a provider authoring page, a changelog
+        # directory and a linter config, none of which existed. Each one is a
+        # dead end somebody finds only after following our instructions, and
+        # the security one was a promise to researchers.
+        run: go run ./tools/claimcheck .
+
+      - name: The prose reads like a person wrote it
+        # The build plan asks for vale with "a custom rule that flags em dashes
+        # and double hyphens in prose". This is that rule. Em dashes are the
+        # most visible tell of text nobody wrote: they are what a machine
+        # reaches for when it cannot decide whether a clause is a parenthesis,
+        # a colon or a full stop. Code is exempt, because `--flag` is how an
+        # option is spelled.
+        run: go run ./tools/prosecheck .
 
       - name: Nothing in the repository looks like a live credential
         # Uses the engine's own detector, so the check and the runtime refusal
