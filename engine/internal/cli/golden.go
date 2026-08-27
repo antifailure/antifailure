@@ -170,6 +170,37 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 				})
 			}
 			env.Out.Table([]string{"VERSION", "STATE", "CREATED", "SIZE", "RULES"}, rows)
+
+			// What this project publishes, and when it refreshes next. Both
+			// are configuration that used to be invisible: a store nobody can
+			// list is a store nobody trusts, and a cron expression with no
+			// daemon behind it needs to say when it will actually fire.
+			published, storeName, storeErr := o.PublishedGoldens(cmd.Context())
+			switch {
+			case storeErr != nil:
+				env.Out.Printf("\n  %s could not be listed: %s\n",
+					env.Out.S(StyleWarn, SymbolWarn), storeErr.Error())
+			case storeName != "" && len(published) == 0:
+				env.Out.Printf("\nNothing published to %s yet.\n", storeName)
+			case storeName != "":
+				env.Out.Printf("\nPublished to %s, newest first:\n", storeName)
+				for _, v := range published {
+					env.Out.Printf("  %s  %s  %s\n", v.Name,
+						v.Modified.Local().Format("2006-01-02 15:04"),
+						humanBytes(uint64(v.Size)))
+				}
+				env.Out.Println("  Bring one onto this machine with: af golden pull")
+			}
+
+			policy, policyErr := o.GoldenPolicy()
+			if policyErr == nil && !policy.Schedule.Zero() && len(goldens) > 0 {
+				next := policy.Schedule.Next(goldens[0].CreatedAt)
+				if !next.IsZero() {
+					env.Out.Printf("\nNext scheduled refresh: %s (%s)\n",
+						next.In(policy.Schedule.Location()).Format("2006-01-02 15:04 MST"),
+						policy.Schedule)
+				}
+			}
 			return nil
 		},
 	}

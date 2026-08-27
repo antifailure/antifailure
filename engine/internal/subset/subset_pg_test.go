@@ -343,7 +343,9 @@ func TestExecute_EveryForeignKeyStillResolves(t *testing.T) {
 	// Asked again, independently, against the loaded database rather than
 	// against the plan's own bookkeeping. Execute checking itself and a test
 	// checking Execute's answer would be one check wearing two hats.
-	orphans, err := subset.CheckDatabase(ctx, pr.Target)
+	loaded, err := subset.ReadCatalog(ctx, pr.Target)
+	require.NoError(t, err)
+	orphans, err := subset.CheckIntegrity(ctx, pr.Target, loaded.Keys)
 	require.NoError(t, err)
 	require.Empty(t, orphans, "every declared foreign key resolves")
 

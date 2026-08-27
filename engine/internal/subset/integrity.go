@@ -93,16 +93,6 @@ WHERE %s AND NOT EXISTS (SELECT 1 FROM %s AS p WHERE %s)`,
 	return out, nil
 }
 
-// CheckDatabase reads a database's own foreign keys and checks every one of
-// them, which is what a test wants when it has no plan to hand.
-func CheckDatabase(ctx context.Context, conn *pgx.Conn) ([]Orphan, error) {
-	cat, err := ReadCatalog(ctx, conn)
-	if err != nil {
-		return nil, err
-	}
-	return CheckIntegrity(ctx, conn, cat.Keys)
-}
-
 func hasColumns(t Table, cols []string) bool {
 	for _, c := range cols {
 		if _, ok := t.ColumnNamed(c); !ok {
