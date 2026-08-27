@@ -27,6 +27,8 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -52,6 +54,8 @@ var notAPath = map[string]string{
 	"masking/fpe-tweak":      "an example branch name in the sentence about branch naming",
 	"docs/neon-provider":     "the second example branch name in that same sentence",
 	"pgregory.net/rapid":     "a Go module path, resolved from the module cache and not a directory here",
+
+	".gate-reports/": "created by `just gate` when it runs and gitignored, so it is a place output goes rather than something the repository contains",
 
 	"antifailure/antifailure-foss": "a GitHub repository name, not a path in this checkout",
 
@@ -121,7 +125,46 @@ func run(root string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return decide(root, claims, notAPath, out)
+	tracked, err := trackedPaths(root)
+	if err != nil {
+		return err
+	}
+	return decide(tracked, claims, notAPath, out)
+}
+
+// trackedPaths asks git what the repository actually contains, rather than
+// looking at the working tree.
+//
+// This distinction is the whole reason the first version of this gate passed
+// locally and failed in CI. CONTRIBUTING mentions `.gate-reports/`, which is
+// gitignored and created by `just gate` at runtime. On the machine of anybody
+// who has run the gate it is right there on disk, so a filesystem check says
+// yes; in a fresh checkout it does not exist and the same check says no. A gate
+// whose answer depends on what you happen to have built is not a gate.
+//
+// Directories are included by implication: git lists files, so every parent of
+// every tracked file is a directory the repository has.
+func trackedPaths(root string) (map[string]bool, error) {
+	cmd := exec.Command("git", "-C", root, "ls-files", "-z")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("asking git what the repository contains: %w", err)
+	}
+
+	paths := map[string]bool{}
+	for _, f := range strings.Split(string(out), "\x00") {
+		if f == "" {
+			continue
+		}
+		paths[f] = true
+		for dir := path.Dir(f); dir != "." && dir != "/"; dir = path.Dir(dir) {
+			paths[dir] = true
+		}
+	}
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("git lists no files under %s, so nothing could be checked", root)
+	}
+	return paths, nil
 }
 
 // collectClaims reads each document and returns the path claims it makes.
@@ -159,7 +202,7 @@ func collectClaims(root string, docs []string) ([]claim, error) {
 // that a test can exercise the dead-path rule and the stale-exclusion rule
 // independently. Reading the global here made every unit test fail on
 // exclusions its one line document was never going to mention.
-func decide(root string, claims []claim, exclusions map[string]string, out io.Writer) error {
+func decide(tracked map[string]bool, claims []claim, exclusions map[string]string, out io.Writer) error {
 	var dead []claim
 	used := map[string]bool{}
 	checked := 0
@@ -171,8 +214,8 @@ func decide(root string, claims []claim, exclusions map[string]string, out io.Wr
 		}
 		checked++
 		// A trailing slash is how prose writes a directory. It is not part of
-		// the name on disk.
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(strings.TrimSuffix(c.text, "/")))); err != nil {
+		// the name git knows.
+		if !tracked[strings.TrimSuffix(c.text, "/")] {
 			dead = append(dead, c)
 		}
 	}

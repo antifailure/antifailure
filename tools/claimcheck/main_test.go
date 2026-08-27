@@ -55,6 +55,16 @@ func writeDoc(t *testing.T, body string) string {
 	return root
 }
 
+// trackedSet builds the "what the repository contains" set a test needs,
+// without a git repository.
+func trackedSet(paths ...string) map[string]bool {
+	m := map[string]bool{}
+	for _, p := range paths {
+		m[p] = true
+	}
+	return m
+}
+
 func claimsIn(t *testing.T, root string) []claim {
 	t.Helper()
 	c, err := collectClaims(root, []string{"README.md"})
@@ -76,7 +86,7 @@ func TestAMissingPathIsReported(t *testing.T) {
 	root := writeDoc(t, "The fakes live in `engine/internal/testutil/fakes`.\n")
 
 	var out strings.Builder
-	err := decide(root, claimsIn(t, root), nil, &out)
+	err := decide(trackedSet(), claimsIn(t, root), nil, &out)
 	if err == nil {
 		t.Fatal("a documented path that does not exist must fail")
 	}
@@ -87,24 +97,18 @@ func TestAMissingPathIsReported(t *testing.T) {
 
 func TestAPathThatExistsPasses(t *testing.T) {
 	root := writeDoc(t, "See `sub/dir`.\n")
-	if err := os.MkdirAll(filepath.Join(root, "sub", "dir"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	var out strings.Builder
-	if err := decide(root, claimsIn(t, root), nil, &out); err != nil {
+	if err := decide(trackedSet("sub/dir"), claimsIn(t, root), nil, &out); err != nil {
 		t.Fatalf("an existing path should pass: %v", err)
 	}
 }
 
 // Prose writes a directory with a trailing slash. That is not part of the name
-// on disk, and treating it as one would fail every correctly written document.
+// git knows, and treating it as one would fail every correctly written document.
 func TestATrailingSlashIsNotPartOfTheName(t *testing.T) {
 	root := writeDoc(t, "Incidents live in `incidents/`.\n")
-	if err := os.MkdirAll(filepath.Join(root, "incidents"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	var out strings.Builder
-	if err := decide(root, claimsIn(t, root), nil, &out); err != nil {
+	if err := decide(trackedSet("incidents"), claimsIn(t, root), nil, &out); err != nil {
 		t.Fatalf("a directory written with a trailing slash should pass: %v", err)
 	}
 }
@@ -117,7 +121,7 @@ func TestAnExclusionThatMatchesNothingIsStale(t *testing.T) {
 
 	var out strings.Builder
 	stale := map[string]string{"never/mentioned": "an exclusion nothing uses"}
-	err := decide(root, claimsIn(t, root), stale, &out)
+	err := decide(trackedSet(), claimsIn(t, root), stale, &out)
 	if err == nil {
 		t.Fatal("exclusions that match nothing must fail")
 	}
@@ -145,8 +149,12 @@ func TestTheRealRepositoryPasses(t *testing.T) {
 	if len(claims) < 5 {
 		t.Fatalf("found %d path claims, which suggests the matcher has stopped matching", len(claims))
 	}
+	tracked, err := trackedPaths(root)
+	if err != nil {
+		t.Fatalf("asking git: %v", err)
+	}
 	var out strings.Builder
-	if err := decide(root, claims, notAPath, &out); err != nil {
+	if err := decide(tracked, claims, notAPath, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 }
@@ -155,6 +163,37 @@ func TestEveryExclusionStatesWhy(t *testing.T) {
 	for tok, reason := range notAPath {
 		if len(strings.Fields(reason)) < 5 {
 			t.Errorf("the exclusion for %q says %q, which is too short to explain why it is not a path", tok, reason)
+		}
+	}
+}
+
+// The bug this gate shipped with, pinned so it cannot come back. `.gate-reports/`
+// is gitignored and created by `just gate`, so a filesystem check passes on any
+// machine that has run the gate and fails in a fresh checkout. Asking git makes
+// the two agree.
+func TestAnUntrackedButPresentDirectoryDoesNotCount(t *testing.T) {
+	root := writeDoc(t, "Reports land in `build-output/`.\n")
+	if err := os.MkdirAll(filepath.Join(root, "build-output"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if err := decide(trackedSet(), claimsIn(t, root), nil, &out); err == nil {
+		t.Fatal("a directory that exists on disk but is not in the repository must not satisfy a claim")
+	}
+}
+
+// Every parent of a tracked file is a directory the repository has, because git
+// lists files and never directories.
+func TestAParentOfATrackedFileCounts(t *testing.T) {
+	root := filepath.Join("..", "..")
+	tracked, err := trackedPaths(root)
+	if err != nil {
+		t.Skipf("no git here: %v", err)
+	}
+	for _, dir := range []string{"tools", "tools/claimcheck", "engine/internal"} {
+		if !tracked[dir] {
+			t.Errorf("%q should be known as a directory the repository contains", dir)
 		}
 	}
 }
