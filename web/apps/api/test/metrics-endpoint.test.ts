@@ -75,18 +75,38 @@ describe('metrics', { skip: hasDatabase ? false : 'no Docker daemon to stand a d
     assert.match(body, /af_http_request_seconds_bucket\{le="\+Inf",route="GET \/health"\}/)
   })
 
-  it('collapses an undeclared path into one series rather than one per path', async () => {
+  it('labels a request by the route it matched, not by the path it arrived on', async () => {
+    // Both of these match the declared GET /v1/environments/:envId. If the
+    // label were the path, every environment identifier anybody ever fetched
+    // would be its own series and the endpoint would grow with traffic while
+    // looking bounded.
     await h.fetch(`/v1/environments/${randomUUID()}`)
     await h.fetch(`/v1/environments/${randomUUID()}`)
+
     const body = await scrape()
-    const series = body
+    const parameterised = body
       .split('\n')
-      .filter((l) => l.startsWith('af_http_requests_total{') && l.includes('other'))
+      .filter((l) => l.startsWith('af_http_requests_total{') && l.includes('/v1/environments/'))
     assert.equal(
-      series.length,
+      parameterised.length,
       1,
-      'two different paths produced two series, so a metrics endpoint grows with the ' +
-        'requests it serves and becomes the largest object in the process',
+      `two identifiers produced ${parameterised.length} series: ${parameterised.join(' | ')}`,
+    )
+    assert.match(parameterised[0] ?? '', /route="GET \/v1\/environments\/:envId"/)
+  })
+
+  it('collapses everything undeclared into one series', async () => {
+    await h.fetch(`/not/a/route/${randomUUID()}`)
+    await h.fetch(`/also/not/${randomUUID()}`)
+
+    const body = await scrape()
+    const other = body
+      .split('\n')
+      .filter((l) => l.startsWith('af_http_requests_total{') && l.includes('"GET other"'))
+    assert.equal(
+      other.length,
+      1,
+      'a scanner trying a thousand URLs would add a thousand series: ' + other.join(' | '),
     )
   })
 

@@ -38,7 +38,7 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import postgres from 'postgres'
@@ -97,6 +97,70 @@ export interface BackupResult {
 
 function bin(name: string, dir?: string): string {
   return dir ? path.join(dir, name) : name
+}
+
+/**
+ * Finds a client at least as new as the server, when the one on PATH is not.
+ *
+ * This is not a convenience. Debian and Ubuntu install every Postgres client
+ * under /usr/lib/postgresql/<major>/bin and put exactly one of them on PATH,
+ * which is routinely not the one matching the server you are backing up: a
+ * GitHub runner ships pg_dump 16 while the Postgres it starts for you is 17.
+ * The failure that produces without this is a refusal at three in the morning
+ * on a box where the right binary is installed and forty characters away.
+ *
+ * It searches downward from the newest, and returns the first directory holding
+ * a client at least the server's major. Nothing is executed to find it; the
+ * version is read from the directory name, and the caller verifies it properly.
+ */
+async function findClientFor(serverMajor: number): Promise<string | undefined> {
+  const root = '/usr/lib/postgresql'
+  let majors: number[]
+  try {
+    majors = (await readdir(root))
+      .map((name) => Number(name))
+      .filter((n) => Number.isInteger(n) && n >= serverMajor)
+      .sort((a, b) => b - a)
+  } catch {
+    return undefined
+  }
+  for (const major of majors) {
+    const dir = path.join(root, String(major), 'bin')
+    try {
+      await stat(path.join(dir, 'pg_dump'))
+      return dir
+    } catch {
+      // The directory exists and the binary does not. Keep looking.
+    }
+  }
+  return undefined
+}
+
+/**
+ * Settles on a bin directory holding a client new enough for this server.
+ *
+ * Returns the directory to use, or undefined to mean "PATH is fine". Throws
+ * when nothing new enough exists anywhere, because continuing would mean
+ * dumping a newer server with an older client, which is unsupported and does
+ * not always fail loudly: it can produce a dump missing objects it did not know
+ * to look for, and a backup missing objects is worse than no backup, because
+ * you will not find out until the restore.
+ */
+async function resolveBinDir(explicit: string | undefined, serverMajor: number): Promise<string | undefined> {
+  if (explicit) return explicit
+
+  const onPath = majorOf(await toolVersion('pg_dump').catch(() => '0'))
+  if (onPath >= serverMajor) return undefined
+
+  const found = await findClientFor(serverMajor)
+  if (found) return found
+
+  throw new Error(
+    `pg_dump on PATH is version ${onPath || 'unknown'} and the server is ${serverMajor}, and no ` +
+      `client of at least ${serverMajor} was found under /usr/lib/postgresql. Dumping a newer ` +
+      `server with an older client is unsupported and can silently omit objects. Install ` +
+      `postgresql-client-${serverMajor}, or pass a binDir pointing at one.`,
+  )
 }
 
 async function toolVersion(tool: string): Promise<string> {
@@ -220,7 +284,9 @@ export async function backup(options: BackupOptions): Promise<BackupResult> {
   const sql = postgres(options.adminUrl, { max: 1, onnotice: () => {} })
 
   try {
-    const versions = await requireUsableClient(bin('pg_dump', options.binDir), sql)
+    const rows = await sql<{ server_version: string }[]>`SHOW server_version`
+    const binDir = await resolveBinDir(options.binDir, majorOf(rows[0]?.server_version ?? ''))
+    const versions = await requireUsableClient(bin('pg_dump', binDir), sql)
     const described = await describe(sql)
 
     const label = options.label ?? 'backup'
@@ -230,7 +296,7 @@ export async function backup(options: BackupOptions): Promise<BackupResult> {
 
     // Custom format, so a restore can be parallel and selective. Owners are
     // dumped; the restore decides whether to apply them.
-    await run(bin('pg_dump', options.binDir), [
+    await run(bin('pg_dump', binDir), [
       '--format=custom',
       '--no-password',
       `--file=${dumpPath}`,
@@ -240,7 +306,7 @@ export async function backup(options: BackupOptions): Promise<BackupResult> {
     // Roles are cluster-level and are NOT in the dump above. Without this file
     // a restore into a fresh cluster has no antifailure_app, every GRANT fails,
     // and the application cannot connect to the database it just restored.
-    const { stdout: roles } = await run(bin('pg_dumpall', options.binDir), [
+    const { stdout: roles } = await run(bin('pg_dumpall', binDir), [
       '--roles-only',
       '--no-password',
       `--dbname=${options.adminUrl}`,
@@ -318,8 +384,11 @@ export async function restore(options: RestoreOptions): Promise<RestoreResult> {
   const problems: string[] = []
 
   const admin = postgres(options.adminUrl, { max: 1, onnotice: () => {} })
+  let binDir: string | undefined
   try {
-    await requireUsableClient(bin('pg_restore', options.binDir), admin)
+    const rows = await admin<{ server_version: string }[]>`SHOW server_version`
+    binDir = await resolveBinDir(options.binDir, majorOf(rows[0]?.server_version ?? ''))
+    await requireUsableClient(bin('pg_restore', binDir), admin)
 
     const exists = await admin<{ n: number }[]>`
       SELECT count(*)::int AS n FROM pg_database WHERE datname = ${options.targetDatabase}`
@@ -361,7 +430,7 @@ export async function restore(options: RestoreOptions): Promise<RestoreResult> {
 
   const targetUrl = urlFor(options.adminUrl, options.targetDatabase)
   try {
-    await run(bin('pg_restore', options.binDir), [
+    await run(bin('pg_restore', binDir), [
       '--no-password',
       '--exit-on-error',
       `--dbname=${targetUrl}`,

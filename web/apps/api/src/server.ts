@@ -42,7 +42,7 @@ import {
   sessionCookie,
 } from './auth/session.ts'
 import { openApiDocument } from './openapi.ts'
-import { limitFor, bucketFor, type EndpointLimit } from './limits.ts'
+import { limitFor, bucketFor, ENDPOINT_LIMITS, type EndpointLimit } from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
 
 export interface ServerOptions {
@@ -68,6 +68,9 @@ export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
   const secure = options.secureCookies ?? true
   const metrics = options.metrics ?? createMetrics(options.version ?? 'dev')
+  // Read once. It is the bounded set of label values, and reading it per
+  // request would be the metrics endpoint doing work proportional to traffic.
+  const declaredRoutes = Object.keys(ENDPOINT_LIMITS)
   const app = new Hono()
 
   // Two limiters with different shapes. Ingestion is high volume from few
@@ -103,16 +106,12 @@ export function createServer(options: ServerOptions) {
   // refusals an operator needs when a limit is set too low.
   app.use('*', async (c, next) => {
     const started = process.hrtime.bigint()
-    // limitFor returns undefined rather than null for an undeclared path, and
-    // the first version of this compared against null. Every path was therefore
-    // "declared", every path became its own label, and the cardinality
-    // protection was inert: a metrics endpoint that grows with the requests it
-    // serves becomes the largest object in the process by the end of the week.
-    // The test that asserts two different paths collapse into one series found
-    // it, which is the whole reason that test is there rather than a comment.
-    const route = routeLabel(c.req.method, new URL(c.req.url).pathname, (method, path) =>
-      limitFor(method, path) !== undefined,
-    )
+    // The label is the declared route key that matched, never the path. See
+    // routeLabel: a path that matches GET /v1/environments/:envId is bounded
+    // only if it is reported as that pattern, and the first version of this
+    // reported the path, so every environment identifier anybody fetched became
+    // its own series.
+    const route = routeLabel(c.req.method, new URL(c.req.url).pathname, declaredRoutes)
     try {
       await next()
     } finally {

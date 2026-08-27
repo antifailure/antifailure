@@ -216,11 +216,20 @@ test('two servers do not share counters', () => {
 // ---------------------------------------------------------------------------
 
 test('an undeclared path becomes one bucket rather than one series per path', () => {
-  const declared = (method: string, path: string) => method === 'GET' && path === '/health'
+  const declared = ['GET /health', 'GET /v1/environments/:envId', 'POST /trpc/*']
+
   assert.equal(routeLabel('get', '/health', declared), 'GET /health')
-  assert.equal(routeLabel('GET', '/v1/environments/9f3c1a', declared), 'GET other')
-  assert.equal(routeLabel('GET', '/v1/environments/22b0ff', declared), 'GET other')
   assert.equal(routeLabel('POST', '/health', declared), 'POST other', 'the method is part of it')
+  assert.equal(routeLabel('GET', '/nothing/declared', declared), 'GET other')
+
+  // The one that matters. Both of these match a declared pattern, and if the
+  // label were the path rather than the pattern they would be two series that
+  // look bounded.
+  assert.equal(routeLabel('GET', '/v1/environments/9f3c1a', declared), 'GET /v1/environments/:envId')
+  assert.equal(routeLabel('GET', '/v1/environments/22b0ff', declared), 'GET /v1/environments/:envId')
+
+  assert.equal(routeLabel('POST', '/trpc/environments.list', declared), 'POST /trpc/*')
+  assert.equal(routeLabel('POST', '/trpc/runs.get', declared), 'POST /trpc/*')
 })
 
 test('statuses collapse to a class', () => {

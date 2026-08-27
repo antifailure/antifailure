@@ -307,17 +307,45 @@ export function createMetrics(version = 'dev'): ControlPlaneMetrics {
  * Reduces a path to something bounded before it becomes a label.
  *
  * A label whose value is a raw path is an unbounded label, and an unbounded
- * label is how a metrics endpoint becomes the largest thing in the process.
- * Every route this server serves is declared in ENDPOINT_LIMITS, so the
- * declared set is the bounded set and anything outside it is "other".
+ * label is how a metrics endpoint becomes the largest thing in the process. The
+ * bounded set is the routes the server declares in ENDPOINT_LIMITS, so the
+ * label is the DECLARED KEY that matched, never the path that matched it.
+ *
+ * That distinction is the whole function, and getting it wrong is not obvious.
+ * The first version asked "is this path declared?" and, when the answer was
+ * yes, used the path. `GET /v1/environments/:envId` is declared, so every
+ * environment identifier anybody ever fetched became its own series while the
+ * code looked like it was bounding them. The test that two different paths
+ * collapse into one series is what found it, twice: once against the wrong
+ * comparison operator, and once against this.
  */
-export function routeLabel(
-  method: string,
-  path: string,
-  isDeclared: (method: string, path: string) => boolean,
-): string {
+export function routeLabel(method: string, path: string, declared: readonly string[]): string {
   const verb = method.toUpperCase()
-  return isDeclared(verb, path) ? `${verb} ${path}` : `${verb} other`
+
+  const exact = `${verb} ${path}`
+  if (declared.includes(exact)) return exact
+
+  // The one real wildcard. Every tRPC procedure is one route as far as a
+  // rate limit is concerned, and so it is here.
+  if (path.startsWith('/trpc/')) {
+    const wildcard = `${verb} /trpc/*`
+    if (declared.includes(wildcard)) return wildcard
+  }
+
+  const segments = path.split('/')
+  for (const key of declared) {
+    const space = key.indexOf(' ')
+    if (key.slice(0, space) !== verb) continue
+    const pattern = key.slice(space + 1).split('/')
+    if (pattern.length !== segments.length) continue
+    if (pattern.every((part, i) => part.startsWith(':') || part === segments[i])) {
+      return key
+    }
+  }
+
+  // Everything the server does not declare, in one series. A 404 storm from a
+  // scanner is one line here rather than one line per URL it tried.
+  return `${verb} other`
 }
 
 /** 2xx, 4xx, 5xx rather than every code, for the same bounding reason. */
