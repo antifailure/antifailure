@@ -1,0 +1,23 @@
+# The image is the control plane and nothing else. Everything below either
+# belongs to another artifact or would put a secret, a credential, or a
+# hundred megabytes of Go into a container that has no use for it.
+.git
+.github
+engine
+runner
+tools
+docs
+examples
+schemas
+bin
+infra
+deploy
+!deploy/docker/bootstrap.mjs
+ee
+web/node_modules
+web/**/node_modules
+web/**/test
+**/*.test.ts
+**/.env
+**/.env.*
+*.md
