@@ -212,27 +212,6 @@ type CreateCloneRequest struct {
 	} `json:"db"`
 }
 
-// Instance is the subset of GET /status this provider reads.
-type Instance struct {
-	Status Status `json:"status"`
-	Engine struct {
-		Version    string `json:"version"`
-		Edition    string `json:"edition"`
-		InstanceID string `json:"instanceID"`
-	} `json:"engine"`
-	Pools []struct {
-		Name        string `json:"name"`
-		Mode        string `json:"mode"`
-		Status      string `json:"status"`
-		DataStateAt Time   `json:"dataStateAt"`
-	} `json:"pools"`
-	Cloning struct {
-		ExpectedCloningTime float64 `json:"expectedCloningTime"`
-		NumClones           int     `json:"numClones"`
-		Clones              []Clone `json:"clones"`
-	} `json:"cloning"`
-}
-
 // APIError is a non-2xx answer, carrying enough to tell a missing resource
 // from a rejected one without matching on prose.
 type APIError struct {
@@ -298,13 +277,6 @@ func Unauthorized(err error) bool {
 // ---------------------------------------------------------------------------
 // Calls
 // ---------------------------------------------------------------------------
-
-// Status returns the instance's own view of itself.
-func (c *Client) Status(ctx context.Context) (Instance, error) {
-	var out Instance
-	err := c.do(ctx, http.MethodGet, "/status", nil, &out)
-	return out, err
-}
 
 // ListSnapshots returns every snapshot the engine holds, newest first.
 func (c *Client) ListSnapshots(ctx context.Context) ([]Snapshot, error) {
