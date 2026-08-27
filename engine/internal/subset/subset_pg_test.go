@@ -15,6 +15,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
+	"github.com/antifailure/antifailure/engine/internal/masking"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/subset"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -89,6 +90,15 @@ CREATE TABLE events (
   kind        text NOT NULL
 );
 
+-- contacts.email is the same value as its employee's, denormalised the way
+-- real schemas denormalise. Masking has to give both the same replacement or
+-- the join stops working, and subsetting must not disturb that.
+CREATE TABLE contacts (
+  id          bigserial PRIMARY KEY,
+  employee_id bigint NOT NULL REFERENCES employees(id),
+  email       text NOT NULL
+);
+
 CREATE TABLE invoices (
   id        bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   region    text NOT NULL,
@@ -141,6 +151,8 @@ UPDATE employees SET primary_project_id = 3 WHERE id IN (4,5);
 -- have a root at all.
 INSERT INTO nodes VALUES (1,1,'root'),(2,1,'child'),(3,2,'grandchild');
 
+INSERT INTO contacts (employee_id, email) SELECT id, email FROM employees;
+
 INSERT INTO events (employee_id, kind) VALUES
   (1,'signed_in'),(2,'signed_in'),(3,'exported'),(4,'signed_in'),(6,'deleted');
 
@@ -179,10 +191,24 @@ type pair struct {
 // is as true of two databases on one server as of two servers. One server
 // rather than one per test, because standing up a golden and branching it
 // takes most of two minutes and eleven of those is a suite nobody runs.
+// A skip is legitimate for exactly one reason: this machine has no Docker, so
+// the developer running the suite could not have run it. Everything else is a
+// FAILURE, including a Postgres that will not start.
+//
+// That distinction is the whole point and it was learned the hard way tonight.
+// With one t.Skipf covering both, a machine too busy to finish initdb inside
+// the provider's readiness window made all eleven of these skip in 0.02s each
+// while `go test` printed `ok ... 377s`, and it was reported as green. A skip
+// the environment can cause is a pass with extra steps, and it is invisible
+// exactly when the machine is busy, which is when suites are run in bulk.
 var shared struct {
 	baseURL string
 	stop    func()
-	skip    string
+	// skip is set only when there is genuinely nothing to run against.
+	skip string
+	// fatal is set when there WAS something to run against and it did not
+	// work. It fails every test rather than quietly excusing them.
+	fatal string
 }
 
 func TestMain(m *testing.M) {
@@ -206,14 +232,16 @@ func TestMain(m *testing.M) {
 		})
 		if err != nil {
 			_ = p.Close()
-			shared.skip = fmt.Sprintf("no golden could be made: %v", err)
+			// Docker answered, so this is a broken run rather than an absent
+			// prerequisite.
+			shared.fatal = fmt.Sprintf("Docker is here and no golden could be made: %v", err)
 			return m.Run()
 		}
 		branch, err := p.Branch(ctx, gv.ID, "subsettest")
 		if err != nil {
 			_ = p.DestroyGolden(ctx, gv.ID)
 			_ = p.Close()
-			shared.skip = fmt.Sprintf("no branch could be made: %v", err)
+			shared.fatal = fmt.Sprintf("Docker is here and no branch could be made: %v", err)
 			return m.Run()
 		}
 		base, err := p.ConnString(ctx, branch, provider.ConnDirect)
@@ -248,6 +276,9 @@ var databaseCounter atomic.Int64
 // requirePair makes a fresh source and candidate for one test.
 func requirePair(t *testing.T) (*pair, func()) {
 	t.Helper()
+	if shared.fatal != "" {
+		t.Fatal(shared.fatal)
+	}
 	if shared.skip != "" {
 		t.Skip("skipped: " + shared.skip)
 	}
@@ -692,6 +723,60 @@ func TestExecute_ReportsWhatArrivedEmptyAndWhatEachKeyCovers(t *testing.T) {
 		}
 	}
 	require.True(t, found, "coverage is reported per relationship: %+v", stats.Coverage)
+}
+
+func TestExecute_MaskingStillJoinsAcrossTheReducedSet(t *testing.T) {
+	// Masking runs AFTER subsetting, and the two have to leave each other
+	// alone. Two columns holding the same value either side of a join have to
+	// get the same replacement, or the join stops working and every test that
+	// relies on it fails for a reason nobody will look for in the subsetter.
+	//
+	// It holds by construction, because a transform is a pure function of the
+	// key, the column's link and the value, with no reference to which rows
+	// are present. Reasoning is how this repository has been wrong before, so
+	// it is run instead.
+	pr, done := requirePair(t)
+	defer done()
+	ctx := context.Background()
+	pr.load(t, ctx)
+
+	cat, err := subset.ReadCatalog(ctx, pr.Source)
+	require.NoError(t, err)
+	plan, err := subset.Build(cat, euOnly(1000))
+	require.NoError(t, err)
+	_, err = subset.Execute(ctx, subset.Options{
+		SourceURL: pr.SourceURL, TargetURL: pr.TargetURL, Plan: plan,
+	})
+	require.NoError(t, err)
+
+	joined := count(t, ctx, pr.Target,
+		"contacts c JOIN employees e ON e.id = c.employee_id AND c.email = e.email")
+	require.Positive(t, joined, "the fixture has to have something to lose")
+	require.Equal(t, count(t, ctx, pr.Target, "contacts"), joined,
+		"every contact matches its employee's address before masking")
+
+	// Now mask the reduced set, with the engine's own rules and executor.
+	key, err := masking.NewKey(secrets.New("subset-masking-test-key"))
+	require.NoError(t, err)
+	rules, err := masking.NewRuleSet(nil)
+	require.NoError(t, err)
+
+	tables, err := masking.ReadCatalog(ctx, pr.Target)
+	require.NoError(t, err)
+	mplan := masking.BuildPlan(tables, rules.Assign(tables), "subset-test")
+	require.True(t, mplan.Runnable(), masking.DescribeProblems(mplan.Problems))
+
+	exec, err := masking.NewExecutor(masking.ExecutorOptions{Key: key, Clock: clock.New()})
+	require.NoError(t, err)
+	_, err = exec.Apply(ctx, pr.Target, mplan)
+	require.NoError(t, err)
+
+	require.Equal(t, int64(0), count(t, ctx, pr.Target,
+		"employees WHERE email LIKE '%@eu.example'"),
+		"the addresses were actually replaced, so the assertion below is not vacuous")
+	require.Equal(t, joined, count(t, ctx, pr.Target,
+		"contacts c JOIN employees e ON e.id = c.employee_id AND c.email = e.email"),
+		"and the join still resolves across the reduced set")
 }
 
 func TestReadCatalog_KeepsACompositeKeyWhole(t *testing.T) {
