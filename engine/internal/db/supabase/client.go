@@ -67,6 +67,16 @@ type Client struct {
 	PollTimeout  time.Duration
 	// Retries bounds attempts at an idempotent request. Zero uses four.
 	Retries int
+	// VisibleTimeout bounds waiting for a write Supabase has already
+	// acknowledged to become readable: a branch that answers 404 seconds after
+	// it was created, or a rename the branch listing has not caught up with.
+	// Zero uses a minute.
+	//
+	// Separate from PollTimeout because it is a different kind of waiting. That
+	// one is a project being provisioned and is measured in minutes; this is a
+	// read catching up with a write, and if it has not happened in a minute
+	// then something else is wrong and waiting longer will not fix it.
+	VisibleTimeout time.Duration
 }
 
 // Branch is the subset of Supabase's branch object this provider uses.
@@ -505,7 +515,7 @@ func (c *Client) DeleteBranch(ctx context.Context, id string) error {
 // catching up rather than a project being provisioned. If it has not happened
 // in a minute, something else is wrong and waiting five more will not fix it.
 func (c *Client) WaitNamed(ctx context.Context, name string) error {
-	deadline := time.Now().Add(namedVisibleTimeout)
+	deadline := time.Now().Add(c.visibleTimeout())
 	for {
 		branches, err := c.ListBranches(ctx)
 		if err != nil {
@@ -519,7 +529,7 @@ func (c *Client) WaitNamed(ctx context.Context, name string) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf(
 				"supabase: branch %s did not appear in the project's branch listing within %s",
-				name, namedVisibleTimeout)
+				name, c.visibleTimeout())
 		}
 		if err := c.sleep(ctx, c.pollInterval()); err != nil {
 			return err
@@ -527,9 +537,16 @@ func (c *Client) WaitNamed(ctx context.Context, name string) error {
 	}
 }
 
-// namedVisibleTimeout bounds waiting for the branch listing to catch up with a
-// change already acknowledged.
-const namedVisibleTimeout = 60 * time.Second
+// defaultVisibleTimeout bounds waiting for a read to catch up with a write that
+// has already been acknowledged.
+const defaultVisibleTimeout = 60 * time.Second
+
+func (c *Client) visibleTimeout() time.Duration {
+	if c.VisibleTimeout > 0 {
+		return c.VisibleTimeout
+	}
+	return defaultVisibleTimeout
+}
 
 // PoolerConfig returns the pooler entries for a branch's own project.
 func (c *Client) PoolerConfig(ctx context.Context, ref string) ([]Pooler, error) {
@@ -549,11 +566,27 @@ func (c *Client) PoolerConfig(ctx context.Context, ref string) ([]Pooler, error)
 // waiting only on the query would hide a branch that failed to provision behind
 // a connection timeout.
 func (c *Client) WaitReady(ctx context.Context, id string) (Detail, error) {
-	deadline := time.Now().Add(c.pollTimeout())
+	start := time.Now()
+	deadline := start.Add(c.pollTimeout())
 	var last Detail
 	for {
 		detail, err := c.GetDetail(ctx, id)
 		if err != nil {
+			// A branch that was created seconds ago is not always readable
+			// yet. Creating one answers 201 with an identifier, and asking for
+			// that identifier can answer 404 for the next few seconds, which is
+			// the write being acknowledged before it is readable rather than
+			// anything being wrong.
+			//
+			// Tolerated only for a short grace period rather than until the
+			// provisioning deadline, so that asking about a branch which really
+			// is gone still fails in seconds instead of hanging for minutes.
+			if NotFound(err) && time.Since(start) < c.visibleTimeout() {
+				if err := c.sleep(ctx, c.pollInterval()); err != nil {
+					return Detail{}, err
+				}
+				continue
+			}
 			return Detail{}, err
 		}
 		last = detail

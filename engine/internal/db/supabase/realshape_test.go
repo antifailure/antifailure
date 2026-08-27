@@ -147,6 +147,24 @@ func TestARealApplicationShapeSurvivesTheCopyAndTheReset(t *testing.T) {
 	require.Equal(t, 1, count(ctx, t, p, branch,
 		`SELECT count(*) FROM public.profiles WHERE nickname = 'ada'`),
 		"the reset did not undo a write")
+
+	// The ordering nobody enumerates: the branch was CREATED and the fill
+	// failed. Creating and filling are two calls, and the retry that follows a
+	// failure of the second one used to be handed the existing branch without
+	// anybody asking whether it held anything. An environment whose database is
+	// empty because a copy failed silently is the failure this product exists
+	// to make impossible, so it is a test rather than a comment.
+	//
+	// A branch that was never filled is one with no record of which golden
+	// filled it, which is what dropping the schema reproduces exactly.
+	exec(ctx, t, p, branch, `DROP SCHEMA `+supabase.MetaSchema+` CASCADE;
+		DROP TABLE public.profiles;`)
+
+	again, err := p.Branch(ctx, gv.ID, "env_realshape00001")
+	require.NoError(t, err)
+	require.Equal(t, branch.ProviderRef, again.ProviderRef,
+		"the retry made a second branch instead of healing the first")
+	assertTheApplicationArrivedIntact(ctx, t, p, again)
 }
 
 func assertTheApplicationArrivedIntact(ctx context.Context, t *testing.T, p *supabase.Provider, b provider.Branch) {

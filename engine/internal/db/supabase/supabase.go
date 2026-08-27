@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -369,12 +371,35 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 	// retry that creates a second branch is how an orphan is made, which here
 	// is a second running project billed by the hour.
 	if existing, ok := findNamed(branches, name); ok {
-		return provider.Branch{
+		b := provider.Branch{
 			EnvID:       envID,
 			From:        parseAnnotation(existing.GitBranch).From,
 			ProviderRef: existing.ID,
 			CreatedAt:   existing.CreatedAt,
-		}, nil
+		}
+		if b.From == "" {
+			b.From = version
+		}
+		// Returning it is not enough. Creating a branch and filling it are two
+		// calls, and the retry that reaches this line is most likely a retry
+		// because the second one failed. Handing back the branch without
+		// looking would hand back an EMPTY database, and an environment whose
+		// database is empty because a copy failed silently is the failure this
+		// whole product exists to make impossible.
+		filled, err := p.holdsVersion(ctx, b, b.From)
+		if err != nil {
+			// Not knowing is reported rather than guessed. Refilling on a bad
+			// answer would empty a branch an application has been writing to,
+			// and returning it would be the silent gap above.
+			return b, err
+		}
+		if filled {
+			return b, nil
+		}
+		if err := p.fill(ctx, b, version); err != nil {
+			return b, err
+		}
+		return b, nil
 	}
 
 	if _, ok := findNamed(branches, PrefixGolden+version); !ok {
@@ -449,6 +474,51 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 	}
 	return b, nil
 }
+
+// holdsVersion reports whether a branch already holds the golden it should.
+//
+// The golden writes its own version into _antifailure.golden before it is
+// published, and a copy carries that schema along with everything else, so an
+// environment branch that was filled says which version filled it. That makes
+// "was this branch ever filled" a question with an answer, rather than
+// something a caller has to assume.
+func (p *Provider) holdsVersion(ctx context.Context, b provider.Branch, version string) (bool, error) {
+	conn, err := p.ConnString(ctx, b, provider.ConnDirect)
+	if err != nil {
+		return false, err
+	}
+	db, err := sql.Open("pgx", conn.Reveal())
+	if err != nil {
+		return false, fmt.Errorf("db.supabase: open branch %s: %w", b.ProviderRef, err)
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+
+	var present bool
+	err = db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM `+MetaSchema+`.golden WHERE version = $1
+		)`, version).Scan(&present)
+	if err != nil {
+		// The table is missing on a branch that was created and never filled,
+		// which is the case this function exists to detect, so it is an answer
+		// rather than a failure.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && (pgErr.Code == undefinedTable || pgErr.Code == invalidSchemaName) {
+			return false, nil
+		}
+		return false, fmt.Errorf("db.supabase: ask branch %s which golden filled it: %w",
+			b.ProviderRef, err)
+	}
+	return present, nil
+}
+
+// Postgres error codes for "that table is not there" and "that schema is not
+// there", which are the two shapes of a branch that was never filled.
+const (
+	undefinedTable    = "42P01"
+	invalidSchemaName = "3F000"
+)
 
 // fill copies a golden into a branch, which is what makes it an environment's
 // database rather than an empty project.

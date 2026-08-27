@@ -107,7 +107,16 @@ type fakeAPI struct {
 	deleted  map[string]bool
 	statuses map[string]int
 	bodies   map[string]string
-	hits     atomic.Int32
+	// script answers the first calls to a path differently from the rest, which
+	// is the only way to reproduce an API that acknowledges a write before it
+	// is readable.
+	script map[string][]scripted
+	hits   atomic.Int32
+}
+
+type scripted struct {
+	code int
+	body string
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
@@ -117,6 +126,7 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 		deleted:  map[string]bool{},
 		statuses: map[string]int{},
 		bodies:   map[string]string{},
+		script:   map[string][]scripted{},
 	}
 }
 
@@ -125,6 +135,14 @@ func (f *fakeAPI) serve() *httptest.Server {
 		f.hits.Add(1)
 		key := r.Method + " " + r.URL.Path
 		f.calls = append(f.calls, key)
+
+		if steps, ok := f.script[key]; ok && len(steps) > 0 {
+			step := steps[0]
+			f.script[key] = steps[1:]
+			w.WriteHeader(step.code)
+			_, _ = w.Write([]byte(step.body))
+			return
+		}
 
 		if code, ok := f.statuses[key]; ok {
 			w.WriteHeader(code)
@@ -166,12 +184,13 @@ func (f *fakeAPI) serve() *httptest.Server {
 
 func (f *fakeAPI) client(srv *httptest.Server) *Client {
 	return &Client{
-		BaseURL:      srv.URL,
-		Key:          secrets.New("sbp_test"),
-		ProjectRef:   "proj",
-		Sleep:        func(context.Context, time.Duration) error { return nil },
-		PollInterval: time.Millisecond,
-		PollTimeout:  50 * time.Millisecond,
+		BaseURL:        srv.URL,
+		Key:            secrets.New("sbp_test"),
+		ProjectRef:     "proj",
+		Sleep:          func(context.Context, time.Duration) error { return nil },
+		PollInterval:   time.Millisecond,
+		PollTimeout:    50 * time.Millisecond,
+		VisibleTimeout: 50 * time.Millisecond,
 	}
 }
 
@@ -344,4 +363,53 @@ func TestTheDeclaredCapabilitiesSayWhatThisProviderActuallyDoes(t *testing.T) {
 	require.True(t, caps.PooledEndpoints)
 	require.Equal(t, []int{15, 17}, caps.SupportedVersions)
 	require.Positive(t, caps.ExpectedBranchLatency)
+}
+
+func TestABranchThatIsNotReadableYetIsWaitedForRatherThanFailed(t *testing.T) {
+	// Creating a branch answers 201 with an identifier, and asking for that
+	// identifier can answer 404 for the next few seconds. Reading that as "the
+	// branch does not exist" fails a refresh four seconds in, which is what
+	// happened against the real API before this.
+	f := newFakeAPI(t)
+	f.script["GET /branches/br1"] = []scripted{
+		{http.StatusNotFound, `{"message":"Not Found"}`},
+		{http.StatusNotFound, `{"message":"Not Found"}`},
+		{http.StatusOK, `{"ref":"abc","status":"ACTIVE_HEALTHY","db_host":"h","db_port":5432,"db_user":"postgres","db_pass":"p"}`},
+	}
+	srv := f.serve()
+
+	got, err := f.client(srv).WaitReady(context.Background(), "br1")
+	require.NoError(t, err)
+	require.Equal(t, "abc", got.Ref)
+}
+
+func TestABranchThatIsTrulyGoneStillFails(t *testing.T) {
+	// The other half. Tolerating a 404 forever would turn asking about a branch
+	// somebody deleted into a wait for the provisioning deadline, which on this
+	// provider is minutes.
+	f := newFakeAPI(t)
+	f.statuses["GET /branches/br1"] = http.StatusNotFound
+	f.bodies["GET /branches/br1"] = `{"message":"Not Found"}`
+	srv := f.serve()
+	_, err := f.client(srv).WaitReady(context.Background(), "br1")
+	require.Error(t, err)
+	require.True(t, NotFound(err), "a branch that is gone must fail as not found, got %v", err)
+}
+
+func TestAPublishIsNotReportedUntilTheListingShowsIt(t *testing.T) {
+	// Renaming answers 200 with the new name while the LISTING still carries
+	// the old one. Publishing a golden is a rename, so a caller that branched
+	// in that window was told its verified golden had failed verification.
+	f := newFakeAPI(t)
+	stale := `[{"id":"br1","name":"af-cand-gv_1","project_ref":"r","persistent":true}]`
+	fresh := `[{"id":"br1","name":"af-gv-gv_1","project_ref":"r","persistent":true}]`
+	f.script["GET /projects/proj/branches"] = []scripted{
+		{http.StatusOK, stale},
+		{http.StatusOK, stale},
+		{http.StatusOK, fresh},
+	}
+	srv := f.serve()
+
+	require.NoError(t, f.client(srv).WaitNamed(context.Background(), "af-gv-gv_1"))
+	require.GreaterOrEqual(t, f.hits.Load(), int32(3))
 }

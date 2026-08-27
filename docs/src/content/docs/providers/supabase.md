@@ -177,6 +177,24 @@ A branch restored from a golden carries the row, so anybody holding an
 environment can read what was scanned and what was found without asking the
 engine or the Supabase API.
 
+## The API acknowledges writes before it can read them back
+
+Two windows, both found by running the conformance suite repeatedly rather than
+once, and both worth knowing if you automate against this API yourself.
+
+Creating a branch answers 201 with an identifier, and asking for that identifier
+can answer 404 for the next few seconds. Reading that as "the branch does not
+exist" fails a refresh four seconds in.
+
+Renaming a branch answers 200 with the new name while the branch LISTING still
+carries the old one. Publishing a golden is a rename, so a caller that branched
+in that window was told its golden had no valid verification attestation. The
+golden was verified. The listing had not caught up, and the operator would have
+been sent to look at their masking rules.
+
+This provider waits out both, for a minute each, and treats exceeding that as a
+real failure rather than waiting longer.
+
 ## When a run is killed
 
 A killed run can leave branches behind, and branches cost money, so there is a
