@@ -51,11 +51,15 @@ func TestConformance(t *testing.T) {
 		require.NoError(t, err)
 		return p
 	}, conformance.Options{
-		// Generous because a behaviour here is several clone creations, and
-		// each one is a ZFS clone plus a container start plus Postgres
-		// recovery. Tight enough that a stuck clone fails the test rather than
-		// the job.
-		Timeout:  6 * time.Minute,
+		// Generous because a behaviour here is up to three clone creations,
+		// each a ZFS clone plus a container start plus a Postgres recovery,
+		// and the later ones are slower because the earlier ones are still
+		// running. Six minutes was not enough and the way it failed was
+		// instructive: the client gave up on a clone the engine went on to
+		// finish, so the behaviour failed AND leaked the clone it had asked
+		// for. Tight enough that a genuinely stuck clone still fails the test
+		// rather than the job.
+		Timeout:  15 * time.Minute,
 		SkipSlow: os.Getenv("AF_SKIP_SLOW") != "",
 	})
 }

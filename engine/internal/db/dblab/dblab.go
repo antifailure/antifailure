@@ -157,10 +157,17 @@ const DefaultDependentTeardownWait = 3 * time.Minute
 //
 // A clone is a ZFS clone plus a container start, so it does not grow with the
 // size of the database, which is the reason to run a Database Lab Engine at
-// all. It is slower than the Docker provider because a container start is
-// preceded by an API round trip and a dataset creation, and much faster than
-// Neon because nothing crosses the public internet.
-const DefaultBranchLatency = 45 * time.Second
+// all. What it does grow with is how busy the engine is, because the engine
+// starts the container and then waits for Postgres by shelling out to docker
+// and psql in a loop.
+//
+// Two minutes is measured on the conformance dataset rather than hoped for:
+// one clone on an idle engine is about ninety seconds, and a second one
+// created while the first is still running is slower. Declaring the ninety
+// second figure would have been a claim about the best case, and this number
+// exists so that a provider getting slower fails a test rather than degrading
+// quietly.
+const DefaultBranchLatency = 2 * time.Minute
 
 // New builds a provider.
 func New(opts Options) (*Provider, error) {

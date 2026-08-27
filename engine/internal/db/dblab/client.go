@@ -494,11 +494,28 @@ func (c *Client) pollInterval() time.Duration {
 	return 500 * time.Millisecond
 }
 
+// DefaultPollTimeout bounds how long a mutating call waits for the engine to
+// finish what it started.
+//
+// Ten minutes rather than the three this began with, and the number is
+// measured rather than chosen. A clone is a ZFS clone, a container start and a
+// Postgres recovery, and the engine drives that last part by shelling out to
+// docker and psql in a poll loop. One clone on an idle engine takes about
+// ninety seconds; a second one, created while the first is still running, took
+// longer than three minutes on the machine this was proved on, and the client
+// gave up on a clone that was healthy a moment later. That failure is
+// expensive rather than merely slow: the engine had already created the clone,
+// so a caller that gives up leaves it behind.
+//
+// This is a backstop and not the real deadline. Every wait sleeps through the
+// caller's context, so an af up with its own deadline still fails on time.
+const DefaultPollTimeout = 10 * time.Minute
+
 func (c *Client) pollTimeout() time.Duration {
 	if c.PollTimeout > 0 {
 		return c.PollTimeout
 	}
-	return 3 * time.Minute
+	return DefaultPollTimeout
 }
 
 const defaultRetries = 4
