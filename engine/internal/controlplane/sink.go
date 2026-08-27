@@ -461,8 +461,14 @@ var typeMap = map[string]string{
 	string(events.EgressDecision): "network.decision",
 }
 
-// KnownTypes lists the engine event types the control plane understands, for
-// the documentation and for the tests that keep this map honest.
+// KnownTypes lists the engine event types the control plane understands.
+//
+// Exported for the drift tests in vocabulary_test.go and for nothing else. It
+// said "for the documentation and for the tests" until a call site sweep found
+// that nothing generates any documentation from it, which is the same defect,
+// in miniature, as the one this map had: a comment describing a caller that
+// does not exist. If something ever does generate a reference page from this,
+// the sentence can come back.
 //
 // Two of the control plane's accepted types have no engine event mapped to
 // them, deliberately. environment.queued is produced by the scheduler, which

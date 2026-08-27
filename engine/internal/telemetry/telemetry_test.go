@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,6 +232,45 @@ func TestALogThatCannotBeOpenedIsReportedRatherThanFatal(t *testing.T) {
 
 	require.NotEmpty(t, warnings, "and it is said out loud rather than swallowed")
 	require.Contains(t, strings.Join(warnings, "\n"), "event log")
+}
+
+// The line an operator sees when a command ends owing events. Without it a
+// control plane outage is indistinguishable from a dashboard that has silently
+// stopped updating, which is the difference between a shrug and a page.
+func TestACommandThatEndsOwingEventsSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	db, err := state.Open(t.Context(), dir)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	// A control plane that is configured and refuses everything.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	var warnings []string
+	bus := events.NewBus(clock.NewFake(time.Unix(1700000000, 0).UTC()))
+	tel, err := Attach(t.Context(), bus, Options{
+		StateDir: dir, EnvID: "shop-main-a1b2", Redactor: redact.New(), State: db,
+		ControlPlaneURL: srv.URL,
+		Getenv: func(k string) string {
+			if k == "AF_CONTROL_PLANE_TOKEN" {
+				return "a-token"
+			}
+			return ""
+		},
+		OnWarning: func(m string) { warnings = append(warnings, m) },
+	})
+	require.NoError(t, err)
+
+	bus.Info("shop-main-a1b2", events.EnvReady, "ready")
+	require.NoError(t, tel.Close(context.Background()))
+
+	joined := strings.Join(warnings, "\n")
+	require.Contains(t, joined, "waiting for the control plane",
+		"the command ended owing events and said nothing: %v", warnings)
+	require.NotZero(t, tel.Spool().Pending())
 }
 
 func TestAttachRefusesWithoutARedactor(t *testing.T) {

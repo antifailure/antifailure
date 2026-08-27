@@ -251,7 +251,12 @@ func (t *Telemetry) StartCommand(ctx context.Context, name string) context.Conte
 	return ctx
 }
 
-// Spool exposes the durable buffer, for `af doctor` and for tests.
+// Spool exposes the durable buffer.
+//
+// Exported for the tests, which is all that reads it. It claimed `af doctor`
+// as a caller until a sweep found there was none; what an operator actually
+// gets is the line Close reports when a command ends owing events, which is
+// below and does have one.
 func (t *Telemetry) Spool() *Spool { return t.spool }
 
 // Close puts everything away in the order that loses least.
@@ -287,6 +292,24 @@ func (t *Telemetry) Close(ctx context.Context) error {
 	if t.sequence != nil && t.bus != nil && t.envID != "" {
 		keep(t.sequence.Settle(ctx, t.envID, t.bus.Seq(t.envID)))
 	}
+	// Said out loud, because this is the moment the promise either held or did
+	// not. A command that ends owing events is fine and expected during a
+	// control plane outage, and a user who is told so can tell it apart from a
+	// dashboard that has silently stopped updating. Events genuinely lost are
+	// reported by the sink's own error.
+	if t.spool != nil {
+		if owed := t.spool.Pending(); owed > 0 {
+			t.warn(fmt.Sprintf(
+				"%d batches of events are waiting for the control plane and will be sent by "+
+					"the next command that reaches it", owed))
+		}
+		if dropped := t.spool.Dropped(); dropped > 0 {
+			t.warn(fmt.Sprintf(
+				"%d events were discarded because the spool is full; the dashboard will have a gap",
+				dropped))
+		}
+	}
+
 	if t.restore != nil {
 		t.restore()
 	}
