@@ -64,6 +64,15 @@ type request struct {
 	body []byte
 	// query is appended when set.
 	query map[string]string
+	// timeout overrides httpTimeout for one call.
+	//
+	// It exists for one case and it is worth its weight: the EC2 instance
+	// metadata address is a link-local address that nothing answers on a
+	// laptop, and the connection does not fail fast, it hangs. At the shared
+	// timeout that is ten seconds added to every af up on every machine that is
+	// not an EC2 instance, to discover something that a machine either is or is
+	// not within a few milliseconds.
+	timeout time.Duration
 }
 
 // response is what came back, with the body already bounded.
@@ -79,7 +88,11 @@ type response struct {
 // decides what a status means, because "404" means "no such secret" to one
 // store and "no such vault" to another.
 func do(ctx context.Context, req request) (*response, error) {
-	ctx, cancel := context.WithTimeout(ctx, httpTimeout)
+	timeout := req.timeout
+	if timeout <= 0 {
+		timeout = httpTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var body io.Reader

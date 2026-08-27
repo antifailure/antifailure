@@ -160,9 +160,12 @@ func (s *Source) Available(ctx context.Context) (bool, string) {
 
 	s.probe.Do(func() { s.probeErr = s.backend.Reach(ctx) })
 	if s.probeErr != nil {
-		if errors.Is(s.probeErr, ErrNotConfigured) {
-			return false, "not configured"
-		}
+		// The backend's own words, whatever kind of failure it was. An earlier
+		// version of this collapsed a configuration problem to the two words
+		// "not configured", which threw away the only useful part: which
+		// variable is missing, or which of four credential mechanisms was
+		// looked for. That is the same silence the whole package exists to
+		// prevent, committed by the thing enforcing the rule.
 		return false, reason(s.probeErr)
 	}
 	return true, ""
