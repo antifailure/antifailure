@@ -369,6 +369,15 @@ jobs:
         # the security one was a promise to researchers.
         run: go run ./tools/claimcheck .
 
+      - name: The prose reads like a person wrote it
+        # The build plan asks for vale with "a custom rule that flags em dashes
+        # and double hyphens in prose". This is that rule. Em dashes are the
+        # most visible tell of text nobody wrote: they are what a machine
+        # reaches for when it cannot decide whether a clause is a parenthesis,
+        # a colon or a full stop. Code is exempt, because `--flag` is how an
+        # option is spelled.
+        run: go run ./tools/prosecheck .
+
       - name: Nothing in the repository looks like a live credential
         # Uses the engine's own detector, so the check and the runtime refusal
         # cannot disagree about what a credential looks like. Its own tests
