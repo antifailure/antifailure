@@ -542,20 +542,26 @@ func (p *Provider) Reset(ctx context.Context, b provider.Branch) error {
 	version := b.From
 	if version == "" {
 		// A caller that has been through a process restart may hold a branch it
-		// read back from the journal. The annotation is the durable copy of the
-		// same fact, so it answers when the caller cannot.
-		detail, err := p.client.ListBranches(ctx)
+		// read back from the journal, and af up and af test are separate
+		// processes. The annotation is the durable copy of the same fact, so it
+		// answers when the caller cannot.
+		branches, err := p.client.ListBranches(ctx)
 		if err != nil {
 			return err
 		}
-		for _, candidate := range detail {
-			if candidate.ID == b.ProviderRef {
-				version = parseAnnotation(candidate.GitBranch).From
+		for _, existing := range branches {
+			if existing.ID == b.ProviderRef {
+				version = parseAnnotation(existing.GitBranch).From
 			}
 		}
 	}
 	if version == "" {
-		return aferrors.Coded(aferrors.AFDB004, "version", "(unknown)")
+		// Neither the caller nor the branch itself knows which golden this came
+		// from, so there is nothing to reset it to. Naming the branch rather
+		// than a version nobody has, because the branch is the thing the
+		// operator can actually go and look at.
+		return aferrors.Coded(aferrors.AFDB004,
+			"version", "the one branch "+b.ProviderRef+" was created from, which it does not record")
 	}
 	return p.fill(ctx, b, version)
 }
