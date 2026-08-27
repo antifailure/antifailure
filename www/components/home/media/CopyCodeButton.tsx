@@ -5,8 +5,8 @@ import { cn } from "@/lib/cn";
 import { CopyIcon } from "@/components/icons";
 
 export function CopyCodeButton({
-  code = "npx antifailure init",
-  copyText = "npx antifailure init",
+  code = "curl -fsSL https://antifailure.dev/install.sh | sh",
+  copyText = "curl -fsSL https://antifailure.dev/install.sh | sh",
   variant = "white",
   className,
 }: {

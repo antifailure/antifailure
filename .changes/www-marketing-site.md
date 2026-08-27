@@ -1,3 +1,4 @@
 # added
 
-The public website source lives in `www/`: marketing home, product, solutions, company pages, docs, and sign-in.
+The public website lives in `www/`, the documentation site in `docs/`, and the
+waitlist endpoint in `api/`. All three are served from antifailure.dev.

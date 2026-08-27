@@ -1,19 +1,25 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { signIn } from "next-auth/react";
+import { useEffect, useState } from "react";
 import { useChrome } from "./Chrome";
 import { LogoMark } from "./icons";
+import { joinWaitlist, rememberedEmail } from "@/lib/waitlist";
 
-const WAITLIST_KEY = "wt-waitlist";
-
-export type AuthProviderId = "github" | "google" | "microsoft";
-export type ConfiguredProviders = Record<AuthProviderId, boolean>;
-
-function writeWaitlist(email: string) {
-  localStorage.setItem(WAITLIST_KEY, JSON.stringify({ email, at: Date.now() }));
-}
-
+/**
+ * There is no account system yet, so this screen does not pretend there is one.
+ *
+ * It previously rendered an email field, a password field with a show/hide
+ * toggle and `autocomplete="new-password"`, and a Continue button. No password
+ * was ever checked, stored or sent: the submit handler called `setPassword("")`
+ * and dropped it. The only configured sign-in was OAuth, which succeeded and
+ * then landed the visitor on a page saying they were on a waitlist. So the
+ * field taught browsers to offer to save a credential for a site that had no
+ * account to attach it to, and people reuse passwords.
+ *
+ * What is real is the waitlist, and it is now actually a waitlist: the address
+ * goes to the server and is stored. That is the whole product surface, so that
+ * is the whole screen.
+ */
 function AuthCover() {
   return (
     <div className="relative hidden h-full overflow-hidden bg-[#f7f7f5] lg:block">
@@ -21,7 +27,7 @@ function AuthCover() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse 90% 70% at 6% 4%, rgba(32, 196, 180, 0.22) 0%, transparent 52%), radial-gradient(ellipse 85% 70% at 96% 98%, rgba(196, 96, 36, 0.28) 0%, transparent 54%)",
+            "radial-gradient(ellipse 90% 70% at 6% 4%, rgba(51, 191, 0, 0.16) 0%, transparent 52%), radial-gradient(ellipse 85% 70% at 96% 98%, rgba(16, 16, 20, 0.10) 0%, transparent 54%)",
         }}
       />
       <div className="auth-honeycomb absolute inset-0 opacity-80" />
@@ -35,186 +41,119 @@ function AuthCover() {
   );
 }
 
-function GitHubGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden>
-      <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.26.8-.58v-2.02c-3.34.72-4.04-1.61-4.04-1.61c-.55-1.39-1.34-1.76-1.34-1.76c-1.09-.75.08-.73.08-.73c1.2.08 1.84 1.24 1.84 1.24c1.07 1.83 2.81 1.3 3.5 1c.1-.78.42-1.3.76-1.6c-2.67-.3-5.47-1.33-5.47-5.93c0-1.31.47-2.38 1.24-3.22c-.13-.3-.54-1.52.12-3.18c0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23c.66 1.66.25 2.88.12 3.18c.77.84 1.24 1.91 1.24 3.22c0 4.61-2.81 5.63-5.48 5.92c.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.82.58A12 12 0 0 0 12 .3z" />
-    </svg>
-  );
-}
-
-function GoogleGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden>
-      <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.26-1.7 3.7-5.5 3.7c-3.31 0-6-2.74-6-6.1S8.69 5.6 12 5.6c1.89 0 3.16.8 3.88 1.5l2.64-2.55C16.9 2.95 14.7 2 12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c5.79 0 9.6-4.07 9.6-9.8c0-.66-.07-1.16-.16-1.66H12Z" />
-    </svg>
-  );
-}
-
-function MicrosoftGlyph() {
-  return (
-    <svg viewBox="0 0 21 21" className="h-4 w-4" aria-hidden>
-      <path fill="#F25022" d="M1 1h9v9H1z" />
-      <path fill="#7FBA00" d="M11 1h9v9h-9z" />
-      <path fill="#00A4EF" d="M1 11h9v9H1z" />
-      <path fill="#FFB900" d="M11 11h9v9h-9z" />
-    </svg>
-  );
-}
-
-const SOCIAL: { id: AuthProviderId; authId: string; label: string; Icon: () => ReactNode }[] = [
-  { id: "google", authId: "google", label: "Google", Icon: GoogleGlyph },
-  { id: "github", authId: "github", label: "GitHub", Icon: GitHubGlyph },
-  { id: "microsoft", authId: "microsoft-entra-id", label: "Microsoft", Icon: MicrosoftGlyph },
-];
-
-export function AuthScreen({
-  mode,
-  configured,
-  sessionEmail,
-  oauthError,
-}: {
-  mode: "signin" | "signup";
-  configured: ConfiguredProviders;
-  sessionEmail: string | null;
-  oauthError?: string | null;
-}) {
+export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
   const { openSheet } = useChrome();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState(oauthError ?? "");
-  const [done, setDone] = useState<string | null>(sessionEmail);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [unset, setUnset] = useState<AuthProviderId | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const [already, setAlready] = useState(false);
 
   useEffect(() => {
-    if (!sessionEmail) return;
-    writeWaitlist(sessionEmail);
-    setDone(sessionEmail);
-  }, [sessionEmail]);
-
-  useEffect(() => {
-    const html = document.documentElement;
-    const body = document.body;
-    const prev = {
-      htmlOverflow: html.style.overflow,
-      bodyOverflow: body.style.overflow,
-      htmlHeight: html.style.height,
-      bodyHeight: body.style.height,
-      htmlOverscroll: html.style.overscrollBehavior,
-      bodyOverscroll: body.style.overscrollBehavior,
-    };
-    html.style.overflow = "hidden";
-    body.style.overflow = "hidden";
-    html.style.height = "100%";
-    body.style.height = "100%";
-    html.style.overscrollBehavior = "none";
-    body.style.overscrollBehavior = "none";
-    return () => {
-      html.style.overflow = prev.htmlOverflow;
-      body.style.overflow = prev.bodyOverflow;
-      html.style.height = prev.htmlHeight;
-      body.style.height = prev.bodyHeight;
-      html.style.overscrollBehavior = prev.htmlOverscroll;
-      body.style.overscrollBehavior = prev.bodyOverscroll;
-    };
+    const known = rememberedEmail();
+    if (known) {
+      setDone(known);
+      setAlready(true);
+    }
   }, []);
 
-  const submitWaitlist = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const value = email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-      setError("Enter a work email.");
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    const result = await joinWaitlist(email, mode);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.message);
       return;
     }
-    writeWaitlist(value);
-    setPassword("");
-    setDone(value);
-    setError("");
-  };
-
-  const startOAuth = async (id: AuthProviderId, authId: string) => {
-    setUnset(null);
-    setError("");
-    if (!configured[id]) {
-      setUnset(id);
-      return;
-    }
-    setBusy(id);
-    await signIn(authId, { callbackUrl: `${mode === "signup" ? "/signup" : "/signin"}?joined=1` });
+    setAlready(result.alreadyJoined);
+    setDone(result.email);
   };
 
   return (
-    <div className="grid h-dvh max-h-dvh w-full overflow-hidden bg-[#f7f7f5] lg:grid-cols-[2fr_3fr]">
+    // No forced `overflow: hidden` on the document and no `h-dvh` cage. The
+    // previous version pinned the page to the viewport height and hid the
+    // overflow, which put the submit button below the fold and out of reach on
+    // a phone. This scrolls.
+    <div className="grid min-h-dvh w-full bg-[#f7f7f5] lg:grid-cols-[2fr_3fr]">
       <AuthCover />
-      <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[#f7f7f5] px-8 py-8 lg:px-16">
-        <a href="/" className="inline-flex shrink-0 items-center gap-2 text-[13px] text-black/45 hover:text-black">
+      <div className="relative flex flex-col bg-[#f7f7f5] px-6 py-8 sm:px-8 lg:px-16">
+        <a
+          href="/"
+          className="inline-flex w-fit shrink-0 items-center gap-2 text-[13px] text-black/45 hover:text-black"
+        >
           <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden>
             <path d="M10 3 5 8l5 5" stroke="currentColor" strokeWidth="1.4" />
           </svg>
           Home
         </a>
 
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden py-4">
+        <div className="flex flex-1 items-center justify-center py-10">
           <div className="w-full max-w-[400px]">
             {done ? (
               <>
-                <h1 className="text-[32px] font-normal tracking-tighter text-black">
-                  You’re on the waitlist
+                <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black">
+                  {already ? "You are already on the list" : "You are on the list"}
                 </h1>
-                <p className="mt-3 text-[14px] leading-6 text-black/50">
-                  We’ll email {done} when the control plane can connect a repo.
+                <p className="mt-4 text-[14px] leading-6 text-black/55">
+                  We have {done}. You will hear from us when there is an
+                  environment you can connect a repository to, and not before.
+                  No newsletter.
+                </p>
+                <p className="mt-4 text-[14px] leading-6 text-black/55">
+                  In the meantime the engine is open source and runs entirely on
+                  your own machine. The{" "}
+                  <a
+                    className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
+                    href="/docs/getting-started/quickstart"
+                  >
+                    quickstart
+                  </a>{" "}
+                  goes from nothing to a working environment without an account.
                 </p>
                 <a
-                  href="/"
-                  className="mt-8 flex h-12 w-full items-center justify-center rounded-md border border-black/20 text-[15px] text-black hover:bg-black/5"
+                  href="/docs"
+                  className="mt-8 flex h-12 w-full items-center justify-center rounded-full bg-black text-[15px] font-medium text-white hover:bg-[#292929]"
                 >
-                  Back to home
+                  Read the documentation
                 </a>
               </>
             ) : (
-              <form onSubmit={submitWaitlist}>
-                <h1 className="text-[32px] font-normal tracking-tighter text-black">
-                  {mode === "signup" ? "Create your free account" : "Log in to your account"}
+              <form onSubmit={submit} noValidate>
+                <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black">
+                  Join the waitlist
                 </h1>
-                <p className="mt-6 text-[13px] text-black/45">Connect to Antifailure with:</p>
+                <p className="mt-4 text-[14px] leading-6 text-black/55">
+                  There is no hosted control plane to sign in to yet, so there is
+                  nothing here to create an account for. Leave an address and we
+                  will tell you when there is.
+                </p>
+                <p className="mt-3 text-[14px] leading-6 text-black/55">
+                  The engine itself needs none of this. It is open source, it
+                  runs locally, and the{" "}
+                  <a
+                    className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
+                    href="/docs/getting-started/quickstart"
+                  >
+                    quickstart
+                  </a>{" "}
+                  works today.
+                </p>
 
-                <div className="mt-4 space-y-2.5">
-                  {SOCIAL.map(({ id, authId, label, Icon }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => startOAuth(id, authId)}
-                      className="flex h-12 w-full items-center justify-center gap-2.5 rounded-md border border-black/15 bg-transparent text-[15px] text-black hover:bg-black/[0.06]"
-                    >
-                      <Icon />
-                      {busy === id ? `${label}…` : label}
-                    </button>
-                  ))}
-                </div>
-                {unset ? (
-                  <p className="mt-3 text-[12px] text-black/45" role="status">
-                    {unset === "github" ? "GitHub" : unset === "google" ? "Google" : "Microsoft"} is
-                    not set up yet. Add the app keys to .env.local — see .env.example.
-                  </p>
-                ) : null}
-
-                <div className="my-7 flex items-center gap-3">
-                  <span className="h-px flex-1 bg-black/12" />
-                  <span className="text-[12px] text-black/40">Or continue with Email</span>
-                  <span className="h-px flex-1 bg-black/12" />
-                </div>
-
-                <label className="block text-[13px] text-black/55" htmlFor="email">
+                <label className="mt-8 block text-[13px] text-black/55" htmlFor="email">
                   Email
                 </label>
                 <input
                   id="email"
                   type="email"
                   value={email}
-                  placeholder="youremail@email.com"
+                  placeholder="you@company.com"
                   autoComplete="email"
+                  required
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={error ? "waitlist-error" : undefined}
                   onChange={(e) => {
                     setEmail(e.target.value);
                     setError("");
@@ -222,98 +161,31 @@ export function AuthScreen({
                   className="mt-1.5 h-12 w-full rounded-md border border-black/15 bg-white px-3 text-[14px] text-black outline-none placeholder:text-black/30 focus:border-black/35"
                 />
 
-                <label className="mt-4 block text-[13px] text-black/55" htmlFor="password">
-                  Password
-                </label>
-                <div className="relative mt-1.5">
-                  <input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    placeholder="Enter a unique password"
-                    autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="h-12 w-full rounded-md border border-black/15 bg-white px-3 pr-11 text-[14px] text-black outline-none placeholder:text-black/30 focus:border-black/35"
-                  />
-                  <button
-                    type="button"
-                    className="absolute inset-y-0 right-0 px-3 text-black/40 hover:text-black/70"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
-                      {showPassword ? (
-                        <path
-                          d="M3 3l18 18M10.5 10.7a2.5 2.5 0 0 0 3.5 3.5M9.9 5.1A10 10 0 0 1 12 5c5.2 0 9.3 3.5 10.5 7c-.4 1.2-1.1 2.4-2 3.4M6.1 6.4C4.2 7.7 2.7 9.4 1.5 12c1.2 3.5 5.3 7 10.5 7c1.4 0 2.7-.2 3.9-.7"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                        />
-                      ) : (
-                        <>
-                          <path
-                            d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                          />
-                          <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.5" />
-                        </>
-                      )}
-                    </svg>
-                  </button>
-                </div>
-
                 {error ? (
-                  <p className="mt-3 text-[13px] text-red-400" role="alert">
+                  <p id="waitlist-error" className="mt-3 text-[13px] text-[#b32d18]" role="alert">
                     {error}
                   </p>
                 ) : null}
 
                 <button
                   type="submit"
-                  className="mt-6 h-12 w-full rounded-md bg-black text-[15px] text-white hover:bg-black/90"
+                  disabled={busy}
+                  className="mt-6 h-12 w-full rounded-full bg-black text-[15px] font-medium text-white hover:bg-[#292929] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Continue
+                  {busy ? "Adding you" : "Join the waitlist"}
                 </button>
 
-                {mode === "signup" ? (
-                  <p className="mt-5 text-[12px] leading-5 text-black/40">
-                    By creating an account you agree to the{" "}
-                    <button
-                      type="button"
-                      className="text-black/70 underline decoration-black/20"
-                      onClick={() => openSheet("terms")}
-                    >
-                      Terms of Service
-                    </button>{" "}
-                    and our{" "}
-                    <button
-                      type="button"
-                      className="text-black/70 underline decoration-black/20"
-                      onClick={() => openSheet("privacy")}
-                    >
-                      Privacy Policy
-                    </button>
-                    . We’ll occasionally send you emails about news, products, and services; you can
-                    opt-out anytime.
-                  </p>
-                ) : null}
-
-                <p className="mt-8 text-[14px] text-black/50">
-                  {mode === "signup" ? (
-                    <>
-                      Already have an account?{" "}
-                      <a href="/signin" className="text-[#3b82f6] hover:underline">
-                        Log in
-                      </a>
-                    </>
-                  ) : (
-                    <>
-                      Don’t have an account?{" "}
-                      <a href="/signup" className="text-[#3b82f6] hover:underline">
-                        Sign up
-                      </a>
-                    </>
-                  )}
+                <p className="mt-5 text-[12px] leading-5 text-black/45">
+                  We store the address and nothing else. It is used to tell you
+                  when the hosted product exists. See the{" "}
+                  <button
+                    type="button"
+                    className="text-black/70 underline decoration-black/20"
+                    onClick={() => openSheet("privacy")}
+                  >
+                    privacy notice
+                  </button>
+                  .
                 </p>
               </form>
             )}

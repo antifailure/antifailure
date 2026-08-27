@@ -29,10 +29,10 @@ const SHEETS: Record<
   },
   community: {
     title: "Open-source surface",
-    lead: "No Discord or public GitHub yet. The inspectable pieces live inside the customer trust boundary.",
+    lead: "The engine is open source and the repository is public. The pieces that touch production data run inside your own boundary.",
     points: [
       "Planned open-source surface: customer agent, local CLI, Postgres adapter, sanitization, egress gateway, simulators, cleanup controller.",
-      "Copy the init command for when the package exists. It is not published.",
+      "The installer is one command and the engine runs entirely on your machine.",
       "Join the waitlist if you want the control plane to connect a repo.",
     ],
     cta: "cli",
@@ -73,7 +73,7 @@ const SHEETS: Record<
     lead: "This page is a product demonstration. It does not create an account or a service contract.",
     points: [
       "Pre-production deployment safety is a category, not a guarantee that every production incident is predicted.",
-      "Commands shown here (npx antifailure init) are not a published package yet.",
+      "The engine is open source under Apache 2.0. The enterprise edition is separately licensed.",
       "Do not treat simulated Stripe, email, or Slack effects on this page as a live integration.",
     ],
   },

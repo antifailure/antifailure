@@ -25,7 +25,7 @@ export function ScaleFooter() {
           <p className="mt-6 max-w-[300px] text-[11px] leading-[1.55] text-black/35">
             © Antifailure 2026. All rights reserved. Pre-production deployment safety is a
             product category, not a guarantee that every production incident is predicted. The
-            init command shown on this site is not a published package.
+            engine is open source; the enterprise edition is separately licensed.
           </p>
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-black/40">
             <FooterAction onClick={() => openSheet("privacy")}>Privacy Notice</FooterAction>

@@ -1,28 +1,16 @@
-import { auth, configuredProviders } from "@/auth";
+import type { Metadata } from "next";
 import { AuthScreen } from "@/components/AuthScreen";
 import { ChromeProvider } from "@/components/Chrome";
-import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Log in — Antifailure",
-  description: "Log in to Antifailure.",
+  title: "Join the waitlist — Antifailure",
+  description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
 };
 
-export default async function SignInPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ joined?: string; error?: string }>;
-}) {
-  const session = await auth();
-  const params = await searchParams;
+export default function SignInPage() {
   return (
     <ChromeProvider>
-      <AuthScreen
-        mode="signin"
-        configured={configuredProviders}
-        sessionEmail={session?.user?.email ?? null}
-        oauthError={params.error ? "Social sign-in was cancelled or failed. Try again." : null}
-      />
+      <AuthScreen mode="signin" />
     </ChromeProvider>
   );
 }

@@ -104,7 +104,7 @@ export const OPEN_SOURCE_PAGE: MarketingContent = {
       <p>
         MIT maximizes adoption but permits unrestricted commercial hosting. Apache 2.0 adds an
         explicit patent grant. The team should choose a standard license with counsel. There is no
-        public GitHub repository yet. The init command shown in docs is not a published package.
+        hosted control plane yet. The engine is open source and runs on your own machine today.
       </p>
       <PageCallout label="Safety is not an enterprise add-on">
         Do not put the only trustworthy security controls behind a paid gate. The open product must

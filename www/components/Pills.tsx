@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { CopyIcon } from "./icons";
 
 export function CopyCli({
-  command = "$ npx antifailure init",
+  command = "$ curl -fsSL https://antifailure.dev/install.sh | sh",
   variant = "light",
 }: {
   command?: string;
@@ -31,7 +31,7 @@ export function CopyCli({
         setTimeout(() => setCopied(false), 1800);
       }}
     >
-      {copied ? "Copied — not published yet" : command}
+      {copied ? "Copied" : command}
       <CopyIcon />
       <span className="sr-only">{copied ? "Copied" : "Copy"}</span>
     </button>

@@ -95,7 +95,7 @@ export function WorkloadIdeStage() {
         <p className="text-[18px] tracking-[-0.015em] text-white max-sm:text-[15px]">
           Try for yourself, start proving a change before it ships.
         </p>
-        <CopyCli command="$ npx antifailure init" variant="mint" />
+        <CopyCli command="$ curl -fsSL https://antifailure.dev/install.sh | sh" variant="mint" />
       </div>
     </div>
   );

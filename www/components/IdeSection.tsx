@@ -167,7 +167,7 @@ const FILE_TOKENS: Record<string, Token[]> = {
   ],
 };
 
-const CMD = "npx antifailure init";
+const CMD = "curl -fsSL https://antifailure.dev/install.sh | sh";
 const HOME_FILE = "index.tsx";
 
 const CHECKS = [

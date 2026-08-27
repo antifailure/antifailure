@@ -191,8 +191,23 @@ export default function SoftAurora({
     const root = container;
 
     const reduced = prefersReducedMotion();
-    const renderer = new Renderer({ alpha: true, premultipliedAlpha: false });
+
+    // A browser that cannot give us a WebGL context is not an exceptional
+    // case: hardware acceleration switched off, a blocklisted GPU driver, a
+    // privacy extension, a headless crawler, or a phone that has run out of
+    // contexts all land here. ogl's Renderer throws in that situation, and a
+    // throw inside an effect takes the whole React tree with it, so an
+    // unguarded `new Renderer` turned the entire marketing page into Next's
+    // stock "a client-side exception has occurred" for those visitors. This
+    // is decoration behind a headline. It degrades to nothing.
+    let renderer: Renderer;
+    try {
+      renderer = new Renderer({ alpha: true, premultipliedAlpha: false });
+    } catch {
+      return;
+    }
     const gl = renderer.gl;
+    if (!gl) return;
     gl.clearColor(0, 0, 0, 0);
     gl.canvas.style.display = "block";
     gl.canvas.style.width = "100%";

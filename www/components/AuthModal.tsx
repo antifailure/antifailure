@@ -1,139 +1,179 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { joinWaitlist, rememberedEmail } from "@/lib/waitlist";
 
-const WAITLIST_KEY = "wt-waitlist";
-
-function readWaitlist(): string | null {
-  try {
-    const raw = localStorage.getItem(WAITLIST_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { email?: string };
-    return parsed.email ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function writeWaitlist(email: string) {
-  localStorage.setItem(WAITLIST_KEY, JSON.stringify({ email, at: Date.now() }));
-}
-
+/**
+ * The in-page version of the waitlist form. Same substance as the full screen:
+ * the address goes to the server, and nothing here claims an account was
+ * created, because none is. The password field this used to carry is gone for
+ * the reason described in AuthScreen.
+ */
 export function AuthModal({
   open,
-  mode,
   onClose,
-  onMode,
 }: {
   open: boolean;
-  mode: "login" | "signup";
+  mode?: "login" | "signup";
   onClose: () => void;
-  onMode: (mode: "login" | "signup") => void;
+  onMode?: (mode: "login" | "signup") => void;
 }) {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  const [already, setAlready] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+  const restoreFocusTo = useRef<Element | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setError("");
-    setPassword("");
-    const existing = readWaitlist();
-    setDone(existing);
-    setEmail(existing ?? "");
-  }, [open, mode]);
+    setBusy(false);
+    const known = rememberedEmail();
+    setDone(known);
+    setAlready(Boolean(known));
+    setEmail(known ?? "");
+    // Send focus into the dialog and put it back where it came from on close,
+    // so a keyboard user is not left tabbing through the page behind this.
+    restoreFocusTo.current = document.activeElement;
+    const t = window.setTimeout(() => firstFieldRef.current?.focus(), 0);
+    return () => {
+      window.clearTimeout(t);
+      (restoreFocusTo.current as HTMLElement | null)?.focus?.();
+    };
+  }, [open]);
+
+  // Keep Tab inside the dialog while it is open.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const root = dialogRef.current;
+      if (!root) return;
+      const focusable = root.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
 
   if (!open) return null;
 
-  const jumpToStart = () => {
-    onClose();
-    document.getElementById("from-pr")?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const value = email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-      setError("Enter a work email.");
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    const result = await joinWaitlist(email, "modal");
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.message);
       return;
     }
-    writeWaitlist(value);
-    setPassword("");
-    setDone(value);
+    setAlready(result.alreadyJoined);
+    setDone(result.email);
   };
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4"
-      onClick={onClose}
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4"
+      onMouseDown={(e) => {
+        // mousedown rather than click, so a drag that starts inside the panel
+        // and ends outside it does not dismiss the dialog mid-selection.
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
       <div
-        className="w-full max-w-[380px] rounded-2xl border border-black/10 bg-white p-6 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="waitlist-title"
+        className="w-full max-w-[400px] rounded-2xl border border-black/10 bg-white p-6 shadow-2xl"
       >
         {done ? (
           <>
-            <div className="text-[15px] font-medium">You’re on the waitlist</div>
-            <p className="mt-1 text-[13px] text-black/50">
-              We’ll email {done} when the control plane can connect a repo. Nothing is created on a
-              server from this page.
+            <div id="waitlist-title" className="text-[15px] font-medium text-black">
+              {already ? "You are already on the list" : "You are on the list"}
+            </div>
+            <p className="mt-2 text-[13px] leading-5 text-gray-new-40">
+              We have {done}. You will hear from us when there is a hosted
+              environment to connect a repository to. The engine itself is open
+              source and runs locally today.
             </p>
-            <button
-              type="button"
-              className="mt-5 h-10 w-full rounded-full bg-black text-[13px] font-medium text-white"
-              onClick={jumpToStart}
+            <a
+              href="/docs/getting-started/quickstart"
+              className="mt-5 flex h-10 w-full items-center justify-center rounded-full bg-black text-[13px] font-medium text-white hover:bg-[#292929]"
             >
-              See how it works
-            </button>
+              Read the quickstart
+            </a>
             <button
               type="button"
-              className="mt-3 w-full text-center text-[12px] text-black/50"
+              className="mt-3 w-full cursor-pointer text-center text-[12px] text-gray-new-40 hover:text-black"
               onClick={onClose}
             >
               Close
             </button>
           </>
         ) : (
-          <form onSubmit={submit}>
-            <div className="text-[15px] font-medium">
-              {mode === "login" ? "Request access" : "Join waitlist"}
+          <form onSubmit={submit} noValidate>
+            <div id="waitlist-title" className="text-[15px] font-medium text-black">
+              Join the waitlist
             </div>
-            <p className="mt-1 text-[13px] text-black/50">
-              No account is created. This stores a waitlist email on this device until the product
-              ships.
+            <p className="mt-2 text-[13px] leading-5 text-gray-new-40">
+              There is no hosted control plane to sign in to yet. Leave an
+              address and we will tell you when there is. We store the address
+              and nothing else.
             </p>
-            <label className="mt-5 block text-[12px] text-black/50">Email</label>
+            <label className="mt-5 block text-[12px] text-gray-new-40" htmlFor="waitlist-email">
+              Email
+            </label>
             <input
+              id="waitlist-email"
+              ref={firstFieldRef}
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-black/10 bg-[#f7f7f5] px-3 text-[13px] text-black outline-none focus:border-black/30"
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setError("");
+              }}
+              className="mt-1.5 h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-[13px] text-black outline-none placeholder:text-black/30 focus:border-black/40"
               placeholder="you@company.com"
               autoComplete="email"
               type="email"
+              required
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "waitlist-modal-error" : undefined}
             />
-            <label className="mt-3 block text-[12px] text-black/50">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-black/10 bg-[#f7f7f5] px-3 text-[13px] text-black outline-none focus:border-black/30"
-              placeholder="••••••••"
-              autoComplete="off"
-            />
-            {error ? <p className="mt-2 text-[12px] text-red-400">{error}</p> : null}
+            {error ? (
+              <p id="waitlist-modal-error" className="mt-2 text-[12px] text-[#b32d18]" role="alert">
+                {error}
+              </p>
+            ) : null}
             <button
               type="submit"
-              className="mt-5 h-10 w-full rounded-full bg-black text-[13px] font-medium text-white"
+              disabled={busy}
+              className="mt-5 h-10 w-full cursor-pointer rounded-full bg-black text-[13px] font-medium text-white hover:bg-[#292929] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {mode === "login" ? "Request access" : "Join waitlist"}
+              {busy ? "Adding you" : "Join the waitlist"}
             </button>
             <button
               type="button"
-              className="mt-3 w-full text-center text-[12px] text-black/50"
-              onClick={() => onMode(mode === "login" ? "signup" : "login")}
+              className="mt-3 w-full cursor-pointer text-center text-[12px] text-gray-new-40 hover:text-black"
+              onClick={onClose}
             >
-              {mode === "login" ? "Join the waitlist instead" : "Request access instead"}
+              Close
             </button>
           </form>
         )}
