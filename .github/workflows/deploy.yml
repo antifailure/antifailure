@@ -1,0 +1,130 @@
+name: Deploy
+
+# The site is a manual snapshot until this runs.
+#
+# `az staticwebapp show -n af-site -g af-web` reports provider SwaCli, and both
+# repositoryUrl and branch are null. There is no repository connection: the live
+# site is whatever somebody last pushed from their own machine with the SWA CLI.
+# So every documentation change sits on main, green, and invisible. The 78 link
+# fixes in 0c69add are on main right now and antifailure.dev still serves the
+# broken ones.
+#
+# Worse than being stale is that nothing says so. A deploy that never happens
+# produces no red check, no failed run, nothing to notice. This makes shipping
+# the site look like shipping the code: a push moves it, and a failure is
+# visible.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    name: site
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # INERT UNTIL THE TOKEN EXISTS, on purpose.
+    #
+    # Adding a workflow that fails until somebody sets a secret would turn main
+    # red for eleven other branches over something none of them did, and a red
+    # main that everybody has learned to ignore is worse than no check at all.
+    # This skips cleanly and starts working the moment the secret is set:
+    #
+    #   az staticwebapp secrets list -n af-site -g af-web \
+    #     --query "properties.apiKey" -o tsv | gh secret set AZURE_STATIC_WEB_APPS_API_TOKEN
+    #
+    # That command is for a person to run. Nothing here reads the token, and no
+    # step prints it.
+    if: ${{ github.repository == 'antifailure/antifailure' }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            www/package-lock.json
+            docs/package-lock.json
+
+      - name: Build the marketing site
+        # next.config.ts sets output: "export", so this writes static files and
+        # needs no server. The waitlist is a managed function under /api and is
+        # deployed by the platform rather than built here.
+        run: npm ci --no-audit --no-fund && npm run build
+        working-directory: www
+
+      - name: Build the documentation
+        # astro.config.mjs sets base: /docs, and that is load bearing rather
+        # than cosmetic: every error the engine prints ends with
+        # antifailure.dev/docs/<the catalog's docs field>, so a page's URL has
+        # to be its path under src/content/docs exactly.
+        run: npm ci --no-audit --no-fund && npm run build
+        working-directory: docs
+
+      - name: Assemble one site
+        # The marketing site at the root, the documentation under /docs. This
+        # is the step that existed only in somebody's shell history, which is
+        # why the layout is written down here rather than remembered.
+        run: |
+          set -euo pipefail
+          test -d www/out || { echo "www did not produce out/; next.config output: export may have changed"; exit 1; }
+          test -d docs/dist || { echo "docs did not produce dist/"; exit 1; }
+          rm -rf site && mkdir -p site
+          cp -R www/out/. site/
+          # Astro nests its output under `base`, so dist already contains docs/.
+          # Copy whichever shape it produced rather than assuming one.
+          if [ -d docs/dist/docs ]; then cp -R docs/dist/docs site/docs
+          else mkdir -p site/docs && cp -R docs/dist/. site/docs/
+          fi
+          test -f site/index.html || { echo "no index.html at the site root"; exit 1; }
+          test -d site/docs || { echo "no /docs in the assembled site"; exit 1; }
+          echo "assembled $(find site -type f | wc -l | tr -d ' ') files"
+
+      - name: Check the assembled site before publishing it
+        # The defect that prompted all of this was 78 links pointing outside
+        # the site, so the built output is checked for the same thing rather
+        # than trusting that the source fix survived the build.
+        run: |
+          set -euo pipefail
+          bad=$(grep -rhoE 'href="/(concepts|guides|reference|providers|self-hosting|enterprise)/' site/docs 2>/dev/null | sort -u || true)
+          if [ -n "$bad" ]; then
+            echo "the built documentation links outside the site, which 404s for a reader:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "no documentation link escapes the /docs base"
+
+      - name: Publish
+        # Skipped, with the job still green, until somebody sets the token.
+        # A skipped publish is honest; a failing one teaches people to ignore
+        # a red main.
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          app_location: site
+          skip_app_build: true
+          skip_api_build: true
+
+      - name: Say so when it was not published
+        if: ${{ env.TOKEN == '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: |
+          echo "Built and checked, but NOT published: AZURE_STATIC_WEB_APPS_API_TOKEN is not set."
+          echo "The live site is a manual snapshot until it is. To wire it up:"
+          echo "  az staticwebapp secrets list -n af-site -g af-web --query properties.apiKey -o tsv \\"
+          echo "    | gh secret set AZURE_STATIC_WEB_APPS_API_TOKEN"

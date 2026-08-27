@@ -15,9 +15,26 @@ which gates failed and the last lines of each, and the full output of every
 gate is under `.gate-reports/`.
 
 That promise is checked rather than trusted: `tools/gatecheck` compares the
-`gate` recipe against `.github/workflows/ci.yml` and fails the build when they
-disagree, because a promise like this rots silently. It has already caught two
-gates CI ran that the justfile did not.
+`gate` recipe against every workflow that runs on a pull request and fails the
+build when they disagree, because a promise like this rots silently. It has
+already caught two gates CI ran that the justfile did not.
+
+**When a gate you did not touch goes red, check a clean copy of `main` before
+you look at your own diff.** Three people arrived at this independently in one
+evening and one of them lost two hours to it. A branch that has been open for a
+while is being tested against its merge with `main`, so a failure can belong to
+somebody else's commit entirely, and it will still be printed underneath your
+change.
+
+```
+git worktree add /tmp/main-check origin/main && cd /tmp/main-check && just gate
+```
+
+The same move catches the opposite mistake, which is a gate that passes for you
+and fails everywhere else. Your machine is not clean: it has the directory a
+tool created, the image docker already pulled, the binary you built. All three
+have produced a green local run and a red CI run here. `git clone --depth 1
+file://$PWD /tmp/fresh` is a clean machine for the length of one command.
 
 ## Getting set up
 
@@ -92,11 +109,31 @@ failure path listed in a design note has a test that exercises it.
 * Every provider implementation runs the shared conformance suite. A provider
   that skips a behavior must skip it explicitly, naming the missing capability.
 * No real clock, no real randomness, no real network, no sleeps. Time comes
-  from an injected `clock.Clock`; the fakes in `engine/internal/testutil/fakes`
-  cover every external dependency and can inject faults.
+  from an injected `clock.Clock`.
+* `engine/internal/testutil/fakes` holds doubles for the two provider
+  interfaces, and each comes with fault injection. `fakes.Break` and
+  `fakes.BreakRuntime` take something that works and return something that
+  violates exactly one guarantee, so you can point a suite at it and find out
+  whether the suite could have failed. That matters more than the doubles
+  themselves: a suite nobody has watched go red is a list of assertions that
+  might all be vacuous, and assertions go vacuous quietly.
+  It covers `provider.Database` and `provider.Runtime`. Time is NOT here: the
+  project already has `clock.Fake` in `engine/internal/clock`, which implements
+  the real `clock.Clock` interface, and a second clock in this package would be
+  one that cannot be injected where the code expects one. It does not
+  yet cover the object store, the control plane client or the secret sources,
+  and this sentence will be wrong the moment somebody adds one, so add it here
+  too.
 
-New tests run twenty times in CI before a pull request can merge. A test that
-fails once out of twenty is a bug in the test or the code, not noise.
+Tests run with the race detector in CI, always. A test that fails once in
+twenty runs is a bug in the test or the code, not noise, so re-running until
+green is not a fix; find the ordering that broke it.
+
+One local caveat that is not flakiness: several tests assert a wall clock
+budget, and those measure the machine as much as the code. On a loaded machine
+they fail while nothing is wrong. `just gate` says so when the load average is
+above one and a half times the core count, and the remedy is to re-run the
+failure on its own before believing it.
 
 ## Writing a provider
 
@@ -119,8 +156,18 @@ from the subtest names, so it can never drift from what actually runs.
 
 ## Style
 
-Go is `gofmt` and `goimports` clean with the linter set in `.golangci.yml`, all
-rules as errors. TypeScript is strict, no `any`, formatted by Biome. Prose in
+Go is `gofmt` and `goimports` clean. `just lint` runs the linter set in
+`.golangci.yml`, which is chosen for signal rather than length: every rule in
+it catches a bug that has actually shipped somewhere, and `unused` in
+particular catches the failure this repository keeps producing, where something
+is declared, documented, and never called, and reads as a working feature.
+
+It is not a merge gate yet, and saying so is the point of this sentence. There
+are 31 findings that predate the config, spread across packages several people
+are editing at once, and turning the gate on before they are cleared would fail
+every branch for something none of them did. `gofmt` and `go vet` are gates
+today. If you are clearing findings in a package you own, that is welcome, and
+the gate goes on when the count reaches zero. TypeScript is strict, no `any`, formatted by Biome. Prose in
 comments, docs, commit messages, and user-facing strings does not use em dashes
 or double hyphens as punctuation. Error messages are written in the second
 person, name the thing that failed, and say what to do next.

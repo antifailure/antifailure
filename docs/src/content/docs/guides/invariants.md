@@ -68,4 +68,4 @@ WHERE s.status = 'active' AND p.id IS NULL
 Write one the first time a bug of that shape reaches production. It is the
 cheapest possible regression test and it runs against every branch afterwards.
 
-Related: [agents](/concepts/agents/), [insights](/concepts/insights/).
+Related: [agents](/docs/concepts/agents/), [insights](/docs/concepts/insights/).
