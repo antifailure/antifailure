@@ -171,6 +171,10 @@ type Result struct {
 	Proxied bool
 	// Rules is how many egress rules the sidecar is enforcing.
 	Rules int
+	// Personas counts the accounts provisioned, so a caller can say that the
+	// environment has somebody to sign in as rather than leaving it to be
+	// discovered when a sign in fails.
+	Personas int
 }
 
 // session holds everything Up opens and must close.
@@ -789,6 +793,24 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	res.Services = env.Services
 	if err != nil {
 		return res, err
+	}
+
+	// After the services, because the migrations run as part of bringing them
+	// up and a persona is a row in a table those migrations create. Before
+	// this, running af up and then opening the application by hand gave you an
+	// environment with no accounts in it, and the sign in page had nothing to
+	// accept. Provisioning is idempotent, so af test reconciling the same
+	// personas afterwards is a no-op rather than a second set.
+	//
+	// A failure here does not fail af up. The environment is running and can
+	// be browsed; what is missing is the accounts, and that is worth saying
+	// loudly rather than tearing down everything that did work. af test, where
+	// a missing persona genuinely blocks the agents, still treats it as fatal.
+	if provisioned, perr := o.provisionPersonas(ctx, s); perr != nil {
+		o.progress("the personas could not be created, so signing in will not work: " +
+			o.opts.Redactor.String(perr.Error()))
+	} else if provisioned != nil {
+		res.Personas = len(provisioned.Accounts)
 	}
 
 	res.URL = env.URL()

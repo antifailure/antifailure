@@ -29,15 +29,36 @@ import (
 
 // ProvisionPersonas creates or reconciles every persona in the manifest.
 //
+// Opens a session of its own, so it is the entry point for a caller that does
+// not already hold one. A caller that does must use provisionPersonas
+// instead: the lock is per environment and per process, and asking for it
+// twice inside one command reports AF-RUN-003 against the command's own pid,
+// which reads as "af up is already running" while af up is running.
+//
 // Returns nil and no error when the manifest declares no personas, which is a
 // valid manifest: a workflow can be about a signed out visitor.
 func (o *Orchestrator) ProvisionPersonas(ctx context.Context) (*personas.Result, error) {
+	if len(o.opts.Manifest.Personas) == 0 {
+		return nil, nil
+	}
+	s, err := o.open(ctx, "af personas")
+	if err != nil {
+		return nil, err
+	}
+	defer s.close()
+	return o.provisionPersonas(ctx, s)
+}
+
+// provisionPersonas does the work against a session the caller already holds.
+func (o *Orchestrator) provisionPersonas(
+	ctx context.Context, s *session,
+) (*personas.Result, error) {
 	list := o.opts.Manifest.Personas
 	if len(list) == 0 {
 		return nil, nil
 	}
 
-	adapter, closeAdapter, err := o.personaAdapter(ctx)
+	adapter, closeAdapter, err := o.personaAdapter(ctx, s)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +108,9 @@ func (o *Orchestrator) personaDeriver() *personas.Deriver {
 // detection finds.
 //
 // The returned function closes whatever the adapter needed, and is never nil.
-func (o *Orchestrator) personaAdapter(ctx context.Context) (personas.Adapter, func(), error) {
+func (o *Orchestrator) personaAdapter(
+	ctx context.Context, s *session,
+) (personas.Adapter, func(), error) {
 	noop := func() {}
 	auth := o.opts.Manifest.Auth
 	if auth == nil {
@@ -96,7 +119,7 @@ func (o *Orchestrator) personaAdapter(ctx context.Context) (personas.Adapter, fu
 
 	switch auth.Adapter {
 	case schema.AuthSeed:
-		url, err := o.branchURL(ctx)
+		url, err := o.branchURL(ctx, s)
 		if err != nil {
 			return nil, noop, err
 		}
@@ -118,11 +141,14 @@ func (o *Orchestrator) personaAdapter(ctx context.Context) (personas.Adapter, fu
 		}), noop, nil
 	}
 
-	// Everything left writes rows, so it needs the branch.
-	conn, done, err := o.connectBranch(ctx)
+	// Everything left writes rows, so it needs the branch. Connected through
+	// the session the caller holds rather than opening another, for the
+	// reason on ProvisionPersonas.
+	conn, err := connectSession(ctx, o, s)
 	if err != nil {
 		return nil, noop, err
 	}
+	done := func() { _ = conn.Close(context.Background()) }
 
 	scheme, err := o.personaScheme(ctx, conn, auth)
 	if err != nil {
@@ -243,13 +269,7 @@ func (o *Orchestrator) lookupSecret(ctx context.Context, name string) (secrets.V
 // Handed to a seed command so that the usual seed script, one that writes
 // rows, has somewhere to write them. Registered with the redactor on the way
 // out, because it is about to be put into a child process's environment.
-func (o *Orchestrator) branchURL(ctx context.Context) (secrets.Value, error) {
-	s, err := o.open(ctx, "af personas")
-	if err != nil {
-		return secrets.Value{}, err
-	}
-	defer s.close()
-
+func (o *Orchestrator) branchURL(ctx context.Context, s *session) (secrets.Value, error) {
 	url, err := s.dbProv.ConnString(ctx, provider.Branch{EnvID: o.envID}, provider.ConnDirect)
 	if err != nil {
 		return secrets.Value{}, err
