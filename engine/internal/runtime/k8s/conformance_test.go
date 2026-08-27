@@ -30,8 +30,6 @@ const kubeContextEnv = "AF_KUBE_CONTEXT"
 // TestConformance runs the shared runtime suite against a real cluster.
 func TestConformance(t *testing.T) {
 	kubeContext := requireCluster(t)
-	proxyImage := buildProxyImage(t)
-
 	loader, ok := k8s.LocalClusterLoaderFor(kubeContext)
 	if !ok {
 		// A real cluster pulls the sidecar from a registry, and this suite has
@@ -43,11 +41,17 @@ func TestConformance(t *testing.T) {
 
 	conformance.RunRuntime(t, func(t *testing.T) provider.Runtime {
 		r, err := k8s.New(k8s.Options{
-			Context:      kubeContext,
-			ProxyImage:   proxyImage,
-			Images:       loader,
-			ReadyTimeout: 3 * time.Minute,
-			Clock:        clock.New(),
+			Context: kubeContext,
+			// Resolved on demand, exactly as the engine does it, rather than
+			// built once at the top of the run. Built once is what this did
+			// first, and on a shared machine the image was pruned by another
+			// process between the build and the first Up, which arrived as
+			// k3d refusing to import an image that was not there any more.
+			// Resolving per environment rebuilds it if it has gone.
+			ResolveProxyImage: proxyImage,
+			Images:            loader,
+			ReadyTimeout:      3 * time.Minute,
+			Clock:             clock.New(),
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = r.Close() })
@@ -100,22 +104,15 @@ func requireCluster(t *testing.T) string {
 	}
 }
 
-// buildProxyImage builds the sidecar on the local daemon, which is the only
-// thing that can build it.
-func buildProxyImage(t *testing.T) string {
-	t.Helper()
+// proxyImage builds the sidecar on the local daemon, which is the only thing
+// that can build it, and is called whenever a runtime needs it.
+func proxyImage(ctx context.Context) (string, error) {
 	r, err := local.New(local.Options{Clock: clock.New()})
 	if err != nil {
-		t.Skipf("skipped: the sidecar image is built on the local Docker daemon and "+
-			"none is reachable: %v", err)
+		return "", err
 	}
 	defer func() { _ = r.Close() }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	ref, err := r.EnsureProxyImage(ctx, func(line string) { t.Log(line) })
-	require.NoError(t, err, "the egress sidecar image must build")
-	return ref
+	return r.EnsureProxyImage(ctx, func(string) {})
 }
 
 // pullLocally makes sure an image is on the local daemon, so that it can be
