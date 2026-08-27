@@ -164,7 +164,7 @@ written to the audit log with the address and user agent. Only owners: a member
 with a recovery code could walk around enforcement for themselves, which is most
 of what enforcement is for.
 
-Note what this is not. It is not a second way to authenticate — there is no
+Note what this is not. It is not a second way to authenticate. There is no
 unauthenticated lookup keyed on a recovery code anywhere in this feature. It is
 a decision not to apply enforcement to a sign-in that has already happened.
 
@@ -182,6 +182,43 @@ authenticated as additional data. That last part is not decoration: without it a
 ciphertext is portable, and anybody able to write a row could copy another
 tenant's encrypted client secret into their own connection and have the server
 decrypt it for them.
+
+## Testing against a real provider
+
+Everything above is exercised by suites that build their own assertions and
+their own tokens. That proves the verifier refuses what it should, and it does
+not prove interoperability, because a fixture written by the same person who
+wrote the parser agrees with the parser by construction. The things that break
+against a real provider are the ones nobody thought to put in a fixture: the
+namespace prefix it happens to use, where it puts the signature, whether it
+sends the address as a NameID or a claim.
+
+So there is a conformance suite that drives a real Keycloak, and a script that
+boots one:
+
+```
+eval "$(ee/web/sso/test/keycloak-up.sh)"
+cd ee/web/sso && node --test test/keycloak.test.ts
+ee/web/sso/test/keycloak-up.sh --down
+```
+
+The `eval` is required rather than tidy. The script generates a certificate at
+run time into a temporary directory outside the repository, and prints both
+`AF_KEYCLOAK_URL` and the `NODE_EXTRA_CA_CERTS` that names a file which did not
+exist until it ran.
+
+The provider has to be HTTPS. This is not a preference: `parseIdentityProviderMetadata`
+refuses an `http` single sign-on URL and `discover` refuses an `http` token
+endpoint, because a token exchange over plain HTTP carries a client secret in
+clear text. An earlier version of this suite documented a plain HTTP provider
+and therefore could not have passed, which is worth recording because a suite
+gated behind an environment variable is a suite nobody runs, and a suite nobody
+runs is a claim nobody checks.
+
+The suite is deliberately not part of `just gate` or CI: it boots a container
+and takes minutes. Keycloak is also not a substitute for Entra ID or Okta, which
+have their own quirks, and `docs/plan/STATUS.md` is explicit about which of the
+three any given row rests on.
 
 ## What is not here yet
 

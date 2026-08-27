@@ -137,7 +137,7 @@ escaped so a value cannot smuggle one.
 | --- | --- |
 | 400 | A filter, a patch, or a body this server cannot act on. Carries a `scimType`. |
 | 401 | No token, or a token that is revoked, expired or never existed. All four answer the same. |
-| 404 | No such resource. **A delete for an unknown user is a 404 and is fine** — deprovisioning arrives twice more than anything else. |
+| 404 | No such resource. **A delete for an unknown user is a 404 and is fine**, because deprovisioning arrives twice more than anything else. |
 | 409 | `uniqueness`: that `userName` is taken. |
 | 412 | A stale `If-Match`. Fetch the resource again and retry. |
 | 429 | Rate limited. Bursts of 200 are absorbed; a first directory sync will not trip it. |

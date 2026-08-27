@@ -20,10 +20,21 @@
 // the two hosted providers: those have their own quirks and their own suite,
 // and the rows in STATUS.md stay honest about which has been run.
 //
-//   docker run -d --name af-keycloak -p 8099:8080 \
-//     -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
-//     quay.io/keycloak/keycloak:26.0 start-dev
-//   AF_KEYCLOAK_URL=http://127.0.0.1:8099 node --test test/keycloak.test.ts
+// THE PROVIDER MUST BE HTTPS, and the invocation documented here used to say
+// otherwise, which meant this suite could never have passed. The product
+// refuses a plain HTTP provider in two places on purpose: an http single
+// sign-on URL in parseIdentityProviderMetadata, and an http token endpoint in
+// discover(). Both refusals are right, because a token exchange over plain HTTP
+// carries a client secret in clear text. So the container gets a certificate,
+// generated at run time outside the repository, and the script below is what
+// arranges it:
+//
+//   eval "$(ee/web/sso/test/keycloak-up.sh)"
+//   node --test ee/web/sso/test/keycloak.test.ts
+//   ee/web/sso/test/keycloak-up.sh --down
+//
+// The eval is not decoration. NODE_EXTRA_CA_CERTS has to name a certificate
+// that did not exist until the script ran.
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
@@ -66,8 +77,15 @@ describe('a real identity provider', { skip }, () => {
   const kc = (path: string) => `${KEYCLOAK.replace(/\/$/, '')}${path}`
   const realmUrl = () => kc(`/realms/${realm}`)
 
+  // Every admin call is scoped to the realm this file created.
+  //
+  // This used to build `/admin/realms${path}`, with no realm in it at all, so
+  // `admin('/clients')` asked for `/admin/realms/clients` and Keycloak read
+  // "clients" as the name of a realm it did not have. The whole suite died in
+  // before() on {"error":"Realm not found."}, which is a thing no amount of
+  // reading found and one run surfaced immediately.
   async function admin(path: string, init: RequestInit = {}): Promise<Response> {
-    return fetch(kc(`/admin/realms${path}`), {
+    return fetch(kc(`/admin/realms/${realm}${path}`), {
       ...init,
       headers: {
         authorization: `Bearer ${adminToken}`,
@@ -78,7 +96,11 @@ describe('a real identity provider', { skip }, () => {
   }
 
   before(async () => {
-    h = await start()
+    // The real network, not the map. Every other suite in this package answers
+    // the OIDC endpoints from a fixture, and a fixture cannot exchange a code
+    // with Keycloak. Running this file against the default was the second
+    // reason it could never have passed.
+    h = await start({ network: 'real' })
     realm = `af-lane8-${randomUUID().slice(0, 8)}`
 
     // 1. An administrator token, through the password grant on admin-cli.
@@ -146,7 +168,13 @@ describe('a real identity provider', { skip }, () => {
         enabled: true,
         publicClient: false,
         standardFlowEnabled: true,
-        redirectUris: [`https://antifailure.test/sso/oidc/${handle}/callback`],
+        // handle + 'o', because that is the handle the OIDC CONNECTION is
+        // stored under a few lines below, and therefore the one the callback
+        // route builds its redirect_uri from. Registering the bare handle here
+        // made Keycloak answer invalid_redirect_uri and return a 400 error
+        // page, which then failed as "no login form" three frames away from
+        // the cause.
+        redirectUris: [`https://antifailure.test/sso/oidc/${handle}o/callback`],
         attributes: { 'post.logout.redirect.uris': '+' },
       }),
     })
@@ -210,7 +238,6 @@ describe('a real identity provider', { skip }, () => {
 
   after(async () => {
     if (orgId) await dropOrg(h, orgId)
-    if (realm && adminToken) await admin(`/`, { method: 'DELETE' }).catch(() => {})
     if (realm && adminToken) {
       await fetch(kc(`/admin/realms/${realm}`), {
         method: 'DELETE',
@@ -250,8 +277,17 @@ describe('a real identity provider', { skip }, () => {
     }
 
     const page = await response.text()
-    const action = /<form[^>]*\baction="([^"]+)"/i.exec(page)?.[1]
-    assert.ok(action, `no login form at ${url}: ${page.slice(0, 400)}`)
+    // Single or double quoted, because a theme is free to choose and this
+    // assertion is not the place to be strict about somebody else's HTML.
+    const action = /<form[^>]*\baction=["']([^"']+)["']/i.exec(page)?.[1]
+    // The slice used to be 400 characters, which on a Keycloak login page is
+    // exactly the <head> and none of the form, so a failure here printed a page
+    // that looked right and told you nothing. Print the status, the URL, and
+    // enough of the body to see what actually came back.
+    assert.ok(
+      action,
+      `no login form at ${url} (status ${response.status}):\n${page.slice(0, 4000)}`,
+    )
     const formUrl = decodeHtml(action)
 
     const submitted = await fetch(formUrl, {

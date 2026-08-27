@@ -18,7 +18,7 @@
 import postgres from 'postgres'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createPool, migrate, sql, type Pool } from '@antifailure/db'
-import { createServer, clearExtensions, registerExtension, setSignInPolicy, FakeClock } from '@antifailure/api'
+import { createServer, clearExtensions, registerExtension, setSignInPolicy, FakeClock, systemClock, type Clock } from '@antifailure/api'
 import { ssoExtension } from '../src/index.ts'
 import { signInPolicy } from '../src/enforce.ts'
 import { seal } from '../src/secrets.ts'
@@ -78,7 +78,7 @@ export const ENCRYPTION_KEY = randomBytes(32)
 export interface Harness {
   admin: postgres.Sql
   pool: Pool
-  clock: FakeClock
+  clock: Clock
   app: ReturnType<typeof createServer>['app']
   idp: Idp
   fetchMock: { responses: Map<string, unknown>; calls: string[] }
@@ -95,22 +95,50 @@ export interface Org {
   domain: string
 }
 
-export async function start(options: { seats?: number | null } = {}): Promise<Harness> {
+export interface StartOptions {
+  seats?: number | null
+  /**
+   * Where the OIDC half of the extension sends its requests.
+   *
+   * `mock`, the default, answers from a map and reaches no network, which is
+   * what every offline suite wants. `real` performs the request for real and
+   * still records the URL, which is what the conformance suite against a live
+   * provider needs: a fake fetch cannot exchange a code with Keycloak, and a
+   * suite whose token endpoint is stubbed is not testing interoperability at
+   * all. This flag exists because that suite was written against the default
+   * and could therefore never have passed.
+   */
+  network?: 'mock' | 'real'
+}
+
+export async function start(options: StartOptions = {}): Promise<Harness> {
   const admin = postgres(adminUrl, { max: 2, connect_timeout: 30, onnotice: () => {} })
   await migrate(admin)
   await admin.unsafe(`ALTER ROLE antifailure_app LOGIN PASSWORD 'app-test-password'`)
 
+  const real = options.network === 'real'
   const pool = createPool({ url: appUrl(), max: 3, connectTimeoutSeconds: 30, statementTimeoutSeconds: 60 })
-  const clock = new FakeClock()
+  // A real provider needs a real clock.
+  //
+  // FakeClock is pinned to 2026-01-01, and Keycloak issues an assertion stamped
+  // with the actual time, so every one of them is "not valid until" a date
+  // eight months after the clock believes it is. The offline suites want the
+  // frozen clock, because a frozen clock is what makes an expiry test
+  // deterministic. A conformance run wants the wall clock, for the same reason
+  // it wants the real network.
+  const clock: Clock = real ? systemClock : new FakeClock()
   const idp = makeIdp()
 
   // A fetch that answers from a map, so the OIDC path can be driven without a
   // network. Every URL asked for is recorded, which is what lets a test assert
   // that the token endpoint was reached rather than assuming it.
   const fetchMock = { responses: new Map<string, unknown>(), calls: [] as string[] }
-  const fakeFetch: typeof fetch = (async (input: string | URL | Request) => {
+  const fakeFetch: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    // Recorded either way, so a test can still assert the token endpoint was
+    // reached rather than assuming a path that skipped it.
     fetchMock.calls.push(url)
+    if (real) return globalThis.fetch(input as never, init)
     const body = fetchMock.responses.get(url)
     if (body === undefined) {
       return new Response(JSON.stringify({ error: 'not_configured' }), { status: 404 })
