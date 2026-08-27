@@ -147,18 +147,37 @@ func tryStartVault() (*liveVault, error) {
 	// IPC_LOCK because that is what HashiCorp's own documentation says to run
 	// this image with. Vault locks its memory so that secrets cannot be paged
 	// to disk, and a container without the capability may refuse to start.
-	out, err := exec.Command("docker", "run", "-d",
+	run := exec.Command("docker", "run", "-d",
 		"-p", "0:8200",
 		"--cap-add", "IPC_LOCK",
 		"-e", "VAULT_DEV_ROOT_TOKEN_ID="+token,
 		"--entrypoint", "vault",
 		vaultImage,
 		"server", "-dev", "-dev-listen-address=0.0.0.0:8200",
-	).CombinedOutput()
+	)
+	// Standard output only, kept apart from standard error. docker writes the
+	// container id to stdout and everything else to stderr, and "everything
+	// else" includes the pull progress when the image is not cached. Reading
+	// them together gives an id with twenty lines of "Pulling fs layer" in
+	// front of it, which every later docker command then rejects.
+	//
+	// This is invisible on a machine that has run the tests once, because the
+	// image is already there and stderr is empty. It fails on every clean
+	// machine, which is to say on CI and on a new contributor's laptop and
+	// nowhere in between.
+	var runErr bytes.Buffer
+	run.Stderr = &runErr
+	out, err := run.Output()
 	if err != nil {
-		return nil, fmt.Errorf("docker run: %s", strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("docker run: %s", strings.TrimSpace(runErr.String()))
 	}
 	id := strings.TrimSpace(string(out))
+	if len(id) < 12 || strings.ContainsAny(id, " \n") {
+		// Belt and braces. If docker ever writes something else to stdout, this
+		// says so rather than passing a sentence to `docker port` and reporting
+		// its confusion as a Vault problem.
+		return nil, fmt.Errorf("docker run did not print a container id; it printed %q", id)
+	}
 
 	// Whether it is still running, before asking about its ports. `docker port`
 	// on an exited container answers "page not found", which reads as a bug in
