@@ -739,10 +739,7 @@ func (o *Orchestrator) Up(ctx context.Context) (res *Result, err error) {
 			return
 		}
 		s.bus.Info(o.envID, events.EnvReady, "the environment is ready",
-			events.F("preview_url", res.URL),
-			events.F("golden_version", res.Golden),
-			events.F("runtime", "local"),
-			events.F("seconds", o.opts.Clock.Since(started).Seconds()))
+			readyFields(res, "local", o.opts.Clock.Since(started).Seconds())...)
 	}()
 
 	// Before anything is created, so that a refusal costs nothing. Checking
@@ -907,6 +904,36 @@ func (o *Orchestrator) Up(ctx context.Context) (res *Result, err error) {
 // AF-DB-001 rather than to a sentence written for a terminal, which is the
 // difference between a dashboard that can group failures and one that shows a
 // list of English.
+// readyFields is the payload of the environment.ready event.
+//
+// A function rather than a literal inside Up so that the one decision it makes
+// can be tested without a Docker daemon. What it decides is whether to send
+// preview_url at all.
+//
+// Omitted rather than sent empty. Result.URL is documented as empty when the
+// manifest declares no web service, and a consumer reading preview_url cannot
+// tell an empty string from a field somebody forgot to set: one means "there
+// is nothing to open" and the other means "this is broken", and they want
+// opposite responses. An absent key says the first and cannot be rendered as a
+// link by accident.
+//
+// This will matter more than it does today. Lane 4 reports that a Kubernetes
+// environment with no runtime.domain configured has no reachable address for
+// any service, so empty becomes the ordinary case there rather than the
+// unusual one. The runtime name is a parameter for the same reason: there is
+// one runtime on this branch and there is about to be more than one.
+func readyFields(res *Result, runtime string, seconds float64) []events.Field {
+	fields := []events.Field{
+		events.F("golden_version", res.Golden),
+		events.F("runtime", runtime),
+		events.F("seconds", seconds),
+	}
+	if res.URL != "" {
+		fields = append(fields, events.F("preview_url", res.URL))
+	}
+	return fields
+}
+
 func codeOf(err error) aferrors.Code {
 	var e *aferrors.Error
 	if aferrors.As(err, &e) {
