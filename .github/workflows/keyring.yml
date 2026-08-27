@@ -111,5 +111,10 @@ jobs:
             printf harness | secret-tool store --label=harness service af-harness account probe
             test "$(secret-tool lookup service af-harness account probe)" = harness
             secret-tool clear service af-harness account probe
-            go test ./internal/secrets/... -count=1 -race
+            # No -race. The race detector needs cgo and this job runs with
+            # CGO_ENABLED=0 deliberately, because that is how the binary ships
+            # and it is the configuration the keyring implementations exist to
+            # work under. The engine job already runs the whole tree under the
+            # race detector on a normal build.
+            go test ./internal/secrets/... -count=1
           '
