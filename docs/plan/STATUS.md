@@ -184,7 +184,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 3.6 Authentication adapters | planned | |
 | 3.7 Neon | proven | The full database conformance suite, all 23 behaviours, against the real Neon API. Found three bugs a fake would not have: `pooled` omitted means pooled, so `ConnDirect` was returning a pooled connection; a 200 with an empty body broke destroy-twice; and Neon's own branch ceiling arrived as an unexplained 422. |
 | 3.8 Supabase | planned | Blocked on Q5: no account provisioned. |
-| 3.9 DBLab | written | `engine/internal/db/dblab` implements the provider and is exercised against a REAL Database Lab Engine (v4.1.3, built for arm64, ZFS pool in a Colima VM), not a fake. Not yet `proven`: the full 23 behaviour run has not completed cleanly end to end. Two real bugs already found that a fake would have agreed with. A clone leaves the engine's API before its ZFS dataset is released, so collecting a golden raced a teardown the API said was finished. And a three minute wait was too short for a second concurrent clone, which did not merely fail: the engine finished making the clone afterwards, so giving up early created an orphan. |
+| 3.9 DBLab | proven | The full database conformance suite against a REAL Database Lab Engine (v4.1.3, built for arm64, ZFS pool in a Colima VM, its own retrieval having pulled a 5000/20000 row source database in): 21 behaviours PASS, 0 FAIL, and 2 skipped by name because this provider does not declare pooled endpoints or a concurrent branch limit. The suite's leak check found nothing left behind. Found three bugs a fake would have agreed with. A clone leaves the engine's API BEFORE its ZFS dataset is released, so collecting a golden raced a teardown the API said had finished, and every golden the suite made was leaking. A three minute wait was too short for a second concurrent clone, which did not merely fail: the engine finished the clone afterwards, so giving up early CREATED an orphan the harness never asked back. And the declared branch latency described a best case. |
 | 3.10 Golden lifecycle | planned | |
 | 3.11 Postgres Insights | planned | |
 
@@ -215,7 +215,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/subset` | proven | dependency order, cycles named where they break, unreachable tables reported |
 | Neon provider | proven | against the real service |
 | Supabase provider | planned | blocked on an account |
-| DBLab provider | written | run against a real self hosted engine; full suite pass outstanding |
+| DBLab provider | proven | against a real self hosted engine, 21 behaviours, 2 named skips, nothing left behind |
 
 ## Phase 4. Build and runtime
 
