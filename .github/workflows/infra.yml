@@ -1,0 +1,192 @@
+# Terraform, on every pull request that touches infra/.
+#
+# The point is that a change which would DESTROY something is visible in review,
+# rather than discovered by the person who runs apply. A plan in a comment is
+# the cheapest code review a piece of infrastructure ever gets.
+#
+# The plan job needs Azure. When the federated credential is not configured it
+# is SKIPPED rather than passed: a green check that did not check anything is
+# worse than a missing one, so the job says out loud which it was.
+name: infra
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - 'tools/azguard/**'
+      - 'tools/cost/**'
+      - '.github/workflows/infra.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - 'tools/azguard/**'
+      - 'tools/cost/**'
+
+permissions:
+  contents: read
+
+env:
+  # Pinned, and verified by checksum below. A toolchain fetched over the network
+  # without a checksum is a supply chain hole in the job that guards the
+  # infrastructure.
+  TERRAFORM_VERSION: 1.13.4
+  TERRAFORM_SHA256: 98aa516201e948306698efd9954ab4cc0d1227c2578ba56245898b5f679e590b
+
+jobs:
+  # The half that needs no cloud account, and therefore always runs.
+  static:
+    name: fmt, validate, guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Terraform
+        run: |
+          set -euo pipefail
+          url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          curl -fsSL -o /tmp/tf.zip "$url"
+          echo "${TERRAFORM_SHA256}  /tmp/tf.zip" | sha256sum -c -
+          sudo unzip -o -q /tmp/tf.zip -d /usr/local/bin
+          terraform version
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive infra/terraform
+
+      - name: terraform validate
+        run: |
+          set -euo pipefail
+          for dir in infra/terraform/modules/* infra/terraform/stacks/*; do
+            [ -d "$dir" ] || continue
+            echo "== $dir"
+            terraform -chdir="$dir" init -backend=false -input=false >/dev/null
+            terraform -chdir="$dir" validate
+          done
+
+      # The azguard and cost tests are deliberately NOT run here. ci.yml already
+      # runs `cd tools && go test ./...` on every pull request and that covers
+      # both. A second, narrower invocation would be a gate with no matching
+      # `just gate` recipe, which gatecheck refuses, and it would be right to:
+      # the promise is that a green `just gate` means a green CI, and that only
+      # holds while the two run the same things.
+
+      # tfsec reads the configuration and needs no credentials, so it runs on
+      # every pull request including one from a fork.
+      - name: tfsec
+        uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6 # v1.0.3
+        with:
+          working_directory: infra/terraform
+          soft_fail: true
+
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    needs: static
+    permissions:
+      contents: read
+      # For the federated credential. No secret, no password, nothing with a
+      # lifetime longer than this job.
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Is Azure configured?
+        id: azure
+        env:
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          if [ -n "$CLIENT_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Plan skipped::AZURE_CLIENT_ID is not set, so no plan was produced. This job checked nothing; it did not pass."
+          fi
+
+      - uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
+        if: steps.azure.outputs.ready == 'true'
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Terraform
+        if: steps.azure.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          curl -fsSL -o /tmp/tf.zip "$url"
+          echo "${TERRAFORM_SHA256}  /tmp/tf.zip" | sha256sum -c -
+          sudo unzip -o -q /tmp/tf.zip -d /usr/local/bin
+
+      - name: terraform plan
+        if: steps.azure.outputs.ready == 'true'
+        working-directory: infra/terraform/stacks/control-plane
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          # Placeholders. A plan does not need the real OAuth application, and
+          # putting one in a pull request job would expose it to any fork.
+          TF_VAR_github_client_id: plan-only
+          TF_VAR_github_client_secret: plan-only
+          TF_VAR_github_redirect_uri: https://example.invalid/auth/callback
+        run: |
+          set -euo pipefail
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ secrets.AZURE_TFSTATE_RG }}" \
+            -backend-config="storage_account_name=${{ secrets.AZURE_TFSTATE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=control-plane.tfstate" \
+            -backend-config="use_oidc=true"
+          terraform plan -input=false -lock-timeout=5m -out=plan.tfplan
+          terraform show -json plan.tfplan > plan.json
+          terraform show -no-color plan.tfplan > plan.txt
+
+      # What this will cost, before it exists. --budget makes it a gate rather
+      # than a note: a plan projected above the resource group's budget in
+      # ISOLATION.md fails here instead of on an invoice.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        if: steps.azure.outputs.ready == 'true'
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
+      - name: cost estimate
+        if: steps.azure.outputs.ready == 'true'
+        run: |
+          GOTOOLCHAIN=local go run ./tools/cost estimate \
+            --plan infra/terraform/stacks/control-plane/plan.json \
+            --pricing infra/pricing.yaml \
+            --budget 300 | tee cost.txt
+
+      # The destroy count, called out on its own. A plan buried in a log is a
+      # plan nobody reads; "3 to destroy" in the summary is one somebody asks
+      # about.
+      - name: Summarise
+        if: steps.azure.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          cd infra/terraform/stacks/control-plane
+          destroys=$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' plan.json)
+          {
+            echo "## Terraform plan"
+            echo
+            if [ "$destroys" -gt 0 ]; then
+              echo "**This plan DESTROYS $destroys resource(s).** Read it before approving."
+            else
+              echo "Nothing is destroyed by this plan."
+            fi
+            echo
+            echo '<details><summary>plan</summary>'
+            echo
+            echo '```'
+            head -c 60000 plan.txt
+            echo '```'
+            echo '</details>'
+            echo
+            echo '```'
+            cat "$GITHUB_WORKSPACE/cost.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
