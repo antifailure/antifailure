@@ -34,7 +34,19 @@ type RuntimeOptions struct {
 	// turned the self test into a four minute hang before the waits here were
 	// made to honour it.
 	Timeout time.Duration
-	// SkipSlow omits the behaviors that bring up two environments.
+	// SkipSlow omits the slowest behaviors, for a run that wants an answer
+	// quickly.
+	//
+	// It cannot omit a containment behavior, and the guard is written as the
+	// Egress_ prefix rather than as a list so that a containment behavior
+	// added later is covered by default rather than when somebody remembers.
+	// This knob used to skip Egress_NamesDoNotCrossEnvironments, which is the
+	// one that proves a service name in one environment does not resolve to
+	// another environment's service. It was the slowest behavior in the suite
+	// and it is also the whole isolation promise, and those two facts together
+	// are exactly why it was the wrong thing to make optional: the runs that
+	// want to go fast are the tired ones, and a green run that never checked
+	// isolation is worse than a slow one.
 	SkipSlow bool
 	// ShellImage is an image holding a POSIX shell, wget, and nslookup. The
 	// default is Alpine, which has all three through busybox.
@@ -318,9 +330,9 @@ func runtimeSkipReason(b Behavior, caps provider.RuntimeCaps, opts RuntimeOption
 			return "log reading"
 		}
 	}
-	if opts.SkipSlow {
+	if opts.SkipSlow && !strings.HasPrefix(b.Name, "Egress_") {
 		switch b.Name {
-		case "Down_TouchesOnlyItsOwnEnvironment", "Egress_NamesDoNotCrossEnvironments":
+		case "Down_TouchesOnlyItsOwnEnvironment":
 			return "a run configured to skip slow behaviors"
 		}
 	}

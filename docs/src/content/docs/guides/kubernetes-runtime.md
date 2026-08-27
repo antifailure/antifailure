@@ -192,9 +192,11 @@ reused normally, which is what makes `af up` idempotent.
 ## Conformance
 
 This runtime is held to the same suite the local one is, and the containment
-behaviours in that suite are not skippable by any capability a runtime can
-declare. A runtime that could declare its way out of them would be a supported
-way to ship one that lets environments reach the internet.
+behaviours in that suite cannot be skipped by anything: not by a capability a
+runtime declares, and not by the knob that trims a slow local run. A runtime
+that could declare its way out of them would be a supported way to ship one
+that lets environments reach the internet, and a knob that skips them is the
+same hole with a friendlier name.
 
 It has passed: 31 behaviours green against a real k3s cluster in one run, with
 one skipped because no domain was configured and there was therefore no ingress
