@@ -92,3 +92,15 @@ bin/
 /licensegen
 engine/af-proxy
 engine/af
+
+# Terraform. State and provider binaries never belong in the repository, and a
+# local backend override is a working convenience rather than a shared choice.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+local_backend_override.tf
+backend.hcl
+*.auto.tfvars

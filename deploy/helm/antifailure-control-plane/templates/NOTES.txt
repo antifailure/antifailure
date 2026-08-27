@@ -1,0 +1,54 @@
+{{ include "cp.fullname" . }} is installed.
+
+Image:    {{ include "cp.image" . }}
+Replicas: {{ if .Values.autoscaling.enabled }}{{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} (autoscaled){{ else }}{{ .Values.replicaCount }}{{ end }}
+
+{{ if .Values.bootstrap.enabled -}}
+The bootstrap job applied the schema and granted the application role its
+membership in antifailure_app. Read what it did:
+
+  kubectl logs -n {{ .Release.Namespace }} job/{{ include "cp.fullname" . }}-bootstrap-{{ .Release.Revision }}
+{{- else -}}
+bootstrap.enabled is false, so nothing applied the schema or granted the
+application role membership in antifailure_app. If neither has been done by
+hand, every request will fail: a role with no USAGE on the schema is told the
+relation does not exist.
+{{- end }}
+
+{{ if .Values.ingress.enabled -}}
+Reachable at:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+
+The GitHub OAuth App's callback URL must match github.redirectUri exactly, or
+sign in fails with a redirect_uri mismatch.
+{{- else -}}
+No ingress. To reach it from your machine:
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "cp.fullname" . }} 8080:{{ .Values.service.port }}
+  curl localhost:8080/health
+{{- end }}
+
+Two things worth knowing:
+
+  Readiness is a TCP check, not /health. /health is a static literal in the
+  application and never touches the database, so it cannot distinguish a
+  replica that has lost its database from one that is serving.
+
+  Partition maintenance: {{ .Values.maintenance.mode }}.
+{{- if eq .Values.maintenance.mode "cronjob" }}
+  The Deployment holds no DDL credential. Only the bootstrap Job and the
+  maintenance CronJob do. That is deliberate: a role that can ALTER TABLE can
+  drop the policies that isolate tenants, and the pods exposed to traffic
+  should not be holding one.
+{{- else if eq .Values.maintenance.mode "inProcess" }}
+  Every serving replica holds a credential that can ALTER TABLE, because that
+  is what maintenance.mode=inProcess means. maintenance.mode=cronjob moves that
+  work to a Job and takes the credential out of the serving pods.
+{{- else }}
+  maintenance.mode is off, so NOTHING in this release keeps the event
+  partitions ahead of the writes. A range-partitioned table with no partition
+  for an incoming row does not slow down, it fails. Something outside this
+  chart must be doing it.
+{{- end }}
