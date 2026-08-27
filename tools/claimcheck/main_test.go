@@ -197,3 +197,188 @@ func TestAParentOfATrackedFileCounts(t *testing.T) {
 		}
 	}
 }
+
+// Documentation addresses hardcoded in Go source.
+
+func TestADocsURLIsFoundInAStringLiteral(t *testing.T) {
+	got := docsURL.FindStringSubmatch(`"see https://antifailure.dev/docs/guides/build for more"`)
+	if got == nil {
+		t.Fatal("a docs address in a literal must be found")
+	}
+	if got[1] != "guides/build" {
+		t.Errorf("captured %q, want the path", got[1])
+	}
+}
+
+func TestDocPageExistsAcceptsBothShapesTheSiteUses(t *testing.T) {
+	tracked := trackedSet(
+		"docs/src/content/docs/guides/build.md",
+		"docs/src/content/docs/providers/index.md",
+	)
+	for _, page := range []string{"guides/build", "providers"} {
+		if !docPageExists(tracked, page) {
+			t.Errorf("%q should resolve", page)
+		}
+	}
+	if docPageExists(tracked, "guides/builds") {
+		t.Error("a page that does not exist must not resolve")
+	}
+}
+
+// The reason this reads literals rather than the file text: the first version
+// grepped the whole file and its first hit was this tool's own comment quoting
+// the broken URL as an example. The doc comment claimed it read only literals
+// while the code read everything, which is the same disagreement between a
+// stated rule and an implemented one that this repository keeps finding.
+func TestAURLInACommentIsNotAClaim(t *testing.T) {
+	root := t.TempDir()
+	src := "package p\n\n// It stamped https://antifailure.dev/docs/nope/missing into the output.\nconst X = 1\n"
+	if err := os.WriteFile(filepath.Join(root, "x.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := checkDocsURLs(root, trackedSet(), &out); err != nil {
+		t.Fatalf("a URL in a comment must not fail the build: %v\n%s", err, out.String())
+	}
+}
+
+func TestAURLInALiteralPointingNowhereFails(t *testing.T) {
+	root := t.TempDir()
+	src := "package p\n\nconst X = \"https://antifailure.dev/docs/nope/missing\"\n"
+	if err := os.WriteFile(filepath.Join(root, "x.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := checkDocsURLs(root, trackedSet(), &out); err == nil {
+		t.Fatal("a literal pointing at a missing page must fail")
+	}
+	if !strings.Contains(out.String(), "404") {
+		t.Errorf("the report should mark it, got %q", out.String())
+	}
+}
+
+// A placeholder describes the shape of a URL rather than naming one.
+func TestAPlaceholderPathIsIgnored(t *testing.T) {
+	root := t.TempDir()
+	src := "package p\n\nconst X = \"https://antifailure.dev/docs/<path>\"\n"
+	if err := os.WriteFile(filepath.Join(root, "x.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := checkDocsURLs(root, trackedSet(), &out); err != nil {
+		t.Fatalf("a placeholder must not fail the build: %v", err)
+	}
+}
+
+// The one that matters: every address the real engine prints must resolve.
+// engine/internal/build stamped /docs/guides/builds into every generated
+// Dockerfile, four times, and the page is guides/build. That URL was live and
+// it 404'd, in output handed to somebody at the moment their build failed.
+func TestEveryDocsURLTheRealEnginePrintsResolves(t *testing.T) {
+	root := filepath.Join("..", "..")
+	tracked, err := trackedPaths(root)
+	if err != nil {
+		t.Skipf("no git here: %v", err)
+	}
+	var out strings.Builder
+	if err := checkDocsURLs(root, tracked, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "documentation addresses in Go source") {
+		t.Errorf("the summary should say how many were checked, got %q", out.String())
+	}
+}
+
+// Internal documentation links.
+
+func writeDocsTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for name, body := range files {
+		full := filepath.Join(root, "docs", "src", "content", "docs", filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// The bug this found live: astro.config.mjs sets base "/docs" and Starlight does
+// not rewrite absolute links to include it, so /concepts/egress/ points outside
+// the site. 78 links were written that way and 404'd for real readers.
+func TestALinkWithoutTheDocsBaseIsReported(t *testing.T) {
+	root := writeDocsTree(t, map[string]string{
+		"index.md": "See [egress](/concepts/egress/).\n",
+	})
+	tracked := trackedSet("docs/src/content/docs/concepts/egress.md")
+
+	var out strings.Builder
+	if err := checkDocsLinks(root, tracked, &out); err == nil {
+		t.Fatal("a link missing the site base must fail; it 404s for a real reader")
+	}
+	if !strings.Contains(out.String(), "BASE") {
+		t.Errorf("the report should mark it, got %q", out.String())
+	}
+}
+
+func TestALinkWithTheBaseAndARealPagePasses(t *testing.T) {
+	root := writeDocsTree(t, map[string]string{
+		"index.md": "See [egress](/docs/concepts/egress/) and [masking](/docs/concepts/masking).\n",
+	})
+	tracked := trackedSet(
+		"docs/src/content/docs/concepts/egress.md",
+		"docs/src/content/docs/concepts/masking.md",
+	)
+
+	var out strings.Builder
+	if err := checkDocsLinks(root, tracked, &out); err != nil {
+		t.Fatalf("correct links should pass: %v\n%s", err, out.String())
+	}
+}
+
+// Both spellings the site accepts, with and without a trailing slash. An
+// earlier negative control of mine silently substituted nothing because it
+// assumed the trailing slash, which taught me about my control rather than
+// about the code.
+func TestATrailingSlashIsOptionalOnALink(t *testing.T) {
+	tracked := trackedSet("docs/src/content/docs/concepts/egress.md")
+	for _, link := range []string{"/docs/concepts/egress/", "/docs/concepts/egress"} {
+		root := writeDocsTree(t, map[string]string{"index.md": "[x](" + link + ")\n"})
+		var out strings.Builder
+		if err := checkDocsLinks(root, tracked, &out); err != nil {
+			t.Errorf("%q should pass: %v", link, err)
+		}
+	}
+}
+
+func TestALinkToAPageThatDoesNotExistIsReported(t *testing.T) {
+	root := writeDocsTree(t, map[string]string{
+		"index.md": "[gone](/docs/concepts/nonexistent/)\n",
+	})
+	var out strings.Builder
+	if err := checkDocsLinks(root, trackedSet(), &out); err == nil {
+		t.Fatal("a link to a missing page must fail")
+	}
+	if !strings.Contains(out.String(), "404") {
+		t.Errorf("the report should mark it, got %q", out.String())
+	}
+}
+
+// The one that matters: every cross reference on the real site resolves.
+func TestEveryInternalDocumentationLinkResolves(t *testing.T) {
+	root := filepath.Join("..", "..")
+	tracked, err := trackedPaths(root)
+	if err != nil {
+		t.Skipf("no git here: %v", err)
+	}
+	var out strings.Builder
+	if err := checkDocsLinks(root, tracked, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "internal documentation links") {
+		t.Errorf("the summary should say how many were checked, got %q", out.String())
+	}
+}

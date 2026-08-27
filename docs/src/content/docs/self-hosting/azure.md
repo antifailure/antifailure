@@ -195,5 +195,5 @@ be destroyed and recreated immediately is one whose secrets can be replaced by
 somebody holding only delete. It will block a new vault of the same name for
 seven days.
 
-Related: [the control plane](/self-hosting/control-plane/),
-[configuration](/reference/control-plane/).
+Related: [the control plane](/docs/self-hosting/control-plane/),
+[configuration](/docs/reference/control-plane/).

@@ -15,12 +15,43 @@ on:
       - 'web/**'
       - 'deploy/**'
       - '.github/workflows/control-plane-image.yml'
+
+  # NO `paths:` FILTER HERE, AND THAT IS THE POINT.
+  #
+  # GitHub combines `branches`/`tags` with `paths` as an AND, so a `paths:`
+  # filter sitting in the same block as `tags: ['v*']` is also applied to the
+  # tag push. A release workflow that publishes on a version tag and quietly
+  # never runs is the failure this shape produces, and it produces it silently:
+  # there is no red check, there is no run at all, and the first symptom is an
+  # operator pulling an image that was never built.
+  #
+  # The cost of dropping the filter is a few wasted minutes when a push to main
+  # touches nothing this workflow cares about. That is the cheaper mistake.
   push:
     branches: [main]
-    paths:
-      - 'web/**'
-      - 'deploy/**'
     tags: ['v*']
+
+  # Publishing a tag that already exists.
+  #
+  # v0.1.1 was tagged for the CLI release before this workflow existed, so the
+  # tag push that would have built the image happened months of commits ago
+  # against a tree with no Dockerfile in it. Re-pointing a released tag to
+  # rebuild it would re-run the CLI release and rewrite a published artifact,
+  # which is worse than the problem. This input publishes the image under a
+  # chosen tag from the current ref instead, and the image's own
+  # org.opencontainers.image.revision label records the commit it was really
+  # built from, so the two can never quietly disagree.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to publish, e.g. v0.1.1. Defaults to main-<sha>.'
+        required: false
+        type: string
+      latest:
+        description: 'Also move :latest to this image.'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -44,7 +75,18 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+          requested="${{ inputs.tag }}"
+          if [[ -n "$requested" ]]; then
+            # A tag reaches a registry path and an OCI reference. Anything
+            # outside this set either fails deep inside `docker push` with a
+            # message about a malformed reference, or does not fail at all and
+            # publishes something nobody meant to.
+            [[ "$requested" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || {
+              echo "::error::refusing tag '$requested': a tag is 1 to 128 characters of letters, digits, dot, dash and underscore, and may not start with a separator"
+              exit 1
+            }
+            tag="$requested"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             tag="${GITHUB_REF#refs/tags/}"
           elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
             tag="main-$(git rev-parse --short HEAD)"
@@ -52,7 +94,7 @@ jobs:
             tag="pr-${{ github.event.number }}"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "building $tag"
+          echo "building $tag from $(git rev-parse HEAD)"
 
       - name: Build
         run: |
@@ -101,15 +143,15 @@ jobs:
       # Only after everything above, and never from a pull request: a fork must
       # not be able to publish under this repository's name.
       - name: Log in to ghcr.io
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Push
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
           docker push "${IMAGE}:${{ steps.meta.outputs.tag }}"
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+          if [[ "${GITHUB_REF}" == refs/tags/v* || "${{ inputs.latest }}" == "true" ]]; then
             docker tag "${IMAGE}:${{ steps.meta.outputs.tag }}" "${IMAGE}:latest"
             docker push "${IMAGE}:latest"
           fi

@@ -558,8 +558,6 @@ func publishedPort(ports nat.PortMap) (int, error) {
 // the same port between the probe and the bind.
 func (p *Provider) freePort() (int, error) { return p.ports.Free() }
 
-var errNotOurs = dockerutil.ErrNotOurs
-
 // AttachToNetwork connects a branch's container to a network under an alias.
 //
 // It exists because the connection string this provider hands out points at

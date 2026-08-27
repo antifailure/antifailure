@@ -24,6 +24,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"io/fs"
 	"os"
@@ -32,6 +35,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -129,7 +133,221 @@ func run(root string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return decide(tracked, claims, notAPath, out)
+	if err := decide(tracked, claims, notAPath, out); err != nil {
+		return err
+	}
+	if err := checkDocsURLs(root, tracked, out); err != nil {
+		return err
+	}
+	return checkDocsLinks(root, tracked, out)
+}
+
+// docsBase is where the documentation site is served from. It is not cosmetic:
+// astro.config.mjs sets `base: "/docs"`, and Starlight does NOT rewrite absolute
+// links to include it. A link written as /concepts/egress/ therefore points at
+// antifailure.dev/concepts/egress/, which is outside the site and 404s.
+const docsBase = "/docs/"
+
+// internalLink matches a markdown link to an absolute path on our own site.
+var internalLink = regexp.MustCompile(`\]\((/[A-Za-z0-9._/-]*)\)`)
+
+// checkDocsLinks verifies that every internal link in the documentation points
+// at a page that exists, at the address the site actually serves.
+//
+// This found 78 broken links live. The site is served under /docs and 78 links
+// were written without it, so a reader following a cross reference in the
+// middle of a page got a 404. Confirmed against production rather than
+// reasoned about: /concepts/agents/ returned 404 and /docs/concepts/agents/
+// returned 200.
+//
+// The reason it went unnoticed is worth recording, because it is the same
+// shape as everything else in this file: BOTH conventions were in use, 68
+// links correct and 78 wrong, so any single page a person opened had a decent
+// chance of looking fine.
+func checkDocsLinks(root string, tracked map[string]bool, out io.Writer) error {
+	dir := filepath.Join(root, "docs", "src", "content", "docs")
+	if _, err := os.Stat(dir); err != nil {
+		report(out, "claimcheck: no documentation tree at %s, so no links checked\n", dir)
+		return nil
+	}
+
+	var wrongBase, dead []string
+	checked := 0
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || (filepath.Ext(path) != ".md" && filepath.Ext(path) != ".mdx") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		for i, line := range strings.Split(string(body), "\n") {
+			for _, m := range internalLink.FindAllStringSubmatch(line, -1) {
+				target := m[1]
+				checked++
+				where := fmt.Sprintf("%s:%d", filepath.ToSlash(rel), i+1)
+
+				if !strings.HasPrefix(target, docsBase) {
+					wrongBase = append(wrongBase, where+" -> "+target)
+					continue
+				}
+				page := strings.Trim(strings.TrimPrefix(target, docsBase), "/")
+				if page != "" && !docPageExists(tracked, page) {
+					dead = append(dead, where+" -> "+target)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	sort.Strings(wrongBase)
+	sort.Strings(dead)
+	for _, w := range wrongBase {
+		report(out, "BASE     %s  (the site is served under %s)\n", w, docsBase)
+	}
+	for _, d := range dead {
+		report(out, "404      %s\n", d)
+	}
+	report(out, "claimcheck: %d internal documentation links, %d with the wrong base, %d pointing nowhere\n",
+		checked, len(wrongBase), len(dead))
+
+	if n := len(wrongBase) + len(dead); n > 0 {
+		return fmt.Errorf("%d internal documentation links are broken. A reader following a cross "+
+			"reference in the middle of a page gets a 404", n)
+	}
+	return nil
+}
+
+// docsURL matches a documentation address written as a literal in Go source.
+//
+// Only literals: `"https://antifailure.dev/docs/" + e.Entry.Docs` builds its
+// path at run time from the error catalog, and tools/errcheck already proves
+// every entry in that catalog has a page. What this catches is the other kind,
+// a path typed by hand into a string, which nothing was checking.
+var docsURL = regexp.MustCompile(`https://antifailure\.dev/docs/([A-Za-z0-9._/-]+)`)
+
+// checkDocsURLs verifies that every documentation address hardcoded in Go
+// source points at a page that exists.
+//
+// It is here because this class has already shipped. engine/internal/build
+// stamped https://antifailure.dev/docs/guides/builds into EVERY generated
+// Dockerfile, four times, and the page is guides/build, singular. That URL was
+// live and it 404'd, in output handed to a user at the moment their build
+// failed, which is the worst possible moment to send somebody to a missing
+// page. errcheck could not see it because it is a raw string rather than a
+// catalog entry.
+func checkDocsURLs(root string, tracked map[string]bool, out io.Writer) error {
+	var dead []string
+	checked := 0
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if path != root && (name == "node_modules" || name == "vendor" || strings.HasPrefix(name, ".")) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".go" {
+			return nil
+		}
+		// Test files are skipped, because this is about addresses a USER
+		// follows and no test output reaches one. It is also the only way a
+		// test can write a deliberately broken URL as a fixture without the
+		// checker treating its own fixture as a defect, which is what
+		// happened the first time.
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+
+		// Parsed rather than grepped, so that only STRING LITERALS are read.
+		// A regular expression over the file text also matches comments, and
+		// the first thing it matched was this file's own comment quoting the
+		// broken URL as an example. Worse than the false positive is that the
+		// comment above claimed it read only literals while the code read
+		// everything, which is precisely the disagreement between a stated
+		// rule and an implemented one that this repository keeps finding.
+		fset := token.NewFileSet()
+		file, perr := parser.ParseFile(fset, path, nil, 0)
+		if perr != nil {
+			// A file that does not parse is somebody else's problem; the
+			// compiler will say so more clearly than this would.
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+
+		ast.Inspect(file, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			value, uerr := strconv.Unquote(lit.Value)
+			if uerr != nil {
+				return true
+			}
+			for _, m := range docsURL.FindAllStringSubmatch(value, -1) {
+				page := strings.TrimSuffix(m[1], "/")
+				if page == "" || strings.Contains(page, "<") {
+					continue
+				}
+				checked++
+				if !docPageExists(tracked, page) {
+					dead = append(dead, fmt.Sprintf("%s:%d -> /docs/%s",
+						filepath.ToSlash(rel), fset.Position(lit.Pos()).Line, page))
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	sort.Strings(dead)
+	for _, d := range dead {
+		report(out, "404      %s\n", d)
+	}
+	report(out, "claimcheck: %d documentation addresses in Go source, %d pointing at a page that does not exist\n",
+		checked, len(dead))
+
+	if len(dead) > 0 {
+		return fmt.Errorf("%d documentation addresses in Go source 404. A user follows these at the "+
+			"moment something has already gone wrong for them", len(dead))
+	}
+	return nil
+}
+
+// report writes a line of the report.
+//
+// Write errors are deliberately not propagated per line. The verdict of this
+// tool is its exit code, not its report, so a broken pipe on stdout changes
+// what a person can read and not whether the build should fail. Ignoring it
+// explicitly, once, with this sentence, is honest; ignoring it silently at
+// eight call sites is the thing errcheck is right to object to.
+func report(out io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(out, format, args...)
+}
+
+// docPageExists reports whether a documentation path has a page behind it,
+// in either of the two shapes the site uses.
+func docPageExists(tracked map[string]bool, page string) bool {
+	const base = "docs/src/content/docs/"
+	return tracked[base+page+".md"] ||
+		tracked[base+page+".mdx"] ||
+		tracked[base+page+"/index.md"] ||
+		tracked[base+page+"/index.mdx"]
 }
 
 // trackedPaths asks git what the repository actually contains, rather than
@@ -229,12 +447,12 @@ func decide(tracked map[string]bool, claims []claim, exclusions map[string]strin
 	sort.Strings(stale)
 
 	for _, c := range dead {
-		fmt.Fprintf(out, "MISSING  %s:%d  %s\n", c.file, c.line, c.text)
+		report(out, "MISSING  %s:%d  %s\n", c.file, c.line, c.text)
 	}
 	for _, tok := range stale {
-		fmt.Fprintf(out, "STALE    %s is listed as not-a-path and no document mentions it\n", tok)
+		report(out, "STALE    %s is listed as not-a-path and no document mentions it\n", tok)
 	}
-	fmt.Fprintf(out, "\nclaimcheck: %d path claims across %d documents, %d dead, %d stale exclusions\n",
+	report(out, "\nclaimcheck: %d path claims across %d documents, %d dead, %d stale exclusions\n",
 		checked, len(documents), len(dead), len(stale))
 
 	switch {

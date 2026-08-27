@@ -43,9 +43,20 @@ resource "azurerm_storage_account" "state" {
   resource_group_name = module.foundation.resource_group_name
   location            = module.foundation.location
 
-  account_tier             = "Standard"
-  account_replication_type = "GRS"
-  account_kind             = "StorageV2"
+  account_tier = "Standard"
+  account_kind = "StorageV2"
+
+  # LRS, and NOT because LRS is the right durability for a file that records
+  # everything this project owns. GRS is. bonfire-sku-allowlist denies any
+  # storage account whose sku is not exactly Standard_LRS, so a GRS account here
+  # is refused at apply and the plan that produced it is clean.
+  #
+  # I had already read that policy when I wrote GRS. I read it for the SKUs it
+  # names for Postgres, satisfied myself the database was fine, and did not
+  # carry the storage clause four files across. Reading the one policy you
+  # expect to bite is not the same as reading all of them, and a plan cannot
+  # tell you the difference because Terraform does not evaluate Azure Policy.
+  account_replication_type = "LRS"
 
   min_tls_version                 = "TLS1_2"
   https_traffic_only_enabled      = true
@@ -56,13 +67,29 @@ resource "azurerm_storage_account" "state" {
   # here, and it has a consequence worth stating rather than discovering:
   #
   # WITH THIS DISABLED, TERRAFORM CANNOT REACH ITS OWN STATE from a laptop or
-  # from a hosted CI runner. Reaching it needs a private endpoint and something
-  # inside the VNet, or a policy exemption for this one account.
+  # from a hosted CI runner. There is no clever way around it: `Disabled` is not
+  # a firewall default that a network rule can carve an exception out of, it
+  # turns the data plane off for everything that is not a private endpoint.
   #
-  # So this stack is written and NOT applied, and the other stacks keep local
-  # state until that is decided. Applying this without deciding it first would
-  # produce a state account nobody can read, which is worse than no remote
-  # state at all.
+  # THAT LEAVES EXACTLY THREE OPTIONS AND THEY ARE NOT TECHNICAL, SO THIS STACK
+  # IS STILL NOT APPLIED:
+  #
+  # 1. An `azurerm_resource_policy_exemption` on THIS resource group only, with
+  #    a waiver category and an expiry. It changes no assignment and no
+  #    definition and touches nothing bonfire owns; it is the mechanism Azure
+  #    provides for precisely this. The account would still be Entra-only
+  #    (shared_access_key_enabled = false), private, and RBAC gated, so reaching
+  #    it needs a directory identity holding a data role rather than a URL. This
+  #    is what most organisations actually run.
+  # 2. A private endpoint plus a self hosted runner inside the VNet. No
+  #    exemption, about 7.30 USD a month, and a runner to maintain.
+  # 3. Local state, which is where the control plane stack sits today.
+  #
+  # Option 1 weakens a control somebody deliberately turned on, and that is a
+  # decision for the person whose subscription this is, not for the person who
+  # finds it inconvenient. Applying this file without settling that first
+  # produces a state account nobody can read, which is strictly worse than no
+  # remote state at all.
   public_network_access_enabled = false
 
   # Entra identity only. A storage key is a credential that cannot be revoked

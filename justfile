@@ -66,6 +66,7 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "prose reads like a person"      just prosecheck
     run "gate matches CI"                just gatecheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
@@ -288,6 +289,10 @@ scanrepo:
 # Every af command shown in the docs is a command that exists.
 docexamples:
     cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists
+
+# The punctuation this project does not use.
+prosecheck:
+    go run ./tools/prosecheck .
 
 # Every repository path our documents point at exists.
 claimcheck:

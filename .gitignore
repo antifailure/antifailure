@@ -68,6 +68,31 @@ runner/artifacts/
 .gate-reports/
 bin/
 
+# Compiled binaries built in place.
+#
+# `go build ./tools/claimcheck` writes ./claimcheck into whatever directory you
+# ran it from, and `git add -A` then commits a platform specific executable that
+# is useless to everybody including the person who built it. It has happened
+# twice here: a 10MB engine/af-proxy and a 3.2MB claimcheck, both arm64 Mach-O,
+# in a repository that ships Linux binaries.
+#
+# Named rather than globbed, because a glob wide enough to catch every future
+# one would also catch source directories that share a name with their command.
+# tools/gatecheck's TestNoCompiledBinaryIsTracked is the real backstop; this
+# just keeps them out of `git status` in the meantime.
+/claimcheck
+/gatecheck
+/vulncheck
+/errcheck
+/ldcheck
+/scanrepo
+/notices
+/proxysrc
+/errgen
+/licensegen
+engine/af-proxy
+engine/af
+
 # Terraform. State and provider binaries never belong in the repository, and a
 # local backend override is a working convenience rather than a shared choice.
 .terraform/

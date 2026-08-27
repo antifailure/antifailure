@@ -20,7 +20,7 @@ database:
 | Provider | Where the data lives | Branch time | Needs |
 | --- | --- | --- | --- |
 | `docker` | A container on the machine running `af` | Grows with the database | A Docker daemon |
-| [`neon`](/providers/neon/) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
+| [`neon`](/docs/providers/neon/) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
 
 `docker` is the default and needs nothing. It is the right choice for a
 repository whose database is small enough that copying it is not the slow part.
