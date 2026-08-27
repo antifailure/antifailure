@@ -117,7 +117,10 @@ failure path listed in a design note has a test that exercises it.
   whether the suite could have failed. That matters more than the doubles
   themselves: a suite nobody has watched go red is a list of assertions that
   might all be vacuous, and assertions go vacuous quietly.
-  It covers `provider.Database` and `provider.Runtime` and a clock. It does not
+  It covers `provider.Database` and `provider.Runtime`. Time is NOT here: the
+  project already has `clock.Fake` in `engine/internal/clock`, which implements
+  the real `clock.Clock` interface, and a second clock in this package would be
+  one that cannot be injected where the code expects one. It does not
   yet cover the object store, the control plane client or the secret sources,
   and this sentence will be wrong the moment somebody adds one, so add it here
   too.

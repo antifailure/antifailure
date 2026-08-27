@@ -276,32 +276,3 @@ func (b *broken) DestroyGolden(ctx context.Context, version string) error {
 	}
 	return b.Database.DestroyGolden(ctx, version)
 }
-
-// Elapsed is a clock that never sleeps, for tests that need time to move
-// without waiting for it. CONTRIBUTING says no real clock and no sleeps; this
-// is the second half of that, the first being the injected clock.Clock.
-type Elapsed struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-// NewElapsed starts a clock at a fixed instant. The instant is arbitrary and
-// deliberately not time.Now: a test that passes only in a particular month is
-// a test that will fail in another one.
-func NewElapsed() *Elapsed {
-	return &Elapsed{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
-}
-
-// Now returns the current fake instant.
-func (e *Elapsed) Now() time.Time {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.now
-}
-
-// Advance moves the clock forward.
-func (e *Elapsed) Advance(d time.Duration) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.now = e.now.Add(d)
-}
