@@ -148,9 +148,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
@@ -159,15 +159,36 @@ jobs:
       - run: npm ci --no-audit --no-fund
         working-directory: www
 
-      - name: Build
+      - name: Build the marketing site
         # The site is the thing we ship to antifailure.dev. A type error or a
-        # broken import is a 404, not a failed unit test, so the proof is a
-        # production build with no OAuth secrets configured.
+        # broken import is a blank page rather than a failed unit test, so the
+        # proof is the production export itself.
         run: npm run build
         working-directory: www
-        env:
-          AUTH_SECRET: AF_FAKE_ci-build-placeholder
-          AUTH_URL: http://127.0.0.1:3000
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: docs
+
+      - name: Build the documentation site
+        run: npm run build
+        working-directory: docs
+
+      - name: Every documented error path has a page at the URL the engine prints
+        # errors.go builds "https://antifailure.dev/docs/" + the catalog's docs
+        # field. errcheck proves the source file exists; this proves the built
+        # site actually serves it at that path, which is a different claim and
+        # the one users experience. A rename that keeps the file but moves the
+        # route would pass errcheck and 404 in production.
+        run: |
+          missing=0
+          for path in $(grep -oE '^[[:space:]]*docs:[[:space:]]*[a-z0-9/_-]+' \
+              engine/internal/errors/catalog.yaml | awk '{print $2}' | sort -u); do
+            if [ ! -f "docs/dist/$path/index.html" ]; then
+              echo "::error::no page built for https://antifailure.dev/docs/$path"
+              missing=1
+            fi
+          done
+          exit $missing
 
   control-plane:
     name: control plane
