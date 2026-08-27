@@ -1,15 +1,36 @@
-// Package insights reads what the database noticed while the environment ran.
+// Package insights answers the questions a branch can answer without running
+// the application at all.
 //
-// The bugs it looks for are the ones no test catches, because the test passes:
-// the endpoint that now runs four hundred queries instead of two, the index
-// that stopped being used, the sequential scan on a table that grew. Each of
-// those is correct and slow, and correct and slow is what takes a site down
-// under load rather than in review.
+// A branch is a real database with production's shape in it, and there are
+// three of those questions. What will these migrations do to a table this
+// size. Does this branch run more queries, or slower ones, than the base did.
+// And does the planner still choose what it chose before.
 //
-// It is read only and it says what it could not see. pg_stat_statements is an
-// extension somebody has to install, and an insight that silently reports
-// nothing because the extension is missing is worse than one that says so:
-// the first looks like a clean bill of health.
+// The discipline the whole package is built on is that it says what it could
+// not see. pg_stat_statements is an extension somebody has to install, an
+// event trigger needs a superuser, and a migration in Ruby cannot be replayed
+// from here. An insight that silently reports nothing in any of those cases is
+// worse than one that says so, because the first looks like a clean bill of
+// health.
+//
+// Where each part lives:
+//
+//   - This file: reading pg_stat_statements, and CompareTo, which is the query
+//     regression diff. Statements match on Query.ID, the server's queryid,
+//     because the stored TEXT of one statement is not stable across resets.
+//   - migrations.go: which migration tool a repository uses, where its SQL is,
+//     and which migrations the database has not recorded yet.
+//   - sql.go: cutting a migration file into statements without breaking a
+//     dollar quoted function body in half.
+//   - lint.go: the six rules, and the catalogue read they need, because most
+//     of them are only true about a particular database.
+//   - rehearsal.go: applying the pending migrations and timing each statement.
+//   - rewrite.go: asking Postgres whether it rewrote a table, rather than
+//     guessing from the statement.
+//   - locks.go: what the migration held, and for how long.
+//   - plan.go: EXPLAIN before and after, and the structural comparison.
+//   - run.go: the manifest block, resolved once, and the run that honours it.
+//   - explain.go: rendering it for somebody with thirty seconds.
 package insights
 
 import (
