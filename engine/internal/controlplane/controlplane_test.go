@@ -357,9 +357,18 @@ func newSink(t *testing.T, rec *recorder, capacity int) (*controlplane.Sink, *cl
 	return s, fake
 }
 
+// event builds one engine event.
+//
+// The type is the events package's own constant and not a string literal, and
+// that is deliberate rather than tidy. This helper used to say
+// Type: "env.up.ready", which is not an event the engine can emit; typeMap was
+// keyed by the same invented name, so the test and the code agreed with each
+// other and both disagreed with the engine. Nine of the map's nine keys were
+// wrong that way, and every test over the translation passed. A literal here is
+// how that happens, so there is not one left in this file.
 func event(id string, seq uint64) events.Event {
 	return events.Event{
-		ID: id, Env: "env-1", Seq: seq, Type: "env.up.ready",
+		ID: id, Env: "env-1", Seq: seq, Type: events.EnvReady,
 		Level: "info", TS: time.Unix(1700000000, 0).UTC(),
 	}
 }

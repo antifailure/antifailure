@@ -41,6 +41,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/state"
+	"github.com/antifailure/antifailure/engine/internal/telemetry"
 	"github.com/antifailure/antifailure/engine/internal/webhook"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -81,6 +82,9 @@ type Options struct {
 	// default chain: this process's environment, then a .env beside the
 	// manifest, then the encrypted local store.
 	Secrets *secrets.Chain
+	// Version is the engine version, reported as a trace attribute so that a
+	// span can be attributed to the build that produced it.
+	Version string
 	// Extensions is consulted before an environment is created. Nil uses the
 	// process-wide registry, which in the community build is empty, so the
 	// check costs one function call that returns nil.
@@ -178,6 +182,7 @@ type session struct {
 	lock    *lock.Lock
 	db      *state.DB
 	bus     *events.Bus
+	tel     *telemetry.Telemetry
 	journal *journal.Journal
 	dbProv  provider.Database
 	runtime *local.Runtime
@@ -197,7 +202,13 @@ func (s *session) close() {
 	if s.dbProv != nil {
 		_ = s.dbProv.Close()
 	}
-	if s.bus != nil {
+	// The telemetry owns the bus: closing it drains every sink queue, closes
+	// each sink, and settles the durable event sequence, in that order. Closing
+	// the bus directly would skip the last two and lose whatever the control
+	// plane sink was still holding.
+	if s.tel != nil {
+		_ = s.tel.Close(context.Background())
+	} else if s.bus != nil {
 		_ = s.bus.Close()
 	}
 	if s.db != nil {
@@ -230,6 +241,32 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 		return nil, err
 	}
 	s.bus = events.NewBus(o.opts.Clock)
+
+	// The bus is attached to its consumers here, and this is the only place it
+	// happens. Until this line existed, nothing in the engine had ever called
+	// AddSink: forty event types were declared, two were emitted, and every one
+	// of them went into a bus with no sinks on it. The local NDJSON log was
+	// never written and no engine event had ever reached a control plane.
+	//
+	// A failure to attach is reported and survived. An environment must not
+	// fail to come up because a log directory is read only.
+	tel, terr := telemetry.Attach(ctx, s.bus, telemetry.Options{
+		StateDir: stateDir,
+		EnvID:    o.envID,
+		Redactor: o.opts.Redactor,
+		Clock:    o.opts.Clock,
+		State:    s.db,
+		Getenv:   o.opts.Getenv,
+		Version:  o.opts.Version,
+		OnWarning: func(msg string) {
+			o.progress(msg)
+		},
+	})
+	if terr != nil {
+		o.progress(fmt.Sprintf("this run is not being recorded: %v", terr))
+	}
+	s.tel = tel
+
 	s.journal = journal.New(s.db, o.opts.Clock, s.bus)
 
 	if s.dbProv, err = o.newDatabaseProvider(ctx); err != nil {
@@ -645,15 +682,45 @@ func (o *Orchestrator) checkPolicy(ctx context.Context) error {
 }
 
 // Up brings the environment up.
-func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
+func (o *Orchestrator) Up(ctx context.Context) (res *Result, err error) {
 	started := o.opts.Clock.Now()
 	s, err := o.open(ctx, "af up")
 	if err != nil {
 		return nil, err
 	}
 	defer s.close()
+	ctx = s.tel.StartCommand(ctx, "af up")
 
-	res := &Result{EnvID: o.envID}
+	res = &Result{EnvID: o.envID}
+
+	// The lifecycle events. Everything downstream of the engine is built on
+	// these three: the control plane's environment row advances on them, the
+	// dashboard shows what it shows because of them, and the local NDJSON log
+	// is how `af support bundle` explains a run afterwards. Until this lane
+	// they were declared and never emitted, so all three consumers were views
+	// over an empty stream.
+	//
+	// Emitted through the bus rather than written anywhere directly, because
+	// the bus is where redaction happens and a second path is a second thing to
+	// remember to redact.
+	s.bus.Info(o.envID, events.EnvCreating, "creating the environment",
+		events.F("branch", o.opts.Branch))
+	defer func() {
+		if err != nil {
+			// The error code travels with the event so that the control plane
+			// and the pull request comment can say why without parsing a
+			// sentence written for a terminal.
+			s.bus.Error(o.envID, events.EnvFailed, "the environment could not be created",
+				events.F("code", string(codeOf(err))),
+				events.F("detail", err.Error()))
+			return
+		}
+		s.bus.Info(o.envID, events.EnvReady, "the environment is ready",
+			events.F("preview_url", res.URL),
+			events.F("golden_version", res.Golden),
+			events.F("runtime", "local"),
+			events.F("seconds", o.opts.Clock.Since(started).Seconds()))
+	}()
 
 	// Before anything is created, so that a refusal costs nothing. Checking
 	// after the database branch exists would leave a branch behind every time a
@@ -795,6 +862,20 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	res.Proxied = env.ProxyReady
 	res.Duration = o.opts.Clock.Since(started)
 	return res, nil
+}
+
+// codeOf reports the engine error code carried by err, or the empty string.
+//
+// The code travels on the failure event so that a consumer can react to
+// AF-DB-001 rather than to a sentence written for a terminal, which is the
+// difference between a dashboard that can group failures and one that shows a
+// list of English.
+func codeOf(err error) aferrors.Code {
+	var e *aferrors.Error
+	if aferrors.As(err, &e) {
+		return e.Code()
+	}
+	return ""
 }
 
 // database makes sure a verified golden exists and branches it.
@@ -1051,8 +1132,24 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 		return nil, err
 	}
 	defer s.close()
+	ctx = s.tel.StartCommand(ctx, "af down")
 
 	td := &Teardown{EnvID: o.envID}
+	s.bus.Info(o.envID, events.EnvDestroying, "tearing the environment down")
+	defer func() {
+		if len(td.Pending) > 0 {
+			// Not destroyed. The distinction matters downstream: an environment
+			// the control plane believes is gone while resources are still
+			// running is a cost nobody is watching and a leak nobody is
+			// looking for. AF-RUN-030 is the same statement to the user.
+			s.bus.Warn(o.envID, events.EnvDestroying, "the environment could not be torn down completely",
+				events.F("removed", td.Removed),
+				events.F("pending", len(td.Pending)))
+			return
+		}
+		s.bus.Info(o.envID, events.EnvDestroyed, "the environment is gone",
+			events.F("removed", td.Removed))
+	}()
 
 	rt, err := s.runtime.Down(ctx, o.envID)
 	td.Removed += rt.Removed

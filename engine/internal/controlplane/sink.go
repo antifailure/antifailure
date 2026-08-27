@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,9 +29,21 @@ import (
 // What is never dropped is the fact that events were dropped. The counter is
 // reported through the bus and printed at close, so a gap in the dashboard is
 // explainable rather than mysterious.
+//
+// Dropping is the last resort rather than the first, because an in-memory
+// buffer alone cannot keep the promise AF-CPL-003 makes. That message says
+// events are buffered and sent when the control plane returns, and `af up`,
+// `af test` and `af down` are three separate processes: a control plane that is
+// down for the eleven seconds of an `af up` and back before `af test` would
+// lose the first command's events entirely, because the buffer holding them
+// exited with the process. So a sink given an Overflow spills to it instead of
+// discarding, and drains it before its own buffer on every flush. Without one
+// the behaviour is exactly what it was: bounded, in memory, and honest about
+// what it lost.
 type Sink struct {
-	client *Client
-	clock  clock.Clock
+	client   *Client
+	clock    clock.Clock
+	overflow Overflow
 
 	// batchSize is how many events go in one request, bounded by what the
 	// control plane accepts.
@@ -58,10 +71,30 @@ type Sink struct {
 	onError func(error)
 }
 
+// Overflow is durable storage for events the sink could not send.
+//
+// Declared here as an interface rather than imported as a concrete type so that
+// this package keeps its one dependency direction: it talks to a control plane
+// and it knows nothing about the filesystem. The implementation lives in
+// internal/telemetry, which is also where the redactor that scrubs each line
+// before it is written comes from.
+type Overflow interface {
+	// Put stores a batch durably. It is called only when the in-memory buffer
+	// is full or the sink is closing, so it is off the happy path entirely.
+	Put(ctx context.Context, batch []Event) error
+	// Take claims the oldest stored batch. The returned function must be
+	// called: nil removes the batch, an error puts it back for the next
+	// attempt. A nil batch with a nil error means there is nothing stored.
+	Take(ctx context.Context) ([]Event, func(error) error, error)
+}
+
 // SinkOptions configures the sink.
 type SinkOptions struct {
 	Client *Client
 	Clock  clock.Clock
+	// Overflow is where events go when the buffer is full or the process is
+	// ending. Nil keeps the old behaviour: the oldest are dropped and counted.
+	Overflow Overflow
 	// Capacity is how many events may wait. Beyond it the oldest are dropped.
 	Capacity int
 	// BatchSize is how many go in one request.
@@ -97,6 +130,7 @@ func NewSink(opts SinkOptions) *Sink {
 
 	s := &Sink{
 		client: opts.Client, clock: c, capacity: capacity,
+		overflow:  opts.Overflow,
 		batchSize: batch, flushEvery: flush,
 		done: make(chan struct{}), onError: onError,
 	}
@@ -108,21 +142,109 @@ func NewSink(opts SinkOptions) *Sink {
 // Name identifies the sink in drop counters.
 func (s *Sink) Name() string { return "control-plane" }
 
-// Deliver buffers one event. It never blocks and never fails.
+// Deliver buffers one event. It never fails.
+//
+// It never blocks either, with one exception worth stating plainly: when the
+// buffer is full and an Overflow is configured, the oldest batch is written to
+// it here, and that is a disk write. Reaching it means the control plane has
+// been unreachable long enough to accumulate ten thousand events, and the
+// alternative at that point is losing them. The write is one file, not one
+// event, so the cost is paid once per batch rather than once per event.
 func (s *Sink) Deliver(_ context.Context, e events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var spill []Event
 
+	s.mu.Lock()
 	if len(s.pending) >= s.capacity {
 		// The oldest goes, not the newest. When something has gone wrong the
 		// events that explain it are the recent ones, and a buffer that keeps
 		// the first ten thousand and discards everything after is a buffer full
 		// of the least useful events it could possibly hold.
-		copy(s.pending, s.pending[1:])
-		s.pending = s.pending[:len(s.pending)-1]
-		s.dropped++
+		if s.overflow != nil {
+			n := min(len(s.pending), s.batchSize)
+			spill = make([]Event, n)
+			copy(spill, s.pending[:n])
+			s.pending = s.pending[n:]
+		} else {
+			copy(s.pending, s.pending[1:])
+			s.pending = s.pending[:len(s.pending)-1]
+			s.dropped++
+		}
 	}
 	s.pending = append(s.pending, toWire(e))
+	s.mu.Unlock()
+
+	s.spill(context.Background(), spill)
+	return nil
+}
+
+// spill hands a batch to the overflow, and counts it as dropped if even that
+// fails. Called with no lock held, because it does file I/O.
+func (s *Sink) spill(ctx context.Context, batch []Event) {
+	if len(batch) == 0 || s.overflow == nil {
+		return
+	}
+	if err := s.overflow.Put(ctx, batch); err != nil {
+		s.mu.Lock()
+		s.dropped += uint64(len(batch))
+		s.mu.Unlock()
+		s.onError(fmt.Errorf(
+			"control plane: %d events could not be written to the spool and were dropped: %w",
+			len(batch), err))
+	}
+}
+
+// drainOverflow sends what an earlier process, or an earlier full buffer, left
+// behind.
+//
+// It runs before the in-memory buffer on every flush, because spooled events
+// are older than anything still in memory and the control plane's projection
+// refuses an event whose sequence is behind the row it addresses. Sending the
+// new ones first would make every spooled one a no-op on arrival.
+//
+// Bounded per call so that a large spool does not hold a flush open
+// indefinitely; the next tick continues where this one stopped.
+func (s *Sink) drainOverflow(ctx context.Context) error {
+	if s.overflow == nil {
+		return nil
+	}
+	s.mu.Lock()
+	throttled := !s.throttledUntil.IsZero() && s.clock.Now().Before(s.throttledUntil)
+	s.mu.Unlock()
+	if throttled {
+		// The spool is durable, so waiting costs nothing. Draining through a
+		// 429 would be the one place in this package that ignores a control
+		// plane asking to be left alone.
+		return nil
+	}
+
+	const maxBatchesPerFlush = 32
+	for range maxBatchesPerFlush {
+		batch, ack, err := s.overflow.Take(ctx)
+		if err != nil {
+			return err
+		}
+		if batch == nil {
+			return nil
+		}
+		_, sendErr := s.client.Send(ctx, batch)
+		if ackErr := ack(sendErr); ackErr != nil && sendErr == nil {
+			// Sent but not acknowledged: the batch will be sent again by
+			// whoever picks it up. The control plane deduplicates on the event
+			// identifier, so a resend is a no-op there rather than a double
+			// count, which is exactly why the identifier is the idempotency
+			// key.
+			s.onError(fmt.Errorf("control plane: spooled batch sent but not cleared: %w", ackErr))
+		}
+		if sendErr != nil {
+			var throttled *Throttled
+			if errors.As(sendErr, &throttled) {
+				s.mu.Lock()
+				s.throttledUntil = s.clock.Now().Add(throttled.RetryAfter)
+				s.mu.Unlock()
+			}
+			return sendErr
+		}
+	}
 	return nil
 }
 
@@ -151,6 +273,24 @@ func (s *Sink) Close() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		err = s.Flush(ctx)
+
+		// Whatever is still held goes to the overflow rather than to nowhere.
+		// This is the moment the promise is kept or broken: the process is
+		// ending, and an event that is only in memory here is an event nobody
+		// will ever see again.
+		s.mu.Lock()
+		remaining := s.pending
+		s.pending = nil
+		s.mu.Unlock()
+		if s.overflow != nil {
+			s.spill(ctx, remaining)
+			err = nil
+		} else if len(remaining) > 0 {
+			s.mu.Lock()
+			s.dropped += uint64(len(remaining))
+			s.mu.Unlock()
+		}
+
 		if dropped := s.Dropped(); dropped > 0 {
 			// Reported rather than swallowed. A gap in the dashboard that
 			// nobody can account for is worse than one that is explained.
@@ -188,6 +328,11 @@ func (s *Sink) loop() {
 // because they are older than anything that arrived while the request was in
 // flight and the control plane orders by sequence rather than by arrival.
 func (s *Sink) Flush(ctx context.Context) error {
+	// Oldest first, and what an earlier process spooled is older than anything
+	// this one is holding.
+	if err := s.drainOverflow(ctx); err != nil {
+		return err
+	}
 	for {
 		s.mu.Lock()
 		if len(s.pending) == 0 {
@@ -213,14 +358,29 @@ func (s *Sink) Flush(ctx context.Context) error {
 				// how a busy control plane becomes an unreachable one.
 				s.throttledUntil = s.clock.Now().Add(throttled.RetryAfter)
 			}
-			s.pending = append(batch, s.pending...)
-			// Putting them back can exceed the capacity, so the same rule
-			// applies: drop the oldest and count it.
-			if over := len(s.pending) - s.capacity; over > 0 {
-				s.pending = s.pending[over:]
-				s.dropped += uint64(over)
+			hasOverflow := s.overflow != nil
+			var spill []Event
+			if hasOverflow {
+				// A batch that failed to send goes to disk rather than back
+				// into memory, and that choice is about `kill -9` rather than
+				// about the control plane. Events held only in memory are lost
+				// when the process dies, so putting a failed batch back would
+				// leave a whole outage's worth of events exposed to a
+				// terminated command. Spilling here bounds what a kill can
+				// cost to a single flush interval. It is the failure path, so
+				// the disk write is free in every sense that matters.
+				spill = batch
+			} else {
+				s.pending = append(batch, s.pending...)
+				// Putting them back can exceed the capacity, so the same rule
+				// applies: drop the oldest and count it.
+				if over := len(s.pending) - s.capacity; over > 0 {
+					s.pending = s.pending[over:]
+					s.dropped += uint64(over)
+				}
 			}
 			s.mu.Unlock()
+			s.spill(ctx, spill)
 			return err
 		}
 	}
@@ -265,24 +425,65 @@ func mapType(t string) string {
 	return t
 }
 
+// typeMap is keyed by the events package's own constants rather than by string
+// literals, and that is the whole correction.
+//
+// It previously held nine literals: env.up.started, env.up.ready,
+// env.up.failed, env.down.done, test.started, test.finished, test.verdict,
+// golden.published and net.decision. Not one of them was a type the engine can
+// emit. The real constants are env.creating, env.ready, env.failed,
+// env.destroyed, agent.started, agent.finished, agent.verdict, golden.ready and
+// egress.decision, so every event would have missed the map, passed through
+// unchanged, and arrived at the control plane as a type outside its accepted
+// set. Such an event is stored and advances nothing, so every environment would
+// have sat in the dashboard at the state it was first reported in, and the
+// failure would have read as a control plane bug rather than as a lookup table
+// nobody had ever executed.
+//
+// Keying by the constant makes that class of drift a compile error. Renaming an
+// event type in the events package now breaks the build here instead of
+// silently emptying the dashboard. The other half, that each value is a type
+// the control plane actually accepts, cannot be checked by the compiler across
+// two languages, so TestEveryMappedTypeIsOneTheControlPlaneAccepts reads the
+// server's own list and compares.
 var typeMap = map[string]string{
-	"env.up.started":   "environment.creating",
-	"env.up.ready":     "environment.ready",
-	"env.up.failed":    "environment.failed",
-	"env.down.done":    "environment.torn_down",
-	"test.started":     "run.started",
-	"test.finished":    "run.finished",
-	"test.verdict":     "verdict.recorded",
-	"golden.published": "golden.published",
-	"net.decision":     "network.decision",
+	string(events.EnvCreating):  "environment.creating",
+	string(events.EnvReady):     "environment.ready",
+	string(events.EnvFailed):    "environment.failed",
+	string(events.EnvSleeping):  "environment.sleeping",
+	string(events.EnvDestroyed): "environment.torn_down",
+
+	string(events.AgentStarted):  "run.started",
+	string(events.AgentFinished): "run.finished",
+	string(events.AgentVerdict):  "verdict.recorded",
+
+	string(events.GoldenReady):    "golden.published",
+	string(events.EgressDecision): "network.decision",
 }
 
-// KnownTypes lists the engine event types that the control plane understands,
-// for the documentation and for a test that keeps this map honest.
+// KnownTypes lists the engine event types the control plane understands, for
+// the documentation and for the tests that keep this map honest.
+//
+// Two of the control plane's accepted types have no engine event mapped to
+// them, deliberately. environment.queued is produced by the scheduler, which
+// runs in the control plane and never in the engine. artifact.stored belongs to
+// the uploader rather than to the environment lifecycle. Both are listed in
+// TestTheControlPlaneTypesWithNoEngineEventAreTheExpectedOnes so that a third
+// one appearing is a test failure and a decision rather than a silent gap.
 func KnownTypes() []string {
 	out := make([]string, 0, len(typeMap))
 	for k := range typeMap {
 		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// MappedTypes returns the control plane type each engine type becomes.
+func MappedTypes() map[string]string {
+	out := make(map[string]string, len(typeMap))
+	for k, v := range typeMap {
+		out[k] = v
 	}
 	return out
 }
