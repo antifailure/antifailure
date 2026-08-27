@@ -128,8 +128,20 @@ func TestAFailingSeedCommandSaysWhatItPrinted(t *testing.T) {
 func TestASeedCommandThatHangsIsCutOffWithAnExplanation(t *testing.T) {
 	// Without a bound, a seed script waiting on something that will never
 	// arrive hangs the whole environment with no output at all.
+	//
+	// The command FORKS deliberately, and that is the whole value of this
+	// test. `sh -c "sleep 30"` is usually exec'd by the shell, replacing it,
+	// so killing the shell kills the sleep and any implementation passes.
+	// `sleep 30 & wait` forces a real grandchild, which is what a seed script
+	// that starts a helper actually does. The grandchild holds the write end
+	// of the pipe being read, so an implementation that kills only the shell
+	// blocks until the grandchild finishes on its own.
+	//
+	// That is not hypothetical. Written the easy way, this test passed on
+	// macOS, where the shell execs, and failed on Linux in CI, where it
+	// forks: a 300ms bound took the full 30 seconds.
 	a := personas.NewSeedAdapter(personas.SeedOptions{
-		Command: "sleep 30",
+		Command: "sleep 30 & wait",
 		Dir:     t.TempDir(), Timeout: 300 * time.Millisecond,
 		Environ: []string{"PATH=" + os.Getenv("PATH")},
 	})
@@ -137,9 +149,12 @@ func TestASeedCommandThatHangsIsCutOffWithAnExplanation(t *testing.T) {
 
 	started := time.Now()
 	_, err := personas.Provision(context.Background(), a, d, []schema.Persona{seedPersona()})
+	elapsed := time.Since(started)
+
 	require.Error(t, err)
-	require.Less(t, time.Since(started), 10*time.Second)
 	require.Contains(t, err.Error(), "did not finish within")
+	require.Lessf(t, elapsed, 10*time.Second,
+		"the command took %s against a 300ms timeout, so the timeout bounded nothing", elapsed)
 }
 
 func TestASeedAdapterWithNoCommandSaysSoRatherThanSucceedingQuietly(t *testing.T) {

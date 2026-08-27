@@ -108,6 +108,19 @@ func (s *SeedAdapter) Provision(
 	cmd.Dir = s.dir
 	cmd.Env = append(append([]string{}, s.environ...), s.environment(p, want)...)
 
+	// The timeout has to bound the whole tree the command starts, not just
+	// the shell. See seed_unix.go: killing the shell alone leaves a forked
+	// grandchild holding the pipe this is reading, and Wait then blocks until
+	// that grandchild finishes, which is exactly the hang the timeout exists
+	// to prevent.
+	isolateProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
+	// The backstop for the case the group kill cannot cover: a grandchild
+	// that escaped into its own session still holds the pipe, and without a
+	// delay Wait would keep waiting on it. After this, the pipes are closed
+	// and Run returns whatever it has.
+	cmd.WaitDelay = 5 * time.Second
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
