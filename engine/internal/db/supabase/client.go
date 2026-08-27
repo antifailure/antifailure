@@ -192,12 +192,36 @@ func Conflict(err error) bool {
 }
 
 // Unauthorized reports whether Supabase rejected the token itself.
+//
+// 401 alone, and the boundary was measured against the real API rather than
+// reasoned about. A token that is not a real one, a token that is well formed
+// and revoked, and no Authorization header at all all answer 401, the first of
+// them with "JWT could not be decoded" rather than "Unauthorized". A token that
+// is valid but cannot see the project answers 404. So there is no observed case
+// where Supabase says 403, and folding one in here would attach the advice
+// "your token was rejected" to a refusal that has nothing to do with the token.
 func Unauthorized(err error) bool {
 	var api *APIError
-	if !errors.As(err, &api) {
-		return false
-	}
-	return api.Status == http.StatusUnauthorized || api.Status == http.StatusForbidden
+	return errors.As(err, &api) && api.Status == http.StatusUnauthorized
+}
+
+// rejectedToken says what to do about a token Supabase will not accept.
+//
+// This is the commonest way this provider fails on a first run, and a bare
+// "supabase: 401: Unauthorized" from whichever request happened to go first
+// tells somebody nothing about which of the two things is wrong or where to fix
+// it. Every request goes through do, so the advice arrives the same way
+// wherever the rejection is noticed.
+//
+// The APIError is kept wrapped: NotFound, Conflict and Unauthorized all read
+// through errors.As, and a caller that stops being able to ask what the status
+// was would be a worse error for a better message.
+func rejectedToken(err error) error {
+	return fmt.Errorf(
+		"db.supabase: Supabase rejected the access token, so it is revoked, expired, "+
+			"or not the one this project expects; issue a new one at "+
+			"supabase.com/dashboard/account/tokens and put it in SUPABASE_ACCESS_TOKEN "+
+			"or whichever variable database.api_key_env names: %w", err)
 }
 
 // persistentRefusal reports whether a delete was refused because the branch is
@@ -301,6 +325,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		err := c.attempt(ctx, method, path, body, out)
 		if err == nil {
 			return nil
+		}
+		if Unauthorized(err) {
+			return rejectedToken(err)
 		}
 		if !worthRetrying(err) {
 			return err

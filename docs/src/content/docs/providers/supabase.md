@@ -50,6 +50,21 @@ under [What it creates](#what-it-creates).
 
 Point it at a project that holds nothing else.
 
+### When the token is refused
+
+Supabase answers 401 whether the token is revoked, expired, mistyped, or absent,
+and the message it returns for a string that is not a token at all is "JWT could
+not be decoded" rather than anything about authorization. So the provider says
+which credential was refused and where to issue another one instead of passing
+the status through, and it does not ask again: the same token cannot be accepted
+on a second attempt, and retrying turns an instant failure into a slow one.
+
+A token that is valid but cannot see the project is a different answer, 404, and
+it reads as a project that is not there rather than a credential that was
+refused. If every call reports a missing project, check `project` before you
+reach for a new token.
+
+
 ## What it costs
 
 A branch is a running project and is billed by the hour, at Micro compute
