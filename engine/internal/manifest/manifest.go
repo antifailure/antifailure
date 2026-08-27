@@ -501,7 +501,7 @@ func suggest(got string, siblings []string) string {
 // only has to be close enough to be useful, so one flat list beats tracking
 // which keys are legal in which position.
 var knownKeys = []string{
-	"version", "name", "services", "database", "egress", "personas", "workflows",
+	"version", "name", "services", "database", "egress", "personas", "auth", "workflows",
 	"invariants", "insights", "load", "runtime", "github",
 	"path", "kind", "build", "command", "port", "health_path", "health_timeout",
 	"env", "replicas", "resources", "schedule", "migrate", "depends_on",
@@ -512,7 +512,7 @@ var knownKeys = []string{
 	"enabled", "seed_table", "seed_where", "max_rows", "follow_dependents",
 	"virtual_relationships", "default", "allow_ipv6", "rules",
 	"host", "mode", "paths", "methods", "rate_limit", "credential", "fixtures",
-	"webhook_path", "note", "email", "role", "login", "mfa", "attributes",
+	"webhook_path", "note", "email", "phone", "role", "login", "mfa", "attributes",
 	"description", "persona", "start_path", "independent", "budget", "expect", "tags",
 	"steps", "usd", "duration", "sql",
 	"migration_rehearsal", "query_regression", "plan_diff", "regression_factor",
@@ -521,6 +521,12 @@ var knownKeys = []string{
 	"p95_increase", "error_rate", "query_count_increase",
 	"ttl", "idle_sleep", "domain", "namespace_prefix", "kubeconfig_context",
 	"comment", "fork_policy", "teardown_on",
+	"adapter", "token_env", "url", "connection", "table", "sessions", "password",
+	"schema", "id", "json", "timestamps", "min_length", "symbols", "forbid",
+	// These four were declared in schemas/manifest.v1.json and missing here,
+	// so a typo of any of them got no suggestion. Found by the drift test,
+	// which is the point of having one.
+	"project", "api_key_env", "max_branches", "to",
 }
 
 func editDistance(a, b string) int {

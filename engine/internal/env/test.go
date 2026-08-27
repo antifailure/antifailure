@@ -3,8 +3,6 @@ package env
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -14,6 +12,7 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/load"
+	"github.com/antifailure/antifailure/engine/internal/personas"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -99,9 +98,14 @@ type workflowDoc struct {
 type personaDoc struct {
 	Name     string `json:"name"`
 	Email    string `json:"email"`
+	Phone    string `json:"phone,omitempty"`
 	Password string `json:"password,omitempty"`
 	Role     string `json:"role,omitempty"`
 	Login    string `json:"login"`
+	// TOTPSecret is the base32 secret the adapter enrolled, present when the
+	// persona has a second factor. The runner holds it so that it can
+	// complete a challenge, which is what the manifest's `mfa` field promises.
+	TOTPSecret string `json:"totpSecret,omitempty"`
 }
 
 // Test runs the manifest's workflows against the running environment.
@@ -119,6 +123,21 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	if len(workflows) == 0 {
 		return nil, aferrors.Coded(aferrors.AFAGT001,
 			"detail", "the manifest declares no workflows to run")
+	}
+
+	// The personas have to exist before the browser opens. Until this call
+	// was here, the runner was handed a name, an address and a derived
+	// password for an account nobody had created, the application refused the
+	// sign in, and settle() reported it as the application refusing a
+	// correct password. Every workflow failed, and it failed with a finding
+	// against the application rather than against the environment, which is
+	// the most expensive kind of wrong answer this product can give.
+	//
+	// Idempotent, so a persona already provisioned into the golden or by an
+	// earlier run is reconciled rather than duplicated.
+	provisioned, err := o.ProvisionPersonas(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	runner, err := o.findRunner(opts.RunnerPath)
@@ -140,7 +159,7 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 
 	job := jobDocument{
 		BaseURL: status.URL, Artifacts: artifacts,
-		Workflows: workflows, Personas: o.personaDocs(),
+		Workflows: workflows, Personas: o.personaDocs(provisioned),
 		AF: self, WorkDir: o.opts.Root,
 		Attempts: opts.Attempts, Headless: !opts.Headed,
 	}
@@ -231,29 +250,33 @@ func (o *Orchestrator) workflowDocs(only []string) []workflowDoc {
 	return out
 }
 
-func (o *Orchestrator) personaDocs() []personaDoc {
+func (o *Orchestrator) personaDocs(provisioned *personas.Result) []personaDoc {
 	var out []personaDoc
 	for _, p := range o.opts.Manifest.Personas {
 		login := string(p.Login)
 		if login == "" {
 			login = string(schema.LoginPassword)
 		}
-		doc := personaDoc{Name: p.Name, Email: p.Email, Role: p.Role, Login: login}
-		if login == string(schema.LoginPassword) {
-			// A password nobody set, derived from the environment so both the
-			// seed and the runner arrive at the same one without anybody
-			// writing it down twice.
-			doc.Password = personaPassword(o.envID, p.Name)
+		doc := personaDoc{Name: p.Name, Email: p.Email, Phone: p.Phone, Role: p.Role, Login: login}
+
+		// Taken from what provisioning actually created, rather than derived
+		// again here. Two derivations that agree today are two derivations
+		// that can disagree tomorrow, and the symptom would be a sign in
+		// refused for a password that is correct everywhere except in the one
+		// place it is typed.
+		if provisioned != nil {
+			if account, ok := provisioned.Account(p.Name); ok {
+				doc.Email = account.Email
+				doc.Phone = account.Phone
+				doc.Password = account.Password.Reveal()
+				doc.TOTPSecret = account.TOTPSecret.Reveal()
+				out = append(out, doc)
+				continue
+			}
 		}
 		out = append(out, doc)
 	}
 	return out
-}
-
-// personaPassword derives a persona's password from the environment.
-func personaPassword(envID, persona string) string {
-	sum := sha256.Sum256([]byte("antifailure/persona/v1\x00" + envID + "\x00" + persona))
-	return "Af-" + hex.EncodeToString(sum[:8]) + "!1"
 }
 
 // LoadOptions configure a load run.

@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-37 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+36 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -229,6 +229,30 @@ The provider's concurrent branch limit ({limit}) is reached.
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/limits](/docs/providers/limits/) |
+
+### AF-DB-020
+
+Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured.
+
+**What to do.** Point auth.url or auth.domain at a sandbox, development or staging tenant and set auth.sandbox: true, so that personas are never created in production.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/personas](/docs/guides/personas/) |
+
+### AF-DB-021
+
+{provider} rejected the admin token used to create personas.
+
+**What to do.** Check that the variable named by auth.token_env holds a key for the sandbox tenant with permission to create users.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/personas](/docs/guides/personas/) |
 
 ## Detection
 
