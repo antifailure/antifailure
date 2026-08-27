@@ -131,6 +131,14 @@ The **manifest** records what a restore has to reproduce: row counts per table,
 every policy, every table with row level security enabled and separately
 `FORCE`d, every privilege the application role holds, and the audit chain head.
 
+It records its own scope as well, which matters more than it sounds. All of
+those checks read the `public` schema, where every one of the control plane's
+tables lives. Anything outside it is listed in the manifest as unverified and
+reported by the restore and the drill as a table the check cannot speak for.
+That is not a restore failure and should not be read as one. It means the
+database grew somewhere this verification does not look, and somebody has to
+decide whether that table matters before the next real recovery.
+
 ### Restore it
 
 ```
