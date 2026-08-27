@@ -13,10 +13,12 @@
 //	   and sent when it returns.                                    STATUS.md                  Nothing had ever attached
 //	                                                                                           the sink, and the buffer
 //	                                                                                           did not outlive a process.
-//	2  A provider that fails during a branch leaves nothing         engine/conformance/db.go   True. The conformance
-//	   behind, or the inventory reports it.                         provider docs              suite already proves it,
-//	                                                                                           and this suite proves the
-//	                                                                                           suite can fail.
+//	2  A provider that fails during a branch leaves nothing         engine/conformance/db.go   Claimed by a test that
+//	   behind, or the inventory reports it.                         provider docs              proves almost nothing: it
+//	                                                                                           cancels BEFORE calling
+//	                                                                                           Branch, so no provider
+//	                                                                                           ever creates anything and
+//	                                                                                           every provider passes.
 //	3  A killed engine reconciles through the journal.              internal/journal doc       False, then fixed.
 //	                                                                STATUS.md                  Replay, NewRegistry and
 //	                                                                                           Commit had zero callers.
@@ -40,8 +42,19 @@
 // created, and a test asserting that events arrived passes trivially against a
 // server that accepts anything. Both were real drafts of tests in this file.
 //
-// The fault must be injected at the layer the claim is about. Scenario 3 is
-// about a crash, so it kills the process's work rather than calling a cleanup
-// function and pretending. Scenario 1 is about a network, so it takes a real
-// HTTP server away rather than returning an error from a fake.
+// The fault must be injected at the layer the claim is about, and at the moment
+// the claim is about. Scenario 3 is about a crash, so it leaves resources the
+// label sweep cannot see rather than ones it can. Scenario 1 is about a
+// network, so it takes a real HTTP server away rather than returning an error
+// from a fake. Scenario 2 is about an interruption during creation, so it
+// cancels a second and a half in rather than before the call: a context that
+// was dead on arrival is refused by every client library, which is why the
+// conformance behaviour it corresponds to passes for every provider that will
+// ever exist while proving nothing about the case anybody worries about.
+//
+// A note on where these run. Each of the Docker-backed tests below stands up a
+// real Postgres and a real golden, and on a machine already running a dozen
+// containers a golden refresh can take minutes or fail its readiness window
+// outright. That is a failure rather than a skip, deliberately: a precondition
+// check that machine load can make false is a way for the suite to pass.
 package chaos

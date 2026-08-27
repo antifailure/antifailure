@@ -37,6 +37,10 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 50, burst: 200, key: 'ip',
     reason: 'A liveness probe from a load balancer, plus whatever else asks. Cheap, and refusing it looks like an outage.',
   },
+  'GET /metrics': {
+    rate: 2, burst: 10, key: 'ip',
+    reason: 'A Prometheus scrape every fifteen seconds is one request per fifteen seconds per replica. Two per second leaves room for several scrapers and a person with curl, and refusing this looks like the control plane is down.',
+  },
   'GET /openapi.json': {
     rate: 2, burst: 10, key: 'ip',
     reason: 'A static document that is fetched once by a person and cached by everything else.',

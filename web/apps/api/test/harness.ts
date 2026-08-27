@@ -19,13 +19,37 @@ export function appUrl(): string {
   return u.toString()
 }
 
+/**
+ * Whether there is a database to test against.
+ *
+ * Two things here are deliberate and both were paid for.
+ *
+ * The timeout is thirty seconds rather than three. Three is plenty on an idle
+ * machine and nowhere near enough on a busy one: measured on a loaded laptop,
+ * accepting a connection took between two and thirty seconds, so the probe
+ * timed out, the suite skipped, and the run went green having tested nothing.
+ * A skip that machine load can cause is a pass with extra steps, and it is
+ * invisible precisely when the machine is busy, which is when tests are being
+ * run in bulk.
+ *
+ * AF_REQUIRE_DATABASE=1 turns the skip into a failure. Somewhere, usually
+ * continuous integration, there has to be a place where "no database" is not an
+ * acceptable answer, or every one of these suites is optional forever.
+ */
 export async function available(): Promise<boolean> {
+  const timeout = Number(process.env.AF_TEST_CONNECT_TIMEOUT ?? 30)
   try {
-    const probe = postgres(adminUrl, { max: 1, connect_timeout: 3, onnotice: () => {} })
+    const probe = postgres(adminUrl, { max: 1, connect_timeout: timeout, onnotice: () => {} })
     await probe`SELECT 1`
-    await probe.end({ timeout: 2 })
+    await probe.end({ timeout: 5 })
     return true
-  } catch {
+  } catch (err) {
+    if (process.env.AF_REQUIRE_DATABASE === '1') {
+      throw new Error(
+        `AF_REQUIRE_DATABASE is set and ${adminUrl} did not answer within ${timeout}s: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
     return false
   }
 }
@@ -43,11 +67,19 @@ export interface ApiHarness {
 }
 
 export async function startApi(): Promise<ApiHarness> {
-  const admin = postgres(adminUrl, { max: 4, connect_timeout: 10, onnotice: () => {} })
+  const admin = postgres(adminUrl, {
+    max: 4,
+    connect_timeout: Number(process.env.AF_TEST_CONNECT_TIMEOUT ?? 30),
+    onnotice: () => {},
+  })
   await migrate(admin)
   await admin.unsafe(`ALTER ROLE antifailure_app LOGIN PASSWORD 'app-test-password'`)
 
-  const pool = createPool({ url: appUrl(), max: 6 })
+  const pool = createPool({
+    url: appUrl(),
+    max: 6,
+    connectTimeoutSeconds: Number(process.env.AF_TEST_CONNECT_TIMEOUT ?? 30),
+  })
   const clock = new FakeClock()
   const github = new FakeGitHub(clock)
   const { app } = createServer({

@@ -58,7 +58,7 @@ function renderLabels(labels: Labels, extra?: Labels): string {
   const all = { ...labels, ...(extra ?? {}) }
   const names = Object.keys(all).sort()
   if (names.length === 0) return ''
-  return `{${names.map((n) => `${n}="${escapeLabelValue(all[n])}"`).join(',')}}`
+  return `{${names.map((n) => `${n}="${escapeLabelValue(all[n] ?? '')}"`).join(',')}}`
 }
 
 /** A number that only goes up. */
@@ -161,7 +161,7 @@ export class Histogram {
     s.sum += value
     s.count += 1
     for (let i = 0; i < this.bounds.length; i++) {
-      if (value <= this.bounds[i]) s.counts[i] += 1
+      if (value <= (this.bounds[i] ?? Infinity)) s.counts[i] = (s.counts[i] ?? 0) + 1
     }
   }
 
@@ -171,7 +171,9 @@ export class Histogram {
       // The stored counts are already cumulative: observe increments every
       // bucket whose bound is at or above the value, which is what le means.
       for (let i = 0; i < this.bounds.length; i++) {
-        lines.push(`${this.name}_bucket${renderLabels(s.labels, { le: formatBound(this.bounds[i]) })} ${s.counts[i]}`)
+        lines.push(
+          `${this.name}_bucket${renderLabels(s.labels, { le: formatBound(this.bounds[i] ?? 0) })} ${s.counts[i] ?? 0}`,
+        )
       }
       lines.push(`${this.name}_bucket${renderLabels(s.labels, { le: '+Inf' })} ${s.count}`)
       lines.push(`${this.name}_sum${renderLabels(s.labels)} ${s.sum}`)
@@ -309,10 +311,13 @@ export function createMetrics(version = 'dev'): ControlPlaneMetrics {
  * Every route this server serves is declared in ENDPOINT_LIMITS, so the
  * declared set is the bounded set and anything outside it is "other".
  */
-export function routeLabel(method: string, path: string, known: (key: string) => boolean): string {
-  const key = `${method.toUpperCase()} ${path}`
-  if (known(key)) return key
-  return `${method.toUpperCase()} other`
+export function routeLabel(
+  method: string,
+  path: string,
+  isDeclared: (method: string, path: string) => boolean,
+): string {
+  const verb = method.toUpperCase()
+  return isDeclared(verb, path) ? `${verb} ${path}` : `${verb} other`
 }
 
 /** 2xx, 4xx, 5xx rather than every code, for the same bounding reason. */

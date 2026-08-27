@@ -2,6 +2,7 @@ package chaos_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,6 +59,20 @@ services:
     port: 3000
 `
 
+// requireDocker skips only when there is genuinely no daemon, and fails for
+// every other reason.
+//
+// The distinction is the whole point. "No Docker on this machine" is a skip,
+// because the person running the suite could not have run it. "Docker answered
+// and then something went wrong" is a failure, because it is a result. One
+// t.Skipf covering both is a way for this suite to pass, and a suite that
+// proves failure paths work is the worst possible place for that.
+//
+// The ping timeout is deliberately generous rather than snappy. Measured on
+// this machine with eleven agents on it, `docker ps -a` took over two minutes
+// to return. A short timeout would turn machine load into a skip, and load is
+// heaviest exactly when tests are being run in bulk, so the skip would arrive
+// precisely when nobody is watching.
 func requireDocker(t *testing.T) *client.Client {
 	t.Helper()
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
@@ -65,10 +80,19 @@ func requireDocker(t *testing.T) *client.Client {
 	}
 	cli, err := dockerutil.Client()
 	if err != nil {
-		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+		t.Skipf("skipped: no Docker daemon is configured: %v", err)
 	}
-	if _, err := cli.Ping(t.Context()); err != nil {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	if _, err := cli.Ping(ctx); err != nil {
 		_ = cli.Close()
+		if errors.Is(err, context.DeadlineExceeded) {
+			// Not a skip. A daemon that is configured and does not answer a
+			// ping in three minutes is a broken environment, and reporting it
+			// as "no Docker" would hide it.
+			t.Fatalf("the Docker daemon is configured and did not answer a ping in three "+
+				"minutes; this is a failure rather than a skip, because the daemon exists: %v", err)
+		}
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })

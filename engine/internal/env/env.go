@@ -588,11 +588,30 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 		kind = m.Database.Provider
 	}
 
+	// Every case here assigns, checks, and returns an explicit nil.
+	//
+	// `return dockerdb.New(...)` reads better and is a crash. The constructors
+	// return a concrete *Provider, and a nil *Provider assigned to a
+	// provider.Database interface produces an interface that is NOT nil. The
+	// caller does `if s.dbProv, err = o.newDatabaseProvider(ctx); err != nil {
+	// s.close() }`, close() guards with `if s.dbProv != nil`, that guard is
+	// true, and Close runs on a nil receiver.
+	//
+	// The result was a segmentation fault from `af down` whenever the Docker
+	// daemon was unreachable, which is the single most common failure this
+	// product will ever meet: a user who has not started Docker Desktop got a
+	// stack trace rather than a remediation. It survived because every test
+	// either has a working daemon or skips. A chaos test that points
+	// DOCKER_HOST at a socket that is not there found it.
 	switch kind {
 	case schema.DBDocker:
-		return dockerdb.New(dockerdb.Options{
+		p, err := dockerdb.New(dockerdb.Options{
 			Version: databaseVersion(m), Clock: o.opts.Clock,
 		})
+		if err != nil {
+			return nil, err
+		}
+		return p, nil
 
 	case schema.DBNeon:
 		db := m.Database
@@ -615,12 +634,16 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 				"names", name,
 				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
 		}
-		return neondb.New(neondb.Options{
+		p, err := neondb.New(neondb.Options{
 			APIKey:      key,
 			ProjectID:   db.Project,
 			Clock:       o.opts.Clock,
 			MaxBranches: db.MaxBranches,
 		})
+		if err != nil {
+			return nil, err
+		}
+		return p, nil
 
 	default:
 		// Named in the schema and not built here. Saying so is better than

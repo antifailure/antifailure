@@ -174,7 +174,7 @@ test('bounds are sorted even when they are declared out of order', () => {
     .split('\n')
     .filter((l) => l.includes('_bucket') && !l.includes('+Inf'))
   assert.deepEqual(
-    lines.map((l) => l.match(/le="([^"]+)"/)![1]),
+    lines.map((l) => l.match(/le="([^"]+)"/)?.[1]),
     ['1.0', '5.0', '10.0'],
   )
 })
@@ -185,7 +185,7 @@ test('a gauge is set rather than accumulated', () => {
   g.set(1, { version: 'v0.1.1' })
   const lines = g.render().split('\n').filter((l) => l.startsWith('af_test_info'))
   assert.equal(lines.length, 1, 'setting twice is one series, not two')
-  assert.match(lines[0], /af_test_info\{version="v0\.1\.1"\} 1/)
+  assert.match(lines[0] ?? '', /af_test_info\{version="v0\.1\.1"\} 1/)
 })
 
 test('the registry renders every metric and ends with a newline', () => {
@@ -216,10 +216,11 @@ test('two servers do not share counters', () => {
 // ---------------------------------------------------------------------------
 
 test('an undeclared path becomes one bucket rather than one series per path', () => {
-  const known = (key: string) => key === 'GET /health'
-  assert.equal(routeLabel('get', '/health', known), 'GET /health')
-  assert.equal(routeLabel('GET', '/v1/environments/9f3c1a', known), 'GET other')
-  assert.equal(routeLabel('GET', '/v1/environments/22b0ff', known), 'GET other')
+  const declared = (method: string, path: string) => method === 'GET' && path === '/health'
+  assert.equal(routeLabel('get', '/health', declared), 'GET /health')
+  assert.equal(routeLabel('GET', '/v1/environments/9f3c1a', declared), 'GET other')
+  assert.equal(routeLabel('GET', '/v1/environments/22b0ff', declared), 'GET other')
+  assert.equal(routeLabel('POST', '/health', declared), 'POST other', 'the method is part of it')
 })
 
 test('statuses collapse to a class', () => {
