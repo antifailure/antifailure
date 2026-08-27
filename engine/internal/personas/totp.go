@@ -6,7 +6,6 @@ import (
 	"encoding/base32"
 	"encoding/binary"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -44,16 +43,6 @@ func TOTPCode(secret string, at time.Time) (string, error) {
 		return "", err
 	}
 	counter := uint64(at.UTC().Unix()) / uint64(TOTPPeriod.Seconds())
-	return hotp(key, counter), nil
-}
-
-// TOTPCodeAt returns the code for a counter, which is what a test that has to
-// pin down a window uses.
-func TOTPCodeAt(secret string, counter uint64) (string, error) {
-	key, err := decodeTOTPSecret(secret)
-	if err != nil {
-		return "", err
-	}
 	return hotp(key, counter), nil
 }
 
@@ -116,20 +105,4 @@ func decodeTOTPSecret(secret string) ([]byte, error) {
 		return nil, fmt.Errorf("the TOTP secret is not base32: %w", err)
 	}
 	return key, nil
-}
-
-// TOTPURI returns the otpauth URL for a secret.
-//
-// Written into the persona metadata so that a person debugging a run can add
-// the same factor to their own authenticator and see what the agent sees.
-// Every parameter is stated rather than left to a default, because the
-// defaults are what differ between implementations.
-func TOTPURI(issuer, account, secret string) string {
-	q := url.Values{}
-	q.Set("secret", secret)
-	q.Set("issuer", issuer)
-	q.Set("algorithm", "SHA1")
-	q.Set("digits", fmt.Sprintf("%d", TOTPDigits))
-	q.Set("period", fmt.Sprintf("%d", int(TOTPPeriod.Seconds())))
-	return "otpauth://totp/" + url.PathEscape(issuer+":"+account) + "?" + q.Encode()
 }

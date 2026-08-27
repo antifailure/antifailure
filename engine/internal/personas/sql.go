@@ -63,9 +63,6 @@ type Scheme struct {
 	// rows intact hands anybody who can reach it a working session belonging
 	// to a real customer.
 	Sessions []string
-	// Packages are the dependency names that identify this scheme, used by
-	// detection so a repository gets the right adapter without being asked.
-	Packages []string
 	// Probe is a table whose presence proves the scheme is the one in use.
 	// Detection from the live schema, which the spec asks for, because a
 	// dependency list can be wrong and a table cannot.

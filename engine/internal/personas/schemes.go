@@ -80,10 +80,6 @@ var SchemeSupabase = Scheme{
 		"auth.mfa_challenges", "auth.one_time_tokens", "auth.flow_state",
 		"auth.saml_relay_states",
 	},
-	Packages: []string{
-		"@supabase/supabase-js", "@supabase/ssr", "@supabase/auth-helpers-nextjs",
-		"@supabase/auth-js", "@supabase/gotrue-js", "supabase",
-	},
 	Probe: "auth.users",
 }
 
@@ -118,11 +114,7 @@ var SchemeNextAuth = Scheme{
 		},
 	},
 	Sessions: []string{"public.sessions", "public.verification_token", "public.accounts"},
-	Packages: []string{
-		"next-auth", "@auth/core", "@auth/pg-adapter", "@auth/prisma-adapter",
-		"@auth/drizzle-adapter", "@next-auth/prisma-adapter",
-	},
-	Probe: "public.verification_token",
+	Probe:    "public.verification_token",
 }
 
 // GenericScheme returns a scheme for an application that owns its users table.

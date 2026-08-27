@@ -187,27 +187,58 @@ type PasswordPolicy struct {
 }
 
 // apply shapes a generated password to the policy.
+//
+// Shaping rather than refusing, because an application with stricter rules
+// than the default should still work. What it cannot do is invent a password
+// out of a policy that forbids everything, and that case is caught by
+// Validate rather than papered over here.
 func (p PasswordPolicy) apply(base string) string {
 	out := base
 	if p.Forbid != "" {
+		filler := p.filler()
 		for _, r := range p.Forbid {
 			// Replaced rather than dropped, so the length and the character
 			// classes survive the substitution.
-			out = strings.ReplaceAll(out, string(r), "x")
+			out = strings.ReplaceAll(out, string(r), filler)
 		}
 		if p.Symbols == "" && strings.ContainsAny(p.Forbid, "!-") {
 			// The default symbols were just removed, so the password no
 			// longer has one and a policy requiring one would reject it.
-			out += "#"
+			for _, candidate := range "#$%*?@" {
+				if !strings.ContainsRune(p.Forbid, candidate) {
+					out += string(candidate)
+					break
+				}
+			}
 		}
 	}
 	if p.Symbols != "" {
-		out = strings.NewReplacer("!", string(p.Symbols[0]), "-", string(p.Symbols[0])).Replace(out)
+		replacement := string(p.Symbols[0])
+		out = strings.NewReplacer("!", replacement, "-", replacement).Replace(out)
 	}
-	for len(out) < p.MinLength {
-		out += "x"
+	// Padded with a character the policy allows. Padding with a fixed "x"
+	// while "x" is forbidden produces a password that fails the very rule the
+	// padding was applied to satisfy, which is a bug that only shows up for
+	// somebody whose policy happens to forbid that one letter.
+	if filler := p.filler(); filler != "" {
+		for len(out) < p.MinLength {
+			out += filler
+		}
 	}
 	return out
+}
+
+// filler returns a character the policy permits, for padding and substitution.
+//
+// Empty when the policy forbids every candidate, which leaves the password
+// short and lets Validate say so rather than producing one that cannot work.
+func (p PasswordPolicy) filler() string {
+	for _, candidate := range "xqzmkwvnbjhgfdsrpltcy" {
+		if !strings.ContainsRune(p.Forbid, candidate) {
+			return string(candidate)
+		}
+	}
+	return ""
 }
 
 // Validate reports whether a password satisfies the policy.
@@ -256,7 +287,23 @@ func Provision(
 ) (*Result, error) {
 	out := &Result{Adapter: a.Name()}
 	for _, p := range list {
-		account, err := a.Provision(ctx, p, d.For(p))
+		want := d.For(p)
+
+		// Checked here rather than at the sign in, which is the whole point of
+		// checking it. An application whose rules are stricter than the
+		// generator refuses the password when the agent types it, and that
+		// arrives as the application rejecting a correct password: a finding
+		// against the application for a manifest problem. Failing now names
+		// the real cause.
+		if needsPassword(p.Login) || p.Login == "" {
+			if err := d.policy.Validate(want.Password.Reveal()); err != nil {
+				return nil, fmt.Errorf(
+					"the password generated for persona %q does not satisfy auth.password: %w",
+					p.Name, err)
+			}
+		}
+
+		account, err := a.Provision(ctx, p, want)
 		if err != nil {
 			return nil, fmt.Errorf("provisioning persona %q: %w", p.Name, err)
 		}

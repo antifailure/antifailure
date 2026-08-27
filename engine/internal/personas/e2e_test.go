@@ -381,6 +381,11 @@ func signInEndToEndWith(
 	sabotage func(ctx context.Context, conn *pgx.Conn, table string),
 ) runnerReport {
 	t.Helper()
+	if testing.Short() {
+		// These start a browser and take about half a minute each, which is
+		// the honest cost of proving a sign in rather than asserting one.
+		t.Skip("skipped: -short")
+	}
 	conn, done := requireDatabase(t)
 	defer done()
 	ctx := context.Background()
@@ -388,6 +393,10 @@ func signInEndToEndWith(
 	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	require.NoError(t, err)
 	if _, err := os.Stat(filepath.Join(repoRoot, "runner", "node_modules", "playwright")); err != nil {
+		// Named rather than silent, because a skip that reads as a pass is
+		// how a suite stops proving anything without anybody noticing. To run
+		// these: npm --prefix runner ci && npx --prefix runner playwright
+		// install chromium, and have a Postgres at 127.0.0.1:55432.
 		t.Skip("skipped: the runner's dependencies are not installed (npm --prefix runner ci)")
 	}
 

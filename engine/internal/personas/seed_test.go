@@ -167,3 +167,60 @@ func TestTheSeedCommandCanReportTheAccountItCreated(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "usr_42", got.Accounts[0].Subject)
 }
+
+func TestAPolicyTheGeneratorCannotSatisfyFailsBeforeTheSignIn(t *testing.T) {
+	// The failure this prevents is a quiet one: the adapter writes a hash for
+	// a password the application will refuse, the agent types it, and the run
+	// reports the application rejecting a correct password. Failing here names
+	// the real cause, which is the manifest.
+	a := personas.NewSeedAdapter(personas.SeedOptions{
+		Command: "true", Dir: t.TempDir(), Environ: []string{"PATH=" + os.Getenv("PATH")},
+	})
+	// A policy that forbids every character the generator has to build with.
+	// There is no password to produce here, and the honest answer is to say
+	// so rather than to hand the adapter something that cannot work.
+	d := personas.NewDeriver("env-abc", personas.PasswordPolicy{
+		MinLength: 60,
+		Forbid:    "abcdefghijklmnopqrstuvwxyzABCDEF0123456789-!#$%*?@",
+	})
+
+	_, err := personas.Provision(context.Background(), a, d, []schema.Persona{seedPersona()})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not satisfy auth.password")
+	require.Contains(t, err.Error(), "owner")
+}
+
+func TestAStricterPolicyIsSatisfiedRatherThanRefused(t *testing.T) {
+	// A policy the generator can meet is met, by shaping the password rather
+	// than by failing. Otherwise every stricter application would be unusable.
+	a := personas.NewSeedAdapter(personas.SeedOptions{
+		Command: "true", Dir: t.TempDir(), Environ: []string{"PATH=" + os.Getenv("PATH")},
+	})
+	d := personas.NewDeriver("env-abc", personas.PasswordPolicy{MinLength: 40, Forbid: "!"})
+
+	got, err := personas.Provision(context.Background(), a, d, []schema.Persona{seedPersona()})
+	require.NoError(t, err)
+
+	password := got.Accounts[0].Password.Reveal()
+	require.GreaterOrEqual(t, len(password), 40)
+	require.NotContains(t, password, "!")
+}
+
+func TestPaddingNeverUsesAForbiddenCharacter(t *testing.T) {
+	// Padding to a minimum length with a fixed letter produces a password
+	// that fails the very rule the padding was applied to satisfy, for
+	// anybody whose policy happens to forbid that one letter. It shows up
+	// only for them, and it shows up as the application refusing a correct
+	// password.
+	a := personas.NewSeedAdapter(personas.SeedOptions{
+		Command: "true", Dir: t.TempDir(), Environ: []string{"PATH=" + os.Getenv("PATH")},
+	})
+	d := personas.NewDeriver("env-abc", personas.PasswordPolicy{MinLength: 48, Forbid: "x"})
+
+	got, err := personas.Provision(context.Background(), a, d, []schema.Persona{seedPersona()})
+	require.NoError(t, err)
+
+	password := got.Accounts[0].Password.Reveal()
+	require.GreaterOrEqual(t, len(password), 48)
+	require.NotContains(t, password, "x")
+}

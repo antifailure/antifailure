@@ -3,40 +3,23 @@ package personas
 import (
 	"context"
 	"fmt"
-	"strings"
 )
 
-// Choosing the adapter, which should not be a question anybody is asked.
+// Choosing the adapter from the database, which should not be a question
+// anybody is asked.
 //
-// Two sources, and they answer different questions. The dependency list is
-// available at `af init` time, before there is any database to look at, which
-// is when the manifest is written. The live schema is available later and is
-// the better evidence: a project can depend on @supabase/supabase-js for the
-// client and keep its users in its own table, and only the schema knows that.
+// There are two moments where the question can be answered and they have
+// different evidence available. At `af init` time there is no database yet,
+// only a dependency list, and that is answered by engine/internal/detect,
+// which writes the manifest. Here, at run time, there is a branch, and a
+// table is better evidence than a package: a project can depend on
+// @supabase/supabase-js for the client and keep its users in its own table,
+// and only the schema knows that. So what is found here wins.
 //
-// So detection from dependencies writes the manifest, and detection from the
-// schema checks it. Where they disagree the schema wins, because a dependency
-// list is a statement of intent and a table is a fact.
-
-// DetectFromDependencies returns the scheme a repository's dependencies imply.
-//
-// Ordered by BuiltinSchemes rather than by iteration, so a project that
-// depends on both Supabase and NextAuth gets a stable answer rather than
-// whichever was seen first.
-func DetectFromDependencies(deps []string) (Scheme, bool) {
-	present := map[string]bool{}
-	for _, d := range deps {
-		present[strings.ToLower(strings.TrimSpace(d))] = true
-	}
-	for _, scheme := range BuiltinSchemes {
-		for _, pkg := range scheme.Packages {
-			if present[strings.ToLower(pkg)] {
-				return scheme, true
-			}
-		}
-	}
-	return Scheme{}, false
-}
+// The dependency mapping lives in engine/internal/detect/auth.go and only
+// there. A second copy in this package would be a second table to keep in
+// step, and the two would disagree the first time somebody added a provider
+// to one of them.
 
 // SchemaProbe reads whether a table exists.
 //

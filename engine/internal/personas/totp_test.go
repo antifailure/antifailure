@@ -100,17 +100,3 @@ func TestTOTPSecretRejectsWhatIsNotBase32(t *testing.T) {
 		t.Error("an empty secret was accepted")
 	}
 }
-
-func TestTOTPURIStatesEveryParameter(t *testing.T) {
-	// The defaults are what differ between implementations, so leaving one
-	// out is how an enrolled factor produces codes the server will not take.
-	uri := TOTPURI("Antifailure", "owner@example.test", "GEZDGNBVGY3TQOJQ")
-	for _, want := range []string{
-		"secret=GEZDGNBVGY3TQOJQ", "algorithm=SHA1", "digits=6", "period=30",
-		"issuer=Antifailure",
-	} {
-		if !strings.Contains(uri, want) {
-			t.Errorf("the otpauth URL does not carry %s: %s", want, uri)
-		}
-	}
-}

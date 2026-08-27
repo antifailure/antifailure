@@ -133,7 +133,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | --- | --- | --- |
 | 1.1 Repository and governance | proven | Governance files, templates, CODEOWNERS, ADRs 0001 and 0002. |
 | 1.2 Toolchain pinning and task runner | planned | |
-| 1.3 Schemas and code generation | proven | `schemas/manifest.v1.json` is the source of truth; Go types mirror it. TypeScript generation lands with the runner. |
+| 1.3 Schemas and code generation | proven | `schemas/manifest.v1.json` is the source of truth and the Go types mirror it, now enforced by a test rather than by intention. Until lane 7 wrote `engine/internal/manifest/schema_drift_test.go`, nothing in the repository read that file: the two could drift freely while three doc comments said they could not. The test walks both structurally, has a negative control proving it can fail, and found four keys declared in the schema and missing from `knownKeys`. TypeScript generation lands with the runner. |
 | 1.4 Continuous integration and gates | proven | Six jobs. The generated files, the policy vectors, the command reference, and the error catalog all fail the build when they drift. |
 | 1.5 Release pipeline | planned | |
 | 1.6 Security baseline | planned | |
@@ -181,7 +181,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 3.3 Masking engine | partial | The 22 transforms and the key hierarchy are proven at 95 percent. The rules model, classifier, SQL compiler, and resumable executor are next. |
 | 3.4 Verification scanner | partial | The 9 detectors are proven at 94 percent. The streaming table scan and the signed attestation are next. |
 | 3.5 Subsetting | planned | |
-| 3.6 Authentication adapters | planned | |
+| 3.6 Authentication adapters | partial | **proven**: all five login strategies (password, magic_link, email_code, sms_code, totp) sign in end to end against a real Postgres, a real application and Chromium, driving `runner/src/main.ts` over the real JSON boundary and asserting the runner's own verdict. A negative control corrupts the stored hash and requires the runner to notice. The Supabase auth schema, NextAuth and the column-configured generic adapter are proven against Supabase's real DDL, including reconciling a masked real user without duplicating, and emptying session and token tables so no live login reaches a branch. **written**: the Supabase admin API, Clerk, Auth0 and WorkOS adapters, exercised against a local server rather than the real APIs. They need a sandbox tenant and a token before they can be proven; without one they refuse with AF-DB-020 rather than create anybody. |
 | 3.7 Neon | proven | The full database conformance suite, all 23 behaviours, against the real Neon API. Found three bugs a fake would not have: `pooled` omitted means pooled, so `ConnDirect` was returning a pooled connection; a 200 with an empty body broke destroy-twice; and Neon's own branch ceiling arrived as an unexplained 422. |
 | 3.8, 3.9 Supabase, DBLab | planned | Blocked on Q5: no accounts provisioned. |
 | 3.10 Golden lifecycle | planned | |
