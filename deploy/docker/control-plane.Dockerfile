@@ -69,6 +69,7 @@ COPY web/packages/policy ./packages/policy
 # a migration job pinned to a different tag from the deployment it precedes is
 # how a schema arrives that the running code does not understand.
 COPY deploy/docker/bootstrap.mjs ./bootstrap.mjs
+COPY deploy/docker/maintenance.mjs ./maintenance.mjs
 
 # The migrations are read from disk at runtime by AF_MIGRATE=1, so they have to
 # be in the image. Asserted rather than assumed: an image whose migration

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "cp.fullname" . }}-test-connection"
+  labels: {{- include "cp.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: probe
+      image: curlimages/curl:8.11.1
+      command: ["curl", "--fail", "--silent", "--show-error", "--max-time", "10"]
+      args: ["http://{{ include "cp.fullname" . }}:{{ .Values.service.port }}/health"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: { drop: ["ALL"] }

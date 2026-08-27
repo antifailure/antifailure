@@ -13,6 +13,7 @@ bin
 infra
 deploy
 !deploy/docker/bootstrap.mjs
+!deploy/docker/maintenance.mjs
 ee
 web/node_modules
 web/**/node_modules

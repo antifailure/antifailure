@@ -1,0 +1,62 @@
+{{- if .Values.bootstrap.enabled }}
+{{- include "cp.validate" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # The revision is in the name so that each upgrade gets its own Job and its
+  # own logs, rather than one object whose history is overwritten.
+  name: {{ include "cp.fullname" . }}-bootstrap-{{ .Release.Revision }}
+  labels: {{- include "cp.labels" . | nindent 4 }}
+  annotations:
+    # Before the Deployment rolls, every time. The schema a replica reads must
+    # exist before that replica serves a request.
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    # Deliberately NOT hook-succeeded: a Job deleted the moment it passes takes
+    # its logs with it, and the first question after a bad upgrade is what the
+    # migration actually did.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.bootstrap.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.bootstrap.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels: {{- include "cp.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: bootstrap
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "cp.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: bootstrap
+          image: {{ include "cp.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["node", "bootstrap.mjs"]
+          env:
+            {{- include "cp.appEnv" . | nindent 12 }}
+            # The privileged role. It appears here and in no other pod: the
+            # Deployment must not be able to run DDL even by accident.
+            - name: AF_MIGRATION_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.databaseSecretName" . }}
+                  key: {{ .Values.database.secretKeys.migrationUrl }}
+          resources: {{- toYaml .Values.bootstrap.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
