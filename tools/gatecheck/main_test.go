@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -163,4 +164,97 @@ func keys(m map[string]struct{}) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// Workflow supply chain. These live here because gatecheck already reads the
+// workflows, and because the tools module's tests run in CI.
+
+func TestEveryActionIsPinnedToACommit(t *testing.T) {
+	// A tag is mutable. `actions/checkout@v4` is a promise the publisher can
+	// change after anybody reviewed it, so the thing that was reviewed and the
+	// thing that runs are only the same by the publisher's continued goodwill.
+	// A commit cannot be changed.
+	uses := regexp.MustCompile(`uses:\s*(\S+)`)
+	pinned := regexp.MustCompile(`^[\w.-]+/[\w.-]+(/[\w.-]+)*@[0-9a-f]{40}$`)
+
+	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no workflows found: %v", err)
+	}
+
+	checked := 0
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range uses.FindAllStringSubmatch(string(body), -1) {
+			ref := m[1]
+			// A local action, referenced by path, has nothing to pin.
+			if strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "docker://") {
+				continue
+			}
+			checked++
+			if !pinned.MatchString(ref) {
+				t.Errorf("%s: %s is pinned to a tag, not a commit.\n"+
+					"    Resolve it: gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq .object.sha\n"+
+					"    Then write it as owner/repo@<sha> # <version>",
+					filepath.Base(file), ref)
+			}
+		}
+	}
+	if checked < 5 {
+		t.Fatalf("only %d actions were checked; the pattern has probably stopped matching", checked)
+	}
+}
+
+func TestEveryPinnedActionSaysWhichVersionItIs(t *testing.T) {
+	// A bare forty character hash is unreviewable and unupgradable: nobody can
+	// tell whether it is a year out of date. The trailing comment is what makes
+	// the pin readable by a person.
+	line := regexp.MustCompile(`uses:\s*[\w.-]+/[\S]*@[0-9a-f]{40}(.*)$`)
+
+	files, _ := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range strings.Split(string(body), "\n") {
+			m := line.FindStringSubmatch(l)
+			if m == nil {
+				continue
+			}
+			if !strings.Contains(m[1], "#") {
+				t.Errorf("%s: pinned with no version comment: %s", filepath.Base(file), strings.TrimSpace(l))
+			}
+		}
+	}
+}
+
+func TestNoWorkflowGrantsWriteToEveryJob(t *testing.T) {
+	// A workflow level `contents: write` gives it to every job in the file,
+	// including the ones that only compile something. The release workflow had
+	// exactly that: four build jobs holding a token that could create a
+	// release.
+	files, _ := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(string(body), "\n")
+		for i, l := range lines {
+			// Only the workflow level block, which is unindented.
+			if l != "permissions:" {
+				continue
+			}
+			for j := i + 1; j < len(lines) && strings.HasPrefix(lines[j], " "); j++ {
+				if strings.Contains(lines[j], ": write") {
+					t.Errorf("%s: grants %q to every job in the file. Move it to the "+
+						"job that needs it.", filepath.Base(file), strings.TrimSpace(lines[j]))
+				}
+			}
+		}
+	}
 }
