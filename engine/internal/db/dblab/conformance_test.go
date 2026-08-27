@@ -166,6 +166,28 @@ func TestSweepLeftovers(t *testing.T) {
 	after, err := p.Inventory(ctx)
 	require.NoError(t, err)
 	require.Empty(t, after, "the sweep left resources behind")
+
+	// Inventory reports only what this provider owns, so the assertion above
+	// is satisfied just as well by a sweep that deleted the engine's own
+	// snapshot as by one that did not. That snapshot is the source every
+	// future golden is built from, and rebuilding it means running the
+	// engine's retrieval against production again, so deleting it is the
+	// worst thing this test could do and the assertion that would have
+	// noticed was missing. It is the same shape as the fault 61ecc70 found
+	// in Branch_RefusesAnUnverifiedGolden: a check that passes because it
+	// looked somewhere the damage does not show.
+	raw := &dblab.Client{BaseURL: url, Token: token}
+	remaining, err := raw.ListSnapshots(ctx)
+	require.NoError(t, err)
+	var base int
+	for _, s := range remaining {
+		if !dblab.IsGolden(s.Message) {
+			base++
+		}
+	}
+	require.NotZero(t, base,
+		"the sweep removed the engine's own snapshot, which is the source every "+
+			"golden is built from and is not this provider's to delete")
 }
 
 // TestTheAttestationTravelsWithTheGolden proves the claim the provider page

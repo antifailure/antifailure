@@ -542,3 +542,36 @@ func TestResettingToACollectedGoldenIsAFDB004(t *testing.T) {
 	err := p.Reset(context.Background(), provider.Branch{EnvID: "env_1", From: "gv_gone"})
 	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFDB004))
 }
+
+// TestIsGoldenTellsAGoldenFromTheEnginesOwnSnapshot is the unit half of the
+// assertion TestSweepLeftovers makes about the base snapshot surviving.
+//
+// The sweep runs against a real engine and cannot prove its own guard by
+// deleting the thing the guard protects, because the engine's own snapshot is
+// the source every golden is built from and rebuilding it means running the
+// retrieval against production again. So the guard is proved here instead, on
+// the messages a real engine actually returns, including the literal "-" ZFS
+// reports for a property that was never set.
+func TestIsGoldenTellsAGoldenFromTheEnginesOwnSnapshot(t *testing.T) {
+	ours := encodeMeta(meta{Version: "gv_20260827220159_74234e98", RulesHash: "abc", Verified: true})
+	if !IsGolden(ours) {
+		t.Fatalf("a message this provider wrote was not recognised as a golden: %s", ours)
+	}
+
+	// Every one of these must be left alone by a sweep. The first three are
+	// what an engine's own retrieval and a human committing a clone by hand
+	// actually produce.
+	for _, notOurs := range []string{
+		"",
+		"-",
+		"nightly retrieval",
+		`{"tool":"something-else","version":"1"}`,
+		`{"antifailure":1}`, // marker present, no version: not a golden we wrote
+		"{not json at all",
+	} {
+		if IsGolden(notOurs) {
+			t.Errorf("a snapshot this provider did not write was reported as a golden, "+
+				"so a sweep would delete it: %q", notOurs)
+		}
+	}
+}

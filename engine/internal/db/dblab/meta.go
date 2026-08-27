@@ -102,3 +102,16 @@ func (m meta) createdAt(fallback time.Time) time.Time {
 	}
 	return at.UTC()
 }
+
+// IsGolden reports whether a snapshot's commit message says this provider
+// wrote it.
+//
+// Exported so that a test can tell a golden from the engine's own snapshot
+// using the rule the provider uses, rather than a second copy of it that can
+// drift. The distinction matters most where the consequence is worst: the
+// engine's own snapshot is the source every golden is built from, and nothing
+// here may delete it.
+func IsGolden(message string) bool {
+	_, ours := decodeMeta(message)
+	return ours
+}
