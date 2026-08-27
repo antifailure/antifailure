@@ -1165,38 +1165,69 @@ func (h *rtHarness) egressNamesDoNotCrossEnvironments(ctx context.Context) {
 	other := h.envID("eg8a")
 	h.mustUp(ctx, provider.EnvSpec{
 		EnvID:    other,
-		Services: []provider.ServiceSpec{h.webService("peer", "MARKERAAA")},
+		Services: []provider.ServiceSpec{h.webService("peer", markerOther)},
 	})
 	h.waitForReady(ctx, other, "peer")
 
 	mine := h.envID("eg8b")
-	prober := h.worker("prober", retrying(
-		"wget -T 5 -q -O - http://peer:8080/ | grep -q MARKERBBB"))
-	// Declared as depending on the service it fetches, and retried on top of
-	// that. The dependency is what a manifest would say; the retry is because
-	// a one line busybox server serves one connection at a time, so the
-	// runtime's own readiness check and this request can arrive together and
-	// one of them is refused. Without both, this behavior fails about half
-	// the time for a reason that has nothing to do with what it is asking.
+	prober := h.worker("prober", crossEnvironmentProbe)
+	// Declared as depending on the service it fetches, so the runtime starts
+	// them in an order where the answer means something.
 	prober.DependsOn = []string{"peer"}
 	_, _ = h.up(ctx, provider.EnvSpec{
 		EnvID: mine,
 		Services: []provider.ServiceSpec{
-			h.webService("peer", "MARKERBBB"),
+			h.webService("peer", markerMine),
 			prober,
 		},
 	})
+
 	// Both environments have a service called peer. The name has to resolve to
 	// this environment's, because service names come from the manifest and
 	// every environment of one repository has the same ones: if they shared a
 	// namespace, two previews of the same pull request would answer each
 	// other's requests.
-	if code := h.waitForExit(ctx, mine, "prober"); code != reached {
-		h.t.Errorf("a service name did not resolve to this environment's service "+
-			"(exit %d); two environments of one repository declare the same service "+
-			"names, so a name that crosses is two previews serving each other", code)
+	switch code := h.waitForExit(ctx, mine, "prober"); code {
+	case reached:
+		return
+	case crossed:
+		h.t.Errorf("a service name resolved to ANOTHER environment's service. Two " +
+			"environments of one repository declare the same service names, so this " +
+			"is two previews of one pull request serving each other's requests")
+	case refused:
+		h.t.Errorf("a service could not reach another service in its own environment " +
+			"by name. Service names come from the manifest and a manifest that says " +
+			"http://peer:8080 has to mean it")
+	default:
+		h.t.Errorf("the cross environment probe exited %d, which it has no path to do", code)
 	}
 }
+
+// The bodies the two environments' peer services answer with, and the probe
+// that tells apart the three things that can happen. Distinguishing them
+// matters: "could not reach it" and "reached the wrong one" look identical
+// from a single exit code and mean opposite things, one a broken environment
+// and the other a broken boundary between environments.
+const (
+	markerMine  = "MARKERMINE"
+	markerOther = "MARKEROTHER"
+	// crossed is the exit code for reaching a service that answered with
+	// another environment's marker.
+	crossed = 8
+)
+
+// The proxy variables are stripped, and that is the point rather than a
+// convenience. This behaviour asks whether a NAME resolves to this
+// environment's service, which is a question about DNS and the network. Left
+// in, busybox wget would send the request to the sidecar (it reads http_proxy
+// and ignores no_proxy entirely, which was verified rather than assumed), and
+// the answer would be whatever the egress policy said about a host called
+// "peer" instead of where the name pointed.
+var crossEnvironmentProbe = "i=0; while [ $i -lt 30 ]; do " +
+	"body=$(" + noProxyVars + "wget -T 5 -q -O - http://peer:8080/ 2>/dev/null); " +
+	"if [ -n \"$body\" ]; then " +
+	"case \"$body\" in *" + markerMine + "*) exit 0;; *) exit 8;; esac; " +
+	"fi; i=$((i+1)); sleep 1; done; exit 9"
 
 // allowOnly permits the allowed host by rule and nothing else.
 func (h *rtHarness) allowOnly() *schema.Egress {

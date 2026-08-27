@@ -444,8 +444,14 @@ func serviceEnv(spec provider.EnvSpec, s provider.ServiceSpec, migration bool) [
 		{Name: "https_proxy", Value: proxyURL},
 		// Never the whole cluster. Only this environment's own names bypass
 		// the proxy, because everything else is a decision.
-		{Name: "NO_PROXY", Value: "localhost,127.0.0.1,.svc,.cluster.local"},
-		{Name: "no_proxy", Value: "localhost,127.0.0.1,.svc,.cluster.local"},
+		//
+		// The service names are listed one by one as well as by suffix, and
+		// they have to be: a manifest says http://api:3000, which is a bare
+		// name, and a bare name does not match a .svc suffix. Without them
+		// every service to service call is sent to the proxy and refused by
+		// the egress policy.
+		{Name: "NO_PROXY", Value: noProxyFor(spec)},
+		{Name: "no_proxy", Value: noProxyFor(spec)},
 		{Name: "AF_ENV_ID", Value: spec.EnvID},
 		{Name: "AF_SERVICE", Value: s.Name},
 	}
@@ -475,6 +481,18 @@ func serviceEnv(spec provider.EnvSpec, s provider.ServiceSpec, migration bool) [
 		out = append(out, corev1.EnvVar{Name: name, Value: s.Env[name].Reveal()})
 	}
 	return out
+}
+
+// noProxyFor lists everything inside the environment that must not be sent to
+// the sidecar.
+func noProxyFor(spec provider.EnvSpec) string {
+	out := []string{"localhost", "127.0.0.1", ProxyName, ".svc", ".cluster.local"}
+	for _, s := range spec.Services {
+		if s.Name != "" {
+			out = append(out, s.Name)
+		}
+	}
+	return strings.Join(out, ",")
 }
 
 // caPath is where the environment certificate is mounted, when there is one.

@@ -93,7 +93,7 @@ var negativeControls = []struct {
 	{flawRawAddressEscapes, "--- FAIL: TestRuntimeSuiteChild/Egress_CannotBeBypassedByAddress"},
 	{flawMetadataReachable, "--- FAIL: TestRuntimeSuiteChild/Egress_CannotReachTheMetadataEndpoint"},
 	{flawUDPEscapes, "--- FAIL: TestRuntimeSuiteChild/Egress_CannotBeBypassedByUDP"},
-	{flawNamesCrossEnvironments, "--- FAIL: TestRuntimeSuiteChild/Egress_NamesDoNotCrossEnvironments"},
+	{flawNamesCrossEnvironments, "resolved to ANOTHER environment's service"},
 	{flawNoLogs, "--- FAIL: TestRuntimeSuiteChild/Logs_ReturnWhatAServiceWrote"},
 	// Not a behavior. The leak check runs after every behavior has passed, and
 	// it is the one assertion a green suite can still fail.

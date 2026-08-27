@@ -460,6 +460,12 @@ func fakeStartOrder(services []provider.ServiceSpec, flaw string) ([]provider.Se
 func (f *fakeRuntime) runCommand(env *fakeEnv, command string) int {
 	cmd := strings.TrimSpace(command)
 
+	if strings.Contains(cmd, "http://peer:8080/") && strings.Contains(cmd, markerMine) {
+		if f.is(flawNamesCrossEnvironments) {
+			return crossed
+		}
+		return reached
+	}
 	// A retrying probe: everything between the loop header and the redirect
 	// is the command it is retrying, and the answer does not change between
 	// attempts, so one evaluation is the whole loop.
@@ -504,7 +510,7 @@ func (f *fakeRuntime) probeReaches(env *fakeEnv, inner string) bool {
 		return f.is(flawUDPEscapes)
 	case strings.Contains(inner, "http://1.1.1.1/"):
 		return f.is(flawRawAddressEscapes)
-	case strings.Contains(inner, "MARKERBBB"):
+	case strings.Contains(inner, markerMine):
 		// The service name resolved to this environment's service, unless the
 		// flaw is that names are shared.
 		return !f.is(flawNamesCrossEnvironments)

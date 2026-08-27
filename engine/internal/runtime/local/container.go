@@ -323,9 +323,23 @@ func (r *Runtime) envList(spec provider.EnvSpec, s provider.ServiceSpec) []strin
 	// Traffic inside the environment must not be sent to the proxy: a service
 	// calling another service, or the database, is not egress, and routing it
 	// through the sidecar would make every internal call a policy decision.
-	noProxy := strings.Join([]string{
-		"localhost", "127.0.0.1", "::1", DatabaseAlias, ProxyAlias,
-	}, ",")
+	//
+	// That is what this list is for, and for a long time it did not contain
+	// the services. It named localhost, the database and the sidecar, so a
+	// manifest that said http://api:3000 from one service to another had that
+	// request sent to the proxy and decided against the egress policy, which
+	// on any environment with the usual default refused it. The decision log
+	// then showed a blocked request to a host called "api", which reads as
+	// the environment being broken rather than as a variable being short.
+	// Nothing caught it because nothing had two services talking to each
+	// other until the runtime conformance suite did.
+	internal := []string{"localhost", "127.0.0.1", "::1", DatabaseAlias, ProxyAlias}
+	for _, other := range spec.Services {
+		if other.Name != "" {
+			internal = append(internal, other.Name)
+		}
+	}
+	noProxy := strings.Join(internal, ",")
 	vars["NO_PROXY"] = noProxy
 	vars["no_proxy"] = noProxy
 
