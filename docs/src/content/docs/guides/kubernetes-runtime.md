@@ -164,10 +164,15 @@ waiting on something, so the finalizers are named in the message.
 
 ## Conformance
 
-This runtime passes the same suite the local one does, and the containment
+This runtime is held to the same suite the local one is, and the containment
 behaviours in that suite are not skippable by any capability a runtime can
 declare. A runtime that could declare its way out of them would be a supported
 way to ship one that lets environments reach the internet.
+
+Held to, and not yet passed. At the time of writing the suite has never
+completed against a cluster, and `docs/plan/STATUS.md` records the row as
+`written` rather than `proven` for that reason. Run it before you rely on this
+on anything you care about.
 
 ```
 AF_KUBE_CONTEXT=k3d-mycluster go test ./engine/internal/runtime/k8s/ -run TestConformance
