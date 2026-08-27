@@ -319,3 +319,24 @@ func TestTheSidecarIsGivenAnEndpoint(t *testing.T) {
 }
 
 func netParse(s string) net.IP { return net.ParseIP(s) }
+
+func TestAClientThatIgnoresProxyVariablesCanStillReachTheSidecar(t *testing.T) {
+	policies := networkPolicies("e1", "af-env-e1", false)
+	egress := findPolicy(t, policies, "af-service-egress-to-proxy")
+
+	ports := map[int32]bool{}
+	for _, p := range egress.Spec.Egress[0].Ports {
+		if p.Port != nil {
+			ports[p.Port.IntVal] = true
+		}
+	}
+	// The sidecar listens transparently on 80 and 443 as well as proxying on
+	// 3128. A client that ignores its proxy variables resolves the name, gets
+	// the sidecar's address, and connects on the ordinary port; without these
+	// the policy blocks the exact case the whole design exists for, and it
+	// fails in the direction that looks safe, because everything is still
+	// contained and a host the policy ALLOWS is unreachable too.
+	for _, want := range []int32{ProxyPort, 80, 443, dnsPort} {
+		require.True(t, ports[want], "egress to the sidecar must permit port %d", want)
+	}
+}

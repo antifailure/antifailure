@@ -87,6 +87,16 @@ func networkPolicies(envID, namespace string, hasIngress bool) []*networkingv1.N
 	tcp, udp := corev1.ProtocolTCP, corev1.ProtocolUDP
 	proxyPort := intstr.FromInt32(ProxyPort)
 	dns := intstr.FromInt32(dnsPort)
+	// The sidecar also listens transparently on 80 and 443, and those are the
+	// ports that matter most. A client that reads its proxy variables talks to
+	// 3128; a client that ignores them, which is Node and a great many SDKs,
+	// resolves the name, gets the sidecar's own address back, and connects to
+	// it on the ordinary port. Leaving these out let the policy block the one
+	// case the whole design exists for, and it failed in the direction that
+	// looks safe: everything was contained, and a host the policy ALLOWED was
+	// unreachable too.
+	httpPort := intstr.FromInt32(80)
+	httpsPort := intstr.FromInt32(443)
 
 	meta := func(name string) metav1.ObjectMeta {
 		return metav1.ObjectMeta{
@@ -120,6 +130,8 @@ func networkPolicies(envID, namespace string, hasIngress bool) []*networkingv1.N
 					To: []networkingv1.NetworkPolicyPeer{{PodSelector: &proxySelector}},
 					Ports: []networkingv1.NetworkPolicyPort{
 						{Protocol: &tcp, Port: &proxyPort},
+						{Protocol: &tcp, Port: &httpPort},
+						{Protocol: &tcp, Port: &httpsPort},
 						{Protocol: &udp, Port: &dns},
 						{Protocol: &tcp, Port: &dns},
 					},
