@@ -58,18 +58,17 @@ type testDB struct {
 	url   secrets.Value
 }
 
-// testPostgresURL is the Postgres the whole project's tests share, the one
-// CONTRIBUTING and `just db` start:
-//
-//	docker run -d --name af-cp-test -p 55432:5432 \
-//	  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine
+// testDatabaseURL is the Postgres the whole project's tests share, the one
+// `just db` starts. AF_TEST_DATABASE_URL overrides it, and the name and the
+// default are the ones web/apps/api/test/harness.ts already uses, because two
+// conventions for the same server is one too many.
 //
 // These tests need a real server rather than a real provider. What they prove
 // is what Postgres does with a migration, an EXPLAIN and a lock, and none of
 // that is different for a database the Docker provider made. Standing up a
 // provider and committing a golden image per test would spend minutes on
 // machinery none of the assertions are about.
-const testPostgresURL = "postgres://postgres:test@127.0.0.1:55432/postgres"
+const testDatabaseURL = "postgres://postgres:test@127.0.0.1:55432/antifailure"
 
 // templateDB holds the schema once. Every test copies it with CREATE DATABASE
 // ... TEMPLATE, which Postgres does by copying the files, so the rows, the
@@ -85,16 +84,32 @@ var shared struct {
 func TestMain(m *testing.M) {
 	code := func() int {
 		defer setupShared()()
+		// A machine with no test Postgres has not found a bug, so the default
+		// is to skip. A machine that was SUPPOSED to have one has found a very
+		// large bug, and skipping there is the worst outcome available: `go
+		// test` prints nothing for a skip, so the package reports ok having
+		// examined almost nothing.
+		//
+		// This is not hypothetical. The engine job in CI had no Postgres at
+		// all, so every test in this file skipped on every run while the job
+		// went green, and the row in STATUS.md said proven on the strength of
+		// it. AF_REQUIRE_DATABASE is what makes that state loud instead.
+		if shared.skip != "" && os.Getenv("AF_REQUIRE_DATABASE") != "" {
+			fmt.Fprintf(os.Stderr,
+				"AF_REQUIRE_DATABASE is set and there is no usable Postgres, so these tests "+
+					"would have skipped silently: %s\n", shared.skip)
+			return 1
+		}
 		return m.Run()
 	}()
 	os.Exit(code)
 }
 
 func maintenanceURL() string {
-	if u := os.Getenv("AF_TEST_POSTGRES_URL"); u != "" {
+	if u := os.Getenv("AF_TEST_DATABASE_URL"); u != "" {
 		return u
 	}
-	return testPostgresURL
+	return testDatabaseURL
 }
 
 // setupShared builds the template database and returns the teardown.

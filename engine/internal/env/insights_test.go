@@ -30,6 +30,27 @@ import (
 // copy of production's data nobody is watching, and nothing inside the
 // insights package can prove it was removed.
 
+// testBudget is how long this test may take, taken from the deadline the
+// caller gave rather than invented here.
+//
+// It was a flat fifteen minutes and that was wrong in both directions. On an
+// idle runner this test finishes in about a minute, so the number was
+// meaningless; on a machine running eleven other agents it expired mid
+// ContainerStart and reported `context deadline exceeded`, which reads exactly
+// like a broken runtime and is not. A wait should be bounded by the caller's
+// own deadline, so a `go test -timeout` that is generous is honoured and one
+// that is tight still fails on time, with a minute kept back so the cleanup
+// that removes the branch is not cancelled with everything else.
+func testBudget(t *testing.T, most time.Duration) time.Duration {
+	t.Helper()
+	if deadline, ok := t.Deadline(); ok {
+		if left := time.Until(deadline) - time.Minute; left < most {
+			return left
+		}
+	}
+	return most
+}
+
 const insightsFixture = `
 CREATE TABLE orders (
   id          bigserial PRIMARY KEY,
@@ -50,7 +71,7 @@ func TestRunInsightsRehearsesOnItsOwnBranchAndTakesItAway(t *testing.T) {
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testBudget(t, 20*time.Minute))
 	defer cancel()
 
 	golden, err := p.RefreshGolden(ctx, provider.GoldenSpec{

@@ -91,6 +91,48 @@ jobs:
             echo "These files are not formatted:"; echo "$unformatted"; exit 1
           fi
 
+      - name: A Postgres the database suites can use
+        # This job had none, and the failure that produced is the one this
+        # repository keeps finding: every test in engine/internal/insights that
+        # needs a real server called t.Skipf, `go test` printed nothing for a
+        # skip, and the job went green having examined almost nothing. A green
+        # that examined nothing is worse than a red.
+        #
+        # Started as a step rather than a `services:` block because the two
+        # -c flags matter and a service cannot override the image's command.
+        # pg_stat_statements has to be preloaded at start: without it the
+        # extension can be created and records nothing, so the query
+        # regression checks read a permanently empty table. It is the same
+        # container `just db` starts, deliberately, so local and CI agree.
+        run: |
+          set -euo pipefail
+          docker run -d --name af-cp-test -p 55432:5432 \
+            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine \
+            -c shared_preload_libraries=pg_stat_statements \
+            -c pg_stat_statements.track=all
+          # A real query against the target database, not pg_isready. During
+          # its first start the image runs a temporary server to initialise
+          # the data directory, and pg_isready answers on that one before
+          # POSTGRES_DB exists: the wait returns and the next command fails
+          # with `database "antifailure" does not exist`. Verified by running
+          # this block, not by reading it.
+          ready=0
+          for _ in $(seq 1 90); do
+            if docker exec af-cp-test psql -U postgres -d antifailure -tAc 'select 1' \
+                 > /dev/null 2>&1; then
+              ready=1; break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then
+            docker logs af-cp-test; echo "postgres never came up"; exit 1
+          fi
+          # The preload is the half that is easy to lose: without it the
+          # extension can be created and records nothing, which reads as an
+          # application that ran no queries.
+          docker exec af-cp-test psql -U postgres -d antifailure -tAc \
+            "SHOW shared_preload_libraries" | grep -q pg_stat_statements
+
       - name: Test
         # The race detector always. A data race that only shows up under load
         # is the kind of bug this product exists to find, and shipping one
@@ -100,6 +142,10 @@ jobs:
           # Docker is available on this runner, so the provider and runtime
           # suites run for real rather than skipping.
           GOTOOLCHAIN: local
+          AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:55432/antifailure
+          # And if that Postgres is not there, say so loudly rather than
+          # skipping every test that needed it.
+          AF_REQUIRE_DATABASE: '1'
 
       - name: Nothing was left behind
         # The suites assert this themselves, and this catches the case where a
