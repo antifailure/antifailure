@@ -394,10 +394,22 @@ func signInEndToEndWith(
 	require.NoError(t, err)
 	if _, err := os.Stat(filepath.Join(repoRoot, "runner", "node_modules", "playwright")); err != nil {
 		// Named rather than silent, because a skip that reads as a pass is
-		// how a suite stops proving anything without anybody noticing. To run
-		// these: npm --prefix runner ci && npx --prefix runner playwright
-		// install chromium, and have a Postgres at 127.0.0.1:55432.
-		t.Skip("skipped: the runner's dependencies are not installed (npm --prefix runner ci)")
+		// how a suite stops proving anything without anybody noticing.
+		//
+		// To run these:
+		//
+		//	npm --prefix runner install
+		//	npx --prefix runner playwright install chromium
+		//	docker run -d --name af-cp-test -p 55432:5432 \
+		//	  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine
+		//
+		// install rather than ci, and that is not a slip: runner/.gitignore
+		// ignores package-lock.json, so a fresh clone has no lockfile and
+		// `npm ci` refuses outright. CI's runner job uses install for the same
+		// reason. This comment said ci until somebody ran it on a clone that
+		// had never installed anything.
+		t.Skip("skipped: the runner's dependencies are not installed " +
+			"(npm --prefix runner install)")
 	}
 
 	table := "e2e_users_" + strings.ReplaceAll(string(strategy), "_", "")
