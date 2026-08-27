@@ -42,6 +42,34 @@ type Options struct {
 	// WorkDir is the directory the manifest is resolved against. Zero means the
 	// process's own working directory.
 	WorkDir string
+	// Extra are commands this binary contributes to the command tree.
+	//
+	// The one place this package is wider than "run the engine", and it earns
+	// it: without it an embedding binary's own commands have to be intercepted
+	// before the tree is built, which means they do not appear in af --help. A
+	// command a user cannot discover is a command that does not exist for most
+	// of the people it was written for.
+	//
+	// A name that collides with a built-in one is ignored. An embedding binary
+	// that could shadow af down with its own implementation would be a binary
+	// where a documented command depends on which build somebody is holding.
+	Extra []Command
+}
+
+// Command is a command an embedding binary contributes.
+//
+// A plain struct rather than anything from the CLI's own library, so that
+// library does not become a public dependency of every build that wraps this.
+type Command struct {
+	// Use is the command line, as "compliance <pack>".
+	Use string
+	// Short is the one line in af --help.
+	Short string
+	// Long is the help text for this command.
+	Long string
+	// Run receives the arguments after the command's own name and returns an
+	// exit code, the same contract Run has.
+	Run func(ctx context.Context, args []string) int
 }
 
 // Run executes one command and returns the exit code.
@@ -54,12 +82,19 @@ type Options struct {
 // enterprise build's licence status reaches a hook deep inside a command
 // without a licence argument threaded through every signature between them.
 func Run(ctx context.Context, args []string, opts Options) int {
+	extra := make([]cli.ExtraCommand, 0, len(opts.Extra))
+	for _, c := range opts.Extra {
+		extra = append(extra, cli.ExtraCommand{
+			Use: c.Use, Short: c.Short, Long: c.Long, Run: c.Run,
+		})
+	}
 	return cli.Execute(ctx, args, cli.Options{
 		Stdout:  opts.Stdout,
 		Stderr:  opts.Stderr,
 		Stdin:   opts.Stdin,
 		Getenv:  opts.Getenv,
 		WorkDir: opts.WorkDir,
+		Extra:   extra,
 	})
 }
 

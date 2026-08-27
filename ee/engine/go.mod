@@ -22,6 +22,7 @@ replace github.com/antifailure/antifailure/engine => ../../engine
 
 require (
 	github.com/antifailure/antifailure/engine v0.0.0-00010101000000-000000000000
+	github.com/jackc/pgx/v5 v5.7.6
 	github.com/stretchr/testify v1.12.1
 )
 
@@ -44,7 +45,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.7.6 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
