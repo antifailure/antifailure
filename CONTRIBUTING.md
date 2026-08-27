@@ -92,8 +92,18 @@ failure path listed in a design note has a test that exercises it.
 * Every provider implementation runs the shared conformance suite. A provider
   that skips a behavior must skip it explicitly, naming the missing capability.
 * No real clock, no real randomness, no real network, no sleeps. Time comes
-  from an injected `clock.Clock`; the fakes in `engine/internal/testutil/fakes`
-  cover every external dependency and can inject faults.
+  from an injected `clock.Clock`.
+* `engine/internal/testutil/fakes` holds doubles for the two provider
+  interfaces, and each comes with fault injection. `fakes.Break` and
+  `fakes.BreakRuntime` take something that works and return something that
+  violates exactly one guarantee, so you can point a suite at it and find out
+  whether the suite could have failed. That matters more than the doubles
+  themselves: a suite nobody has watched go red is a list of assertions that
+  might all be vacuous, and assertions go vacuous quietly.
+  It covers `provider.Database` and `provider.Runtime` and a clock. It does not
+  yet cover the object store, the control plane client or the secret sources,
+  and this sentence will be wrong the moment somebody adds one, so add it here
+  too.
 
 Tests run with the race detector in CI, always. A test that fails once in
 twenty runs is a bug in the test or the code, not noise, so re-running until
@@ -133,7 +143,7 @@ particular catches the failure this repository keeps producing, where something
 is declared, documented, and never called, and reads as a working feature.
 
 It is not a merge gate yet, and saying so is the point of this sentence. There
-are 81 findings that predate the config, spread across packages several people
+are 31 findings that predate the config, spread across packages several people
 are editing at once, and turning the gate on before they are cleared would fail
 every branch for something none of them did. `gofmt` and `go vet` are gates
 today. If you are clearing findings in a package you own, that is welcome, and

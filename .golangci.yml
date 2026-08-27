@@ -43,7 +43,17 @@ linters:
       exclude-functions:
         - (io.Closer).Close
     misspell:
-      locale: US
+      # No locale, deliberately. misspell's locale option is a dialect
+      # converter rather than a spell checker: set it to US and it reports
+      # fifty British spellings, set it to UK and it reports fifty American
+      # ones, and this repository contains both. Neither list is a list of
+      # mistakes, and a rule whose output is entirely correct English is one
+      # people learn to run with their eyes closed.
+      #
+      # Unset, it catches the thing it is actually good at, which is a genuine
+      # typo like recieve or occured. Which dialect the prose should use is a
+      # decision for a person, in one pass, not a gate that argues about it on
+      # every commit.
 
   exclusions:
     rules:
