@@ -183,7 +183,8 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 3.5 Subsetting | planned | |
 | 3.6 Authentication adapters | planned | |
 | 3.7 Neon | proven | The full database conformance suite, all 23 behaviours, against the real Neon API. Found three bugs a fake would not have: `pooled` omitted means pooled, so `ConnDirect` was returning a pooled connection; a 200 with an empty body broke destroy-twice; and Neon's own branch ceiling arrived as an unexplained 422. |
-| 3.8, 3.9 Supabase, DBLab | planned | Blocked on Q5: no accounts provisioned. |
+| 3.8 Supabase | proven | All 23 behaviours of the database conformance suite against the real Supabase Management API, zero skips, nothing left behind. It took four runs: the suite found three bugs and every one was an ordering rather than a state. Branching a golden worked and resetting that same branch failed; a rename is acknowledged before the branch listing shows it, so a caller was told a verified golden had failed verification; and a branch answers 404 for seconds after being created. Also proven separately: a real application shape (a public table with a foreign key to auth.users, an identity, a live session, a non public schema, row level security with a policy), and the sweep, on a run killed on purpose. |
+| 3.9 DBLab | planned | Blocked on Q5: no account provisioned. |
 | 3.10 Golden lifecycle | planned | |
 | 3.11 Postgres Insights | planned | |
 
@@ -213,7 +214,8 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/verify` attestation | proven | Ed25519; rejects a deleted finding |
 | `internal/subset` | proven | dependency order, cycles named where they break, unreachable tables reported |
 | Neon provider | proven | against the real service |
-| Supabase, DBLab providers | planned | blocked on accounts |
+| Supabase provider | proven | against the real service |
+| DBLab provider | planned | blocked on an account |
 
 ## Phase 4. Build and runtime
 
@@ -370,7 +372,10 @@ Everything remaining needs infrastructure that does not exist yet rather than
 code that has not been written:
 
 - **8.10, 14.1, 14.3, 14.10** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. There is also no Kubernetes runtime yet. A manifest asking for one is now refused with a message rather than quietly given containers on the local machine.
-- **3.8 and 3.9** need Supabase and DBLab accounts. 3.7 no longer does.
+- **3.9** needs a DBLab instance. 3.7 and 3.8 no longer need anything: the
+  Supabase suite runs against a dedicated project (`af-conformance`, ref
+  `fmidgkkluotxzopkdnnr`, org `tilt`) which costs about $0.32 a day and should
+  be deleted, with its access token revoked, once nobody is running the suite.
 - **13.2, 13.3** need identity provider test tenants.
 - **13.9** needs a Stripe account.
 - **8.3, 8.4, 8.8, 8.9, and Phase 11** are the web application and the docs
