@@ -48,6 +48,15 @@ const (
 	LabelGolden = "dev.antifailure.golden"
 	// LabelService is the manifest service name a container runs.
 	LabelService = "dev.antifailure.service"
+	// LabelServiceKind is web, worker, or cron.
+	//
+	// Recorded rather than inferred. Status used to decide a service was web
+	// because a published port had been found for it, which meant a worker
+	// came back with no kind at all and a web service came back with no kind
+	// until its forwarder existed. af up reads the kind back to choose the
+	// service whose URL it prints, so the inference was one race away from an
+	// environment that is running and reports no address.
+	LabelServiceKind = "dev.antifailure.service-kind"
 	// LabelCreated is RFC 3339, used to age out orphans whose creating
 	// process died before it could clean up.
 	LabelCreated = "dev.antifailure.created"

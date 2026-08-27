@@ -143,6 +143,7 @@ func (r *Runtime) create(
 ) (string, error) {
 	labels := dockerutil.Managed(dockerutil.KindService, spec.EnvID, r.clock.Now())
 	labels[dockerutil.LabelService] = s.Name
+	labels[dockerutil.LabelServiceKind] = s.Kind
 
 	cfg := &container.Config{
 		Image:  s.Image,

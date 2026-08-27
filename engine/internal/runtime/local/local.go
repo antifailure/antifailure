@@ -104,6 +104,23 @@ func New(opts Options) (*Runtime, error) {
 // Name identifies the runtime.
 func (r *Runtime) Name() string { return "local" }
 
+// Capabilities declares what this runtime can do.
+//
+// All three are true, which is what makes it the reference: it is the runtime
+// the other one is compared against, so a behavior it skipped would be a
+// behavior nothing had ever run.
+func (r *Runtime) Capabilities() provider.RuntimeCaps {
+	return provider.RuntimeCaps{
+		// Every web service gets a forwarder publishing a port on the host,
+		// so the URL Status reports is reachable from the machine that ran af.
+		Ingress: true,
+		Logs:    true,
+		// The database provider's branches are containers on this same
+		// daemon, so they can be joined to the environment's network.
+		AttachesLocalDatabase: true,
+	}
+}
+
 // Close releases the daemon connection.
 func (r *Runtime) Close() error { return r.cli.Close() }
 
@@ -359,14 +376,25 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 		rs := provider.RunningService{
 			Name:        c.Labels[dockerutil.LabelService],
 			ContainerID: c.ID,
+			Kind:        c.Labels[dockerutil.LabelServiceKind],
 			State:       c.State,
 			Ready:       c.State == "running",
 		}
 		if c.Status != "" {
 			rs.Detail = c.Status
 		}
+		// The list reports the exit code only inside a human sentence, so the
+		// number comes from an inspect. Anything that wanted it before parsed
+		// "Exited (9) 3 seconds ago" with a regular expression, which is a
+		// format Docker has never promised to keep.
+		if c.State != "running" {
+			if insp, err := r.cli.ContainerInspect(ctx, c.ID); err == nil &&
+				insp.State != nil && !insp.State.Running && insp.State.FinishedAt != "" {
+				code := insp.State.ExitCode
+				rs.ExitCode = &code
+			}
+		}
 		if port, ok := published[rs.Name]; ok {
-			rs.Kind = "web"
 			rs.URL = fmt.Sprintf("http://127.0.0.1:%d", port)
 		}
 		env.Services = append(env.Services, rs)
@@ -422,14 +450,11 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 }
 
 // LogLine is one line of a service's output.
-type LogLine struct {
-	// Service is which service wrote it.
-	Service string
-	// Stream is "stdout" or "stderr".
-	Stream string
-	// Text is the line, already redacted.
-	Text string
-}
+//
+// An alias rather than its own type, so that this runtime satisfies
+// provider.LogReader without every caller of af logs having to be rewritten
+// to name the shared type.
+type LogLine = provider.LogLine
 
 // Logs returns recent output from an environment's services.
 //
