@@ -224,9 +224,9 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/build` ignore | proven | `.dockerignore` implemented here rather than added as a dependency |
 | `internal/build` buildpacks | proven | Go, Node, Python, Ruby; three are built for real in the suite |
 | `internal/build` docker | proven | output redacted at the writer |
-| `internal/runtime/local` | proven | 20 behaviors, plus all 31 of the runtime conformance suite against a real daemon, with no skips |
-| `internal/runtime/k8s` | written | Passes its own unit tests and builds, but the conformance suite has NOT been run against a cluster: this machine sat at load 40 to 55 on 8 CPUs and the k3s API server timed out talking to its own loopback. Namespace per environment, five NetworkPolicies, an escape probe that refuses a cluster whose CNI ignores policy. |
-| `engine/conformance` runtime suite | proven | 31 behaviours, and 33 negative controls proving every one of them can fail. The containment behaviours are not skippable by any capability. |
+| `internal/runtime/local` | proven | 20 behaviors, plus all 32 of the runtime conformance suite against a real daemon, with no skips |
+| `internal/runtime/k8s` | proven | The runtime conformance suite against a real k3s cluster: 31 behaviours passed, 1 skipped naming the capability it lacks (no ingress domain configured), 0 failed, in one process, 28 minutes, nothing left behind. Namespace per environment, five NetworkPolicies, an escape probe that refuses a cluster whose CNI does not enforce policy. Getting there took five attempts and each one found a real bug; the last was a policy that contained everything correctly and also blocked a host it was configured to allow. |
+| `engine/conformance` runtime suite | proven | 32 behaviours, and 34 negative controls proving every one of them can fail, plus a positive control asserting all 32 PASS against a correct fake so the suite cannot pass by skipping itself. Offline, 55 seconds. The containment behaviours are not skippable by any capability. |
 | `internal/env` | proven | lock, state, journal, database, build, runtime, in the one order that works |
 
 ## Phase 5. Egress control
@@ -371,7 +371,7 @@ indistinguishable from one that works until somebody relies on it.
 Everything remaining needs infrastructure that does not exist yet rather than
 code that has not been written:
 
-- **8.10, 14.1, 14.3, 14.10** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. The Kubernetes runtime itself now exists (`internal/runtime/k8s`) and `runtime.provider: kubernetes` builds it; what is missing is a cluster to prove it against, not the code.
+- **8.10, 14.1, 14.3, 14.10** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. The Kubernetes runtime itself is done and proven against a real k3s cluster; what AKS would add is the three things k3d cannot show, which are ingress under a real domain, LoadBalancer services, and node pool behaviour.
 - **3.8 and 3.9** need Supabase and DBLab accounts. 3.7 no longer does.
 - **13.2, 13.3** need identity provider test tenants.
 - **13.9** needs a Stripe account.
