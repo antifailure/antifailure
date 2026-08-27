@@ -138,7 +138,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 1.5 Release pipeline | planned | |
 | 1.6 Security baseline | planned | |
 | 1.7 Documentation site skeleton | planned | |
-| 1.8 Azure foundation (Terraform) | planned | Isolation boundary documented in `infra/ISOLATION.md`. Blocked on Q4. |
+| 1.8 Azure foundation (Terraform) | written | `infra/terraform` with a foundation module (resource group, budget on forecast as well as actual, Log Analytics) and a control plane stack. `terraform plan` against the real subscription is clean at 30 to add, 0 to change, 0 to destroy. Nothing has been applied, so this is not `proven`. `tools/azguard` and `tools/cost` are `proven`: the guard refuses all five foreign resource groups in this subscription and fails closed, and the estimator reports 32.49 USD a month from prices read out of the Azure retail API. Q4 is narrower now: what remains is the Entra app registration and federated credential, without which the CI plan job skips rather than passes. |
 | 1.9 Test infrastructure and fakes | planned | |
 | 1.10 Events, logging, and redaction | proven | 100 percent coverage on redaction, 454 ns/op with no allocations. |
 | 1.11 Local state store and journal | proven | Crash injection at every step, plus a property test over random interleavings. |
@@ -310,7 +310,7 @@ pushed. The first release is the test.
 | 8.7 Audit log | proven | Insert and select granted, nothing else, asserted against the grant table. Hash chain detects every field of every entry being altered in a 25-entry chain. |
 | 8.8 Agent live view | planned | Needs the streaming endpoint and the web application. |
 | 8.9 Design system | planned | The web application. |
-| 8.10 Deployment | planned | Terraform and Helm. The subscription now has quota (65 cores in eastus, no cluster limit), so this is a decision about spending rather than a missing prerequisite. |
+| 8.10 Deployment | written | The control plane image exists (`deploy/docker/control-plane.Dockerfile`), is built and published by a workflow, and has been `proven` locally: built, run, migrated a fresh database, served 200. The Helm chart installs on any cluster and its value guards are `proven` able to refuse, but the kind install runs in CI and has not been run by hand, so the chart is `written`. Terraform targets Container Apps rather than AKS: 32.49 USD a month against about 75 for an idle AKS control plane before a node runs. Quota is confirmed at 65 cores in southcentralus as well as eastus, and the control plane needs none of it. |
 
 | Component | State | Coverage or notes |
 | --- | --- | --- |
@@ -369,7 +369,8 @@ indistinguishable from one that works until somebody relies on it.
 Everything remaining needs infrastructure that does not exist yet rather than
 code that has not been written:
 
-- **8.10, 14.1, 14.3, 14.10** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. There is also no Kubernetes runtime yet. A manifest asking for one is now refused with a message rather than quietly given containers on the local machine.
+- **8.10** is no longer blocked on an AKS decision. The control plane runs on Container Apps, where the whole stack costs 32.49 USD a month against roughly 75 for an idle AKS control plane before a node runs. The Terraform is written and plans clean; what is left is the decision to spend, and an Entra app registration so CI can plan with a federated credential instead of skipping.
+- **14.1, 14.3, 14.10** still want a cluster, which costs money for as long as it exists.
 - **3.8 and 3.9** need Supabase and DBLab accounts. 3.7 no longer does.
 - **13.2, 13.3** need identity provider test tenants.
 - **13.9** needs a Stripe account.
