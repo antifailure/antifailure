@@ -25,6 +25,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -84,17 +85,19 @@ const DefaultReadyTimeout = 5 * time.Minute
 
 // Runtime places environments on a Kubernetes cluster.
 type Runtime struct {
-	cli       kubernetes.Interface
-	rest      *rest.Config
-	clock     clock.Clock
-	redactor  *redact.Redactor
-	prefix    string
-	domain    string
-	ingress   string
-	resolver  string
-	images    ImageLoader
-	proxyRef  string
-	readyWait time.Duration
+	cli          kubernetes.Interface
+	rest         *rest.Config
+	clock        clock.Clock
+	redactor     *redact.Redactor
+	prefix       string
+	domain       string
+	ingress      string
+	resolver     string
+	images       ImageLoader
+	proxyRef     string
+	resolveProxy func(context.Context) (string, error)
+	proxyOnce    sync.Mutex
+	readyWait    time.Duration
 	// skipContainmentCheck is never set by anything a user can reach.
 	//
 	// It exists for exactly one test, the one that proves the containment
@@ -131,9 +134,18 @@ type Options struct {
 	// Resolver is the ADDRESS of the cluster's DNS service, with no port.
 	// Empty discovers it from the kube-dns service.
 	Resolver string
-	// ProxyImage is the sidecar image reference. Required: this package does
-	// not build images, and the engine that does knows the reference.
+	// ProxyImage is the sidecar image reference, when it is already known.
 	ProxyImage string
+	// ResolveProxyImage produces the sidecar image reference on demand, for
+	// the usual case where producing it means building it.
+	//
+	// Lazy on purpose, and the reason is worth stating. The sidecar is
+	// compiled from source carried in this binary, so obtaining its reference
+	// can mean a container build of a minute or more on a cold cache. Only Up
+	// needs it. Resolving it in the constructor made af status, af logs and
+	// af down each build an image before answering, which on a cold cache is
+	// a quarter of an hour to be told what is running.
+	ResolveProxyImage func(context.Context) (string, error)
 	// Images makes an image available to the cluster. Nil means every image
 	// is already pullable from where the nodes can reach.
 	Images ImageLoader
@@ -183,7 +195,8 @@ func New(opts Options) (*Runtime, error) {
 		prefix: opts.NamespacePrefix, domain: opts.Domain,
 		ingress: opts.IngressClass, resolver: opts.Resolver,
 		images: opts.Images, proxyRef: opts.ProxyImage,
-		readyWait: opts.ReadyTimeout,
+		resolveProxy: opts.ResolveProxyImage,
+		readyWait:    opts.ReadyTimeout,
 	}, nil
 }
 
@@ -253,6 +266,31 @@ func (r *Runtime) Capabilities() provider.RuntimeCaps {
 // outlives a request, so there is nothing to release, and saying so is better
 // than an empty method that looks unfinished.
 func (r *Runtime) Close() error { return nil }
+
+// proxyImage returns the sidecar's image reference, producing it if this is
+// the first time anything has asked.
+func (r *Runtime) proxyImage(ctx context.Context) (string, error) {
+	r.proxyOnce.Lock()
+	defer r.proxyOnce.Unlock()
+	if r.proxyRef != "" {
+		return r.proxyRef, nil
+	}
+	if r.resolveProxy == nil {
+		return "", aferrors.Coded(aferrors.AFRUN040,
+			"detail", "no sidecar image was given to the Kubernetes runtime, and an "+
+				"environment without a sidecar has no egress policy at all")
+	}
+	ref, err := r.resolveProxy(ctx)
+	if err != nil {
+		return "", err
+	}
+	if ref == "" {
+		return "", aferrors.Coded(aferrors.AFRUN040,
+			"detail", "the sidecar image could not be produced")
+	}
+	r.proxyRef = ref
+	return ref, nil
+}
 
 // namespace is the namespace an environment lives in.
 func (r *Runtime) namespace(envID string) string {

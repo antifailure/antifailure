@@ -567,32 +567,14 @@ func (o *Orchestrator) Runtime() (provider.Runtime, error) { return o.newRuntime
 // two honest answers, and an environment with no sidecar is not a third: it
 // would have no egress policy at all.
 func (o *Orchestrator) newKubernetesRuntime(cfg *schema.Runtime) (provider.Runtime, error) {
-	getenv := o.opts.Getenv
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	image := getenv("AF_PROXY_IMAGE")
-	if image == "" {
-		builder, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
-		if err != nil {
-			return nil, aferrors.Coded(aferrors.AFRUN044, "detail",
-				"the egress sidecar image is built on a local container daemon and none "+
-					"is reachable. Either start one, or publish the sidecar image and "+
-					"name it in AF_PROXY_IMAGE")
-		}
-		defer func() { _ = builder.Close() }()
-
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-		defer cancel()
-		if image, err = builder.EnsureProxyImage(ctx, o.progress); err != nil {
-			return nil, err
-		}
-	}
-
 	opts := k8s.Options{
-		ProxyImage: image,
-		Clock:      o.opts.Clock,
-		Redactor:   o.opts.Redactor,
+		Clock:    o.opts.Clock,
+		Redactor: o.opts.Redactor,
+		// Resolved when something needs it, which is only ever bringing an
+		// environment up. Building it here instead made af status, af logs
+		// and af down each compile the sidecar before answering, which on a
+		// cold cache is a quarter of an hour to be told what is running.
+		ResolveProxyImage: o.resolveProxyImage,
 	}
 	if cfg != nil {
 		opts.Context = cfg.KubeconfigContext
@@ -600,6 +582,34 @@ func (o *Orchestrator) newKubernetesRuntime(cfg *schema.Runtime) (provider.Runti
 		opts.Domain = cfg.Domain
 	}
 	return k8s.New(opts)
+}
+
+// resolveProxyImage produces the sidecar image the cluster needs.
+//
+// The sidecar is compiled from source carried in this binary, so something has
+// to build it, and the only thing that can is a container daemon on this
+// machine. A cluster cannot see that daemon, so the image is built here and
+// either copied into a development cluster or, for a real one, named by
+// AF_PROXY_IMAGE and pulled from wherever it was published. Those are the only
+// two honest answers, and an environment with no sidecar is not a third: it
+// would have no egress policy at all.
+func (o *Orchestrator) resolveProxyImage(ctx context.Context) (string, error) {
+	getenv := o.opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if image := getenv("AF_PROXY_IMAGE"); image != "" {
+		return image, nil
+	}
+	builder, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	if err != nil {
+		return "", aferrors.Coded(aferrors.AFRUN044, "detail",
+			"the egress sidecar image is built on a local container daemon and none "+
+				"is reachable. Either start one, or publish the sidecar image and "+
+				"name it in AF_PROXY_IMAGE")
+	}
+	defer func() { _ = builder.Close() }()
+	return builder.EnsureProxyImage(ctx, o.progress)
 }
 
 // newDatabaseProvider builds the provider the manifest asked for.

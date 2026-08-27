@@ -105,13 +105,12 @@ func LocalClusterLoaderFor(kubeContext string) (ImageLoader, bool) {
 // ensureImages puts every image an environment needs where the nodes can find
 // it, before anything is created.
 func (r *Runtime) ensureImages(ctx context.Context, spec provider.EnvSpec, progress func(string)) error {
-	if r.proxyRef == "" {
-		return aferrors.Coded(aferrors.AFRUN040,
-			"detail", "no sidecar image was given to the Kubernetes runtime, and an "+
-				"environment without a sidecar has no egress policy at all")
+	proxy, err := r.proxyImage(ctx)
+	if err != nil {
+		return err
 	}
 	seen := map[string]bool{}
-	refs := []string{r.proxyRef}
+	refs := []string{proxy}
 	for _, s := range spec.Services {
 		refs = append(refs, s.Image)
 	}

@@ -80,7 +80,10 @@ func (r *Runtime) verifyContainment(
 	journal func(string, string) error,
 	progress func(string),
 ) error {
-	image := r.probeImage(spec)
+	image, err := r.probeImage(ctx, spec)
+	if err != nil {
+		return err
+	}
 	if image == "" {
 		return aferrors.Coded(aferrors.AFRUN043, "detail",
 			"there is no image to run the containment check with, so whether this "+
@@ -120,7 +123,7 @@ func (r *Runtime) verifyContainment(
 		_ = r.cli.CoreV1().Pods(namespace).Delete(remove, probeName, metav1.DeleteOptions{})
 	}()
 
-	_, err := r.cli.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
+	_, err = r.cli.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		_ = r.cli.CoreV1().Pods(namespace).Delete(ctx, probeName, metav1.DeleteOptions{})
 		_, err = r.cli.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
@@ -154,13 +157,13 @@ func (r *Runtime) verifyContainment(
 // air gapped install where nothing can be pulled, and it asks the question in
 // the image that is actually going to run here rather than in a convenient
 // one.
-func (r *Runtime) probeImage(spec provider.EnvSpec) string {
+func (r *Runtime) probeImage(ctx context.Context, spec provider.EnvSpec) (string, error) {
 	for _, s := range spec.Services {
 		if s.Image != "" {
-			return s.Image
+			return s.Image, nil
 		}
 	}
-	return r.proxyRef
+	return r.proxyImage(ctx)
 }
 
 // awaitProbe waits for the probe to finish and returns what it said.

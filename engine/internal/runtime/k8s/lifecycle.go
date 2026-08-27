@@ -175,7 +175,7 @@ func (r *Runtime) startProxy(
 	journal func(string, string) error,
 	progress func(string),
 ) (string, error) {
-	secret, deployment, service, err := r.proxyObjects(spec.EnvID, namespace, podCIDR, resolver, spec)
+	secret, deployment, service, err := r.proxyObjects(ctx, spec.EnvID, namespace, podCIDR, resolver, spec)
 	if err != nil {
 		return "", err
 	}

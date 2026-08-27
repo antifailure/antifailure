@@ -277,9 +277,14 @@ func internalNames(namespace string, services []provider.ServiceSpec) []string {
 
 // proxyObjects builds the sidecar's Secret, Deployment and Service.
 func (r *Runtime) proxyObjects(
+	ctx context.Context,
 	envID, namespace, subnet, resolver string,
 	spec provider.EnvSpec,
 ) (*corev1.Secret, *appsv1.Deployment, *corev1.Service, error) {
+	proxyRef, imageErr := r.proxyImage(ctx)
+	if imageErr != nil {
+		return nil, nil, nil, imageErr
+	}
 	egress := schema.Egress{}
 	if spec.Egress != nil {
 		egress = *spec.Egress
@@ -345,7 +350,7 @@ func (r *Runtime) proxyObjects(
 					AutomountServiceAccountToken: falseRef(),
 					Containers: []corev1.Container{{
 						Name:  "proxy",
-						Image: r.proxyRef,
+						Image: proxyRef,
 						Args:  []string{"-config", configPath},
 						Env:   env,
 						Ports: []corev1.ContainerPort{
