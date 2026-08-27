@@ -1,0 +1,93 @@
+# Unit prices for every Azure SKU this project uses.
+#
+# Every number here was read from the Azure retail prices API
+# (https://prices.azure.com/api/retail/prices) on the date below, for the region
+# below, in USD, at pay-as-you-go rates. None of it is from memory and none of
+# it is an estimate. `tools/cost estimate` reads a Terraform plan against this
+# file and prints a projected monthly bill.
+#
+# Two things this file is NOT:
+#
+#   It is not a quote. Retail prices ignore reservations, savings plans,
+#   Microsoft customer agreements, and free grants beyond the ones named here.
+#   Spec 1.8 sets the bar as "within 10 percent of the Azure cost analysis after
+#   one week", which is a comparison against reality rather than a promise.
+#
+#   It is not automatically current. Azure moves prices. The `checked` date is
+#   how you know whether to distrust it, which is why it is a field rather than
+#   a comment.
+
+meta:
+  currency: USD
+  region: southcentralus
+  checked: 2026-08-27
+  source: https://prices.azure.com/api/retail/prices
+  hours_per_month: 730
+
+# --- Azure Database for PostgreSQL, flexible server ------------------------
+# Burstable B1ms and B2s carry a flat per-instance meter. From B2ms upward the
+# meter is per vCore and the listed price is already the whole instance.
+postgres_flexible:
+  compute_per_hour:
+    B_Standard_B1ms: 0.0204
+    B_Standard_B2s: 0.0816
+    B_Standard_B2ms: 0.1632
+    B_Standard_B4ms: 0.3264
+    B_Standard_B8ms: 0.6528
+    GP_Standard_D2s_v3: 0.1418
+    GP_Standard_D4s_v3: 0.2836
+  storage_per_gb_month: 0.138
+  # Backup up to the size of provisioned storage is included. This is the rate
+  # beyond it, which is what a long retention actually costs.
+  backup_lrs_per_gb_month: 0.114
+  # Zone redundant HA runs a second server. It is not a surcharge, it is a
+  # second bill, and burstable SKUs cannot do it at all.
+  high_availability_multiplier: 2.0
+
+# --- Container Apps, consumption -------------------------------------------
+# A replica that is up but serving nothing is billed at the idle rate. The free
+# grant is per subscription per month and is applied once across every app.
+container_apps:
+  vcpu_second_active: 0.000024
+  vcpu_second_idle: 0.000003
+  memory_gib_second_active: 0.000003
+  memory_gib_second_idle: 0.000003
+  requests_per_million: 0.40
+  free_grant:
+    vcpu_seconds: 180000
+    memory_gib_seconds: 360000
+    requests: 2000000
+
+# --- Key Vault --------------------------------------------------------------
+key_vault:
+  operations_per_10k: 0.03
+
+# --- Storage, general purpose v2, hot -------------------------------------
+storage:
+  hot_lrs_per_gb_month: 0.018
+  hot_grs_per_gb_month: 0.036
+  write_operations_per_10k: 0.065
+  read_operations_per_10k: 0.005
+
+# --- Log Analytics ----------------------------------------------------------
+# The first 5 GB per billing account per month is free; beyond that this is what
+# a chatty diagnostic setting costs, which is the usual reason a small
+# deployment's bill is not small.
+log_analytics:
+  ingestion_per_gb: 2.76
+  retention_per_gb_month: 0.12
+  free_ingestion_gb: 5
+
+# --- Assumptions the estimate needs and a plan cannot tell it ---------------
+# Stated here rather than buried in the tool, because they are the numbers most
+# likely to be wrong and they should be easy to argue with.
+assumptions:
+  log_analytics_gb_per_month: 2
+  key_vault_operations_per_month: 50000
+  golden_storage_gb: 50
+  container_apps_requests_per_month: 1000000
+  # A replica with min_replicas >= 1 is up all month. Whether it is billed at
+  # the active or the idle rate depends on traffic; the estimate uses idle,
+  # and says so, because a control plane serving a handful of teams is idle
+  # almost all of the time.
+  container_apps_duty_cycle: 0.05
