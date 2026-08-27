@@ -500,3 +500,45 @@ func TestCollectingAGoldenNeverForces(t *testing.T) {
 	require.NoError(t, p.DestroyGolden(context.Background(), "gv_x"))
 	require.False(t, forced, "the golden was collected with force, which takes dependent datasets with it")
 }
+
+// Reset names the golden the branch came from, never "latest".
+//
+// The ordering this guards is real and quiet: a golden refresh that happens
+// while an environment is up makes a newer snapshot the latest one, and a
+// reset to "latest" would move that environment onto data it never branched
+// from. Nothing would report it; the environment would simply start disagreeing
+// with the test run that created it.
+func TestResetTargetsTheGoldenTheBranchCameFromAndNotTheLatest(t *testing.T) {
+	older := goldenSnapshot("pool/older@1", "gv_older")
+	older.CreatedAt = Time{time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)}
+	newer := goldenSnapshot("pool/newer@2", "gv_newer")
+	newer.CreatedAt = Time{time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)}
+
+	var body map[string]any
+	p := testProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/snapshots":
+			_ = json.NewEncoder(w).Encode([]Snapshot{newer, older})
+		case strings.HasSuffix(r.URL.Path, "/reset"):
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			w.WriteHeader(http.StatusOK)
+		default:
+			_, _ = w.Write([]byte(`{"id":"af-env-env_1","status":{"code":"OK"},"db":{"port":"6000"}}`))
+		}
+	}))
+
+	require.NoError(t, p.Reset(context.Background(),
+		provider.Branch{EnvID: "env_1", From: "gv_older", ProviderRef: PrefixEnv + "env_1"}))
+
+	require.Equal(t, older.ID, body["snapshotID"],
+		"the reset targeted %v, so an environment would land on a golden it never branched from", body["snapshotID"])
+	require.Equal(t, false, body["latest"])
+}
+
+// Resetting to a golden the engine no longer holds is a missing version, not a
+// reset to whatever happens to be newest.
+func TestResettingToACollectedGoldenIsAFDB004(t *testing.T) {
+	p := testProvider(t, snapshotsHandler(nil, nil))
+	err := p.Reset(context.Background(), provider.Branch{EnvID: "env_1", From: "gv_gone"})
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFDB004))
+}

@@ -381,12 +381,19 @@ func (c *Client) DeleteClone(ctx context.Context, id string) error {
 	return c.awaitGone(ctx, id)
 }
 
-// ResetClone returns a clone to a snapshot and waits for it to come back.
+// ResetClone returns a clone to a named snapshot and waits for it to come
+// back.
+//
+// The snapshot is always named. The engine also accepts {"latest": true},
+// which this client deliberately does not offer: the latest snapshot may be a
+// golden published by a refresh that happened while an environment was up, and
+// resetting to that would silently move the environment onto data it never
+// branched from.
 func (c *Client) ResetClone(ctx context.Context, id, snapshotID string) error {
-	body := map[string]any{"snapshotID": snapshotID, "latest": false}
 	if snapshotID == "" {
-		body = map[string]any{"latest": true}
+		return fmt.Errorf("dblab: reset of clone %s needs a snapshot to reset to", id)
 	}
+	body := map[string]any{"snapshotID": snapshotID, "latest": false}
 	if err := c.do(ctx, http.MethodPost, "/clone/"+url.PathEscape(id)+"/reset", body, nil); err != nil {
 		return err
 	}
