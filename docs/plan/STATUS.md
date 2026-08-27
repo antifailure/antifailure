@@ -176,7 +176,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 
 | Sub-phase | State | Notes |
 | --- | --- | --- |
-| 3.1 Provider interface and conformance suite | proven | 23 behaviors in `engine/conformance`. A behavior a provider cannot support is skipped explicitly, naming the capability. |
+| 3.1 Provider interface and conformance suite | proven | 23 behaviors in `engine/conformance`, for the DATABASE provider; the runtime suite in the same package is a separate 31. A behavior a provider cannot support is skipped explicitly, naming the capability. |
 | 3.2 Docker provider | proven | 21 behaviors pass against a real daemon, 2 skip with named reasons, zero resources left behind across repeated runs. |
 | 3.3 Masking engine | partial | The 22 transforms and the key hierarchy are proven at 95 percent. The rules model, classifier, SQL compiler, and resumable executor are next. |
 | 3.4 Verification scanner | partial | The 9 detectors are proven at 94 percent. The streaming table scan and the signed attestation are next. |
@@ -224,7 +224,9 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/build` ignore | proven | `.dockerignore` implemented here rather than added as a dependency |
 | `internal/build` buildpacks | proven | Go, Node, Python, Ruby; three are built for real in the suite |
 | `internal/build` docker | proven | output redacted at the writer |
-| `internal/runtime/local` | proven | 20 behaviors against a real daemon |
+| `internal/runtime/local` | proven | 20 behaviors, plus all 31 of the runtime conformance suite against a real daemon, with no skips |
+| `internal/runtime/k8s` | written | Passes its own unit tests and builds, but the conformance suite has NOT been run against a cluster: this machine sat at load 40 to 55 on 8 CPUs and the k3s API server timed out talking to its own loopback. Namespace per environment, five NetworkPolicies, an escape probe that refuses a cluster whose CNI ignores policy. |
+| `engine/conformance` runtime suite | proven | 31 behaviours, and 33 negative controls proving every one of them can fail. The containment behaviours are not skippable by any capability. |
 | `internal/env` | proven | lock, state, journal, database, build, runtime, in the one order that works |
 
 ## Phase 5. Egress control
@@ -369,7 +371,7 @@ indistinguishable from one that works until somebody relies on it.
 Everything remaining needs infrastructure that does not exist yet rather than
 code that has not been written:
 
-- **8.10, 14.1, 14.3, 14.10** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. There is also no Kubernetes runtime yet. A manifest asking for one is now refused with a message rather than quietly given containers on the local machine.
+- **8.10, 14.1, 14.3, 14.10** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. The Kubernetes runtime itself now exists (`internal/runtime/k8s`) and `runtime.provider: kubernetes` builds it; what is missing is a cluster to prove it against, not the code.
 - **3.8 and 3.9** need Supabase and DBLab accounts. 3.7 no longer does.
 - **13.2, 13.3** need identity provider test tenants.
 - **13.9** needs a Stripe account.
@@ -384,10 +386,14 @@ rather than `proven`. The distinction is the point of this file.
 1. 13.2 and 13.3 need identity provider test tenants.
 2. Anything blocked above, as soon as the account or the quota exists.
 
-Notes for whoever picks this up. The conformance suite is not yet tested
-against a deliberately buggy provider, so it is not yet proved that every
-subtest can fail; that is worth doing before a second provider is written
-against it. And the Docker provider reports every committed image as verified,
+Notes for whoever picks this up. The RUNTIME conformance suite is now tested
+against a deliberately broken fake, one flaw at a time, so every one of its
+behaviours is proved able to fail; the pattern is in
+`engine/conformance/fakeruntime_test.go` and `runtime_selftest_test.go`. The
+DATABASE suite still is not, and that matters more now than when this note was
+written, because the second and third providers are being written against it.
+
+And the Docker provider reports every committed image as verified,
 which is true by construction today because the commit is the last step of a
 refresh, but will stop being true once goldens can be imported. `af up`
 creates an empty golden when no source database is configured, so the schema
