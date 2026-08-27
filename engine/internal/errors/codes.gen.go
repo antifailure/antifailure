@@ -218,6 +218,9 @@ const (
 	AFRUN043 Code = "AF-RUN-043"
 	// This runtime cannot do that: {detail}
 	AFRUN044 Code = "AF-RUN-044"
+	// {kind} {name} was not created by this runtime, so it was not
+	// removed.
+	AFRUN045 Code = "AF-RUN-045"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -969,6 +972,15 @@ var catalog = map[Code]Entry{
 		Area:      "RUN",
 		Message:   "This runtime cannot do that: {detail}",
 		NextStep:  "Use the runtime that supports it, or run the command against an environment placed by one that does.",
+		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN045: {
+		Code:      AFRUN045,
+		Area:      "RUN",
+		Message:   "{kind} {name} was not created by this runtime, so it was not removed.",
+		NextStep:  "Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns.",
 		Docs:      "guides/kubernetes-runtime",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

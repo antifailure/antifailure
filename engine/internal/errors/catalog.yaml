@@ -359,6 +359,13 @@ errors:
     docs: guides/kubernetes-runtime
     retryable: false
     exit_code: 3
+  - code: AF-RUN-045
+    area: RUN
+    message: "{kind} {name} was not created by this runtime, so it was not removed."
+    next_step: "Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns."
+    docs: guides/kubernetes-runtime
+    retryable: false
+    exit_code: 3
   - code: AF-RUN-009
     area: RUN
     message: "No free port was found in the range {range} to publish the environment on."

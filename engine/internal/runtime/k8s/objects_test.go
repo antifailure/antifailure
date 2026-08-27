@@ -6,10 +6,16 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -339,4 +345,101 @@ func TestAClientThatIgnoresProxyVariablesCanStillReachTheSidecar(t *testing.T) {
 	for _, want := range []int32{ProxyPort, 80, 443, dnsPort} {
 		require.True(t, ports[want], "egress to the sidecar must permit port %d", want)
 	}
+}
+
+// TestDownRefusesANamespaceItDoesNotOwn is the guard on the one operation here
+// that cannot be undone.
+//
+// Down derives a namespace name from an environment id and deletes it, and
+// deleting a namespace takes every object inside it. So the question that
+// matters is not "does it delete the right one" but "what does it do when the
+// name it computed belongs to somebody else", and the conformance suite cannot
+// ask it: the suite's leak check compares the runtime's own Inventory before
+// and after, Inventory lists only namespaces labelled managed, and a namespace
+// wrongly deleted was never in that list. The assertion is scoped to exclude
+// the casualty, so it passes either way.
+//
+// Both directions are checked, because a refusal that also refuses our own
+// namespaces would pass the first half of this and break teardown entirely.
+func TestDownRefusesANamespaceItDoesNotOwn(t *testing.T) {
+	const envID = "e1"
+	name := "af-env-" + envID
+
+	newRuntime := func(labels map[string]string) (*Runtime, kubernetes.Interface) {
+		cli := k8sfake.NewSimpleClientset(&corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		})
+		return &Runtime{
+			cli:       cli,
+			rest:      &rest.Config{Host: "https://cluster.test"},
+			prefix:    "af-env-",
+			readyWait: time.Second,
+		}, cli
+	}
+
+	t.Run("a namespace with our name but not our label survives", func(t *testing.T) {
+		// The shape a person hits: they had a namespace called af-env-e1
+		// before they ever ran af, and an environment id collided with it.
+		r, cli := newRuntime(map[string]string{"owner": "somebody-else"})
+
+		_, err := r.Down(context.Background(), envID)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "AF-RUN-045")
+
+		_, getErr := cli.CoreV1().Namespaces().Get(
+			context.Background(), name, metav1.GetOptions{})
+		require.NoError(t, getErr, "the namespace was deleted anyway")
+	})
+
+	t.Run("a namespace we labelled is removed", func(t *testing.T) {
+		r, cli := newRuntime(labelsFor(envID, "namespace"))
+
+		_, err := r.Down(context.Background(), envID)
+		require.NoError(t, err)
+
+		_, getErr := cli.CoreV1().Namespaces().Get(
+			context.Background(), name, metav1.GetOptions{})
+		require.True(t, apierrors.IsNotFound(getErr),
+			"teardown left the namespace it owns behind: %v", getErr)
+	})
+}
+
+// TestUpRefusesANamespaceItDoesNotOwn is the other half, and the worse half.
+//
+// Down deleting somebody's namespace is loud: their objects are gone and they
+// will notice. Up reusing it is quiet, and it is not merely additive, because
+// applyPolicies runs immediately afterwards and its first policy denies all
+// traffic in both directions. Everything already running in that namespace
+// would stop talking to anything, with no error on either side and no obvious
+// cause. So it refuses.
+//
+// The second case is why this cannot simply refuse every namespace that
+// already exists: Up is idempotent, and the second Up of one environment finds
+// the namespace the first one made.
+func TestUpRefusesANamespaceItDoesNotOwn(t *testing.T) {
+	const envID = "e1"
+	name := "af-env-" + envID
+
+	newRuntime := func(labels map[string]string) *Runtime {
+		return &Runtime{
+			cli: k8sfake.NewSimpleClientset(&corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+			}),
+			rest:      &rest.Config{Host: "https://cluster.test"},
+			prefix:    "af-env-",
+			readyWait: time.Second,
+		}
+	}
+
+	t.Run("somebody else's namespace is not adopted", func(t *testing.T) {
+		r := newRuntime(map[string]string{"owner": "somebody-else"})
+		err := r.ensureNamespace(context.Background(), envID)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "AF-RUN-045")
+	})
+
+	t.Run("our own namespace is reused, because Up is idempotent", func(t *testing.T) {
+		r := newRuntime(labelsFor(envID, "namespace"))
+		require.NoError(t, r.ensureNamespace(context.Background(), envID))
+	})
 }

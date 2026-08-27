@@ -122,14 +122,23 @@ func (r *Runtime) ensureNamespace(ctx context.Context, envID string) error {
 		return aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
 	}
 	if apierrors.IsAlreadyExists(err) {
+		existing, getErr := r.cli.CoreV1().Namespaces().Get(ctx, ns.Name, metav1.GetOptions{})
 		// A namespace that is on its way out cannot be reused: every create
 		// inside it is refused, and the refusal names a terminating namespace
 		// rather than the environment somebody is trying to start.
-		existing, getErr := r.cli.CoreV1().Namespaces().Get(ctx, ns.Name, metav1.GetOptions{})
 		if getErr == nil && existing.Status.Phase == corev1.NamespaceTerminating {
 			return aferrors.Coded(aferrors.AFRUN002, "endpoint", r.rest.Host,
 				"detail", fmt.Sprintf("namespace %s is still terminating from a previous "+
 					"teardown. Wait for it to finish, or run af down again", ns.Name))
+		}
+		// The other half of the ownership question Down asks, and the worse
+		// half. Reusing somebody else's namespace does not merely add objects
+		// to it: applyPolicies runs next and its first policy denies all
+		// traffic in both directions, so whatever was already running in there
+		// stops talking to anything. Refusing to start is the only outcome
+		// that leaves their cluster as it was.
+		if getErr == nil && existing.Labels[LabelManaged] != "true" {
+			return aferrors.Coded(aferrors.AFRUN045, "kind", "namespace", "name", ns.Name)
 		}
 	}
 	return nil
@@ -575,6 +584,27 @@ func (r *Runtime) Down(ctx context.Context, envID string) (provider.Teardown, er
 	if err != nil {
 		return td, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
 	}
+
+	// The name is not the proof of ownership, the label is.
+	//
+	// Everything up to here derived the namespace from an environment id, and
+	// deleting a namespace takes everything inside it with no undo. A
+	// namespace this runtime created carries the managed label because Create
+	// sets it in the same call that makes the object, so there is no window in
+	// which one of ours exists without it. A namespace with the right name and
+	// no label is therefore definitively somebody else's, and the only correct
+	// thing to do with it is nothing.
+	//
+	// The local runtime has never had this hole: it removes by label filter,
+	// so it can only touch what it labelled. This runtime deleted by computed
+	// name, and the conformance suite cannot see the difference, because its
+	// leak check is scoped to what the runtime's own Inventory reports and
+	// Inventory reports only what is managed. An assertion scoped to exclude
+	// the casualty cannot fail on it.
+	if existing.Labels[LabelManaged] != "true" {
+		return td, aferrors.Coded(aferrors.AFRUN045, "kind", "namespace", "name", namespace)
+	}
+
 	// Counted before the delete, because afterwards there is nothing to count
 	// and a teardown that always reported zero would be indistinguishable
 	// from one that removed nothing.

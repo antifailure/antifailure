@@ -174,6 +174,21 @@ teardown had not finished.
 A namespace that will not finish terminating is almost always a finalizer
 waiting on something, so the finalizers are named in the message.
 
+It deletes only what it created, and the label decides that rather than the
+name. A namespace name is derived from an environment id, so a cluster that
+already had a namespace by that name would otherwise lose it and everything in
+it. Every namespace this runtime makes carries `dev.antifailure.managed=true`,
+set in the same call that creates the object, so one of ours without the label
+cannot exist. One with the name and without the label is somebody else's, and
+`af down` refuses it with **AF-RUN-045** rather than removing it.
+
+`af up` refuses the same namespace for a sharper reason. Placing an environment
+in it would not simply add objects: the first policy applied denies all traffic
+in both directions, so whatever was already running in there would stop talking
+to anything, with no error on either side. Refusing to start is the only
+outcome that leaves the cluster as it was. A namespace this runtime made is
+reused normally, which is what makes `af up` idempotent.
+
 ## Conformance
 
 This runtime is held to the same suite the local one is, and the containment
