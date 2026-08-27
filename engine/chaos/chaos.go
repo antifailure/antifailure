@@ -52,6 +52,17 @@
 // conformance behaviour it corresponds to passes for every provider that will
 // ever exist while proving nothing about the case anybody worries about.
 //
+// A retry must be able to retry. This is the third rule and it was learned
+// late. refreshGolden below retries a busy daemon three times, and for its
+// first night it did not: all three attempts shared one deadline, so the first
+// spent the budget and the other two failed instantly on a context that was
+// already dead. The loop was three lines of comment describing behaviour that
+// could not happen. Worse, the spent deadline then poisoned the assertions
+// after it, and the test failed saying the provider could not enumerate
+// itself, which is a sentence about the wrong component. Each attempt now has
+// its own budget, and a blown budget is reported as a statement about the
+// machine rather than about the code under test.
+//
 // A note on where these run. Each of the Docker-backed tests below stands up a
 // real Postgres and a real golden, and on a machine already running a dozen
 // containers a golden refresh can take minutes or fail its readiness window

@@ -2,6 +2,7 @@ package chaos_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -73,29 +74,55 @@ func newDockerProvider(t *testing.T) *dockerdb.Provider {
 // hit the same thing from their own directions. Every other error is returned
 // on the first attempt.
 //
+// EACH ATTEMPT GETS ITS OWN BUDGET, and that is the whole reason this function
+// takes a testing.T rather than a context. The first version shared one
+// deadline across all three, which meant that on the machine it was written
+// for it did not retry at all: attempt one spent the budget, and attempts two
+// and three failed instantly on a context that was already dead. A retry loop
+// whose later attempts cannot run is a comment, not a retry. Observed at load
+// 40, where attempt two came back "context deadline exceeded" in the middle of
+// an image pull.
+//
+// The parent is t.Context() so a finished test still cancels the work, and it
+// carries no deadline of its own, so the budget below is the only clock.
+//
 // Exhausting the attempts is a FAILURE and not a skip. "The daemon is there and
 // cannot start a database" is a result about the environment, and reporting it
 // as a skip would let this suite go green on a machine that cannot run it.
-func refreshGolden(ctx context.Context, t *testing.T, p *dockerdb.Provider, rules string) provider.GoldenVersion {
+func refreshGolden(t *testing.T, p *dockerdb.Provider, rules string) provider.GoldenVersion {
 	t.Helper()
+	const perAttempt = 4 * time.Minute
 	var last error
 	for attempt := 1; attempt <= 3; attempt++ {
+		ctx, cancel := context.WithTimeout(t.Context(), perAttempt)
 		gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
 			Version: 17, RulesHash: rules,
 			Mask:   func(context.Context, secrets.Value) error { return nil },
 			Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
 		})
+		cancel()
 		if err == nil {
 			return gv
 		}
 		last = err
-		if !strings.Contains(err.Error(), "unexpected EOF") &&
-			!strings.Contains(err.Error(), "could not be reached") {
+		busy := strings.Contains(err.Error(), "unexpected EOF") ||
+			strings.Contains(err.Error(), "could not be reached")
+		// A blown per-attempt budget is the busy daemon by another name: the
+		// pull or the initdb did not finish in four minutes. Retried for the
+		// same reason, and named separately so the log says which it was.
+		if errors.Is(err, context.DeadlineExceeded) {
+			t.Logf("attempt %d: the daemon did not finish inside %s: %v", attempt, perAttempt, err)
+			continue
+		}
+		if !busy {
 			t.Fatalf("RefreshGolden: %v", err)
 		}
 		t.Logf("attempt %d: the daemon could not bring Postgres up in time: %v", attempt, err)
 	}
-	t.Fatalf("three attempts and the daemon never started a usable Postgres: %v", last)
+	t.Fatalf("three attempts of %s each and the daemon never started a usable Postgres. "+
+		"This is a statement about the machine rather than about the provider, and it is a "+
+		"failure rather than a skip on purpose: a suite that goes green here has proved "+
+		"nothing.\nlast error: %v", perAttempt, last)
 	return provider.GoldenVersion{}
 }
 
@@ -103,11 +130,16 @@ func TestABranchInterruptedPartWayThroughIsEitherGoneOrInTheInventory(t *testing
 	scenario(t)
 	p := newDockerProvider(t)
 
+	// Built before the working deadline starts. Preparing the fixture is not
+	// part of what this scenario measures, and letting it eat the budget is
+	// how the inventory call below came to fail with "a provider that cannot
+	// enumerate itself", which blamed the provider for a clock this test had
+	// already spent.
+	gv := refreshGolden(t, p, "chaos-interrupted-branch")
+	t.Cleanup(func() { _ = p.DestroyGolden(context.Background(), gv.ID) })
+
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
-
-	gv := refreshGolden(ctx, t, p, "chaos-interrupted-branch")
-	t.Cleanup(func() { _ = p.DestroyGolden(context.Background(), gv.ID) })
 
 	const envID = "chaosinterrupted01"
 	t.Cleanup(func() {
@@ -124,6 +156,16 @@ func TestABranchInterruptedPartWayThroughIsEitherGoneOrInTheInventory(t *testing
 	branch, branchErr := p.Branch(interrupted, gv.ID, envID)
 
 	inventory, invErr := p.Inventory(ctx)
+	// Two different failures wear the same error here and want opposite
+	// responses, so they are separated rather than both reported as a provider
+	// fault. This assertion used to blame the provider for a deadline the test
+	// had already spent building its fixture, which sends whoever reads it on
+	// Monday to read Inventory rather than to look at their machine.
+	if errors.Is(invErr, context.DeadlineExceeded) {
+		t.Fatalf("this scenario ran out of time before it could check anything, which is a "+
+			"statement about the machine and not about the provider. Nothing was proved "+
+			"either way.\ninventory said: %v", invErr)
+	}
 	require.NoError(t, invErr, "a provider that cannot enumerate itself cannot be checked at all")
 
 	reported := func(needle string) bool {
@@ -185,10 +227,10 @@ func TestAProviderThatReportsADeleteAsCompleteHasActuallyReleasedIt(t *testing.T
 	scenario(t)
 	p := newDockerProvider(t)
 
+	gv := refreshGolden(t, p, "chaos-delete-then-collect")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
-
-	gv := refreshGolden(ctx, t, p, "chaos-delete-then-collect")
 
 	branch, err := p.Branch(ctx, gv.ID, "chaosdeleterace01")
 	require.NoError(t, err)
