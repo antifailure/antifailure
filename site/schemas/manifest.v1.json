@@ -1,0 +1,939 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://antifailure.dev/schemas/manifest.v1.json",
+  "title": "Antifailure manifest",
+  "description": "The file antifailure.yaml at the root of a repository. It describes what to build, where the database comes from, what the environment may reach on the network, who the agents log in as, and what they do. It is the whole configuration surface: nothing about an environment is configured anywhere else.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+      "maxLength": 40,
+      "description": "A short name for this application, used in environment hostnames and in the control plane. Defaults to the repository directory name."
+    },
+    "services": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "$ref": "#/$defs/service"
+      },
+      "description": "Every process the environment runs: web servers, API servers, background workers, and scheduled jobs."
+    },
+    "database": {
+      "$ref": "#/$defs/database"
+    },
+    "egress": {
+      "$ref": "#/$defs/egress"
+    },
+    "personas": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "$ref": "#/$defs/persona"
+      },
+      "description": "The accounts agents log in as. Each is created or reconciled in the golden by the authentication adapter, so a persona is a real user of the application rather than a bypass."
+    },
+    "workflows": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/workflow"
+      },
+      "description": "What the agents do, written as sentences. A workflow is a goal, not a script: the runner decides the actions and verifies the outcome."
+    },
+    "invariants": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/invariant"
+      },
+      "description": "Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer."
+    },
+    "insights": {
+      "$ref": "#/$defs/insights"
+    },
+    "load": {
+      "$ref": "#/$defs/load"
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
+    "github": {
+      "$ref": "#/$defs/github"
+    }
+  },
+  "$defs": {
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+          "maxLength": 40,
+          "description": "Unique within the manifest. Appears in hostnames, logs, and container names."
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Directory containing the service, relative to the repository root. Defaults to the root. A path outside the repository is rejected."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "web",
+            "worker",
+            "cron"
+          ],
+          "default": "web",
+          "description": "What the service is. A web service gets a hostname and a readiness check; a worker gets neither; a cron service is invoked on a schedule instead of run continuously."
+        },
+        "build": {
+          "$ref": "#/$defs/build"
+        },
+        "command": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port the service listens on. Required for a web service unless detection found it."
+        },
+        "health_path": {
+          "type": "string",
+          "maxLength": 512,
+          "default": "/",
+          "description": "HTTP path that reports readiness. A service is not considered up until this returns a 2xx or 3xx status."
+        },
+        "health_timeout": {
+          "type": "string",
+          "pattern": "^[0-9]+(ms|s|m)$",
+          "default": "180s",
+          "description": "How long to wait for readiness before failing with AF-RUN-004."
+        },
+        "env": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/envVar"
+          },
+          "description": "Names of environment variables this service needs. Names only. Values come from the secrets subsystem, and a name with no value anywhere fails with AF-SEC-001 rather than starting a service that will misbehave."
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1,
+          "description": "How many instances to run."
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "schedule": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Cron expression for a cron service, with an optional CRON_TZ prefix. Evaluated in the declared zone."
+        },
+        "migrate": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Command that applies pending migrations. Run once against a fresh branch before the services start, and rehearsed with timing and lock analysis when insights are on."
+        },
+        "depends_on": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "description": "Services that must be ready first. A cycle is rejected at validation."
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How to turn the service directory into an image. Omitted means detect: a Dockerfile if there is one, otherwise a buildpack.",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "dockerfile",
+            "buildpack",
+            "image"
+          ],
+          "default": "auto"
+        },
+        "dockerfile": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Path to the Dockerfile, relative to the repository root."
+        },
+        "target": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Stage to build in a multi stage Dockerfile."
+        },
+        "context": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Build context directory, relative to the repository root. Defaults to the repository root so that a service can copy from a shared package."
+        },
+        "image": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "A prebuilt image reference, used with the image strategy. Pinned by digest is strongly preferred."
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "maxProperties": 50,
+          "description": "Build arguments. Never secrets: build arguments are recorded in image metadata and are visible to anyone who can pull the image. Secrets are mounted, and the linter rejects a secret shaped argument."
+        },
+        "allow_hosts": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 253
+          },
+          "description": "Hosts the build may reach. The build runs under the same default deny as the environment, so a package registry or an engine download must be named here."
+        }
+      }
+    },
+    "envVar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "maxLength": 128
+        },
+        "required": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the environment fails to start without it. Defaults to true, because a service silently missing configuration is the failure this product exists to prevent."
+        },
+        "sandbox": {
+          "type": "boolean",
+          "default": false,
+          "description": "Marks a credential that must be a sandbox one. The secrets subsystem refuses a value carrying a known live prefix, and the proxy trips a wire if one reaches the network anyway."
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "A literal value for a variable that is configuration rather than a secret, such as a feature flag or a public URL. A value that looks like a credential is rejected."
+        },
+        "from": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Where to read the value: a secrets adapter name, or the name of a different variable to copy."
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?m?$",
+          "default": "1",
+          "description": "CPU limit, in cores or millicores."
+        },
+        "memory": {
+          "type": "string",
+          "pattern": "^[0-9]+(Mi|Gi|M|G)$",
+          "default": "1Gi",
+          "description": "Memory limit."
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "docker",
+            "neon",
+            "supabase",
+            "dblab"
+          ],
+          "default": "docker",
+          "description": "Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service."
+        },
+        "version": {
+          "type": "integer",
+          "enum": [
+            14,
+            15,
+            16,
+            17
+          ],
+          "default": 17,
+          "description": "Postgres major version. Must match the source, because a dump does not restore across majors."
+        },
+        "source_url_env": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "maxLength": 128,
+          "description": "Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored."
+        },
+        "url_env": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "maxLength": 128,
+          "default": "DATABASE_URL",
+          "description": "Name of the environment variable to inject into services with the branch's connection string."
+        },
+        "masking_rules": {
+          "type": "string",
+          "maxLength": 512,
+          "default": "masking.yaml",
+          "description": "Path to the masking rules file, relative to the repository root."
+        },
+        "project": {
+          "type": "string",
+          "description": "The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not."
+        },
+        "api_key_env": {
+          "type": "string",
+          "description": "The name of the variable holding the provider's API key. Named rather than carried: a manifest is committed and a key is not. Defaults to NEON_API_KEY for the neon provider."
+        },
+        "max_branches": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging."
+        },
+        "golden": {
+          "$ref": "#/$defs/golden"
+        },
+        "subset": {
+          "$ref": "#/$defs/subset"
+        },
+        "seed": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Command that seeds a branch, for a project with no production database yet. Mutually exclusive with source_url_env."
+        }
+      }
+    },
+    "golden": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The masked, verified copy every environment branches from.",
+      "properties": {
+        "schedule": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Cron expression for automatic refreshes, with an optional CRON_TZ prefix. A refresh that would overlap a running one is skipped with an event rather than queued."
+        },
+        "max_age": {
+          "type": "string",
+          "pattern": "^[0-9]+(h|d)$",
+          "default": "168h",
+          "description": "How stale a golden may be before af up refreshes it first."
+        },
+        "retain": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 5,
+          "description": "How many versions to keep. A referenced version is never collected regardless of this."
+        },
+        "storage": {
+          "type": "string",
+          "enum": [
+            "local",
+            "azure_blob",
+            "s3"
+          ],
+          "default": "local",
+          "description": "Where dumps and attestations live."
+        },
+        "storage_url": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Container or bucket URL for a remote store. Credentials come from the secrets subsystem, never from this URL."
+        }
+      }
+    },
+    "subset": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Take a production shaped slice rather than the whole database. The closure is computed over foreign keys, so a subset always satisfies every constraint the schema declares.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "seed_table": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Table the selection starts from, for example the tenant or account table."
+        },
+        "seed_where": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "A SQL predicate selecting the seed rows, for example created_at > now() - interval '90 days'."
+        },
+        "max_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1000000,
+          "description": "Upper bound on rows per table, applied deterministically so two runs produce the same subset."
+        },
+        "follow_dependents": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "default": 1,
+          "description": "How many levels of rows that reference the seed to include. Zero includes only what the seed rows reference, which is the minimum that satisfies foreign keys."
+        },
+        "virtual_relationships": {
+          "type": "array",
+          "maxItems": 200,
+          "description": "Relationships the schema does not declare as foreign keys but the application relies on. Without these, a subset can look complete and still break the application.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "from",
+              "to"
+            ],
+            "properties": {
+              "from": {
+                "type": "string",
+                "maxLength": 260,
+                "description": "table.column"
+              },
+              "to": {
+                "type": "string",
+                "maxLength": 260,
+                "description": "table.column"
+              }
+            }
+          }
+        }
+      }
+    },
+    "egress": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the environment may reach on the network. Everything leaves through the sidecar, and everything not named here is blocked.",
+      "properties": {
+        "default": {
+          "type": "string",
+          "enum": [
+            "block",
+            "allow",
+            "capture",
+            "mock",
+            "sandbox",
+            "synth"
+          ],
+          "default": "block",
+          "description": "What happens to a host with no rule. Changing this away from block is a deliberate act with a real cost: it is how a preview environment emails a real customer."
+        },
+        "allow_ipv6": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the environment may open IPv6 connections. Off by default, because an IPv6 path that bypasses the proxy is the most common way an egress control is silently defeated."
+        },
+        "rules": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/egressRule"
+          }
+        }
+      }
+    },
+    "egressRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "mode"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "maxLength": 253,
+          "description": "Host to match. A leading *. matches one or more labels. An IP literal matches only itself."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "block",
+            "allow",
+            "capture",
+            "mock",
+            "sandbox",
+            "synth"
+          ],
+          "description": "block refuses with a readable decision. allow passes through with a rate limit. sandbox substitutes test credentials and forwards to the provider's sandbox. capture records the message into the inbox and returns the provider's success shape. mock answers from a fixture or an offline pack. synth asks a model to invent a response and marks every result that touched it as unverified."
+        },
+        "paths": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": "Restrict the rule to these path prefixes. Anything else on the same host falls through to the next rule."
+        },
+        "methods": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "HEAD",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "OPTIONS",
+              "CONNECT",
+              "TRACE"
+            ]
+          },
+          "description": "Restrict the rule to these HTTP methods."
+        },
+        "rate_limit": {
+          "type": "string",
+          "pattern": "^[0-9]+/(s|m|h)$",
+          "description": "Token bucket rate, for example 10/s or 600/m. Applies to allow and sandbox."
+        },
+        "credential": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "maxLength": 128,
+          "description": "Name of the environment variable holding the sandbox credential for this host."
+        },
+        "fixtures": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Path to a fixture pack or an OpenAPI document for mock mode, relative to the repository root."
+        },
+        "webhook_path": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Path on the application that this provider posts webhooks to. The sandbox forwarder and the offline pack both deliver here."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Why this rule exists. Rendered in the network policy view, because a rule nobody can explain is a rule nobody dares remove."
+        }
+      }
+    },
+    "persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+          "maxLength": 40
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 254,
+          "description": "Login address. Defaults to name@example.test, which is a reserved domain that can never receive mail."
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Application role to provision, for example admin or member. Interpreted by the authentication adapter."
+        },
+        "login": {
+          "type": "string",
+          "enum": [
+            "password",
+            "magic_link",
+            "email_code",
+            "sms_code",
+            "totp",
+            "session"
+          ],
+          "default": "password",
+          "description": "How this persona signs in. magic_link and email_code read the message from the captured inbox, so they work with no mail provider at all."
+        },
+        "mfa": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to enroll a time based one time password secret, which the runner holds so that it can complete a challenge."
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "maxProperties": 50,
+          "description": "Extra columns to set on the persona's row, for a schema with application specific fields."
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 4000,
+          "description": "What a person would do, in sentences. Say the goal and what proves it happened, not the selectors."
+        },
+        "persona": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Which persona runs it. Defaults to the first persona."
+        },
+        "start_path": {
+          "type": "string",
+          "maxLength": 512,
+          "default": "/",
+          "description": "Where to begin. Defaults to the application root."
+        },
+        "independent": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this workflow can run at the same time as others. Workflows that share an environment run one at a time unless this says otherwise, because two agents mutating the same data produce failures nobody can reproduce."
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Hard caps. A workflow that exhausts its budget ends as blocked with the reason, never as a partial pass.",
+          "properties": {
+            "steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 60
+            },
+            "usd": {
+              "type": "number",
+              "minimum": 0,
+              "default": 0.5
+            },
+            "duration": {
+              "type": "string",
+              "pattern": "^[0-9]+(s|m)$",
+              "default": "10m"
+            }
+          }
+        },
+        "expect": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "description": "Observations that must hold for a pass, written as sentences. These are assertions about what the user can see, not about the DOM."
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 40
+          }
+        }
+      }
+    },
+    "invariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sql"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+          "maxLength": 64
+        },
+        "sql": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 4000,
+          "description": "A single read only statement. It runs inside a read only transaction with a statement timeout, so a write is refused by Postgres as well as by validation. The invariant fails when the statement returns any row, so write it to select the violations."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "What is wrong when this fails, in one sentence. It becomes the failure message."
+        }
+      }
+    },
+    "insights": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The Postgres native checks that turn a preview environment into a database review.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "migration_rehearsal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply pending migrations to a fresh branch, recording per statement duration and the strongest lock held per table."
+        },
+        "query_regression": {
+          "type": "boolean",
+          "default": true,
+          "description": "Diff pg_stat_statements between the base branch and this one after running the same workflows, to catch a query loop before it reaches production."
+        },
+        "plan_diff": {
+          "type": "boolean",
+          "default": true,
+          "description": "Compare query plans between branches to catch an index that stopped being used."
+        },
+        "regression_factor": {
+          "type": "number",
+          "minimum": 1,
+          "default": 1.5,
+          "description": "How much slower a query may get before it is reported."
+        },
+        "regression_min_ms": {
+          "type": "number",
+          "minimum": 0,
+          "default": 5,
+          "description": "Minimum absolute change in mean milliseconds before a regression is reported, so that a query going from 0.1 to 0.2 milliseconds is not news."
+        },
+        "large_table_rows": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 100000,
+          "description": "Row count above which a migration lint treats a table as large, where a rewrite or an exclusive lock is an outage rather than a pause."
+        }
+      }
+    },
+    "load": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Traffic shaped like production, compared between the base branch and this one. Results are always deltas, never absolute capacity claims.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "none",
+            "datadog",
+            "newrelic",
+            "otel",
+            "access_log"
+          ],
+          "default": "none",
+          "description": "Where the endpoint mix comes from."
+        },
+        "source_config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "maxProperties": 20,
+          "description": "Adapter specific settings, such as a service name or a log path. Credentials come from the secrets subsystem."
+        },
+        "scale": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 1,
+          "default": 0.05,
+          "description": "Fraction of production arrival rate to reproduce."
+        },
+        "duration": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m)$",
+          "default": "2m",
+          "description": "How long to run. Capped at fifteen minutes."
+        },
+        "safe_routes": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": "Routes that may be called freely because they do not mutate state."
+        },
+        "unsafe_routes": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": "Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards."
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers.",
+          "properties": {
+            "p95_increase": {
+              "type": "number",
+              "minimum": 0,
+              "default": 0.25
+            },
+            "error_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.01
+            },
+            "query_count_increase": {
+              "type": "number",
+              "minimum": 0,
+              "default": 0.2
+            }
+          }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "local",
+            "kubernetes"
+          ],
+          "default": "local"
+        },
+        "ttl": {
+          "type": "string",
+          "pattern": "^[0-9]+(h|d)$",
+          "default": "168h",
+          "description": "How long an environment lives before automatic teardown."
+        },
+        "idle_sleep": {
+          "type": "string",
+          "pattern": "^[0-9]+(m|h)$",
+          "default": "30m",
+          "description": "How long an environment may sit idle before it is scaled to zero. It wakes on the next request."
+        },
+        "domain": {
+          "type": "string",
+          "maxLength": 253,
+          "default": "localhost",
+          "description": "Wildcard domain for environment hostnames. Defaults to localhost, which needs no DNS at all."
+        },
+        "namespace_prefix": {
+          "type": "string",
+          "maxLength": 40,
+          "default": "af",
+          "description": "Prefix for Kubernetes namespaces."
+        },
+        "kubeconfig_context": {
+          "type": "string",
+          "maxLength": 253,
+          "description": "Which kubeconfig context to use. Naming it prevents an environment landing on whatever cluster happened to be current."
+        }
+      }
+    },
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "actions",
+            "app",
+            "off"
+          ],
+          "default": "actions",
+          "description": "actions runs everything inside a workflow with no server. app uses the GitHub App and the control plane."
+        },
+        "comment": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to maintain a single comment on the pull request. It is updated in place rather than appended, so a busy pull request does not accumulate twenty bot comments."
+        },
+        "fork_policy": {
+          "type": "string",
+          "enum": [
+            "never",
+            "label",
+            "always"
+          ],
+          "default": "label",
+          "description": "What to do with a pull request from a fork. label requires a maintainer to add antifailure:allow first, which is the only safe default: a fork's code would otherwise run with the environment's credentials."
+        },
+        "teardown_on": {
+          "type": "array",
+          "maxItems": 5,
+          "default": [
+            "close",
+            "merge",
+            "ttl"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "close",
+              "merge",
+              "ttl"
+            ]
+          },
+          "description": "Events that tear the environment down."
+        }
+      }
+    }
+  }
+}
