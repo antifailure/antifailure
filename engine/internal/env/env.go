@@ -761,6 +761,20 @@ func (o *Orchestrator) Up(ctx context.Context) (res *Result, err error) {
 	}
 	res.Built, res.Cached = built, cached
 
+	// The runtime records every resource here before it creates it.
+	//
+	// There is deliberately no matching commit, because the contract has no
+	// place for one: the callback fires before the create and the runtime never
+	// calls back afterwards. That leaves each record in the intent state, which
+	// the journal treats as "this may or may not exist at the provider", and
+	// which is exactly right for a name the runtime is about to use. The
+	// compensating delete addresses it by that name, so a crash between this
+	// line and the create compensates identically to a crash after it.
+	//
+	// A post-create hook would let the record carry the provider's own
+	// identifier, which is worth having for a runtime whose names are not
+	// addressable. That is a change to provider.EnvSpec and belongs with
+	// whoever owns the runtime contract rather than here.
 	recordIntent := func(kind, id string) error {
 		_, jerr := s.journal.Intent(ctx, o.envID, "local", journal.Kind(kind), id, nil)
 		return jerr
@@ -920,11 +934,26 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	}
 	o.progress("branching the database from " + version)
 
-	if _, err := s.journal.Intent(ctx, o.envID, "docker", journal.Kind("database"), o.envID, nil); err != nil {
+	// Recorded against the provider that is about to create it, not against
+	// "docker". The provider name is the first half of the key the compensating
+	// deleter is looked up by, so a record naming a provider that did not make
+	// the branch is a record nothing can ever delete. It said "docker"
+	// unconditionally, which was invisible while nothing replayed the journal
+	// and would have been a leak per environment on Neon the moment something
+	// did.
+	rec, err := s.journal.Intent(
+		ctx, o.envID, s.dbProv.Name(), journal.KindDatabaseBranch, o.envID, nil)
+	if err != nil {
 		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
 	branch, err := s.dbProv.Branch(ctx, version, o.envID)
 	if err != nil {
+		return "", zero, secrets.Value{}, secrets.Value{}, err
+	}
+	// The provider's own reference for the branch, which for a hosted provider
+	// is not derivable from the environment identifier. Without it a
+	// compensating delete has nothing to address.
+	if err := s.journal.Commit(ctx, rec.ID, branch.ProviderRef); err != nil {
 		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
 	direct, err := s.dbProv.ConnString(ctx, branch, provider.ConnDirect)
@@ -1173,6 +1202,21 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 		td.Removed++
 		o.progress("removed the database branch")
 	}
+
+	// Last, and only after the sweep, because the two find different things.
+	//
+	// The sweep asks the daemon what carries this environment's labels, which
+	// covers everything running and nothing else. The journal knows what was
+	// recorded, which covers a resource created in the instant before a crash,
+	// a resource at a provider with no daemon to sweep, and every kind no sweep
+	// looks for. Running both and merging what each leaves behind is the only
+	// combination in which neither gap is silent.
+	//
+	// Until this call existed the journal was written and never read: Replay,
+	// NewRegistry and Commit each had zero callers in the engine, so the
+	// compensating half of "everything that is created has a recorded,
+	// compensating deletion" had never run.
+	o.reconcile(ctx, s, td)
 
 	o.observe(ctx, extension.LifecycleEvent{
 		Repository: o.opts.Manifest.Name,
