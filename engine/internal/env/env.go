@@ -375,6 +375,17 @@ func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, e
 			// for and charges real cards.
 			return nil, aferrors.Coded(aferrors.AFSEC003, "name", live.Name)
 		}
+		var rejected *extension.CredentialRejectedError
+		if errors.As(err, &rejected) {
+			// A store that refused the credential, after the one refresh it is
+			// allowed. Its own code, because the next step differs: an
+			// unreachable store is worth retrying and a refused credential is a
+			// configuration problem that will refuse again for ever. Telling
+			// somebody to try again would be telling them to wait for something
+			// that is not going to change.
+			return nil, aferrors.Coded(aferrors.AFSEC002,
+				"source", rejected.Source, "detail", rejected.Detail)
+		}
 		return nil, err
 	}
 

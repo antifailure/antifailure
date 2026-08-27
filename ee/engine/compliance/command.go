@@ -28,6 +28,7 @@ import (
 
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
+	"github.com/antifailure/antifailure/engine/pkg/afcli"
 )
 
 // Exit codes, matching the engine's own vocabulary: 1 is a failure, 3 is a
@@ -39,6 +40,43 @@ const (
 	exitConfig    = 3
 	exitControlNo = 6
 )
+
+// Name is what this command is called on the command line.
+//
+// A constant because two things have to agree about it: the enterprise binary,
+// which contributes it, and the community docs test, which allows it on an
+// enterprise page precisely because the community tree does not have it. A test
+// in this module asserts they still agree.
+const Name = "compliance"
+
+// Contributed returns this command in the form an embedding binary registers.
+//
+// Built here rather than in main so that the help text lives beside the flags
+// it describes, and so that a test can assert the binary contributes what the
+// community docs test was told to expect.
+func Contributed(gather func(ctx context.Context, org string, from, to time.Time) (Evidence, error)) afcli.Command {
+	return afcli.Command{
+		Use:   Name + " <pack>",
+		Short: "Produce evidence for SOC 2 or HIPAA from what this installation recorded",
+		Long: strings.TrimSpace(`
+Produces evidence for one framework from the audit log, the masking
+attestations and the policy decisions this installation recorded.
+
+It is not an audit report and it is not an opinion. Every control says what the
+evidence shows, names the artifact so somebody can go and look, and says which
+part of the requirement this product covers, which is never all of it. Controls
+this product records nothing about are listed as such rather than omitted, so
+the gaps are visible rather than implied.
+
+Packs: soc2, hipaa
+
+It exits 6 when a control has evidence of NOT holding, so a nightly job can fail
+on a broken audit chain without parsing the document.`),
+		Run: func(ctx context.Context, args []string) int {
+			return Command(ctx, args, Options{Getenv: os.Getenv, Gather: gather})
+		},
+	}
+}
 
 // Options are what the command needs from the binary embedding it.
 type Options struct {

@@ -151,7 +151,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 2.2 Manifest loader and validator | proven | Fuzzed. Unknown keys are errors with a line and a suggestion. |
 | 2.3 Detection engine | proven | Twelve analyzers. Deterministic, bounded, fuzzed, never executes repository code. |
 | 2.4 `af init` | proven | Validates its own output before writing. |
-| 2.5 Secrets subsystem | proven | Sources with precedence, a dotenv reader, an encrypted local store, and a resolution layer. A sandbox credential reaches the sidecar as a file and the service as a marker; proven against a running container. The OS keyring is an interface with a fake: no real credential store is wired yet. |
+| 2.5 Secrets subsystem | proven | Sources with precedence, a dotenv reader, an encrypted local store, and a resolution layer. A sandbox credential reaches the sidecar as a file and the service as a marker; proven against a running container. Two of the three system keyrings are `proven` and one is `written`: the macOS keychain was run against the real keychain on a workstation, and Linux against a real gnome-keyring behind a real D-Bus in a container, where the run corrected two guesses. Windows is `written`: it calls advapi32 through LazyDLL, it cross-compiles and vets clean, and there is no Windows machine in this development loop, so a windows-latest job was added and the row becomes `proven` when that job has run green and not before. A registered source can add a store from outside the module through engine/pkg/extension. |
 | 2.6 `af doctor` | proven | |
 | 2.7 HUD | proven | Model, rendering, non-TTY fallback, the Bubble Tea program, and `af up --hud`, which is the caller it did not have. `engine/internal/hud`: reorder window that abandons a gap rather than stalling, three layouts (stacked at 80, two column at 120, three column at 160) with seven golden frames committed, keyboard navigation, resize handling, and a queue that drops and counts rather than ever applying backpressure to the bus. Wiring it end to end meant making the engine emit what the dashboard draws: `internal/env` now publishes env.creating, golden.ready, db.branching, db.branched, build.started, build.log, build.finished, build.failed, service.starting, service.ready, service.exited, env.ready, env.failed, env.destroying and env.destroyed, and `Orchestrator.AddSink` attaches a subscriber to the session bus each command opens. Before this the bus had no subscribers at all and every event the journal published was delivered to nobody. Four tests in `internal/env` prove the attachment against a real Up, with no Docker daemon, by stopping the run at the policy hook; a negative control that removes the AddSink loop turns all four red. Looking at a frame built from the real stream found three more things reading the code did not: the golden fixtures were scripted with `service.started`, which is not an event type, so six committed frames were pictures of a stream the engine cannot produce; every log line repeated `env=` for the environment named in the header; and a verified golden showed as unverified on every ordinary run, because the pane only believed mask.verified and an ordinary run branches from a golden verified days earlier. goleak found a goroutine leaked per dashboard, from a cancellation watcher receiving on a nil Done channel, and a leaked drainer in the package's own concurrency test. `Program.Close` now signals on a second channel rather than closing the one producers write to, so Send after Close is a counted drop instead of a panic, and Close is idempotent because both the bus and the command legitimately call it. Outstanding: the vhs recordings for the docs page. `docs/guides/dashboard.md` documents the panes, the keys and the fallback without them. Driven by a real `af up` on 2026-08-27, not only by fixtures: the non-TTY fallback rendered env.creating, golden.ready with verified=true, db.branching, ninety build.log lines, build.finished with its duration, service.starting, and a failure at error level with its reason. That run also showed what the display does not say: the runtime's progress lines went to the terminal and not to the stream, and dashboard mode silences the terminal, so the readiness wait, which is the longest part of a run, drew nothing at all. They are on the stream now, tagged with the service they name when they name one that exists. Run end to end three times on 2026-08-27 against a real daemon, and each run found something the run before it hid. The first proved the wiring: env.creating through env.ready, 105 seconds, service answering 200. The second showed `service.ready web is running detail=` on every line, because an empty field was attached whatever its value, and `env=` repeated on a line already scoped to that environment. The third showed the readiness wait still silent, because the runtime's progress lines were emitted as service.log, which the fallback correctly folds away as noise: a service writes thousands of lines and a build log is not the place for them. `engine.progress` is a new type for exactly that, a step in a long running operation with no more specific event, and the run after it reads `engine.progress egress proxy ready with 0 rules` and `engine.progress web: ready at http://127.0.0.1:46000`, where thirty seconds of nothing used to be. |
 | 2.8 Event sinks | proven | NDJSON with rotation, JSON, memory, and a replay reader. |
@@ -161,7 +161,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | Package | State | Coverage |
 | --- | --- | --- |
 | `internal/clock` | proven | 88 percent |
-| `internal/secrets` | proven | 100 percent |
+| `internal/secrets` | proven | 100 percent; three real keyrings and a registered-source adapter |
 | `internal/redact` | proven | 100 percent |
 | `internal/errors` | proven | 100 percent |
 | `internal/events` | proven | 94 percent |
@@ -353,7 +353,39 @@ environment ending at the right sequence, and `af env pull` reading it back.
 | 13.5 Audit export and SIEM streaming | proven | The hash chain is in the control plane's audit log. Forwarding is a bounded queue that cannot fail or slow the action it audits, with signed batch manifests carrying the chain head so a batch in an object store verifies on its own. Splunk, Event Hubs, an object store, and a signed webhook, at 31 tests. |
 | 13.6 Organization policy enforcement | proven | 100 percent. A property test over five hundred random policies proves a stricter policy never permits more. |
 | 13.4 Advanced access control and approvals | proven | 42 tests. The role model and scopes, approval policies that one person cannot complete alone, and the model as a reviewable file with a dry run that refuses a file leaving a required approval unreachable. |
-| 13.2, 13.3, 13.7 to 13.14 | planned | Single sign on, SCIM, multi-cluster, secrets adapters, billing, dashboard, support tooling, compliance, deployment. |
+| 13.8 Enterprise secret stores | mixed | The contract, the conformance suite, and four adapters. HashiCorp Vault is `proven`: twelve conformance behaviours against a real Vault in a container, nothing skipped. AWS is `mixed`: its Signature Version 4 implementation is `proven` against the worked example AWS publishes, and everything needing an account is `written`. Azure and Google are `written`: the Google service account assertion is signed with a real RSA key and verified with its public half, and the Key Vault name mapping is a pure function over a documented constraint, but neither has been run against a live account. See the note below. |
+| 13.12 Compliance packs | proven | SOC 2 and HIPAA, run end to end against a real control plane: migrations applied to a real Postgres, an audit chain written by the control plane's own appendAudit, seventeen tables checked for row level security, and the real grants on the audit log. Then a privileged connection altered one entry and deleted another and the report named both at the right sequence numbers and exited 6. The Go chain verifier is proved to agree byte for byte with web/packages/db/src/audit.ts by running that TypeScript, and the attestation verifier against attestations the engine signed. |
+| 13.2, 13.3, 13.7, 13.9 to 13.11, 13.13, 13.14 | planned | Single sign on, SCIM, multi-cluster, billing, dashboard, support tooling, deployment. |
+
+`13.8` is the one row on this page that is not a single word, because a single
+word would be a lie in either direction. What can be proved without an account
+is proved: a real Vault in a container, and AWS's own published signing vector.
+What cannot is marked `written` and named, because "tested against a local
+server speaking the documented wire format" proves what the adapter does with
+each response and proves nothing about whether the service accepts the request.
+Those rows become `proven` when there are credentials to run them with.
+
+## The enterprise binary
+
+`ee/engine/cmd/af` is the enterprise edition, and before it existed everything
+under `ee/engine` compiled, was tested, and could not be run by anything:
+`policyenforce.NewHook` had no non-test caller and neither did `feature.With`.
+An enterprise binary has to register its hooks and then run the CLI, and the
+CLI is `engine/internal/cli`, which Go's internal rule makes unimportable from a
+separate module, so there was no import path that resolved.
+
+`engine/pkg/afcli` is the other half of the socket: one function that runs the
+command tree, the signal handling so control C means the same thing in both
+binaries, and a way to contribute a command so an enterprise command appears in
+`af --help`. `engine/pkg/edition` lets the running binary say which edition it
+is, so `af license status` no longer reports "This is the community edition"
+from inside the enterprise one.
+
+| Piece | State | Notes |
+| --- | --- | --- |
+| `engine/pkg/afcli` | proven | Built and run: the enterprise binary resolves a variable out of a real Vault under a real signed licence, and reports it as unavailable with the reason when the licence is removed. |
+| `engine/pkg/edition` | proven | `af license status` in the enterprise binary reports the organization, the plan, the expiry and the features the evaluated licence permits, which differ from the claims for an expired or revoked one. |
+| `ee/engine/cmd/af` | proven | Registers the secret sources, attaches the licence to the context, contributes `af compliance`. |
 
 The boundary is a separate Go module rather than a build tag. The community
 build cannot resolve an enterprise import path at all, so a mistaken import is

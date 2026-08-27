@@ -103,10 +103,9 @@ errors:
     retryable: false
     exit_code: 3
   - code: AF-SEC-002
-    planned: true
     area: SEC
-    message: "The credential for {source} was rejected after one refresh."
-    next_step: "Rotate the credential and store the new value where {source} reads it."
+    message: "The credential for {source} was rejected after one refresh: {detail}"
+    next_step: "Rotate the credential and store the new value where {source} reads it. A rejection that survives a refresh is a credential that was revoked or was never right, so retrying will not help."
     docs: guides/secrets
     retryable: false
     exit_code: 4

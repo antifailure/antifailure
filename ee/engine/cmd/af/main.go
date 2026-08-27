@@ -91,26 +91,7 @@ func main() {
 	}
 
 	os.Exit(afcli.Run(ctx, os.Args[1:], afcli.Options{
-		Extra: []afcli.Command{{
-			Use:   "compliance <pack>",
-			Short: "Produce evidence for SOC 2 or HIPAA from what this installation recorded",
-			Long: "Produces evidence for one framework from the audit log, the masking\n" +
-				"attestations and the policy decisions this installation recorded.\n\n" +
-				"It is not an audit report and it is not an opinion. Every control says\n" +
-				"what the evidence shows, names the artifact so somebody can go and look,\n" +
-				"and says which part of the requirement this product covers, which is never\n" +
-				"all of it. Controls this product records nothing about are listed as such\n" +
-				"rather than omitted, so the gaps are visible rather than implied.\n\n" +
-				"Packs: soc2, hipaa\n\n" +
-				"It exits 6 when a control has evidence of NOT holding, so a nightly job can\n" +
-				"fail on a broken audit chain without parsing the document.",
-			Run: func(ctx context.Context, args []string) int {
-				return compliance.Command(ctx, args, compliance.Options{
-					Getenv: os.Getenv,
-					Gather: gatherEvidence,
-				})
-			},
-		}},
+		Extra: []afcli.Command{compliance.Contributed(gatherEvidence)},
 	}))
 }
 
