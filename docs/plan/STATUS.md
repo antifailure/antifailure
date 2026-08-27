@@ -141,7 +141,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 1.8 Azure foundation (Terraform) | planned | Isolation boundary documented in `infra/ISOLATION.md`. Blocked on Q4. |
 | 1.9 Test infrastructure and fakes | planned | |
 | 1.10 Events, logging, and redaction | proven | 100 percent coverage on redaction, 454 ns/op with no allocations. |
-| 1.11 Local state store and journal | proven | Crash injection at every step, plus a property test over random interleavings. |
+| 1.11 Local state store and journal | proven | Crash injection at every step, plus a property test over random interleavings. The journal is now also read: `af down` replays it after the label sweep, which nothing did until phase 14, so the records had gone in and never come out. |
 
 ## Phase 2. Engine core and CLI
 
@@ -154,7 +154,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 2.5 Secrets subsystem | proven | Sources with precedence, a dotenv reader, an encrypted local store, and a resolution layer. A sandbox credential reaches the sidecar as a file and the service as a marker; proven against a running container. The OS keyring is an interface with a fake: no real credential store is wired yet. |
 | 2.6 `af doctor` | proven | |
 | 2.7 HUD | planned | |
-| 2.8 Event sinks | proven | NDJSON with rotation, JSON, memory, and a replay reader. |
+| 2.8 Event sinks | proven | NDJSON with rotation, JSON, memory, and a replay reader. Attached to a bus by `internal/telemetry` since phase 14; before that every constructor here had zero callers outside a test, so the log this row describes was never written on any machine. |
 
 ## Supporting packages
 
@@ -354,7 +354,44 @@ indistinguishable from one that works until somebody relies on it.
 | 14.2 Environment scheduler | proven | 98.6 percent. Ten thousand runs across fifty organizations plan in 12 ms against a one-second budget, with no limit exceeded and every organization served. |
 | 14.9 Retention and archival | proven | Events partitioned by month on `occurred_at`, kept ahead by a daily pass, archived to newline delimited JSON before a drop. Proven against a real Postgres, including the ordering where the job stopped and the writes went to the default partition. The negative control, partitioning on `received_at` instead, makes the retry test fail. See `docs/plan/14.9-partitioning.md`. |
 | 14.7 Rate limiting, quotas, kill switch | proven | Every public endpoint has a declared limit, checked against the server's own route table. An endpoint with none is refused rather than served unbounded. |
-| 14.1, 14.3 to 14.6, 14.8 to 14.10 | planned | Horizontal scaling, multi-cluster pools, incremental goldens, runner pools, observability, chaos, archival, disaster recovery. |
+| 14.6 Observability | proven | The engine's event stream reaches a local NDJSON log and a control plane, which it never had before: nothing in the engine had ever called `Bus.AddSink`, no sink constructor had a caller outside a test, and `controlplane.NewSink` had none at all. The control plane serves `/metrics` in the Prometheus text format from counters it keeps itself and no query, because an aggregate across tenants would need a role that can read every tenant's rows. Alert rules and a Grafana dashboard live in `observability/` and a test fails on any metric they name that nothing exports. |
+| 14.8 Platform chaos testing | proven | Four claims the repository made in prose. Two were false. See `engine/chaos`, whose package doc carries the table. |
+| 14.10 Disaster recovery | proven | Backup, restore, and a drill that runs both against a real Postgres and reports the recovery time it measured. The restore is checked against a manifest taken at backup time and then asked, through the unprivileged role, to refuse a cross-tenant read. |
+| 14.4 Incremental goldens | planned | Not attempted rather than unfinished. It lands entirely in `internal/env/golden.go` and `internal/golden`, which another lane rebuilt in the same session; writing it unwired would be another instance of the bug this phase spent its time finding. The fingerprint design is recorded in the pull request. |
+| 14.5 Runner pools | planned | Needs the Kubernetes runtime and the runner's own model and artifact paths. Worth recording while it is fresh: `artifact.stored` is an event type the control plane accepts and nothing produces, because artifact upload does not exist yet. |
+| 14.1, 14.3 | planned | Horizontal scaling and multi-cluster pools. |
+
+Three bugs on that path were each invisible for the same reason, and are
+worth stating because the shape recurs. `typeMap` translated nine engine event
+names to the control plane's and not one of the nine was a name the engine can
+emit, so every event would have arrived as a type the control plane stores and
+acts on not at all, leaving every environment displayed at whatever state it
+was first reported in. The test that covered the translation passed, because
+its helper built events with the same invented names. The per-environment
+sequence restarted at zero in every process, and the control plane advances a
+row only where the sequence is ahead of it, so every event after the first
+command would have been refused. And `Journal.Replay`, `journal.NewRegistry`
+and `Journal.Commit` each had zero callers, so the compensating half of
+"everything that is created has a recorded, compensating deletion" had never
+run.
+
+Two smaller ones fell out of the chaos tests. `af down` segfaulted whenever
+the Docker daemon was unreachable, because `newDatabaseProvider` returned a
+typed nil inside a non-nil interface; it now reports AF-RUN-002. And the api
+test harness decided whether a database existed with a three second connect
+timeout, which on a loaded machine meant whole suites skipped and reported
+green.
+
+What is `written` rather than `proven` here, and why. OTLP trace export is
+exercised against an in-memory exporter rather than a collector, so the
+redaction property and the span shape are proven and the wire format is not.
+Chaos scenario 2 needs a real golden and fails on a saturated laptop inside the
+provider's readiness window; it is proven on continuous integration and not
+here. `events.EgressDecision` and `events.EgressTripwire` are declared,
+described, and emitted by nothing, so the control plane has no record of a
+single egress decision: the proxy is a separate process in a sidecar and
+nothing bridges its decisions back to the bus. That is a real gap rather than
+an oversight in this lane, and it is named here so it is not found again.
 
 ## Phase 11. Documentation site
 
@@ -369,7 +406,7 @@ indistinguishable from one that works until somebody relies on it.
 Everything remaining needs infrastructure that does not exist yet rather than
 code that has not been written:
 
-- **8.10, 14.1, 14.3, 14.10** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. There is also no Kubernetes runtime yet. A manifest asking for one is now refused with a message rather than quietly given containers on the local machine.
+- **8.10, 14.1, 14.3** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. There is also no Kubernetes runtime yet. A manifest asking for one is now refused with a message rather than quietly given containers on the local machine.
 - **3.8 and 3.9** need Supabase and DBLab accounts. 3.7 no longer does.
 - **13.2, 13.3** need identity provider test tenants.
 - **13.9** needs a Stripe account.
