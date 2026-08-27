@@ -23,7 +23,7 @@ function ClusterIcon({ play }: { play: boolean }) {
           cx={x}
           cy={y}
           r="2.2"
-          fill="white"
+          fill="#0a0a0a"
           initial={{ opacity: 0 }}
           animate={play ? { opacity: 0.35 + (i % 3) * 0.2 } : { opacity: 0 }}
           transition={{ duration: 0.4, delay: i * 0.05, ease: EASE }}
@@ -57,8 +57,9 @@ function Chip({
         ...at(x, y),
         opacity: show,
         transform: `translate(-50%, calc(-50% + ${(1 - show) * 8}px))`,
-        background: tone === "white" ? "#fff" : "#2a2a2a",
-        color: tone === "white" ? "#111" : "#f4f4f5",
+        background: tone === "white" ? "#fff" : "#0a0a0a",
+        color: tone === "white" ? "#0a0a0a" : "#f4f4f5",
+        boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.12)",
       }}
     >
       {label}
@@ -92,7 +93,7 @@ function Caption({
 function Stamp({ x, y, label, show }: { x: number; y: number; label: string; show: number }) {
   return (
     <div
-      className="absolute -translate-x-1/2 whitespace-nowrap text-[11px] text-white/40"
+      className="absolute -translate-x-1/2 whitespace-nowrap text-[11px] text-black/40"
       style={{ ...at(x, y), opacity: show, transform: "translate(-50%, 0)" }}
     >
       {label}
@@ -144,13 +145,13 @@ export function TwinsSection() {
   const headX = 56 + prod * 1000;
 
   return (
-    <section id="twins" className="bg-black">
+    <section id="twins" className="bg-[#f7f7f5]">
       <div ref={headRef} className="px-8 pt-12 lg:px-16 lg:pl-[260px]">
         <div className="min-w-0 text-center">
           <ClusterIcon play={headStory || reduced} />
           <h2 className="mx-auto max-w-[900px] text-[36px] font-semibold leading-[1.2] tracking-[-0.03em] md:text-[44px]">
-            <span className="text-white">Isolated twins. </span>
-            <span className="text-white/45">
+            <span className="text-black">Isolated twins. </span>
+            <span className="text-black/45">
               A private, production-shaped environment for the change — then destroy it automatically.
             </span>
           </h2>
@@ -175,7 +176,7 @@ export function TwinsSection() {
             <path
               d="M220 370 L220 175 L980 175"
               fill="none"
-              stroke="#5a5a5a"
+              stroke="#c4c4c0"
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -202,7 +203,7 @@ export function TwinsSection() {
           <Caption x={930} y={128} label="twin destroyed" show={destroyed} color="#a1a1aa" />
 
           <div
-            className="absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-[#111] text-[9px] font-medium text-white"
+            className="absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white text-[9px] font-medium text-black"
             style={{
               ...at(220, 370),
               opacity: candidate,

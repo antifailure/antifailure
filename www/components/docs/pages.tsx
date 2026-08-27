@@ -46,7 +46,7 @@ export function IntroPage() {
       </P>
       <P>
         Crowdi is a feature inside{" "}
-        <Link href="/docs/workload" className="text-white underline decoration-white/25 underline-offset-4">
+        <Link href="/docs/workload" className="text-black underline decoration-black/25 underline-offset-4">
           Workload Studio
         </Link>
         . It contributes exploratory AI users. It is not the product category, the buyer, or the main value.
@@ -154,7 +154,7 @@ the constraint in a later migration.`}</Pre>
       <H2>Preview URL</H2>
       <P>
         Each twin may receive an authenticated preview endpoint such as{" "}
-        <span className="font-mono text-[13px] text-white/90">fix-billing-184.preview.company.com</span>.
+        <span className="font-mono text-[13px] text-black/90">fix-billing-184.preview.company.com</span>.
         It is private by default. Credentials must never be shared across agent sessions unless they
         represent an intentionally reusable synthetic identity.
       </P>
@@ -197,13 +197,13 @@ export function ConceptsPage() {
       <Ul
         items={[
           <>
-            <Link href="/docs/firewall" className="text-white underline decoration-white/25 underline-offset-4">
+            <Link href="/docs/firewall" className="text-black underline decoration-black/25 underline-offset-4">
               Side-effect firewall
             </Link>{" "}
             — no default public egress; simulators instead of the real world.
           </>,
           <>
-            <Link href="/docs/workload" className="text-white underline decoration-white/25 underline-offset-4">
+            <Link href="/docs/workload" className="text-black underline decoration-black/25 underline-offset-4">
               Workload Studio
             </Link>{" "}
             — observed patterns, deterministic scenarios, Crowdi exploration.

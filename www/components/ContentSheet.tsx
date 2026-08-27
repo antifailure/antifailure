@@ -116,27 +116,27 @@ export function ContentSheet({
       onClick={onClose}
     >
       <div
-        className="max-h-[min(88vh,720px)] w-full max-w-[480px] overflow-y-auto rounded-2xl border border-white/10 bg-[#0a0a0a] p-6 shadow-2xl"
+        className="max-h-[min(88vh,720px)] w-full max-w-[480px] overflow-y-auto rounded-2xl border border-black/10 bg-white p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-[15px] font-medium">{sheet.title}</div>
-        <p className="mt-1 text-[13px] leading-5 text-[#a1a1aa]">{sheet.lead}</p>
-        <ul className="mt-5 space-y-2.5 text-[13px] leading-5 text-white/80">
+        <p className="mt-1 text-[13px] leading-5 text-black/50">{sheet.lead}</p>
+        <ul className="mt-5 space-y-2.5 text-[13px] leading-5 text-black/75">
           {sheet.points.map((p) => (
-            <li key={p} className="border-l border-white/15 pl-3">
+            <li key={p} className="border-l border-black/15 pl-3">
               {p}
             </li>
           ))}
         </ul>
         {sheet.cta === "cli" ? (
           <div className="mt-6">
-            <CopyCli variant="dark" />
+            <CopyCli variant="light" />
           </div>
         ) : null}
         {sheet.cta === "waitlist" ? (
           <a
             href="/signup"
-            className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-full bg-white text-[13px] font-medium text-black"
+            className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-full bg-black text-[13px] font-medium text-white"
           >
             Sign up
           </a>
@@ -145,14 +145,14 @@ export function ContentSheet({
           <a
             href="/#migration"
             onClick={onClose}
-            className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-full bg-white text-[13px] font-medium text-black"
+            className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-full bg-black text-[13px] font-medium text-white"
           >
             See the migration demo
           </a>
         ) : null}
         <button
           type="button"
-          className="mt-3 w-full text-center text-[12px] text-[#a1a1aa]"
+          className="mt-3 w-full text-center text-[12px] text-black/40"
           onClick={onClose}
         >
           Close

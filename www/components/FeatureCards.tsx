@@ -10,7 +10,7 @@ type Play = { story: boolean; idle: boolean; reduced: boolean; delay: number };
 
 function CardFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative mt-4 overflow-visible rounded-sm border border-white/12 bg-[#0a0a0a]">
+    <div className="relative mt-4 overflow-visible rounded-sm border border-black/12 bg-white">
       <div className="scanlines pointer-events-none absolute inset-0 z-[2] mix-blend-overlay" aria-hidden />
       <div className="relative z-[1]">{children}</div>
     </div>
@@ -33,22 +33,22 @@ function StackPane({
   return (
     <motion.div
       className="min-w-0 flex-1 rounded-sm border px-2 py-2"
-      style={{ borderColor: accent ? "rgba(51,191,0,0.5)" : "rgba(255,255,255,0.14)" }}
+      style={{ borderColor: accent ? "rgba(51,191,0,0.5)" : "rgba(0,0,0,0.14)" }}
       initial={{ opacity: 0, y: 8 }}
       animate={show ? { opacity: 1, y: 0 } : { opacity: 0, y: 8 }}
       transition={{ duration: 0.4, ease: EASE }}
     >
-      <div className={`text-[10px] font-medium ${accent ? "text-[#33bf00]" : "text-white/70"}`}>{label}</div>
+      <div className={`text-[10px] font-medium ${accent ? "text-[#33bf00]" : "text-black/70"}`}>{label}</div>
       {STACK_LAYERS.map((name, i) => (
         <div key={name} className="mt-2">
           <motion.div
             className="h-[7px] origin-left rounded-[1px]"
-            style={{ background: accent ? "rgba(51,191,0,0.4)" : "rgba(255,255,255,0.18)" }}
+            style={{ background: accent ? "rgba(51,191,0,0.4)" : "rgba(0,0,0,0.18)" }}
             initial={{ scaleX: 0 }}
             animate={{ scaleX: layers > i ? 1 : 0 }}
             transition={{ duration: 0.35, delay: show ? i * 0.08 : 0, ease: EASE }}
           />
-          <div className="mt-0.5 font-mono text-[8px] tracking-wide text-white/40">{name}</div>
+          <div className="mt-0.5 font-mono text-[8px] tracking-wide text-black/40">{name}</div>
         </div>
       ))}
     </motion.div>
@@ -79,7 +79,7 @@ function TwinClone({ story, reduced, delay }: Play) {
         <StackPane label="production" show={n >= 1} layers={n >= 1 ? 3 : 0} />
         <div className="flex w-5 shrink-0 flex-col items-center justify-center">
           <motion.div
-            className="h-px w-full origin-left border-t border-dashed border-white/40"
+            className="h-px w-full origin-left border-t border-dashed border-black/40"
             initial={{ scaleX: 0 }}
             animate={{ scaleX: n >= 2 ? 1 : 0 }}
             transition={{ duration: 0.4, ease: EASE }}
@@ -166,13 +166,13 @@ function StateForm({ story, reduced, delay }: Play) {
   return (
     <CardFrame>
       <div className="flex flex-col px-4 py-3 pb-4">
-        <div className="text-[9px] tracking-[0.18em] text-white/40">SAFE-STATE.</div>
+        <div className="text-[9px] tracking-[0.18em] text-black/40">SAFE-STATE.</div>
         <div className="mt-2 text-[13px] font-medium">Sanitized snapshot</div>
-        <label className="mt-3 text-[10px] text-white/45">Email</label>
+        <label className="mt-3 text-[10px] text-black/45">Email</label>
         <div
-          className="relative mt-1 overflow-hidden rounded bg-black px-2 py-1.5 text-[11px] text-white/80"
+          className="relative mt-1 overflow-hidden rounded bg-[#f0f0ee] px-2 py-1.5 text-[11px] text-black/80"
           style={{
-            boxShadow: chrome ? "inset 0 0 0 1px rgba(255,255,255,0.12)" : "inset 0 0 0 1px rgba(255,255,255,0.04)",
+            boxShadow: chrome ? "inset 0 0 0 1px rgba(0,0,0,0.12)" : "inset 0 0 0 1px rgba(0,0,0,0.04)",
             transition: "box-shadow 0.55s cubic-bezier(0.16,1,0.3,1)",
           }}
         >
@@ -187,12 +187,12 @@ function StateForm({ story, reduced, delay }: Play) {
           {email}
           {phase === "type" && email.length < EMAIL_FULL.length ? <Caret /> : null}
         </div>
-        <label className="mt-2 text-[10px] text-white/45">Token</label>
+        <label className="mt-2 text-[10px] text-black/45">Token</label>
         <div
-          className="relative mt-1 overflow-hidden rounded bg-black px-2 py-1.5 font-mono text-[11px]"
+          className="relative mt-1 overflow-hidden rounded bg-[#f0f0ee] px-2 py-1.5 font-mono text-[11px]"
           style={{
-            boxShadow: chrome ? "inset 0 0 0 1px rgba(255,255,255,0.12)" : "inset 0 0 0 1px rgba(255,255,255,0.04)",
-            color: phase === "done" ? "rgba(255,255,255,0.38)" : "rgba(255,255,255,0.7)",
+            boxShadow: chrome ? "inset 0 0 0 1px rgba(0,0,0,0.12)" : "inset 0 0 0 1px rgba(0,0,0,0.04)",
+            color: phase === "done" ? "rgba(10,10,10,0.38)" : "rgba(10,10,10,0.7)",
             letterSpacing: phase === "redact" ? "0.04em" : "0",
             transition: "box-shadow 0.55s 0.08s cubic-bezier(0.16,1,0.3,1), color 0.35s",
           }}
@@ -283,11 +283,11 @@ function FirewallTerminal({ story, reduced, delay }: Play) {
   return (
     <CardFrame>
       <div className="flex flex-col font-mono text-[10.5px]">
-        <div className="flex items-center gap-1.5 px-3 pt-2.5 text-[10px] text-white/50">
+        <div className="flex items-center gap-1.5 px-3 pt-2.5 text-[10px] text-black/50">
           <span className="h-1.5 w-1.5 rounded-full bg-[#33bf00]" />
           Running
         </div>
-        <div className="mt-2 space-y-1 px-3 text-white/55">
+        <div className="mt-2 space-y-1 px-3 text-black/55">
           <div className="flex items-center justify-between gap-2">
             <span>{typed[0] || "\u00a0"}</span>
             <span
@@ -368,7 +368,7 @@ function WorkloadTree({ story, reduced, delay }: Play) {
             x2="1"
             y1="0"
             y2="20"
-            stroke="rgba(255,255,255,0.35)"
+            stroke="rgba(0,0,0,0.35)"
             strokeWidth="1.4"
             initial={{ pathLength: 0 }}
             animate={{ pathLength: n >= 2 ? 1 : 0 }}
@@ -376,12 +376,12 @@ function WorkloadTree({ story, reduced, delay }: Play) {
           />
         </svg>
         <motion.div
-          className="ml-2 flex items-center gap-2 text-[11px] text-white/80"
+          className="ml-2 flex items-center gap-2 text-[11px] text-black/80"
           initial={{ scale: 0.85, opacity: 0 }}
           animate={n >= 2 ? { scale: 1, opacity: 1 } : { scale: 0.85, opacity: 0 }}
           transition={{ type: "spring", stiffness: 380, damping: 24 }}
         >
-          <span className="h-3.5 w-3.5 rounded-sm border border-white/30" />
+          <span className="h-3.5 w-3.5 rounded-sm border border-black/30" />
           /checkout
         </motion.div>
         <svg width="2" height="16" className="ml-4 overflow-visible">
@@ -390,7 +390,7 @@ function WorkloadTree({ story, reduced, delay }: Play) {
             x2="1"
             y1="0"
             y2="16"
-            stroke="rgba(255,255,255,0.35)"
+            stroke="rgba(0,0,0,0.35)"
             strokeWidth="1.4"
             initial={{ pathLength: 0 }}
             animate={{ pathLength: n >= 3 ? 1 : 0 }}
@@ -398,12 +398,12 @@ function WorkloadTree({ story, reduced, delay }: Play) {
           />
         </svg>
         <motion.div
-          className="ml-2 flex items-center gap-2 text-[11px] text-white/80"
+          className="ml-2 flex items-center gap-2 text-[11px] text-black/80"
           initial={{ scale: 0.85, opacity: 0 }}
           animate={n >= 3 ? { scale: 1, opacity: 1 } : { scale: 0.85, opacity: 0 }}
           transition={{ type: "spring", stiffness: 380, damping: 24 }}
         >
-          <span className="h-3.5 w-3.5 rounded-sm border border-white/30" />
+          <span className="h-3.5 w-3.5 rounded-sm border border-black/30" />
           /upgrade
         </motion.div>
       </div>
@@ -444,9 +444,9 @@ function OracleChip({ story, reduced, delay }: Play) {
             />
           ) : null}
           <div
-            className="relative overflow-hidden rounded-lg border bg-black px-3 py-2 font-mono text-[11px]"
+            className="relative overflow-hidden rounded-lg border bg-[#f0f0ee] px-3 py-2 font-mono text-[11px]"
             style={{
-              borderColor: phase === "block" ? "rgba(51,191,0,0.45)" : "rgba(255,255,255,0.12)",
+              borderColor: phase === "block" ? "rgba(51,191,0,0.45)" : "rgba(0,0,0,0.12)",
               boxShadow: phase === "block" ? "0 0 0 1px rgba(51,191,0,0.15)" : "none",
               transition: "border-color 0.3s, box-shadow 0.3s",
             }}
@@ -515,13 +515,13 @@ export function FeatureCards() {
   const { story, idle, reduced } = useInViewPlay(ref, 0.18);
 
   return (
-    <section id="cards" ref={ref} className="bg-black px-6 pb-24 pt-4 lg:px-10">
+    <section id="cards" ref={ref} className="bg-[#f7f7f5] px-6 pb-24 pt-4 lg:px-10">
       <div className="grid grid-cols-1 items-start gap-6 sm:grid-cols-2 lg:grid-cols-5 lg:gap-6">
         {cards.map((card, i) => (
           <div key={card.title}>
             <p className="text-[15px] leading-snug">
-              <span className="font-semibold text-white">{card.title} </span>
-              <span className="text-white/45">{card.body}</span>
+              <span className="font-semibold text-black">{card.title} </span>
+              <span className="text-black/45">{card.body}</span>
             </p>
             <card.Visual story={story} idle={idle} reduced={reduced} delay={CARD_START_MS[i] ?? 0} />
           </div>

@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
-import { ChromeProvider } from "@/components/Chrome";
 import { DocsShell } from "@/components/docs/DocsShell";
-import { ScaleFooter } from "@/components/ScaleFooter";
-import { SiteHeader } from "@/components/SiteHeader";
+import { SiteLayout } from "@/components/layout/SiteLayout";
 
 export const metadata: Metadata = {
   title: "Antifailure docs",
@@ -12,12 +10,8 @@ export const metadata: Metadata = {
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ChromeProvider>
-      <div className="min-h-screen bg-black">
-        <SiteHeader />
-        <DocsShell>{children}</DocsShell>
-        <ScaleFooter />
-      </div>
-    </ChromeProvider>
+    <SiteLayout overlay={false}>
+      <DocsShell>{children}</DocsShell>
+    </SiteLayout>
   );
 }

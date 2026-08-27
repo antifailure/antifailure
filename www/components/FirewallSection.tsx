@@ -29,7 +29,7 @@ function RingIcon({ play }: { play: boolean }) {
           cx={cx}
           cy={cy}
           r="1.7"
-          fill="white"
+          fill="#0a0a0a"
           initial={{ opacity: 0 }}
           animate={play ? { opacity: o } : { opacity: 0 }}
           transition={{ duration: 0.35, delay: i * 0.04, ease: EASE }}
@@ -84,13 +84,13 @@ export function FirewallSection() {
   }, [story, reduced]);
 
   return (
-    <section id="firewall" className="relative overflow-hidden bg-black pb-40 pt-12">
+    <section id="firewall" className="relative overflow-hidden bg-[#f7f7f5] pb-40 pt-12">
       <div ref={headRef} className="px-8 lg:px-16 lg:pl-[260px]">
         <div className="min-w-0 text-center">
           <RingIcon play={headStory || headReduced} />
           <h2 className="mx-auto max-w-[920px] text-[36px] font-semibold leading-[1.2] tracking-[-0.03em] md:text-[44px]">
-            <span className="text-white">Side-Effect Firewall included. </span>
-            <span className="text-white/45">
+            <span className="text-black">Side-Effect Firewall included. </span>
+            <span className="text-black/45">
               Keep cloned applications from charging cards, emailing users, or touching production.
             </span>
           </h2>
@@ -98,9 +98,9 @@ export function FirewallSection() {
       </div>
 
       <div ref={ref} className="relative mx-auto mt-16 min-h-0 max-w-[1100px] px-8 lg:min-h-[520px]">
-        <div className="overflow-hidden rounded-md border border-white/8 opacity-50">
-          <table className="w-full text-left text-[12px] text-white/70">
-            <thead className="bg-white/5 text-white/40">
+        <div className="overflow-hidden rounded-md border border-black/10">
+          <table className="w-full text-left text-[12px] text-black/70">
+            <thead className="bg-black/5 text-black/50">
               <tr>
                 {["id", "destination", "operation", "decision", "ledger"].map((h) => (
                   <th key={h} className="px-4 py-2 font-normal">
@@ -115,7 +115,7 @@ export function FirewallSection() {
                 return (
                   <tr
                     key={row[0]}
-                    className="border-t border-white/6"
+                    className="border-t border-black/6"
                     style={{
                       boxShadow:
                         deny && pulse
@@ -124,7 +124,7 @@ export function FirewallSection() {
                             ? "inset 3px 0 0 #f87171"
                             : i === 0
                               ? "inset 3px 0 0 #33bf00"
-                              : "inset 3px 0 0 rgba(255,255,255,0.16)",
+                              : "inset 3px 0 0 rgba(0,0,0,0.16)",
                       transition: "box-shadow 0.4s",
                     }}
                   >

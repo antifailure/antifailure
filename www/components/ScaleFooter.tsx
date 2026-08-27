@@ -8,26 +8,26 @@ export function ScaleFooter() {
   const { openSheet } = useChrome();
 
   return (
-    <footer className="bg-black px-8 pb-16 pt-16 lg:px-16">
+    <footer className="bg-[#f7f7f5] px-8 pb-16 pt-16 lg:px-16">
       <div className="grid gap-12 lg:grid-cols-[minmax(260px,1.45fr)_repeat(4,minmax(0,0.9fr))] lg:gap-10">
         <div>
           <Wordmark />
-          <p className="mt-3 max-w-[280px] text-[13.5px] leading-5 text-white/45">
+          <p className="mt-3 max-w-[280px] text-[13.5px] leading-5 text-black/45">
             Pre-production deployment safety.
           </p>
           <div
             id="community"
-            className="mt-14 flex items-center gap-2 text-[13.5px] text-white"
+            className="mt-14 flex items-center gap-2 text-[13.5px] text-black"
           >
             <span className="h-[7px] w-[7px] rounded-full bg-[#33bf00]" />
             Design-partner waitlist open.
           </div>
-          <p className="mt-6 max-w-[300px] text-[11px] leading-[1.55] text-white/35">
+          <p className="mt-6 max-w-[300px] text-[11px] leading-[1.55] text-black/35">
             © Antifailure 2026. All rights reserved. Pre-production deployment safety is a
             product category, not a guarantee that every production incident is predicted. The
             init command shown on this site is not a published package.
           </p>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-white/40">
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-black/40">
             <FooterAction onClick={() => openSheet("privacy")}>Privacy Notice</FooterAction>
             <FooterAction onClick={() => openSheet("terms")}>Terms of Use</FooterAction>
             <FooterAction onClick={() => openSheet("platform-terms")}>Platform Terms</FooterAction>
@@ -63,7 +63,7 @@ export function ScaleFooter() {
 
         <div>
           <ColTitle>Community</ColTitle>
-          <ul className="mt-4 space-y-3 text-[13.5px] text-white">
+          <ul className="mt-4 space-y-3 text-[13.5px] text-black">
             <CommunityItem icon={<WaitlistIcon />} href="/signup">
               Sign up
             </CommunityItem>
@@ -93,7 +93,7 @@ export function ScaleFooter() {
             <li>
               <button
                 type="button"
-                className="text-white hover:text-white/70"
+                className="text-black hover:text-black/70"
                 onClick={() => openSheet("security")}
               >
                 Security
@@ -108,7 +108,7 @@ export function ScaleFooter() {
 
 function ColTitle({ children }: { children: string }) {
   return (
-    <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/40">
+    <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-black/40">
       {children}
     </div>
   );
@@ -122,7 +122,7 @@ function FooterAction({
   onClick: () => void;
 }) {
   return (
-    <button type="button" className="hover:text-white/70" onClick={onClick}>
+    <button type="button" className="hover:text-black/70" onClick={onClick}>
       {children}
     </button>
   );
@@ -146,17 +146,17 @@ function FooterCol({
   return (
     <div>
       <ColTitle>{title}</ColTitle>
-      <ul className="mt-4 space-y-3 text-[13.5px] text-white">
+      <ul className="mt-4 space-y-3 text-[13.5px] text-black">
         {links.map((l) => (
           <li key={l.label}>
             {l.href ? (
-              <a href={l.href} className="hover:text-white/70">
+              <a href={l.href} className="hover:text-black/70">
                 {l.label}
               </a>
             ) : (
               <button
                 type="button"
-                className="text-left hover:text-white/70"
+                className="text-left hover:text-black/70"
                 onClick={() => {
                   if (l.sheet) onSheet(l.sheet);
                 }}
@@ -186,11 +186,11 @@ function TrustRow({
 }) {
   const body = (
     <>
-      <span className="text-white">{label}</span>
-      <span className="shrink-0 text-white/40">{status}</span>
+      <span className="text-black">{label}</span>
+      <span className="shrink-0 text-black/40">{status}</span>
     </>
   );
-  const cls = "flex w-full items-baseline justify-between gap-3 text-left hover:text-white/70";
+  const cls = "flex w-full items-baseline justify-between gap-3 text-left hover:text-black/70";
   if (href) {
     return (
       <li>
@@ -220,7 +220,7 @@ function CommunityItem({
   onClick?: () => void;
   href?: string;
 }) {
-  const className = "flex items-center gap-2.5 hover:text-white/70";
+  const className = "flex items-center gap-2.5 hover:text-black/70";
   return (
     <li>
       {href ? (
