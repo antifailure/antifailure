@@ -64,4 +64,4 @@ repository that already has one tells you it is there rather than replacing it.
 If the repository has changed enough to want a fresh look, delete the manifest
 and run it again, or read the new one against the old with `git diff`.
 
-Related: [the manifest reference](/reference/manifest/), [building](/guides/build/).
+Related: [the manifest reference](/docs/reference/manifest/), [building](/docs/guides/build/).

@@ -88,5 +88,5 @@ By default workflows share an environment and run in order, because a sign-up
 usually has to happen before a subscription. `independent: true` says this one
 does not depend on the others, which lets it run in parallel.
 
-Related: [workflows](/guides/workflows/), [personas](/guides/personas/),
-[invariants](/guides/invariants/).
+Related: [workflows](/docs/guides/workflows/), [personas](/docs/guides/personas/),
+[invariants](/docs/guides/invariants/).

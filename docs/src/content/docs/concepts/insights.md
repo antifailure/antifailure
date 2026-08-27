@@ -65,5 +65,5 @@ ten million.
 Every check is a `*bool`, so `false` is distinguishable from unset. Setting
 `plan_diff: false` turns off that check and nothing else.
 
-Related: [goldens](/concepts/goldens/), [load](/concepts/load/),
-[invariants](/guides/invariants/).
+Related: [goldens](/docs/concepts/goldens/), [load](/docs/concepts/load/),
+[invariants](/docs/guides/invariants/).

@@ -83,4 +83,4 @@ Almost always a permission the App was not granted, or a token from a workflow
 with a narrower `permissions:` block than the job needs. The message carries
 GitHub's own words, which name the missing scope.
 
-Related: [scheduling](/concepts/scheduling/), [the control plane](/self-hosting/control-plane/).
+Related: [scheduling](/docs/concepts/scheduling/), [the control plane](/docs/self-hosting/control-plane/).
