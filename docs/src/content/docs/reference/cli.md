@@ -834,6 +834,7 @@ af up [flags]
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to create the environment for, defaulting to the checked out one. |
+| `--hud` | `false` | Watch the run on a live dashboard, or a line per event where there is no terminal. |
 | `--rebuild` | `false` | Build every image again, even when an identical one exists. |
 
 ### `af version`

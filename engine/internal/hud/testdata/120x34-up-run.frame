@@ -1,0 +1,23 @@
+antifailure  pr-482  up 14s                                                                                    2/2 ready
+SERVICES ─────────────────────────────────────────────────────────────── NETWORK ───────────────────────────────────────
+✓ web                       http://127.0.0.1:41273                       allow 0   deny 0   mock 0   record 0           
+✓ worker                    running                                                                                     
+                                                                         DATABASE ──────────────────────────────────────
+                                                                         branched                                       
+                                                                         gv_20260101_ab12cd  verified                   
+AGENTS ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+no agents running
+
+
+▸ LOG ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+00:00:05 build.started worker: build starting service=worker
+00:00:06 build.finished worker: image is unchanged cached=true seconds=0.2 service=worker
+00:00:07 golden.ready golden gv_20260101_ab12cd is verified phase=golden verified=true version=gv_20260101_ab12cd
+00:00:08 db.branching branching from gv_20260101_ab12cd phase=branching version=gv_20260101_ab12cd
+00:00:09 db.branched branched from gv_20260101_ab12cd phase=branched version=gv_20260101_ab12cd
+00:00:10 resource.created network id=af-pr-482 kind=network provider=local
+00:00:11 service.starting web is starting kind=web service=web state=starting
+00:00:12 service.starting worker is starting kind=worker service=worker state=starting
+00:00:13 service.ready web is running kind=web service=web state=running url=http://127.0.0.1:41273
+00:00:14 service.ready worker is running kind=worker service=worker state=running
+00:00:15 env.ready pr-482 is ready proxied=true url=http://127.0.0.1:41273

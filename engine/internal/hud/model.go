@@ -367,6 +367,13 @@ func (m *Model) applyDatabase(e events.Event) {
 	case events.MaskFinding:
 		m.database.Findings++
 	}
+	// An explicit field wins over the type, and is read last for that reason.
+	// A run that branches from a golden verified last week never emits
+	// mask.verified, and without this the pane would call a verified golden
+	// unverified on every ordinary af up.
+	if v, ok := e.Data["verified"].(bool); ok {
+		m.database.Verified = v
+	}
 }
 
 func (m *Model) applyAgent(e events.Event) {
