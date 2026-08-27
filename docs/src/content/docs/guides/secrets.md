@@ -109,6 +109,14 @@ goes through it. Redaction happens at the writer rather than at each call site,
 because a call site somebody forgot is exactly how a secret ends up in a CI
 log.
 
+The engine has five writers that can put an event somewhere a person later
+reads it: the local NDJSON log, the spool on disk, a span attribute, the bytes
+an OTLP collector receives, and the body of the request the control plane
+receives. Each redacts at its own writer, and each has a test that a connection
+string cannot reach it. The last of those is the only one that leaves the
+machine, so a self-hosted control plane stores events that have already been
+through the redactor of the engine that sent them.
+
 You will see this in error messages: `postgres://user:[redacted]@host/db`. That
 is working.
 
