@@ -383,8 +383,10 @@ timeout, which on a loaded machine meant whole suites skipped and reported
 green.
 
 What is `written` rather than `proven` here, and why. OTLP trace export is
-exercised against an in-memory exporter rather than a collector, so the
-redaction property and the span shape are proven and the wire format is not.
+posted as JSON to a real HTTP endpoint in the tests and decoded back, so the
+wire format, the identifier encoding, the integers-as-strings rule and the
+redaction of the actual bytes are all proven; what is not is a real
+OpenTelemetry Collector accepting them, which needs one running.
 Chaos scenario 2 needs a real golden and fails on a saturated laptop inside the
 provider's readiness window; it is proven on continuous integration and not
 here. `events.EgressDecision` and `events.EgressTripwire` are declared,

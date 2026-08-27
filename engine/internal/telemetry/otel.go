@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -78,19 +77,16 @@ func NewTracing(ctx context.Context, opts TracingOptions) (*Tracing, error) {
 		if strings.EqualFold(strings.TrimSpace(getenv("OTEL_SDK_DISABLED")), "true") {
 			return disabledTracing(), nil
 		}
-		endpoint := firstNonEmpty(
-			getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
-			getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-		)
+		endpoint := tracesEndpoint(getenv)
 		if endpoint == "" {
 			return disabledTracing(), nil
 		}
-		exp, err := otlptracehttp.New(ctx)
+		exp, err := newOTLPJSONExporter(endpoint, otlpHeaders(getenv), nil)
 		if err != nil {
-			// Reported and then ignored. An unreachable collector must not stop
-			// an environment coming up, for exactly the reason an unreachable
-			// control plane must not: the observability of the thing is not the
-			// thing.
+			// Reported and then ignored. An unreachable or misconfigured
+			// collector must not stop an environment coming up, for exactly the
+			// reason an unreachable control plane must not: the observability of
+			// the thing is not the thing.
 			return disabledTracing(), fmt.Errorf("telemetry: tracing is off: %w", err)
 		}
 		exporter = exp
@@ -175,15 +171,6 @@ func (t *Tracing) Install() func() {
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, propagation.Baggage{}))
 	return func() { otel.SetTracerProvider(previous) }
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 // spanSink turns bus events into span events on the command's span.
