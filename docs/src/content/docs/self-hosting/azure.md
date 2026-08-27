@@ -93,7 +93,7 @@ that keeps the event partitions ahead, and the application on public HTTPS.
 Container Apps rather than AKS, deliberately. The control plane is one web
 process and a database. The cheapest always-on AKS control plane is around 75
 USD a month before a single node runs, and buys nothing here. If you want it on
-Kubernetes anyway, the [Helm chart](/self-hosting/control-plane/) installs on
+Kubernetes anyway, the [Helm chart](/docs/self-hosting/control-plane/) installs on
 any conformant cluster.
 
 ### After an upgrade that carries new migrations
