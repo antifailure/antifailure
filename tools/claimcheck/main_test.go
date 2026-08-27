@@ -197,3 +197,94 @@ func TestAParentOfATrackedFileCounts(t *testing.T) {
 		}
 	}
 }
+
+// Documentation addresses hardcoded in Go source.
+
+func TestADocsURLIsFoundInAStringLiteral(t *testing.T) {
+	got := docsURL.FindStringSubmatch(`"see https://antifailure.dev/docs/guides/build for more"`)
+	if got == nil {
+		t.Fatal("a docs address in a literal must be found")
+	}
+	if got[1] != "guides/build" {
+		t.Errorf("captured %q, want the path", got[1])
+	}
+}
+
+func TestDocPageExistsAcceptsBothShapesTheSiteUses(t *testing.T) {
+	tracked := trackedSet(
+		"docs/src/content/docs/guides/build.md",
+		"docs/src/content/docs/providers/index.md",
+	)
+	for _, page := range []string{"guides/build", "providers"} {
+		if !docPageExists(tracked, page) {
+			t.Errorf("%q should resolve", page)
+		}
+	}
+	if docPageExists(tracked, "guides/builds") {
+		t.Error("a page that does not exist must not resolve")
+	}
+}
+
+// The reason this reads literals rather than the file text: the first version
+// grepped the whole file and its first hit was this tool's own comment quoting
+// the broken URL as an example. The doc comment claimed it read only literals
+// while the code read everything, which is the same disagreement between a
+// stated rule and an implemented one that this repository keeps finding.
+func TestAURLInACommentIsNotAClaim(t *testing.T) {
+	root := t.TempDir()
+	src := "package p\n\n// It stamped https://antifailure.dev/docs/nope/missing into the output.\nconst X = 1\n"
+	if err := os.WriteFile(filepath.Join(root, "x.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := checkDocsURLs(root, trackedSet(), &out); err != nil {
+		t.Fatalf("a URL in a comment must not fail the build: %v\n%s", err, out.String())
+	}
+}
+
+func TestAURLInALiteralPointingNowhereFails(t *testing.T) {
+	root := t.TempDir()
+	src := "package p\n\nconst X = \"https://antifailure.dev/docs/nope/missing\"\n"
+	if err := os.WriteFile(filepath.Join(root, "x.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := checkDocsURLs(root, trackedSet(), &out); err == nil {
+		t.Fatal("a literal pointing at a missing page must fail")
+	}
+	if !strings.Contains(out.String(), "404") {
+		t.Errorf("the report should mark it, got %q", out.String())
+	}
+}
+
+// A placeholder describes the shape of a URL rather than naming one.
+func TestAPlaceholderPathIsIgnored(t *testing.T) {
+	root := t.TempDir()
+	src := "package p\n\nconst X = \"https://antifailure.dev/docs/<path>\"\n"
+	if err := os.WriteFile(filepath.Join(root, "x.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := checkDocsURLs(root, trackedSet(), &out); err != nil {
+		t.Fatalf("a placeholder must not fail the build: %v", err)
+	}
+}
+
+// The one that matters: every address the real engine prints must resolve.
+// engine/internal/build stamped /docs/guides/builds into every generated
+// Dockerfile, four times, and the page is guides/build. That URL was live and
+// it 404'd, in output handed to somebody at the moment their build failed.
+func TestEveryDocsURLTheRealEnginePrintsResolves(t *testing.T) {
+	root := filepath.Join("..", "..")
+	tracked, err := trackedPaths(root)
+	if err != nil {
+		t.Skipf("no git here: %v", err)
+	}
+	var out strings.Builder
+	if err := checkDocsURLs(root, tracked, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "documentation addresses in Go source") {
+		t.Errorf("the summary should say how many were checked, got %q", out.String())
+	}
+}
