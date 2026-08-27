@@ -86,4 +86,4 @@ reading the record.
 `.gitignore`, which `af init` adds. It holds no secrets: connection strings are
 resolved when needed and never written down.
 
-Related: [the local runtime](/guides/local-runtime/), [providers](/providers/overview/).
+Related: [the local runtime](/docs/guides/local-runtime/), [providers](/docs/providers/overview/).

@@ -130,7 +130,7 @@ subset silently breaks.
 | --- | --- |
 | `default` | `block` (default) or `allow`. |
 | `allow_ipv6` | Off by default. |
-| `rules` | See [egress](/concepts/egress/). |
+| `rules` | See [egress](/docs/concepts/egress/). |
 
 ## `runtime`
 
@@ -165,5 +165,5 @@ an edit.
 test validates real manifests against both, so a field in one and not the other
 fails the build. Point your editor at it for completion and inline errors.
 
-Related: [detection](/concepts/detection/), [egress](/concepts/egress/),
-[providers](/providers/overview/).
+Related: [detection](/docs/concepts/detection/), [egress](/docs/concepts/egress/),
+[providers](/docs/providers/overview/).

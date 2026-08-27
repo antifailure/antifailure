@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -384,4 +385,89 @@ func TestEveryWorkflowIsValidYAML(t *testing.T) {
 	if seen == 0 {
 		t.Error("checked no workflows, which means this test has stopped looking in the right place")
 	}
+}
+
+// No compiled binary is ever committed.
+//
+// This has happened twice. `go build ./tools/claimcheck` writes ./claimcheck
+// into the current directory, `git add -A` picks it up, and a platform specific
+// executable lands in a repository that ships Linux binaries. A 10MB
+// engine/af-proxy arrived the same way and sat there for longer.
+//
+// It matters more than the disk space. Git keeps a blob for ever, so every
+// rebuild-and-recommit adds another copy of something nobody can run; and a
+// repository that has just spent a night pinning its supply chain has no
+// business carrying an unexplained executable at its root, because the honest
+// answer to "what is this and who built it" is that nobody knows.
+//
+// .gitignore is the convenience and this is the backstop, because .gitignore
+// only helps for the names somebody thought of first.
+func TestNoCompiledBinaryIsTracked(t *testing.T) {
+	root := filepath.Join("..", "..")
+	out, err := exec.Command("git", "-C", root, "ls-files", "-z").Output()
+	if err != nil {
+		t.Skipf("no git here: %v", err)
+	}
+
+	files := strings.Split(string(out), "\x00")
+	if len(files) < 10 {
+		t.Fatalf("git listed %d files, so this check has stopped looking", len(files))
+	}
+
+	checked := 0
+	for _, f := range files {
+		if f == "" {
+			continue
+		}
+		// Only files with no extension are plausible Go binaries; everything
+		// with a suffix is read as itself and reading every file in the
+		// repository to check would make this slow for no gain.
+		if filepath.Ext(f) != "" {
+			continue
+		}
+		full := filepath.Join(root, f)
+		info, err := os.Stat(full)
+		if err != nil || info.IsDir() || info.Size() < 4 {
+			continue
+		}
+		checked++
+
+		fh, err := os.Open(full)
+		if err != nil {
+			continue
+		}
+		var magic [4]byte
+		n, _ := fh.Read(magic[:])
+		fh.Close()
+		if n < 4 {
+			continue
+		}
+		if kind := executableKind(magic); kind != "" {
+			t.Errorf("%s is a committed %s binary, %d bytes. "+
+				"It is almost certainly `go build` output that `git add -A` picked up. "+
+				"Remove it with `git rm --cached %s` and add it to .gitignore.",
+				f, kind, info.Size(), f)
+		}
+	}
+	if checked == 0 {
+		t.Error("inspected no extensionless files, which means this check is looking in the wrong place")
+	}
+}
+
+// executableKind names the format a magic number belongs to, or empty for
+// anything that is not an executable.
+func executableKind(m [4]byte) string {
+	switch {
+	case m[0] == 0x7f && m[1] == 'E' && m[2] == 'L' && m[3] == 'F':
+		return "ELF"
+	case m[0] == 0xcf && m[1] == 0xfa && m[2] == 0xed && m[3] == 0xfe:
+		return "Mach-O 64-bit"
+	case m[0] == 0xce && m[1] == 0xfa && m[2] == 0xed && m[3] == 0xfe:
+		return "Mach-O 32-bit"
+	case m[0] == 0xca && m[1] == 0xfe && m[2] == 0xba && m[3] == 0xbe:
+		return "Mach-O universal"
+	case m[0] == 'M' && m[1] == 'Z':
+		return "Windows PE"
+	}
+	return ""
 }
