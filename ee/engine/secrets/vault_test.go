@@ -137,8 +137,19 @@ func tryStartVault() (*liveVault, error) {
 	// a container that publishes a port, writes nothing to its log, and answers
 	// nothing, so every test skips and the package reports ok. Naming the
 	// entrypoint and the arguments makes a failure to start a failure.
-	out, err := exec.Command("docker", "run", "-d", "--rm",
+	// No --rm. A container that removes itself on exit takes its log with it,
+	// and the log is the only thing that explains why it exited: the first CI
+	// run of this reported "the container published no port; its log said:
+	// Error response from daemon: page not found", which is docker saying the
+	// container is already gone rather than anything about Vault. Every path
+	// out of here removes it explicitly instead.
+	//
+	// IPC_LOCK because that is what HashiCorp's own documentation says to run
+	// this image with. Vault locks its memory so that secrets cannot be paged
+	// to disk, and a container without the capability may refuse to start.
+	out, err := exec.Command("docker", "run", "-d",
 		"-p", "0:8200",
+		"--cap-add", "IPC_LOCK",
 		"-e", "VAULT_DEV_ROOT_TOKEN_ID="+token,
 		"--entrypoint", "vault",
 		vaultImage,
@@ -149,17 +160,26 @@ func tryStartVault() (*liveVault, error) {
 	}
 	id := strings.TrimSpace(string(out))
 
+	// Whether it is still running, before asking about its ports. `docker port`
+	// on an exited container answers "page not found", which reads as a bug in
+	// this harness and is actually the container having died with something to
+	// say.
+	if state, err := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", id).Output(); err == nil &&
+		strings.TrimSpace(string(state)) != "true" {
+		return nil, fmt.Errorf("the container exited immediately; its log said:\n%s\n%s",
+			containerLog(id), removeContainer(id))
+	}
+
 	portOut, err := exec.Command("docker", "port", id, "8200/tcp").Output()
 	if err != nil {
-		logs, _ := exec.Command("docker", "logs", id).CombinedOutput()
-		_ = exec.Command("docker", "rm", "-f", id).Run()
-		return nil, fmt.Errorf("the container published no port; its log said:\n%s", logs)
+		return nil, fmt.Errorf("the container published no port; its log said:\n%s\n%s",
+			containerLog(id), removeContainer(id))
 	}
 	// docker port prints one line per address family; the port is the same.
 	line := strings.TrimSpace(strings.Split(strings.TrimSpace(string(portOut)), "\n")[0])
 	colon := strings.LastIndex(line, ":")
 	if colon < 0 {
-		_ = exec.Command("docker", "rm", "-f", id).Run()
+		removeContainer(id)
 		return nil, fmt.Errorf("cannot read a port out of %q", line)
 	}
 	address := "http://127.0.0.1:" + line[colon+1:]
@@ -176,12 +196,31 @@ func tryStartVault() (*liveVault, error) {
 			}
 		}
 		if time.Now().After(deadline) {
-			logs, _ := exec.Command("docker", "logs", id).CombinedOutput()
-			_ = exec.Command("docker", "rm", "-f", id).Run()
-			return nil, fmt.Errorf("vault did not become healthy in 90s; its log said:\n%s", logs)
+			return nil, fmt.Errorf("vault did not become healthy in 90s; its log said:\n%s\n%s",
+				containerLog(id), removeContainer(id))
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// containerLog reads what the container said before it stopped.
+//
+// Read while the container still exists, which is the whole reason startVault
+// does not pass --rm. A log that is deleted at the moment of failure is a log
+// that exists for every case except the one that needed it.
+func containerLog(id string) string {
+	out, err := exec.Command("docker", "logs", id).CombinedOutput()
+	if err != nil || len(out) == 0 {
+		return "(the container wrote nothing)"
+	}
+	return string(out)
+}
+
+// removeContainer cleans up and returns an empty string, so it can be called
+// inside an error message and the cleanup cannot be forgotten on a path out.
+func removeContainer(id string) string {
+	_ = exec.Command("docker", "rm", "-f", id).Run()
+	return ""
 }
 
 // call makes a raw request to Vault, so the test seeds and configures through
