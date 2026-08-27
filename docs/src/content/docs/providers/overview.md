@@ -11,7 +11,7 @@ outside this repository.
 
 ```yaml
 database:
-  provider: docker   # or neon
+  provider: docker   # or neon, or supabase
   version: 17
 ```
 
@@ -21,12 +21,19 @@ database:
 | --- | --- | --- | --- |
 | `docker` | A container on the machine running `af` | Grows with the database | A Docker daemon |
 | [`neon`](/providers/neon/) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
+| [`supabase`](/providers/supabase/) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 
 `docker` is the default and needs nothing. It is the right choice for a
 repository whose database is small enough that copying it is not the slow part.
 
 `neon` is the right choice when it is. Neon branches are copy on write, so
 creating one takes about as long for a hundred gigabytes as for a hundred rows.
+
+`supabase` is the right choice when your application already lives there.
+Branch time is not flat, because Supabase creates a branch with no data in it
+and the golden has to be copied in, but what you get back is a real Supabase
+project with the Auth, Storage and Realtime services your application is
+calling, which neither of the others can offer. A branch is billed by the hour.
 
 A provider named in the manifest and not built into this binary is refused at
 startup rather than substituted. Falling back to `docker` would hand somebody
