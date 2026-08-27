@@ -65,26 +65,30 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		return env, err
 	}
 
+	// The namespace is what is journalled, and almost the only thing, because
+	// it is the unit of teardown: Down deletes it and everything inside goes
+	// with it. A record naming a NetworkPolicy or a Secret inside it would be
+	// a record teardown has no separate use for and the inventory does not
+	// report, which is a row nothing can ever act on. The Deployments are
+	// journalled as well because the inventory does report them and they are
+	// what somebody reads to see what an environment is running.
 	if err := journal("namespace", namespace); err != nil {
 		return env, err
 	}
 	if err := r.ensureNamespace(ctx, spec.EnvID); err != nil {
 		return env, err
 	}
-	if err := r.applyPolicies(ctx, spec.EnvID, namespace, journal); err != nil {
+	if err := r.applyPolicies(ctx, spec.EnvID, namespace); err != nil {
 		return env, err
 	}
 
 	if !r.skipContainmentCheck {
-		if err := r.verifyContainment(ctx, spec, namespace, resolver, journal, progress); err != nil {
+		if err := r.verifyContainment(ctx, spec, namespace, resolver, progress); err != nil {
 			return env, err
 		}
 	}
 
 	if spec.CACertPEM != "" {
-		if err := journal("secret", namespace+"/"+caSecretName); err != nil {
-			return env, err
-		}
 		if err := r.ensureCASecret(ctx, spec, namespace); err != nil {
 			return env, err
 		}
@@ -132,13 +136,8 @@ func (r *Runtime) ensureNamespace(ctx context.Context, envID string) error {
 }
 
 // applyPolicies writes every NetworkPolicy the environment needs.
-func (r *Runtime) applyPolicies(
-	ctx context.Context, envID, namespace string, journal func(string, string) error,
-) error {
+func (r *Runtime) applyPolicies(ctx context.Context, envID, namespace string) error {
 	for _, policy := range networkPolicies(envID, namespace, r.domain != "") {
-		if err := journal("networkpolicy", namespace+"/"+policy.Name); err != nil {
-			return err
-		}
 		_, err := r.cli.NetworkingV1().NetworkPolicies(namespace).Create(ctx, policy, metav1.CreateOptions{})
 		if apierrors.IsAlreadyExists(err) {
 			continue
@@ -179,12 +178,11 @@ func (r *Runtime) startProxy(
 	if err != nil {
 		return "", err
 	}
-	for kind, name := range map[string]string{
-		"secret": secret.Name, "deployment": deployment.Name, "service": service.Name,
-	} {
-		if err := journal(kind, namespace+"/"+name); err != nil {
-			return "", err
-		}
+	// Only the Deployment. The Secret and the Service live in the namespace
+	// and go when it goes, and a journal entry naming something the inventory
+	// does not report is a record nothing can act on.
+	if err := journal("deployment", namespace+"/"+deployment.Name); err != nil {
+		return "", err
 	}
 	if err := r.createOrReplaceSecret(ctx, namespace, secret); err != nil {
 		return "", err
@@ -248,9 +246,6 @@ func (r *Runtime) startService(
 	running := provider.RunningService{Name: s.Name, Kind: s.Kind}
 
 	if s.Migrate != "" {
-		if err := journal("job", namespace+"/"+s.Name+"-migrate"); err != nil {
-			return running, err
-		}
 		if err := r.runMigration(ctx, spec, s, namespace, resolverIP, progress); err != nil {
 			return running, err
 		}
@@ -266,9 +261,6 @@ func (r *Runtime) startService(
 			"detail", fmt.Sprintf("creating %s: %v", s.Name, err))
 	}
 
-	if err := journal("service", namespace+"/"+s.Name); err != nil {
-		return running, err
-	}
 	if _, err := r.cli.CoreV1().Services(namespace).Create(ctx,
 		serviceObject(spec.EnvID, namespace, s), metav1.CreateOptions{}); err != nil &&
 		!apierrors.IsAlreadyExists(err) {
@@ -276,9 +268,6 @@ func (r *Runtime) startService(
 	}
 
 	if s.Kind == "web" && s.Port > 0 && r.domain != "" {
-		if err := journal("ingress", namespace+"/"+s.Name); err != nil {
-			return running, err
-		}
 		if _, err := r.cli.NetworkingV1().Ingresses(namespace).Create(ctx,
 			r.ingressFor(spec.EnvID, namespace, s), metav1.CreateOptions{}); err != nil &&
 			!apierrors.IsAlreadyExists(err) {

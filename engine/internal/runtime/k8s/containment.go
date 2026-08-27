@@ -93,7 +93,6 @@ func (r *Runtime) verifyContainment(
 	ctx context.Context,
 	spec provider.EnvSpec,
 	namespace, resolver string,
-	journal func(string, string) error,
 	progress func(string),
 ) error {
 	image, err := r.probeImage(ctx, spec)
@@ -104,9 +103,6 @@ func (r *Runtime) verifyContainment(
 		return aferrors.Coded(aferrors.AFRUN043, "detail",
 			"there is no image to run the containment check with, so whether this "+
 				"cluster enforces network policy is unknown")
-	}
-	if err := journal("pod", namespace+"/"+probeName); err != nil {
-		return err
 	}
 	progress("checking that this cluster enforces network policy")
 
