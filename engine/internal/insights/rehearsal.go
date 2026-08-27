@@ -127,17 +127,20 @@ func Rehearse(
 		r.Lint = Lint(stmts, schema, largeRows)
 	}
 
-	// Rewrites come from the database rather than from reading the SQL. An
-	// event trigger on table_rewrite is Postgres telling us it is about to
-	// copy a table, which no amount of statement matching can be as sure of.
-	// It needs a superuser, which is true on a local branch and often not on
-	// a hosted one, so a refusal is reported rather than fatal.
-	rewrites, stopCapture, err := installRewriteCapture(ctx, conn)
+	// What the server did comes from the server. Event triggers record every
+	// DDL command and its duration, and every table Postgres rewrote, neither
+	// of which is knowable from the statement: whether an ALTER TABLE rewrites
+	// depends on the type the column is coming from, and how long a statement
+	// took is not observable from outside when somebody else's tool is sending
+	// it. It needs a superuser, which is true on a local branch and often not
+	// on a hosted one, so a refusal is reported rather than fatal.
+	watcher, stopCapture, err := installCapture(ctx, conn)
 	if err != nil {
 		r.Missing = append(r.Missing,
-			"table rewrites could not be watched, because installing an event trigger needs "+
-				"a superuser and this role is not one, so a rewrite is only reported when the "+
-				"statement makes it obvious: "+short(err))
+			"the server could not be asked what the migrations did, because installing an "+
+				"event trigger needs a superuser and this role is not one. Statement timings "+
+				"come from the applier where it knows them, and a rewrite is only reported "+
+				"when the statement makes it obvious: "+short(err))
 	} else {
 		defer stopCapture()
 	}
@@ -158,8 +161,18 @@ func Rehearse(
 
 	r.Locks = collect()
 	r.Statements = timings
-	if rewrites != nil {
-		attachRewrites(&r, rewrites(ctx))
+	if watcher != nil {
+		// The applier may have finished before the server did, which is
+		// normal when it ran somewhere else.
+		waitForQuiet(ctx, conn, 5*time.Second)
+		if len(r.Statements) == 0 {
+			// The applier does not know what it ran, which is the case for
+			// every tool whose migrations are not SQL we can read. The server
+			// does, so this is where a Rails or Django migration gets its
+			// per-statement timing.
+			r.Statements = watcher.timings(ctx)
+		}
+		attachRewrites(&r, watcher.rewrites(ctx))
 	}
 
 	if applyErr != nil {

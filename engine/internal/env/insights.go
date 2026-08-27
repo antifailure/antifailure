@@ -10,6 +10,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/insights"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // InsightsOptions are the parts of an insights run the caller decides.
@@ -92,11 +93,6 @@ func (o *Orchestrator) rehearsalBranch(
 	ctx context.Context, s *session,
 ) (*insights.Target, func(), string, error) {
 	set := insights.Discover(os.DirFS(o.opts.Root))
-	if !set.SQLAvailable() {
-		// Nothing to apply from here. Run reports the tool and the reason it
-		// carries, which is more use than a branch nobody migrates.
-		return nil, nil, "", nil
-	}
 
 	version, why, err := o.environmentGolden(ctx, s)
 	if err != nil {
@@ -127,6 +123,16 @@ func (o *Orchestrator) rehearsalBranch(
 	}
 	o.opts.Redactor.Register(url.Reveal())
 
+	applier, why, err := o.applierFor(ctx, s, set, branch)
+	if err != nil {
+		destroy()
+		return nil, nil, "", err
+	}
+	if applier == nil {
+		destroy()
+		return nil, nil, why, nil
+	}
+
 	conn, err := pgx.Connect(ctx, url.Reveal())
 	if err != nil {
 		destroy()
@@ -148,9 +154,91 @@ func (o *Orchestrator) rehearsalBranch(
 		destroy()
 	}
 	return &insights.Target{
-		Conn: conn, Watch: watch, URL: url, Set: set,
-		Applier: &insights.SQLApplier{Progress: o.progress},
+		Conn: conn, Watch: watch, URL: url, Set: set, Applier: applier,
 	}, release, "", nil
+}
+
+// applierFor decides how the pending migrations get applied.
+//
+// A project whose migrations are SQL files has them replayed from here, one
+// statement at a time, which is the only way to time each one exactly. A
+// project whose migrations are Ruby, Python or JavaScript has to be applied by
+// its own tool inside its own image, because only that tool knows what they
+// become and the answer depends on the gems and packages in the image rather
+// than on whatever is installed on this machine. Running the tool on the
+// workstation would rehearse something the deploy does not do, which is worse
+// than not rehearsing, because it produces a result somebody would believe.
+func (o *Orchestrator) applierFor(
+	ctx context.Context, s *session, set insights.MigrationSet, branch provider.Branch,
+) (insights.Applier, string, error) {
+	if set.SQLAvailable() {
+		return &insights.SQLApplier{Progress: o.progress}, "", nil
+	}
+	if set.Tool == insights.ToolNone {
+		return nil, "the migrations were not rehearsed: no migration tool was recognised in " +
+			"this repository", nil
+	}
+
+	svc, ok := migratingService(o.opts.Manifest)
+	if !ok {
+		return nil, "the migrations were not rehearsed: " + string(set.Tool) + " migrations have " +
+			"to be run by their own tool inside the service's image, and no service in the " +
+			"manifest declares a migrate command", nil
+	}
+
+	ig, err := readIgnore(o.opts.Root)
+	if err != nil {
+		return nil, "", err
+	}
+	// The environment is already up, so this is a cache lookup rather than a
+	// build: the image reference is derived from the build context's digest,
+	// so the same tree produces the same tag.
+	image, _, err := o.buildOne(ctx, s, svc, ig)
+	if err != nil {
+		return nil, "", err
+	}
+
+	applier := &insights.ContainerApplier{
+		Image:    image,
+		Command:  svc.Migrate,
+		URLVar:   databaseURLVar(o.opts.Manifest),
+		Env:      serviceEnv(svc),
+		EnvID:    o.envID,
+		Progress: o.progress,
+	}
+	// A provider whose branches are local containers has to put this one on a
+	// network with the migration, because its connection string points at the
+	// host's loopback and that is the container itself from inside.
+	if attachable, isLocal := s.dbProv.(insights.Attachable); isLocal {
+		applier.Database = attachable
+		applier.DatabaseRef = branch.ProviderRef
+	}
+	return applier, "", nil
+}
+
+// migratingService is the service whose migrate command builds the schema.
+//
+// The first one, because a manifest with two migrating services is a project
+// with two databases and this rehearsal is about one branch. Reporting which
+// was chosen matters more than choosing cleverly, and the applier's name and
+// image are both in the report.
+func migratingService(m *schema.Manifest) (schema.Service, bool) {
+	for _, svc := range m.Services {
+		if svc.Migrate != "" {
+			return svc, true
+		}
+	}
+	return schema.Service{}, false
+}
+
+// databaseURLVar is the variable the application reads its connection string
+// from, which the manifest names because not every framework reads
+// DATABASE_URL.
+func databaseURLVar(m *schema.Manifest) string {
+	if m.Database != nil && m.Database.URLEnv != "" {
+		return m.Database.URLEnv
+	}
+	return ""
 }
 
 // environmentGolden is the golden version the environment's own database came

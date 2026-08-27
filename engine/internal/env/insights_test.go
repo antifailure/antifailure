@@ -156,3 +156,110 @@ func TestRunInsightsRehearsesOnItsOwnBranchAndTakesItAway(t *testing.T) {
 			"the rehearsal branch outlived the rehearsal")
 	}
 }
+
+// applierFor is the decision that makes the container applier reachable at
+// all, so it is tested on its own rather than only through a run that needs a
+// daemon. A prebuilt image is returned by buildOne before it touches the
+// session, which is what lets these stay offline, and an empty session stands
+// in for a provider whose branches are not local containers: a nil interface
+// fails the Attachable assertion, which is the hosted provider's path.
+
+func repoWith(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for name, body := range files {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o755))
+		require.NoError(t, os.WriteFile(full, []byte(body), 0o644))
+	}
+	return root
+}
+
+func orchestratorFor(t *testing.T, root string, m *schema.Manifest) *Orchestrator {
+	t.Helper()
+	o, err := New(Options{
+		Root: root, Branch: "main", Clock: clock.New(),
+		Manifest: m, Secrets: secrets.NewChain(),
+	})
+	require.NoError(t, err)
+	return o
+}
+
+func migratingManifest(image, command string) *schema.Manifest {
+	return &schema.Manifest{
+		Name: "app",
+		Services: []schema.Service{{
+			Name:    "web",
+			Migrate: command,
+			Build:   &schema.Build{Strategy: schema.BuildImage, Image: image},
+		}},
+		Database: &schema.Database{Provider: schema.DBDocker, URLEnv: "MY_DB_URL"},
+	}
+}
+
+func TestApplierFor_ASQLDirectoryIsReplayedFromHere(t *testing.T) {
+	root := repoWith(t, map[string]string{"migrations/001_a.sql": "SELECT 1;"})
+	o := orchestratorFor(t, root, migratingManifest("nginx:alpine", "true"))
+
+	set := insights.Discover(os.DirFS(root))
+	applier, why, err := o.applierFor(t.Context(), &session{}, set, provider.Branch{})
+	require.NoError(t, err)
+	require.Empty(t, why)
+	require.Equal(t, "sql", applier.Name())
+}
+
+func TestApplierFor_RailsIsRunByItsOwnToolInTheServicesImage(t *testing.T) {
+	// The whole reason the container applier exists. Only ActiveRecord knows
+	// what a Rails migration becomes, and the answer depends on the gems in
+	// the image rather than on what is installed on this machine.
+	root := repoWith(t, map[string]string{
+		"Gemfile":                  "gem 'rails'",
+		"db/migrate/001_create.rb": "class Create < ActiveRecord::Migration; end",
+	})
+	o := orchestratorFor(t, root, migratingManifest("myapp:built", "bin/rails db:migrate"))
+
+	set := insights.Discover(os.DirFS(root))
+	require.Equal(t, insights.ToolRails, set.Tool)
+
+	applier, why, err := o.applierFor(t.Context(), &session{}, set, provider.Branch{})
+	require.NoError(t, err)
+	require.Empty(t, why)
+	require.Equal(t, "container", applier.Name())
+
+	c, ok := applier.(*insights.ContainerApplier)
+	require.True(t, ok)
+	require.Equal(t, "myapp:built", c.Image)
+	require.Equal(t, "bin/rails db:migrate", c.Command)
+	// The manifest names the variable because not every framework reads
+	// DATABASE_URL, and handing Rails the wrong variable name would make it
+	// migrate whatever its own config points at, which is nothing here.
+	require.Equal(t, "MY_DB_URL", c.URLVar)
+}
+
+func TestApplierFor_SaysWhyWhenNoServiceDeclaresAMigrateCommand(t *testing.T) {
+	// The failure this guards against is a report that reads like a rehearsal
+	// that found nothing.
+	root := repoWith(t, map[string]string{"manage.py": "import django"})
+	o := orchestratorFor(t, root, &schema.Manifest{
+		Name:     "app",
+		Services: []schema.Service{{Name: "web"}},
+	})
+
+	applier, why, err := o.applierFor(t.Context(), &session{}, insights.Discover(os.DirFS(root)),
+		provider.Branch{})
+	require.NoError(t, err)
+	require.Nil(t, applier)
+	require.Contains(t, why, "django")
+	require.Contains(t, why, "no service in the manifest declares a migrate command")
+}
+
+func TestApplierFor_SaysWhyWhenNoToolIsRecognised(t *testing.T) {
+	root := repoWith(t, map[string]string{"README.md": "hello"})
+	o := orchestratorFor(t, root, migratingManifest("nginx:alpine", "true"))
+
+	applier, why, err := o.applierFor(t.Context(), &session{}, insights.Discover(os.DirFS(root)),
+		provider.Branch{})
+	require.NoError(t, err)
+	require.Nil(t, applier)
+	require.Contains(t, why, "no migration tool was recognised")
+}

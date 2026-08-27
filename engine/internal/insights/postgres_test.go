@@ -774,3 +774,72 @@ func TestRun_SaysTheCallersReasonForNotRehearsing(t *testing.T) {
 	require.Contains(t, full.Missing, reason)
 	require.Contains(t, full.Explain(), reason)
 }
+
+func TestRehearse_TimesEachStatementFromTheServerWhenTheApplierCannot(t *testing.T) {
+	db, done := requireDatabase(t, "insightsddlcapture")
+	defer done()
+
+	// The case every tool whose migrations are not SQL falls into: something
+	// else ran the DDL and we did not see it go past. The server did, and the
+	// event trigger pair is how a Rails or Django migration still gets a
+	// duration per statement.
+	r, err := insights.Rehearse(context.Background(), db.conn, db.watch, db.url,
+		insights.MigrationSet{Tool: insights.ToolRails},
+		&opaqueApplier{url: db.url, sql: []string{
+			"ALTER TABLE orders ADD COLUMN currency text",
+			"CREATE INDEX orders_status_idx ON orders (status)",
+		}},
+		insights.LargeTableRows)
+	require.NoError(t, err)
+	require.False(t, r.Failed, r.Error)
+
+	require.Len(t, r.Statements, 2,
+		"the applier reported nothing, so every statement here came from the server")
+	require.Contains(t, r.Statements[0].SQL, "ADD COLUMN")
+	require.Contains(t, r.Statements[1].SQL, "CREATE INDEX")
+	require.Greater(t, r.Statements[1].MS, 0.0)
+	// Building an index over 50,000 rows is slower than adding a nullable
+	// column, and the ordering is the whole reason to report each separately.
+	require.Greater(t, r.Statements[1].MS, r.Statements[0].MS)
+}
+
+func TestRehearse_ReportsARewriteEvenWhenTheApplierSawNothing(t *testing.T) {
+	db, done := requireDatabase(t, "insightsddlrewrite")
+	defer done()
+
+	r, err := insights.Rehearse(context.Background(), db.conn, db.watch, db.url,
+		insights.MigrationSet{Tool: insights.ToolDjango},
+		&opaqueApplier{url: db.url, sql: []string{
+			"ALTER TABLE orders ALTER COLUMN total_cents TYPE bigint",
+		}},
+		insights.LargeTableRows)
+	require.NoError(t, err)
+	require.False(t, r.Failed, r.Error)
+	require.Contains(t, r.Rewrote(), "orders",
+		"a Django migration rewriting a table is exactly what this has to catch")
+}
+
+// opaqueApplier runs SQL and reports nothing about it, which is what an
+// applier that shells out to somebody else's migration tool can honestly say.
+type opaqueApplier struct {
+	url secrets.Value
+	sql []string
+}
+
+func (*opaqueApplier) Name() string { return "opaque" }
+
+func (a *opaqueApplier) Apply(
+	ctx context.Context, _ secrets.Value, _ []insights.Migration,
+) ([]insights.StatementTiming, error) {
+	conn, err := pgx.Connect(ctx, a.url.Reveal())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	for _, s := range a.sql {
+		if _, err := conn.Exec(ctx, s); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}

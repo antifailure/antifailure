@@ -197,18 +197,48 @@ the SQL it finds:
 | Drizzle | the directory beside `meta/_journal.json` | the file stem |
 | Flyway | `db/migration`, `sql`, or `src/main/resources/db/migration` | `flyway_schema_history.version` |
 | A plain SQL directory | `migrations`, `db/migrations`, `sql/migrations` | the file stem |
+| Rails, Django, Alembic, Knex | not read: the tool runs in the service's image | the tool's own history table |
 
 Flyway is ordered by version rather than by filename, because it compares
 versions component by component and numerically: `V1.1` comes after `V1`, while
 the filenames sort the other way round.
 
 Rails, Django, Alembic and Knex write their migrations as Ruby, Python or
-JavaScript, and only those tools know what SQL they become. They are recognised
-and named, and the report says plainly that their migrations were not replayed
-rather than reporting an empty set that reads like a repository with no
-migrations at all. Rehearsing them means running the project's own migrate
-command inside the service's image, never on the workstation, and that is not
-built yet.
+JavaScript, and only those tools know what SQL they become. So they are not
+replayed: the project's own migrate command runs inside the service's own
+image, against the rehearsal branch.
+
+It has to be the image rather than the workstation. What a Rails migration
+becomes depends on the gems in the image, and what a Django one becomes depends
+on its installed packages. Running the tool here would rehearse something the
+deploy does not do, which is worse than not rehearsing, because it produces a
+result somebody would believe.
+
+The migrate command comes from the service that declares one, and the
+connection string is handed to it as `database.url_env`, because not every
+framework reads `DATABASE_URL`. If the tool fails, its own output is the
+finding: a migration tool explains itself far better than an exit code does.
+
+**That container has no route off the machine.** It runs on a network created
+`internal`, holding the branch's database and nothing else. This container has
+a connection to a copy of production's data, and the product's premise is that
+an environment has nowhere to send a packet, so a rehearsal quietly running
+with the internet attached would be the one hole in it. There is a test that
+tries to resolve a public name and open a socket from inside, and requires both
+to fail while the database still answers.
+
+Since the tool is opaque, per-statement timing comes from the server instead.
+Two event triggers around every DDL command record what was sent and how long
+it took, so a Rails migration is still reported statement by statement:
+
+```
+Migrations rehearsed: 3 pending, 1m12s in total.
+      71.4s  ALTER TABLE orders ALTER COLUMN total_cents TYPE bigint
+             rewrote orders, which copies every row under a lock nothing can read through
+```
+
+Where the event triggers cannot be installed, because they need a superuser and
+a hosted provider often will not give one, the report says so.
 
 ## Turning things off
 
