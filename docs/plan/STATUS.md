@@ -180,7 +180,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 3.2 Docker provider | proven | 21 behaviors pass against a real daemon, 2 skip with named reasons, zero resources left behind across repeated runs. |
 | 3.3 Masking engine | partial | The 22 transforms and the key hierarchy are proven at 95 percent. The rules model, classifier, SQL compiler, and resumable executor are next. |
 | 3.4 Verification scanner | partial | The 9 detectors are proven at 94 percent. The streaming table scan and the signed attestation are next. |
-| 3.5 Subsetting | proven | A closure over the real foreign keys, executed against a real Postgres 17 on a schema with a composite key, a nullable self reference, a required self reference, a two table cycle, an identity column, a generated column, a table with no primary key and a relationship the schema does not declare. Every key resolves afterwards, asserted by querying the loaded database. Before this the package had no callers at all. |
+| 3.5 Subsetting | proven | A closure over the real foreign keys, executed against a real Postgres in CI and on a workstation, on a schema with a composite key, a nullable self reference, a required self reference, a two table cycle, an identity column, a generated column, a table with no primary key and a relationship the schema does not declare. Every key resolves afterwards, asserted by querying the loaded database rather than the planner. Masking is run over the result and the link groups still join. Before this the package had no callers at all. |
 | 3.6 Authentication adapters | planned | |
 | 3.7 Neon | proven | The full database conformance suite, all 23 behaviours, against the real Neon API. Found three bugs a fake would not have: `pooled` omitted means pooled, so `ConnDirect` was returning a pooled connection; a 200 with an empty body broke destroy-twice; and Neon's own branch ceiling arrived as an unexplained 422. |
 | 3.8, 3.9 Supabase, DBLab | planned | Blocked on Q5: no accounts provisioned. |
@@ -211,8 +211,8 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/verify` detectors | proven | 9 detectors |
 | `internal/verify` scan | proven | catches unmasked data, not only passes masked data |
 | `internal/verify` attestation | proven | Ed25519; rejects a deleted finding |
-| `internal/subset` | proven | closure, execution and an integrity check, against a real Postgres. This row said `proven` when the package had zero importers; it is true now. |
-| `internal/golden` | proven | cron with a zone at both daylight saving transitions; retention, including a property test that a sweep always leaves something branchable; three storage backends round tripped against a real filesystem, a real MinIO and a real Azurite |
+| `internal/subset` | proven | closure, execution and an integrity check, against a real Postgres. This row said `proven` when the package had zero importers; it is true now. The suites ask for Postgres 16 rather than 17 deliberately: pg_dump refuses to read a server newer than itself and Debian, Ubuntu and the runners still ship a 16 client. |
+| `internal/golden` | proven | cron with a zone at both daylight saving transitions; retention, including a property test that a sweep always leaves something branchable; three storage backends round tripped against a real filesystem, a real MinIO and a real Azurite. The two remote backends need those servers, so in CI they skip and the rows rest on the local runs. |
 | Neon provider | proven | against the real service |
 | Supabase, DBLab providers | planned | blocked on accounts |
 
@@ -372,6 +372,11 @@ code that has not been written:
 
 - **8.10, 14.1, 14.3, 14.10** are unblocked on quota and blocked on a decision: an AKS cluster costs money for as long as it exists. There is also no Kubernetes runtime yet. A manifest asking for one is now refused with a message rather than quietly given containers on the local machine.
 - **3.8 and 3.9** need Supabase and DBLab accounts. 3.7 no longer does.
+- **pg_dump refuses to read a server newer than itself**, so a golden refresh
+  from a Postgres 17 source needs a 17 client. `pgcopy` now looks for one
+  across PATH and the places distributions install the versions that are not on
+  it, and names the package when there is none. It is worth an `af doctor`
+  check as well, which does not exist yet.
 - **Subsetting needs a provider that fills an empty database**, which today is
   the Docker one. Neon builds a candidate by branching production, so it holds
   everything the moment it exists and there is nowhere to load a slice into. A
