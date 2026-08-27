@@ -184,13 +184,22 @@ func (f *fakeAPI) serve() *httptest.Server {
 
 func (f *fakeAPI) client(srv *httptest.Server) *Client {
 	return &Client{
-		BaseURL:        srv.URL,
-		Key:            secrets.New("sbp_test"),
-		ProjectRef:     "proj",
-		Sleep:          func(context.Context, time.Duration) error { return nil },
-		PollInterval:   time.Millisecond,
-		PollTimeout:    50 * time.Millisecond,
-		VisibleTimeout: 50 * time.Millisecond,
+		BaseURL:      srv.URL,
+		Key:          secrets.New("sbp_test"),
+		ProjectRef:   "proj",
+		Sleep:        func(context.Context, time.Duration) error { return nil },
+		PollInterval: time.Millisecond,
+
+		// These budgets are generous on purpose. Sleeping is stubbed out, so
+		// the only time a poll spends here is the real HTTP round trip through
+		// httptest, and a test that proves the client KEEPS POLLING has to make
+		// several of them. A 50ms budget made those tests a stopwatch race
+		// against the machine rather than a check on the client, and it lost
+		// under -race on a loaded one: a correct implementation reported that a
+		// published golden never appeared. The test that wants a wait to GIVE
+		// UP shortens the budget itself, which is the thing that test is about.
+		PollTimeout:    10 * time.Second,
+		VisibleTimeout: 10 * time.Second,
 	}
 }
 
@@ -277,6 +286,52 @@ func TestAReadIsRetried(t *testing.T) {
 	_, err := c.ListBranches(context.Background())
 	require.Error(t, err)
 	require.Equal(t, int32(3), f.hits.Load())
+}
+
+func TestARejectedTokenSaysWhichTokenAndWhereToFixIt(t *testing.T) {
+	// The commonest way a first run fails, and until this was wired the answer
+	// was "supabase: 401: Unauthorized" from whichever request happened to go
+	// first, which names neither the credential nor anywhere to change it.
+	f := newFakeAPI(t)
+	f.statuses["GET /projects/proj/branches"] = http.StatusUnauthorized
+	f.bodies["GET /projects/proj/branches"] = `{"message":"Unauthorized"}`
+	srv := f.serve()
+	c := f.client(srv)
+	c.Retries = 3
+
+	_, err := c.ListBranches(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "SUPABASE_ACCESS_TOKEN")
+	require.Contains(t, err.Error(), "account/tokens")
+
+	// A rejected token is not a transport failure, and asking again with the
+	// same token cannot answer differently. Retrying it three times turns an
+	// instant, clear failure into a slow one.
+	require.Equal(t, int32(1), f.hits.Load())
+
+	// The status stays askable. NotFound, Conflict and Unauthorized all read
+	// through errors.As, so a wrapper that swallowed the APIError would trade
+	// a better message for a worse error.
+	require.True(t, Unauthorized(err), "the wrapped error no longer reads as unauthorized: %v", err)
+
+	// And nothing about the token itself appears in the message. It is the
+	// error most likely to be pasted into an issue.
+	require.NotContains(t, err.Error(), "sbp_test")
+}
+
+func TestARefusalThatIsNotAboutTheTokenDoesNotBlameTheToken(t *testing.T) {
+	// A token that is valid and cannot see the project answers 404 on the real
+	// API, not 403, so nothing here should attach "rotate your token" to a
+	// refusal that would send somebody to issue a new one for no reason.
+	f := newFakeAPI(t)
+	f.statuses["GET /projects/proj/branches"] = http.StatusForbidden
+	f.bodies["GET /projects/proj/branches"] = `{"message":"Forbidden"}`
+	srv := f.serve()
+
+	_, err := f.client(srv).ListBranches(context.Background())
+	require.Error(t, err)
+	require.False(t, Unauthorized(err))
+	require.NotContains(t, err.Error(), "SUPABASE_ACCESS_TOKEN")
 }
 
 func TestABranchThatWillNeverComeUpFailsRatherThanPolling(t *testing.T) {
@@ -391,7 +446,14 @@ func TestABranchThatIsTrulyGoneStillFails(t *testing.T) {
 	f.statuses["GET /branches/br1"] = http.StatusNotFound
 	f.bodies["GET /branches/br1"] = `{"message":"Not Found"}`
 	srv := f.serve()
-	_, err := f.client(srv).WaitReady(context.Background(), "br1")
+
+	// The grace has to END, so this is the one test that wants a short one.
+	// It is a property of the client rather than of the machine, so shortening
+	// it here cannot make the test flaky the way a shared short budget did.
+	c := f.client(srv)
+	c.VisibleTimeout = 50 * time.Millisecond
+
+	_, err := c.WaitReady(context.Background(), "br1")
 	require.Error(t, err)
 	require.True(t, NotFound(err), "a branch that is gone must fail as not found, got %v", err)
 }
