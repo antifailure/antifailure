@@ -80,6 +80,7 @@ gate: _reports
     run "lint"                           just lint
     run "the gates themselves"           just test-tools
     run "engine"                         just test-engine
+    run "this platform's keyring"        just keyring
     run "control plane"                  just test-web
     run "runner"                         just test-runner
     run "edition boundary"               just edition
@@ -444,6 +445,20 @@ generate:
     cd engine && go test ./internal/events -update-schema
     cd engine && go test ./internal/masking -update-transforms
     cd engine && go test ./internal/hud -update-frames
+
+# This machine's own credential store, against the real thing.
+#
+# The same command the keyring workflow runs, which is what lets `just gate` and
+# CI agree about it. What it actually exercises differs per platform and that is
+# the point: macOS runs the keychain tests here, Linux runs the Secret Service
+# ones, and Windows runs the Credential Manager ones. No single machine can run
+# all three, which is why that workflow has a job per platform, and why running
+# the local one here is the most a developer's gate can honestly do.
+#
+# A machine with no keyring daemon skips rather than fails. That is correct: the
+# chain's whole design is that an unavailable source is named and stepped over.
+keyring:
+    cd engine && go test ./internal/secrets/
 
 # The community build does not contain or need the enterprise edition.
 edition:
