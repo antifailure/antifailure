@@ -19,7 +19,7 @@ func TestCompareTo_FindsAQueryThisBranchRunsAndTheBaselineDidNot(t *testing.T) {
 		insights.Query{Text: "SELECT * FROM audit_log", Calls: 1, MeanMs: 80},
 	).CompareTo(report(
 		insights.Query{Text: "SELECT * FROM users WHERE id = $1", Calls: 4, MeanMs: 1},
-	), 0, 0)
+	), insights.Thresholds{})
 
 	require.Len(t, diff.NewQueries, 1)
 	require.Contains(t, diff.NewQueries[0].Text, "audit_log")
@@ -34,7 +34,7 @@ func TestCompareTo_FindsTheNPlusOne(t *testing.T) {
 		insights.Query{Text: "SELECT * FROM items WHERE order_id = $1", Calls: 412, MeanMs: 2},
 	).CompareTo(report(
 		insights.Query{Text: "SELECT * FROM items WHERE order_id = $1", Calls: 4, MeanMs: 2},
-	), 0, 0)
+	), insights.Thresholds{})
 
 	require.Len(t, diff.Busier, 1)
 	require.InDelta(t, 103, diff.Busier[0].Factor, 1)
@@ -50,7 +50,7 @@ func TestCompareTo_FindsAQueryThatGotSlower(t *testing.T) {
 		insights.Query{Text: "SELECT * FROM orders WHERE email = $1", Calls: 10, MeanMs: 240},
 	).CompareTo(report(
 		insights.Query{Text: "SELECT * FROM orders WHERE email = $1", Calls: 10, MeanMs: 3},
-	), 0, 0)
+	), insights.Thresholds{})
 
 	require.Len(t, diff.Slower, 1)
 	require.InDelta(t, 80, diff.Slower[0].Factor, 1)
@@ -66,7 +66,7 @@ func TestCompareTo_IgnoresSmallChanges(t *testing.T) {
 		insights.Query{Text: "SELECT 1", Calls: 5, MeanMs: 1.1},
 	).CompareTo(report(
 		insights.Query{Text: "SELECT 1", Calls: 4, MeanMs: 1.0},
-	), 0, 0)
+	), insights.Thresholds{})
 	require.True(t, diff.Empty())
 }
 
@@ -79,7 +79,7 @@ func TestCompareTo_WorstFirst(t *testing.T) {
 	).CompareTo(report(
 		insights.Query{Text: "a", Calls: 10, MeanMs: 1},
 		insights.Query{Text: "b", Calls: 4, MeanMs: 1},
-	), 0, 0)
+	), insights.Thresholds{})
 
 	require.Len(t, diff.Busier, 2)
 	require.Equal(t, "b", diff.Busier[0].Text)

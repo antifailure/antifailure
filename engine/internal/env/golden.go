@@ -18,7 +18,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
-	"github.com/antifailure/antifailure/engine/internal/insights"
 	"github.com/antifailure/antifailure/engine/internal/masking"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/verify"
@@ -561,14 +560,4 @@ func (o *Orchestrator) VerifyGolden(ctx context.Context, version string) (verify
 	return verify.Scan(ctx, conn, verify.Options{
 		Now: func() time.Time { return o.opts.Clock.Now() },
 	})
-}
-
-// Insights reads what the database noticed while the environment ran.
-func (o *Orchestrator) Insights(ctx context.Context, limit int) (insights.Report, error) {
-	conn, closeConn, err := o.connectBranch(ctx)
-	if err != nil {
-		return insights.Report{}, err
-	}
-	defer closeConn()
-	return insights.Collect(ctx, conn, limit)
 }

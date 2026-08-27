@@ -201,10 +201,9 @@ errors:
     retryable: false
     exit_code: 3
   - code: AF-DB-030
-    planned: true
     area: DB
     message: "Migrations failed on the branch: {detail}"
-    next_step: "Read the migration log at {location}, fix the migration, and push again."
+    next_step: "The rehearsal names the statement that failed and times the ones before it. Fix the migration and push again: a migration that fails on a branch with production's shape is one that would have failed in production."
     docs: concepts/insights
     retryable: false
     exit_code: 5

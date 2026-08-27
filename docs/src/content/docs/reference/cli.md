@@ -343,20 +343,24 @@ af init [flags]
 
 ### `af insights`
 
-Show what the database noticed while the environment ran.
+What Postgres can tell you about this change before anybody clicks anything.
 
-The bugs this looks for are the ones no test catches, because the test passes:
-the endpoint that now runs four hundred queries instead of two, the index that
-stopped being used, the sequential scan on a table that grew. Each is correct
-and slow, and correct and slow is what takes a site down under load rather than
-in review.
+A branch is a real database with production's shape in it, which makes some
+questions answerable without running the application at all.
+
+The migrations are rehearsed against a throwaway branch and every statement is
+timed, so a migration that takes four seconds on an empty test database and
+ninety on production row counts is visible before the deploy window rather than
+during it. The plans on that branch are compared before and after, which is how
+a sequential scan appearing where an index scan was gets found. And the queries
+this environment ran are compared against a report saved on the base branch.
 
   af insights --save baseline.json     on main
   af insights --baseline baseline.json on the branch
 
-It says what it could not measure. pg_stat_statements is an extension somebody
-has to install, and an insight that silently reports nothing because it is
-missing looks exactly like a clean bill of health.
+It says what it could not measure, and it names any check the manifest turned
+off. A report that silently omits a check reads exactly like a check that found
+nothing.
 
 ```
 af insights [flags]
@@ -367,6 +371,7 @@ af insights [flags]
 | `--baseline` | - | Compare against a report saved earlier. |
 | `--branch` | - | Branch to read, defaulting to the checked out one. |
 | `--limit` | `20` | How many queries to show. |
+| `--no-rehearsal` | `false` | Skip the migration rehearsal, which is the only check that makes a second branch. |
 | `--save` | - | Save this report to compare against later. |
 
 ### `af license`

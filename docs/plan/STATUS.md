@@ -185,7 +185,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 3.7 Neon | proven | The full database conformance suite, all 23 behaviours, against the real Neon API. Found three bugs a fake would not have: `pooled` omitted means pooled, so `ConnDirect` was returning a pooled connection; a 200 with an empty body broke destroy-twice; and Neon's own branch ceiling arrived as an unexplained 422. |
 | 3.8, 3.9 Supabase, DBLab | planned | Blocked on Q5: no accounts provisioned. |
 | 3.10 Golden lifecycle | planned | |
-| 3.11 Postgres Insights | planned | |
+| 3.11 Postgres Insights | partial | All three checks the manifest configures are real and proven against a real Postgres 17: migration rehearsal on a throwaway branch of the environment's OWN golden with every statement timed separately, rewrites reported by a `table_rewrite` event trigger rather than inferred from the SQL, `pg_locks` sampled every 250ms from a second connection, a six rule DDL lint with a positive and a negative fixture each, query regression matched on `queryid`, and a `GENERIC_PLAN` structural plan diff that finds a planted dropped index. `af insights` is proven end to end through the orchestrator: it rehearses on its own branch, leaves the environment's database untouched, and destroys the branch. Two limits, both stated in the report at run time rather than only here. Rails, Django, Alembic and Knex are recognised and reported as not replayable, because rehearsing them needs a runtime primitive that runs one command in a service's image and that does not exist yet. And the two query regression behaviours need `pg_stat_statements` preloaded, which the documented test Postgres does not do, so they are proven locally against a server started with `-c shared_preload_libraries=pg_stat_statements` and skip in CI until that flag is added. |
 
 ## Supporting packages, phase 3
 
@@ -253,7 +253,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `runner` browser | proven | Playwright, accessibility tree, three tests against a real browser |
 | `internal/env` test | proven | `af test` end to end |
 | Model driven planning | proven | Anthropic and OpenAI; refuses a control the page does not have; falls back when the model is unreachable |
-| Invariants and insights | planned | |
+| Invariants and insights | partial | Insights are proven, see 3.11. Invariants are still planned. |
 
 ## Phase 7. Load
 
