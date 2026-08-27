@@ -1,0 +1,74 @@
+{{- if eq .Values.maintenance.mode "cronjob" }}
+{{- include "cp.validate" . -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "cp.fullname" . }}-maintenance
+  labels: {{- include "cp.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.maintenance.schedule | quote }}
+  # A pass that is late must still run. Skipping it silently is how an
+  # installation arrives at the month with no partition for it.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: {{ .Values.maintenance.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.maintenance.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .Values.maintenance.activeDeadlineSeconds }}
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "cp.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: maintenance
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "cp.serviceAccountName" . }}
+          automountServiceAccountToken: false
+          {{- with .Values.image.pullSecrets }}
+          imagePullSecrets: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext: {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: maintenance
+              image: {{ include "cp.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext: {{- toYaml .Values.securityContext | nindent 16 }}
+              command: ["node", "maintenance.mjs"]
+              env:
+                - name: AF_MAINTENANCE_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "cp.databaseSecretName" . }}
+                      key: {{ .Values.database.secretKeys.migrationUrl }}
+                {{- if .Values.config.eventRetentionMonths }}
+                - name: AF_EVENT_RETENTION_MONTHS
+                  value: {{ .Values.config.eventRetentionMonths | quote }}
+                {{- end }}
+                {{- if .Values.config.eventArchiveDir }}
+                - name: AF_EVENT_ARCHIVE_DIR
+                  value: {{ .Values.config.eventArchiveDir | quote }}
+                {{- end }}
+              resources: {{- toYaml .Values.maintenance.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                {{- if .Values.config.eventArchiveDir }}
+                - name: archive
+                  mountPath: {{ .Values.config.eventArchiveDir }}
+                {{- end }}
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            {{- if .Values.config.eventArchiveDir }}
+            - name: archive
+              emptyDir: {}
+            {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations: {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

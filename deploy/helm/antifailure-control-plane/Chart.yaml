@@ -1,0 +1,23 @@
+apiVersion: v2
+name: antifailure-control-plane
+description: The Antifailure control plane. Environments that outlive a CI job, quotas, and history.
+type: application
+
+# The chart version moves when the chart changes. appVersion follows the
+# application image and is what `image.tag` defaults to, so a chart installed
+# without an explicit tag runs the application this chart was written against
+# rather than whatever `latest` happens to be that day.
+version: 0.1.0
+appVersion: "v0.1.1"
+
+home: https://antifailure.dev
+sources:
+  - https://github.com/antifailure/antifailure
+keywords:
+  - antifailure
+  - preview-environments
+maintainers:
+  - name: Antifailure
+    url: https://github.com/antifailure/antifailure
+annotations:
+  artifacthub.io/license: MIT
