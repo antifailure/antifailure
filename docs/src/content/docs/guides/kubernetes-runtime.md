@@ -113,6 +113,22 @@ controller in. Without a domain, no Ingress is created and the runtime reports
 that it has no ingress, so `af up` prints no URL rather than one that resolves
 to nothing.
 
+## Readiness, and one real difference
+
+A service with no `health_path` is ready when its port accepts a connection,
+which is what the local runtime does and is as much as can be asked without
+inventing a protocol the application does not speak.
+
+A service that declares one is polled, and here the two runtimes differ.
+Locally, any HTTP status counts as ready, including a 500, because readiness
+there means the process is listening and routing. Kubernetes decides readiness
+itself and treats 4xx and 5xx as not ready. So a service whose declared health
+path answers 500 comes up locally and does not come up here.
+
+Declaring a health path is a statement that the path reports health, so this is
+the more defensible of the two behaviours, but it is a real difference and it
+belongs in front of you rather than in a support conversation.
+
 ## What this runtime does not do yet
 
 Stated here rather than discovered later.

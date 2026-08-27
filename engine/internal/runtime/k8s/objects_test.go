@@ -230,3 +230,44 @@ func envValue(t *testing.T, env []corev1.EnvVar, name string) string {
 }
 
 func secretValue(s string) secrets.Value { return secrets.New(s) }
+
+func TestTheSidecarCanBindTheDNSPort(t *testing.T) {
+	r := &Runtime{prefix: DefaultNamespacePrefix, proxyRef: "proxy:test"}
+	_, deployment, _, err := r.proxyObjects("e1", "af-env-e1", "10.42.0.0/16", "10.43.0.10:53",
+		provider.EnvSpec{EnvID: "e1"})
+	require.NoError(t, err)
+
+	sc := deployment.Spec.Template.Spec.Containers[0].SecurityContext
+	require.NotNil(t, sc)
+	require.Contains(t, sc.Capabilities.Drop, corev1.Capability("ALL"))
+	// The sidecar answers DNS on port 53 and does not run as root. Without
+	// this one capability the container starts, fails to listen, and every
+	// name lookup in the environment goes unanswered, which reads as an
+	// environment whose services cannot find anything rather than as a
+	// permission it was not given.
+	require.Contains(t, sc.Capabilities.Add, corev1.Capability("NET_BIND_SERVICE"),
+		"a process that is not root cannot bind a port below 1024 without it")
+	require.True(t, *sc.RunAsNonRoot)
+}
+
+func TestReadinessMirrorsTheLocalRuntime(t *testing.T) {
+	// No health path: ready when the port accepts a connection, because
+	// asking for more would mean inventing a protocol the application does
+	// not speak. This is what the local runtime does.
+	probe := readinessProbe(provider.ServiceSpec{Name: "web", Port: 8080})
+	require.NotNil(t, probe.TCPSocket)
+	require.Nil(t, probe.HTTPGet)
+
+	probe = readinessProbe(provider.ServiceSpec{Name: "web", Port: 8080, HealthPath: "/healthz"})
+	require.NotNil(t, probe.HTTPGet)
+	require.Equal(t, "/healthz", probe.HTTPGet.Path)
+}
+
+func TestAServiceWithNoPortIsNotProbed(t *testing.T) {
+	r := &Runtime{prefix: DefaultNamespacePrefix}
+	spec := provider.EnvSpec{EnvID: "e1", Services: []provider.ServiceSpec{{Name: "worker", Kind: "worker"}}}
+	d := r.deploymentFor(spec, spec.Services[0], "af-env-e1", "10.43.0.9")
+	// A worker listens on nothing. A probe against a port it does not have
+	// would restart it forever.
+	require.Nil(t, d.Spec.Template.Spec.Containers[0].ReadinessProbe)
+}

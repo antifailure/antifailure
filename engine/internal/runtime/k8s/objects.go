@@ -354,11 +354,25 @@ func (r *Runtime) proxyObjects(
 						}},
 						SecurityContext: &corev1.SecurityContext{
 							AllowPrivilegeEscalation: falseRef(),
-							ReadOnlyRootFilesystem:   trueRef(),
-							RunAsNonRoot:             trueRef(),
-							RunAsUser:                int64Ref(65532),
+							// The sidecar reads its configuration and writes
+							// its decisions to stdout. It opens no file, so
+							// there is nothing for a writable root to be for.
+							ReadOnlyRootFilesystem: trueRef(),
+							RunAsNonRoot:           trueRef(),
+							RunAsUser:              int64Ref(65532),
 							Capabilities: &corev1.Capabilities{
 								Drop: []corev1.Capability{"ALL"},
+								// Everything dropped except the one thing it
+								// cannot work without. The sidecar answers DNS
+								// on port 53, and a process that is not root
+								// cannot bind a port below 1024 without this.
+								// Without it the container starts, fails to
+								// listen, and every name lookup in the
+								// environment goes unanswered, which reads as
+								// an environment whose services cannot find
+								// anything rather than as a missing
+								// capability.
+								Add: []corev1.Capability{"NET_BIND_SERVICE"},
 							},
 						},
 					}},
@@ -485,6 +499,7 @@ func containerFor(spec provider.EnvSpec, s provider.ServiceSpec, migration bool)
 	}
 	if !migration && s.Port > 0 {
 		c.Ports = []corev1.ContainerPort{{ContainerPort: int32(s.Port), Protocol: corev1.ProtocolTCP}}
+		c.ReadinessProbe = readinessProbe(s)
 	}
 	if spec.CACertPEM != "" {
 		c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{
@@ -715,4 +730,40 @@ func (r *Runtime) clusterPodCIDR(ctx context.Context) (string, error) {
 				"cannot be told which of its addresses to answer on")
 	}
 	return covering, nil
+}
+
+// readinessProbe decides when a service is answering.
+//
+// The two cases mirror the local runtime's. With no health path declared, a
+// service is ready when its port accepts a connection, because asking for more
+// would mean inventing a protocol the application does not speak. With one
+// declared, it is polled.
+//
+// The difference from the local runtime is worth knowing, and it is documented
+// on the Kubernetes runtime page rather than hidden here. Locally, any HTTP
+// status counts as ready, including a 500, because readiness there means the
+// process is listening and routing. Kubernetes decides readiness itself and
+// treats 4xx and 5xx as not ready. So a service whose declared health path
+// answers 500 comes up locally and does not come up here. Declaring a health
+// path is a statement that the path reports health, so this is the more
+// defensible of the two, but it is a real difference between the runtimes and
+// pretending otherwise would be worse than saying it.
+func readinessProbe(s provider.ServiceSpec) *corev1.Probe {
+	probe := &corev1.Probe{
+		PeriodSeconds:    2,
+		FailureThreshold: 60,
+		TimeoutSeconds:   3,
+	}
+	if s.HealthPath == "" {
+		probe.ProbeHandler = corev1.ProbeHandler{
+			TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(int32(s.Port))},
+		}
+		return probe
+	}
+	probe.ProbeHandler = corev1.ProbeHandler{
+		HTTPGet: &corev1.HTTPGetAction{
+			Path: s.HealthPath, Port: intstr.FromInt32(int32(s.Port)),
+		},
+	}
+	return probe
 }
