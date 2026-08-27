@@ -99,7 +99,7 @@ AF-SEC-003 The value supplied for STRIPE_SECRET_KEY carries a live credential
 prefix, and STRIPE_SECRET_KEY is configured for sandbox use.
 ```
 
-See [sandbox credentials](/guides/sandbox/). Checked before anything starts.
+See [sandbox credentials](/docs/guides/sandbox/). Checked before anything starts.
 
 ## Values never reach a log
 
@@ -112,4 +112,4 @@ log.
 You will see this in error messages: `postgres://user:[redacted]@host/db`. That
 is working.
 
-Related: [sandbox credentials](/guides/sandbox/), [egress](/concepts/egress/).
+Related: [sandbox credentials](/docs/guides/sandbox/), [egress](/docs/concepts/egress/).

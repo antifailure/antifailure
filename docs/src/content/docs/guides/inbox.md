@@ -66,5 +66,5 @@ recorded and answered with a plausible success, and `af inbox get` shows the
 raw body. Less convenient than a parsed message and better than a flow that
 cannot finish.
 
-Related: [egress](/concepts/egress/), [personas](/guides/personas/),
-[workflows](/guides/workflows/).
+Related: [egress](/docs/concepts/egress/), [personas](/docs/guides/personas/),
+[workflows](/docs/guides/workflows/).

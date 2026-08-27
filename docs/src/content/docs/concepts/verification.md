@@ -98,4 +98,4 @@ SELECT version, rules_hash, created_at, attestation FROM _antifailure.golden;
 It is signed so that "this data was scanned" is a claim you can check rather
 than one you have to take on trust.
 
-Related: [masking](/concepts/masking/), [goldens](/concepts/goldens/).
+Related: [masking](/docs/concepts/masking/), [goldens](/docs/concepts/goldens/).

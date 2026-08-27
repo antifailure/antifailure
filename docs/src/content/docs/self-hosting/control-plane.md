@@ -44,7 +44,7 @@ docker run \
 ```
 
 Every variable it reads is in the [configuration
-reference](/reference/control-plane/), including retention and the schema
+reference](/docs/reference/control-plane/), including retention and the schema
 maintenance that keeps the events table partitioned.
 
 ## Two database roles, on purpose
@@ -105,4 +105,4 @@ role has `INSERT` and `SELECT` on it and nothing else, and `UPDATE`, `DELETE`
 and `TRUNCATE` are explicitly revoked. Entries are hash chained, so removing one
 from the middle leaves a break that anybody can detect.
 
-Related: [configuration](/reference/control-plane/), [GitHub](/guides/github/).
+Related: [configuration](/docs/reference/control-plane/), [GitHub](/docs/guides/github/).

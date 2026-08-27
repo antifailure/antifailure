@@ -288,3 +288,97 @@ func TestEveryDocsURLTheRealEnginePrintsResolves(t *testing.T) {
 		t.Errorf("the summary should say how many were checked, got %q", out.String())
 	}
 }
+
+// Internal documentation links.
+
+func writeDocsTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for name, body := range files {
+		full := filepath.Join(root, "docs", "src", "content", "docs", filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// The bug this found live: astro.config.mjs sets base "/docs" and Starlight does
+// not rewrite absolute links to include it, so /concepts/egress/ points outside
+// the site. 78 links were written that way and 404'd for real readers.
+func TestALinkWithoutTheDocsBaseIsReported(t *testing.T) {
+	root := writeDocsTree(t, map[string]string{
+		"index.md": "See [egress](/concepts/egress/).\n",
+	})
+	tracked := trackedSet("docs/src/content/docs/concepts/egress.md")
+
+	var out strings.Builder
+	if err := checkDocsLinks(root, tracked, &out); err == nil {
+		t.Fatal("a link missing the site base must fail; it 404s for a real reader")
+	}
+	if !strings.Contains(out.String(), "BASE") {
+		t.Errorf("the report should mark it, got %q", out.String())
+	}
+}
+
+func TestALinkWithTheBaseAndARealPagePasses(t *testing.T) {
+	root := writeDocsTree(t, map[string]string{
+		"index.md": "See [egress](/docs/concepts/egress/) and [masking](/docs/concepts/masking).\n",
+	})
+	tracked := trackedSet(
+		"docs/src/content/docs/concepts/egress.md",
+		"docs/src/content/docs/concepts/masking.md",
+	)
+
+	var out strings.Builder
+	if err := checkDocsLinks(root, tracked, &out); err != nil {
+		t.Fatalf("correct links should pass: %v\n%s", err, out.String())
+	}
+}
+
+// Both spellings the site accepts, with and without a trailing slash. An
+// earlier negative control of mine silently substituted nothing because it
+// assumed the trailing slash, which taught me about my control rather than
+// about the code.
+func TestATrailingSlashIsOptionalOnALink(t *testing.T) {
+	tracked := trackedSet("docs/src/content/docs/concepts/egress.md")
+	for _, link := range []string{"/docs/concepts/egress/", "/docs/concepts/egress"} {
+		root := writeDocsTree(t, map[string]string{"index.md": "[x](" + link + ")\n"})
+		var out strings.Builder
+		if err := checkDocsLinks(root, tracked, &out); err != nil {
+			t.Errorf("%q should pass: %v", link, err)
+		}
+	}
+}
+
+func TestALinkToAPageThatDoesNotExistIsReported(t *testing.T) {
+	root := writeDocsTree(t, map[string]string{
+		"index.md": "[gone](/docs/concepts/nonexistent/)\n",
+	})
+	var out strings.Builder
+	if err := checkDocsLinks(root, trackedSet(), &out); err == nil {
+		t.Fatal("a link to a missing page must fail")
+	}
+	if !strings.Contains(out.String(), "404") {
+		t.Errorf("the report should mark it, got %q", out.String())
+	}
+}
+
+// The one that matters: every cross reference on the real site resolves.
+func TestEveryInternalDocumentationLinkResolves(t *testing.T) {
+	root := filepath.Join("..", "..")
+	tracked, err := trackedPaths(root)
+	if err != nil {
+		t.Skipf("no git here: %v", err)
+	}
+	var out strings.Builder
+	if err := checkDocsLinks(root, tracked, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "internal documentation links") {
+		t.Errorf("the summary should say how many were checked, got %q", out.String())
+	}
+}

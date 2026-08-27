@@ -136,7 +136,94 @@ func run(root string, out io.Writer) error {
 	if err := decide(tracked, claims, notAPath, out); err != nil {
 		return err
 	}
-	return checkDocsURLs(root, tracked, out)
+	if err := checkDocsURLs(root, tracked, out); err != nil {
+		return err
+	}
+	return checkDocsLinks(root, tracked, out)
+}
+
+// docsBase is where the documentation site is served from. It is not cosmetic:
+// astro.config.mjs sets `base: "/docs"`, and Starlight does NOT rewrite absolute
+// links to include it. A link written as /concepts/egress/ therefore points at
+// antifailure.dev/concepts/egress/, which is outside the site and 404s.
+const docsBase = "/docs/"
+
+// internalLink matches a markdown link to an absolute path on our own site.
+var internalLink = regexp.MustCompile(`\]\((/[A-Za-z0-9._/-]*)\)`)
+
+// checkDocsLinks verifies that every internal link in the documentation points
+// at a page that exists, at the address the site actually serves.
+//
+// This found 78 broken links live. The site is served under /docs and 78 links
+// were written without it, so a reader following a cross reference in the
+// middle of a page got a 404. Confirmed against production rather than
+// reasoned about: /concepts/agents/ returned 404 and /docs/concepts/agents/
+// returned 200.
+//
+// The reason it went unnoticed is worth recording, because it is the same
+// shape as everything else in this file: BOTH conventions were in use, 68
+// links correct and 78 wrong, so any single page a person opened had a decent
+// chance of looking fine.
+func checkDocsLinks(root string, tracked map[string]bool, out io.Writer) error {
+	dir := filepath.Join(root, "docs", "src", "content", "docs")
+	if _, err := os.Stat(dir); err != nil {
+		report(out, "claimcheck: no documentation tree at %s, so no links checked\n", dir)
+		return nil
+	}
+
+	var wrongBase, dead []string
+	checked := 0
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || (filepath.Ext(path) != ".md" && filepath.Ext(path) != ".mdx") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		for i, line := range strings.Split(string(body), "\n") {
+			for _, m := range internalLink.FindAllStringSubmatch(line, -1) {
+				target := m[1]
+				checked++
+				where := fmt.Sprintf("%s:%d", filepath.ToSlash(rel), i+1)
+
+				if !strings.HasPrefix(target, docsBase) {
+					wrongBase = append(wrongBase, where+" -> "+target)
+					continue
+				}
+				page := strings.Trim(strings.TrimPrefix(target, docsBase), "/")
+				if page != "" && !docPageExists(tracked, page) {
+					dead = append(dead, where+" -> "+target)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	sort.Strings(wrongBase)
+	sort.Strings(dead)
+	for _, w := range wrongBase {
+		report(out, "BASE     %s  (the site is served under %s)\n", w, docsBase)
+	}
+	for _, d := range dead {
+		report(out, "404      %s\n", d)
+	}
+	report(out, "claimcheck: %d internal documentation links, %d with the wrong base, %d pointing nowhere\n",
+		checked, len(wrongBase), len(dead))
+
+	if n := len(wrongBase) + len(dead); n > 0 {
+		return fmt.Errorf("%d internal documentation links are broken. A reader following a cross "+
+			"reference in the middle of a page gets a 404", n)
+	}
+	return nil
 }
 
 // docsURL matches a documentation address written as a literal in Go source.

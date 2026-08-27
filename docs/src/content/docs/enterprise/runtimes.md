@@ -43,4 +43,4 @@ One runtime, the local one. `runtime.provider` in the manifest names `local`
 and `kubernetes`, and only `local` is built; asking for the other is refused
 with a message rather than quietly substituted.
 
-Related: [scheduling](/concepts/scheduling/), [licensing](/enterprise/licensing/).
+Related: [scheduling](/docs/concepts/scheduling/), [licensing](/docs/enterprise/licensing/).

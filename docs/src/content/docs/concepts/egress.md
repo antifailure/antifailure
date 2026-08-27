@@ -150,5 +150,5 @@ IPv6 is off by default, because an environment that can reach a host by an
 address the policy did not evaluate is an environment whose policy is advisory.
 Turning it on is one line, and the policy applies to both families equally.
 
-Related: [mocking](/guides/mocking/), [sandbox credentials](/guides/sandbox/),
-[the inbox](/guides/inbox/), [webhooks](/guides/webhooks/).
+Related: [mocking](/docs/guides/mocking/), [sandbox credentials](/docs/guides/sandbox/),
+[the inbox](/docs/guides/inbox/), [webhooks](/docs/guides/webhooks/).

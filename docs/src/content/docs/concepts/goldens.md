@@ -98,5 +98,5 @@ It is not a backup. It is masked, which means it is deliberately not the data
 production has. Do not restore one into production, and do not treat a
 successful branch as evidence that your backups work.
 
-Related: [masking](/concepts/masking/), [verification](/concepts/verification/),
-[providers](/providers/overview/).
+Related: [masking](/docs/concepts/masking/), [verification](/docs/concepts/verification/),
+[providers](/docs/providers/overview/).
