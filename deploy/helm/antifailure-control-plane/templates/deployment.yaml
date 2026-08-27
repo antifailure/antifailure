@@ -1,0 +1,146 @@
+{{- include "cp.validate" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cp.fullname" . }}
+  labels: {{- include "cp.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels: {{- include "cp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cp.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+      annotations:
+        # Rolls the pods when a credential changes. Without this a rotated
+        # secret sits unread until something unrelated causes a restart, which
+        # is the kind of gap that gets discovered during an incident.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}{{- toYaml . | nindent 8 }}{{- end }}
+    spec:
+      serviceAccountName: {{ include "cp.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: control-plane
+          image: {{ include "cp.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.port }}
+              protocol: TCP
+          env:
+            {{- include "cp.appEnv" . | nindent 12 }}
+            - name: AF_GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.githubSecretName" . }}
+                  key: {{ .Values.github.secretKeys.clientId }}
+            - name: AF_GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.githubSecretName" . }}
+                  key: {{ .Values.github.secretKeys.clientSecret }}
+            - name: AF_GITHUB_REDIRECT_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.githubSecretName" . }}
+                  key: {{ .Values.github.secretKeys.redirectUri }}
+            - name: AF_PORT
+              value: {{ .Values.config.port | quote }}
+            - name: AF_POOL_MAX
+              value: {{ .Values.config.poolMax | quote }}
+            {{- if .Values.config.appBaseUrl }}
+            - name: AF_APP_BASE_URL
+              value: {{ .Values.config.appBaseUrl | quote }}
+            {{- end }}
+            {{- if .Values.config.insecureCookies }}
+            - name: AF_INSECURE_COOKIES
+              value: "1"
+            {{- end }}
+            {{- if .Values.config.eventRetentionMonths }}
+            - name: AF_EVENT_RETENTION_MONTHS
+              value: {{ .Values.config.eventRetentionMonths | quote }}
+            {{- end }}
+            {{- if .Values.config.eventArchiveDir }}
+            - name: AF_EVENT_ARCHIVE_DIR
+              value: {{ .Values.config.eventArchiveDir | quote }}
+            {{- end }}
+            {{- if eq .Values.maintenance.mode "inProcess" }}
+            # Only in this mode. Partition maintenance is DDL, so this is the
+            # privileged role, and putting it here means every replica exposed
+            # to traffic can ALTER TABLE. The default mode is `cronjob`
+            # precisely so that this block does not render.
+            - name: AF_MAINTENANCE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.databaseSecretName" . }}
+                  key: {{ .Values.database.secretKeys.migrationUrl }}
+            {{- end }}
+            # AF_MIGRATE is deliberately absent. Migrations are the bootstrap
+            # Job's work, once, and not something every replica races to do on
+            # startup.
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          # A TCP check and not /health, on purpose. /health is a static
+          # literal in the application: it cannot tell a replica that has lost
+          # its database from one that is serving. Gating readiness on it would
+          # claim more than it knows, so readiness claims only that the port is
+          # accepting connections until the application grows a /ready that
+          # queries the pool.
+          readinessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            # readOnlyRootFilesystem is on, and Node writes to /tmp.
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.config.eventArchiveDir }}
+            - name: archive
+              mountPath: {{ .Values.config.eventArchiveDir }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.config.eventArchiveDir }}
+        - name: archive
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
