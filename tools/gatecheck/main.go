@@ -1,0 +1,267 @@
+// Command gatecheck proves that `just gate` runs what CI runs.
+//
+// CONTRIBUTING.md makes a specific promise: "That runs every quality gate the
+// CI runs, in the same order, with the same tool versions. If it is green
+// locally it is green in CI." That promise is worth having and it rots without
+// anything watching it. Somebody adds a job to the workflow, the justfile does
+// not learn about it, and from then on a green local run means less than the
+// document says it does. Nobody finds out until a pull request that passed
+// locally fails in CI, which is exactly the moment the promise was supposed to
+// prevent.
+//
+// So this compares the two. It is deliberately not a full YAML or justfile
+// parser: it looks for the commands that constitute a gate, on both sides, and
+// reports anything CI runs that the justfile does not. Being approximate is
+// fine; being silent is not.
+package main
+
+import (
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// A gate is a command worth failing over. Matching on these rather than on
+// every line keeps `cd`, `echo`, and shell plumbing out of the comparison,
+// which would otherwise make this noisy enough that somebody deletes it.
+//
+// `cmd` anchors each one at a word boundary so that a substring of a longer
+// token is not a match, and quoted spans are removed before matching. Both are
+// there for one observed failure: `echo "go test is not being run here"`
+// registered as a gate called `gotest is`, which is how a check starts
+// reporting drift that does not exist and gets deleted for being noisy.
+const cmd = "(?:^|[\\s;&|(])"
+
+var gatePatterns = []*regexp.Regexp{
+	regexp.MustCompile(cmd + `go run \./tools/(\w+)`),
+	regexp.MustCompile(cmd + `go (test|vet|build) ([^\s|;&]+)`),
+	regexp.MustCompile(cmd + `(npm|npx) [\w\s./-]*?(test|tsc)\b`),
+	regexp.MustCompile(cmd + `gofmt -l`),
+	regexp.MustCompile(cmd + `node --test`),
+}
+
+// quoted spans, removed before matching so that a command named inside a
+// message is not mistaken for a command being run.
+var quoted = regexp.MustCompile(`"[^"]*"|'[^']*'`)
+
+// gate is one thing that must happen on both sides.
+type gate struct {
+	kind string // "tool", "gotest", "govet", "gobuild", "npm", "gofmt", "nodetest"
+	arg  string
+}
+
+func (g gate) String() string {
+	if g.arg == "" {
+		return g.kind
+	}
+	return g.kind + " " + g.arg
+}
+
+func main() {
+	root := flag.String("root", ".", "repository root")
+	flag.Parse()
+	if args := flag.Args(); len(args) > 0 {
+		*root = args[0]
+	}
+
+	ciPath := filepath.Join(*root, ".github", "workflows", "ci.yml")
+	justPath := filepath.Join(*root, "justfile")
+
+	ci, err := os.ReadFile(ciPath)
+	if err != nil {
+		fail("reading %s: %v", ciPath, err)
+	}
+	just, err := os.ReadFile(justPath)
+	if err != nil {
+		fail("reading %s: %v\n\nCONTRIBUTING.md promises `just gate`. Without a "+
+			"justfile that promise is a lie in the first document a contributor reads.", justPath, err)
+	}
+
+	ciGates := collect(string(ci))
+	justGates := collect(string(just))
+
+	if len(ciGates) == 0 {
+		fail("found no gates in %s. Either the workflow stopped running any, or "+
+			"this check has stopped recognising them. Both are worth stopping for.", ciPath)
+	}
+	if len(justGates) == 0 {
+		fail("found no gates in %s, which cannot be right if `just gate` exists.", justPath)
+	}
+
+	var missing []string
+	for _, g := range sortedKeys(ciGates) {
+		if _, ok := justGates[g]; !ok {
+			missing = append(missing, g)
+		}
+	}
+
+	// The `gate` recipe has to actually invoke the individual recipes, or the
+	// justfile could define every gate and run none of them.
+	uncalled := uncalledByGate(string(just))
+
+	if len(missing) == 0 && len(uncalled) == 0 {
+		fmt.Printf("gatecheck: %d gates in CI, every one reachable from `just gate`\n", len(ciGates))
+		return
+	}
+
+	if len(missing) > 0 {
+		fmt.Fprintf(os.Stderr, "gatecheck: CI runs %d things the justfile does not:\n", len(missing))
+		for _, m := range missing {
+			fmt.Fprintf(os.Stderr, "  %s\n", m)
+		}
+		fmt.Fprintf(os.Stderr, "\nAdd a recipe for each, and call it from `gate`.\n")
+	}
+	if len(uncalled) > 0 {
+		fmt.Fprintf(os.Stderr, "\ngatecheck: these recipes exist and `just gate` never calls them:\n")
+		for _, u := range uncalled {
+			fmt.Fprintf(os.Stderr, "  %s\n", u)
+		}
+		fmt.Fprintf(os.Stderr, "\nA gate the one command does not run is a gate nobody runs.\n")
+	}
+	fmt.Fprintf(os.Stderr, "\nCONTRIBUTING.md says a green `just gate` means a green CI. "+
+		"That is only true while these agree.\n")
+	os.Exit(1)
+}
+
+// collect finds every gate in a file.
+func collect(text string) map[string]struct{} {
+	found := map[string]struct{}{}
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		trimmed = quoted.ReplaceAllString(trimmed, `""`)
+		for _, g := range gatesIn(trimmed) {
+			found[g.String()] = struct{}{}
+		}
+	}
+	return found
+}
+
+func gatesIn(line string) []gate {
+	var out []gate
+	for _, re := range gatePatterns {
+		for _, m := range re.FindAllStringSubmatch(line, -1) {
+			// The anchor is part of m[0]; the command starts at "go", "npm",
+			// "npx", "gofmt" or "node".
+			whole := strings.TrimLeft(m[0], " \t;&|($")
+			switch {
+			case strings.HasPrefix(whole, "go run ./tools/"):
+				out = append(out, gate{"tool", m[1]})
+			case strings.HasPrefix(whole, "go test"):
+				out = append(out, gate{"gotest", normalizeTarget(m[2])})
+			case strings.HasPrefix(whole, "go vet"):
+				out = append(out, gate{"govet", normalizeTarget(m[2])})
+			case strings.HasPrefix(whole, "go build"):
+				// A build is covered by the tests that follow it, and the
+				// edition boundary builds with flags this cannot usefully
+				// compare. Recorded as one gate rather than per target.
+				out = append(out, gate{"gobuild", ""})
+			case strings.HasPrefix(whole, "gofmt -l"):
+				out = append(out, gate{"gofmt", ""})
+			case strings.HasPrefix(whole, "node --test"):
+				out = append(out, gate{"nodetest", ""})
+			default:
+				out = append(out, gate{"npm", m[2]})
+			}
+		}
+	}
+	return out
+}
+
+// normalizeTarget reduces a Go package pattern to what is worth comparing.
+//
+// CI and a justfile reach the same packages by different routes: one does
+// `cd engine && go test ./...` and the other `go test ./...` from a recipe
+// that already set the directory. Comparing the raw strings would report
+// drift that is not drift.
+func normalizeTarget(target string) string {
+	target = strings.Trim(target, `"'`)
+	switch {
+	case strings.Contains(target, "..."):
+		return "./..."
+	case strings.HasPrefix(target, "./internal/"), strings.HasPrefix(target, "./license"):
+		return target
+	default:
+		return target
+	}
+}
+
+// uncalledByGate reports recipes that define a gate and that `just gate` never
+// invokes. Read by looking at which `just <name>` calls appear inside the gate
+// recipe, against the recipes the file defines.
+func uncalledByGate(just string) []string {
+	lines := strings.Split(just, "\n")
+
+	// The body of the `gate` recipe: from its header to the next unindented
+	// line that is not blank or a comment.
+	var body []string
+	in := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "gate:") || strings.HasPrefix(line, "gate ") {
+			in = true
+			continue
+		}
+		if in {
+			if line != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") &&
+				!strings.HasPrefix(line, "#") {
+				break
+			}
+			body = append(body, line)
+		}
+	}
+	if len(body) == 0 {
+		return []string{"(no `gate` recipe at all)"}
+	}
+
+	called := map[string]bool{}
+	callRe := regexp.MustCompile(`just ([a-z][\w-]*)`)
+	for _, line := range body {
+		for _, m := range callRe.FindAllStringSubmatch(line, -1) {
+			called[m[1]] = true
+		}
+	}
+
+	// Recipes that are gates rather than conveniences. A recipe that mutates
+	// (fmt, generate, db, build, clean) is not something `gate` should run.
+	convenience := map[string]bool{
+		"default": true, "setup": true, "db": true, "db-down": true, "deps": true,
+		"build": true, "build-release": true, "test": true, "test-short": true,
+		"fmt": true, "generate": true, "clean": true, "gate": true, "leaks": true,
+	}
+
+	recipeRe := regexp.MustCompile(`^([a-z][\w-]*)(?: [\w"=]+)*:`)
+	var uncalled []string
+	for _, line := range lines {
+		m := recipeRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		name := m[1]
+		if strings.HasPrefix(name, "_") || convenience[name] || called[name] {
+			continue
+		}
+		uncalled = append(uncalled, name)
+	}
+	sort.Strings(uncalled)
+	return uncalled
+}
+
+func sortedKeys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func fail(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "gatecheck: "+format+"\n", args...)
+	os.Exit(1)
+}

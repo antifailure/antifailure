@@ -53,6 +53,14 @@ jobs:
         # caught it: each did exactly what it was asked.
         run: go run ./tools/ldcheck .
 
+      - name: The one command runs what this workflow runs
+        # CONTRIBUTING.md promises that a green `just gate` means a green CI.
+        # Nothing watched that, so a job added here would quietly stop being
+        # covered locally and nobody would find out until a pull request that
+        # passed locally failed here, which is the moment the promise was
+        # supposed to prevent.
+        run: go run ./tools/gatecheck .
+
       - name: The error catalog and the code agree
         # The reference page promises that a code with no entry fails the build
         # and an entry nothing returns fails it too. It promised that for a

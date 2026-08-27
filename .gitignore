@@ -63,3 +63,7 @@ pnpm-debug.log*
 # Local artifacts produced by test runs
 engine/**/testdata/tmp/
 runner/artifacts/
+
+# Local gate output. Generated per run, never committed.
+.gate-reports/
+bin/

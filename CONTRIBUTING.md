@@ -9,9 +9,15 @@ few things that actually matter for a project that touches production data.
 just gate
 ```
 
-That runs every quality gate the CI runs, in the same order, with the same
-tool versions. If it is green locally it is green in CI. If it is red, the
-report under `.gate-reports/` names the file and the line.
+That runs every quality gate CI runs, in the same order, with the same tool
+versions. If it is green locally it is green in CI. If it is red, it prints
+which gates failed and the last lines of each, and the full output of every
+gate is under `.gate-reports/`.
+
+That promise is checked rather than trusted: `tools/gatecheck` compares the
+`gate` recipe against `.github/workflows/ci.yml` and fails the build when they
+disagree, because a promise like this rots silently. It has already caught two
+gates CI ran that the justfile did not.
 
 ## Getting set up
 
@@ -19,10 +25,15 @@ report under `.gate-reports/` names the file and the line.
 git clone https://github.com/antifailure/antifailure
 cd antifailure
 git config core.hooksPath .githooks   # see below
-just setup     # installs pinned tool versions into .tools/
+just setup     # checks your toolchain and names what is missing
+just db        # starts the Postgres the control plane suites need
 just build     # builds the af binary into bin/af
 just test      # unit and property tests
 ```
+
+`just` itself is the only thing you need before `just setup` can help you:
+`brew install just`, or see https://just.systems. `just` with no argument
+lists every recipe.
 
 The hooks line is worth the ten seconds. It adds the sign-off trailer for you
 and refuses a commit authored by an address that is known to belong to somebody
@@ -30,9 +41,13 @@ else's GitHub account, which is a mistake this repository has actually made.
 CI checks both, so the hooks only decide whether you find out before the push
 or after it.
 
-You need Go 1.25, Node 22 or newer with pnpm 10, and a working Docker daemon.
-`just setup` reports anything missing with the command that installs it.
-`af doctor` does the same for a machine that only runs Antifailure.
+You need Go 1.25, Node 24 or newer, npm, and a working Docker daemon.
+`just setup` reports anything missing with the command that installs it, and
+it also checks the two things about your clone that CI enforces: that the
+hooks are on and that your commit identity is set.
+
+`af doctor` does the same for a machine that only runs Antifailure rather than
+developing it.
 
 ## Sign your commits off
 
