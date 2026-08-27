@@ -116,15 +116,29 @@ func TestARestoreAlwaysExitsOnError(t *testing.T) {
 
 func testDatabaseURL(t *testing.T) secrets.Value {
 	t.Helper()
-	raw := os.Getenv("AF_TEST_DATABASE_URL")
-	if raw == "" {
+
+	// Naming the server is a STATEMENT THAT ONE IS MEANT TO BE THERE, so an
+	// unreachable one is a failure rather than a skip. The variable buys a
+	// faster run, never a quieter one. Without it the default is a
+	// convenience, and a machine that has not run `just db` skips by name.
+	//
+	// The asymmetry is lane 5's, arrived at from the other direction: their
+	// suite was spending its time building containers it did not need, and the
+	// same helper that lets you point at a standing server is the one that
+	// silently reports success when you point it at nothing.
+	raw, named := os.LookupEnv("AF_TEST_DATABASE_URL")
+	if !named {
 		raw = "postgres://postgres:test@127.0.0.1:55432/antifailure?sslmode=disable"
 	}
+
 	conn := secrets.New(raw)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := Ping(ctx, conn); err != nil {
-		t.Skipf("skipped: no test Postgres at %s (run `just db`)", "AF_TEST_DATABASE_URL")
+		if named {
+			t.Fatalf("AF_TEST_DATABASE_URL names a Postgres that cannot be reached: %v", err)
+		}
+		t.Skip("skipped: no test Postgres (run `just db`, or set AF_TEST_DATABASE_URL)")
 	}
 	return conn
 }
