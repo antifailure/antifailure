@@ -18,6 +18,16 @@
 // The suite is itself tested, against a fake provider that is deliberately
 // broken one behavior at a time. A suite nobody has proved can fail is a suite
 // that proves nothing.
+//
+// That second rule is met by the runtime suite, in fakeruntime_test.go and
+// runtime_selftest_test.go, and is NOT yet met by the database suite below.
+// This paragraph used to claim it for both, which was the more comfortable of
+// the two things it could have said and the wrong one: STATUS.md has recorded
+// the gap for some time, and a package doc asserting a guarantee the package
+// does not make is exactly the kind of thing this suite exists to catch in
+// other people's code. The runtime files are the pattern to copy; the cost is
+// an afternoon and the thing it buys is knowing that a green run means
+// anything at all.
 package conformance
 
 import (
