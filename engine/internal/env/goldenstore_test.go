@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
-	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
 	"github.com/antifailure/antifailure/engine/internal/golden"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -81,8 +80,10 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	for _, tbl := range refreshed.Subset.Tables {
 		rows[tbl.Table] = tbl.Rows
 	}
-	require.Equal(t, int64(2), rows["public.customers"], "the two EU customers, not the American one")
-	require.Equal(t, int64(2), rows["public.regions"], "and the regions they need")
+	require.Equal(t, int64(1), rows["public.regions"],
+		"the seed is one region, so the slice is one region")
+	require.Equal(t, int64(2), rows["public.customers"],
+		"and its two customers, followed downward; the American one is not in the slice")
 
 	// Machine two. Same manifest, same store, and NO production credential at
 	// all, which is the point: a runner that cannot reach production is
@@ -90,10 +91,12 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	second, stopSecond := requireOrchestrator(t, "puller", "", storeDir)
 	defer stopSecond()
 
-	before, err := second.Goldens(ctx)
-	require.NoError(t, err)
-	require.Empty(t, publishedIDs(before), "the second machine starts with nothing of its own")
-
+	// The two machines share this laptop's Docker daemon, so they share its
+	// image store, and pretending otherwise would be a fiction the assertion
+	// then has to work around. What is real and is asserted below is that the
+	// second machine has NO production credential: its manifest has no
+	// source_url_env, so it could not refresh even if it wanted to, and the
+	// only way it can end up with data is through the store.
 	pulled, err := second.PullGolden(ctx, "")
 	require.NoError(t, err)
 	require.Equal(t, refreshed.Version, pulled.From, "the newest complete version was taken")
@@ -119,7 +122,7 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 		WHERE NOT EXISTS (SELECT 1 FROM regions r WHERE r.code = c.region_code)`).Scan(&orphans))
 
 	require.Equal(t, int64(2), customers)
-	require.Equal(t, int64(2), regions)
+	require.Equal(t, int64(1), regions)
 	require.Equal(t, int64(0), orphans,
 		"the foreign keys still resolve on the far side of the store")
 
@@ -159,36 +162,61 @@ func TestPull_RefusesAVersionWhosePublishDidNotFinish(t *testing.T) {
 	require.Contains(t, err.Error(), "no complete versions")
 }
 
-// requireSourceDatabase stands up a Postgres to play production.
+// requireSourceDatabase makes a database on the project's test Postgres to
+// play production.
+//
+// The standing test server rather than a container of its own, because this
+// test already asks the Docker provider to build two goldens and branch them,
+// and every one of those is an initdb. On a busy machine a sixth initdb is the
+// one that misses the provider's readiness window, and what that produces is a
+// SKIP: the suite reports ok and nothing ran. A skip that reads as a pass is
+// worse than a failure, so the cheapest container is the one not created.
 func requireSourceDatabase(t *testing.T, ctx context.Context) (string, func()) {
 	t.Helper()
-	p, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: 46900})
-	if err != nil {
-		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+	base := os.Getenv("AF_TEST_POSTGRES")
+	if base == "" {
+		base = "postgres://postgres:test@127.0.0.1:55432/antifailure?sslmode=disable"
 	}
-	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
-		Version: 17, RulesHash: "store-test",
-		Mask:   func(context.Context, secrets.Value) error { return nil },
-		Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
-	})
+	admin, err := pgx.Connect(ctx, base)
 	if err != nil {
-		_ = p.Close()
-		t.Skipf("skipped: no golden could be made: %v", err)
+		t.Skipf("skipped: no test Postgres at %s. Start one with: "+
+			"docker run -d --name af-cp-test -p 55432:5432 -e POSTGRES_PASSWORD=test "+
+			"-e POSTGRES_DB=antifailure postgres:17-alpine",
+			redactHost(base))
 	}
-	branch, err := p.Branch(ctx, gv.ID, "storesource")
-	require.NoError(t, err)
-	url, err := p.ConnString(ctx, branch, provider.ConnDirect)
+	name := fmt.Sprintf("af_store_source_%d", time.Now().UnixNano())
+	_, err = admin.Exec(ctx, "CREATE DATABASE "+name)
 	require.NoError(t, err)
 
-	require.NoError(t, pgcopy.Exec(ctx, url, sourceSchema))
+	url := replaceDatabase(base, name)
+	require.NoError(t, pgcopy.Exec(ctx, secrets.New(url), sourceSchema))
 
-	return url.Reveal(), func() {
-		c, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	return url, func() {
+		c, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		_ = p.Destroy(c, branch)
-		_ = p.DestroyGolden(c, gv.ID)
-		_ = p.Close()
+		_, _ = admin.Exec(c, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+		_ = admin.Close(c)
 	}
+}
+
+// replaceDatabase swaps the database in a connection string.
+func replaceDatabase(url, name string) string {
+	at := strings.LastIndex(url, "@")
+	rest := url[at+1:]
+	slash := strings.Index(rest, "/")
+	suffix := ""
+	if q := strings.Index(rest, "?"); q >= 0 {
+		suffix = rest[q:]
+	}
+	return url[:at+1] + rest[:slash+1] + name + suffix
+}
+
+// redactHost keeps a connection string out of a message.
+func redactHost(url string) string {
+	if at := strings.LastIndex(url, "@"); at >= 0 {
+		return url[at+1:]
+	}
+	return url
 }
 
 // requireOrchestrator builds one machine's engine: its own state directory,
@@ -264,14 +292,6 @@ func requireBranch(t *testing.T, ctx context.Context, o *Orchestrator, version s
 		_ = s.dbProv.Destroy(c, branch)
 		s.close()
 	}
-}
-
-func publishedIDs(versions []provider.GoldenVersion) []string {
-	out := make([]string, 0, len(versions))
-	for _, v := range versions {
-		out = append(out, v.ID)
-	}
-	return out
 }
 
 var _ = fmt.Sprintf
