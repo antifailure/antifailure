@@ -153,7 +153,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 2.4 `af init` | proven | Validates its own output before writing. |
 | 2.5 Secrets subsystem | proven | Sources with precedence, a dotenv reader, an encrypted local store, and a resolution layer. A sandbox credential reaches the sidecar as a file and the service as a marker; proven against a running container. The OS keyring is an interface with a fake: no real credential store is wired yet. |
 | 2.6 `af doctor` | proven | |
-| 2.7 HUD | planned | |
+| 2.7 HUD | written | The state layer and the non-TTY fallback, not the terminal UI. `engine/internal/hud` holds the model: the reorder window that orders events by sequence and abandons a gap rather than stalling the dashboard, per-pane state for services, egress, database and agents, a bounded tail, rune-safe truncation, and counts for everything sampled away. `hud.Plain` is the fallback a CI log actually gets: one line per significant event, progress folded into a summary, and warnings and errors never suppressed even for a noisy type. 23 tests, race clean, plus a rapid property test over 200-event sequences with deliberately wrong-typed payloads, which is the spec's no-panic exit criterion. NOT DONE: the Bubble Tea panes, keyboard navigation, width adaptation from 80 to 200 columns, the golden frame tests at 80x24 and 160x50, and the vhs recordings. |
 | 2.8 Event sinks | proven | NDJSON with rotation, JSON, memory, and a replay reader. |
 
 ## Supporting packages
