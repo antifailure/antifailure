@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // A check nobody has proved can fail is a check that passes everything the day
@@ -134,8 +136,8 @@ func TestTheRealRepositoryAgrees(t *testing.T) {
 	// The one that matters. Reads the actual files rather than a fixture, so
 	// this fails the moment the workflow and the justfile drift.
 	root := filepath.Join("..", "..")
-	ci, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
-	if err != nil {
+	workflows, err := pullRequestWorkflows(filepath.Join(root, ".github", "workflows"))
+	if err != nil || len(workflows.paths) == 0 {
 		t.Skipf("no workflow to compare: %v", err)
 	}
 	just, err := os.ReadFile(filepath.Join(root, "justfile"))
@@ -143,14 +145,24 @@ func TestTheRealRepositoryAgrees(t *testing.T) {
 		t.Fatalf("CONTRIBUTING.md promises `just gate` and there is no justfile: %v", err)
 	}
 
-	ciGates := collect(string(ci))
+	ciGates := collect(workflows.text())
 	if len(ciGates) < 8 {
 		t.Fatalf("only %d gates found in CI; the patterns have probably stopped matching", len(ciGates))
 	}
 	justGates := collect(string(just))
 	for g := range ciGates {
+		if _, exempt := exemptFromGate[g]; exempt {
+			continue
+		}
 		if _, ok := justGates[g]; !ok {
 			t.Errorf("CI runs %q and the justfile does not", g)
+		}
+	}
+	// Every exemption must still name something a workflow runs.
+	for g := range exemptFromGate {
+		if _, ok := ciGates[g]; !ok {
+			t.Errorf("%q is exempt from `just gate` but no pull request workflow runs it, "+
+				"so the exemption is describing a gate that is not there", g)
 		}
 	}
 	if u := uncalledByGate(string(just)); len(u) > 0 {
@@ -256,5 +268,120 @@ func TestNoWorkflowGrantsWriteToEveryJob(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// Workflow discovery. gatecheck used to read ci.yml by name, which meant a
+// second workflow could carry gates nothing compared against the justfile.
+
+func writeWorkflows(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestAWorkflowThatRunsOnPullRequestsIsRead(t *testing.T) {
+	dir := writeWorkflows(t, map[string]string{
+		"ci.yml":       "on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  a:\n    steps:\n      - run: go test ./...\n",
+		"security.yml": "on:\n  pull_request:\n  schedule:\n    - cron: \"0 7 * * *\"\njobs:\n  b:\n    steps:\n      - run: go run ./tools/vulncheck .\n",
+	})
+
+	set, err := pullRequestWorkflows(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.paths) != 2 {
+		t.Fatalf("read %v, want both workflows", set.paths)
+	}
+	gates := collect(set.text())
+	if _, ok := gates["tool vulncheck"]; !ok {
+		t.Errorf("a gate in the second workflow must be seen, got %v", keys(gates))
+	}
+}
+
+// A workflow that never runs against a branch is out of scope, and out of scope
+// for a stated reason rather than because it was left off a list.
+func TestAWorkflowThatDoesNotRunOnPullRequestsIsSkipped(t *testing.T) {
+	dir := writeWorkflows(t, map[string]string{
+		"ci.yml":      "on:\n  pull_request:\njobs:\n  a:\n    steps:\n      - run: go test ./...\n",
+		"release.yml": "on:\n  push:\n    tags: ['v*']\njobs:\n  b:\n    steps:\n      - run: go run ./tools/notagate .\n",
+	})
+
+	set, err := pullRequestWorkflows(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.paths) != 1 || set.paths[0] != "ci.yml" {
+		t.Fatalf("read %v, want only ci.yml", set.paths)
+	}
+	if _, ok := collect(set.text())["tool notagate"]; ok {
+		t.Error("a tag-triggered workflow must not contribute gates; it runs long after the gate had its say")
+	}
+}
+
+// The trigger has to be the workflow's own, not the word appearing anywhere.
+func TestTheWordPullRequestInACommentIsNotATrigger(t *testing.T) {
+	dir := writeWorkflows(t, map[string]string{
+		"release.yml": "# not run on pull_request: on purpose\non:\n  push:\n    tags: ['v*']\njobs: {}\n",
+	})
+
+	set, err := pullRequestWorkflows(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.paths) != 0 {
+		t.Errorf("read %v, want none", set.paths)
+	}
+}
+
+// Every exemption has to carry a reason, for the same reason .govulncheck.yaml
+// entries do: an exemption with no stated reason is a mute button.
+func TestEveryExemptionStatesWhy(t *testing.T) {
+	for gate, reason := range exemptFromGate {
+		if len(strings.Fields(reason)) < 20 {
+			t.Errorf("the exemption for %q is %d words, which is too short to be a reason "+
+				"to skip a gate in the one command CONTRIBUTING promises", gate, len(strings.Fields(reason)))
+		}
+	}
+}
+
+// A workflow with a YAML error does not fail loudly. GitHub declines to run it
+// and says so only on a page nobody opens, so the symptom is a check that
+// quietly stops existing. Everything else in this file reads the workflows as
+// text, which would not notice.
+func TestEveryWorkflowIsValidYAML(t *testing.T) {
+	dir := filepath.Join("..", "..", ".github", "workflows")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Skipf("no workflows: %v", err)
+	}
+
+	seen := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || (!strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml")) {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var parsed map[string]any
+		if err := yaml.Unmarshal(body, &parsed); err != nil {
+			t.Errorf("%s is not valid YAML, so GitHub will not run it: %v", name, err)
+			continue
+		}
+		if len(parsed["jobs"].(map[string]any)) == 0 {
+			t.Errorf("%s parses but declares no jobs", name)
+		}
+		seen++
+	}
+	if seen == 0 {
+		t.Error("checked no workflows, which means this test has stopped looking in the right place")
 	}
 }

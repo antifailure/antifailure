@@ -2,10 +2,12 @@ module github.com/antifailure/antifailure/engine
 
 go 1.25.0
 
+toolchain go1.25.14
+
 require (
 	github.com/docker/docker v28.5.1+incompatible
 	github.com/docker/go-connections v0.6.0
-	github.com/jackc/pgx/v5 v5.7.6
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/pflag v1.0.9
 	github.com/stretchr/testify v1.12.1

@@ -1,0 +1,58 @@
+name: Security
+
+# Vulnerability scanning is on its own workflow, and on a schedule, because the
+# thing that changes is not this repository. A commit that was clean yesterday
+# is not clean today if an advisory landed overnight against a dependency it
+# already had. Tying the scan only to pushes would mean a quiet repository is
+# reported as a safe one, which is exactly backwards: the longer nothing is
+# pushed, the staler the last answer.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # 07:00 UTC daily. The Go vulnerability database publishes on weekdays, so a
+    # daily run means at most one working day between an advisory and this
+    # repository knowing about it.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read, and only read. Same reasoning as CI: nothing here writes back, and every
+# action is pinned to a commit because a tag can be moved after it is reviewed.
+permissions:
+  contents: read
+
+jobs:
+  vulnerabilities:
+    name: known vulnerabilities
+    runs-on: ubuntu-latest
+    # Symbol level analysis of the engine walks the whole call graph, including
+    # the Docker client, the OpenTelemetry exporters and a pure Go SQLite. It is
+    # minutes, not seconds, which is the reason this is not part of `just gate`.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: |
+            engine/go.sum
+            tools/go.sum
+            ee/engine/go.sum
+
+      - name: Known vulnerabilities
+        # govulncheck asks whether a known vulnerability is reachable from our
+        # code. tools/vulncheck holds the answer to a policy: anything reachable
+        # must be matched by an entry in .govulncheck.yaml that says why it
+        # cannot hurt us and when that judgement expires, and an entry that has
+        # expired or that no longer matches anything fails too.
+        #
+        # govulncheck itself is pinned in tools/go.mod as a tool dependency, so
+        # the scanner is version controlled like everything else rather than
+        # resolved to whatever @latest means on the day.
+        run: go run ./tools/vulncheck .
