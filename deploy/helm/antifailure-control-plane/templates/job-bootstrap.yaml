@@ -25,7 +25,19 @@ spec:
         app.kubernetes.io/component: bootstrap
     spec:
       restartPolicy: Never
-      serviceAccountName: {{ include "cp.serviceAccountName" . }}
+      # No serviceAccountName, deliberately, and this is not an oversight.
+      #
+      # This Job is a pre-install hook, so it runs BEFORE the release's own
+      # ServiceAccount exists. A pod naming a ServiceAccount that is not there
+      # is rejected by the API server, the Job retries it forever, and the
+      # install fails eight minutes later with "timed out waiting for the
+      # condition" and no pod to look at. That is exactly what happened the
+      # first time this chart was installed on a real cluster.
+      #
+      # Making the ServiceAccount a hook too would fix the ordering and break
+      # uninstall, because Helm does not track hook resources in the release
+      # manifest and would leave it behind. The Job does not need one anyway:
+      # it talks to Postgres and never to the Kubernetes API.
       automountServiceAccountToken: false
       {{- with .Values.image.pullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}

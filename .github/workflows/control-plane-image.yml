@@ -243,6 +243,11 @@ jobs:
         run: |
           kubectl -n cp get all
           kubectl -n cp describe pods
+          # The Job, not only its pods. When a hook fails because its pod was
+          # never created, the pods tell you nothing and the Job's events say
+          # exactly why.
+          kubectl -n cp describe job
+          kubectl -n cp get events --sort-by=.lastTimestamp | tail -40
           kubectl -n cp logs -l app.kubernetes.io/name=antifailure-control-plane --tail=100 --all-containers || true
           kubectl -n cp logs -l app.kubernetes.io/component=bootstrap --tail=100 || true
 
