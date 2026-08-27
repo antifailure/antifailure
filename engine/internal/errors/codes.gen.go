@@ -469,7 +469,7 @@ var catalog = map[Code]Entry{
 		Code:      AFDB030,
 		Area:      "DB",
 		Message:   "Migrations failed on the branch: {detail}",
-		NextStep:  "Read the migration log at {location}, fix the migration, and push again.",
+		NextStep:  "The rehearsal names the statement that failed and times the ones before it. Fix the migration and push again: a migration that fails on a branch with production's shape is one that would have failed in production.",
 		Docs:      "concepts/insights",
 		Retryable: false,
 		ExitCode:  ExitProvider,
