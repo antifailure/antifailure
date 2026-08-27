@@ -56,6 +56,16 @@ variable "database_app_user" {
 variable "database_sku" {
   type    = string
   default = "B_Standard_B1ms"
+  # The subscription's bonfire-sku-allowlist policy permits exactly three
+  # server SKUs. Terraform writes the tier as a prefix (B_, GP_); the policy
+  # reads sku.name, which is the part after it.
+  validation {
+    condition = contains(
+      ["B_Standard_B1ms", "B_Standard_B2s", "GP_Standard_D2ds_v4"],
+      var.database_sku,
+    )
+    error_message = "bonfire-sku-allowlist on this subscription permits only Standard_B1ms, Standard_B2s and Standard_D2ds_v4 for a flexible server. Anything else plans cleanly and is denied at apply."
+  }
 }
 variable "database_storage_mb" {
   type    = number
@@ -89,6 +99,28 @@ variable "assign_deployer_secret_officer" {
   default     = true
   description = "Give whoever runs Terraform the ability to write the secrets below, scoped to this vault only. Turn off when the role is granted out of band."
 }
+variable "goldens_enabled" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    Create the goldens storage account.
+
+    OFF by default, deliberately. Nothing in the control plane reads blob
+    storage: there is no @azure/storage dependency anywhere in web/, and no
+    code path that opens a container. Creating an account nothing reads is a
+    resource that looks like a feature, which is the shape this repository
+    keeps having to remove.
+
+    It is also not merely idle. bonfire-deny-public-data refuses any storage
+    account whose publicNetworkAccess is not Disabled, so the account can only
+    be reached through a private endpoint, which is a real monthly cost for a
+    consumer that does not exist yet.
+
+    Turn it on when the golden storage backend lands, and add the private
+    endpoint in the same change.
+  EOT
+}
+
 variable "golden_replication" {
   type    = string
   default = "LRS"
@@ -96,11 +128,6 @@ variable "golden_replication" {
 variable "golden_soft_delete_days" {
   type    = number
   default = 30
-}
-variable "golden_allowed_ips" {
-  type        = list(string)
-  default     = []
-  description = "Public IPs allowed to reach the goldens account. Empty means only the apps subnet can."
 }
 
 # --- application ----------------------------------------------------------

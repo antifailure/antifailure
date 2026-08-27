@@ -9,7 +9,10 @@ output "database_fqdn" {
 }
 
 output "key_vault_name" { value = azurerm_key_vault.this.name }
-output "goldens_account" { value = azurerm_storage_account.goldens.name }
+output "goldens_account" {
+  value       = var.goldens_enabled ? azurerm_storage_account.goldens[0].name : null
+  description = "Null unless goldens_enabled. Nothing in the control plane reads blob storage yet."
+}
 output "identity_client_id" { value = azurerm_user_assigned_identity.app.client_id }
 
 output "bootstrap_job_name" {

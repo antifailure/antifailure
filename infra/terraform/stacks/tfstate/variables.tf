@@ -4,12 +4,12 @@ variable "subscription_id" {
 
 variable "resource_group_name" {
   type    = string
-  default = "af-tfstate-scus"
+  default = "af-tfstate-eastus"
 }
 
 variable "location" {
   type    = string
-  default = "southcentralus"
+  default = "eastus"
 }
 
 variable "storage_account_name" {

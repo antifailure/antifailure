@@ -11,10 +11,16 @@ tagged `project=antifailure`:
 
 | Group | Holds | Budget |
 | --- | --- | --- |
-| `af-dev-scus` | Development: registry, key vault, storage, the DNS zone for previews | 400 USD per month |
-| `af-corpus-scus` | Corpus testing: the preview cluster and its spot node pool | 600 USD per month |
-| `af-cp-scus` | The hosted control plane | 300 USD per month |
-| `af-tfstate-scus` | Terraform remote state only | negligible |
+| `af-dev-eastus` | Development: registry, key vault, storage, the DNS zone for previews | 400 USD per month |
+| `af-corpus-eastus` | Corpus testing: the preview cluster and its spot node pool | 600 USD per month |
+| `af-cp-eastus` | The hosted control plane | 300 USD per month |
+| `af-tfstate-eastus` | Terraform remote state only | negligible |
+
+These were named `-scus` when this document was written, for South Central US.
+That region is denied on this subscription by a policy assignment called
+`bonfire-allowed-locations`, which permits only `eastus`, `centralus` and
+`global`. Quota was never the constraint; both regions have 65 cores. Note that
+`af-web`, created by the site work, is also ours and also tagged.
 
 Nothing outside these four is created, modified, read for configuration, or
 deleted. No role is ever assigned at subscription scope.
@@ -68,6 +74,25 @@ as decoration, just written in prose.
    with its own state key, so one cannot reference the other's resources.
    The remote state account itself is created by `stacks/tfstate` and does not
    exist yet, so state is local until somebody runs it.
+
+## Azure Policy is a fourth mechanism, and it is not ours
+
+The subscription carries deny assignments that no code here controls:
+`bonfire-allowed-locations`, `bonfire-deny-public-data` (Postgres and storage
+must have `publicNetworkAccess` Disabled) and `bonfire-sku-allowlist`.
+
+They matter to this document because **`terraform plan` does not evaluate
+them**. A plan can be entirely clean and every resource refused at apply. The
+modules therefore repeat the same rules as variable validations, so the refusal
+happens at plan time and names the policy instead of arriving as
+`RequestDisallowedByPolicy`.
+
+One trap worth recording, because it made a guard silently useless: a
+validation on a value that is unknown at plan time is SKIPPED, not failed. The
+location check was originally on the control plane module, whose location comes
+from the resource group's attribute and is unknown until apply, so it never ran
+and a plan in a denied region looked fine. It is now on the stack's own input,
+which is known.
 
 ## Cost
 

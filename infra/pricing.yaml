@@ -19,7 +19,7 @@
 
 meta:
   currency: USD
-  region: southcentralus
+  region: eastus
   checked: 2026-08-27
   source: https://prices.azure.com/api/retail/prices
   hours_per_month: 730
@@ -29,17 +29,19 @@ meta:
 # meter is per vCore and the listed price is already the whole instance.
 postgres_flexible:
   compute_per_hour:
-    B_Standard_B1ms: 0.0204
-    B_Standard_B2s: 0.0816
-    B_Standard_B2ms: 0.1632
-    B_Standard_B4ms: 0.3264
-    B_Standard_B8ms: 0.6528
-    GP_Standard_D2s_v3: 0.1418
-    GP_Standard_D4s_v3: 0.2836
-  storage_per_gb_month: 0.138
+    # Only the first two, plus GP_Standard_D2ds_v4, are permitted by this
+    # subscription's bonfire-sku-allowlist. The rest are here so that a plan
+    # naming one is priced rather than reported UNKNOWN, and so the cost of
+    # asking for an exemption is visible.
+    B_Standard_B1ms: 0.017
+    B_Standard_B2s: 0.068
+    B_Standard_B2ms: 0.136
+    B_Standard_B4ms: 0.272
+    B_Standard_B8ms: 0.544
+  storage_per_gb_month: 0.115
   # Backup up to the size of provisioned storage is included. This is the rate
   # beyond it, which is what a long retention actually costs.
-  backup_lrs_per_gb_month: 0.114
+  backup_lrs_per_gb_month: 0.095
   # Zone redundant HA runs a second server. It is not a surcharge, it is a
   # second bill, and burstable SKUs cannot do it at all.
   high_availability_multiplier: 2.0
@@ -64,8 +66,8 @@ key_vault:
 
 # --- Storage, general purpose v2, hot -------------------------------------
 storage:
-  hot_lrs_per_gb_month: 0.018
-  hot_grs_per_gb_month: 0.036
+  hot_lrs_per_gb_month: 0.0208
+  hot_grs_per_gb_month: 0.0416
   write_operations_per_10k: 0.065
   read_operations_per_10k: 0.005
 
@@ -74,9 +76,18 @@ storage:
 # a chatty diagnostic setting costs, which is the usual reason a small
 # deployment's bill is not small.
 log_analytics:
-  ingestion_per_gb: 2.76
-  retention_per_gb_month: 0.12
+  ingestion_per_gb: 2.30
+  retention_per_gb_month: 0.10
   free_ingestion_gb: 5
+
+# --- Not priced here, on purpose -------------------------------------------
+# azurerm_private_endpoint. The retail prices API does not expose a Private
+# Link meter for this region under any service name I could find, and this file
+# only carries numbers that came from it. So the estimator reports a private
+# endpoint as UNKNOWN and suppresses the total, which is the correct behaviour:
+# it is a real recurring cost and pretending it is zero would understate a
+# stack that used one. If a plan needs one, get the number from the pricing
+# calculator and add it here with its own `checked` note.
 
 # --- Assumptions the estimate needs and a plan cannot tell it ---------------
 # Stated here rather than buried in the tool, because they are the numbers most

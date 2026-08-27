@@ -51,6 +51,20 @@ resource "azurerm_storage_account" "state" {
   https_traffic_only_enabled      = true
   allow_nested_items_to_be_public = false
 
+  # bonfire-deny-public-data on this subscription refuses any storage account
+  # whose publicNetworkAccess is not "Disabled". That is not negotiable from
+  # here, and it has a consequence worth stating rather than discovering:
+  #
+  # WITH THIS DISABLED, TERRAFORM CANNOT REACH ITS OWN STATE from a laptop or
+  # from a hosted CI runner. Reaching it needs a private endpoint and something
+  # inside the VNet, or a policy exemption for this one account.
+  #
+  # So this stack is written and NOT applied, and the other stacks keep local
+  # state until that is decided. Applying this without deciding it first would
+  # produce a state account nobody can read, which is worse than no remote
+  # state at all.
+  public_network_access_enabled = false
+
   # Entra identity only. A storage key is a credential that cannot be revoked
   # per person and appears in no audit trail as a name, and this account holds
   # every database password the project has.
