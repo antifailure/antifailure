@@ -132,14 +132,14 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | Sub-phase | State | Notes |
 | --- | --- | --- |
 | 1.1 Repository and governance | proven | Governance files, templates, CODEOWNERS, ADRs 0001 and 0002. |
-| 1.2 Toolchain pinning and task runner | planned | |
+| 1.2 Toolchain pinning and task runner | proven | `just gate` runs the 17 gates CI runs, in CI's order, and has been run end to end. `tools/gatecheck` fails the build when the justfile and the workflows disagree, and it reads every workflow that triggers on a pull request rather than `ci.yml` by name. Go is pinned by a `toolchain` directive in all three modules. |
 | 1.3 Schemas and code generation | proven | `schemas/manifest.v1.json` is the source of truth; Go types mirror it. TypeScript generation lands with the runner. |
 | 1.4 Continuous integration and gates | proven | Six jobs. The generated files, the policy vectors, the command reference, and the error catalog all fail the build when they drift. |
-| 1.5 Release pipeline | planned | |
-| 1.6 Security baseline | planned | |
+| 1.5 Release pipeline | proven | v0.1.1 released and verified end to end: downloaded, checksum matched, `af version` correct, and `af init`, `af up`, `af down` run on a scratch repository. `tools/ldcheck` refuses a release that stamps a symbol which does not exist, which is the bug that made v0.1.0 report itself as `dev`. The SPDX bill of materials and the cosign keyless signing added under 1.6 have NEVER RUN: no release has been cut since, so those two steps are written and not proven. |
+| 1.6 Security baseline | proven | `tools/vulncheck` runs govulncheck over all three modules against the real Go vulnerability database, on every pull request and daily, and CI reports 2 reachable, 2 accepted, 0 unaccepted, 0 stale. It found 20 reachable vulnerabilities: 16 in the standard library (CI was installing Go 1.25.0) and GO-2026-5004, a SQL injection in pgx. Every action is pinned to a commit; `contents: write` is scoped to the publish job. SECURITY.md made ten claims to security researchers and seven were false; it now names only what a reader can go and look at, and states the two remaining gaps, no reproducibility verification and no adversarial suite. |
 | 1.7 Documentation site skeleton | planned | |
 | 1.8 Azure foundation (Terraform) | planned | Isolation boundary documented in `infra/ISOLATION.md`. Blocked on Q4. |
-| 1.9 Test infrastructure and fakes | planned | |
+| 1.9 Test infrastructure and fakes | written | `engine/internal/testutil/fakes` exists, which CONTRIBUTING had claimed for some time while the directory did not. `fakes.Break` injects nine faults, one broken guarantee at a time, and `fakes.Catches` maps each to the conformance behaviour that must catch it. PROVEN: each fault really does corrupt the guarantee it names, against an in-memory provider with a control asserting the baseline keeps all of them. NOT PROVEN, and this is the point of the package: nothing yet points the conformance SUITE at a broken provider, so the suite is still not known to be able to fail. That needs a real database and a way to run one named behaviour, which `RunDatabase` does not expose. `provider.Runtime` has no fake and no suite at all. |
 | 1.10 Events, logging, and redaction | proven | 100 percent coverage on redaction, 454 ns/op with no allocations. |
 | 1.11 Local state store and journal | proven | Crash injection at every step, plus a property test over random interleavings. |
 
