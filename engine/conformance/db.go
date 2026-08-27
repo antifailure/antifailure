@@ -569,14 +569,38 @@ func (h *harness) branchRefusesUnverified(ctx context.Context) {
 	h.failVerify = true
 	gv, err := h.p.RefreshGolden(ctx, h.spec())
 	h.trackGolden(gv.ID)
-	if err == nil && gv.ID != "" {
-		_, branchErr := h.p.Branch(ctx, gv.ID, "env_conformance00003")
-		if branchErr == nil {
-			h.t.Fatal("an unverified golden was branched; this is the product's central promise")
+
+	// Every path asserts something. It did not: the whole body used to sit
+	// inside `if err == nil && gv.ID != ""`, and a provider that correctly
+	// refuses to PUBLISH an unverified version returns an error and an empty
+	// ID, so the condition was false and nothing ran. The behaviour passed
+	// having checked nothing, for exactly the providers that behave correctly,
+	// which is every provider shipped today. Found by the self test in
+	// db_selftest_test.go, which points the suite at a provider that branches
+	// unverified goldens on purpose and requires this to go red.
+	if err != nil || gv.ID == "" {
+		// The provider refused at the refresh, which is the stronger place to
+		// refuse: there is then no unverified version in existence to branch.
+		// Assert the refusal was well formed rather than returning silently.
+		if err == nil {
+			h.t.Fatal("the refresh published nothing and reported no error, so a caller " +
+				"cannot tell a refusal from a success")
 		}
-		if !errors.Is(branchErr, aferrors.Coded(aferrors.AFMSK001)) {
-			h.t.Errorf("branching an unverified golden failed with %v, and must fail with AF-MSK-001", branchErr)
+		if gv.ID != "" {
+			h.t.Fatalf("the refresh reported an error and still published %s; a version that "+
+				"exists after a failed verification is one something else can branch", gv.ID)
 		}
+		return
+	}
+
+	// It published a version whose verification failed. Branching that version
+	// must be refused, and this is the product's central promise.
+	_, branchErr := h.p.Branch(ctx, gv.ID, "env_conformance00003")
+	if branchErr == nil {
+		h.t.Fatal("an unverified golden was branched; this is the product's central promise")
+	}
+	if !errors.Is(branchErr, aferrors.Coded(aferrors.AFMSK001)) {
+		h.t.Errorf("branching an unverified golden failed with %v, and must fail with AF-MSK-001", branchErr)
 	}
 }
 

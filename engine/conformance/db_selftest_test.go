@@ -128,13 +128,17 @@ func TestTheSuitePassesAgainstAProviderThatKeepsItsGuarantees(t *testing.T) {
 // Neither is a fault in the fake.
 var knownGaps = map[fakes.Fault]string{
 	fakes.BranchAcceptsUnverified: "" +
-		"Branch_RefusesAnUnverifiedGolden puts its whole assertion inside " +
-		"`if err == nil && gv.ID != \"\"`, and a provider that correctly refuses to " +
-		"PUBLISH an unverified version never satisfies that condition, so the body " +
-		"never runs. The behaviour therefore checks nothing for exactly the providers " +
-		"that behave correctly on the refresh side, and the product's central promise " +
-		"is unchecked on the branch side. A provider could publish verified versions " +
-		"correctly and still branch an unverified one that arrived some other way.",
+		"The VACUITY in Branch_RefusesAnUnverifiedGolden is fixed: it used to put " +
+		"its whole assertion inside `if err == nil && gv.ID != \"\"`, which a " +
+		"provider that correctly refuses to PUBLISH never satisfies, so nothing " +
+		"ran. It now asserts on both paths, and fakes.RefusesWithoutSayingSo " +
+		"proves the refusal path is live. " +
+		"What remains cannot be closed from here: a provider that refuses to " +
+		"publish never produces an unverified version, so there is nothing for " +
+		"the suite to hand to Branch, and the branch-side rule is unreachable " +
+		"through the interface. Closing it needs a way to obtain an unverified " +
+		"version, which is an interface change and a design decision rather " +
+		"than a fix.",
 
 	fakes.HealthErrorsOnDestroyed: "" +
 		"Health_ReportsADestroyedBranch is DECLARED as \"Health reports a destroyed " +

@@ -49,6 +49,16 @@ const (
 	// verification scan returned an error.
 	PublishesWhenVerificationFails Fault = "publishes-when-verification-fails"
 
+	// RefusesWithoutSayingSo makes a refresh whose verification failed return
+	// no version AND no error, so a caller cannot tell a refusal from a
+	// success and carries on as though a golden exists.
+	//
+	// It exists to prove that Branch_RefusesAnUnverifiedGolden actually
+	// asserts something on the path where the provider refuses to publish.
+	// That path used to assert nothing at all, which is why the behaviour
+	// passed for every correct provider while checking nothing.
+	RefusesWithoutSayingSo Fault = "refuses-without-saying-so"
+
 	// BranchIsNotIdempotent makes a second Branch for the same environment
 	// create a second database. This is how orphans are made: the engine
 	// retries after a timeout and the retry leaves a resource nothing owns.
@@ -84,6 +94,7 @@ func Faults() []Fault {
 		PublishesUnverifiedGolden,
 		SkipsMasking,
 		PublishesWhenVerificationFails,
+		RefusesWithoutSayingSo,
 		BranchIsNotIdempotent,
 		BranchAcceptsUnverified,
 		DestroyTwiceErrors,
@@ -106,6 +117,7 @@ func Catches() map[Fault]string {
 		PublishesUnverifiedGolden:       "Refresh_ProducesAVerifiedGolden",
 		SkipsMasking:                    "Refresh_CallsMaskThenVerify",
 		PublishesWhenVerificationFails:  "Refresh_RefusesToPublishWhenVerificationFails",
+		RefusesWithoutSayingSo:          "Branch_RefusesAnUnverifiedGolden",
 		BranchIsNotIdempotent:           "Branch_IsIdempotentByEnvironment",
 		BranchAcceptsUnverified:         "Branch_RefusesAnUnverifiedGolden",
 		DestroyTwiceErrors:              "Destroy_OfSomethingAlreadyGoneSucceeds",
@@ -173,6 +185,10 @@ func (b *broken) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) (p
 
 	v, err := b.Database.RefreshGolden(ctx, spec)
 	if err != nil {
+		if b.is(RefusesWithoutSayingSo) {
+			// Swallow the refusal. Nothing published, nothing said.
+			return provider.GoldenVersion{}, nil
+		}
 		return v, err
 	}
 	if b.is(PublishesUnverifiedGolden) {
