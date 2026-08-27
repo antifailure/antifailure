@@ -128,8 +128,8 @@ type Options struct {
 	// IngressClass names the ingress controller. Empty uses the cluster's
 	// default ingress class.
 	IngressClass string
-	// Resolver is the cluster DNS service address internal names are
-	// forwarded to. Empty discovers it from the kube-dns service.
+	// Resolver is the ADDRESS of the cluster's DNS service, with no port.
+	// Empty discovers it from the kube-dns service.
 	Resolver string
 	// ProxyImage is the sidecar image reference. Required: this package does
 	// not build images, and the engine that does knows the reference.
@@ -302,7 +302,16 @@ func managedSelector() metav1.ListOptions {
 	return metav1.ListOptions{LabelSelector: LabelManaged + "=true"}
 }
 
-// clusterResolver finds the address internal names are forwarded to.
+// clusterResolver finds the ADDRESS, not the endpoint, of the cluster's own
+// resolver.
+//
+// An address rather than a host and port on purpose, because it is used two
+// ways and only one of them takes a port. The sidecar is configured with an
+// endpoint and forwards internal names to it. A pod's dnsConfig takes
+// nameservers, and Kubernetes validates those as bare IP addresses and refuses
+// a pod whose nameserver carries a port. Returning the endpoint form and
+// handing it to both was a pod that could never be created, which is what the
+// containment probe would have hit first.
 //
 // Discovered rather than configured, because it is the one piece of cluster
 // specific information that is both required and knowable: every conformant
@@ -317,7 +326,7 @@ func (r *Runtime) clusterResolver(ctx context.Context) (string, error) {
 		if err != nil || svc.Spec.ClusterIP == "" || svc.Spec.ClusterIP == corev1.ClusterIPNone {
 			continue
 		}
-		return fmt.Sprintf("%s:%d", svc.Spec.ClusterIP, dnsPort), nil
+		return svc.Spec.ClusterIP, nil
 	}
 	return "", aferrors.Coded(aferrors.AFRUN002, "endpoint", "kubernetes",
 		"detail", "no DNS service was found in kube-system, so the sidecar has nowhere "+

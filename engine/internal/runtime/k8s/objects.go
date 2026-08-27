@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -288,13 +289,15 @@ func (r *Runtime) proxyObjects(
 		credentials[name] = value.Reveal()
 	}
 	cfg := sidecarConfig{
-		Egress:      egress,
-		Subnet:      subnet,
-		Internal:    internalNames(namespace, spec.Services),
-		EnvID:       envID,
-		MockPacks:   spec.MockPacks,
+		Egress:    egress,
+		Subnet:    subnet,
+		Internal:  internalNames(namespace, spec.Services),
+		EnvID:     envID,
+		MockPacks: spec.MockPacks,
+		// The sidecar forwards to an endpoint, so the port goes on here and
+		// nowhere else. A pod's nameserver is a bare address.
 		Credentials: credentials,
-		Resolver:    resolver,
+		Resolver:    net.JoinHostPort(resolver, strconv.Itoa(dnsPort)),
 		CACert:      spec.CACertPEM,
 	}
 	if spec.CAKeyPEM.Reveal() != "" {

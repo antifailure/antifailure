@@ -1,6 +1,8 @@
 package k8s
 
 import (
+	"encoding/json"
+	"net"
 	"strings"
 	"testing"
 
@@ -289,3 +291,30 @@ func TestADeploymentUsesTheOnlyRestartPolicyItMay(t *testing.T) {
 	job := r.migrationJob(spec, spec.Services[0], "af-env-e1", "10.43.0.9")
 	require.Equal(t, corev1.RestartPolicyNever, job.Spec.Template.Spec.RestartPolicy)
 }
+
+func TestANameserverIsABareAddress(t *testing.T) {
+	_, cfg := podDNS("af-env-e1", "10.43.0.10")
+	// Kubernetes validates dnsConfig.nameservers as IP addresses and refuses
+	// a pod whose nameserver carries a port. The cluster resolver is also
+	// given to the sidecar, which forwards to an endpoint and does want one,
+	// and handing the same string to both produced a pod that could never be
+	// created.
+	for _, ns := range cfg.Nameservers {
+		require.NotContains(t, ns, ":", "a nameserver may not carry a port")
+		require.NotNil(t, netParse(ns), "a nameserver must be an address")
+	}
+}
+
+func TestTheSidecarIsGivenAnEndpoint(t *testing.T) {
+	r := &Runtime{prefix: DefaultNamespacePrefix, proxyRef: "proxy:test"}
+	secret, _, _, err := r.proxyObjects("e1", "af-env-e1", "10.42.0.0/16", "10.43.0.10",
+		provider.EnvSpec{EnvID: "e1"})
+	require.NoError(t, err)
+
+	var cfg sidecarConfig
+	require.NoError(t, json.Unmarshal(secret.Data[configKey], &cfg))
+	require.Equal(t, "10.43.0.10:53", cfg.Resolver,
+		"the sidecar dials this, so it needs the port the pods' nameserver must not have")
+}
+
+func netParse(s string) net.IP { return net.ParseIP(s) }
