@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import tailwindcss from "@tailwindcss/vite";
 
 // Every error the engine prints ends with a link to this site. errors.go builds
 // it as "https://antifailure.dev/docs/" + the catalog's docs field, and
@@ -9,6 +10,7 @@ import starlight from "@astrojs/starlight";
 // /docs and a page's URL has to be its path under src/content/docs, exactly.
 // Change either and every error message in the product starts lying.
 export default defineConfig({
+  vite: { plugins: [tailwindcss()] },
   site: "https://antifailure.dev",
   base: "/docs",
   trailingSlash: "ignore",
@@ -17,12 +19,12 @@ export default defineConfig({
       title: "Antifailure",
       description:
         "A disposable copy of your production stack for every pull request: masked Postgres branches, contained third-party APIs, agents that use the app like people, and load shaped like your real traffic.",
-      logo: {
-        src: "./src/assets/wordmark.svg",
-        replacesTitle: true,
-      },
       favicon: "/favicon.svg",
       customCss: ["./src/styles/antifailure.css"],
+      components: {
+        Header: "./src/components/Header.astro",
+        Footer: "./src/components/Footer.astro",
+      },
       social: [
         {
           icon: "github",

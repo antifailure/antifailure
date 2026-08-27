@@ -236,7 +236,7 @@ export const FOOTER_MENUS = [
     heading: "Resources",
     items: [
       { text: "Docs", href: "/docs" },
-      { text: "Quickstart", href: "/docs/quickstart" },
+      { text: "Quickstart", href: "/docs/getting-started/quickstart" },
       { text: "Architecture", href: "/product/architecture" },
       { text: "Solutions", href: "/solutions" },
       { text: "Privacy Notice", href: "/privacy" },
