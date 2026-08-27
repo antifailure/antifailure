@@ -217,6 +217,42 @@ func TestMain(m *testing.M) {
 			shared.skip = "AF_SKIP_DOCKER is set"
 			return m.Run()
 		}
+		// A server that is already running is used in preference to one this
+		// suite builds, and the reason is not convenience. What follows below
+		// is a golden refresh and a branch, which is two initdbs plus a
+		// pg_dump, and on a machine where several suites are competing for one
+		// Docker daemon that is where this suite fails: not in the subsetter,
+		// which needs nothing but a connection, but in the twenty seconds of
+		// container startup it asks for before reaching any of its own code.
+		// Every test here then creates its own pair of databases regardless,
+		// so the container was never what any of them were testing.
+		//
+		// It does not remove the client tools from the picture, and that is
+		// worth saying because the failure would otherwise be puzzling: each
+		// test still calls pgcopy.CopySchema, which shells out to pg_dump, and
+		// pg_dump refuses to read a server newer than itself. So the server
+		// named here has to be one the pg_dump on this machine can read. That
+		// refusal is reported by name, which is the whole point of toolFor and
+		// tooOld, but it is a property of the server you chose rather than of
+		// anything this suite did.
+		//
+		// Setting AF_TEST_POSTGRES is a statement that a database is meant to
+		// be there, so an unreachable one is a failure rather than a reason to
+		// excuse the suite. That asymmetry is the whole point: the variable
+		// buys a faster run, never a quieter one.
+		if base := os.Getenv("AF_TEST_POSTGRES"); base != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			admin, err := pgx.Connect(ctx, withDatabase(base, "postgres"))
+			if err != nil {
+				cancel()
+				shared.fatal = fmt.Sprintf("AF_TEST_POSTGRES is set and %s did not answer: %v", base, err)
+				return m.Run()
+			}
+			_ = admin.Close(ctx)
+			cancel()
+			shared.baseURL = base
+			return m.Run()
+		}
 		p, err := dockerdb.New(dockerdb.Options{Version: testPostgresMajor, Clock: clock.New(), PortFrom: 46700})
 		if err != nil {
 			shared.skip = fmt.Sprintf("no Docker daemon is reachable: %v", err)
