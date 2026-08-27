@@ -152,6 +152,39 @@ type SecretSource interface {
 	Lookup(ctx context.Context, name string) (value string, found bool, err error)
 }
 
+// CredentialRejectedError reports that a store refused the credential rather
+// than refusing the request.
+//
+// A distinct type because the engine renders it as a distinct error. A store
+// that is unreachable is a transient problem worth retrying; a store that says
+// the credential is not valid is a configuration problem, and telling somebody
+// to try again is telling them to wait for something that will not change.
+//
+// "After one refresh" is part of the claim and part of the contract. Every
+// cloud store here authenticates with a token that expires, so a long-lived
+// process will eventually present a stale one, and one renewal covers that
+// entirely. A second rejection is a credential that has been revoked or was
+// never right. A source that returns this without having tried a refresh, where
+// a refresh was possible, is making a statement that is not true.
+type CredentialRejectedError struct {
+	// Source names the store, as Name does, so the message says which of an
+	// organization's several credentials to rotate.
+	Source string
+	// Detail is what the store said, for the operator reading the log.
+	Detail string
+	// Err is the underlying failure, for errors.Is.
+	Err error
+}
+
+func (e *CredentialRejectedError) Error() string {
+	if e.Detail == "" {
+		return e.Source + " rejected the credential"
+	}
+	return e.Source + " rejected the credential: " + e.Detail
+}
+
+func (e *CredentialRejectedError) Unwrap() error { return e.Err }
+
 // Registry holds what has been registered.
 //
 // A value rather than only a package-level singleton, so that a test can build
