@@ -53,6 +53,19 @@ digest cannot, and an operator who took the trouble to pin one meant it.
 {{- default (printf "%s-database" (include "cp.fullname" .)) .Values.database.existingSecret -}}
 {{- end -}}
 
+{{/*
+The Secret the bootstrap hook reads. An operator-supplied Secret already exists
+before the install starts, so the hook can use it directly; otherwise the hook
+gets its own, created at a lower hook weight than the Job that needs it.
+*/}}
+{{- define "cp.bootstrapSecretName" -}}
+{{- if .Values.database.existingSecret -}}
+{{- .Values.database.existingSecret -}}
+{{- else -}}
+{{- printf "%s-bootstrap" (include "cp.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "cp.githubSecretName" -}}
 {{- default (printf "%s-github" (include "cp.fullname" .)) .Values.github.existingSecret -}}
 {{- end -}}

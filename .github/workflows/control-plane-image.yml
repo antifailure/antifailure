@@ -155,6 +155,21 @@ jobs:
             --set github.clientId=i --set github.clientSecret=s \
             --set github.redirectUri=https://x/cb
 
+      # Install-time ordering, checked without needing a cluster. This chart
+      # failed on a real cluster twice for the same reason: a pre-install hook
+      # referencing a normal release resource that does not exist yet. Neither
+      # failure was visible in the rendered YAML, which was valid both times,
+      # and both cost eight minutes to surface as "timed out waiting for the
+      # condition".
+      - name: Hook ordering
+        run: |
+          set -euo pipefail
+          helm template r deploy/helm/antifailure-control-plane \
+            --set database.url=x --set database.migrationUrl=y \
+            --set github.clientId=i --set github.clientSecret=s \
+            --set github.redirectUri=https://x/cb \
+            | python3 deploy/helm/hook-ordering-check.py
+
       # The guards must be able to REFUSE. A validation nobody has watched fail
       # is a validation that may not work.
       - name: The value guards refuse bad input

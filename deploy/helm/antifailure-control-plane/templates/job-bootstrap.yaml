@@ -49,14 +49,21 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
           command: ["node", "bootstrap.mjs"]
+          # Both read from the hook's own Secret, never the release's: the
+          # release's does not exist yet when this runs.
           env:
-            {{- include "cp.appEnv" . | nindent 12 }}
-            # The privileged role. It appears here and in no other pod: the
-            # Deployment must not be able to run DDL even by accident.
+            - name: AF_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.bootstrapSecretName" . }}
+                  key: {{ .Values.database.secretKeys.url }}
+            # The privileged role. It appears here and in no pod that serves
+            # traffic: the Deployment must not be able to run DDL even by
+            # accident.
             - name: AF_MIGRATION_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "cp.databaseSecretName" . }}
+                  name: {{ include "cp.bootstrapSecretName" . }}
                   key: {{ .Values.database.secretKeys.migrationUrl }}
           resources: {{- toYaml .Values.bootstrap.resources | nindent 12 }}
           volumeMounts:
