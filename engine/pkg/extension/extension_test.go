@@ -31,6 +31,9 @@ func TestAnEmptyRegistryObservesNothingAndReportsNoProblems(t *testing.T) {
 	require.Empty(t, r.Observe(context.Background(), extension.LifecycleEvent{Kind: "up"}))
 	require.Empty(t, r.Audit(context.Background(), extension.AuditEntry{Action: "x"}))
 	require.Empty(t, r.Registered())
+	// Nothing extra to look a secret up in, which is what keeps the engine's
+	// lookup chain byte for byte the chain it was before this hook existed.
+	require.Empty(t, r.SecretSources())
 }
 
 func TestTheDefaultRegistryIsEmpty(t *testing.T) {
@@ -156,7 +159,72 @@ func TestRegisteredNamesWhatIsPluggedInSorted(t *testing.T) {
 	r.AddLifecycle(&failingLifecycle{})
 	r.AddAuditSink(&failingSink{})
 
-	require.Equal(t, []string{"audit:splunk", "lifecycle:meter", "policy:masking"}, r.Registered())
+	r.AddSecretSource(&stubSource{name: "HashiCorp Vault at vault.internal"})
+
+	require.Equal(t, []string{
+		"audit:splunk",
+		"lifecycle:meter",
+		"policy:masking",
+		"secret-source:HashiCorp Vault at vault.internal",
+	}, r.Registered())
+	require.False(t, r.Empty())
+}
+
+// ---------------------------------------------------------------------------
+
+// stubSource is a registered source as an adapter would write one: standard
+// library types only, and no knowledge of the engine's redacting Value at all.
+type stubSource struct {
+	name   string
+	ok     bool
+	why    string
+	values map[string]string
+}
+
+func (s *stubSource) Name() string                             { return s.name }
+func (s *stubSource) Available(context.Context) (bool, string) { return s.ok, s.why }
+func (s *stubSource) Lookup(_ context.Context, name string) (string, bool, error) {
+	v, ok := s.values[name]
+	return v, ok, nil
+}
+
+func TestSecretSourcesAreReturnedInRegistrationOrder(t *testing.T) {
+	t.Parallel()
+	// Order decides which of two sources answers, so it has to be the order
+	// they were added rather than whatever iteration happens to produce. An
+	// organization running both Vault and a cloud secret manager gets the same
+	// answer on every run.
+	r := extension.NewRegistry()
+	r.AddSecretSource(&stubSource{name: "first"})
+	r.AddSecretSource(&stubSource{name: "second"})
+	r.AddSecretSource(&stubSource{name: "third"})
+
+	got := r.SecretSources()
+	require.Len(t, got, 3)
+	require.Equal(t, "first", got[0].Name())
+	require.Equal(t, "second", got[1].Name())
+	require.Equal(t, "third", got[2].Name())
+}
+
+func TestSecretSourcesReturnsACopy(t *testing.T) {
+	t.Parallel()
+	// A caller that appended to the returned slice would otherwise be able to
+	// splice a source into the registry's own list without registering it.
+	r := extension.NewRegistry()
+	r.AddSecretSource(&stubSource{name: "real"})
+
+	got := r.SecretSources()
+	got[0] = &stubSource{name: "swapped"}
+
+	require.Equal(t, "real", r.SecretSources()[0].Name())
+}
+
+func TestARegistryWithOnlyASecretSourceIsNotEmpty(t *testing.T) {
+	t.Parallel()
+	// Empty() gates whole code paths, so a registry carrying only a secret
+	// source must not report itself as the community no-op.
+	r := extension.NewRegistry()
+	r.AddSecretSource(&stubSource{name: "vault"})
 	require.False(t, r.Empty())
 }
 
@@ -183,10 +251,19 @@ func TestConcurrentRegistrationAndUseIsSafe(t *testing.T) {
 			r.AddPolicy(&refusing{name: "p"})
 		}
 	}()
+	sources := make(chan struct{})
+	go func() {
+		defer close(sources)
+		for range 200 {
+			r.AddSecretSource(&stubSource{name: "s"})
+		}
+	}()
 	for range 200 {
 		_ = r.CheckPolicy(context.Background(), extension.EnvironmentRequest{})
 		_ = r.Registered()
 		_ = r.Empty()
+		_ = r.SecretSources()
 	}
 	<-done
+	<-sources
 }
