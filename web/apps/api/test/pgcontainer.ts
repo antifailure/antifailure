@@ -13,6 +13,7 @@
 // than the tests do.
 
 import { execFile } from 'node:child_process'
+import { readdir } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import postgres from 'postgres'
 
@@ -21,6 +22,43 @@ const run = promisify(execFile)
 export const CONTAINER = 'af-dr-test'
 export const PORT = 55433
 export const URL = `postgres://postgres:test@127.0.0.1:${PORT}/antifailure`
+
+/**
+ * The Postgres major this machine has a client for.
+ *
+ * The suite starts a server matching the newest pg_dump it can find rather than
+ * pinning a version, because dumping a newer server with an older client is
+ * unsupported and the tool under test refuses it. A GitHub runner ships the
+ * version 16 client and no 17, so a suite that insisted on 17 would refuse
+ * itself and report that as a failure of the code.
+ *
+ * Matching is also the honest thing to test. An operator's box has whatever
+ * client the base image shipped, and the drill has to work there.
+ */
+export async function clientMajor(): Promise<number> {
+  const found = new Set<number>()
+
+  try {
+    const { stdout } = await run('pg_dump', ['--version'])
+    const m = stdout.match(/(\d+)/)
+    if (m) found.add(Number(m[1]))
+  } catch {
+    // Nothing on PATH. The directories below may still have one.
+  }
+  try {
+    for (const name of await readdir('/usr/lib/postgresql')) {
+      const n = Number(name)
+      if (Number.isInteger(n)) found.add(n)
+    }
+  } catch {
+    // Not a Debian layout. Whatever PATH gave is what there is.
+  }
+
+  const best = [...found].sort((a, b) => b - a)[0]
+  // 17 when there is no client at all, so the failure is "pg_dump is missing"
+  // from the tool rather than a confusing image tag from here.
+  return best ?? 17
+}
 
 async function docker(args: string[]): Promise<string> {
   const { stdout } = await run('docker', args)
@@ -59,12 +97,13 @@ export async function start(): Promise<boolean> {
     'ps', '-a', '--filter', `name=^/${CONTAINER}$`, '--format', '{{.State}}',
   ])
   if (existing === '') {
+    const major = await clientMajor()
     await docker([
       'run', '-d', '--name', CONTAINER,
       '-p', `${PORT}:5432`,
       '-e', 'POSTGRES_PASSWORD=test',
       '-e', 'POSTGRES_DB=antifailure',
-      'postgres:17-alpine',
+      `postgres:${major}-alpine`,
     ])
   } else if (existing !== 'running') {
     await docker(['start', CONTAINER])
