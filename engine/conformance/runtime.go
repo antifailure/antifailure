@@ -202,9 +202,17 @@ func RunRuntime(t *testing.T, factory RuntimeFactory, opts RuntimeOptions) {
 // imagePrepareTimeout bounds making the suite's fixture image available.
 const imagePrepareTimeout = 25 * time.Minute
 
-// DefaultShellImage is small, has a shell, and is on every machine that has
-// ever run this test suite.
-const DefaultShellImage = "alpine:3.20"
+// DefaultShellImage is small and carries everything the suite needs from
+// inside an environment: a shell, wget, nslookup, env, grep, and an httpd that
+// serves more than one connection at a time.
+//
+// busybox rather than alpine, which is what this used first. Alpine's busybox
+// is built with a reduced applet set and has no httpd, so the fixture web
+// server exited 127 and six behaviours failed at once. The official busybox
+// image carries the full set, which is the whole reason to prefer it: one
+// image, no package installs, and an environment with no egress could not
+// install anything anyway.
+const DefaultShellImage = "busybox:1.36"
 
 // DefaultAllowedHost and DefaultRefusedHost are two real hosts. They are real
 // so that a refusal can be told apart from a machine with no internet, and

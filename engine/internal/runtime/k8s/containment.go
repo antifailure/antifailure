@@ -27,7 +27,20 @@ const probeName = "af-containment-probe"
 const containmentMarker = "AF-CONTAINMENT"
 
 // escapeScript tries every way out of the environment that does not go
-// through the sidecar, and reports which of them worked.
+// through the sidecar, and reports whether any of them still works.
+//
+// It LOOPS until nothing gets out, rather than asking once, and that is not
+// patience for its own sake. A NetworkPolicy is an object the API server
+// accepts immediately and the CNI programs some time afterwards, so there is a
+// window between creating the policy and the packet filter existing in which a
+// pod really is uncontained. Asking once inside that window reports an escape
+// on a cluster that contains everything a second later, which is a false
+// refusal; worse, it is the same window a SERVICE would start in. Waiting here
+// until an entire pass gets nowhere is what closes it for the services too,
+// because nothing else is created until this returns.
+//
+// What it does not do is soften: a pass that gets out is an escape, and the
+// deadline expiring with anything still reachable fails the environment.
 //
 // The four attempts are the ones the specification names, and each is a real
 // route somebody has used. A direct connection to a public address skips DNS
@@ -43,20 +56,23 @@ const containmentMarker = "AF-CONTAINMENT"
 // each hangs until it is cut off, and four hangs at the default timeout would
 // add minutes to every af up.
 const escapeScript = `
-escaped=""
-try() {
-  if "$@" >/dev/null 2>&1; then escaped="$escaped $1"; fi
-}
-wget -T 4 -q -O /dev/null http://1.1.1.1/ >/dev/null 2>&1 && escaped="$escaped tcp-to-a-public-address"
-nslookup example.com 1.1.1.1 >/dev/null 2>&1 && escaped="$escaped udp-to-a-public-resolver"
-wget -T 4 -q -O /dev/null http://169.254.169.254/ >/dev/null 2>&1 && escaped="$escaped the-instance-metadata-endpoint"
-wget -T 4 -q -O /dev/null --no-check-certificate https://kubernetes.default.svc/version >/dev/null 2>&1 && escaped="$escaped the-cluster-api-server"
-if [ -n "$escaped" ]; then
-  echo "` + containmentMarker + ` escaped:$escaped"
-  exit 1
-fi
-echo "` + containmentMarker + ` contained"
-exit 0
+deadline=$(( $(date +%s) + 90 ))
+while :; do
+  escaped=""
+  wget -T 3 -q -O /dev/null http://1.1.1.1/ >/dev/null 2>&1 && escaped="$escaped tcp-to-a-public-address"
+  nslookup example.com 1.1.1.1 >/dev/null 2>&1 && escaped="$escaped udp-to-a-public-resolver"
+  wget -T 3 -q -O /dev/null http://169.254.169.254/ >/dev/null 2>&1 && escaped="$escaped the-instance-metadata-endpoint"
+  wget -T 3 -q -O /dev/null --no-check-certificate https://kubernetes.default.svc/version >/dev/null 2>&1 && escaped="$escaped the-cluster-api-server"
+  if [ -z "$escaped" ]; then
+    echo "` + containmentMarker + ` contained"
+    exit 0
+  fi
+  if [ "$(date +%s)" -ge "$deadline" ]; then
+    echo "` + containmentMarker + ` escaped:$escaped"
+    exit 1
+  fi
+  sleep 2
+done
 `
 
 // verifyContainment refuses to bring an environment up on a cluster that does
