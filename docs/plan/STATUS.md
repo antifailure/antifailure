@@ -183,7 +183,8 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 3.5 Subsetting | planned | |
 | 3.6 Authentication adapters | planned | |
 | 3.7 Neon | proven | The full database conformance suite, all 23 behaviours, against the real Neon API. Found three bugs a fake would not have: `pooled` omitted means pooled, so `ConnDirect` was returning a pooled connection; a 200 with an empty body broke destroy-twice; and Neon's own branch ceiling arrived as an unexplained 422. |
-| 3.8, 3.9 Supabase, DBLab | planned | Blocked on Q5: no accounts provisioned. |
+| 3.8 Supabase | planned | Blocked on Q5: no account provisioned. |
+| 3.9 DBLab | written | `engine/internal/db/dblab` implements the provider and is exercised against a REAL Database Lab Engine (v4.1.3, built for arm64, ZFS pool in a Colima VM), not a fake. Not yet `proven`: the full 23 behaviour run has not completed cleanly end to end. Two real bugs already found that a fake would have agreed with. A clone leaves the engine's API before its ZFS dataset is released, so collecting a golden raced a teardown the API said was finished. And a three minute wait was too short for a second concurrent clone, which did not merely fail: the engine finished making the clone afterwards, so giving up early created an orphan. |
 | 3.10 Golden lifecycle | planned | |
 | 3.11 Postgres Insights | planned | |
 
@@ -213,7 +214,8 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/verify` attestation | proven | Ed25519; rejects a deleted finding |
 | `internal/subset` | proven | dependency order, cycles named where they break, unreachable tables reported |
 | Neon provider | proven | against the real service |
-| Supabase, DBLab providers | planned | blocked on accounts |
+| Supabase provider | planned | blocked on an account |
+| DBLab provider | written | run against a real self hosted engine; full suite pass outstanding |
 
 ## Phase 4. Build and runtime
 
@@ -371,7 +373,11 @@ code that has not been written:
 
 - **8.10** is no longer blocked on an AKS decision. The control plane runs on Container Apps, where the whole stack costs 32.49 USD a month against roughly 75 for an idle AKS control plane before a node runs. The Terraform is written and plans clean; what is left is the decision to spend, and an Entra app registration so CI can plan with a federated credential instead of skipping.
 - **14.1, 14.3, 14.10** still want a cluster, which costs money for as long as it exists.
-- **3.8 and 3.9** need Supabase and DBLab accounts. 3.7 no longer does.
+- **3.8** needs a Supabase account. 3.7 no longer does. **3.9 never needed one**:
+  a Database Lab Engine is self hosted, so the only cost is a machine with ZFS
+  and a copy of production. `docs/providers/dblab` says how to stand one up,
+  including on Apple Silicon, where neither ZFS nor an arm64 image exists
+  out of the box.
 - **13.2, 13.3** need identity provider test tenants.
 - **13.9** needs a Stripe account.
 - **8.3, 8.4, 8.8, 8.9, and Phase 11** are the web application and the docs
