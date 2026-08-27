@@ -170,6 +170,7 @@ func volumeExists(t *testing.T, cli *client.Client, name string) bool {
 }
 
 func TestAKilledEngineIsReconciledFromTheJournal(t *testing.T) {
+	scenario(t)
 	cli := requireDocker(t)
 	o, envID, stateDir := newEnvironment(t, "chaos/killed-engine")
 
@@ -218,6 +219,7 @@ func TestAKilledEngineIsReconciledFromTheJournal(t *testing.T) {
 // already gone has to succeed, or a record stays live forever describing a
 // resource that does not exist.
 func TestReconcilingAResourceThatIsAlreadyGoneSucceeds(t *testing.T) {
+	scenario(t)
 	requireDocker(t)
 	o, envID, stateDir := newEnvironment(t, "chaos/already-gone")
 
@@ -240,6 +242,7 @@ func TestReconcilingAResourceThatIsAlreadyGoneSucceeds(t *testing.T) {
 // Running teardown twice is not an error and must not undo the first one's
 // bookkeeping. This is the ordering a user reaches by pressing up-enter.
 func TestReconcilingTwiceIsNotAnError(t *testing.T) {
+	scenario(t)
 	cli := requireDocker(t)
 	o, envID, stateDir := newEnvironment(t, "chaos/twice")
 
@@ -270,6 +273,7 @@ func TestReconcilingTwiceIsNotAnError(t *testing.T) {
 // reported: a resource nothing can remove and nobody is told about is the leak
 // the journal exists to prevent, with a record of itself.
 func TestAResourceThisBuildCannotDeleteIsReportedRatherThanForgotten(t *testing.T) {
+	scenario(t)
 	requireDocker(t)
 	o, envID, stateDir := newEnvironment(t, "chaos/unknown-kind")
 

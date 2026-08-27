@@ -146,6 +146,7 @@ func spoolFiles(t *testing.T, dir string) []string {
 }
 
 func TestACommandRunAgainstALiveControlPlaneReportsToIt(t *testing.T) {
+	scenario(t)
 	requireDocker(t)
 	plane := newDeadOrLivePlane(true)
 	srv := httptest.NewServer(plane)
@@ -164,6 +165,7 @@ func TestACommandRunAgainstALiveControlPlaneReportsToIt(t *testing.T) {
 }
 
 func TestEventsFromACommandRunWhileTheControlPlaneWasDownArriveWithTheNextOne(t *testing.T) {
+	scenario(t)
 	requireDocker(t)
 	plane := newDeadOrLivePlane(false)
 	srv := httptest.NewServer(plane)

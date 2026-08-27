@@ -100,6 +100,7 @@ func refreshGolden(ctx context.Context, t *testing.T, p *dockerdb.Provider, rule
 }
 
 func TestABranchInterruptedPartWayThroughIsEitherGoneOrInTheInventory(t *testing.T) {
+	scenario(t)
 	p := newDockerProvider(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
@@ -181,6 +182,7 @@ func TestABranchInterruptedPartWayThroughIsEitherGoneOrInTheInventory(t *testing
 // first. If a delete is reported complete before it is, anything that acts on
 // what the resource was holding is racing a teardown it cannot see.
 func TestAProviderThatReportsADeleteAsCompleteHasActuallyReleasedIt(t *testing.T) {
+	scenario(t)
 	p := newDockerProvider(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)

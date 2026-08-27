@@ -51,6 +51,7 @@ func orchestratorOver(t *testing.T, dir, branch string) *env.Orchestrator {
 }
 
 func TestATeardownAgainstAnUnreachableProviderSaysSoAndTheNextOneFinishesIt(t *testing.T) {
+	scenario(t)
 	cli := requireDocker(t)
 	dir := chaosRepo(t)
 	envID := env.EnvID("chaostest", "chaos/partition")
@@ -116,6 +117,7 @@ func TestATeardownAgainstAnUnreachableProviderSaysSoAndTheNextOneFinishesIt(t *t
 // teardown that leaves work behind must not exit zero, or a pipeline that tears
 // down after every run accumulates resources while every job goes green.
 func TestAnIncompleteTeardownCarriesTheCodeAndTheExitStatusThatSayItIsIncomplete(t *testing.T) {
+	scenario(t)
 	err := aferrors.Coded(aferrors.AFRUN030, "count", "3")
 	require.Equal(t, aferrors.ExitInterruptedDirty, aferrors.ExitCodeOf(err),
 		"an incomplete teardown that exits zero is a leak with a green tick over it")
