@@ -78,18 +78,24 @@ func main() {
 	for _, note := range notes {
 		fmt.Fprintf(os.Stderr, "af: %s\n", note)
 	}
+
+	// Each configured store, with whether it can actually be used, at startup
+	// rather than on the first environment somebody tries to create. This makes
+	// whatever reachability check each store has, which is the point: an
+	// operator whose Vault token expired should find that out when they start
+	// the binary, not twenty minutes later inside a failed run.
+	//
+	// Only when a store is configured, so the ordinary case of no enterprise
+	// secret sources at all prints nothing. A banner on every invocation of
+	// every command is a banner people stop reading.
+	if len(registered) > 0 {
+		for _, line := range secrets.Describe(ctx, registered) {
+			fmt.Fprintf(os.Stderr, "af: secret source: %s\n", line)
+		}
+	}
 	if warning := status.Warning; warning != "" {
 		fmt.Fprintf(os.Stderr, "af: %s\n", warning)
 	}
-	if len(registered) > 0 && !status.Enabled(license.FeatureSecrets) {
-		// Worth saying explicitly. Otherwise an operator has configured Vault,
-		// can see it in af license status, and cannot work out why every
-		// variable still resolves out of .env.
-		fmt.Fprintf(os.Stderr,
-			"af: %d secret source(s) are configured and the enterprise_secrets feature is "+
-				"not licensed, so they will not be asked\n", len(registered))
-	}
-
 	os.Exit(afcli.Run(ctx, os.Args[1:], afcli.Options{
 		Extra: []afcli.Command{compliance.Contributed(gatherEvidence)},
 	}))
