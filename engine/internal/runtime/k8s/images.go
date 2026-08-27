@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -58,14 +59,33 @@ type LocalClusterLoader struct {
 	Tool string
 	// Cluster is the cluster name that tool knows it by.
 	Cluster string
+
+	// done records what has already been copied in.
+	//
+	// A copy is a full export of the image and a load into the node's store,
+	// which for a small image is tens of seconds and for a real application
+	// image is minutes. Neither tool will tell you whether an image is
+	// already there, and an image that is there stays there for the life of
+	// the cluster, so the cheapest correct answer is to remember. Without
+	// this, every environment re-copied every image it uses, and the
+	// conformance suite re-copied the same one thirty one times.
+	mu   sync.Mutex
+	done map[string]bool
 }
 
-func (l LocalClusterLoader) Describe() string {
+func (l *LocalClusterLoader) Describe() string {
 	return fmt.Sprintf("images are copied from the local Docker daemon into the %s cluster %q",
 		l.Tool, l.Cluster)
 }
 
-func (l LocalClusterLoader) Ensure(ctx context.Context, ref string) (string, error) {
+func (l *LocalClusterLoader) Ensure(ctx context.Context, ref string) (string, error) {
+	l.mu.Lock()
+	if l.done[ref] {
+		l.mu.Unlock()
+		return ref, nil
+	}
+	l.mu.Unlock()
+
 	var cmd *exec.Cmd
 	switch l.Tool {
 	case "k3d":
@@ -82,6 +102,12 @@ func (l LocalClusterLoader) Ensure(ctx context.Context, ref string) (string, err
 			"detail", fmt.Sprintf("copying %s into the %s cluster %q failed: %v: %s",
 				ref, l.Tool, l.Cluster, err, strings.TrimSpace(string(out))))
 	}
+	l.mu.Lock()
+	if l.done == nil {
+		l.done = map[string]bool{}
+	}
+	l.done[ref] = true
+	l.mu.Unlock()
 	return ref, nil
 }
 
@@ -93,10 +119,10 @@ func (l LocalClusterLoader) Ensure(ctx context.Context, ref string) (string, err
 // assuming. A wrong guess here would try to copy an image into a production
 // cluster and fail confusingly; no guess just means the images have to come
 // from a registry, which is what a production cluster wanted anyway.
-func LocalClusterLoaderFor(kubeContext string) (ImageLoader, bool) {
+func LocalClusterLoaderFor(kubeContext string) (*LocalClusterLoader, bool) {
 	for _, tool := range []string{"k3d", "kind"} {
 		if name, ok := strings.CutPrefix(kubeContext, tool+"-"); ok && name != "" {
-			return LocalClusterLoader{Tool: tool, Cluster: name}, true
+			return &LocalClusterLoader{Tool: tool, Cluster: name, done: map[string]bool{}}, true
 		}
 	}
 	return nil, false

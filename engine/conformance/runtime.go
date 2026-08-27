@@ -144,7 +144,13 @@ func RunRuntime(t *testing.T, factory RuntimeFactory, opts RuntimeOptions) {
 	_ = probe.Close()
 
 	if opts.PrepareImage != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
+		// Its own budget, and a generous one. Timeout bounds a BEHAVIOR, and
+		// making an image available is setup: on a cluster it is a full
+		// export of the image and a load into the node's store, which has
+		// nothing to do with how long any behavior should take. Bounding it
+		// by the behavior timeout killed the copy halfway on a busy machine
+		// and reported it as the suite failing.
+		ctx, cancel := context.WithTimeout(context.Background(), imagePrepareTimeout)
 		if err := opts.PrepareImage(ctx, opts.ShellImage); err != nil {
 			cancel()
 			t.Fatalf("the suite could not make %s available to the runtime: %v", opts.ShellImage, err)
@@ -192,6 +198,9 @@ func RunRuntime(t *testing.T, factory RuntimeFactory, opts RuntimeOptions) {
 			"when it finishes, whether it passed or not", res)
 	}
 }
+
+// imagePrepareTimeout bounds making the suite's fixture image available.
+const imagePrepareTimeout = 25 * time.Minute
 
 // DefaultShellImage is small, has a shell, and is on every machine that has
 // ever run this test suite.

@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"strings"
@@ -235,7 +236,7 @@ func secretValue(s string) secrets.Value { return secrets.New(s) }
 
 func TestTheSidecarCanBindTheDNSPort(t *testing.T) {
 	r := &Runtime{prefix: DefaultNamespacePrefix, proxyRef: "proxy:test"}
-	_, deployment, _, err := r.proxyObjects("e1", "af-env-e1", "10.42.0.0/16", "10.43.0.10:53",
+	_, deployment, _, err := r.proxyObjects(context.Background(), "e1", "af-env-e1", "10.42.0.0/16", "10.43.0.10",
 		provider.EnvSpec{EnvID: "e1"})
 	require.NoError(t, err)
 
@@ -307,7 +308,7 @@ func TestANameserverIsABareAddress(t *testing.T) {
 
 func TestTheSidecarIsGivenAnEndpoint(t *testing.T) {
 	r := &Runtime{prefix: DefaultNamespacePrefix, proxyRef: "proxy:test"}
-	secret, _, _, err := r.proxyObjects("e1", "af-env-e1", "10.42.0.0/16", "10.43.0.10",
+	secret, _, _, err := r.proxyObjects(context.Background(), "e1", "af-env-e1", "10.42.0.0/16", "10.43.0.10",
 		provider.EnvSpec{EnvID: "e1"})
 	require.NoError(t, err)
 
