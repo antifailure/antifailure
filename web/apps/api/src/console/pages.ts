@@ -848,3 +848,200 @@ export async function membersPage(pool: Pool, viewer: Viewer, orgId: string): Pr
     `,
   )
 }
+
+// ---------------------------------------------------------------------------
+// Provider keys
+// ---------------------------------------------------------------------------
+
+/**
+ * Bring your own key, and the budget that bounds it.
+ *
+ * The key is never rendered. It cannot be: nothing on this page reads the
+ * ciphertext, and the three things it does show -- provider, last four,
+ * fingerprint -- are the columns stored beside it precisely so that a screen
+ * has no reason to ask for the secret.
+ *
+ * The budget is on the same page rather than behind a tab, because a key with
+ * no cap is the shape of an unbounded bill on somebody else's card, and putting
+ * the cap one click away is how it ends up unset.
+ */
+export function keysPage(input: {
+  viewer: Viewer
+  keys: { provider: string; last4: string; fingerprint: string; createdAt: Date; rotatedAt: Date | null }[]
+  budgets: { provider: string; capUsd: number; spentUsd: number; remainingUsd: number; period: string }[]
+  sealingConfigured: boolean
+  notice?: { tone: 'ok' | 'bad' | 'warn'; title: string; body: string }
+}): Html {
+  const { viewer } = input
+  const byProvider = (p: string) => input.keys.find((k) => k.provider === p) ?? null
+  const budgetFor = (p: string) => input.budgets.find((b) => b.provider === p) ?? null
+
+  const providers: { id: string; name: string; hint: string }[] = [
+    { id: 'anthropic', name: 'Anthropic', hint: 'Starts with sk-ant-. Used for the agents that drive your workflows.' },
+    { id: 'openai', name: 'OpenAI', hint: 'Starts with sk-. Used when a workflow names an OpenAI model.' },
+  ]
+
+  return page(
+    { title: 'Provider keys', current: 'keys', viewer, environmentLabel: 'staging' },
+    html`
+      <div class="page">
+        <div class="page-head">
+          <div class="eyebrow">Organization</div>
+          <h1>Provider keys</h1>
+          <p>
+            Your own Anthropic and OpenAI keys, sealed with a secret that is not in this
+            database. They are never shown again after you save them, including to us: the
+            last four characters and a fingerprint are all that any screen can read.
+          </p>
+        </div>
+
+        ${
+          input.notice
+            ? html`<div class="notice ${input.notice.tone}">
+                <span><strong>${input.notice.title}</strong>${input.notice.body}</span>
+              </div>`
+            : ''
+        }
+
+        ${
+          input.sealingConfigured
+            ? ''
+            : html`<div class="notice bad">
+                <span>
+                  <strong>Keys cannot be stored on this installation</strong>
+                  AF_PROVIDER_KEY_SECRET is not set, so there is nothing to seal them with.
+                  Until it is, saving a key is refused rather than stored in the clear.
+                </span>
+              </div>`
+        }
+
+        <div class="grid grid-2">
+          ${providers.map((p) => {
+            const key = byProvider(p.id)
+            const budget = budgetFor(p.id)
+            const spentPct = budget && budget.capUsd > 0 ? Math.min(100, (budget.spentUsd / budget.capUsd) * 100) : 0
+            return html`
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>${p.name}</h2>
+                  ${key ? chip('active') : html`<span class="chip neutral">not set</span>`}
+                </div>
+                <div class="panel-body">
+                  ${
+                    key
+                      ? html`
+                          <dl class="kv" style="margin-bottom:18px">
+                            <dt>Key</dt>
+                            <dd class="mono">••••••••${key.last4}</dd>
+                            <dt>Fingerprint</dt>
+                            <dd class="mono" style="color:var(--ink-3)">${key.fingerprint}</dd>
+                            <dt>Stored</dt>
+                            <dd>${when(key.createdAt)}</dd>
+                            ${key.rotatedAt ? html`<dt>Rotated</dt><dd>${when(key.rotatedAt)}</dd>` : ''}
+                          </dl>
+                        `
+                      : html`
+                          <p class="hint" style="margin-bottom:18px">
+                            No key stored. Runs that need ${p.name} are refused with a message
+                            saying so, rather than falling back to a key of ours.
+                          </p>
+                        `
+                  }
+
+                  <form method="post" action="/console/keys">
+                    <input type="hidden" name="csrf" value="${viewer.csrfToken}" />
+                    <input type="hidden" name="provider" value="${p.id}" />
+                    <div class="field">
+                      <label for="key-${p.id}">${key ? `Replace the ${p.name} key` : `${p.name} API key`}</label>
+                      <input
+                        id="key-${p.id}"
+                        name="key"
+                        type="password"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="${key ? 'Paste a new key to rotate' : 'Paste your key'}"
+                      />
+                      <p class="hint">${p.hint}</p>
+                    </div>
+                    <div class="row">
+                      <button class="btn btn-primary" type="submit" name="action" value="save"
+                        ${input.sealingConfigured ? raw('') : raw('disabled')}>
+                        ${key ? 'Rotate' : 'Save'}
+                      </button>
+                      ${
+                        key
+                          ? html`<button class="btn btn-danger" type="submit" name="action" value="revoke">
+                              Remove
+                            </button>`
+                          : ''
+                      }
+                    </div>
+                  </form>
+                </div>
+
+                <div class="panel-head" style="border-top:1px solid var(--hairline-soft);border-bottom:0">
+                  <h2>Monthly budget</h2>
+                  <span class="chip neutral">${budget ? budget.period.slice(0, 7) : 'not set'}</span>
+                </div>
+                <div class="panel-body">
+                  ${
+                    budget
+                      ? html`
+                          <div class="stat" style="padding:0 0 12px">
+                            <div class="v">${budget.spentUsd.toFixed(2)}<span style="color:var(--ink-3);font-size:15px;font-weight:500"> of ${budget.capUsd.toFixed(2)} USD</span></div>
+                            <div class="sub">${budget.remainingUsd.toFixed(2)} USD left this month</div>
+                          </div>
+                          <div style="height:6px;border-radius:3px;background:var(--surface-sunk);overflow:hidden">
+                            <div style="height:100%;width:${spentPct.toFixed(1)}%;background:${spentPct >= 100 ? 'var(--danger)' : 'var(--accent)'}"></div>
+                          </div>
+                        `
+                      : html`
+                          <p class="hint" style="margin-bottom:14px">
+                            No budget, and that means nothing may be spent. A missing cap is read
+                            as zero rather than as unlimited, because the alternative on somebody
+                            else's key is an unbounded bill.
+                          </p>
+                        `
+                  }
+                  <form method="post" action="/console/keys" class="row" style="margin-top:14px">
+                    <input type="hidden" name="csrf" value="${viewer.csrfToken}" />
+                    <input type="hidden" name="provider" value="${p.id}" />
+                    <input type="hidden" name="action" value="budget" />
+                    <div class="field" style="flex:1;margin-bottom:0">
+                      <label for="cap-${p.id}">Cap, USD per month</label>
+                      <input id="cap-${p.id}" name="cap" type="number" min="0" step="1"
+                             value="${budget ? String(budget.capUsd) : ''}" placeholder="50" />
+                    </div>
+                    <button class="btn" type="submit">Set</button>
+                  </form>
+                </div>
+              </div>
+            `
+          })}
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>What happens to a key here</h2></div>
+          <div class="panel-body">
+            <p style="color:var(--ink-2)">
+              It is sealed with AES-256-GCM under a secret held outside this database, bound
+              to this organization and this provider. A row copied to another tenant does not
+              open. A row edited by one bit does not open.
+            </p>
+            <p style="color:var(--ink-2)">
+              The only code that ever holds the plaintext is the code putting it in a request
+              to the provider. It is not in an event, an artifact, a log line, or a support
+              bundle, and the budget above is checked before it is decrypted, so a run with no
+              allowance never causes the key to exist in memory at all.
+            </p>
+            <p style="color:var(--ink-2)">
+              Rotating stores the new key and revokes the old one in the same transaction. The
+              old fingerprint stays in the audit log so it is possible to say which key was in
+              use when, without either key being readable.
+            </p>
+          </div>
+        </div>
+      </div>
+    `,
+  )
+}

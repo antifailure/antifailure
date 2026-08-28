@@ -97,7 +97,7 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   },
   'GET /console/icon.svg': {
     rate: 20, burst: 120, key: 'ip',
-    reason: 'The favicon, cached for a day.',
+    reason: 'The favicon, cached for a day, so a browser fetches it once per session and never again.',
   },
   'GET /environments': {
     rate: 10, burst: 60, key: 'ip',
@@ -142,6 +142,15 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   'POST /console/signout': {
     rate: 2, burst: 20, key: 'ip',
     reason: 'Signing out must never be refused in practice; this only bounds a script.',
+  },
+
+  'GET /settings/keys': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'Two queries for the keys and this month\'s budgets. Never reads a ciphertext.',
+  },
+  'POST /console/keys': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Storing, rotating or removing a key, and setting a cap. A person does this a few times a year, and a script doing it faster is not a person.',
   },
 
   'GET /openapi.json': {

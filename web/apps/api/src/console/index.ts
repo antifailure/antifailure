@@ -29,8 +29,11 @@ import {
   clearedCookie,
 } from '../auth/session.ts'
 import { approveDeviceCode, denyDeviceCode, describePending, DeviceError, normaliseUserCode } from '../auth/device.ts'
+import { PROVIDERS, type Provider } from '../providers/seal.ts'
+import { listBudgets, listKeys, ProviderKeyError, revokeKey, saveKey, setBudget } from '../providers/store.ts'
 import { CONSOLE_CSS, CONSOLE_ICON, html, page, type Viewer } from './layout.ts'
 import {
+  keysPage,
   auditPage,
   devicePage,
   environmentPage,
@@ -48,6 +51,10 @@ export interface ConsoleOptions {
   pool: Pool
   clock: Clock
   secureCookies: boolean
+  /** The secret that seals provider keys, or null when none is configured.
+   *  Null does not disable the page: it shows why keys cannot be stored, which
+   *  is more useful than a form that fails on submit. */
+  sealingKey?: Buffer | null
 }
 
 // Strict, and it names every source rather than relying on a default. The
@@ -234,6 +241,144 @@ export function mountConsole(app: Hono, options: ConsoleOptions): void {
       throw err
     }
     return send(c, devicePage({ viewer, code, pending: null, approved: true }))
+  })
+
+  // ---- provider keys ------------------------------------------------------
+
+  async function renderKeys(
+    c: Context,
+    viewer: Viewer,
+    orgId: string,
+    notice?: { tone: 'ok' | 'bad' | 'warn'; title: string; body: string },
+  ) {
+    const [keys, budgets] = await Promise.all([
+      listKeys(pool, orgId),
+      listBudgets(pool, clock, orgId),
+    ])
+    return send(
+      c,
+      keysPage({
+        viewer,
+        keys,
+        budgets,
+        sealingConfigured: Boolean(options.sealingKey),
+        notice,
+      }),
+    )
+  }
+
+  app.get('/settings/keys', guarded((c, v, org) => renderKeys(c, v, org).then((r) => r as never)))
+
+  app.post('/console/keys', async (c) => {
+    const viewer = await viewerFor(c)
+    if (!viewer) return send(c, signInPage(), 401)
+    if (!viewer.organization) return send(c, noOrganizationPage(viewer), 403)
+
+    const form = await c.req.formData()
+    if (!csrfOk(c, String(form.get('csrf') ?? ''))) {
+      return renderKeys(c, viewer, viewer.organization, {
+        tone: 'bad',
+        title: 'That request could not be trusted',
+        body: 'Reload the page and try again.',
+      })
+    }
+
+    const provider = String(form.get('provider') ?? '') as Provider
+    if (!PROVIDERS.includes(provider)) {
+      return renderKeys(c, viewer, viewer.organization, {
+        tone: 'bad',
+        title: 'Unknown provider',
+        body: 'Only Anthropic and OpenAI keys can be stored here.',
+      })
+    }
+
+    const action = String(form.get('action') ?? '')
+    try {
+      if (action === 'budget') {
+        const cap = Number(form.get('cap') ?? '')
+        if (!Number.isFinite(cap) || cap < 0) {
+          return renderKeys(c, viewer, viewer.organization, {
+            tone: 'bad',
+            title: 'That is not a cap',
+            body: 'Give a number of US dollars, zero or more.',
+          })
+        }
+        const budget = await setBudget(pool, clock, {
+          orgId: viewer.organization,
+          provider,
+          capUsd: cap,
+          actorLabel: viewer.label,
+          actorUserId: viewer.userId,
+        })
+        return renderKeys(c, viewer, viewer.organization, {
+          tone: 'ok',
+          title: `The ${provider} cap is now ${budget.capUsd.toFixed(2)} USD a month`,
+          body: `${budget.spentUsd.toFixed(2)} USD has been spent so far this month.`,
+        })
+      }
+
+      if (action === 'revoke') {
+        const { revoked } = await revokeKey(pool, clock, {
+          orgId: viewer.organization,
+          provider,
+          actorLabel: viewer.label,
+          actorUserId: viewer.userId,
+        })
+        return renderKeys(c, viewer, viewer.organization, {
+          tone: revoked ? 'ok' : 'warn',
+          title: revoked ? `The ${provider} key is removed` : 'There was nothing to remove',
+          body: revoked
+            ? 'It cannot be used from here again. Revoke it at the provider too, because this does not reach them.'
+            : `No ${provider} key was stored.`,
+        })
+      }
+
+      const key = String(form.get('key') ?? '')
+      if (!key.trim()) {
+        return renderKeys(c, viewer, viewer.organization, {
+          tone: 'bad',
+          title: 'No key was given',
+          body: 'Paste the key into the field before saving.',
+        })
+      }
+      if (!options.sealingKey) {
+        // Refused rather than stored in the clear. An installation with no
+        // sealing secret has nowhere safe to put this.
+        return renderKeys(c, viewer, viewer.organization, {
+          tone: 'bad',
+          title: 'This installation cannot store a key',
+          body: 'AF_PROVIDER_KEY_SECRET is not set, so there is nothing to seal it with.',
+        })
+      }
+
+      const result = await saveKey(pool, clock, options.sealingKey, {
+        orgId: viewer.organization,
+        provider,
+        key,
+        actorUserId: viewer.userId,
+        actorLabel: viewer.label,
+      })
+      return renderKeys(c, viewer, viewer.organization, {
+        tone: result.sameAsBefore ? 'warn' : 'ok',
+        title: result.sameAsBefore
+          ? 'That is the key that was already stored'
+          : result.replaced
+            ? `The ${provider} key is rotated`
+            : `The ${provider} key is stored`,
+        body: result.sameAsBefore
+          ? 'Nothing changed. If you meant to rotate, create a new key at the provider first.'
+          : `It ends ${result.stored.last4}. It will not be shown again.`,
+      })
+    } catch (err) {
+      if (err instanceof ProviderKeyError) {
+        return renderKeys(c, viewer, viewer.organization, {
+          tone: 'bad',
+          title: 'That key was not stored',
+          body: err.message,
+        })
+      }
+      throw err
+    }
   })
 
   // ---- signing out --------------------------------------------------------

@@ -74,6 +74,9 @@ export interface ServerOptions {
   signInAllowlist?: SignInAllowlist
   /** Set false to serve the API alone, without the console's pages. */
   console?: boolean
+  /** The secret that seals provider keys. Null means keys cannot be stored,
+   *  which the console says out loud rather than failing on submit. */
+  sealingKey?: Buffer | null
   ingestLimit?: { rate: number; burst: number }
   authLimit?: { rate: number; burst: number }
 }
@@ -666,7 +669,12 @@ export function createServer(options: ServerOptions) {
   // browser holds is the session these pages read, and a separate origin would
   // need CORS, a second cookie policy and a place to put a token in a client.
   if (options.console !== false) {
-    mountConsole(app, { pool: options.pool, clock, secureCookies: secure })
+    mountConsole(app, {
+      pool: options.pool,
+      clock,
+      secureCookies: secure,
+      sealingKey: options.sealingKey ?? null,
+    })
   }
 
   return { app, ingestLimiter, authLimiter }
