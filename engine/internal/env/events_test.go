@@ -143,3 +143,24 @@ func TestRuntimeProgressLinesCarryTheServiceTheyName(t *testing.T) {
 		require.Equal(t, c.want, fields[0].Value)
 	}
 }
+
+// A service that started cleanly has no detail to give, and a real run put
+// "service.ready web is running detail= " on the screen because the field was
+// attached whatever its value. A key with nothing after it is noise in the one
+// place a reader is scanning.
+func TestEmptyFieldsAreLeftOffRatherThanSentEmpty(t *testing.T) {
+	got := env.NonEmptyForTest("service", "web", "kind", "web", "url", "", "detail", "")
+
+	require.Len(t, got, 2, "an empty value should not become a field")
+	require.Equal(t, "service", got[0].Key)
+	require.Equal(t, "web", got[0].Value)
+	require.Equal(t, "kind", got[1].Key)
+
+	require.Empty(t, env.NonEmptyForTest("url", "", "detail", ""))
+	require.Empty(t, env.NonEmptyForTest())
+
+	// An odd number of arguments is a caller's mistake, and dropping the last
+	// one is better than a field with no value or a panic in the middle of a
+	// run.
+	require.Len(t, env.NonEmptyForTest("service", "web", "kind"), 1)
+}

@@ -43,6 +43,7 @@ This page is generated from `schemas/events.v1.json`. Edit the schema, then run 
 | `egress.decision` | The proxy decided what to do with an outbound request. |
 | `egress.tripwire` | A request carrying a live credential was blocked. |
 | `engine.error` | An operation failed. The data carries the error code. |
+| `engine.progress` | A step in a long running operation, for work with no more specific event of its own. |
 | `engine.retry` | A provider call is being retried after a transient failure. |
 | `engine.sink_dropped` | A sink fell behind and dropped events. The data carries the count. |
 | `engine.warning` | Something is not right but the operation continues. |
