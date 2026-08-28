@@ -12,7 +12,14 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/api .
 
 FROM alpine:3.20
-RUN adduser -D -u 10001 api
+# psql, because the manifest's migrate command uses it and it runs inside this
+# image. Leaving it out made `af up` wait on a migration that could never run,
+# which the walkthrough found and reading the Dockerfile did not.
+#
+# postgresql-client, not postgresql17-client. Alpine 3.20 has no such package
+# and `apk add` fails the build; the unversioned name gives psql 16, which
+# talks to a 17 server perfectly well.
+RUN apk add --no-cache postgresql-client && adduser -D -u 10001 api
 USER api
 COPY --from=build /out/api /usr/local/bin/api
 EXPOSE 3000
