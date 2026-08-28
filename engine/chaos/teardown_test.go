@@ -58,7 +58,7 @@ func TestATeardownAgainstAnUnreachableProviderSaysSoAndTheNextOneFinishesIt(t *t
 
 	netName := "af-chaos-partition-" + envID
 	t.Cleanup(func() { _ = cli.NetworkRemove(context.Background(), netName) })
-	_, err := cli.NetworkCreate(t.Context(), netName, network.CreateOptions{})
+	_, err := cli.NetworkCreate(t.Context(), netName, network.CreateOptions{Labels: ownedByUs(envID)})
 	require.NoError(t, err)
 
 	journalAs(t, filepath.Join(dir, env.StateDir), envID,

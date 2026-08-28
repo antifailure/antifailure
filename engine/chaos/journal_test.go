@@ -174,10 +174,10 @@ func TestAKilledEngineIsReconciledFromTheJournal(t *testing.T) {
 	cli := requireDocker(t)
 	o, envID, stateDir := newEnvironment(t, "chaos/killed-engine")
 
-	// Deliberately unlabelled. An environment's own resources carry labels and
-	// the teardown sweep finds them by those labels, so labelling these would
-	// let the sweep pass this test and hide whether the journal did anything.
-	// The journal is the only thing that knows about them.
+	// Owned by Antifailure and invisible to the sweep. See ownedByUs: the
+	// sweep needs the environment label as well as the managed one, so these
+	// carry only the managed one. The journal is the only thing that can find
+	// them, which is what this scenario is about.
 	netName := "af-chaos-net-" + envID
 	volName := "af-chaos-vol-" + envID
 	t.Cleanup(func() {
@@ -185,9 +185,9 @@ func TestAKilledEngineIsReconciledFromTheJournal(t *testing.T) {
 		_ = cli.VolumeRemove(context.Background(), volName, true)
 	})
 
-	_, err := cli.NetworkCreate(t.Context(), netName, network.CreateOptions{})
+	_, err := cli.NetworkCreate(t.Context(), netName, network.CreateOptions{Labels: ownedByUs(envID)})
 	require.NoError(t, err)
-	_, err = cli.VolumeCreate(t.Context(), volume.CreateOptions{Name: volName})
+	_, err = cli.VolumeCreate(t.Context(), volume.CreateOptions{Name: volName, Labels: ownedByUs(envID)})
 	require.NoError(t, err)
 	require.True(t, networkExists(t, cli, netName))
 	require.True(t, volumeExists(t, cli, volName))
@@ -248,7 +248,7 @@ func TestReconcilingTwiceIsNotAnError(t *testing.T) {
 
 	netName := "af-chaos-twice-" + envID
 	t.Cleanup(func() { _ = cli.NetworkRemove(context.Background(), netName) })
-	_, err := cli.NetworkCreate(t.Context(), netName, network.CreateOptions{})
+	_, err := cli.NetworkCreate(t.Context(), netName, network.CreateOptions{Labels: ownedByUs(envID)})
 	require.NoError(t, err)
 
 	journalAs(t, stateDir, envID,
@@ -316,4 +316,27 @@ func pendingSummary(td *env.Teardown) string {
 		fmt.Fprintf(&b, "%s %s: %s", p.Kind, p.ID, p.Reason)
 	}
 	return b.String()
+}
+
+// ownedByUs is the label set the engine puts on everything it creates, WITHOUT
+// the environment label the teardown sweep filters on.
+//
+// The distinction is the whole point of these fixtures and it took a CI failure
+// to get right. These resources have to be invisible to the label sweep, or the
+// sweep passes the test and says nothing about whether the journal did
+// anything. The first version achieved that by creating them with NO labels at
+// all, which also made them, correctly, not Antifailure's: the compensating
+// delete now refuses a resource it does not own, and refused these.
+//
+// dockerutil.EnvFilter requires BOTH the managed label and the environment
+// label, so carrying only the first is invisible to the sweep and still owned.
+// It is also the more honest fixture. The real engine passes its labels to
+// NetworkCreate and VolumeCreate in the same call that makes the resource, so
+// there is no instant in which a crash could leave an unlabelled resource
+// behind. A test that simulated a crash by producing one was simulating a state
+// the engine cannot reach.
+func ownedByUs(envID string) map[string]string {
+	labels := dockerutil.Managed(dockerutil.KindNetwork, envID, time.Now())
+	delete(labels, dockerutil.LabelEnv)
+	return labels
 }
