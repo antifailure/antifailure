@@ -82,7 +82,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - uses: extractions/setup-just@e33e0f60d0f8a86c1fc0d6d18d75d1c9e5cfdc44 # v3.0.0
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
 
       - name: A Postgres for the control plane's own suite
         run: |
