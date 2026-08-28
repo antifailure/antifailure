@@ -353,17 +353,34 @@ environment ending at the right sequence, and `af env pull` reading it back.
 | 13.5 Audit export and SIEM streaming | proven | The hash chain is in the control plane's audit log. Forwarding is a bounded queue that cannot fail or slow the action it audits, with signed batch manifests carrying the chain head so a batch in an object store verifies on its own. Splunk, Event Hubs, an object store, and a signed webhook, at 31 tests. |
 | 13.6 Organization policy enforcement | proven | 100 percent. A property test over five hundred random policies proves a stricter policy never permits more. |
 | 13.4 Advanced access control and approvals | proven | 42 tests. The role model and scopes, approval policies that one person cannot complete alone, and the model as a reviewable file with a dry run that refuses a file leaving a required approval unreachable. |
-| 13.8 Enterprise secret stores | mixed | The contract, the conformance suite, and four adapters. HashiCorp Vault is `proven`: twelve conformance behaviours against a real Vault in a container, nothing skipped. AWS is `mixed`: its Signature Version 4 implementation is `proven` against the worked example AWS publishes, and everything needing an account is `written`. Azure and Google are `written`: the Google service account assertion is signed with a real RSA key and verified with its public half, and the Key Vault name mapping is a pure function over a documented constraint, but neither has been run against a live account. See the note below. |
+| 13.8 Enterprise secret stores | mixed | The contract, the conformance suite, and four adapters. Two of the four are `proven` against the real service. HashiCorp Vault: twelve conformance behaviours against a real Vault in a container, nothing skipped, on every pull request. Azure Key Vault: the same twelve against a real vault in a real subscription, nothing skipped, and the first live run failed and found a real fault described below. AWS is `mixed`: its Signature Version 4 implementation is `proven` against the worked example AWS publishes, and everything needing an account is `written`. Google is `written`: the service account assertion is signed with a real RSA key and verified with its public half, but it has never been run against Secret Manager. See the note below. |
 | 13.12 Compliance packs | proven | SOC 2 and HIPAA, run end to end against a real control plane: migrations applied to a real Postgres, an audit chain written by the control plane's own appendAudit, seventeen tables checked for row level security, and the real grants on the audit log. Then a privileged connection altered one entry and deleted another and the report named both at the right sequence numbers and exited 6. The Go chain verifier is proved to agree byte for byte with web/packages/db/src/audit.ts by running that TypeScript, and the attestation verifier against attestations the engine signed. |
 | 13.2, 13.3, 13.7, 13.9 to 13.11, 13.13, 13.14 | planned | Single sign on, SCIM, multi-cluster, billing, dashboard, support tooling, deployment. |
 
 `13.8` is the one row on this page that is not a single word, because a single
-word would be a lie in either direction. What can be proved without an account
-is proved: a real Vault in a container, and AWS's own published signing vector.
-What cannot is marked `written` and named, because "tested against a local
-server speaking the documented wire format" proves what the adapter does with
-each response and proves nothing about whether the service accepts the request.
-Those rows become `proven` when there are credentials to run them with.
+word would be a lie in either direction. "Tested against a local server speaking
+the documented wire format" proves what the adapter does with each response and
+proves nothing about whether the service accepts the request, so the two are
+tracked separately and only the second earns `proven`.
+
+Azure is the case that shows why the distinction is worth the extra words. The
+adapter passed every behaviour against a local server standing in for Key Vault,
+and failed on the first run against a real vault. `Reach` acquired a Microsoft
+Entra token and never touched the vault, so a vault behind a firewall, a private
+endpoint, or a typo handed back a good token and the source reported itself
+usable. AF-SEC-001 would have listed Key Vault as a place the value could have
+come from while nothing there could be read, which is the exact failure this
+contract exists to prevent. The fake could not have caught it, because it is one
+process serving the token endpoint and the vault, so a dead address broke them
+together and the token failure hid the vault failure.
+
+AWS and Google are both blocked on a payment method rather than on work, and it
+is worth naming which so nobody re-derives it. There is no AWS account here at
+all. Google is authenticated and a throwaway project exists, but Secret Manager
+refuses to enable without billing (`UREQ_PROJECT_BILLING_NOT_FOUND`), and the
+one billing account on the tenant reports `open: false`, so linking it leaves
+`billingEnabled: false`. Both rows become `proven` the day there are credentials
+to run them with; the suites are written and the setup is scripted.
 
 ## The enterprise binary
 

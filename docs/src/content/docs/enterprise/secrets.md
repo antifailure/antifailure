@@ -145,6 +145,19 @@ stripping would map two different variables onto one secret.
 `AZURE_AUTHORITY_HOST` for Azure Government (`https://login.microsoftonline.us`)
 or the China cloud (`https://login.partner.microsoftonline.cn`).
 
+**The service principal needs `Key Vault Secrets User` and nothing more.** That
+role grants get and not list, which is deliberate and worth knowing before you
+read a log: this source can read a secret it is asked for and cannot enumerate
+the vault, so a 403 on a listing is the normal state of a correctly configured
+installation rather than a symptom. The source treats it that way and reports
+the vault as reachable, because a refusal is still an answer.
+
+A vault that cannot be reached is reported as unreachable even when the
+credential is perfect. Microsoft Entra and the vault are different hosts, so a
+vault behind a firewall rule, a private endpoint, or a typo will still issue a
+valid token, and a source that stopped at the token would call itself healthy
+and leave you reading AF-SEC-001 wondering why the value never arrived.
+
 ## Google Secret Manager
 
 ```sh
