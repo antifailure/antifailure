@@ -3,6 +3,7 @@
 package secrets_test
 
 import (
+	"errors"
 	"os/exec"
 	"testing"
 
@@ -37,7 +38,13 @@ func requireKeyring(t *testing.T) secrets.Keyring {
 	// ordinary state of a CI runner. That is a skip and not a failure: the
 	// chain's whole design is that an unavailable source is named and stepped
 	// over.
-	if _, err := ring.Get("antifailure-test", "probe"); err != nil && err != secrets.ErrNotFound {
+	//
+	// errors.Is rather than !=, and it is not only the linter's preference. A
+	// miss that ever arrives wrapped would stop matching a bare comparison, and
+	// this guard would then read an ordinary miss as a dead daemon and skip the
+	// whole file. A silent skip that the code under test can cause is the one
+	// failure this package has already been bitten by.
+	if _, err := ring.Get("antifailure-test", "probe"); err != nil && !errors.Is(err, secrets.ErrNotFound) {
 		t.Skipf("skipped: the Secret Service is not answering: %v", err)
 	}
 	return ring

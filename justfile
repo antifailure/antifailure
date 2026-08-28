@@ -81,6 +81,7 @@ gate: _reports
     run "the gates themselves"           just test-tools
     run "engine"                         just test-engine
     run "this platform's keyring"        just keyring
+    run "the other platforms lint"       just lint-platforms
     run "control plane"                  just test-web
     run "runner"                         just test-runner
     run "edition boundary"               just edition
@@ -459,6 +460,20 @@ generate:
 # chain's whole design is that an unavailable source is named and stepped over.
 keyring:
     cd engine && go test ./internal/secrets/
+
+# Lint the code the other platforms compile.
+#
+# The main lint runs on one machine, so it only ever sees the files that
+# machine's build tags select. keyring_windows.go and keyring_darwin.go are
+# invisible to it, and a file nothing lints drifts: GOOS=windows found an
+# unchecked return in the Windows keyring that had been merged and green for a
+# day, because no linter on any runner had ever compiled it.
+#
+# Cross compiling for the lint costs nothing. It needs no runner of that
+# platform, since it type checks rather than runs.
+lint-platforms:
+    cd engine && GOOS=windows golangci-lint run --timeout 15m
+    cd engine && GOOS=darwin golangci-lint run --timeout 15m
 
 # The community build does not contain or need the enterprise edition.
 edition:

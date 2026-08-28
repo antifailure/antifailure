@@ -68,6 +68,41 @@ jobs:
           go test ./internal/secrets/ -count=1 -v
           -run 'SystemKeyringRoundTrips|AValueWithAwkwardCharactersSurvives|NonASCIIAndAstral|AMultiLineValueAndTrailingNewline|AValueAtTheLimit|ARealisticallyLongValue|AnEmptyValueIsPresent'
 
+  crosslint:
+    name: The other platforms lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      # The main lint runs on one machine, so it only ever sees the files that
+      # machine's build tags select. keyring_windows.go and keyring_darwin.go
+      # are invisible to it, and a file nothing lints drifts: GOOS=windows found
+      # an unchecked return in the Windows keyring that had been merged and
+      # green for a day, because no linter on any runner had compiled it.
+      #
+      # On ubuntu-latest rather than on a runner of each platform, because this
+      # type checks rather than runs. Cross compiling for the lint costs a
+      # minute and needs no scarce runner.
+      - name: Lint what the other platforms compile
+        working-directory: engine
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.13.1/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.13.1
+          for target in windows darwin; do
+            echo "::group::GOOS=$target"
+            GOOS="$target" "$(go env GOPATH)/bin/golangci-lint" run --timeout 15m
+            echo "::endgroup::"
+          done
+
   linux:
     name: Linux Secret Service
     runs-on: ubuntu-latest

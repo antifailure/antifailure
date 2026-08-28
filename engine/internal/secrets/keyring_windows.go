@@ -118,7 +118,14 @@ func (SystemKeyring) Get(service, name string) (string, error) {
 	// Freed on every path out, including the error ones. advapi32 allocated
 	// this buffer and it holds a plaintext secret; leaking it leaks both memory
 	// and the credential, for as long as the process lives.
-	defer procCredFree.Call(uintptr(unsafe.Pointer(cred)))
+	//
+	// The results are discarded explicitly rather than ignored. CredFree
+	// returns void, and LazyProc.Call always hands back a non-nil error read
+	// out of GetLastError, so there is nothing here that could be checked: the
+	// error belongs to whatever ran last, not to this call. Naming that is
+	// better than a lint suppression, which would read as a rule bent rather
+	// than a fact about the API.
+	defer func() { _, _, _ = procCredFree.Call(uintptr(unsafe.Pointer(cred))) }()
 
 	if cred.CredentialBlobSize == 0 || cred.CredentialBlob == nil {
 		// A credential that exists and holds nothing. Present and empty, which
