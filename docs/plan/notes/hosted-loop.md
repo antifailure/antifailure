@@ -38,10 +38,10 @@ behind. **Set but empty means nobody, not everybody** — an empty value is far
 more likely to be a deployment script that lost one than a decision to admit the
 world.
 
-**Continuous deployment.** See `docs/plan/notes/cd.md`. A merge to `main` runs
-the full gate, builds, migrates, deploys a revision at zero traffic, checks it,
-promotes it, checks the public origin including *which commit answers*, and rolls
-traffic back if that fails.
+**Continuous deployment.** See `docs/plan/notes/cd.md`. A merge to `main` waits
+for CI to go green on that commit, builds, migrates in a job, brings up a
+revision at zero traffic, checks it on its own address, promotes it, and checks
+the public origin including *which commit answers*.
 
 **`af login`, `af logout`, `af whoami`.** The device authorization grant against
 the control plane, issuing a scoped token stored in the operating system keyring.

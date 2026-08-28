@@ -74,16 +74,24 @@ it on a real kind cluster on every pull request, including the assertion that
 matters, `pg_has_role('af_app','antifailure_app','MEMBER')`. It remains the
 artifact self-hosting operators use. We do not run it ourselves.
 
-## Why the full gate
+## Why it waits for CI rather than checking anything itself
 
-`cd.yml` runs `just gate` before it builds. That is the promise the repository
-makes about itself, and a deploy that ran a narrower check than a pull request
-did is a deploy that can ship something a pull request would have refused.
+The `gate` job polls for CI's conclusion on the same commit and refuses anything
+but success. CI already runs on this push and is the promise the repository
+makes about itself; running the same checks again here would double the work
+and, worse, the two runs could disagree, at which point nobody knows which
+verdict was real.
 
-The cost is real: while `main` is red for a reason that has nothing to do with
-the control plane, staging does not move. That is the correct trade, and Vir
-chose it explicitly. Staging keeps serving the last green build, which is a
-working system, and the fix is to fix `main`.
+The first version ran `just gate` directly and failed with exit 127 across half
+its recipes. `just gate` is a workstation command that assumes vale, lychee,
+cspell and an npm install in three workspaces are present; `ci.yml` does not use
+it for exactly that reason, and copying it here without its prerequisites
+produced a gate that failed for reasons unrelated to the commit.
+
+The cost is real and was chosen deliberately: while `main` is red for a reason
+that has nothing to do with the control plane, staging does not move. Staging
+keeps serving the last green build, which is a working system, and the fix is to
+fix `main`.
 
 ## Proof
 
