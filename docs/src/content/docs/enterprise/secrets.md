@@ -56,7 +56,7 @@ colleague resolves.
 
 ```sh
 export AF_SECRET_SOURCES=vault
-export VAULT_ADDR=https://vault.internal:8200
+export VAULT_ADDR=https://vault.example.com:8200
 export VAULT_TOKEN=...            # or an AppRole, below
 export AF_VAULT_PATH=antifailure  # the secret holding your variables
 ```
@@ -182,7 +182,7 @@ AF-SEC-001 The variables STRIPE_SECRET_KEY are declared in the manifest but
 were not found in any configured source.
   Next: Add them to one of the searched sources: this shell's environment,
   .env (not present), the encrypted local store (no passphrase is set),
-  the system keyring, HashiCorp Vault at https://vault.internal:8200
+  the system keyring, HashiCorp Vault at https://vault.example.com:8200
   (secret/antifailure) (is sealed).
 ```
 
