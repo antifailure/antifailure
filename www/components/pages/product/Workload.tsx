@@ -146,7 +146,7 @@ assertions:
         items={[
           { href: "/product/crowdi", title: "Crowdi", description: "The exploratory-user feature inside Workload Studio, not the product." },
           { href: "/product/oracle", title: "Differential Oracle", description: "Same compiled workload against baseline and candidate." },
-          { href: "/docs/workload", title: "Workload docs", description: "Scenario IR and traffic controls." },
+          { href: "/docs/concepts/load/", title: "Workload docs", description: "Scenario IR and traffic controls." },
         ]}
       />
     </PageShell>

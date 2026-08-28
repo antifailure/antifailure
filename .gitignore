@@ -110,3 +110,11 @@ backend.hcl
 /site/
 /docs/dist/
 /www/out/
+
+# Synced by `vale sync` from the version named in .vale.ini. Not committed:
+# it is a third party style package with its own licence, and vendoring it
+# would put someone else's rules in this repository's notices.
+tools/docs/styles/Google/
+
+# Scratch output from browser automation.
+.playwright-mcp/
