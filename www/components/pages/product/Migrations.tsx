@@ -271,7 +271,7 @@ rolling rollback is unsafe`}
         items={[
           { href: "/solutions/migrations", title: "Schema migrations", description: "Why this is the starting wedge." },
           { href: "/product/report", title: "Safety Report", description: "How the lock becomes a GitHub check." },
-          { href: "/docs/migration-safety", title: "Migration docs", description: "The subscriptions demo in full." },
+          { href: "/docs/concepts/insights/", title: "Migration docs", description: "The subscriptions demo in full." },
         ]}
       />
     </PageShell>

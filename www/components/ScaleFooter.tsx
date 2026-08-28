@@ -51,7 +51,7 @@ export function ScaleFooter() {
           title="Resources"
           links={[
             { label: "Docs", href: "/docs" },
-            { label: "Postgres notes", href: "/docs/migration-safety" },
+            { label: "Postgres notes", href: "/docs/concepts/insights/" },
             { label: "Migration safety", href: "/#migration" },
             { label: "Isolated twins", href: "/#twins" },
             { label: "Side-Effect Firewall", href: "/#firewall" },

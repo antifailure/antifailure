@@ -1,0 +1,57 @@
+name: Links
+
+# Every address the site points at, including the ones that leave it.
+#
+# Separate from CI and on a schedule because an external link check is not a
+# property of a change. A vendor's documentation site going down is not a
+# reason to refuse somebody's pull request, and a check that fails for reasons
+# the author cannot fix is a check everybody learns to re-run until it passes.
+# CI checks the internal links and fragments on every build, where a failure is
+# always the author's to fix.
+
+on:
+  schedule:
+    # 06:00 UTC daily, before the working day in Europe.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    name: every address resolves
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: www
+
+      - run: npm run build
+        working-directory: www
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: docs
+
+      - run: npm run build
+        working-directory: docs
+
+      - name: Assemble the site
+        run: |
+          rm -rf site && mkdir -p site
+          cp -R www/out/. site/
+          cp -R docs/dist site/docs
+
+      - name: Check every link, including the external ones
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: --config lychee.toml --no-progress --root-dir site 'site/**/*.html'
+          fail: true
