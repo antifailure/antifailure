@@ -56,7 +56,9 @@ func (r Request) String() string {
 		scheme = "https"
 	}
 	host := r.Host
-	if r.Port != 0 && !((r.TLS && r.Port == 443) || (!r.TLS && r.Port == 80)) {
+	// The port is part of the identity unless it is the default one for the
+	// scheme, where including it would make the same request read as two.
+	if r.Port != 0 && (!r.TLS || r.Port != 443) && (r.TLS || r.Port != 80) {
 		host = net.JoinHostPort(host, strconv.Itoa(r.Port))
 	}
 	method := r.Method

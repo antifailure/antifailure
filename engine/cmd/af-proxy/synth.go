@@ -97,7 +97,8 @@ func (p *proxy) serveSynth(w io.Writer, req *http.Request, host string, rec *rec
 	// The header is not decoration. An application that logs its responses can
 	// tell afterwards which ones were invented, and a workflow that touched
 	// one reports unverified rather than passed.
-	fmt.Fprintf(w,
+	// Not checked: a failure here means the client hung up mid response.
+	_, _ = fmt.Fprintf(w,
 		"HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n"+
 			"X-Antifailure-Synthesized: true\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
 		status, http.StatusText(status), len(payload), payload)

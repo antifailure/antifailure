@@ -55,6 +55,7 @@ jobs:
           (cd engine && go test ./internal/policy -update-vectors)
           (cd engine && go test ./internal/cli -update-reference)
           (cd engine && go test ./internal/events -update-schema)
+          (cd engine && go test ./internal/masking -update-transforms)
           git diff --exit-code
 
       - name: The release stamps a version that exists
@@ -90,6 +91,19 @@ jobs:
 
       - name: Vet
         run: cd engine && go vet ./...
+
+      - name: Lint
+        # The linter set CONTRIBUTING describes, and it is a gate rather than
+        # advice: the engine is at zero findings, and the way it stays there is
+        # a check that refuses the first one. Getting there meant migrating off
+        # four deprecated Docker SDK calls, wiring up five symbols that were
+        # defined and never used, and fixing three places where an error was
+        # formatted instead of wrapped.
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.1
+          working-directory: engine
+          args: --timeout 15m
 
       - name: The gates themselves
         # errcheck, ldcheck and the generators decide whether a build is

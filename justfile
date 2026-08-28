@@ -75,6 +75,7 @@ gate: _reports
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
+    run "lint"                           just lint
     run "the gates themselves"           just test-tools
     run "engine"                         just test-engine
     run "control plane"                  just test-web
@@ -375,12 +376,14 @@ _generated:
     (cd engine && go test ./internal/policy -update-vectors)
     (cd engine && go test ./internal/cli -update-reference)
     (cd engine && go test ./internal/events -update-schema)
+    (cd engine && go test ./internal/masking -update-transforms)
     git diff --exit-code -- \
       engine/internal/errors/codes.gen.go \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
       schemas/events.v1.json \
       docs/src/content/docs/reference/cli.md \
+      docs/src/content/docs/reference/transforms.md \
       docs/src/content/docs/reference/schemas
 
 # Regenerate and keep the result.
@@ -391,6 +394,7 @@ generate:
     cd engine && go test ./internal/policy -update-vectors
     cd engine && go test ./internal/cli -update-reference
     cd engine && go test ./internal/events -update-schema
+    cd engine && go test ./internal/masking -update-transforms
 
 # The community build does not contain or need the enterprise edition.
 edition:
@@ -470,10 +474,9 @@ vuln:
 
 # The linter set CONTRIBUTING describes.
 #
-# Not part of `just gate`. There are findings that predate the config, in
-# packages several people are editing at once, and a gate that fails every
-# branch for something none of them did is a gate people learn to route around.
-# It goes into `gate` when the count reaches zero.
+# Part of `just gate` since the count reached zero. It was kept out while there
+# were findings that predated the config, because a gate that fails every
+# branch for something none of them did is one people learn to route around.
 lint:
     #!/usr/bin/env bash
     set -euo pipefail

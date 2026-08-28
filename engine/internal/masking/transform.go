@@ -75,6 +75,7 @@ func init() {
 	register(phoneTransform{})
 	register(addressTransform{})
 	register(cityTransform{})
+	register(regionTransform{})
 	register(postcodeTransform{})
 	register(companyTransform{})
 	register(uuidRemapTransform{})
@@ -314,6 +315,31 @@ func (cityTransform) Apply(k *Key, c Column, in *string) (*string, error) {
 	}
 	s := newPRFStream(k.Sub(c), *in)
 	return str(cityNames[s.intn(len(cityNames))]), nil
+}
+
+// regionTransform replaces a subdivision code.
+//
+// Two letters out, whatever went in, because that is the shape an address form
+// validates and the shape the lexicon holds. A column that stores the full
+// name of a state is a different column and wants a different rule; the
+// description says so, so nobody finds out from the data.
+type regionTransform struct{}
+
+func (regionTransform) Name() string { return "region" }
+func (regionTransform) Describe() string {
+	return "Replaces a state or subdivision code with a synthetic two letter one. " +
+		"For a column holding the full name of a region, use city or nullify instead."
+}
+func (regionTransform) PreservesUniqueness() bool { return false }
+func (regionTransform) Apply(k *Key, c Column, in *string) (*string, error) {
+	if nullOK(in) {
+		return nil, nil
+	}
+	if strings.TrimSpace(*in) == "" {
+		return in, nil
+	}
+	s := newPRFStream(k.Sub(c), *in)
+	return str(regionCodes[s.intn(len(regionCodes))]), nil
 }
 
 // postcodeTransform rewrites a postal code in place, keeping letters as

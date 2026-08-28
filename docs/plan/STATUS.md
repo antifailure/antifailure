@@ -271,10 +271,29 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | --- | --- | --- |
 | `.github/workflows/ci.yml` | proven | engine with the race detector against a real daemon, runner with a real browser, edition boundary, credential scan |
 | `tools/scanrepo` | proven | uses the engine's own detector, so CI and the proxy cannot disagree |
+| `golangci-lint` | proven | zero findings across the engine, and a gate in CI and in `just gate` rather than advice |
+| `tools/gatecheck` | proven | 22 gates in CI, every one reachable from `just gate`; one exemption left, `vuln`, which security.yml owns |
 
 It found two real bugs on its first two runs: stale packaged sidecar
 sources, and a database provider that inventoried every managed container
 and so blamed itself for the runtime's.
+
+Getting the linter to zero was not a formatting exercise. It found five
+symbols that were defined and never called, which is the shape a half
+finished feature takes: a duplicate path existence check beside the one that
+runs, a command tree walker whose comment named two callers it did not have,
+a helper for commands that do not exist, a scheduler field holding a number
+already in the field beside it, and `regionCodes`, a lexicon with no
+transform to use it. The last one was a missing feature rather than a
+leftover, so `region` is now a masking transform.
+
+It also found a property test that built a record of what happened to every
+resource and asserted nothing about it, three places where an error was
+formatted into a string instead of wrapped, so `errors.Is` stopped working
+across them, and seven writes to the output stream whose failure was
+discarded. That last one is why `af` now exits non zero when it could not
+write what it was asked to write: reporting success tells a script that the
+output it never received is complete.
 
 ## Phase 9. GitHub
 
@@ -360,9 +379,12 @@ indistinguishable from one that works until somebody relies on it.
 
 | Component | State | Notes |
 | --- | --- | --- |
-| 11.2 Generated references | proven | The command reference is generated from the cobra tree and the error reference from the catalog. Both fail the build when they drift. |
+| 11.2 Generated references | proven | Five references are generated and every one fails the build when it drifts: the command reference from the cobra tree, the error reference from the catalog, the transform reference from the masking registry, and a page per JSON Schema from `tools/schemadoc`. The event envelope schema itself is generated from the Go type, with a test that walks the struct so a field added without a schema entry fails rather than ships. |
 | 11.4 Error catalog completeness | proven | Every entry is either returned somewhere or marked reserved, and a reserved entry that something returns fails too. It found 38 entries documenting errors this version cannot produce. |
-| 11.1, 11.3, 11.5, 11.6 | planned | The site, the guides, and the examples. Assigned elsewhere. |
+| 11.5 Contributing and provider authoring | written | `CONTRIBUTING.md`, `docs/contributing/provider-authoring.md`, and an ADR directory with a template and two decisions. The worked example the plan asks for exists as `engine/internal/testutil/fakes/inmemory.go` and the guide does not yet walk through it. No RFC process. |
+| 11.6 Documentation quality assurance | written | The four gates the plan names are at zero findings and run in CI: vale with the Google style at error level, cspell with a project dictionary, lychee over the assembled site including fragments, and the G8 forbidden token scan. Not built: a readability report per page, screenshot freshness by regeneration, and the scripted new user walkthrough that times the getting started path. |
+| 11.1 Information architecture and content | written | 43 pages across the fixed architecture, and the site is live. Missing what the plan names by framework: Next.js with Supabase, Next.js with Neon, Django, Rails, monorepos. Getting started has one page rather than the three the plan asks for, so the GitHub Actions and hosted paths are undocumented. |
+| 11.3 Examples and tutorials | planned | No `examples/` directory. The three minimal applications, their manifests, and the recorded tutorials do not exist. |
 
 ## What is not built, and why
 
