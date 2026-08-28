@@ -22,7 +22,7 @@ const CHART = { x: 300, y: 188, w: 580, h: 228 };
 const LANES = [
   { key: "obs", label: "Observed", y: 86, color: "#285D49" },
   { key: "det", label: "Deterministic", y: 128, color: "#33bf00" },
-  { key: "crowdi", label: "Crowdi", y: 170, color: "#00e599" },
+  { key: "explore", label: "Exploratory", y: 170, color: "#00e599" },
 ] as const;
 const DOTS_PER = 6;
 const TRACE_N = 72;
@@ -86,10 +86,10 @@ function LaneDots({ t, merge }: { t: number; merge: number }) {
       if (local < 0.05 || local > period - 0.08) continue;
       const x = 48 + (local / period) * (MIX_X - 48);
       let y: number = src.y;
-      if (src.key === "crowdi" && merge > 0) {
+      if (src.key === "explore" && merge > 0) {
         y = lerp(src.y, LANES[1].y, merge);
       }
-      const compiling = src.key === "crowdi" && merge > 0.15;
+      const compiling = src.key === "explore" && merge > 0.15;
       nodes.push(
         <circle
           key={`${src.key}-${i}`}
@@ -163,7 +163,7 @@ export function WorkloadScene() {
                 fill="#111"
                 fontSize="10"
                 fontFamily="var(--font-mono), ui-monospace, monospace"
-                opacity={lane.key === "crowdi" ? 0.55 + 0.45 * (1 - merge) : 0.7}
+                opacity={lane.key === "explore" ? 0.55 + 0.45 * (1 - merge) : 0.7}
               >
                 {lane.label}
               </text>

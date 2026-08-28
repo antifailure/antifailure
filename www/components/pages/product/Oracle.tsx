@@ -62,19 +62,19 @@ const CAUSAL_PATH = ["failure", "call", "query", "lock", "migration", "effect"] 
 
 function CompareBoard() {
   return (
-    <Panel className="rounded-[12px]">
+    <Panel className="rounded-[12px] bg-white">
       <div className="grid grid-cols-2 max-md:grid-cols-1">
         <div className="border-r border-black/10 px-6 py-5 max-md:border-r-0 max-md:border-b">
           <MonoLabel>BASELINE</MonoLabel>
           <div className="mt-4 flex items-end justify-between gap-4">
             <div>
               <div className="font-mono text-[11px] tracking-extra-tight text-black/40">p99</div>
-              <Ticker className="text-[28px] leading-none text-black" value="820" />
+              <Ticker className="text-[18px] leading-none text-black" value="820" />
               <span className="ml-1 font-mono text-[11px] text-black/35">ms</span>
             </div>
             <div className="text-right">
               <div className="font-mono text-[11px] tracking-extra-tight text-black/40">stripe</div>
-              <Ticker className="text-[28px] leading-none text-black" value="1" />
+              <Ticker className="text-[18px] leading-none text-black" value="1" />
             </div>
           </div>
           <div className="mt-4 font-mono text-[11px] tabular-nums tracking-extra-tight text-black/35">
@@ -89,12 +89,12 @@ function CompareBoard() {
           <div className="mt-4 flex items-end justify-between gap-4">
             <div>
               <div className="font-mono text-[11px] tracking-extra-tight text-black/40">p99</div>
-              <Ticker className="text-[28px] leading-none text-red-700" value="6900" />
+              <Ticker className="text-[18px] leading-none text-red-700" value="6900" />
               <span className="ml-1 font-mono text-[11px] text-black/35">ms</span>
             </div>
             <div className="text-right">
               <div className="font-mono text-[11px] tracking-extra-tight text-black/40">stripe</div>
-              <Ticker className="text-[28px] leading-none text-red-700" value="2" />
+              <Ticker className="text-[18px] leading-none text-red-700" value="2" />
             </div>
           </div>
           <div className="mt-4 font-mono text-[11px] tabular-nums tracking-extra-tight text-red-700">
@@ -175,7 +175,7 @@ function CompareBoard() {
 
 function LinkageTrace() {
   return (
-    <Panel className="rounded-[12px]">
+    <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between gap-3 border-b border-black/10 px-5 py-3">
         <MonoLabel>CAUSAL LINKAGE</MonoLabel>
         <MonoLabel>keyed artifacts · one failure</MonoLabel>
@@ -225,11 +225,9 @@ export function OraclePage() {
         eyebrow="Differential Oracle"
         title="Same state. Same behavior. Two versions."
         lead="Compare normalized HTTP, status classes, database writes, events, traces, query plans, latency, journeys, and logs. Declared expected differences do not count as regressions."
+        framed={false}
+        visual={<OracleScene />}
       />
-
-      <PageSection>
-        <OracleScene />
-      </PageSection>
 
       <PageSection tone="white">
         <PageHeading title="<strong>Unexpected diffs block.</strong> Declared diffs do not." />

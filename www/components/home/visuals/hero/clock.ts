@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clamp } from "@/lib/easing";
 import { useInViewPlay } from "@/lib/useInViewPlay";
 import { usePausedRaf } from "@/lib/usePausedRaf";
@@ -25,14 +25,20 @@ export function useHeroFilmClock({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { inView, reduced } = useInViewPlay(ref, 0.15);
-  const freeze = stillT ?? loop * 0.4;
+  const freeze = stillT ?? 0;
   const info = reducedT ?? freeze;
   const [t, setT] = useState(freeze);
   const [elapsedSec, setElapsedSec] = useState(0);
   const playing = active && inView && !reduced;
 
+  useEffect(() => {
+    if (playing) return;
+    setT(freeze);
+    setElapsedSec(0);
+  }, [playing, freeze]);
+
   usePausedRaf(playing, (_now, elapsed) => {
-    const sec = elapsed / 1000;
+    const sec = (elapsed / 1000) * 1.12;
     setElapsedSec(sec);
     if (hovered && hoverRange) {
       const [a, b] = hoverRange;
@@ -44,7 +50,7 @@ export function useHeroFilmClock({
 
   let clock = freeze;
   if (reduced) clock = info;
-  else if (active) clock = t;
+  else if (playing) clock = t;
 
   return { ref, t: clock, elapsed: playing ? elapsedSec : clock, reduced, playing, inView };
 }

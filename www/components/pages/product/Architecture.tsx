@@ -89,7 +89,7 @@ function PlaneColumn({
       className={cn(
         "flex min-w-0 flex-col p-8 max-md:p-6",
         tone === "control" && "bg-white",
-        tone === "data" && "bg-[#E4F1EB]/55",
+        tone === "data" && "bg-white",
       )}
     >
       <MonoLabel className="uppercase tracking-[0.14em]">{kicker}</MonoLabel>
@@ -161,7 +161,7 @@ function PlaneDiagram() {
           className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-px bg-[#c41e1e]/70 lg:block"
           aria-hidden
         />
-        <div className="pointer-events-none absolute top-6 left-1/2 z-[1] hidden -translate-x-1/2 bg-white px-2.5 py-1 ring-1 ring-black/10 lg:block">
+        <div className="pointer-events-none absolute top-6 left-1/2 z-[1] hidden -translate-x-1/2 border border-black/[0.08] bg-white px-2.5 py-1 lg:block">
           <MonoLabel className="uppercase tracking-[0.12em]">trust boundary</MonoLabel>
         </div>
       </div>
@@ -182,11 +182,8 @@ export function ArchitecturePage() {
         eyebrow="Architecture"
         title="Hosted control plane. Customer-hosted data plane."
         lead="Organizations, policy, and reports live in the control plane. Snapshots, secrets, sanitization, provisioning, egress, and cleanup stay in the customer boundary. The agent is outbound-only, authenticated with short-lived mTLS."
-        visual={
-          <Stage className="min-h-[360px]">
-            <TrustBoundaryScene />
-          </Stage>
-        }
+        visual={<TrustBoundaryScene />}
+        framed={false}
       />
 
       <PageSection>
@@ -200,7 +197,7 @@ export function ArchitecturePage() {
       <PageSection tone="sage">
         <Split
           visual={
-            <Panel className="rounded-[12px] bg-white p-7 ring-1 ring-black/10 max-md:p-5">
+            <Panel className="rounded-[12px] bg-white p-7 max-md:p-5">
               <MonoLabel className="uppercase tracking-[0.14em]">Isolation minimums</MonoLabel>
               <ul className="mt-5 grid grid-cols-1 gap-3">
                 {ISOLATION_MINIMUMS.map((item) => (
@@ -269,7 +266,7 @@ export function ArchitecturePage() {
         items={[
           { href: "/security", title: "Security", description: "Fail closed. Data stays in your boundary." },
           { href: "/open-source", title: "Open source", description: "The inspectable surface inside the boundary." },
-          { href: "/docs/guides/local-runtime/", title: "Architecture docs", description: "Lifecycle and isolation in full." },
+          { href: "/docs/architecture", title: "Architecture docs", description: "Lifecycle and isolation in full." },
         ]}
       />
     </PageShell>

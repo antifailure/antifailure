@@ -7,7 +7,6 @@ import {
   PageShell,
   RelatedGrid,
   Split,
-  Stage,
 } from "@/components/pages/kit";
 import {
   CheckRow,
@@ -47,7 +46,7 @@ function fillClass(tone: MeterTone) {
 
 function FidelityMeter() {
   return (
-    <Panel className="flex flex-col rounded-[12px] bg-[#f7f7f5] ring-0">
+    <Panel className="flex flex-col rounded-[12px] bg-white">
       <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 px-5 py-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -57,7 +56,7 @@ function FidelityMeter() {
             <MonoLabel className="tabular-nums">fix-billing-184</MonoLabel>
           </div>
           <div className="mt-3 flex items-baseline gap-3">
-            <p className="font-title text-[44px] leading-none tracking-tighter text-black max-md:text-[36px]">
+            <p className="font-mono text-[28px] leading-none tracking-extra-tight tabular-nums text-black max-md:text-[22px]">
               87%
             </p>
             <MonoLabel className="uppercase">Environment fidelity</MonoLabel>
@@ -100,12 +99,15 @@ function FidelityMeter() {
 
       <Hairline />
 
-      <div className="border-l-2 border-amber-600 bg-amber-50 px-5 py-3.5">
-        <MonoLabel className="mb-2 block uppercase text-amber-800">Missing</MonoLabel>
+      <div className="border-t border-black/[0.08] px-5 py-3.5">
+        <div className="mb-2 flex items-center gap-2">
+          <StatusPill tone="WARN">WARN</StatusPill>
+          <MonoLabel className="uppercase">Missing</MonoLabel>
+        </div>
         <ul className="space-y-1.5">
           {MISSING.map((item) => (
             <li key={item}>
-              <CheckRow ok="warn" className="text-amber-900">
+              <CheckRow ok="warn" className="text-black/70">
                 {item}
               </CheckRow>
             </li>
@@ -157,18 +159,21 @@ function PolicyPanel() {
         </p>
       </div>
       <Hairline />
-      <div className="border-l-2 border-amber-600 bg-amber-50 px-5 py-4">
-        <MonoLabel className="mb-2 block uppercase text-amber-800">Named gaps</MonoLabel>
+      <div className="border-t border-black/[0.08] px-5 py-4">
+        <div className="mb-2 flex items-center gap-2">
+          <StatusPill tone="WARN">WARN</StatusPill>
+          <MonoLabel className="uppercase">Named gaps</MonoLabel>
+        </div>
         <ul className="space-y-2">
           {MISSING.map((item) => (
             <li key={item}>
-              <CheckRow ok="warn" className="text-[12px] text-amber-900">
+              <CheckRow ok="warn" className="text-[12px] text-black/70">
                 {item}
               </CheckRow>
             </li>
           ))}
         </ul>
-        <p className="mt-3 text-[13px] leading-5 tracking-extra-tight text-amber-900/80">
+        <p className="mt-3 text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
           The score is above the gate. The missing providers are still listed, not absorbed into 87%.
         </p>
       </div>
@@ -183,11 +188,7 @@ export function FidelityPage() {
         eyebrow="Fidelity Graph"
         title="Say what the twin actually reproduced."
         lead="Application services, databases, volume, queues, jobs, third parties, secrets, network, capacity, and traffic shape. Fidelity is a number you can gate on — not a magical truth score."
-        visual={
-          <Stage className="overflow-hidden">
-            <FidelityMeter />
-          </Stage>
-        }
+        visual={<FidelityMeter />}
       />
       <PageSection>
         <PageHeading title="<strong>Inspectable components.</strong> Reproduced, simulated, subset, or missing — named, not hidden." />
