@@ -198,9 +198,27 @@ that could declare its way out of them would be a supported way to ship one
 that lets environments reach the internet, and a knob that skips them is the
 same hole with a friendlier name.
 
-It has passed: 31 behaviours green against a real k3s cluster in one run, with
-one skipped because no domain was configured and there was therefore no ingress
-to reach, which the suite names rather than passing over.
+It has not passed, and the number this page used to quote should not be
+repeated. Two runs against real k3s reported 31 of 32 and then 29 of 32, and
+both were measuring a suite that could pass without containment ever having
+been in force: blocked and not-yet-governed are the same observation from
+inside a pod, and every containment behaviour but one asserts that something
+was blocked. The suite has since been shown to give a clean sweep to a runtime
+whose pods never came under policy at all.
+
+What a run did catch, before that was understood, is the thing this runtime
+still does not handle: a pod is not contained for a short window after it
+starts, because a NetworkPolicy is programmed for each new pod some time after
+the API server accepts the object. A service reached 1.1.1.1 on UDP 53 and got
+the real public address back. One packet out and one back fits inside that
+window; a lookup, a handshake and an HTTP exchange do not, which is why the
+other escapes never saw it.
+
+The fix is a gate in the pod itself, an initContainer that will not complete
+until an escape attempt fails, so that no service process starts before its
+own pod is governed. It is not built. Until it is, and until a full run passes
+with the suite's own readiness gate in place, this runtime is `written` rather
+than `proven` and there is no number to quote.
 
 The skip is worth understanding before you rely on it. A behaviour a runtime
 cannot support is skipped by name, so the output tells you which guarantee this
