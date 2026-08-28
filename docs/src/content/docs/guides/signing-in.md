@@ -71,7 +71,7 @@ grants provider-key management without reading the words.
 
 `providers.write` lets a terminal store, rotate, remove and cap a key. There is
 no scope that reads one back, and there is no route that would serve it. See
-[Your own provider keys](/guides/provider-keys/).
+[Your own provider keys](/docs/guides/provider-keys/).
 
 Scope is decided by the control plane from a closed list and is recorded when
 the login starts, so approving cannot widen it and asking for something that

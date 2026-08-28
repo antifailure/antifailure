@@ -62,7 +62,7 @@ af login --scope providers.write
 ```
 
 The scope appears on the screen where you approve the login, so nobody grants
-this without seeing the words. See [Signing in from a terminal](/guides/signing-in/).
+this without seeing the words. See [Signing in from a terminal](/docs/guides/signing-in/).
 
 ### What is set
 
