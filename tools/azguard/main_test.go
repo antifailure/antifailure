@@ -94,3 +94,43 @@ func TestRefusalNamesTheOwner(t *testing.T) {
 		t.Errorf("refusal did not name the owner: %v", err)
 	}
 }
+
+// The group Azure makes that this project did not ask for.
+//
+// Creating a Container Apps environment produces ME_<env>_<group>_<location>
+// alongside it. It is refused, because operating on it directly breaks a
+// running environment, and the REASON matters as much as the refusal: the
+// generic message would tell a reader it belongs to somebody else's project,
+// which is a confident wrong answer about a group this project's own apply
+// caused to exist.
+func TestTheGroupAzureMakesForAContainerAppsEnvironmentIsRefusedForTheRightReason(t *testing.T) {
+	const g = "ME_afcp-env_af-cp-centralus_centralus"
+	err := nameIsOurs(g)
+	if err == nil {
+		t.Fatalf("%s does not start with af- and was allowed", g)
+	}
+	for _, want := range []string{"Azure", "Container Apps", "Delete the environment", "project=antifailure"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal for %s should mention %q, got: %v", g, want, err)
+		}
+	}
+	// And it must NOT claim the group belongs to another project. Matching on
+	// "belongs to" alone is too crude, because the correct message legitimately
+	// says the group's lifecycle belongs to its environment; the phrase that
+	// would be wrong is the foreign-group one.
+	if strings.Contains(err.Error(), "not to Antifailure") {
+		t.Errorf("refusal for %s reads as somebody else's group, which is wrong: %v", g, err)
+	}
+}
+
+// bonfire's own environment group keeps its named refusal, because that one
+// really does belong to somebody else and the ME_ rule must not swallow it.
+func TestBonfiresEnvironmentGroupIsStillNamedAsForeign(t *testing.T) {
+	err := nameIsOurs("ME_bonfire-aca-env_bonfire_eastus")
+	if err == nil {
+		t.Fatal("bonfire's environment group was allowed")
+	}
+	if !strings.Contains(err.Error(), "bonfire") {
+		t.Errorf("refusal should name bonfire so somebody knows whose work it protected: %v", err)
+	}
+}

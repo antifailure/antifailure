@@ -103,6 +103,23 @@ func nameIsOurs(group string) error {
 	if owner, ok := knownForeign[strings.ToLower(group)]; ok {
 		return fmt.Errorf("%s belongs to %s, not to Antifailure. ISOLATION.md lists it as a group this project never touches", group, owner)
 	}
+	// AZURE CREATES RESOURCE GROUPS THIS PROJECT DID NOT ASK FOR, and refusing
+	// them with "belongs to another project" would be a confident, wrong answer.
+	//
+	// A Container Apps environment produces a second group called
+	// ME_<environment>_<group>_<location> holding the platform's own
+	// infrastructure. It is created and deleted by Azure, its `managedBy` points
+	// back at the environment, and it inherits the environment's tags, so a
+	// cleanup scoped to project=antifailure DOES reach it even though the name
+	// rule cannot. Deleting the environment deletes it; touching it directly is
+	// how a running environment gets broken.
+	//
+	// This is still a REFUSAL. The message is the whole difference: it says why
+	// the group exists and what to operate on instead.
+	if strings.HasPrefix(group, "ME_") {
+		return fmt.Errorf("%s is created and owned by Azure, not by this project: it holds the infrastructure for a Container Apps environment and its lifecycle belongs to that environment. Delete the environment instead. It inherits the environment's tags, so a cleanup scoped to %s=%s reaches it even though its name cannot start with %s",
+			group, requiredTagKey, requiredTagVal, requiredPrefix)
+	}
 	if !strings.HasPrefix(group, requiredPrefix) {
 		return fmt.Errorf("%s is not prefixed %q. Antifailure creates and operates on resource groups it owns and nothing else; this subscription holds other projects' groups", group, requiredPrefix)
 	}

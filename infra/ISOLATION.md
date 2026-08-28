@@ -151,6 +151,38 @@ as decoration, just written in prose.
    a data role. Delete the exemption and the next write to the account is
    denied.
 
+## Azure creates a resource group this project did not ask for
+
+`terraform apply` of the control plane produced a second group:
+
+```
+ME_afcp-env_af-cp-centralus_centralus
+```
+
+It holds the infrastructure for the Container Apps environment. Azure names it,
+Azure creates it, Azure deletes it when the environment goes, and its
+`managedBy` points back at the environment. **It cannot be prefixed `af-`**, so
+mechanism 1 above does not cover it, and that is worth stating plainly rather
+than discovering during a cleanup.
+
+Mechanism 2 does cover it. It INHERITS the environment's tags, verified rather
+than assumed:
+
+```
+project=antifailure  environment=cp  managed_by=terraform
+aca-managed-env-id=/subscriptions/.../managedEnvironments/afcp-env
+```
+
+so a cleanup scoped to `project=antifailure` reaches it. Destroying the
+environment removed the eastus copy of this group with it, also verified.
+
+`azguard` refuses it, and the refusal says *why it exists and what to operate on
+instead*, rather than the generic message about another project's work. Getting
+that wrong would be a confident, wrong answer about a group this project's own
+apply caused to exist. There is a test for the message, and a second test that
+bonfire's own `ME_bonfire-aca-env_bonfire_eastus` keeps its named refusal, so
+the pattern rule cannot swallow a genuinely foreign group.
+
 ## Azure Policy is a fourth mechanism, and it is not ours
 
 The subscription carries deny assignments that no code here controls:
