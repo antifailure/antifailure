@@ -222,7 +222,7 @@
             "type": "string",
             "maxLength": 253
           },
-          "description": "Hosts the build may reach. The build runs under the same default deny as the environment, so a package registry or an engine download must be named here."
+          "description": "Hosts the build is declared to reach, such as a package registry or an engine download. DECLARED RATHER THAN ENFORCED in this release: the list is validated and shown by af explain, and the local builder does not yet seal a build or apply it. Write it as the record of what your build needs, and do not rely on it as a control."
         }
       }
     },

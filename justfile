@@ -335,6 +335,15 @@ links:
     cp -R docs/dist site/docs
     lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
 
+# The getting started path, run in order and timed.
+#
+# Not in `just gate`. It needs a Docker daemon and it takes minutes, because it
+# really does build an image, branch a database, and wait for a service to
+# answer. The daily schedule in .github/workflows/walkthrough.yml is where it
+# runs unattended; run it here before changing anything a new user touches.
+walkthrough:
+    go run ./tools/walkthrough .
+
 # The examples build and their manifests are valid.
 #
 # An example that does not compile is worse than no example: it is the first

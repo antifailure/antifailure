@@ -72,6 +72,13 @@ export interface UnscopedOptions {
   ssoState?: string
   /** The hash of a SCIM bearer token, for resolving a provisioning request. */
   scimTokenHash?: Buffer
+  /** The hash of a device code, for a terminal polling its own login. It has
+   *  no session and no tenant by definition, and it holds this. */
+  deviceCodeHash?: Buffer
+  /** The short code a person typed off a terminal, for the browser approving
+   *  it. The row has no organization until that approval happens, so it cannot
+   *  be reached by tenant. */
+  deviceUserCode?: string
 }
 
 export interface Pool {
@@ -157,6 +164,8 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.sso_domain': '',
           'antifailure.sso_state': '',
           'antifailure.scim_token_hash': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
         },
         fn,
       )
@@ -180,6 +189,10 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.scim_token_hash': opts?.scimTokenHash
             ? opts.scimTokenHash.toString('hex')
             : '',
+          'antifailure.device_code_hash': opts?.deviceCodeHash
+            ? opts.deviceCodeHash.toString('hex')
+            : '',
+          'antifailure.device_user_code': opts?.deviceUserCode ?? '',
         },
         fn,
       )

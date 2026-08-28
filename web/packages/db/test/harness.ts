@@ -232,6 +232,19 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
     INSERT INTO scim_group_members (org_id, group_id, member_ref, resource_id)
     VALUES (${orgId}, ${group!.id}, ${`ext-${slug}`}, ${resource!.id})`
 
+  // A provider key and its budget. The ciphertext here is not a sealed key and
+  // is not meant to be: this fixture exists so the cross-tenant suite has a row
+  // of each to attack, and what it proves is that Postgres refuses another
+  // tenant's row. Whether the bytes decrypt is src/providers/seal.ts's problem
+  // and is tested there.
+  await admin`
+    INSERT INTO provider_keys (org_id, provider, ciphertext, nonce, fingerprint, last4)
+    VALUES (${orgId}, 'anthropic', ${Buffer.from(`not-a-key-${slug}`)},
+            ${Buffer.from('000000000000')}, ${'fp-' + slug.slice(0, 12)}, '0000')`
+  await admin`
+    INSERT INTO provider_budgets (org_id, provider, period, cap_usd, spent_usd)
+    VALUES (${orgId}, 'anthropic', date_trunc('month', now())::date, 100, 0)`
+
   return { orgId, userId, repoId, envId, runId, slug, connectionId }
 }
 

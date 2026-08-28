@@ -15,6 +15,7 @@ import {
   inet,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -254,7 +255,61 @@ export const engineTokens = pgTable('engine_tokens', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  // 'engine' or 'cli'. A cli token acts as a person and carries user_id; an
+  // engine token is a machine and deliberately has none. See migration 0012.
+  kind: text('kind').notNull().default('engine'),
+  userId: uuid('user_id'),
+  scopes: text('scopes').array().notNull().default([]),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
 }, (t) => [index('engine_tokens_org_idx').on(t.orgId)])
+
+// A terminal signing in. It has no tenant until somebody approves it, which is
+// why it is not in tenantScopedTables and is classified separately in the
+// tenancy suite: its rows are reachable only by a secret the caller already
+// holds, the same shape as oauth_states.
+export const deviceAuthorizations = pgTable('device_authorizations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  deviceCodeHash: bytea('device_code_hash').notNull(),
+  userCode: text('user_code').notNull(),
+  scopes: text('scopes').array().notNull(),
+  clientLabel: text('client_label').notNull(),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  approvedUserId: uuid('approved_user_id'),
+  approvedOrgId: uuid('approved_org_id'),
+  deniedAt: timestamp('denied_at', { withTimezone: true }),
+  redeemedAt: timestamp('redeemed_at', { withTimezone: true }),
+  lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (t) => [index('device_authorizations_expiry_idx').on(t.expiresAt)])
+
+// A customer's provider key. The ciphertext is here; nothing reads it except
+// the code handing the key to the provider. See src/providers/seal.ts.
+export const providerKeys = pgTable('provider_keys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  provider: text('provider').notNull(),
+  ciphertext: bytea('ciphertext').notNull(),
+  nonce: bytea('nonce').notNull(),
+  keyVersion: text('key_version').notNull().default('v1'),
+  fingerprint: text('fingerprint').notNull(),
+  last4: text('last4').notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  rotatedAt: timestamp('rotated_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+})
+
+// What a provider key may spend this month, and what it has. A missing row is
+// zero rather than unlimited; see src/providers/store.ts for why.
+export const providerBudgets = pgTable('provider_budgets', {
+  orgId: uuid('org_id').notNull(),
+  provider: text('provider').notNull(),
+  period: timestamp('period', { mode: 'string' }).notNull(),
+  capUsd: numeric('cap_usd', { precision: 12, scale: 4 }).notNull(),
+  spentUsd: numeric('spent_usd', { precision: 12, scale: 4 }).notNull().default('0'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.orgId, t.provider, t.period] })])
 
 // Partitioned by month on occurred_at. Both keys carry the partition column
 // because Postgres requires it; see migrations/0011_partition_events.sql for
@@ -460,7 +515,7 @@ export const scimGroupMembers = pgTable('scim_group_members', {
 export const tenantScopedTables = [
   members, githubInstallations, repositories, environments, goldenVersions,
   runs, verdicts, artifacts, maskingRules, networkRules, engineTokens, events,
-  auditEntries,
+  auditEntries, providerKeys, providerBudgets,
   ssoConnections, ssoConnectionSecrets, ssoDomains, ssoLoginStates,
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,

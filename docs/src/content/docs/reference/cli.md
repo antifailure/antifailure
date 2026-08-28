@@ -470,6 +470,54 @@ af load smoke [flags]
 | `--scale` | `0.1` | Multiplier on production's rate. |
 | `--seed` | `1` | Makes two runs send the same sequence. |
 
+### `af login`
+
+Sign in to a control plane from this terminal.
+
+Signs this machine in to a control plane using the device authorization grant.
+
+af login prints a short code and opens a browser. Approve it there, and the
+token arrives here over TLS and goes straight into the operating system's
+credential store. The credential is never shown, never copied through a
+clipboard, and never written to a shell history file.
+
+The token is scoped to reading environments and runs and writing events. It
+cannot manage members, change policy, or read a provider key, and asking for
+more is refused by the control plane rather than granted quietly.
+
+Run af logout to remove it from this machine and revoke it everywhere.
+
+```
+af login [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to sign in to (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+| `--no-browser` | `false` | Do not try to open a browser; print the address instead. |
+
+### `af logout`
+
+Remove this machine's credential and revoke it.
+
+Removes the stored token and tells the control plane to revoke it.
+
+Both halves matter. Removing it locally stops this machine using it; revoking
+it stops anybody who copied it. A logout that only deleted the local copy would
+leave a working credential in whatever backup or screen recording captured it.
+
+If the control plane cannot be reached, the local credential is still removed
+and the command says the revocation did not happen, so nobody is left believing
+a token is dead when it is not.
+
+```
+af logout [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to sign out of (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
 ### `af logs`
 
 Show what the environment's services have written.
@@ -899,4 +947,26 @@ af webhook trigger <provider> <event> [flags]
 | `--secret` | - | Signing secret, defaulting to the provider's variable in this shell. |
 | `--service` | - | Service to deliver to, defaulting to the first reachable one. |
 | `--set` | - | Set a field on the event payload, as key=value. |
+
+### `af whoami`
+
+Who this machine is signed in as.
+
+Asks the control plane who the stored token belongs to.
+
+It asks rather than reading the stored copy, because the stored copy is what
+this machine believed at login time and the control plane is what is true now.
+A token whose membership has been removed still looks perfectly good on disk,
+and reporting it would tell somebody they have access they do not have.
+
+--offline reports the stored copy without a network call, and says so.
+
+```
+af whoami [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to ask (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+| `--offline` | `false` | Report the stored credential without asking the control plane. |
 

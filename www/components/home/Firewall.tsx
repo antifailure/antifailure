@@ -1,6 +1,6 @@
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
-import { FirewallScene } from "./visuals/FirewallScene";
+import { FailClosedScene } from "./visuals/FailClosedScene";
 
 export function Firewall() {
   return (
@@ -18,7 +18,7 @@ export function Firewall() {
             title="<strong>Fail closed on side effects.</strong> The twin cannot charge cards, email users, or invoke production webhooks. Unknown destinations are blocked."
           />
           <div className="mt-8 max-xl:mt-6 max-lg:mt-5">
-            <FirewallScene />
+            <FailClosedScene />
           </div>
         </div>
       </Container>

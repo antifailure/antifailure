@@ -1,0 +1,55 @@
+name: Walkthrough
+
+# The getting started path, run in order and timed, on a clean machine.
+#
+# Every other check here proves a part works. This one proves that the sequence
+# a new user is told to type gets them to a running environment, and says how
+# long they wait for it. It is the only check that drives `af up` through the
+# CLI against a real example rather than through a package's tests.
+#
+# On a schedule rather than on every push, for the same reason as the external
+# link check: it needs a daemon and takes minutes, and a check that costs
+# everybody that on every branch is one people learn to skip. A regression here
+# is worth finding within a day; it is not worth blocking a documentation typo.
+
+on:
+  schedule:
+    # 05:00 UTC daily, before the link check, so a broken path is first in the
+    # morning's list rather than second.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  walkthrough:
+    name: the getting started path
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Walk it
+        # The budget is generous on purpose. It is there to catch a path that
+        # broke into a timeout, not to police a runner having a slow morning.
+        run: go run ./tools/walkthrough . --budget 20m
+
+      - name: Nothing was left behind
+        # The walkthrough tears down its own environment. This checks that it
+        # did, because a teardown that quietly failed leaves the next run to
+        # fail for a reason that has nothing to do with the product.
+        if: always()
+        run: |
+          left=$(docker ps -aq --filter=label=dev.antifailure.managed | wc -l)
+          if [ "$left" -ne 0 ]; then
+            echo "::error::$left managed containers survived the walkthrough"
+            docker ps -a --filter=label=dev.antifailure.managed
+            exit 1
+          fi
+          echo "nothing managed by Antifailure is still on this machine"

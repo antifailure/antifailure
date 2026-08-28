@@ -164,7 +164,7 @@ export const SOLUTION_PAGES: Record<string, MarketingContent> = {
   marketplaces: {
     eyebrow: "Solutions · Marketplaces",
     title: "Queues, workers, dual-writes, and matching logic staging never reproduces.",
-    lead: "The twin includes workers and queues. The firewall blocks production webhooks. Crowdi explores multi-tab and retry behavior; the oracle compares event emissions.",
+    lead: "The twin includes workers and queues. The firewall blocks production webhooks. Exploratory users try multi-tab and retry behavior; the oracle compares event emissions.",
     description: "Deployment safety for marketplace systems with queues, workers, and dual-writes.",
     features: [
       { title: "Queues in the twin", body: "Simulated streams so dual-writes and retries are visible." },
@@ -323,7 +323,7 @@ export const SOLUTION_PAGES: Record<string, MarketingContent> = {
     features: [
       { title: "Jobs in the twin", body: "Background workers and scheduled tasks run against sanitized state." },
       { title: "Long-tail records", body: "Malformed historical state that fixtures never include." },
-      { title: "Multi-tab behavior", body: "Crowdi personas that abandon, resume, and retry." },
+      { title: "Multi-tab behavior", body: "Exploratory personas that abandon, resume, and retry." },
     ],
     related: RELATED,
     body: (
