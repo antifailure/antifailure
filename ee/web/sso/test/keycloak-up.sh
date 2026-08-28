@@ -82,16 +82,26 @@ if ! docker ps --filter "name=^${NAME}$" --format '{{.Names}}' | grep -q .; then
   # The bootstrap password of a container this script creates and destroys. It
   # is not a credential anybody can reuse and it is overridable so that nothing
   # here hardcodes one that could be.
-  # The dev database lives in memory.
+  # The dev database lives in memory, and a WRONG DIAGNOSIS is recorded here
+  # because the right one is only visible next to it.
   #
-  # start-dev keeps an H2 file under /opt/keycloak/data, and on a loaded machine
-  # that file is where this falls over: the observed failure was
-  # `IO Exception: "/opt/keycloak/data/h2/keycloakdb.mv.db" [90028-230]`, on the
-  # container's overlay filesystem while a dozen other containers competed for
-  # the same disk. A tmpfs removes that contention entirely. Losing the data on
-  # restart is correct rather than a compromise: the suite creates its own realm
-  # every run and deletes it afterwards, and the bootstrap admin is recreated
-  # when there is no admin to find.
+  # start-dev keeps an H2 file under /opt/keycloak/data. The observed failure
+  # was `IO Exception: "/opt/keycloak/data/h2/keycloakdb.mv.db" [90028-230]`,
+  # and I read that as disk contention on the container's overlay filesystem,
+  # since a dozen other containers were competing for the same disk. So I moved
+  # it to a tmpfs. IT FAILED THE SAME WAY WITH THE DATABASE IN MEMORY, which is
+  # what disproves the theory: there is no disk to contend for in a tmpfs.
+  #
+  # The real cause is one frame up the stack, in the lines that PRECEDE the H2
+  # error every time: `Acquisition timeout while waiting for new connection`,
+  # from io.agroal.pool.ConnectionPool. The JVM is starved badly enough that the
+  # connection pool's own timeout expires, the waiting thread is interrupted,
+  # and H2's file channel write fails BECAUSE of the interruption. The IO
+  # exception is the symptom and the pool timeout is the cause, which is why the
+  # acquisition timeout is raised below and why that is the setting that matters.
+  #
+  # The tmpfs stays because it is harmless and a throwaway realm has no reason to
+  # touch a disk, not because it fixed anything. It did not.
   #
   # CPU pinned, and the JVM told about it.
   #
@@ -131,7 +141,7 @@ if ! docker ps --filter "name=^${NAME}$" --format '{{.Names}}' | grep -q .; then
   # the port mapping is the guarantee.
   docker run -d --name "$NAME" -p "127.0.0.1:${PORT}:8443" \
     --cpus="${AF_KEYCLOAK_CPUS:-4}" \
-    -e JAVA_OPTS_APPEND="-XX:ActiveProcessorCount=${AF_KEYCLOAK_CPUS:-4}" \
+    -e JAVA_OPTS_APPEND="-XX:ActiveProcessorCount=${AF_KEYCLOAK_CPUS:-4} -Dquarkus.datasource.jdbc.acquisition-timeout=${AF_KEYCLOAK_DB_TIMEOUT:-120}" \
     -e KC_BOOTSTRAP_ADMIN_USERNAME="${AF_KEYCLOAK_USER:-admin}" \
     -e KC_BOOTSTRAP_ADMIN_PASSWORD="${AF_KEYCLOAK_PASSWORD:-admin}" \
     -e KC_HTTPS_CERTIFICATE_FILE=/etc/x509/tls.crt \
