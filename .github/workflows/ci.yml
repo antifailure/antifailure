@@ -274,15 +274,11 @@ jobs:
           vale docs/src/content/docs examples README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
 
       - name: Assemble the site
-        # Exactly what deploy.yml publishes: the marketing site at the root and
-        # the documentation under /docs. The link check and the preview both
-        # need the real layout, because /docs/reference/cli/#af-init is only a
-        # real address once both halves are in the same tree.
-        run: |
-          rm -rf site && mkdir -p site
-          cp -R www/out/. site/
-          cp -R docs/dist site/docs
-          echo "assembled $(find site -type f | wc -l) files"
+        # Exactly what deploy.yml publishes, because it is now the same script
+        # rather than a second copy that claimed to be. The link check and the
+        # preview both need the real layout, because /docs/reference/cli/#af-init
+        # is only a real address once both halves are in the same tree.
+        run: tools/site/assemble.sh
 
       - name: Every link on the assembled site resolves
         # Offline: internal links and fragments only. A fragment is the case
