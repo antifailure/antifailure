@@ -1,52 +1,33 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { LayoutGroup, motion } from "motion/react";
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
-import { cn } from "@/lib/cn";
-import { EASE } from "@/lib/easing";
-import { MigrationScene, type MigrationBar } from "@/components/home/visuals/MigrationScene";
+import { MigrationScene } from "@/components/home/visuals/MigrationScene";
 
-const TABS = ["Catch exclusive locks", "Safer expand-and-contract"] as const;
-const VEIL_EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 const CAPTIONS = [
   "An exclusive lock on subscriptions stalls checkout. The twin reports BLOCK before it ships.",
   "Expand-and-contract keeps checkout live. Lock 0.4s, rollback feasible, PASS.",
 ] as const;
-const EVIDENCE = [
-  "ACCESS EXCLUSIVE 27.4s · checkout p99 820ms→6.9s · 11.8% upgrade timeouts · rollback unsafe",
-  "expand → backfill → contract · lock 0.4s · blocked 0 · p99 834ms · rollback feasible",
-] as const;
+
+const VEIL_EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 
 export function Migrations() {
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState<0 | 1>(0);
   const [playId, setPlayId] = useState(0);
   const [veil, setVeil] = useState(0);
-  const [bar, setBar] = useState<MigrationBar>({
-    verdict: "BLOCK",
-    slam: false,
-    decided: false,
-    passGlow: false,
-  });
   const busy = useRef(false);
   const timers = useRef<number[]>([]);
 
   useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
 
-  function cutTo(index: number) {
+  function cutTo(index: 0 | 1) {
     if (busy.current || index === active) return;
     busy.current = true;
     setVeil(1);
     const cut = window.setTimeout(() => {
       setActive(index);
       setPlayId((n) => n + 1);
-      setBar({
-        verdict: index === 0 ? "BLOCK" : "PASS",
-        slam: false,
-        decided: false,
-        passGlow: false,
-      });
     }, 90);
     const clear = window.setTimeout(() => {
       setVeil(0);
@@ -70,56 +51,11 @@ export function Migrations() {
             theme="light"
             title="<strong>Migration safety first.</strong> Measure locks, plans, pool pressure, and rollback feasibility on a production-shaped twin before the change ships."
           />
-          <LayoutGroup id="mig-home-tabs">
-          <div className="group relative z-20 mt-10 flex w-fit max-xl:mt-9 max-lg:mt-8 max-md:mt-7">
-            {TABS.map((item, index) => (
-              <button
-                className={cn(
-                  "relative h-11 min-w-[134px] px-4 py-3 whitespace-nowrap",
-                  "font-medium leading-none tracking-extra-tight",
-                  "border border-gray-new-10 even:border-l-0",
-                  "max-xl:h-10 max-xl:min-w-[130px] max-lg:h-9 max-lg:min-w-[124px] max-lg:px-3 max-lg:py-2.5 max-md:text-[14px]",
-                  index === active ? "text-gray-new-10" : "text-gray-new-10/80 hover:text-gray-new-10",
-                )}
-                key={item}
-                type="button"
-                onClick={() => cutTo(index)}
-              >
-                {index === active ? (
-                  <motion.span
-                    layoutId="mig-home-tab"
-                    className="absolute inset-0 bg-white"
-                    transition={{ duration: 0.38, ease: EASE }}
-                  />
-                ) : null}
-                <span className="relative z-10">{item}</span>
-              </button>
-            ))}
-          </div>
-          </LayoutGroup>
-          <div className="relative z-10 mt-8 w-full min-w-0 max-lg:mt-6">
+          <div className="relative z-10 mt-14 w-full min-w-0 max-xl:mt-12 max-lg:mt-10">
             <div className="relative">
-              <MigrationScene tab={active as 0 | 1} playId={playId} onBar={setBar} />
-              <div className="relative z-20 border-x border-b border-gray-new-10 bg-[#CAE6D9] px-5 py-3 max-md:px-4">
-                <p className="font-mono text-[13px] leading-5 tracking-extra-tight text-pretty text-[#285D49] max-xl:text-[12px] max-md:text-[12px] max-md:leading-5">
-                  <span
-                    className={cn(
-                      "font-semibold uppercase tabular-nums",
-                      bar.verdict === "BLOCK" && bar.decided && "text-red-600",
-                      bar.verdict === "PASS" && bar.passGlow && "text-green-45",
-                    )}
-                    style={{
-                      letterSpacing: bar.slam ? "0.05em" : "0em",
-                      transition: bar.slam ? "none" : `letter-spacing 220ms ${VEIL_EASE}`,
-                    }}
-                  >
-                    {bar.verdict}
-                  </span>
-                  <span className="ml-2 font-medium normal-case">{EVIDENCE[active]}</span>
-                </p>
-              </div>
+              <MigrationScene tab={active} playId={playId} onTab={cutTo} />
               <div
-                className="pointer-events-none absolute inset-0 z-30 bg-[#E4F1EB]"
+                className="pointer-events-none absolute inset-0 z-30 rounded-[16px] bg-[#E4F1EB]"
                 style={{
                   opacity: veil,
                   transition: `opacity 90ms ${VEIL_EASE}`,

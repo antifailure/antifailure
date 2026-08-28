@@ -171,7 +171,7 @@ export function TwinsPage() {
                 <MonoLabel className="uppercase tracking-[0.14em]">authenticated preview</MonoLabel>
                 <StatusPill tone="PASS">private</StatusPill>
               </div>
-              <div className="mt-4 flex items-center gap-2 border border-black/10 bg-[#f4f7f5] px-3 py-2.5">
+              <div className="mt-4 flex items-center gap-2 border border-black/[0.08] bg-white px-3 py-2.5">
                 <span className="size-2 rounded-full bg-[#33bf00]" aria-hidden />
                 <span className="min-w-0 truncate font-mono text-[13px] tracking-extra-tight text-black tabular-nums">
                   fix-billing-184.preview.company.com
@@ -341,7 +341,7 @@ function LifecycleRail() {
 
 function IsolationSpec() {
   return (
-    <Panel className="mt-14 rounded-[12px] bg-[#f4f7f5] max-md:mt-10">
+    <Panel className="mt-14 rounded-[12px] bg-white max-md:mt-10">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
         <div className="flex items-center gap-4">
           <MonoLabel className="uppercase tracking-[0.14em]">isolation model</MonoLabel>

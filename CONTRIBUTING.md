@@ -178,10 +178,24 @@ Every user-facing error carries a code from
 `engine/internal/errors/catalog.yaml`. Adding a code without a catalog entry
 fails the build, and so does a catalog entry that nothing returns.
 
-## Architecture decisions
+## Proposals and decisions
 
-A change to a public interface needs an ADR in `docs/adr/`, using
-`docs/adr/0000-template.md`. Keep it to one page.
+Two documents, for two different moments.
+
+An **RFC** in `docs/rfc/` comes first, using `docs/rfc/0000-template.md`. It is
+for a change somebody outside this repository will notice: a new or changed
+public interface, a manifest key, an event type, a guarantee. Open it as a
+pull request with the RFC alone, so the design is argued before the code
+exists and nobody has to weigh a proposal against the work already spent on
+it. An RFC that turns out to be uncontroversial is cheap; it is one page.
+
+An **ADR** in `docs/adr/` comes after, using `docs/adr/0000-template.md`. It
+records what was decided and why, including the alternatives that lost. A
+change to a public interface needs one whether or not it needed an RFC, because
+the next person to read the interface needs the reason and the pull request
+discussion will not be where they look.
+
+Keep both to one page. A proposal nobody finishes reading is not a proposal.
 
 ## Security
 

@@ -32,7 +32,9 @@ import (
 )
 
 // documents are the trees whose prose is checked.
-var documents = []string{"docs/src/content/docs", "."}
+// examples is here because an example's README is documentation a user reads
+// before anything else: it is the first prose most people meet.
+var documents = []string{"docs/src/content/docs", "examples", "."}
 
 // banned are the characters and sequences, with what to write instead.
 //

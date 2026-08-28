@@ -71,6 +71,8 @@ gate: _reports
     run "spelling"                       just spell
     run "prose style"                    just vale
     run "every link resolves"            just links
+    run "prose stays readable"           just readability
+    run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
@@ -306,13 +308,13 @@ prosecheck:
 
 # Spelling, with the project dictionary in tools/docs/dictionary.txt.
 spell:
-    npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" README.md CONTRIBUTING.md SECURITY.md
+    npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" "examples/**/*.md" README.md CONTRIBUTING.md SECURITY.md
 
 # Prose style: the Google developer documentation style, plus the rule about
 # em dashes. `vale sync` fetches the style package named in .vale.ini.
 vale:
     vale sync
-    vale docs/src/content/docs README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
+    vale docs/src/content/docs examples README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
 
 # Every link on the assembled site, including fragments.
 #
@@ -330,6 +332,49 @@ links:
     cp -R www/out/. site/
     cp -R docs/dist site/docs
     lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
+
+# The getting started path, run in order and timed.
+#
+# Not in `just gate`. It needs a Docker daemon and it takes minutes, because it
+# really does build an image, branch a database, and wait for a service to
+# answer. The daily schedule in .github/workflows/walkthrough.yml is where it
+# runs unattended; run it here before changing anything a new user touches.
+walkthrough:
+    go run ./tools/walkthrough .
+
+# The examples build and their manifests are valid.
+#
+# An example that does not compile is worse than no example: it is the first
+# thing a user copies. They are separate modules, outside the workspace on
+# purpose, so that an example's dependencies never enter the engine's module
+# graph, which means `go build ./...` at the root does not see them and this
+# recipe is the only thing that does.
+examples:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for dir in examples/*/; do
+      [ -f "$dir/go.mod" ] || continue
+      echo "  $dir"
+      # -o /dev/null, because a bare `go build ./...` writes the binary into
+      # the example directory and the next `git add -A` stages it. That has
+      # happened here twice.
+      (cd "$dir" && GOWORK=off go build -o /dev/null ./... && GOWORK=off go vet ./...)
+    done
+    go build -o /tmp/af-examples ./engine/cmd/af
+    for dir in examples/*/; do
+      [ -f "$dir/antifailure.yaml" ] || continue
+      (cd "$dir" && /tmp/af-examples explain > /dev/null)
+      echo "  $dir manifest is valid"
+    done
+
+# How hard each page is to read, worst first.
+#
+# The threshold is a regression guard rather than a style rule. The hardest
+# page today averages 23 words a sentence, so 28 leaves five words of headroom:
+# it fires on a page that drifted, not on a page whose subject needs long
+# sentences. Run it with no argument to read the whole report.
+readability:
+    go run ./tools/readability . --max 28
 
 # The G8 forbidden token scan: notes to the author, unfilled slots, names that
 # belong to a person rather than the product, addresses that resolve only on

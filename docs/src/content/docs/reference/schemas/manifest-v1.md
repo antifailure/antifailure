@@ -32,7 +32,7 @@ How to turn the service directory into an image. Omitted means detect: a Dockerf
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `allow_hosts` | list of string | no | Hosts the build may reach. The build runs under the same default deny as the environment, so a package registry or an engine download must be named here. Max items 50. |
+| `allow_hosts` | list of string | no | Hosts the build is declared to reach, such as a package registry or an engine download. DECLARED RATHER THAN ENFORCED in this release: the list is validated and shown by af explain, and the local builder does not yet seal a build or apply it. Write it as the record of what your build needs, and do not rely on it as a control. Max items 50. |
 | `args` | object | no | Build arguments. Never secrets: build arguments are recorded in image metadata and are visible to anyone who can pull the image. Secrets are mounted, and the linter rejects a secret shaped argument. Max properties 50. |
 | `context` | string | no | Build context directory, relative to the repository root. Defaults to the repository root so that a service can copy from a shared package. Max length 512. |
 | `dockerfile` | string | no | Path to the Dockerfile, relative to the repository root. Max length 512. |
