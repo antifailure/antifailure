@@ -138,7 +138,51 @@ export function createServer(options: ServerOptions) {
     c.header('x-frame-options', 'DENY')
   })
 
+  // Liveness. Deliberately a static literal that touches nothing: it answers
+  // "is this process running", and it is not allowed to imply more.
   app.get('/health', (c) => c.json({ ok: true }))
+
+  // Readiness, which is a different question, and the difference is not
+  // academic.
+  //
+  // The first deploy of this application to Azure answered /health with 200 for
+  // thirteen minutes while every endpoint that touched a table returned 500.
+  // The schema had never applied, because the managed Postgres refused
+  // CREATE EXTENSION pgcrypto, and nothing that was being monitored could tell.
+  // A health check that cannot fail for the most common cause of an unusable
+  // deploy is decoration.
+  //
+  // So this one takes a connection out of the pool the application actually
+  // serves with and asks the database a question. It reports the build as well,
+  // because the second thing a deploy gate needs to know, after "is it well",
+  // is "is it the build I just deployed" -- otherwise a rollout that silently
+  // did not happen passes every check.
+  app.get('/readyz', async (c) => {
+    const build = {
+      version: process.env.AF_VERSION ?? 'dev',
+      commit: process.env.AF_COMMIT ?? 'unknown',
+    }
+    try {
+      await options.pool.withoutTenant(async (db) => {
+        await db.execute(rawSql`SELECT 1`)
+      })
+    } catch (err) {
+      // 503, not 500. This is "not ready to receive traffic", which is what a
+      // load balancer and a deploy gate both act on, and it is what makes an
+      // automatic rollback fire rather than a page at three in the morning.
+      return c.json(
+        {
+          ready: false,
+          ...build,
+          // The message and not the stack. A readiness endpoint is unauthenticated.
+          reason: err instanceof Error ? err.message : 'the database did not answer',
+        },
+        503,
+      )
+    }
+    return c.json({ ready: true, ...build })
+  })
+
   app.get('/openapi.json', (c) => c.json(openApiDocument()))
 
   // -------------------------------------------------------------------------

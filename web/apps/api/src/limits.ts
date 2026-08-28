@@ -37,6 +37,10 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 50, burst: 200, key: 'ip',
     reason: 'A liveness probe from a load balancer, plus whatever else asks. Cheap, and refusing it looks like an outage.',
   },
+  'GET /readyz': {
+    rate: 50, burst: 200, key: 'ip',
+    reason: 'The deploy gate polls it every two seconds for a few minutes, and a load balancer may too. It runs one trivial query, so the cost is a round trip to Postgres.',
+  },
   'GET /openapi.json': {
     rate: 2, burst: 10, key: 'ip',
     reason: 'A static document that is fetched once by a person and cached by everything else.',

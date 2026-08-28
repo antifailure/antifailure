@@ -29,6 +29,43 @@ is a process that fails in production rather than at deploy time.
 | `AF_INSECURE_COOKIES` | unset | Set to `1` to drop the `Secure` attribute from cookies. For local development over plain HTTP and nothing else. |
 | `AF_MIGRATE` | unset | Set to `1` to apply migrations at startup. Requires `AF_MIGRATION_DATABASE_URL`. |
 | `AF_MIGRATION_DATABASE_URL` | unset | A connection string for a role that may run DDL. |
+| `AF_VERSION` | `dev` | The build's version, reported by `/readyz`. Stamped into the image at build time; setting it by hand only makes the endpoint lie. |
+| `AF_COMMIT` | `unknown` | The commit the build came from, reported by `/readyz`. Stamped the same way. |
+
+## Health
+
+Two endpoints, answering two different questions. Point the right thing at the
+right one.
+
+| Endpoint | Answers | Touches the database |
+| --- | --- | --- |
+| `GET /health` | Is the process alive? | No |
+| `GET /readyz` | Can it serve a request? | Yes, one trivial query |
+
+`/health` is a static literal, and it stays one. A liveness probe restarts the
+container when it fails, so wiring it to the database turns a slow Postgres
+into a restart loop that makes the outage worse.
+
+`/readyz` takes a connection from the pool the application serves with and asks
+the database a question. It answers `200` with the build, or `503` with the
+reason:
+
+```json
+{ "ready": true, "version": "v0.2.0", "commit": "31ce3f7" }
+```
+
+```json
+{ "ready": false, "version": "v0.2.0", "commit": "31ce3f7",
+  "reason": "password authentication failed for user \"af_app\"" }
+```
+
+Use `/readyz` for a deploy gate, and check the `commit` as well as the status.
+The first deploy of this application to Azure answered `/health` with `200` for
+thirteen minutes while every endpoint that touched a table returned `500`: the
+schema had never applied, because the managed Postgres refused
+`CREATE EXTENSION pgcrypto`. A gate watching `/health` would have called that
+deploy a success. Checking the commit catches the other half, a rollout that
+silently did not happen and left the previous build serving.
 
 ## Schema maintenance
 
