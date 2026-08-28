@@ -31,6 +31,7 @@ else
   # that can only be passed by lying in it.
   targets=(
     "$root/docs/src/content/docs"
+    "$root/examples"
     "$root/README.md"
     "$root/CONTRIBUTING.md"
     "$root/SECURITY.md"

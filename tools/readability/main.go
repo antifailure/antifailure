@@ -110,12 +110,16 @@ func overallMean(rs []report) float64 {
 	return float64(words) / float64(sentences)
 }
 
-// collect finds the pages a reader sees. docs/plan is the build log for this
-// repository rather than product documentation.
+// collect finds the pages a reader sees: the documentation site and the
+// examples, whose READMEs are the first prose most people meet. docs/plan is
+// the build log for this repository rather than product documentation.
 func collect(root string) ([]string, error) {
 	var out []string
-	err := filepath.WalkDir(filepath.Join(root, "docs", "src", "content", "docs"),
-		func(path string, d fs.DirEntry, err error) error {
+	for _, dir := range []string{
+		filepath.Join(root, "docs", "src", "content", "docs"),
+		filepath.Join(root, "examples"),
+	} {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -125,8 +129,9 @@ func collect(root string) ([]string, error) {
 			out = append(out, path)
 			return nil
 		})
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
 	}
 	sort.Strings(out)
 	return out, nil
@@ -135,6 +140,7 @@ func collect(root string) ([]string, error) {
 var (
 	frontmatter = regexp.MustCompile(`(?s)\A---\n.*?\n---\n`)
 	fenced      = regexp.MustCompile("(?s)```.*?```")
+	indented    = regexp.MustCompile(`(?m)^(?:    |\t).*$`)
 	inlineCode  = regexp.MustCompile("`[^`]*`")
 	link        = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
 	heading     = regexp.MustCompile(`(?m)^#{1,6} .*$`)
@@ -153,6 +159,9 @@ var (
 func measure(page string) report {
 	text := frontmatter.ReplaceAllString(page, "")
 	text = fenced.ReplaceAllString(text, " ")
+	// An indented block is a code block too, and a README that lists three
+	// endpoints that way is not harder to read for it.
+	text = indented.ReplaceAllString(text, " ")
 	text = htmlComment.ReplaceAllString(text, " ")
 	text = tableRow.ReplaceAllString(text, " ")
 	text = heading.ReplaceAllString(text, " ")

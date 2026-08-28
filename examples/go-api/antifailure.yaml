@@ -1,0 +1,92 @@
+version: 1
+name: orders-api
+
+# The whole configuration surface for this example, with nothing configured
+# anywhere else. Read it top to bottom: what runs, where the data comes from,
+# what it may reach, who the agents are, and what they do.
+
+services:
+  - name: api
+    kind: web
+    path: .
+    port: 3000
+    health_path: /health
+    # Migrations run before the service starts, against the branch rather than
+    # the golden, so a pull request that adds a column gets it and nobody
+    # else's environment does.
+    migrate: "psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/0001_init.sql"
+    build:
+      strategy: dockerfile
+      dockerfile: Dockerfile
+      # The build runs under the same default deny as the environment. The Go
+      # module proxy is named because the build fetches from it; nothing else
+      # is reachable, including at build time.
+      allow_hosts:
+        - proxy.golang.org
+        - sum.golang.org
+        - dl-cdn.alpinelinux.org
+    env:
+      - name: DATABASE_URL
+        required: true
+      - name: PORT
+        value: "3000"
+
+database:
+  provider: docker
+  version: 17
+  masking_rules: masking.yaml
+  golden:
+    # Refreshed nightly and never used past a week. A golden older than that
+    # is a copy of a schema that has moved on, and branching from it produces
+    # migration failures that look like application bugs.
+    schedule: "0 3 * * *"
+    max_age: 168h
+    retain: 3
+
+egress:
+  # Nothing reaches the internet unless it is named here. This example names
+  # one host, and the entry is a sandbox rather than an allow: the container
+  # gets a placeholder credential and the proxy substitutes the real sandbox
+  # key, so the application's code path is exercised and the key never enters
+  # the environment.
+  default: block
+  rules:
+    - host: api.stripe.com
+      mode: sandbox
+      credential: STRIPE_SECRET_KEY
+      note: "payment intents, against Stripe's own test mode"
+
+personas:
+  - name: returning-customer
+    email: ada@example.test
+    role: customer
+    login: password
+
+workflows:
+  - name: place-an-order
+    description: >-
+      As the returning customer, look at the customer list, place an order for
+      2599 cents, and check that it appears with the right total.
+    persona: returning-customer
+    start_path: /customers
+    expect:
+      - "the customer list is not empty"
+      - "the new order is returned with a total of 2599"
+    tags: [smoke]
+
+invariants:
+  - name: no-orphaned-orders
+    description: >-
+      Every order belongs to a customer that exists. This is the assertion the
+      API cannot make from the outside, and the one a masking run that broke
+      the join would fail.
+    sql: |
+      SELECT count(*) AS violations
+      FROM orders o
+      LEFT JOIN customers c ON c.id = o.customer_id
+      WHERE c.id IS NULL
+
+  - name: no-negative-totals
+    description: An order's total is always positive, whatever the masking did to it.
+    sql: |
+      SELECT count(*) AS violations FROM orders WHERE total_cents <= 0

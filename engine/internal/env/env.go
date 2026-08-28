@@ -811,7 +811,14 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		MigrationDatabaseURL: insideMigrateURL,
 		Journal:              recordIntent,
 		Progress: func(line string) {
-			o.event(s, events.ServiceLog, line, serviceField(line, names)...)
+			// engine.progress, not service.log. A real run showed why: the
+			// non-TTY fallback folds service.log away as noise, correctly,
+			// because a service writes thousands of lines and a build log is
+			// not the place for them. These are lifecycle steps rather than
+			// service output, they arrive perhaps four times in a run, and
+			// folding them away restored exactly the silence this exists to
+			// end.
+			o.event(s, events.Progress, line, serviceField(line, names)...)
 			o.progress(line)
 		},
 	}
@@ -879,10 +886,13 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		if !svc.Ready {
 			t, level = events.ServiceExited, events.LevelError
 		}
+		// Empty fields are left off rather than sent empty. A real run showed
+		// "service.ready web is running detail= " on every line, because a
+		// service that started cleanly has no detail to give, and a key with
+		// nothing after it is noise in the one place a reader is scanning.
 		o.emit(s, level, t, svc.Name+" is "+orDefault(svc.State, "unknown"),
-			events.F("service", svc.Name), events.F("kind", svc.Kind),
-			events.F("url", svc.URL), events.F("state", svc.State),
-			events.F("detail", svc.Detail))
+			nonEmpty("service", svc.Name, "kind", svc.Kind,
+				"url", svc.URL, "state", svc.State, "detail", svc.Detail)...)
 	}
 	if err != nil {
 		return res, err
@@ -892,6 +902,23 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	res.Proxied = env.ProxyReady
 	res.Duration = o.opts.Clock.Since(started)
 	return res, nil
+}
+
+// nonEmpty builds fields from key and value pairs, leaving out the values that
+// are empty.
+//
+// Variadic strings rather than a map so the order is the caller's: the display
+// sorts by key, but the NDJSON sink and anything reading the file get them as
+// written, and "service" first is what a person scanning a log wants.
+func nonEmpty(kv ...string) []events.Field {
+	out := make([]events.Field, 0, len(kv)/2)
+	for i := 0; i+1 < len(kv); i += 2 {
+		if kv[i+1] == "" {
+			continue
+		}
+		out = append(out, events.F(kv[i], kv[i+1]))
+	}
+	return out
 }
 
 // serviceField attaches a service name to a runtime progress line when the
