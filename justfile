@@ -43,16 +43,40 @@ gate: _reports
       fi
     }
 
+    # Several gates assert a wall clock budget: a manifest parses in under
+    # 250ms, ten thousand runs plan in under a second, a container build
+    # finishes inside its deadline. Those are real guards and they are worth
+    # keeping, but they measure the machine as much as the code. On a box that
+    # is oversubscribed they fail while nothing is wrong, and the failure reads
+    # exactly like a regression, so say so before the run rather than after.
+    cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+    load=$(uptime | sed 's/.*averages*: *//' | awk '{print $1}' | tr -d ',')
+    busy=$(awk -v l="$load" -v c="$cores" 'BEGIN { print (l > c * 1.5) ? 1 : 0 }')
+    if [ "$busy" = "1" ]; then
+      echo "Load average is $load on $cores cores."
+      echo "Timing gates can fail here while nothing is wrong. Re-run a failure on"
+      echo "its own before believing it."
+      echo
+    fi
+
     echo "Gates"
     run "generated files are current" just _generated
     run "release stamps a real version"  just ldcheck
     run "error catalog and code agree"   just errcheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
+    run "documented paths exist"         just claimcheck
+    run "prose reads like a person"      just prosecheck
+    run "no forbidden tokens in docs"    just forbidden
+    run "spelling"                       just spell
+    run "prose style"                    just vale
+    run "every link resolves"            just links
+    run "prose stays readable"           just readability
     run "gate matches CI"                just gatecheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
+    run "lint"                           just lint
     run "the gates themselves"           just test-tools
     run "engine"                         just test-engine
     run "control plane"                  just test-web
@@ -111,6 +135,11 @@ setup:
     need git    ""        "brew install git"                                   git --version
 
     echo
+    echo "Documentation gates"
+    need vale   ""        "brew install vale , or https://vale.sh/docs/install"   vale --version
+    need lychee ""        "brew install lychee , or https://lychee.cli.rs"        lychee --version
+
+    echo
     echo "Repository"
     printf '  %-12s' "hooks"
     if [ "$(git config core.hooksPath || true)" = ".githooks" ]; then
@@ -146,12 +175,34 @@ setup:
     fi
 
 # Start the Postgres the control plane suites need.
+#
+# pg_stat_statements is preloaded because the query regression work needs it and
+# because of how it fails without it: `CREATE EXTENSION pg_stat_statements`
+# succeeds on a server that never loaded the library, the view exists, and it
+# records nothing. The tests then skip rather than fail, and a suite that skips
+# reports ok. Preloading costs nothing for anybody who does not use it, and
+# `track=all` counts statements inside functions and procedures, which is where
+# an N+1 usually hides.
+#
+# The readiness loop below waits for a query to succeed rather than for the port
+# to open. An open port is not an accepting database: the postgres image runs
+# initdb against a temporary server and shuts it down before starting the real
+# one, so both `nc -z` and `pg_isready` answer yes during a window when the next
+# query fails with "the database system is shutting down". Getting this wrong is
+# how a suite ends up skipping and reporting ok.
 db:
     @docker rm -f af-cp-test > /dev/null 2>&1 || true
     docker run -d --name af-cp-test -p 55432:5432 \
-      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine
+      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine \
+      -c shared_preload_libraries=pg_stat_statements \
+      -c pg_stat_statements.track=all
     @echo "waiting for postgres"
-    @for i in $(seq 1 60); do nc -z 127.0.0.1 55432 && break || sleep 1; done
+    @for i in $(seq 1 90); do \
+      docker exec af-cp-test psql -U postgres -d antifailure -tAc 'select 1' > /dev/null 2>&1 && break; \
+      sleep 1; \
+    done
+    @docker exec af-cp-test psql -U postgres -d antifailure -tAc 'select 1' > /dev/null 2>&1 \
+      || { echo "postgres never accepted a query"; exit 1; }
     @echo "up on 55432"
 
 # Remove it again.
@@ -252,6 +303,56 @@ scanrepo:
 docexamples:
     cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists
 
+# The punctuation this project does not use.
+prosecheck:
+    go run ./tools/prosecheck .
+
+# Spelling, with the project dictionary in tools/docs/dictionary.txt.
+spell:
+    npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" README.md CONTRIBUTING.md SECURITY.md
+
+# Prose style: the Google developer documentation style, plus the rule about
+# em dashes. `vale sync` fetches the style package named in .vale.ini.
+vale:
+    vale sync
+    vale docs/src/content/docs README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
+
+# Every link on the assembled site, including fragments.
+#
+# Against the built site rather than the markdown, because the addresses a
+# reader follows are the built ones: /docs/reference/cli/#af-init is a heading
+# on a page, not a file in the tree, and only the built site knows whether it
+# exists. Offline, so a slow upstream cannot fail somebody's local run; the
+# external addresses are checked on the daily schedule.
+links:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    (cd www && npm run build)
+    (cd docs && npm run build)
+    rm -rf site && mkdir -p site
+    cp -R www/out/. site/
+    cp -R docs/dist site/docs
+    lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
+
+# How hard each page is to read, worst first.
+#
+# The threshold is a regression guard rather than a style rule. The hardest
+# page today averages 23 words a sentence, so 28 leaves five words of headroom:
+# it fires on a page that drifted, not on a page whose subject needs long
+# sentences. Run it with no argument to read the whole report.
+readability:
+    go run ./tools/readability . --max 28
+
+# The G8 forbidden token scan: notes to the author, unfilled slots, names that
+# belong to a person rather than the product, addresses that resolve only on
+# somebody's private network, and identifiers that name a real cloud tenant.
+forbidden:
+    ./tools/docs/forbidden.sh
+
+# Every repository path our documents point at exists.
+claimcheck:
+    go run ./tools/claimcheck .
+
 # This justfile runs what CI runs.
 gatecheck:
     go run ./tools/gatecheck .
@@ -283,20 +384,33 @@ _generated:
     set -euo pipefail
     go run ./tools/errgen
     go run ./tools/proxysrc
+    go run ./tools/schemadoc .
     (cd engine && go test ./internal/policy -update-vectors)
     (cd engine && go test ./internal/cli -update-reference)
+    (cd engine && go test ./internal/events -update-schema)
+    (cd engine && go test ./internal/masking -update-transforms)
+    (cd engine && go test ./internal/hud -update-frames)
     git diff --exit-code -- \
       engine/internal/errors/codes.gen.go \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
-      docs/src/content/docs/reference/cli.md
+      schemas/events.v1.json \
+      docs/src/content/docs/reference/cli.md \
+      docs/src/content/docs/reference/transforms.md \
+      docs/src/content/docs/guides/dashboard.md \
+      engine/internal/hud/testdata \
+      docs/src/content/docs/reference/schemas
 
 # Regenerate and keep the result.
 generate:
     go run ./tools/errgen
     go run ./tools/proxysrc
+    go run ./tools/schemadoc .
     cd engine && go test ./internal/policy -update-vectors
     cd engine && go test ./internal/cli -update-reference
+    cd engine && go test ./internal/events -update-schema
+    cd engine && go test ./internal/masking -update-transforms
+    cd engine && go test ./internal/hud -update-frames
 
 # The community build does not contain or need the enterprise edition.
 edition:
@@ -360,3 +474,35 @@ leaks:
 clean:
     rm -rf bin {{reports}}
     @echo "clean"
+
+# Known vulnerabilities that our code can actually reach.
+#
+# Not part of `just gate`, and that is deliberate rather than an oversight. The
+# answer comes from the Go vulnerability database, so it is not a function of
+# this tree: the same commit is clean today and not clean tomorrow. `just gate`
+# promises that green here means green in CI, and a scan whose input moves under
+# it cannot keep that promise in either direction. It also needs the network.
+#
+# security.yml runs it on every pull request and again every morning, which is
+# where a check like this belongs. Run it here whenever you change a dependency.
+vuln:
+    go run ./tools/vulncheck .
+
+# The linter set CONTRIBUTING describes.
+#
+# Part of `just gate` since the count reached zero. It was kept out while there
+# were findings that predated the config, because a gate that fails every
+# branch for something none of them did is one people learn to route around.
+lint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v golangci-lint > /dev/null; then
+      echo "golangci-lint is not installed. brew install golangci-lint"
+      exit 1
+    fi
+    cd engine
+    # verify before run. `run` does not validate the config, so an invalid one
+    # passes locally and fails the moment CI's action verifies it, which is
+    # exactly what happened with an empty misspell key.
+    golangci-lint config verify
+    golangci-lint run --timeout 15m ./...

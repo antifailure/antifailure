@@ -1,0 +1,81 @@
+{{- if .Values.bootstrap.enabled }}
+{{- include "cp.validate" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # The revision is in the name so that each upgrade gets its own Job and its
+  # own logs, rather than one object whose history is overwritten.
+  name: {{ include "cp.fullname" . }}-bootstrap-{{ .Release.Revision }}
+  labels: {{- include "cp.labels" . | nindent 4 }}
+  annotations:
+    # Before the Deployment rolls, every time. The schema a replica reads must
+    # exist before that replica serves a request.
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    # Deliberately NOT hook-succeeded: a Job deleted the moment it passes takes
+    # its logs with it, and the first question after a bad upgrade is what the
+    # migration actually did.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.bootstrap.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.bootstrap.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels: {{- include "cp.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: bootstrap
+    spec:
+      restartPolicy: Never
+      # No serviceAccountName, deliberately, and this is not an oversight.
+      #
+      # This Job is a pre-install hook, so it runs BEFORE the release's own
+      # ServiceAccount exists. A pod naming a ServiceAccount that is not there
+      # is rejected by the API server, the Job retries it forever, and the
+      # install fails eight minutes later with "timed out waiting for the
+      # condition" and no pod to look at. That is exactly what happened the
+      # first time this chart was installed on a real cluster.
+      #
+      # Making the ServiceAccount a hook too would fix the ordering and break
+      # uninstall, because Helm does not track hook resources in the release
+      # manifest and would leave it behind. The Job does not need one anyway:
+      # it talks to Postgres and never to the Kubernetes API.
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: bootstrap
+          image: {{ include "cp.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["node", "bootstrap.mjs"]
+          # Both read from the hook's own Secret, never the release's: the
+          # release's does not exist yet when this runs.
+          env:
+            - name: AF_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.bootstrapSecretName" . }}
+                  key: {{ .Values.database.secretKeys.url }}
+            # The privileged role. It appears here and in no pod that serves
+            # traffic: the Deployment must not be able to run DDL even by
+            # accident.
+            - name: AF_MIGRATION_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.bootstrapSecretName" . }}
+                  key: {{ .Values.database.secretKeys.migrationUrl }}
+          resources: {{- toYaml .Values.bootstrap.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

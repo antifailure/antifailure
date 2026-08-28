@@ -5,15 +5,16 @@ sidebar:
   order: 8
 ---
 
-Every transform available to a masking rule. This page is generated from
-`engine/internal/masking/transform.go`, so a transform that exists and is not
-here fails the build.
+Every transform available to a masking rule. The table is generated from the
+registry in `engine/internal/masking/transform.go`, so a transform that exists
+and is not listed here fails the build.
 
 The **unique** column matters more than it looks. A transform that does not
 preserve uniqueness cannot be used on a column with a unique constraint: the
 masked values collide and the update fails partway. `af mask plan` catches that
 before anything runs.
 
+<!-- transforms:start -->
 | Transform | Unique | What it does |
 | --- | --- | --- |
 | `address` | no | Replaces a street address with a synthetic one of a similar shape. |
@@ -34,10 +35,12 @@ before anything runs.
 | `phone` | no | Replaces the digits of a phone number in place, keeping its length, punctuation, and country prefix so that format checks still pass. |
 | `postcode` | no | Rewrites a postal code in place, keeping letters as letters and digits as digits so the country's format still validates. |
 | `preserve` | yes | Leaves the value unchanged. Use it to record that a column was reviewed and found safe, rather than leaving it out. |
+| `region` | no | Replaces a state or subdivision code with a synthetic two letter one. For a column holding the full name of a region, use city or nullify instead. |
 | `string_fpe` | no | Replaces a string with one of the same length, keeping digits as digits and letters as letters so a format check still matches. |
 | `url` | no | Keeps a URL's scheme and path shape, replacing its host with a synthetic one at example.test. |
 | `username` | yes | Replaces a handle with a unique synthetic one made of a word and a number. |
 | `uuid_remap` | yes | Maps a UUID to a different valid UUID. Columns that share a link map identically, so foreign keys still join. |
+<!-- transforms:end -->
 
 ## Check constraints
 
@@ -90,4 +93,4 @@ golden, which is what makes `link` work and what makes a masked database
 self-consistent. Across goldens the key differs, so the mapping cannot be
 reversed by diffing two refreshes.
 
-Related: [masking](/concepts/masking/), [verification](/concepts/verification/).
+Related: [masking](/docs/concepts/masking/), [verification](/docs/concepts/verification/).

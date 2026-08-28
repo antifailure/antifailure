@@ -1,0 +1,371 @@
+/*
+ * The documentation theme.
+ *
+ * The documentation and the marketing site are one site, so they share one
+ * palette, one type scale and one set of tokens. The tokens below are copied
+ * from www/app/globals.css deliberately rather than approximated: a docs site
+ * that is nearly the same as the site around it reads worse than one that is
+ * obviously different, because the small mismatches look like mistakes.
+ *
+ * Starlight's own variables are then mapped onto those tokens, so its sidebar,
+ * search, code blocks and asides inherit the same colours as everything else
+ * instead of shipping its defaults.
+ */
+
+@import "tailwindcss";
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/docs/fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
+    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/docs/fonts/Geist-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/docs/fonts/Geist-Medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/docs/fonts/Geist-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/docs/fonts/GeistMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/docs/fonts/GeistMono-Medium.woff2") format("woff2");
+}
+
+/* The site's tokens, verbatim. */
+@theme {
+  --color-neon: #33bf00;
+  --color-black-pure: #000000;
+  --color-gray-new-10: #18191b;
+  --color-gray-new-20: #303236;
+  --color-gray-new-40: #61646b;
+  --color-gray-new-50: #797d86;
+  --color-gray-new-60: #94979e;
+  --color-gray-new-80: #c9cbcf;
+  --color-gray-new-90: #e4e5e7;
+  --color-green-45: #00e599;
+  --color-green-52: #34d59a;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-title: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+  --leading-dense: 1.125;
+  --tracking-tighter: -0.04em;
+  --tracking-extra-tight: -0.02em;
+  --tracking-snug: -0.01em;
+}
+
+/* --------------------------------------------------- Starlight, remapped */
+
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] {
+  --sl-font: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --sl-content-width: 47rem;
+  --sl-sidebar-width: 18rem;
+  --sl-nav-height: 7.75rem;
+  --sl-line-height: 1.7;
+  --sl-text-code: 0.9em;
+
+  /* The site commits to one light appearance, so the documentation does too.
+     Both themes are defined identically rather than left to Starlight's dark
+     default, which would give the toggle a look the rest of the site does not
+     have. */
+  --sl-color-accent-low: #dcf0d2;
+  --sl-color-accent: #1a7f00;
+  --sl-color-accent-high: #10490a;
+
+  --sl-color-white: #18191b;
+  --sl-color-gray-1: #18191b;
+  --sl-color-gray-2: #303236;
+  --sl-color-gray-3: #61646b;
+  --sl-color-gray-4: #797d86;
+  --sl-color-gray-5: #c9cbcf;
+  --sl-color-gray-6: #e4e5e7;
+  --sl-color-gray-7: #f2f2f0;
+  --sl-color-black: #ffffff;
+
+  --sl-color-text: #303236;
+  --sl-color-text-accent: #16660a;
+  --sl-color-bg: #ffffff;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #ffffff;
+  --sl-color-bg-inline-code: #f2f2f0;
+  --sl-color-hairline: #e4e5e7;
+  --sl-color-hairline-light: #c9cbcf;
+  --sl-color-hairline-shade: #e4e5e7;
+
+  --af-rule: #e4e5e7;
+  --af-surface: #f7f7f5;
+  --af-accent-ink: #1a7f00;
+}
+
+::selection {
+  background: #33bf00;
+  color: #000;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.01em;
+}
+
+/* ------------------------------------------------------------------ type */
+
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--font-title);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.content-panel h1,
+.sl-markdown-content h1 {
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.125;
+}
+
+/* A rule above every h2 gives the page a spine you can scan, which is most of
+   what somebody does when they arrive here from an error message. */
+.sl-markdown-content h2 {
+  margin-top: 2.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--af-rule);
+  font-weight: 500;
+}
+
+.sl-markdown-content h3 {
+  margin-top: 2rem;
+  font-weight: 500;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--af-accent-ink);
+  text-decoration-color: color-mix(in srgb, var(--af-accent-ink) 35%, transparent);
+  text-underline-offset: 0.22em;
+  text-decoration-thickness: 1px;
+}
+
+.sl-markdown-content a:hover:not(:where(.not-content *)) {
+  text-decoration-color: var(--af-accent-ink);
+}
+
+/* ------------------------------------------------------- code and tables */
+
+.sl-markdown-content code:not(:where(.not-content *)) {
+  border: 1px solid var(--af-rule);
+  border-radius: 4px;
+  padding: 0.1em 0.36em;
+}
+
+.expressive-code .frame pre,
+.sl-markdown-content pre:not(:where(.not-content *)) {
+  border-radius: 10px;
+  border: 1px solid var(--af-rule);
+}
+
+.sl-markdown-content table {
+  font-variant-numeric: tabular-nums;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9375rem;
+}
+
+.sl-markdown-content :is(th, td) {
+  border: none;
+  border-bottom: 1px solid var(--af-rule);
+  padding: 0.65rem 0.9rem 0.65rem 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.sl-markdown-content :is(th, td) code {
+  white-space: nowrap;
+}
+
+/* On a phone, a single long identifier in a cell sets the whole table's
+ * minimum width and pushes the last column off the screen. A regular
+ * expression in the manifest reference did exactly that: the table needed
+ * 571px inside a 358px column, so the Notes column was cut off mid sentence.
+ * Letting code wrap there costs a line break in an identifier and buys a table
+ * that fits. */
+@media (max-width: 50rem) {
+  .sl-markdown-content :is(th, td) code {
+    white-space: normal;
+    /* anywhere, not break-word. break-word leaves a cell's minimum width at
+     * the width of its longest word, so one regular expression still pushed
+     * the table 115px past the screen. anywhere lets everything compress,
+     * which fits, and costs the first column a floor so that the layout
+     * cannot starve it and break "egress" across two lines. */
+    overflow-wrap: anywhere;
+  }
+
+  .sl-markdown-content :is(th, td):first-child {
+    min-width: 5.5rem;
+  }
+}
+
+.sl-markdown-content th {
+  font-weight: 500;
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+  border-bottom-color: var(--sl-color-hairline-light);
+}
+
+/* A wide table scrolls inside itself; the page never scrolls sideways.
+ *
+ * The shadow at each edge is there because on a phone the scrollbar is
+ * invisible until you already know to scroll, and a reference table whose
+ * Notes column is cut off mid sentence reads as a broken page rather than a
+ * scrollable one. The two pairs of gradients are the standard CSS scroll
+ * shadow: the opaque covers scroll with the content, the shadows do not, so a
+ * shadow is only visible while there is something past that edge. No script,
+ * and nothing animates. */
+.sl-markdown-content .table-wrapper,
+.sl-markdown-content > table {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  background:
+    linear-gradient(to right, var(--sl-color-bg) 30%, transparent) left center,
+    linear-gradient(to left, var(--sl-color-bg) 30%, transparent) right center,
+    radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / 0.2), transparent) left center,
+    radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / 0.2), transparent) right center;
+  background-repeat: no-repeat;
+  background-size: 2.5rem 100%, 2.5rem 100%, 0.85rem 100%, 0.85rem 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+/* ---------------------------------------------------------------- chrome */
+
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover {
+  background: transparent;
+  color: var(--color-black-pure);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--color-neon);
+  border-radius: 0;
+}
+
+.sidebar-content a {
+  /* 44px targets on a phone, which the default 8px padding does not reach. */
+  padding-block: 0.55rem;
+}
+
+.sidebar-content summary,
+.sidebar-content .group-label span {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+
+.sidebar-content ul li {
+  border-inline-start: 1px solid var(--af-rule);
+}
+
+/* ---------------------------------------------------------------- asides */
+
+.sl-markdown-content .starlight-aside {
+  border: 1px solid var(--af-rule);
+  border-inline-start: 2px solid var(--af-rule);
+  border-radius: 8px;
+  background: var(--af-surface);
+  padding: 1rem 1.15rem;
+}
+
+.sl-markdown-content .starlight-aside__title {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  gap: 0.5rem;
+}
+
+.sl-markdown-content .starlight-aside--tip {
+  border-inline-start-color: var(--color-neon);
+}
+.sl-markdown-content .starlight-aside--tip .starlight-aside__title {
+  color: var(--af-accent-ink);
+}
+.sl-markdown-content .starlight-aside--caution {
+  border-inline-start-color: #8a6a00;
+}
+.sl-markdown-content .starlight-aside--caution .starlight-aside__title {
+  color: #8a6a00;
+}
+.sl-markdown-content .starlight-aside--danger {
+  border-inline-start-color: #b32d18;
+}
+.sl-markdown-content .starlight-aside--danger .starlight-aside__title {
+  color: #b32d18;
+}
+
+/* ----------------------------------------------------------- affordances */
+
+:where(a, button, input, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-neon);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Nothing on this site animates on a loop. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (max-width: 50rem) {
+  :root {
+    --sl-text-h1: 2rem;
+    /* 56px header plus a shorter documentation bar. */
+    --sl-nav-height: 6.75rem;
+  }
+  .sl-markdown-content h2 {
+    margin-top: 2.25rem;
+    padding-top: 1.25rem;
+  }
+}

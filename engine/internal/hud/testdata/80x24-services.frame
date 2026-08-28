@@ -1,0 +1,19 @@
+antifailure  pr-482  up 21s                                  2/3 ready  1 errors
+▸ SERVICES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ web                         http://127.0.0.1:8080
+✓ worker                      running
+· a-very-long-service-name-…  starting
+NETWORK ────────────────────────────────────────────────────────────────────────
+allow 12   deny 1   mock 1   record 0
+last denied telemetry.vendor.example
+DATABASE ───────────────────────────────────────────────────────────────────────
+gv_20260101_ab12cd  verified
+
+AGENTS ─────────────────────────────────────────────────────────────────────────
+checkout-flow               3 passed  1 failed  failed
+smoke                       7 passed  0 failed  running
+
+LOG ────────────────────────────────────────────────────────────────────────────
+00:00:20 agent.started agent=smoke failed=0 passed=7 state=running
+00:00:21 agent.started agent=checkout-flow failed=1 passed=3 state=failed
+00:00:22 env.failed the worker exited with status 1

@@ -389,7 +389,10 @@ func (d *DB) Tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	}()
 	if err := fn(tx); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
-			return fmt.Errorf("state: rollback after %v: %w", err, rbErr)
+			// Both wrapped. A caller asking errors.Is about the original
+			// failure has to get an answer even when the rollback also
+			// failed, and it is the original that says what went wrong.
+			return fmt.Errorf("state: rollback after %w: %w", err, rbErr)
 		}
 		return err
 	}

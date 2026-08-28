@@ -80,4 +80,4 @@ Load runs against environments Antifailure made, and refuses anything else.
 This is a load generator with a production traffic shape pointed at it; the one
 thing it must never do is point at production.
 
-Related: [insights](/concepts/insights/), [scheduling](/concepts/scheduling/).
+Related: [insights](/docs/concepts/insights/), [scheduling](/docs/concepts/scheduling/).

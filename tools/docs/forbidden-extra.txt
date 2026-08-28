@@ -1,0 +1,2 @@
+# Names of people and customers that must never appear in documentation.
+# One per line. Matched whole word, case sensitively.

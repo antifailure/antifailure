@@ -258,7 +258,10 @@ func runIn(ctx context.Context, dir, name string, args ...string) error {
 		if len(tail) > 800 {
 			tail = tail[len(tail)-800:]
 		}
-		return fmt.Errorf("%s: %s", err, strings.TrimSpace(tail))
+		// Wrapped, not formatted. The caller decides what to do from the
+		// error underneath, and a %s here turns an exec.ExitError into a
+		// string that errors.As can no longer see.
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(tail))
 	}
 	return nil
 }

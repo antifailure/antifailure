@@ -1,0 +1,30 @@
+antifailure  pr-482  up 21s                                                                                                                  2/3 ready  1 errors
+▸ SERVICES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ NETWORK ──────────────────────────────────────────── AGENTS ───────────────────────────────────────────────
+✓ web                http://127.0.0.1:8080           allow 12   deny 1   mock 1   record 0                checkout-flow       3 passed  1 failed  failed        
+✓ worker             running                         last denied telemetry.vendor.example                 smoke               7 passed  0 failed  running       
+· a-very-long-serv…  starting                                                                                                                                   
+                                                     DATABASE ───────────────────────────────────────────                                                       
+                                                     gv_20260101_ab12cd  verified                                                                               
+LOG ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+00:00:01 service.ready kind=web service=web state=running url=http://127.0.0.1:8080
+00:00:02 service.ready kind=worker service=worker state=running
+00:00:03 service.starting kind=cron service=a-very-long-service-name-that-will-not-fit state=starting
+00:00:04 egress.decision decision=allow
+00:00:05 egress.decision decision=allow
+00:00:06 egress.decision decision=allow
+00:00:07 egress.decision decision=allow
+00:00:08 egress.decision decision=allow
+00:00:09 egress.decision decision=allow
+00:00:10 egress.decision decision=allow
+00:00:11 egress.decision decision=allow
+00:00:12 egress.decision decision=allow
+00:00:13 egress.decision decision=allow
+00:00:14 egress.decision decision=allow
+00:00:15 egress.decision decision=allow
+00:00:16 egress.decision decision=deny host=telemetry.vendor.example
+00:00:17 egress.decision decision=mock
+00:00:18 mask.progress percent=64 phase=masking
+00:00:19 mask.verified version=gv_20260101_ab12cd
+00:00:20 agent.started agent=smoke failed=0 passed=7 state=running
+00:00:21 agent.started agent=checkout-flow failed=1 passed=3 state=failed
+00:00:22 env.failed the worker exited with status 1

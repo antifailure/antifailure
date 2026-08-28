@@ -1,0 +1,133 @@
+---
+/**
+ * The site footer, for the documentation.
+ *
+ * Mirrors www/components/layout/SiteFooter: same columns, same tokens, same
+ * spacing, same tap targets. The waitlist form is the one piece not carried
+ * across, because it is a React island and the documentation has no other
+ * reason to ship a client bundle; the sign-up page it posts to is one link
+ * away and is linked here.
+ */
+const FOOTER_MENUS = [
+  {
+    heading: "Company",
+    items: [
+      { text: "About", href: "/company" },
+      { text: "Pricing", href: "/pricing" },
+      { text: "Security", href: "/security" },
+      { text: "Open source", href: "/open-source" },
+      { text: "Design partners", href: "/design-partners" },
+      { text: "Sign up", href: "/signup" },
+    ],
+  },
+  {
+    heading: "Product",
+    items: [
+      { text: "Product overview", href: "/product" },
+      { text: "Isolated Twin", href: "/product/twins" },
+      { text: "Safe State", href: "/product/safe-state" },
+      { text: "Firewall", href: "/product/firewall" },
+      { text: "Workload Studio", href: "/product/workload" },
+      { text: "Migrations", href: "/product/migrations" },
+      { text: "Safety report", href: "/product/report" },
+    ],
+  },
+  {
+    heading: "Documentation",
+    items: [
+      { text: "Quickstart", href: "/docs/getting-started/quickstart" },
+      { text: "Goldens", href: "/docs/concepts/goldens" },
+      { text: "Masking", href: "/docs/concepts/masking" },
+      { text: "Egress", href: "/docs/concepts/egress" },
+      { text: "Command reference", href: "/docs/reference/cli" },
+      { text: "Error reference", href: "/docs/reference/errors" },
+    ],
+  },
+];
+---
+
+<footer class="af-site-footer relative z-30 mt-auto border-t border-gray-new-90 bg-white">
+  <div class="mx-auto w-full max-w-[1856px] px-8 max-lg:px-8 max-md:px-5">
+    <div
+      class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-16 py-16 max-xl:gap-x-10 max-lg:grid-cols-1 max-lg:gap-y-12 max-lg:py-12 max-md:py-10"
+    >
+      <div class="flex max-w-[360px] flex-col items-start max-lg:max-w-none">
+        <a href="/" class="flex shrink-0 items-center gap-x-2.5" aria-label="Antifailure home">
+          <svg viewBox="0 0 18 18" class="h-[18px] w-[18px]" fill="none" aria-hidden="true">
+            <path
+              d="M1.8 6.4V1.8H6.4M11.6 1.8H16.2V6.4M16.2 11.6V16.2H11.6M6.4 16.2H1.8V11.6"
+              stroke="#33bf00"
+              stroke-width="2.1"
+              stroke-linecap="square"></path>
+          </svg>
+          <span class="text-[15px] font-medium tracking-extra-tight text-black">Antifailure</span>
+        </a>
+        <p class="mt-4 text-[14px] leading-normal tracking-extra-tight text-gray-new-40">
+          A disposable copy of your production stack for every pull request.
+        </p>
+        <a
+          class="mt-7 inline-flex h-10 cursor-pointer items-center justify-center rounded-full bg-black px-5 text-[14px] font-medium tracking-extra-tight text-white transition-colors duration-200 hover:bg-[#292929]"
+          href="/signup">Join the waitlist</a
+        >
+        <div class="mt-auto flex flex-wrap items-center gap-x-5 gap-y-3 pt-8 max-lg:mt-0 max-lg:pt-7">
+          <a
+            class="inline-flex items-center gap-x-2 py-2.5 text-[14px] tracking-extra-tight text-gray-new-40 transition-colors duration-200 hover:text-black"
+            href="https://github.com/antifailure/antifailure"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="currentColor" aria-hidden="true">
+              <path
+                d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.26.8-.58v-2.02c-3.34.72-4.04-1.61-4.04-1.61c-.55-1.39-1.34-1.76-1.34-1.76c-1.09-.75.08-.73.08-.73c1.2.08 1.84 1.24 1.84 1.24c1.07 1.83 2.81 1.3 3.5 1c.1-.78.42-1.3.76-1.6c-2.67-.3-5.47-1.33-5.47-5.93c0-1.31.47-2.38 1.24-3.22c-.13-.3-.54-1.52.12-3.18c0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23c.66 1.66.25 2.88.12 3.18c.77.84 1.24 1.91 1.24 3.22c0 4.61-2.81 5.63-5.48 5.92c.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.82.58A12 12 0 0 0 12 .3z"
+              ></path>
+            </svg>
+            View the source
+          </a>
+          <span class="flex items-center gap-x-2 text-[14px] tracking-extra-tight text-gray-new-40">
+            <span class="h-2 w-2 shrink-0 rounded-full bg-[#33bf00]"></span>
+            Waitlist open
+          </span>
+        </div>
+      </div>
+
+      <nav
+        aria-label="Footer"
+        class="grid grid-cols-3 gap-x-20 max-xl:gap-x-12 max-lg:gap-x-8 max-md:grid-cols-2 max-md:gap-y-9"
+      >
+        {
+          FOOTER_MENUS.map((col) => (
+            <div>
+              <h2 class="text-[11px] font-medium uppercase tracking-[0.1em] text-gray-new-10">{col.heading}</h2>
+              <ul class="mt-3 flex flex-col">
+                {col.items.map((item) => (
+                  <li>
+                    <a
+                      class="block py-2.5 text-[15px] leading-normal tracking-extra-tight text-gray-new-40 transition-colors duration-200 hover:text-black"
+                      href={item.href}
+                    >
+                      {item.text}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </nav>
+    </div>
+
+    <div
+      class="flex items-start justify-between gap-x-10 gap-y-5 border-t border-gray-new-90 py-7 max-lg:flex-col max-md:py-6"
+    >
+      <p class="max-w-[720px] text-[13px] leading-normal tracking-extra-tight text-gray-new-50">
+        © Antifailure 2026. Pre-production deployment safety is a product category, not a guarantee that every
+        production incident is predicted.
+      </p>
+      <span class="-my-2 flex shrink-0 items-center gap-x-5 text-[13px] tracking-extra-tight text-gray-new-50">
+        <a class="py-2.5 transition-colors duration-200 hover:text-black" href="/privacy">Privacy</a>
+        <a class="py-2.5 transition-colors duration-200 hover:text-black" href="/terms">Terms</a>
+        <a class="py-2.5 transition-colors duration-200 hover:text-black" href="/security">Security</a>
+      </span>
+    </div>
+  </div>
+</footer>

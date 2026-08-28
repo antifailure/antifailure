@@ -1,0 +1,20 @@
+extends: existence
+message: "'%s' reads as a machine wrote it. Use a comma, a colon, or a full stop."
+level: error
+# text, not raw. A raw scope reads the fenced blocks too, and there ' -- ' is
+# how a SQL comment and an argument separator are spelled. Four false positives
+# in the documentation came from exactly that, all of them correct code.
+scope: text
+nonword: true
+# The rule the plan singles out: em dashes, en dashes, and double hyphens used
+# as punctuation.
+#
+# tools/prosecheck is the gate that enforces this in CI, and it is the more
+# careful of the two: it empties inline code and skips fenced blocks, so a
+# --flag is spelled the way an option is spelled and a defect beside one is
+# still found. This exists so that an editor with Vale running flags the same
+# thing while the sentence is being written, rather than at push time.
+tokens:
+  - '—'
+  - '–'
+  - '\s--\s'

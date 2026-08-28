@@ -3,6 +3,7 @@ package build
 import (
 	"archive/tar"
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -126,7 +127,7 @@ func TestContext_TarIsReadableAndNormalized(t *testing.T) {
 	seen := map[string]string{}
 	for {
 		h, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		require.NoError(t, err)

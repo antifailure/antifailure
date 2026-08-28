@@ -1,0 +1,21 @@
+antifailure  pr-482  up 14s                                                            2/2 ready
+▸ SERVICES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ web                               http://127.0.0.1:41273
+✓ worker                            running
+
+
+NETWORK ────────────────────────────────────────────────────────────────────────────────────────
+allow 0   deny 0   mock 0   record 0
+
+DATABASE ───────────────────────────────────────────────────────────────────────────────────────
+branched
+gv_20260101_ab12cd  verified
+AGENTS ─────────────────────────────────────────────────────────────────────────────────────────
+no agents running
+
+
+
+LOG ────────────────────────────────────────────────────────────────────────────────────────────
+00:00:13 service.ready web is running kind=web service=web state=running url=http://127.0.0.1:4…
+00:00:14 service.ready worker is running kind=worker service=worker state=running
+00:00:15 env.ready pr-482 is ready proxied=true url=http://127.0.0.1:41273

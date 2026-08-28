@@ -97,6 +97,7 @@ type Orchestrator struct {
 	opts     Options
 	envID    string
 	progress func(string)
+	sinks    []events.Sink
 }
 
 // New returns an orchestrator for a branch.
@@ -152,6 +153,49 @@ func trimForName(s string, max int) string {
 
 // EnvID reports the identifier this orchestrator works on.
 func (o *Orchestrator) EnvID() string { return o.envID }
+
+// AddSink subscribes something to the event stream for every lifecycle this
+// orchestrator runs from now on.
+//
+// Call it before Up, Down, or Status. The bus does not exist between commands,
+// so a sink is not attached to a bus here; it is remembered and attached to
+// each session as that session opens, and closed with it. That is what lets a
+// caller hand over a dashboard without knowing when the bus is created or
+// having to close it.
+//
+// This is the whole reason the engine emits anything. Before af up --hud there
+// was a bus with no subscribers, and every event it published was delivered to
+// nobody.
+func (o *Orchestrator) AddSink(s events.Sink) {
+	if s == nil {
+		return
+	}
+	o.sinks = append(o.sinks, s)
+}
+
+// emit publishes one event to whatever sinks the caller attached.
+//
+// It tolerates a nil session and a session with no bus. Those are real states:
+// a failure inside open returns before there is a bus, and the alternative to
+// tolerating them here is a nil check repeated at every call site plus a panic
+// the first time one is forgotten.
+func (o *Orchestrator) emit(s *session, level events.Level, t events.Type, msg string, f ...events.Field) {
+	if s == nil || s.bus == nil {
+		return
+	}
+	s.bus.Emit(o.envID, t, level, msg, f...)
+}
+
+// event publishes at info level, which is what almost every lifecycle step is.
+func (o *Orchestrator) event(s *session, t events.Type, msg string, f ...events.Field) {
+	o.emit(s, events.LevelInfo, t, msg, f...)
+}
+
+// eventErr publishes at error level, which is what puts a line in the
+// dashboard's error pane rather than only in the scrolling tail.
+func (o *Orchestrator) eventErr(s *session, t events.Type, msg string, f ...events.Field) {
+	o.emit(s, events.LevelError, t, msg, f...)
+}
 
 // Result is what Up produced.
 type Result struct {
@@ -230,6 +274,13 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 		return nil, err
 	}
 	s.bus = events.NewBus(o.opts.Clock)
+	// Before the journal, so that a sink attached by the caller sees the very
+	// first resource intent rather than joining part way through a run.
+	for _, sink := range o.sinks {
+		if sink != nil {
+			s.bus.AddSink(sink)
+		}
+	}
 	s.journal = journal.New(s.db, o.opts.Clock, s.bus)
 
 	if s.dbProv, err = o.newDatabaseProvider(ctx); err != nil {
@@ -645,7 +696,7 @@ func (o *Orchestrator) checkPolicy(ctx context.Context) error {
 }
 
 // Up brings the environment up.
-func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
+func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	started := o.opts.Clock.Now()
 	s, err := o.open(ctx, "af up")
 	if err != nil {
@@ -654,6 +705,20 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	defer s.close()
 
 	res := &Result{EnvID: o.envID}
+
+	o.event(s, events.EnvCreating, "creating "+o.envID, events.F("branch", o.opts.Branch))
+	// Registered after s.close, so it runs before it: defers unwind last in
+	// first out and the bus has to still be open for the last event to reach a
+	// sink. Reading the named results is what makes this cover every return in
+	// the function, including the ones added after this was written.
+	defer func() {
+		if rerr != nil {
+			o.eventErr(s, events.EnvFailed, rerr.Error())
+			return
+		}
+		o.event(s, events.EnvReady, o.envID+" is ready",
+			events.F("url", result.URL), events.F("proxied", result.Proxied))
+	}()
 
 	// Before anything is created, so that a refusal costs nothing. Checking
 	// after the database branch exists would leave a branch behind every time a
@@ -730,13 +795,25 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	// allow or block never terminates a connection, and asking its services to
 	// trust a certificate they will never see is a change to their trust store
 	// for no reason.
+	// The runtime's progress lines go to the event stream as well as to the
+	// terminal. They are the only thing said during the readiness wait, which
+	// is the longest part of a run, and in dashboard mode the terminal
+	// reporter is silenced, so without this the display goes quiet for
+	// minutes at exactly the point somebody is watching it.
+	names := make(map[string]bool, len(specs))
+	for _, sv := range specs {
+		names[sv.Name] = true
+	}
 	spec := provider.EnvSpec{
 		EnvID: o.envID, Branch: o.opts.Branch, Services: specs,
 		Egress:               o.opts.Manifest.Egress,
 		DatabaseURL:          insideURL,
 		MigrationDatabaseURL: insideMigrateURL,
 		Journal:              recordIntent,
-		Progress:             o.progress,
+		Progress: func(line string) {
+			o.event(s, events.ServiceLog, line, serviceField(line, names)...)
+			o.progress(line)
+		},
 	}
 	spec.SandboxCredentials = resolved.Sidecar
 	spec.ModelEnv = o.modelEnv()
@@ -785,8 +862,28 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 		o.progress("issued an environment certificate so the proxy can read inside TLS where the policy needs it")
 	}
 
+	for _, svc := range spec.Services {
+		o.event(s, events.ServiceStarting, svc.Name+" is starting",
+			events.F("service", svc.Name), events.F("kind", svc.Kind),
+			events.F("state", "starting"))
+	}
+
 	env, err := s.runtime.Up(ctx, spec)
 	res.Services = env.Services
+	// Emitted before the error is returned, not after. A run that failed with
+	// three of five services up is exactly when somebody needs to see which
+	// three, and returning first would leave the dashboard showing all five
+	// starting forever.
+	for _, svc := range env.Services {
+		t, level := events.ServiceReady, events.LevelInfo
+		if !svc.Ready {
+			t, level = events.ServiceExited, events.LevelError
+		}
+		o.emit(s, level, t, svc.Name+" is "+orDefault(svc.State, "unknown"),
+			events.F("service", svc.Name), events.F("kind", svc.Kind),
+			events.F("url", svc.URL), events.F("state", svc.State),
+			events.F("detail", svc.Detail))
+	}
 	if err != nil {
 		return res, err
 	}
@@ -795,6 +892,21 @@ func (o *Orchestrator) Up(ctx context.Context) (*Result, error) {
 	res.Proxied = env.ProxyReady
 	res.Duration = o.opts.Clock.Since(started)
 	return res, nil
+}
+
+// serviceField attaches a service name to a runtime progress line when the
+// line names one.
+//
+// The runtime writes "web: running migrations", so the name is the prefix. It
+// is matched against the services this environment actually has rather than
+// split on the first colon, because "error: something" is not a service called
+// error and a row named for one would be a row nobody can explain.
+func serviceField(line string, names map[string]bool) []events.Field {
+	name, _, ok := strings.Cut(line, ": ")
+	if !ok || !names[name] {
+		return nil
+	}
+	return []events.Field{events.F("service", name)}
 }
 
 // database makes sure a verified golden exists and branches it.
@@ -822,6 +934,8 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	}
 	if version == "" {
 		o.progress("no golden yet, creating one")
+		o.event(s, events.GoldenRefreshing, "no golden yet, creating one",
+			events.F("phase", "refreshing"))
 		gv, refreshErr := s.dbProv.RefreshGolden(ctx, provider.GoldenSpec{
 			Version:   databaseVersion(o.opts.Manifest),
 			RulesHash: "empty",
@@ -836,8 +950,21 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			return "", zero, secrets.Value{}, secrets.Value{}, refreshErr
 		}
 		version = gv.ID
+		o.event(s, events.GoldenReady, "golden "+version+" is ready",
+			events.F("phase", "golden"), events.F("version", version),
+			events.F("verified", gv.Verified))
+	} else {
+		// Reported even though nothing was done, because the display cannot
+		// tell a verified golden from an unverified one by its absence, and
+		// calling a verified golden unverified on every ordinary run is worse
+		// than one extra event.
+		o.event(s, events.GoldenReady, "golden "+version+" is verified",
+			events.F("phase", "golden"), events.F("version", version),
+			events.F("verified", true))
 	}
 	o.progress("branching the database from " + version)
+	o.event(s, events.DBBranching, "branching from "+version,
+		events.F("phase", "branching"), events.F("version", version))
 
 	if _, err := s.journal.Intent(ctx, o.envID, "docker", journal.Kind("database"), o.envID, nil); err != nil {
 		return "", zero, secrets.Value{}, secrets.Value{}, err
@@ -854,6 +981,9 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	// connection string is registered so that it is redacted wherever it
 	// appears rather than wherever somebody remembered to.
 	o.opts.Redactor.Register(direct.Reveal())
+
+	o.event(s, events.DBBranched, "branched from "+version,
+		events.F("phase", "branched"), events.F("version", version))
 
 	pooled := direct
 	if s.dbProv.Capabilities().PooledEndpoints {
@@ -944,13 +1074,18 @@ func (o *Orchestrator) buildOne(
 ) (string, bool, error) {
 	root := o.opts.Root
 	dir := strings.Trim(filepath.ToSlash(svc.Path), "/")
+	o.event(s, events.BuildStarted, svc.Name+": build starting", events.F("service", svc.Name))
 
 	if svc.Build != nil && svc.Build.Strategy == schema.BuildImage {
 		if svc.Build.Image == "" {
-			return "", false, aferrors.Coded(aferrors.AFBLD010, "service", svc.Name)
+			err := aferrors.Coded(aferrors.AFBLD010, "service", svc.Name)
+			o.eventErr(s, events.BuildFailed, err.Error(), events.F("service", svc.Name))
+			return "", false, err
 		}
 		// Nothing to build. A prebuilt image is a promise the user made and
 		// the runtime keeps.
+		o.event(s, events.BuildFinished, svc.Name+": image was supplied, nothing to build",
+			events.F("service", svc.Name), events.F("cached", true))
 		return svc.Build.Image, true, nil
 	}
 
@@ -961,8 +1096,15 @@ func (o *Orchestrator) buildOne(
 
 	explained := false
 	req := build.Request{Service: svc.Name, Context: bctx, EnvID: o.envID}
-	if o.opts.Verbose {
-		req.Progress = o.progress
+	// Every build line reaches the event stream, and only reaches the terminal
+	// when verbose was asked for. A dashboard has a pane for seventeen lines
+	// per layer; a terminal running two other services does not, which is why
+	// the quiet default stayed quiet and the HUD still gets the whole log.
+	req.Progress = func(line string) {
+		o.event(s, events.BuildLog, line, events.F("service", svc.Name))
+		if o.opts.Verbose {
+			o.progress(line)
+		}
 	}
 	if svc.Build != nil {
 		req.Target = svc.Build.Target
@@ -979,7 +1121,9 @@ func (o *Orchestrator) buildOne(
 	default:
 		bp, ok := build.DetectBuildpack(bctx, dir, svc.Command, svc.Port)
 		if !ok {
-			return "", false, aferrors.Coded(aferrors.AFBLD010, "service", svc.Name)
+			err := aferrors.Coded(aferrors.AFBLD010, "service", svc.Name)
+			o.eventErr(s, events.BuildFailed, err.Error(), events.F("service", svc.Name))
+			return "", false, err
 		}
 		o.progress(fmt.Sprintf("%s: no Dockerfile, so %s", svc.Name, lowerFirst(bp.Why)))
 		req.Dockerfile = bp.Dockerfile
@@ -999,6 +1143,7 @@ func (o *Orchestrator) buildOne(
 				o.progress(line)
 			}
 		}
+		o.eventErr(s, events.BuildFailed, err.Error(), events.F("service", svc.Name))
 		return "", false, err
 	}
 	if res.Cached {
@@ -1006,6 +1151,9 @@ func (o *Orchestrator) buildOne(
 	} else {
 		o.progress(fmt.Sprintf("%s: built in %s", svc.Name, res.Duration.Round(time.Second)))
 	}
+	o.event(s, events.BuildFinished, svc.Name+": built in "+res.Duration.Round(time.Second).String(),
+		events.F("service", svc.Name), events.F("cached", res.Cached),
+		events.F("seconds", res.Duration.Seconds()))
 
 	return res.ImageRef, res.Cached, nil
 }
@@ -1053,6 +1201,7 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 	defer s.close()
 
 	td := &Teardown{EnvID: o.envID}
+	o.event(s, events.EnvDestroying, "removing "+o.envID)
 
 	rt, err := s.runtime.Down(ctx, o.envID)
 	td.Removed += rt.Removed
@@ -1076,6 +1225,14 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 		td.Removed++
 		o.progress("removed the database branch")
 	}
+
+	// Emitted before observe and before the return, so it is still inside the
+	// session and the bus is still open. A teardown that left resources behind
+	// still says destroyed, with the count, because the environment is gone as
+	// far as anybody looking at it is concerned and the pending list is what
+	// says otherwise.
+	o.event(s, events.EnvDestroyed, "removed "+o.envID,
+		events.F("removed", td.Removed), events.F("pending", len(td.Pending)))
 
 	o.observe(ctx, extension.LifecycleEvent{
 		Repository: o.opts.Manifest.Name,
