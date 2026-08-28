@@ -122,14 +122,42 @@ func (a *AzureBackend) Describe() string {
 	return "Azure Key Vault at " + a.cfg.VaultURL + " (a variable's underscores become hyphens)"
 }
 
-// Reach acquires a token.
+// Reach acquires a token and then proves the vault itself answers.
 //
-// A real call, and the right one to make: acquiring the token is what actually
-// fails, through a wrong tenant, an expired client secret, or a host with no
-// managed identity assigned, and it costs nothing at the vault.
+// Both halves are needed and for a while this did only the first. Acquiring the
+// token is what fails for a wrong tenant, an expired client secret, or a host
+// with no managed identity, so it looked like the whole story. It is not:
+// Microsoft Entra is a different host from the vault, so a vault behind a
+// private endpoint, a firewall rule, a typo in the name, or a DNS failure still
+// hands back a perfectly good token. Reach then reported the source usable,
+// Available said nothing was wrong, and AF-SEC-001 listed Key Vault as a place
+// the value could have come from while nothing there could be read.
+//
+// A local server standing in for Azure could never have caught it, because the
+// fake is one process serving both the token endpoint and the vault, so
+// pointing the test at a dead address broke them together. The real service
+// separated them and the conformance suite said "a source pointed at nothing
+// reports itself usable" on the first live run.
+//
+// ANY answer from the vault proves it is reachable, including a refusal, and
+// that distinction is the whole point of the second call. 403 in particular is
+// the normal state of a correctly configured source: Key Vault Secrets User
+// grants get and not list, so the principal that is supposed to be here cannot
+// list and must not be reported as unreachable for it. Whether a credential is
+// refused is Fetch's question and it is answered per variable, because a
+// principal may hold one secret and not another.
 func (a *AzureBackend) Reach(ctx context.Context) error {
-	_, err := a.bearer(ctx)
-	return err
+	if _, err := a.bearer(ctx); err != nil {
+		return err
+	}
+	if _, err := do(ctx, request{
+		method: "GET",
+		url:    a.cfg.VaultURL + "/secrets",
+		query:  map[string]string{"api-version": a.cfg.APIVersion, "maxresults": "1"},
+	}); err != nil {
+		return fmt.Errorf("cannot be reached: %s", err)
+	}
+	return nil
 }
 
 func (a *AzureBackend) bearer(ctx context.Context) (string, error) {
