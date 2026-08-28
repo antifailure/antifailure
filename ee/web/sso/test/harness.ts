@@ -20,6 +20,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { createPool, migrate, sql, type Pool } from '@antifailure/db'
 import { createServer, clearExtensions, registerExtension, setSignInPolicy, FakeClock, systemClock, type Clock } from '@antifailure/api'
 import { ssoExtension } from '../src/index.ts'
+import { scimExtension } from '../../scim/src/index.ts'
 import { signInPolicy } from '../src/enforce.ts'
 import { seal } from '../src/secrets.ts'
 import { makeIdp, type Idp } from './idp.ts'
@@ -109,6 +110,15 @@ export interface StartOptions {
    * and could therefore never have passed.
    */
   network?: 'mock' | 'real'
+  /**
+   * Register the SCIM extension alongside single sign-on.
+   *
+   * Off by default, because most of these suites are about one subsystem. It
+   * exists for the seam tests: the defect that let an Entra offboard report
+   * success while the person kept access lived BETWEEN these two extensions,
+   * and no suite that registered only one of them could ever have seen it.
+   */
+  scim?: boolean
 }
 
 export async function start(options: StartOptions = {}): Promise<Harness> {
@@ -166,6 +176,11 @@ export async function start(options: StartOptions = {}): Promise<Harness> {
       fetch: fakeFetch,
     }),
   )
+  if (options.scim) {
+    registerExtension(
+      scimExtension({ pool, clock, baseUrl: BASE_URL, defaultRole: 'member' }),
+    )
+  }
   setSignInPolicy(signInPolicy(pool))
 
   const { app } = createServer({

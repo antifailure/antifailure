@@ -39,6 +39,26 @@ export function parseXml(xml: string): Document {
   if (typeof xml !== 'string' || xml.trim() === '') {
     throw new MalformedXml('The document is empty.')
   }
+  // A leading byte order mark is stripped, and ONLY a leading byte order mark.
+  //
+  // Microsoft serves its federation metadata with one: the bytes EF BB BF sit
+  // in front of the XML declaration. That is legal, every specification says a
+  // parser should tolerate it, and xmldom reports it as "an xml declaration
+  // which is only at the start of the document" because as far as it is
+  // concerned the declaration is now at position 1. Since this parser makes
+  // every warning fatal on purpose, the product refused Entra ID's real
+  // metadata outright and told the administrator their document was malformed.
+  //
+  // Found by feeding this parser a document Microsoft wrote rather than one
+  // written here, which is the entire reason for testing against a real
+  // provider: no fixture written by the author of a parser has a byte order
+  // mark in it.
+  //
+  // The fatal-warning rule is NOT relaxed. This removes one specific,
+  // specified, leading code point and changes nothing else, because a parser
+  // that recovers from malformed input is a parser with an opinion about what
+  // the document meant.
+  if (xml.charCodeAt(0) === 0xfeff) xml = xml.slice(1)
   // Cheap and absolute. A DOCTYPE has no legitimate use in a SAML message and
   // every use of one here is an attack.
   if (/<!DOCTYPE/i.test(xml)) {

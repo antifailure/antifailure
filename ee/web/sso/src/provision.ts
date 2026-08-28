@@ -144,6 +144,31 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
   )
 
   return pool.withTenant({ orgId: connection.orgId }, async (db) => {
+    // THE DIRECTORY WINS. If SCIM has this person marked inactive, they do not
+    // get in, whatever the provider's assertion says.
+    //
+    // Without this an offboarding is only as good as the provider's willingness
+    // to keep telling us about it, and Microsoft Entra explicitly stops:
+    // once it has soft-deleted somebody it answers a further deprovision with
+    // `RedundantSoftDelete` and skips. So a person deprovisioned in the
+    // directory who could still authenticate would sign back in, be granted a
+    // membership again, and the directory would never send another
+    // deactivation to take it away. Measured against a real tenant.
+    //
+    // Refusing here is also the honest order of authority: SCIM is the
+    // directory's statement about who works here, and a SAML assertion is only
+    // a statement about who is holding the password.
+    const deactivated = await db.execute<{ id: string }>(sql`
+      SELECT id FROM scim_resources
+      WHERE org_id = ${connection.orgId} AND lower(user_name) = ${email} AND NOT active`)
+    if (deactivated[0]) {
+      throw new ProvisioningRefused(
+        'AF-EE-SSO-003',
+        `${email} is marked inactive by the directory, so the sign-in was refused. ` +
+          `Reactivate them in your identity provider and the next sign-in will work.`,
+      )
+    }
+
     const existing = await db.execute<{ user_id: string; role: Role; source: string }>(sql`
       SELECT m.user_id, m.role, m.source
       FROM members m JOIN users u ON u.id = m.user_id
@@ -215,20 +240,37 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
       }
     }
 
+    // Somebody this organisation already had, and deprovisioned, is ADOPTED
+    // rather than duplicated.
+    //
+    // The lookup above joins through members, so a person whose membership was
+    // deleted by a SCIM deprovision matches nothing here. Creating a fresh row
+    // for them was measured against a real Entra tenant to break offboarding:
+    // the directory kept managing the old row while the person signed in as the
+    // new one, so a later deprovision reported success and revoked nothing. See
+    // migration 0013, which also explains why this needs a SECURITY DEFINER
+    // function rather than a plain SELECT.
+    const orphan = await db.execute<{ id: string | null }>(
+      sql`SELECT adoptable_directory_user(${email}) AS id`,
+    )
+    const adopted = orphan[0]?.id ?? null
+
     // The key is generated here rather than asked for back. INSERT ...
     // RETURNING has the SELECT policies applied to the returned row, and this
     // account is not readable until its membership row exists, which is written
     // on the next statement. Migration 0006 records the same trap on the GitHub
     // path, and 0012 records the ordering it forces.
-    const userId = randomUUID()
+    const userId = adopted ?? randomUUID()
 
     // github_id and github_login are null here, which migration 0012 made
     // possible: this account did not come from GitHub and there is no id to
     // invent. identity_source records where it did come from.
-    await db.execute(sql`
-      INSERT INTO users (id, email, name, identity_source, created_at, updated_at)
-      VALUES (${userId}, ${email}, ${displayNameFor(identity)}, 'sso',
-              ${now.toISOString()}, ${now.toISOString()})`)
+    if (!adopted) {
+      await db.execute(sql`
+        INSERT INTO users (id, email, name, identity_source, created_at, updated_at)
+        VALUES (${userId}, ${email}, ${displayNameFor(identity)}, 'sso',
+                ${now.toISOString()}, ${now.toISOString()})`)
+    }
 
     await db.execute(sql`
       INSERT INTO members (org_id, user_id, role, source, created_at, updated_at)

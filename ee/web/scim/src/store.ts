@@ -386,7 +386,16 @@ export async function updateUser(
       // The deprovisioning path, and the reason it is a delete and not a flag.
       // Last, so that the profile write above still had a membership to be
       // permitted by.
-      if (!active && (before.active as boolean)) {
+      //
+      // Revoked whenever the directory says inactive, NOT only on the
+      // active-to-inactive transition. Guarding on the transition made a repeat
+      // deactivation a silent no-op, and access can be regained BETWEEN two
+      // deactivations by any path that grants a membership. Microsoft Entra
+      // will not rescue us from that: once it has soft-deleted somebody it
+      // answers the next deprovision with `RedundantSoftDelete` and skips
+      // entirely, so the one call that would have cleaned up never arrives.
+      // Revoking unconditionally is idempotent and costs one statement.
+      if (!active) {
         await revokeAccess(db, caller.orgId, localUserId, now)
       }
     }
@@ -473,6 +482,19 @@ async function upsertLocalUser(
     SELECT u.id FROM users u JOIN members m ON m.user_id = u.id
     WHERE m.org_id = ${orgId} AND lower(u.email) = ${userName}`)
   if (existing[0]) return existing[0].id
+
+  // Somebody this organization previously deprovisioned is ADOPTED rather than
+  // duplicated. The lookup above joins through members, so a person whose
+  // membership was deleted matches nothing, and creating a fresh row for them
+  // splits one human across two accounts. Measured against a real Entra tenant
+  // in the other direction: it is what let an offboard report success and
+  // revoke nothing. Migration 0013 carries the reasoning and the safety
+  // argument for the SECURITY DEFINER lookup.
+  const orphan = await db.execute<{ id: string | null }>(
+    sql`SELECT adoptable_directory_user(${userName}) AS id`,
+  )
+  const adopted = orphan[0]?.id ?? null
+  if (adopted) return adopted
 
   // The key is generated here rather than asked for back, and that is not a
   // style choice. INSERT ... RETURNING has the SELECT policies applied to the
