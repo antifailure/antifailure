@@ -110,6 +110,15 @@ func (a *ContainerApplier) Apply(
 		defer func() {
 			c, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 			defer cancel()
+			// netID is the id NetworkCreate returned to this call, not a name
+			// resolved afterwards, so the network being removed is provably
+			// the one this function made. That is the difference between
+			// naming a resource and proving it is yours, and it is why these
+			// two lines do not need the label check dockerutil.RemoveContainer
+			// applies: there is no name for a foreign network to collide with.
+			//
+			// The disconnect is of somebody else's container from our network,
+			// which removes nothing and is what lets the network go.
 			_ = cli.NetworkDisconnect(c, netID, a.DatabaseRef, true)
 			_ = cli.NetworkRemove(c, netID)
 		}()
@@ -207,6 +216,8 @@ func (a *ContainerApplier) joinDatabase(
 	}
 	port, err = a.Database.AttachToNetwork(ctx, a.DatabaseRef, created.ID, databaseAlias)
 	if err != nil {
+		// Removed by the id the create above returned, so it is provably the
+		// network this call made rather than one that answers to the name.
 		_ = cli.NetworkRemove(ctx, created.ID)
 		return "", 0, fmt.Errorf("insights: attach the branch to the rehearsal network: %w", err)
 	}
