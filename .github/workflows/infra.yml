@@ -180,6 +180,12 @@ jobs:
           # that property: a plan run with different inputs is a plan about a
           # different desired state, and its destroy count is noise.
           TF_VAR_ci_principal_id: ${{ vars.AZURE_CI_PRINCIPAL_ID }}
+          # budget_contact_emails is deliberately NOT passed. The module
+          # notifies by ROLE, so the default of [] is what the apply uses too
+          # and the two agree without a secret existing. If you do set addresses
+          # for a real apply, you must pass the same ones here or every plan
+          # proposes to delete the notification blocks, which reads as a small
+          # in-place update and would quietly switch the alerts off.
         run: |
           set -euo pipefail
           if [ "${{ steps.azure.outputs.remote_state }}" = "true" ]; then

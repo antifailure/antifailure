@@ -84,6 +84,24 @@ resource "azurerm_consumption_budget_resource_group" "this" {
     start_date = var.budget_start_date
   }
 
+  # BY ROLE BY DEFAULT, NOT BY ADDRESS, AND THAT IS A PRIVACY DECISION.
+  #
+  # An address given to contact_emails is stored in the budget, is stored in the
+  # Terraform state, and is PRINTED IN FULL by any plan that proposes to change
+  # a notification block. This repository plans on every pull request and puts
+  # the result in a step summary, and on a public repository that summary is
+  # world readable. An address supplied as a variable therefore leaves through
+  # a diff without anybody typing it into a document.
+  #
+  # `sensitive = true` on the variable is NOT enough, which was checked rather
+  # than assumed: the value printed on a removal diff comes from prior state
+  # rather than from the variable, so the mark does not reach it. It is still
+  # marked, because it protects the forward direction, and it is still not
+  # sufficient on its own.
+  #
+  # contact_roles has none of that. Azure resolves "Owner" to whoever holds the
+  # role at the time, so the alert reaches a person and the person's address is
+  # nowhere in the configuration, the state, or the log.
   dynamic "notification" {
     for_each = var.budget_alert_thresholds
     content {
@@ -92,6 +110,7 @@ resource "azurerm_consumption_budget_resource_group" "this" {
       operator       = "GreaterThan"
       threshold_type = "Actual"
       contact_emails = var.budget_contact_emails
+      contact_roles  = var.budget_contact_roles
     }
   }
 
@@ -103,6 +122,7 @@ resource "azurerm_consumption_budget_resource_group" "this" {
       operator       = "GreaterThan"
       threshold_type = "Forecasted"
       contact_emails = var.budget_contact_emails
+      contact_roles  = var.budget_contact_roles
     }
   }
 }

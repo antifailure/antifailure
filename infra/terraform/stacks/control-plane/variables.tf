@@ -71,8 +71,10 @@ variable "monthly_budget_usd" {
 }
 
 variable "budget_contact_emails" {
-  type    = list(string)
-  default = []
+  type        = list(string)
+  default     = []
+  sensitive   = true
+  description = "Marked sensitive so it cannot reach a public pull request plan summary. See the foundation module's copy for the full reason."
 }
 
 variable "log_retention_days" {
