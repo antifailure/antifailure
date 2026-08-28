@@ -834,8 +834,16 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	}
 	res.Built, res.Cached = built, cached
 
+	// The runtime names itself rather than being named "local" here.
+	//
+	// The journal's provider field is not a label: Replay looks a deleter up
+	// by it, so a record filed under the wrong runtime is a resource the
+	// compensation path either hands to something that cannot delete it or
+	// skips entirely. It was a true constant for as long as there was one
+	// runtime, and it became a stored lie the moment there were two.
+	runtimeName := s.runtime.Name()
 	recordIntent := func(kind, id string) error {
-		_, jerr := s.journal.Intent(ctx, o.envID, "local", journal.Kind(kind), id, nil)
+		_, jerr := s.journal.Intent(ctx, o.envID, runtimeName, journal.Kind(kind), id, nil)
 		return jerr
 	}
 
