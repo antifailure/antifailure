@@ -360,6 +360,15 @@ examples:
       # happened here twice.
       (cd "$dir" && GOWORK=off go build -o /dev/null ./... && GOWORK=off go vet ./...)
     done
+    # The same rule for the examples that are not Go. An example that does not
+    # build is worse than no example whatever it is written in, and checking
+    # only the compiled ones would have left the newest one unchecked by the
+    # gate that exists to say exactly this.
+    for dir in examples/*/; do
+      [ -f "$dir/package.json" ] || continue
+      echo "  $dir"
+      (cd "$dir" && npm ci --no-audit --no-fund --silent && npm run build)
+    done
     go build -o /tmp/af-examples ./engine/cmd/af
     for dir in examples/*/; do
       [ -f "$dir/antifailure.yaml" ] || continue

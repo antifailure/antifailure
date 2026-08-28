@@ -1,0 +1,168 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --line: #e3e2df;
+  --ink: #1a1917;
+  --ink-soft: #6b6862;
+  --accent: #1f6f4a;
+  --radius: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121211;
+    --surface: #1a1a18;
+    --line: #2e2d2a;
+    --ink: #eceae5;
+    --ink-soft: #98948c;
+    --accent: #6cc79a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 5rem;
+}
+
+h1 {
+  margin: 0 0 0.35rem;
+  font-size: clamp(1.6rem, 5vw, 2.1rem);
+  font-weight: 620;
+  letter-spacing: -0.021em;
+  line-height: 1.15;
+}
+
+.lede {
+  margin: 0 0 2.25rem;
+  max-width: 34rem;
+  color: var(--ink-soft);
+}
+
+/* The table is allowed to be wider than a phone, and says so. Without the
+   shadows the right hand column is simply cut off at the edge, which reads as
+   a broken layout rather than as something you can scroll. The gradients are
+   painted on the scroll container: the pair that scroll with the content sit
+   at the ends, and the pair fixed to the container fade them out when there is
+   nothing more in that direction. */
+.scroller {
+  overflow-x: auto;
+  background:
+    linear-gradient(to right, var(--bg) 40%, transparent) left center / 28px 100% no-repeat,
+    linear-gradient(to left, var(--bg) 40%, transparent) right center / 28px 100% no-repeat,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.13), transparent) left center / 12px 100% no-repeat,
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.13), transparent) right center / 12px 100% no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+
+table {
+  width: 100%;
+  /* No floor here. Below 40rem the email becomes a second line under the name
+     and the table is three columns, which fits. The floor that keeps four
+     columns honest is in the media query at the end of this file. */
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+caption {
+  caption-side: top;
+  text-align: left;
+  padding-bottom: 0.6rem;
+  font-size: 0.8125rem;
+  color: var(--ink-soft);
+}
+
+th, td {
+  padding: 0.7rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+thead th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+tbody tr:last-child td { border-bottom: 0; }
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* break-word rather than anywhere, and it is a backstop rather than the
+   mechanism. The table's min-width above is what keeps addresses on one line;
+   this only matters for an address longer than any of these, and it breaks at
+   the last point that fits rather than mid character wherever the line ends. */
+.email {
+  color: var(--ink-soft);
+  overflow-wrap: break-word;
+}
+
+.empty {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 2rem 1.25rem;
+  color: var(--ink-soft);
+}
+
+.empty strong { display: block; color: var(--ink); margin-bottom: 0.3rem; }
+
+footer {
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--accent);
+}
+
+/* The email is a column on a wide screen and a second line under the name on a
+   narrow one.
+ 
+   Measured rather than guessed. With four columns at a 507 pixel viewport the
+   table squeezed until every address broke across two lines; giving it a
+   36rem floor fixed that but pushed Spent, the number people came for, off the
+   edge behind a scroll. Dropping the widest and least important column at that
+   size fits all three that are left, with nothing hidden and nothing to
+   scroll: the address is still on the row, just under the name. */
+.email-inline { display: none; }
+
+@media (max-width: 40rem) {
+  .col-email { display: none; }
+
+  .email-inline {
+    display: block;
+    margin-top: 0.15rem;
+    color: var(--ink-soft);
+    font-size: 0.875rem;
+    overflow-wrap: break-word;
+  }
+}
+
+@media (min-width: 40.0625rem) {
+  /* Four columns need the room, and below this width the table would go back
+     to squeezing addresses onto two lines rather than scrolling. */
+  table { min-width: 36rem; }
+}

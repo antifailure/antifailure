@@ -123,7 +123,18 @@ func collect(root string) ([]string, error) {
 			if err != nil {
 				return err
 			}
-			if d.IsDir() || filepath.Ext(path) != ".md" {
+			// Installed dependencies and build output are not prose this
+			// project ships. An example with a package.json puts thousands of
+			// other people's READMEs under node_modules, and the report went
+			// from 45 pages to 94 with the hardest one belonging to semver.
+			if d.IsDir() {
+				switch d.Name() {
+				case "node_modules", ".next", "dist", "vendor":
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if filepath.Ext(path) != ".md" {
 				return nil
 			}
 			out = append(out, path)

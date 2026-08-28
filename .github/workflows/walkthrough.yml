@@ -24,9 +24,17 @@ permissions:
 
 jobs:
   walkthrough:
-    name: the getting started path
+    name: the getting started path (${{ matrix.example }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      # Both examples, and neither cancels the other. They fail for different
+      # reasons: go-api exercises a compiled binary and a mocked egress rule,
+      # next-app exercises a framework with a build step. A run that stopped at
+      # the first failure would hide the second one for a day.
+      fail-fast: false
+      matrix:
+        example: [go-api, next-app]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -38,7 +46,7 @@ jobs:
       - name: Walk it
         # The budget is generous on purpose. It is there to catch a path that
         # broke into a timeout, not to police a runner having a slow morning.
-        run: go run ./tools/walkthrough . --budget 20m
+        run: go run ./tools/walkthrough . --example ${{ matrix.example }} --budget 20m
 
       - name: Nothing was left behind
         # The walkthrough tears down its own environment. This checks that it
