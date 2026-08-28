@@ -4,7 +4,7 @@
 //
 // One unscoped read: the bearer token lookup, which determines the tenant and
 // therefore cannot be scoped by it. It declares the hash it is presenting and
-// the policy in migration 0012 returns that row alone, exactly as engine tokens
+// the policy in migration 0013 returns that row alone, exactly as engine tokens
 // have done since migration 0004. Everything else here runs inside the
 // organization that lookup named.
 //
@@ -488,7 +488,7 @@ async function upsertLocalUser(
   // membership was deleted matches nothing, and creating a fresh row for them
   // splits one human across two accounts. Measured against a real Entra tenant
   // in the other direction: it is what let an offboard report success and
-  // revoke nothing. Migration 0013 carries the reasoning and the safety
+  // revoke nothing. Migration 0014 carries the reasoning and the safety
   // argument for the SECURITY DEFINER lookup.
   const orphan = await db.execute<{ id: string | null }>(
     sql`SELECT adoptable_directory_user(${userName}) AS id`,
@@ -506,7 +506,7 @@ async function upsertLocalUser(
   // randomUUID is a version 4 UUID, which is exactly what the column's
   // gen_random_uuid() default produces, so nothing downstream can tell.
   const id = randomUUID()
-  // github_id is null, which migration 0012 made possible: this account did
+  // github_id is null, which migration 0013 made possible: this account did
   // not come from GitHub and there is no id to invent.
   await db.execute(sql`
     INSERT INTO users (id, email, name, identity_source, created_at, updated_at)

@@ -248,7 +248,7 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
     // for them was measured against a real Entra tenant to break offboarding:
     // the directory kept managing the old row while the person signed in as the
     // new one, so a later deprovision reported success and revoked nothing. See
-    // migration 0013, which also explains why this needs a SECURITY DEFINER
+    // migration 0014, which also explains why this needs a SECURITY DEFINER
     // function rather than a plain SELECT.
     const orphan = await db.execute<{ id: string | null }>(
       sql`SELECT adoptable_directory_user(${email}) AS id`,
@@ -259,10 +259,10 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
     // RETURNING has the SELECT policies applied to the returned row, and this
     // account is not readable until its membership row exists, which is written
     // on the next statement. Migration 0006 records the same trap on the GitHub
-    // path, and 0012 records the ordering it forces.
+    // path, and 0013 records the ordering it forces.
     const userId = adopted ?? randomUUID()
 
-    // github_id and github_login are null here, which migration 0012 made
+    // github_id and github_login are null here, which migration 0013 made
     // possible: this account did not come from GitHub and there is no id to
     // invent. identity_source records where it did come from.
     if (!adopted) {

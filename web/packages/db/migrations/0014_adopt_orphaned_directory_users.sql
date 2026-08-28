@@ -29,7 +29,7 @@
 -- permit, and the duplicate row was the price of it.
 --
 -- So the lookup that can see an orphan has to be SECURITY DEFINER, exactly like
--- user_belongs_only_to in 0012, and it has to be narrow enough that being
+-- user_belongs_only_to in 0013, and it has to be narrow enough that being
 -- SECURITY DEFINER buys an attacker nothing.
 
 -- Returns an existing directory account for this address that belongs to NO

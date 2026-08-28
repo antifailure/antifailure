@@ -6,7 +6,7 @@
 // There are exactly four unauthenticated reads in this file and each one is a
 // lookup that DETERMINES the tenant, which is the one thing a tenant-scoped
 // query cannot do. Each declares the single value it is already holding and the
-// policy in migration 0012 returns the row that value names and nothing else.
+// policy in migration 0013 returns the row that value names and nothing else.
 // Everything else in this file is scoped, and stays scoped, including every
 // write.
 //

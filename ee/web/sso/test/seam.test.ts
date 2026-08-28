@@ -18,7 +18,7 @@
 // revokes a row nobody uses. Entra reported action=Disable status=Success while
 // the person kept a membership and a live session.
 //
-// Migration 0013 carries the fix and the reason it has to be SECURITY DEFINER.
+// Migration 0014 carries the fix and the reason it has to be SECURITY DEFINER.
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
