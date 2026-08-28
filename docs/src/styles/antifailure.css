@@ -1,201 +1,181 @@
 /*
- * The Antifailure documentation theme.
+ * The documentation theme.
  *
- * Starlight ships a good default and a recognisable one. A reader who has seen
- * three Starlight sites this week recognises the fourth, and a docs site that
- * looks like every other docs site quietly says nobody spent an afternoon on
- * it. So every token below is set deliberately: the palette, the type, the
- * density, the code surfaces.
+ * The documentation and the marketing site are one site, so they share one
+ * palette, one type scale and one set of tokens. The tokens below are copied
+ * from www/app/globals.css deliberately rather than approximated: a docs site
+ * that is nearly the same as the site around it reads worse than one that is
+ * obviously different, because the small mismatches look like mistakes.
  *
- * Two palettes, authored separately rather than one inverted into the other.
- * Dark is the default because it is what the marketing site commits to and
- * because most people read this next to a terminal. Light is a real light
- * theme on warm paper, not a photographic negative of the dark one: the
- * accent green changes hue and value between them, because #33bf00 reads at
- * 8.6:1 on black and 2.4:1 on white, and only one of those is legible.
+ * Starlight's own variables are then mapped onto those tokens, so its sidebar,
+ * search, code blocks and asides inherit the same colours as everything else
+ * instead of shipping its defaults.
  */
 
+@import "tailwindcss";
+
 @font-face {
-  font-family: "DM Sans";
+  font-family: "Inter";
   font-style: normal;
-  font-weight: 100 1000;
+  font-weight: 100 900;
   font-display: swap;
-  src: url("@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2") format("woff2-variations");
+  src: url("/docs/fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
     U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
     U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: "DM Mono";
+  font-family: "Geist";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("@fontsource/dm-mono/files/dm-mono-latin-400-normal.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
-    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
-    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  src: url("/docs/fonts/Geist-Regular.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "DM Mono";
+  font-family: "Geist";
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url("@fontsource/dm-mono/files/dm-mono-latin-500-normal.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
-    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
-    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  src: url("/docs/fonts/Geist-Medium.woff2") format("woff2");
 }
 
-/* ---------------------------------------------------------------- palette */
-
-:root {
-  --af-green: #33bf00;
-  --af-green-ink: #1a7f00; /* 5.1:1 on white; the dark green is 2.4:1 and unusable there */
-  --af-red: #f0563f;
-  --af-red-ink: #b32d18;
-  --af-amber: #d9a400;
-  --af-amber-ink: #8a6a00;
-
-  --sl-font: "DM Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --sl-font-mono: "DM Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-
-  /* Starlight's default content column is generous for marketing prose and too
-     wide for reading. 46rem lands around 75 characters at this size. */
-  --sl-content-width: 46rem;
-  --sl-sidebar-width: 17.5rem;
-  --sl-text-code: 0.9em;
-  --sl-line-height: 1.7;
-  --sl-nav-height: 3.75rem;
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/docs/fonts/Geist-SemiBold.woff2") format("woff2");
 }
 
-/* Dark: the marketing site's black, its green, and surfaces that step up in
-   value rather than borrowing a blue-grey from somewhere else. */
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/docs/fonts/GeistMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/docs/fonts/GeistMono-Medium.woff2") format("woff2");
+}
+
+/* The site's tokens, verbatim. */
+@theme {
+  --color-neon: #33bf00;
+  --color-black-pure: #000000;
+  --color-gray-new-10: #18191b;
+  --color-gray-new-20: #303236;
+  --color-gray-new-40: #61646b;
+  --color-gray-new-50: #797d86;
+  --color-gray-new-60: #94979e;
+  --color-gray-new-80: #c9cbcf;
+  --color-gray-new-90: #e4e5e7;
+  --color-green-45: #00e599;
+  --color-green-52: #34d59a;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-title: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+  --leading-dense: 1.125;
+  --tracking-tighter: -0.04em;
+  --tracking-extra-tight: -0.02em;
+  --tracking-snug: -0.01em;
+}
+
+/* --------------------------------------------------- Starlight, remapped */
+
 :root,
+:root[data-theme="light"],
 :root[data-theme="dark"] {
-  --sl-color-accent-low: #0d2400;
-  --sl-color-accent: #2aa000;
-  --sl-color-accent-high: #7ce34f;
+  --sl-font: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --sl-color-white: #ffffff;
-  --sl-color-gray-1: #ededf0;
-  --sl-color-gray-2: #c8c8cf;
-  --sl-color-gray-3: #a1a1aa;
-  --sl-color-gray-4: #52525b;
-  --sl-color-gray-5: #2a2a30;
-  --sl-color-gray-6: #18181c;
-  --sl-color-gray-7: #101014;
-  --sl-color-black: #000000;
+  --sl-content-width: 47rem;
+  --sl-sidebar-width: 18rem;
+  --sl-nav-height: 7.75rem;
+  --sl-line-height: 1.7;
+  --sl-text-code: 0.9em;
 
-  --sl-color-text: #d4d4d8;
-  --sl-color-text-accent: #7ce34f;
-  --sl-color-bg: #000000;
-  --sl-color-bg-nav: rgba(0, 0, 0, 0.86);
-  --sl-color-bg-sidebar: #000000;
-  --sl-color-bg-inline-code: rgba(255, 255, 255, 0.07);
-  --sl-color-hairline: rgba(255, 255, 255, 0.1);
-  --sl-color-hairline-light: rgba(255, 255, 255, 0.16);
-  --sl-color-hairline-shade: rgba(255, 255, 255, 0.07);
-
-  --af-surface: #0a0a0c;
-  --af-surface-2: #101014;
-  --af-rule: rgba(255, 255, 255, 0.1);
-  --af-accent-ink: var(--af-green);
-  --af-red-text: var(--af-red);
-  --af-amber-text: var(--af-amber);
-  --af-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 8px 24px rgba(0, 0, 0, 0.45);
-}
-
-/* Light: warm paper rather than #fff, ink rather than #000, and the darker
-   green so links and inline code still pass contrast. */
-:root[data-theme="light"] {
+  /* The site commits to one light appearance, so the documentation does too.
+     Both themes are defined identically rather than left to Starlight's dark
+     default, which would give the toggle a look the rest of the site does not
+     have. */
   --sl-color-accent-low: #dcf0d2;
   --sl-color-accent: #1a7f00;
   --sl-color-accent-high: #10490a;
 
-  --sl-color-white: #16161a;
-  --sl-color-gray-1: #232329;
-  --sl-color-gray-2: #3f3f46;
-  --sl-color-gray-3: #5c5c66;
-  --sl-color-gray-4: #8e8e99;
-  --sl-color-gray-5: #d7d7d2;
-  --sl-color-gray-6: #ececeb;
-  --sl-color-gray-7: #f5f5f3;
-  --sl-color-black: #fbfbfa;
+  --sl-color-white: #18191b;
+  --sl-color-gray-1: #18191b;
+  --sl-color-gray-2: #303236;
+  --sl-color-gray-3: #61646b;
+  --sl-color-gray-4: #797d86;
+  --sl-color-gray-5: #c9cbcf;
+  --sl-color-gray-6: #e4e5e7;
+  --sl-color-gray-7: #f2f2f0;
+  --sl-color-black: #ffffff;
 
-  --sl-color-text: #27272a;
+  --sl-color-text: #303236;
   --sl-color-text-accent: #16660a;
-  --sl-color-bg: #fbfbfa;
-  --sl-color-bg-nav: rgba(251, 251, 250, 0.9);
-  --sl-color-bg-sidebar: #fbfbfa;
-  --sl-color-bg-inline-code: rgba(16, 16, 20, 0.06);
-  --sl-color-hairline: rgba(16, 16, 20, 0.12);
-  --sl-color-hairline-light: rgba(16, 16, 20, 0.2);
-  --sl-color-hairline-shade: rgba(16, 16, 20, 0.08);
+  --sl-color-bg: #ffffff;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #ffffff;
+  --sl-color-bg-inline-code: #f2f2f0;
+  --sl-color-hairline: #e4e5e7;
+  --sl-color-hairline-light: #c9cbcf;
+  --sl-color-hairline-shade: #e4e5e7;
 
-  --af-surface: #ffffff;
-  --af-surface-2: #f2f2ef;
-  --af-rule: rgba(16, 16, 20, 0.12);
-  --af-accent-ink: var(--af-green-ink);
-  --af-red-text: var(--af-red-ink);
-  --af-amber-text: var(--af-amber-ink);
-  --af-shadow: 0 1px 2px rgba(16, 16, 20, 0.05), 0 6px 20px rgba(16, 16, 20, 0.06);
+  --af-rule: #e4e5e7;
+  --af-surface: #f7f7f5;
+  --af-accent-ink: #1a7f00;
 }
 
 ::selection {
-  background: var(--af-green);
+  background: #33bf00;
   color: #000;
 }
 
-/* ------------------------------------------------------------------- type */
-
 body {
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+  letter-spacing: -0.01em;
 }
 
-.sl-markdown-content {
-  font-size: 1rem;
-}
+/* ------------------------------------------------------------------ type */
 
-/* Display sizes want tight leading and negative tracking; body text wants
-   neither. Starlight applies one default to both. */
 .sl-markdown-content :is(h1, h2, h3, h4, h5, h6) {
-  letter-spacing: -0.022em;
+  font-family: var(--font-title);
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
-.sl-markdown-content h1,
-.content-panel h1 {
-  font-weight: 600;
-  letter-spacing: -0.032em;
-  line-height: 1.1;
+.content-panel h1,
+.sl-markdown-content h1 {
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.125;
 }
 
-/* A rule above every h2 gives the page a spine you can scan at arm's length,
-   which is most of what somebody is doing when they land here from an error
-   message and want one section. */
+/* A rule above every h2 gives the page a spine you can scan, which is most of
+   what somebody does when they arrive here from an error message. */
 .sl-markdown-content h2 {
   margin-top: 2.75rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--af-rule);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .sl-markdown-content h3 {
   margin-top: 2rem;
-  font-weight: 600;
-}
-
-.sl-markdown-content p,
-.sl-markdown-content li {
-  line-height: 1.7;
+  font-weight: 500;
 }
 
 .sl-markdown-content a:not(:where(.not-content *)) {
   color: var(--af-accent-ink);
-  text-decoration-color: color-mix(in srgb, var(--af-accent-ink) 40%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--af-accent-ink) 35%, transparent);
   text-underline-offset: 0.22em;
   text-decoration-thickness: 1px;
 }
@@ -204,24 +184,20 @@ body {
   text-decoration-color: var(--af-accent-ink);
 }
 
-/* --------------------------------------------------------- code and data */
+/* ------------------------------------------------------- code and tables */
 
 .sl-markdown-content code:not(:where(.not-content *)) {
-  border: 1px solid var(--sl-color-hairline-shade);
+  border: 1px solid var(--af-rule);
   border-radius: 4px;
   padding: 0.1em 0.36em;
-  font-weight: 500;
 }
 
 .expressive-code .frame pre,
 .sl-markdown-content pre:not(:where(.not-content *)) {
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid var(--af-rule);
 }
 
-/* Tabular figures everywhere a number sits in a column. A reference table of
-   durations or limits that does not align its digits is harder to read for no
-   reason. */
 .sl-markdown-content table {
   font-variant-numeric: tabular-nums;
   border-collapse: collapse;
@@ -232,13 +208,17 @@ body {
 .sl-markdown-content :is(th, td) {
   border: none;
   border-bottom: 1px solid var(--af-rule);
-  padding: 0.6rem 0.9rem 0.6rem 0;
+  padding: 0.65rem 0.9rem 0.65rem 0;
   text-align: left;
   vertical-align: top;
 }
 
+.sl-markdown-content :is(th, td) code {
+  white-space: nowrap;
+}
+
 .sl-markdown-content th {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 0.8125rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -246,11 +226,7 @@ body {
   border-bottom-color: var(--sl-color-hairline-light);
 }
 
-.sl-markdown-content tbody tr:hover {
-  background: var(--sl-color-bg-inline-code);
-}
-
-/* A wide table scrolls inside itself. The page body never scrolls sideways. */
+/* A wide table scrolls inside itself; the page never scrolls sideways. */
 .sl-markdown-content .table-wrapper,
 .sl-markdown-content > table {
   display: block;
@@ -263,17 +239,22 @@ body {
 .sidebar-content a[aria-current="page"],
 .sidebar-content a[aria-current="page"]:hover {
   background: transparent;
-  color: var(--sl-color-white);
-  font-weight: 600;
-  box-shadow: inset 2px 0 0 var(--af-green);
+  color: var(--color-black-pure);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--color-neon);
   border-radius: 0;
+}
+
+.sidebar-content a {
+  /* 44px targets on a phone, which the default 8px padding does not reach. */
+  padding-block: 0.55rem;
 }
 
 .sidebar-content summary,
 .sidebar-content .group-label span {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.09em;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--sl-color-gray-3);
 }
@@ -282,70 +263,52 @@ body {
   border-inline-start: 1px solid var(--af-rule);
 }
 
-header.header {
-  border-bottom: 1px solid var(--af-rule);
-  backdrop-filter: blur(12px);
-}
-
-.site-title {
-  font-weight: 600;
-}
-
 /* ---------------------------------------------------------------- asides */
 
-/* Starlight's asides are a coloured slab. These are a hairline and a label,
-   which sits better next to prose and stops a page of three notes reading
-   like a traffic light. */
 .sl-markdown-content .starlight-aside {
   border: 1px solid var(--af-rule);
   border-inline-start: 2px solid var(--af-rule);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--af-surface);
   padding: 1rem 1.15rem;
 }
 
 .sl-markdown-content .starlight-aside__title {
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: 0.6875rem;
+  font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   gap: 0.5rem;
 }
 
 .sl-markdown-content .starlight-aside--tip {
-  border-inline-start-color: var(--af-green);
+  border-inline-start-color: var(--color-neon);
 }
 .sl-markdown-content .starlight-aside--tip .starlight-aside__title {
   color: var(--af-accent-ink);
 }
-
 .sl-markdown-content .starlight-aside--caution {
-  border-inline-start-color: var(--af-amber-text);
+  border-inline-start-color: #8a6a00;
 }
 .sl-markdown-content .starlight-aside--caution .starlight-aside__title {
-  color: var(--af-amber-text);
+  color: #8a6a00;
 }
-
 .sl-markdown-content .starlight-aside--danger {
-  border-inline-start-color: var(--af-red-text);
+  border-inline-start-color: #b32d18;
 }
 .sl-markdown-content .starlight-aside--danger .starlight-aside__title {
-  color: var(--af-red-text);
+  color: #b32d18;
 }
 
 /* ----------------------------------------------------------- affordances */
 
-/* Starlight sets a focus ring; this makes it the brand colour and, more
-   importantly, guarantees it is never removed. A docs site is read by
-   keyboard more than most. */
 :where(a, button, input, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--af-green);
+  outline: 2px solid var(--color-neon);
   outline-offset: 2px;
   border-radius: 3px;
 }
 
-/* Nothing on this site animates on a loop. The only motion is the transition
-   a reader causes, and it stops entirely when they have asked it to. */
+/* Nothing on this site animates on a loop. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -357,13 +320,12 @@ header.header {
   }
 }
 
-/* -------------------------------------------------------------- narrow */
-
 @media (max-width: 50rem) {
   :root {
-    --sl-text-h1: 1.9rem;
+    --sl-text-h1: 2rem;
+    /* 56px header plus a shorter documentation bar. */
+    --sl-nav-height: 6.75rem;
   }
-
   .sl-markdown-content h2 {
     margin-top: 2.25rem;
     padding-top: 1.25rem;

@@ -104,3 +104,9 @@ crash.log
 local_backend_override.tf
 backend.hcl
 *.auto.tfvars
+
+# Assembled deploy output: www/out + docs/dist + the apex files, built by
+# `just site` and uploaded straight to the host. Nothing here is source.
+/site/
+/docs/dist/
+/www/out/

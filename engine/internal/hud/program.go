@@ -3,6 +3,7 @@ package hud
 import (
 	"context"
 	"io"
+	"sync"
 	"sync/atomic"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -30,6 +31,18 @@ type Program struct {
 	tea     *tea.Program
 	events  chan events.Event
 	dropped atomic.Int64
+	// done is closed instead of the event channel, and that is deliberate.
+	// Closing the channel a producer writes to means every Send after the
+	// close is a panic on a send to a closed channel, not a dropped event, and
+	// the producers here are the engine's own goroutines. Signalling on a
+	// second channel makes Send total: it always either delivers or counts a
+	// drop, whatever the display is doing.
+	done chan struct{}
+	// closeOnce makes Close idempotent. Two people legitimately close this:
+	// the bus, when it shuts its sinks down at the end of a run, and the
+	// caller, when the run failed before a bus ever existed and nothing else
+	// is going to stop the display.
+	closeOnce sync.Once
 }
 
 // eventMsg carries one event into the Bubble Tea update loop.
@@ -58,13 +71,23 @@ func (t teaModel) Init() tea.Cmd { return waitFor(t.prog) }
 // waitFor blocks on the queue in Bubble Tea's own goroutine and hands the next
 // event back as a message. Re-issued after every event, which is how a Bubble
 // Tea program consumes a channel without holding the update loop.
+//
+// Queued events win over the quit signal, in the first select, so that closing
+// the program still shows what had already arrived. Without that a run that
+// ends quickly draws a dashboard of everything except its last few events.
 func waitFor(p *Program) tea.Cmd {
 	return func() tea.Msg {
-		e, ok := <-p.events
-		if !ok {
+		select {
+		case e := <-p.events:
+			return eventMsg(e)
+		default:
+		}
+		select {
+		case e := <-p.events:
+			return eventMsg(e)
+		case <-p.done:
 			return tea.Quit()
 		}
-		return eventMsg(e)
 	}
 }
 
@@ -118,7 +141,7 @@ func (t teaModel) View() string { return t.m.Render(t.focus) }
 // terminal and so a caller that has already decided stdout is not a terminal
 // can use Plain instead.
 func NewProgram(m *Model, input io.Reader, output io.Writer) *Program {
-	p := &Program{events: make(chan events.Event, queueDepth)}
+	p := newProgram(queueDepth)
 	p.tea = tea.NewProgram(
 		teaModel{m: m, prog: p},
 		tea.WithInput(input),
@@ -130,11 +153,33 @@ func NewProgram(m *Model, input io.Reader, output io.Writer) *Program {
 	return p
 }
 
+// newProgram builds the queue and the quit signal together.
+//
+// Every Program comes through here, tests included. A struct literal elsewhere
+// could leave done nil, and a nil done channel makes Close panic and Send
+// block forever, which is exactly the pair of failures this type exists to
+// prevent.
+func newProgram(depth int) *Program {
+	return &Program{
+		events: make(chan events.Event, depth),
+		done:   make(chan struct{}),
+	}
+}
+
 // Send offers an event to the dashboard and never blocks.
 //
 // Returns false when the event was dropped, which callers are free to ignore;
 // the count is reported on the status line either way.
 func (p *Program) Send(e events.Event) bool {
+	select {
+	case <-p.done:
+		// The display has stopped. Counted as a drop rather than ignored,
+		// because an engine that kept emitting after the dashboard went away
+		// is worth seeing in the number.
+		p.dropped.Add(1)
+		return false
+	default:
+	}
 	select {
 	case p.events <- e:
 		return true
@@ -149,13 +194,25 @@ func (p *Program) Dropped() int64 { return p.dropped.Load() }
 
 // Run draws until the user quits or the context is cancelled.
 func (p *Program) Run(ctx context.Context) error {
+	// The watcher has to be able to stop for a reason other than cancellation,
+	// or it outlives every run that ended normally. A context.Background has a
+	// nil Done channel, so a bare receive on it blocks forever and leaks a
+	// goroutine per dashboard. goleak found this the first time a test ran a
+	// program to completion.
+	stop := make(chan struct{})
 	go func() {
-		<-ctx.Done()
-		p.tea.Quit()
+		select {
+		case <-ctx.Done():
+			p.tea.Quit()
+		case <-stop:
+		}
 	}()
 	_, err := p.tea.Run()
+	close(stop)
 	return err
 }
 
 // Close stops accepting events. The program quits once the queue drains.
-func (p *Program) Close() { close(p.events) }
+//
+// Safe to call more than once and from more than one goroutine.
+func (p *Program) Close() { p.closeOnce.Do(func() { close(p.done) }) }
