@@ -781,7 +781,7 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		envID := ns.Labels[LabelEnv]
 		out = append(out, provider.Resource{
 			Kind: "namespace", ID: ns.Name, EnvID: envID,
-			CreatedAt: ns.CreationTimestamp.Time.UTC(),
+			CreatedAt: ns.CreationTimestamp.UTC(),
 			Labels:    map[string]string{"name": ns.Name, "phase": string(ns.Status.Phase)},
 		})
 		deployments, err := r.cli.AppsV1().Deployments(ns.Name).List(ctx, metav1.ListOptions{})
@@ -791,7 +791,7 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		for _, d := range deployments.Items {
 			out = append(out, provider.Resource{
 				Kind: "deployment/" + componentOf(d), ID: ns.Name + "/" + d.Name, EnvID: envID,
-				CreatedAt: d.CreationTimestamp.Time.UTC(),
+				CreatedAt: d.CreationTimestamp.UTC(),
 				Labels: map[string]string{
 					"name": d.Name, "service": d.Labels[LabelService],
 					"ready": strconv.Itoa(int(d.Status.ReadyReplicas)),

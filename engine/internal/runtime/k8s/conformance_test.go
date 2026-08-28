@@ -150,7 +150,7 @@ func pullLocally(ctx context.Context, ref string) error {
 	}
 	out, err := exec.CommandContext(ctx, "docker", "pull", ref).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("pulling %s: %v: %s", ref, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("pulling %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

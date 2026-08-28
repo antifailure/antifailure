@@ -563,17 +563,6 @@ func probeCmd(command string) string {
 	return governed + command + " >/dev/null 2>&1 && exit 0 || exit 9"
 }
 
-// retrying turns a command into one that keeps trying for half a minute
-// before it gives up, and still exits reached or refused and nothing else.
-//
-// Only for probes aimed at a service inside the environment. A probe aimed
-// outward must never retry: the answer there is the policy's decision, which
-// does not change, and retrying a refusal only makes a failing test slow.
-func retrying(command string) string {
-	return "i=0; while [ $i -lt 30 ]; do " + command +
-		" >/dev/null 2>&1 && exit 0; i=$((i+1)); sleep 1; done; exit 9"
-}
-
 // noProxyVars strips the proxy variables, so the command that follows makes
 // the request a client with no proxy support would make.
 const noProxyVars = "env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY "
@@ -1345,7 +1334,7 @@ const (
 // and ignores no_proxy entirely, which was verified rather than assumed), and
 // the answer would be whatever the egress policy said about a host called
 // "peer" instead of where the name pointed.
-var crossEnvironmentProbe = "i=0; while [ $i -lt 30 ]; do " +
+var crossEnvironmentProbe = governed + "i=0; while [ $i -lt 30 ]; do " +
 	"body=$(" + noProxyVars + "wget -T 5 -q -O - http://peer:8080/ 2>/dev/null); " +
 	"if [ -n \"$body\" ]; then " +
 	"case \"$body\" in *" + markerMine + "*) exit 0;; *) exit 8;; esac; " +
