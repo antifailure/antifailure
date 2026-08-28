@@ -61,7 +61,7 @@ export function Twins() {
           <div className="mt-14 max-xl:mt-12 max-lg:mt-10">
             <TwinLifecycleScene />
           </div>
-          <ul className="mt-11 grid grid-cols-3 gap-x-16 max-xl:mt-9 max-lg:mt-12 max-lg:gap-x-8 max-md:mt-10 max-md:grid-cols-1 max-md:gap-y-7">
+          <ul className="mt-10 grid grid-cols-3 gap-x-16 max-xl:mt-8 max-lg:mt-10 max-lg:gap-x-8 max-md:mt-8 max-md:grid-cols-1 max-md:gap-y-7">
             {FEATURES.map((item) => (
               <li key={item.title}>
                 <div className="text-black">{item.icon}</div>

@@ -42,8 +42,8 @@ const SHEETS: Record<
     lead: "A disposable production twin that proves whether a deployment is safe before it ships.",
     points: [
       "Category: pre-production deployment safety. Not AI QA, synthetic-user, staging, or load-testing.",
-      "Twin, safe state, side-effect firewall, workload (including Crowdi), comparison, judgment, evidence, cleanup.",
-      "Crowdi is a Workload Studio feature — exploratory AI users — not the product or the buyer.",
+      "Twin, safe state, side-effect firewall, workload (including exploratory users), comparison, judgment, evidence, cleanup.",
+      "Exploratory AI users live in Workload Studio, beside observed and deterministic traffic.",
       "The promise is evidence, not a mathematical guarantee that production cannot fail.",
     ],
     cta: "migration",

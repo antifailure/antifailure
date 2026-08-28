@@ -13,7 +13,7 @@ export function IdeOverlay({ className }: { className?: string }) {
           <span className="size-1.5 rounded-full bg-[#33bf00]" />
           WORKLOAD STUDIO
         </div>
-        <div className="text-[#6a9955]"># observed · deterministic · crowdi</div>
+        <div className="text-[#6a9955]"># observed · deterministic · exploratory</div>
         <div>
           <span className="text-[#c586c0]">contain</span>
           <span className="text-white/50">: [stripe, email]</span>
@@ -27,7 +27,7 @@ export function IdeOverlay({ className }: { className?: string }) {
         </div>
       </div>
       <div className="absolute right-6 bottom-8 left-6 flex items-center justify-between border border-white/10 bg-black/65 px-3 py-2 font-mono text-[11px] text-white/45">
-        <span>observed 42% · deterministic 38% · crowdi 20%</span>
+        <span>observed 42% · deterministic 38% · exploratory 20%</span>
         <span className="text-[#33bf00]">fail closed</span>
       </div>
       <Grain />

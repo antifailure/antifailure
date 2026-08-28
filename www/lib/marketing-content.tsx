@@ -79,9 +79,8 @@ export const PRODUCT_OVERVIEW: MarketingContent = {
         a technical buyer, measurable value, and a natural expansion path.
       </p>
       <p>
-        Crowdi is a feature within{" "}
-        <Link href="/product/workload">Workload Studio</Link>. It contributes exploratory AI users. It is
-        not the product category, the primary buyer, or the main value proposition.
+        Exploratory AI users live in{" "}
+        <Link href="/product/workload">Workload Studio</Link>, beside observed and deterministic traffic.
       </p>
     </>
   ),
@@ -242,7 +241,7 @@ export const PRODUCT_PAGES: Record<string, MarketingContent> = {
     related: [
       { href: "/security", title: "Security", description: "Fail closed is a product principle, not a slogan." },
       { href: "/product/oracle", title: "Differential Oracle", description: "Third-party effects are compared, not ignored." },
-      { href: "/docs/concepts/egress/", title: "Firewall docs", description: "Controls and example behavior." },
+      { href: "/docs/firewall", title: "Firewall docs", description: "Controls and example behavior." },
     ],
     body: (
       <>
@@ -287,20 +286,20 @@ export const PRODUCT_PAGES: Record<string, MarketingContent> = {
   workload: {
     eyebrow: "Workload Studio",
     title: "Exercise the twin the way production actually behaves.",
-    lead: "Three traffic sources: observed production patterns, deterministic journeys, and Crowdi exploratory users. Production requests are never synchronously diverted.",
-    description: "Observed patterns, deterministic scenarios, and Crowdi exploratory users.",
+    lead: "Three traffic sources: observed production patterns, deterministic journeys, and exploratory users. Production requests are never synchronously diverted.",
+    description: "Observed patterns, deterministic scenarios, and exploratory users.",
     features: [
       { title: "Observed patterns", body: "Ingress traces, API telemetry, OpenTelemetry, or customer-provided samples, redacted first." },
       { title: "Deterministic scenarios", body: "Versioned journeys at controlled concurrency for repeatability and CI." },
-      { title: "Crowdi users", body: "Exploratory agents that pursue goals, discover paths, and explain friction." },
+      { title: "Exploratory users", body: "Exploratory agents that pursue goals, discover paths, and explain friction." },
       { title: "AI discovers", body: "Agents are excellent at exploration. They are not economical load generators." },
       { title: "Systems prove", body: "Successful journeys compile into deterministic scenarios for scale." },
       { title: "Never in the hot path", body: "Shadowing is asynchronous and must never delay or alter production responses." },
     ],
     related: [
-      { href: "/product/crowdi", title: "Crowdi", description: "The exploratory-user feature, not the product." },
+      { href: "/product/exploratory-users", title: "Exploratory users", description: "Exploratory users inside Workload Studio, beside observed and deterministic traffic." },
       { href: "/product/oracle", title: "Differential Oracle", description: "Same workload against baseline and candidate." },
-      { href: "/docs/concepts/load/", title: "Workload docs", description: "Scenario IR and traffic controls." },
+      { href: "/docs/workload", title: "Workload docs", description: "Scenario IR and traffic controls." },
     ],
     body: (
       <>
@@ -334,7 +333,7 @@ assertions:
         </p>
         <h3>Exploratory AI users</h3>
         <p>
-          Crowdi-style agents receive goals, context, synthetic accounts, and behavioral traits. They
+          Exploratory agents receive goals, context, synthetic accounts, and behavioral traits. They
           navigate the application, discover new paths, test ambiguous states, and explain friction.
           Useful discoveries compile into candidate regression scenarios.
         </p>
@@ -355,10 +354,10 @@ assertions:
       </>
     ),
   },
-  crowdi: {
-    eyebrow: "Crowdi · Workload Studio",
+  "exploratory-users": {
+    eyebrow: "Workload Studio",
     title: "Exploratory users that discover paths. Deterministic systems that prove them.",
-    lead: "Crowdi is a feature within Workload Studio. It is not the product category, the primary buyer, or the main value. AI discovers journeys. Conventional execution engines reproduce them at scale.",
+    lead: "Exploratory users live in Workload Studio, beside observed and deterministic traffic. AI discovers journeys. Conventional execution engines reproduce them at scale.",
     description: "Exploratory AI users inside Workload Studio, not a standalone AI QA product.",
     features: [
       { title: "Goals, not selectors", body: "Agents pursue business-relevant goals rather than fixed CSS paths." },
@@ -367,7 +366,7 @@ assertions:
       { title: "Grounded or labeled", body: "Personas come from product analytics or are explicitly synthetic hypotheses." },
     ],
     related: [
-      { href: "/product/workload", title: "Workload Studio", description: "Where Crowdi lives." },
+      { href: "/product/workload", title: "Workload Studio", description: "Observed, deterministic, and exploratory traffic." },
       { href: "/product/oracle", title: "Differential Oracle", description: "Where discoveries become evidence." },
       { href: "/product", title: "Product", description: "The company is not a synthetic-user company." },
     ],
@@ -397,9 +396,9 @@ assertions:
         </ul>
         <h2>What we will not claim</h2>
         <p>
-          Crowdi must not be positioned merely as “more personalities than Autosana.” That feature can
-          be copied. The defensible system links exploratory behavior to infrastructure and database
-          evidence. We will not claim that thousands of AI agents behave exactly like humans.
+          Exploratory users must not be positioned merely as “more personalities than Autosana.” That
+          feature can be copied. The defensible system links exploratory behavior to infrastructure and
+          database evidence. We will not claim that thousands of AI agents behave exactly like humans.
         </p>
         <PageCallout label="Cost and determinism">
           AI users are expensive and nondeterministic. Use AI for discovery. Compile successful
@@ -425,7 +424,7 @@ assertions:
     related: [
       { href: "/solutions/migrations", title: "Schema migrations", description: "Why this is the starting wedge." },
       { href: "/product/report", title: "Safety Report", description: "A 27-second lock is a block." },
-      { href: "/docs/concepts/insights/", title: "Migration docs", description: "The subscriptions demo in full." },
+      { href: "/docs/migration-safety", title: "Migration docs", description: "The subscriptions demo in full." },
     ],
     body: (
       <>
@@ -468,7 +467,7 @@ the constraint in a later migration.`}</PagePre>
         <p>
           A checkout flow, a Postgres subscriptions table, a background billing worker, Stripe calls,
           and confirmation emails. The candidate adds a risky defaulted column and changes event
-          handling. Crowdi discovers an impatient double-click on Upgrade. Deterministic traffic
+          handling. Exploratory users discover an impatient double-click on Upgrade. Deterministic traffic
           scales that behavior. The migration produces a table lock. Duplicate billing events reach
           the Stripe simulator. Baseline stays healthy. The GitHub check blocks and explains both
           defects. Resources are destroyed automatically.
@@ -683,7 +682,7 @@ Missing: Twilio voice callbacks, internal recommendations service`}</PagePre>
     related: [
       { href: "/security", title: "Security", description: "Fail closed. Data stays in your boundary." },
       { href: "/open-source", title: "Open source", description: "The inspectable surface inside the boundary." },
-      { href: "/docs/guides/local-runtime/", title: "Architecture docs", description: "Lifecycle and isolation in full." },
+      { href: "/docs/architecture", title: "Architecture docs", description: "Lifecycle and isolation in full." },
     ],
     body: (
       <>

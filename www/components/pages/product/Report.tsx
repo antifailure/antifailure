@@ -97,7 +97,7 @@ function ToneDot({ tone }: { tone: Tone }) {
 
 function GateCard({ tone, pr, title, evidence, merge }: (typeof GATES)[number]) {
   return (
-    <Panel>
+    <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between gap-3 px-4 py-2.5">
         <span className="font-mono text-[11px] tracking-extra-tight text-black/45">{pr}</span>
         <StatusPill tone={tone} />
@@ -124,10 +124,10 @@ function GateCard({ tone, pr, title, evidence, merge }: (typeof GATES)[number]) 
 
 function PrCheckChrome() {
   return (
-    <Panel>
+    <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between gap-4 px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="inline-flex items-center px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight text-black/70 ring-1 ring-black/10">
+          <span className="inline-flex items-center border border-black/[0.08] px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight text-black/70">
             pr/184
           </span>
           <span className="truncate font-mono text-[13px] tracking-extra-tight text-black">add access_tier</span>
@@ -156,11 +156,7 @@ function PrCheckChrome() {
 
       <Hairline />
 
-      <div className="px-3 py-3">
-        <div
-          className="px-3 py-3"
-          style={{ boxShadow: "inset 1px 0 0 #b91c1c" }}
-        >
+      <div className="px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-start gap-2">
               <ToneDot tone="BLOCK" />
@@ -191,7 +187,6 @@ function PrCheckChrome() {
             </p>
           </div>
         </div>
-      </div>
 
       <Hairline />
 
@@ -220,7 +215,7 @@ function PrCheckChrome() {
             inert · required check BLOCKED
           </div>
         </div>
-        <span className="bg-black/[0.04] px-2.5 py-1 font-mono text-[10px] tracking-extra-tight text-black/30 ring-1 ring-black/10">
+        <span className="border border-black/[0.08] bg-white px-2.5 py-1 font-mono text-[10px] tracking-extra-tight text-black/30">
           Merge
         </span>
       </div>
@@ -269,7 +264,7 @@ export function ReportPage() {
         </p>
         <div className="mt-12 grid grid-cols-2 gap-5 max-md:grid-cols-1">
           {POLICIES.map((policy) => (
-            <Panel key={policy.rule}>
+            <Panel key={policy.rule} className="rounded-[12px] bg-white">
               <div className="flex items-center justify-between gap-3 px-5 py-3">
                 <span className="font-mono text-[11px] tracking-extra-tight text-black/45">{policy.rule}</span>
                 <StatusPill tone={policy.tone}>{policy.pill}</StatusPill>
@@ -285,21 +280,16 @@ export function ReportPage() {
       </PageSection>
 
       <PageSection tone="sage">
-        <div className="mx-auto max-w-[800px] text-center">
-          <div className="mb-8 flex items-center justify-center gap-2">
-            <StatusPill tone="PASS" />
-            <StatusPill tone="WARN" />
-            <StatusPill tone="BLOCK" />
-          </div>
-          <h2 className="text-[44px] leading-dense tracking-tighter text-gray-new-40 max-xl:text-[36px] max-lg:text-[28px] max-md:text-[24px]">
-            <strong className="font-normal text-black">Center the deployment decision.</strong> Environment
-            creation, data, agents, and load are supporting systems.
-          </h2>
-          <p className="mx-auto mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Every workflow and report answers whether this deployment is safe to ship under the conditions
-            that actually matter. If the product becomes a bundle of tools, it has failed.
-          </p>
+        <PageHeading title="<strong>Center the deployment decision.</strong> Environment creation, data, agents, and load are supporting systems." />
+        <div className="mt-8 flex items-center gap-2">
+          <StatusPill tone="PASS" />
+          <StatusPill tone="WARN" />
+          <StatusPill tone="BLOCK" />
         </div>
+        <p className="mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
+          Every workflow and report answers whether this deployment is safe to ship under the conditions
+          that actually matter. If the product becomes a bundle of tools, it has failed.
+        </p>
       </PageSection>
 
       <RelatedGrid
