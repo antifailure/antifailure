@@ -123,6 +123,7 @@ jobs:
         working-directory: infra/terraform/stacks/control-plane
         env:
           ARM_USE_OIDC: "true"
+          ARM_USE_AZUREAD: "true"
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
@@ -134,13 +135,29 @@ jobs:
           TF_VAR_github_redirect_uri: https://example.invalid/auth/callback
         run: |
           set -euo pipefail
+          # use_azuread_auth, and it is not optional.
+          #
+          # Without it the azurerm backend authenticates to the state container
+          # by first calling listKeys on the storage account. That fails twice
+          # over here: the CI identity is not granted listKeys, and the account
+          # created by stacks/tfstate has key-based authentication DISABLED
+          # outright, so even an identity that could ask would be refused.
+          # The error is a 403 during `init`, before any Terraform runs, and it
+          # reads as a permissions problem rather than as a missing flag.
           terraform init -input=false \
             -backend-config="resource_group_name=${{ secrets.AZURE_TFSTATE_RG }}" \
             -backend-config="storage_account_name=${{ secrets.AZURE_TFSTATE_ACCOUNT }}" \
             -backend-config="container_name=tfstate" \
             -backend-config="key=control-plane.tfstate" \
-            -backend-config="use_oidc=true"
-          terraform plan -input=false -lock-timeout=5m -out=plan.tfplan
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true"
+          # The same var-file the deployment uses. Planning without it renames
+          # the Key Vault (the module computes a different name from var.name
+          # than the deployed vault has), so the plan would show a DESTROY that
+          # is an artefact of the plan job rather than of the change under
+          # review. A destroy count nobody believes is worse than none, which is
+          # the entire premise of this workflow.
+          terraform plan -input=false -lock-timeout=5m -var-file=staging.tfvars -out=plan.tfplan
           terraform show -json plan.tfplan > plan.json
           terraform show -no-color plan.tfplan > plan.txt
 

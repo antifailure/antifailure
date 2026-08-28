@@ -120,7 +120,7 @@ const FILE_TOKENS: Record<string, Token[]> = {
     { t: "Workload", cls: TEAL },
     { t: ".compile", cls: FN },
     { t: "(\n  ", cls: VAR },
-    { t: '"crowdi:double_click_upgrade"', cls: STR },
+    { t: '"explore:double_click_upgrade"', cls: STR },
     { t: "\n)", cls: VAR },
   ],
   "app.tsx": [
@@ -180,7 +180,7 @@ const CHECKS = [
 const CHECK_DETAIL = [
   "Isolated twin of this PR. Destroyed when the TTL expires.",
   "Redacted production-shaped traffic. Never diverted from live users.",
-  "Crowdi discoveries compiled to versioned IR. No LLM at scale.",
+  "Exploratory discoveries compiled to versioned IR. No LLM at scale.",
   "Stripe simulated in a clone-local ledger. Email captured, never delivered.",
 ];
 
@@ -744,8 +744,8 @@ export function IdePlay() {
               <span className="text-[15px] tracking-[0.2em] text-black/35">···</span>
             </div>
             <p className="mt-3 px-3.5 text-[12px] leading-[18px] text-black/55">
-              Workload Studio compiles observed traffic, deterministic journeys, and Crowdi
-              exploration into a scenario that runs against an isolated twin.
+              Workload Studio compiles observed traffic, deterministic journeys, and exploratory
+              users into a scenario that runs against an isolated twin.
             </p>
             <pre className="mx-3.5 mt-3 overflow-hidden rounded-lg bg-[#f4f4f2] p-2.5 font-mono text-[10.5px] leading-[17px]">
               <span className="mb-1 block text-[10px] text-black/35">workload.ts</span>
@@ -761,7 +761,7 @@ export function IdePlay() {
               <span className={TEAL}>Workload</span>
               <span className={FN}>.connect</span>
               <span className={VAR}>{"();\n"}</span>
-              <span className={CM}>{"// Observed, deterministic, Crowdi"}</span>
+              <span className={CM}>{"// Observed, deterministic, exploratory"}</span>
             </pre>
             <ul className="mt-3 space-y-2 px-3.5 text-[12.5px]">
               {CHECKS.map((item, i) => (
@@ -843,7 +843,7 @@ export function IdeSection() {
                 className="absolute inset-0"
                 style={{
                   background:
-                    "radial-gradient(ellipse 58% 52% at 6% 100%, rgba(26,212,192,0.58), transparent 62%), radial-gradient(ellipse 58% 52% at 94% 100%, rgba(232,148,64,0.62), transparent 62%)",
+                    "radial-gradient(ellipse 58% 52% at 6% 100%, rgba(51,191,0,0.58), transparent 62%), radial-gradient(ellipse 58% 52% at 94% 100%, rgba(0,229,153,0.55), transparent 62%)",
                   opacity: story ? 1 : 0.7,
                   transition: "opacity 0.8s ease",
                 }}

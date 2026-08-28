@@ -1,64 +1,106 @@
 "use client";
 
-import { sparkPath, span, useHeroFilmClock, type FilmProps } from "./clock";
+import { span, useHeroFilmClock, type FilmProps } from "./clock";
+import { Avatar, Bar, Hairline, Label, Meta, easeInOut, moveStyle, smooth } from "./linear";
 
 const LOOP = 8;
-const MIX = [
-  { label: "observed", value: 40 },
-  { label: "recorded", value: 40 },
-  { label: "crowdi", value: 20 },
+
+const JOURNEYS = [
+  { label: "observed", value: 0.4, display: "40%", avatars: null },
+  { label: "deterministic", value: 0.4, display: "40%", avatars: null },
+  {
+    label: "exploratory",
+    value: 0.2,
+    display: "20%",
+    avatars: [
+      { initial: "I", bg: "#c17a5a" },
+      { initial: "M", bg: "#6b8cae" },
+      { initial: "S", bg: "#5a8f6e" },
+    ],
+  },
 ] as const;
+
+const STEPS = ["checkout", "retry", "unknown sku"] as const;
 
 export function WorkloadFilm({ active, hovered }: FilmProps) {
   const { ref, t } = useHeroFilmClock({
     loop: LOOP,
     active,
     hovered,
-    stillT: 5.5,
-    reducedT: 5.5,
+    stillT: 0,
+    reducedT: 0,
   });
 
-  const draw = span(t, 0.2, 1.6);
-  const mixP = span(t, 0.15, 1.4);
-  const obs = sparkPath(11, 20, 240, 72, 0.42);
-  const cand = sparkPath(19, 20, 240, 72, 0.58);
-  const dash = 420;
-  const shown = dash * draw;
+  const fill = smooth(span(t, 0.45, 1.85));
+  const page = easeInOut(span(t, 3.3, 4.45));
 
   return (
-    <div ref={ref} className="absolute inset-0 flex flex-col p-3 font-sans select-none" aria-hidden>
-      <div className="mb-1.5 flex items-baseline justify-between gap-2">
-        <span className="font-sans text-[10px] tracking-extra-tight text-black/45">mix</span>
-        <span className="font-sans text-[10px] tracking-extra-tight text-black/35">not live diversion</span>
-      </div>
-      <div className="mb-2 grid grid-cols-3 gap-2">
-        {MIX.map((m) => (
-          <div key={m.label} className="min-w-0">
-            <div className="font-sans text-[11px] tabular-nums tracking-extra-tight text-[#285D49]">
-              {Math.round(m.value * mixP)}
+    <div ref={ref} className="absolute inset-0 overflow-hidden font-sans select-none" aria-hidden>
+      <div
+        className="absolute inset-3.5 flex flex-col"
+        style={moveStyle({ opacity: 1 - page, y: page * -10, scale: 1 + page * 0.16 })}
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <Label>mix</Label>
+          <Meta>not live diversion</Meta>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-black/[0.08] bg-white">
+          {JOURNEYS.map((row, i) => (
+            <div key={row.label}>
+              {i > 0 ? <Hairline /> : null}
+              <div className="px-2.5 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-[11px] tracking-extra-tight text-[#1A1A1A]">
+                    {row.label}
+                  </span>
+                  {row.avatars ? (
+                    <span className="flex -space-x-1.5">
+                      {row.avatars.map((a, ai) => {
+                        const show = smooth(span(t, 1.4 + ai * 0.18, 1.95 + ai * 0.18));
+                        return (
+                          <span key={a.initial} style={moveStyle({ opacity: show, scale: 0.7 + show * 0.3 })}>
+                            <Avatar initial={a.initial} bg={a.bg} />
+                          </span>
+                        );
+                      })}
+                    </span>
+                  ) : null}
+                  <Meta className="tabular-nums">{row.display}</Meta>
+                </div>
+                <Bar className="mt-1.5" value={fill * row.value} tone={row.label === "exploratory" ? "ok" : "neutral"} />
+              </div>
             </div>
-            <div className="font-sans text-[10px] tracking-extra-tight text-black/40">{m.label}</div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-      <svg viewBox="0 0 240 72" className="min-h-0 w-full flex-1" aria-hidden>
-        <path
-          d={obs}
-          fill="none"
-          stroke="rgba(40,93,73,0.35)"
-          strokeWidth="1"
-          strokeDasharray={dash}
-          strokeDashoffset={dash - shown}
-        />
-        <path
-          d={cand}
-          fill="none"
-          stroke="#33BF00"
-          strokeWidth="1"
-          strokeDasharray={dash}
-          strokeDashoffset={dash - shown}
-        />
-      </svg>
+
+      <div
+        className="absolute inset-3.5 flex flex-col"
+        style={moveStyle({ opacity: page, y: (1 - page) * 14, scale: 0.96 + page * 0.04 })}
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <Label>exploratory</Label>
+          <span className="flex -space-x-1.5">
+            {JOURNEYS[2].avatars.map((a) => (
+              <Avatar key={a.initial} initial={a.initial} bg={a.bg} />
+            ))}
+          </span>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col justify-center overflow-hidden rounded-[10px] border border-black/[0.08] bg-white px-2.5 py-2">
+          {STEPS.map((step, i) => {
+            const show = smooth(span(t, 4.35 + i * 0.28, 5.0 + i * 0.28));
+            return (
+              <div key={step}>
+                {i > 0 ? <Hairline className="my-1.5" /> : null}
+                <div className="flex items-center gap-2" style={moveStyle({ opacity: show, x: (1 - show) * 8 })}>
+                  <Meta className="w-3 tabular-nums">{i + 1}</Meta>
+                  <span className="min-w-0 truncate text-[11px] tracking-extra-tight text-[#1A1A1A]">{step}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

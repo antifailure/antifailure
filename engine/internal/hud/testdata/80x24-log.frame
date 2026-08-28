@@ -14,6 +14,6 @@ checkout-flow               3 passed  1 failed  failed
 smoke                       7 passed  0 failed  running
 
 ▸ LOG ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-00:00:20 agent.started env=pr-482 agent=smoke failed=0 passed=7 state=running
-00:00:21 agent.started env=pr-482 agent=checkout-flow failed=1 passed=3 state=f…
-00:00:22 env.failed env=pr-482 the worker exited with status 1
+00:00:20 agent.started agent=smoke failed=0 passed=7 state=running
+00:00:21 agent.started agent=checkout-flow failed=1 passed=3 state=failed
+00:00:22 env.failed the worker exited with status 1

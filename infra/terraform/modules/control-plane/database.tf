@@ -84,6 +84,29 @@ resource "azurerm_postgresql_flexible_server" "this" {
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
 }
 
+# The extensions the schema needs, allow-listed.
+#
+# THIS IS WHY A FRESH INSTALL ON AZURE COULD NOT MIGRATE. Azure Database for
+# PostgreSQL refuses CREATE EXTENSION for anything not named in the
+# azure.extensions server parameter, and that parameter defaults to EMPTY.
+# Migration 0001 opens with `CREATE EXTENSION IF NOT EXISTS pgcrypto`, so the
+# very first statement of the very first migration was refused, the whole file
+# rolled back, and the control plane came up serving /health with a database it
+# had no schema in.
+#
+# It was invisible until it ran here because every other place the schema is
+# proved uses a stock postgres image, where CREATE EXTENSION simply works: the
+# kind cluster in control-plane-image.yml, the docker-compose in development,
+# and every test in web/packages/db. A managed Postgres is not a Postgres with
+# a different hostname, and this is the difference that bites first.
+#
+# Changing azure.extensions is dynamic and needs no restart.
+resource "azurerm_postgresql_flexible_server_configuration" "extensions" {
+  name      = "azure.extensions"
+  server_id = azurerm_postgresql_flexible_server.this.id
+  value     = join(",", var.database_extensions)
+}
+
 resource "azurerm_postgresql_flexible_server_database" "this" {
   name      = var.database_name
   server_id = azurerm_postgresql_flexible_server.this.id

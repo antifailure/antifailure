@@ -1,0 +1,112 @@
+version: 1
+name: orders-api
+
+# The whole configuration surface for this example, with nothing configured
+# anywhere else. Read it top to bottom: what runs, where the data comes from,
+# what it may reach, who the agents are, and what they do.
+
+services:
+  - name: api
+    kind: web
+    path: .
+    port: 3000
+    health_path: /health
+    # Migrations run before the service starts, against the branch rather than
+    # the golden, so a pull request that adds a column gets it and nobody
+    # else's environment does.
+    migrate: "psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/0001_init.sql"
+    build:
+      strategy: dockerfile
+      dockerfile: Dockerfile
+      # What this build reaches, written down. Declared rather than enforced in
+      # this release: the engine validates the list and shows it in af explain,
+      # and the local builder does not yet seal a build. It is the record of
+      # what the build needs, not a control you can rely on.
+      allow_hosts:
+        - proxy.golang.org
+        - sum.golang.org
+        - dl-cdn.alpinelinux.org
+    env:
+      # DATABASE_URL is not declared here on purpose. The database block below
+      # injects it, and declaring it as well makes the secret resolver demand
+      # a value nobody has to supply. A real run refuses with AF-SEC-001, which
+      # is how this example was found to be wrong.
+      - name: PORT
+        value: "3000"
+
+database:
+  provider: docker
+  version: 17
+  masking_rules: masking.yaml
+  golden:
+    # Refreshed nightly and never used past a week. A golden older than that
+    # is a copy of a schema that has moved on, and branching from it produces
+    # migration failures that look like application bugs.
+    schedule: "0 3 * * *"
+    max_age: 168h
+    retain: 3
+
+egress:
+  # Nothing reaches the internet unless it is named here.
+  #
+  # mock, so that this example runs with nothing configured: the Stripe pack
+  # ships with the engine and answers from recorded responses. One line turns
+  # it into the stronger thing, once you have a test key to put in the store:
+  #
+  #     mode: sandbox
+  #     credential: STRIPE_SECRET_KEY
+  #
+  # Sandbox mode gives the container a placeholder and has the proxy substitute
+  # the real key on the way out, so the payment path runs and the key is never
+  # inside the environment.
+  default: block
+  rules:
+    - host: api.stripe.com
+      mode: mock
+      note: "payment intents, answered from the pack that ships with the engine"
+
+personas:
+  - name: returning-customer
+    email: ada@example.test
+    role: customer
+    # none, because this service is an API and has no sign in page. It said
+    # `password` until `af ci` was actually run against it, and every run came
+    # back blocked with "locator.fill: Timeout 10000ms exceeded, waiting for
+    # getByLabel(/^(email|email address|e-mail|username or email)$/i)": the
+    # agent was looking for a login form on a service that serves JSON. A
+    # persona that cannot sign in blocks its workflow forever, and blocked does
+    # not count against a change, so it would have sat there looking like a
+    # feature.
+    login: none
+
+workflows:
+  - name: place-an-order
+    description: >-
+      As the returning customer, look at the customer list, place an order for
+      2599 cents, and check that it appears with the right total.
+    persona: returning-customer
+    start_path: /customers
+    expect:
+      - "the customer list is not empty"
+      - "the new order is returned with a total of 2599"
+    tags: [smoke]
+
+# Declared and validated, not yet run. The engine parses these, refuses one that
+# is not read only, and shows them in af explain. Nothing executes the SQL in
+# this release, so a green run says nothing about them either way.
+invariants:
+  - name: no-orphaned-orders
+    description: >-
+      Every order belongs to a customer that exists. This is the assertion the
+      API cannot make from the outside, and the one a masking run that broke
+      the join would fail.
+    sql: |
+      SELECT count(*) AS violations
+      FROM orders o
+      LEFT JOIN customers c ON c.id = o.customer_id
+      WHERE c.id IS NULL
+
+  - name: no-negative-totals
+    description: An order's total is always positive, whatever the masking did to it.
+    sql: |
+      SELECT count(*) AS violations FROM orders WHERE total_cents <= 0

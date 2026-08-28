@@ -84,7 +84,7 @@ function RuleChip({ rule }: { rule: MaskRule | SubsetFate }) {
 
 function MaskingPanel() {
   return (
-    <Panel className="rounded-[12px]">
+    <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between gap-3 px-4 py-2.5">
         <MonoLabel className="uppercase">public.users</MonoLabel>
         <div className="flex items-center gap-2">
@@ -236,7 +236,7 @@ function SubsetGraph() {
 
 function SubsetPanel() {
   return (
-    <Panel className="rounded-[12px]">
+    <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between gap-3 px-4 py-2.5">
         <MonoLabel className="uppercase">referential subset</MonoLabel>
         <MonoLabel className="uppercase text-[#285D49]">12% · joins valid</MonoLabel>
@@ -292,7 +292,7 @@ function SubsetPanel() {
 
 function LifecyclePanel() {
   return (
-    <Panel className="rounded-[12px]">
+    <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between gap-3 px-5 py-3">
         <MonoLabel className="uppercase">Postgres adapter</MonoLabel>
         <MonoLabel>logical restore · CoW when supported</MonoLabel>
@@ -386,7 +386,7 @@ export function SafeStatePage() {
       <PageSection tone="sage">
         <Split
           visual={
-            <Stage className="min-h-[360px] bg-white/50 [&>div]:mt-1">
+            <Stage>
               <TrustBoundaryScene />
             </Stage>
           }

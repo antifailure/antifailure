@@ -47,6 +47,40 @@ func TestMyProvider(t *testing.T) {
 That is the whole harness. It runs twenty three behaviours against your
 provider and each one is a property a user depends on.
 
+## A worked example, in one sitting
+
+`engine/internal/testutil/fakes/inmemory.go` is a complete
+`provider.Database` in 180 lines, with no database behind it. It is the
+shortest thing in the tree that passes the suite, and it is worth reading
+before you write your own, because it makes the shape of the interface
+obvious without any of a real service's noise.
+
+Four things in it are worth copying rather than inventing.
+
+**It declares only what it can do.** `Capabilities()` returns
+`provider.Caps{Branching: true}` and nothing else. It has no rows, so it does
+not claim `Reset`, and it has no pooler, so it does not claim pooled
+endpoints. The suite skips those behaviours and says which capability was
+missing as it skips them.
+
+**It refuses rather than pretends.** Branching from a version that does not
+exist, or from one that failed verification, returns an error. A provider that
+invents a branch for a golden it does not have will pass a shallow test and
+lose somebody's data on the real one.
+
+**Destroy is idempotent, and so is everything teardown touches.** Removing a
+branch twice succeeds, because teardown retries and a crash leaves a partial
+state. It keeps a `destroyed` set for exactly that.
+
+**Health answers rather than errors.** A destroyed branch is unreachable, not
+a failure. `af down` asks for health, and a provider that errors on a branch it
+has just removed makes a successful teardown look like a failure.
+
+It is also the provider the suite's own negative controls run against, which
+is the other reason it exists: a control that needs infrastructure gets
+skipped, and a skipped control is a false green rather than a proof. That is
+the subject of the next two sections.
+
 ## Capabilities, and why skipping has to be loud
 
 Not every provider can do everything. A provider without copy-on-write cannot

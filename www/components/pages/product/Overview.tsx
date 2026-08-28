@@ -12,68 +12,49 @@ import { MigrationScene } from "@/components/home/visuals/MigrationScene";
 import {
   CheckRow,
   Hairline,
-  LockBadge,
   MonoLabel,
-  Node,
   Panel,
   StatusPill,
 } from "@/components/home/visuals/primitives";
 import { cn } from "@/lib/cn";
 
 const MODULES: {
-  n: string;
   title: string;
   body: string;
-  mark?: string;
   verdict?: "PASS" | "WARN" | "BLOCK";
 }[] = [
   {
-    n: "01",
     title: "Twin",
     body: "An isolated, temporary copy of the relevant application stack.",
-    mark: "isolated",
   },
   {
-    n: "02",
     title: "State",
     body: "A safe, referentially consistent, production-shaped dataset.",
-    mark: "sanitized",
   },
   {
-    n: "03",
     title: "Containment",
     body: "No charging cards, emailing users, or invoking production webhooks.",
-    mark: "fail closed",
   },
   {
-    n: "04",
     title: "Behavior",
     body: "Captured workloads, deterministic scenarios, and exploratory AI users.",
-    mark: "compiled",
   },
   {
-    n: "05",
     title: "Comparison",
     body: "Current and proposed versions against equivalent state and behavior.",
-    mark: "differential",
   },
   {
-    n: "06",
     title: "Judgment",
     body: "Functional, database, performance, integration, and behavioral regressions.",
-    mark: "attributed",
   },
   {
-    n: "07",
     title: "Evidence",
     body: "An auditable pass, warning, or block report on the pull request.",
     verdict: "BLOCK",
   },
   {
-    n: "08",
     title: "Cleanup",
     body: "Destroy temporary resources and prove that cleanup completed.",
-    mark: "attested",
   },
 ];
 
@@ -118,35 +99,27 @@ export function OverviewPage() {
           pass, warning, or block — then the environment is destroyed.
         </p>
 
-        <div className="mt-12 flex items-center gap-2 max-md:hidden" aria-hidden>
-          {MODULES.map((m, i) => (
-            <div key={m.n} className="flex min-w-0 flex-1 items-center gap-2">
-              <span className="font-mono text-[11px] tracking-extra-tight text-[#33bf00]">{m.n}</span>
-              {i < MODULES.length - 1 ? (
-                <span className="h-px min-w-0 flex-1 bg-black/12" />
-              ) : null}
-            </div>
-          ))}
+        <div className="relative mt-16 max-md:mt-10">
+          <ul className="grid grid-cols-4 gap-x-12 gap-y-14 max-lg:grid-cols-2 max-md:grid-cols-1 max-md:gap-y-8">
+            {MODULES.map((m) => (
+              <li key={m.title} className="min-w-0">
+                <svg viewBox="0 0 16 16" className="mb-4 size-4 text-black" fill="none" aria-hidden>
+                  <rect x="1.5" y="1.5" width="13" height="13" stroke="currentColor" strokeWidth="1.2" />
+                </svg>
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-[18px] leading-snug tracking-extra-tight text-black">{m.title}</h3>
+                  {m.verdict ? <StatusPill tone={m.verdict}>{m.verdict}</StatusPill> : null}
+                </div>
+                <p className="mt-2 max-w-[280px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+                  {m.body}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <span className="pointer-events-none absolute inset-y-0 left-[calc(25%-24px)] w-px bg-black/12 max-lg:hidden" />
+          <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-black/12 max-md:hidden" />
+          <span className="pointer-events-none absolute inset-y-0 right-[calc(25%-24px)] w-px bg-black/12 max-lg:hidden" />
         </div>
-
-        <ol className="mt-6 grid grid-cols-4 gap-px overflow-hidden rounded-[12px] bg-black/10 ring-1 ring-black/10 max-lg:grid-cols-2 max-md:mt-10 max-md:grid-cols-1">
-          {MODULES.map((m) => (
-            <li key={m.title} className="min-w-0 bg-[#f7f7f5] p-7 max-lg:p-6 max-md:p-5">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-mono text-[12px] tracking-extra-tight text-[#33bf00]">{m.n}</span>
-                {m.verdict ? (
-                  <StatusPill tone={m.verdict}>{m.verdict}</StatusPill>
-                ) : (
-                  <Node label={m.mark ?? ""} lit />
-                )}
-              </div>
-              <h3 className="mt-5 text-[18px] leading-snug tracking-extra-tight text-black">{m.title}</h3>
-              <p className="mt-2 max-w-[280px] text-[14px] leading-6 tracking-extra-tight text-gray-new-40">
-                {m.body}
-              </p>
-            </li>
-          ))}
-        </ol>
       </PageSection>
 
       <PageSection tone="sage">
@@ -162,7 +135,7 @@ export function OverviewPage() {
                 {FRAGMENTS.map((name) => (
                   <span
                     key={name}
-                    className="px-2 py-1 font-mono text-[10px] tracking-extra-tight text-black/45 ring-1 ring-black/10"
+                    className="border border-black/[0.08] px-2 py-1 font-mono text-[10px] tracking-extra-tight text-black/45"
                   >
                     {name}
                   </span>
@@ -173,7 +146,7 @@ export function OverviewPage() {
                 <div className="border-r border-black/8 px-5 py-5 max-sm:border-r-0 max-sm:border-b max-sm:border-black/8">
                   <div className="flex items-center justify-between gap-2">
                     <MonoLabel>Shared staging</MonoLabel>
-                    <span className="font-mono text-[10px] tracking-extra-tight text-black/35 ring-1 ring-black/10 px-1.5 py-0.5">
+                    <span className="border border-black/[0.08] px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight text-black/35">
                       drifted
                     </span>
                   </div>
@@ -223,15 +196,8 @@ export function OverviewPage() {
           automated safety validation for risky Postgres-backed web deployments.
         </p>
 
-        <div className="mt-14 overflow-hidden rounded-[12px] ring-1 ring-black/10">
+        <div className="mt-14">
           <MigrationScene tab={0} playId={0} />
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-x border-b border-black/10 bg-white px-5 py-3">
-            <StatusPill tone="BLOCK">BLOCK</StatusPill>
-            <LockBadge exclusive />
-            <span className="font-mono text-[12px] tracking-extra-tight text-gray-new-40">
-              subscriptions 27.4s · checkout p99 820ms→6.9s · 11.8% upgrade timeouts · rollback unsafe
-            </span>
-          </div>
         </div>
 
         <div className="mt-8 grid grid-cols-2 gap-5 max-lg:grid-cols-1">
@@ -262,12 +228,12 @@ export function OverviewPage() {
                 ))}
               </dl>
             </div>
-            <div className="border-t border-black/8 bg-[#f4f7f5] px-5 py-3 font-mono text-[11px] leading-5 tracking-extra-tight text-[#285D49]">
+            <div className="border-t border-black/[0.08] px-5 py-3 font-mono text-[11px] leading-5 tracking-extra-tight text-[#285D49]">
               suggested · nullable, no default · batch backfill · dual-read · constrain later
             </div>
           </Panel>
 
-          <div className="flex min-w-0 flex-col justify-center rounded-[12px] bg-white px-8 py-8 ring-1 ring-black/10 max-md:px-5 max-md:py-6">
+          <div className="flex min-w-0 flex-col justify-center rounded-[12px] border border-black/[0.08] bg-white px-8 py-8 max-md:px-5 max-md:py-6">
             <h3 className="text-[28px] leading-dense tracking-tighter text-gray-new-40 max-lg:text-[22px] [&>strong]:font-normal [&>strong]:text-black">
               <strong>A 27-second lock is a block.</strong> Not a warning you can ignore.
             </h3>
@@ -296,17 +262,11 @@ export function OverviewPage() {
 
       <PageSection tone="white">
         <PageHeading title="<strong>The output is a decision.</strong> Not a dataset. Not a preview URL alone." />
-        <ul className="mt-16 grid grid-cols-3 overflow-hidden rounded-[12px] ring-1 ring-black/10 max-md:grid-cols-1">
-          {VERDICTS.map((item, i) => (
-            <li
-              key={item.tone}
-              className={cn(
-                "min-w-0 px-8 py-10 max-lg:px-6 max-lg:py-8",
-                i < VERDICTS.length - 1 && "border-r border-black/8 max-md:border-r-0 max-md:border-b",
-              )}
-            >
+        <ul className="relative mt-16 grid grid-cols-3 gap-x-16 max-md:grid-cols-1 max-md:gap-y-10">
+          {VERDICTS.map((item) => (
+            <li key={item.tone} className="min-w-0">
               <StatusPill tone={item.tone}>{item.tone}</StatusPill>
-              <h3 className="mt-6 text-[28px] leading-dense tracking-tighter text-black max-lg:text-[22px]">
+              <h3 className="mt-5 text-[22px] leading-dense tracking-tighter text-black max-lg:text-[18px]">
                 {item.title}
               </h3>
               <p className="mt-2 max-w-[280px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
@@ -314,12 +274,14 @@ export function OverviewPage() {
               </p>
             </li>
           ))}
+          <span className="pointer-events-none absolute inset-y-0 left-[calc(33.333%-32px)] w-px bg-black/12 max-md:hidden" />
+          <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-md:hidden" />
         </ul>
         <div className="mt-16 max-w-[640px] border-t border-black/10 pt-8">
           <MonoLabel>What we will not claim</MonoLabel>
           <p className="mt-3 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
             Zero rollback. No deployment can ever fail. Thousands of AI agents behave exactly like humans.
-            One click perfectly clones every cloud. Crowdi is a Workload Studio feature, not the category.
+            One click perfectly clones every cloud. Exploratory users live in Workload Studio, not as the category.
           </p>
         </div>
       </PageSection>

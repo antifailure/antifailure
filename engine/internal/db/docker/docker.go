@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -251,7 +252,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		ID: version, CreatedAt: p.clock.Now().UTC(), RulesHash: spec.RulesHash,
 		Verified: spec.Verify != nil, Attestation: attestation, ProviderRef: tag,
 	}
-	if info, _, err := p.cli.ImageInspectWithRaw(ctx, tag); err == nil {
+	if info, err := p.cli.ImageInspect(ctx, tag); err == nil {
 		gv.SizeBytes = info.Size
 	}
 	return gv, nil
@@ -340,7 +341,7 @@ func (p *Provider) DestroyGolden(ctx context.Context, version string) error {
 		}
 	}
 	_, err = p.cli.ImageRemove(ctx, tag, image.RemoveOptions{PruneChildren: true})
-	if err != nil && !client.IsErrNotFound(err) {
+	if err != nil && !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("db.docker: remove the golden image %s: %w", version, err)
 	}
 	return nil
@@ -358,8 +359,8 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 	}
 
 	tag := ImageRepo + ":" + version
-	if _, _, err := p.cli.ImageInspectWithRaw(ctx, tag); err != nil {
-		if client.IsErrNotFound(err) {
+	if _, err := p.cli.ImageInspect(ctx, tag); err != nil {
+		if cerrdefs.IsNotFound(err) {
 			return provider.Branch{}, aferrors.Coded(aferrors.AFDB004, "version", version)
 		}
 		return provider.Branch{}, fmt.Errorf("db.docker: inspect the golden image: %w", err)
@@ -464,7 +465,7 @@ func (p *Provider) ConnString(ctx context.Context, b provider.Branch, mode provi
 		}
 		return p.connString(port), nil
 	}
-	if lastErr != nil && client.IsErrNotFound(lastErr) {
+	if lastErr != nil && cerrdefs.IsNotFound(lastErr) {
 		return secrets.Value{}, aferrors.Coded(aferrors.AFDB004, "version", b.From)
 	}
 	if lastErr == nil {

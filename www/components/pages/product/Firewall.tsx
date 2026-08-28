@@ -6,9 +6,8 @@ import {
   PageShell,
   RelatedGrid,
   Split,
-  Stage,
 } from "@/components/pages/kit";
-import { FirewallScene } from "@/components/home/visuals/FirewallScene";
+import { FailClosedScene } from "@/components/home/visuals/FailClosedScene";
 import {
   Hairline,
   MonoLabel,
@@ -17,7 +16,6 @@ import {
   Receipt,
   StatusPill,
 } from "@/components/home/visuals/primitives";
-import { cn } from "@/lib/cn";
 
 type LedgerTone = "PASS" | "BLOCK";
 
@@ -141,11 +139,8 @@ export function FirewallPage() {
         eyebrow="Side-Effect Firewall"
         title="The twin cannot act on the real world."
         lead="No default public egress. Clone-local DNS. Stateful provider simulators. Unknown destinations are blocked and written to the attempted-effect ledger."
-        visual={
-          <Stage className="min-h-[280px]">
-            <FirewallScene />
-          </Stage>
-        }
+        framed={false}
+        visual={<FailClosedScene />}
       />
 
       <PageSection>
@@ -195,10 +190,7 @@ export function FirewallPage() {
             {LEDGER.map((row) => (
               <li
                 key={row.receipt}
-                className={cn(
-                  "flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-black/8 px-5 py-3 last:border-b-0",
-                  row.tone === "PASS" ? "border-l-2 border-l-[#33bf00]" : "border-l-2 border-l-red-600 bg-red-50/40",
-                )}
+                className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-black/[0.08] px-5 py-3 last:border-b-0"
               >
                 <span className="w-10 shrink-0 font-mono text-[10px] tracking-extra-tight text-black/40">
                   {row.method}
@@ -225,7 +217,7 @@ export function FirewallPage() {
       <PageSection tone="white">
         <Split
           visual={
-            <Panel className="flex flex-col rounded-[12px] bg-[#f4f7f5]">
+            <Panel className="flex flex-col rounded-[12px] bg-white">
               <div className="flex items-center justify-between gap-3 px-5 py-3">
                 <MonoLabel>BYPASS DETECTED</MonoLabel>
                 <StatusPill tone="BLOCK">BLOCK</StatusPill>
@@ -289,7 +281,7 @@ export function FirewallPage() {
         items={[
           { href: "/security", title: "Security", description: "Fail closed is a product principle." },
           { href: "/product/oracle", title: "Differential Oracle", description: "Third-party effects are compared." },
-          { href: "/docs/firewall", title: "Firewall docs", description: "Controls and example behavior." },
+          { href: "/docs/concepts/egress", title: "Egress docs", description: "Controls and example behavior." },
         ]}
       />
     </PageShell>

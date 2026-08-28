@@ -44,7 +44,7 @@ specifically, because that is the shape of change that turns into an outage.
 Queries are timed against the branch and against the base. A query more than
 `regression_factor` slower is reported.
 
-`regression_min_ms` exists because a query going from 0.1ms to 0.3ms is three
+`regression_min_ms` exists because a query going from 0.1 ms to 0.3 ms is three
 times slower and means nothing. Without a floor the report is all noise and
 people stop reading it.
 

@@ -182,7 +182,7 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 	res := Result{Service: req.Service, ImageRef: ref}
 
 	if !b.noCache {
-		if _, _, err := b.cli.ImageInspectWithRaw(ctx, ref); err == nil {
+		if _, err := b.cli.ImageInspect(ctx, ref); err == nil {
 			res.Cached = true
 			return res, nil
 		}
