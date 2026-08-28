@@ -11,9 +11,10 @@
 // deliberately paranoid: it fails closed, so an error talking to Azure is a
 // refusal rather than an assumption that the target was fine.
 //
-//	azguard check af-cp-scus              # is this group ours?
-//	azguard check --tags af-cp-scus       # ...and does it carry the tag?
+//	azguard check af-cp-centralus         # is this group ours?
+//	azguard check --tags af-cp-centralus  # ...and does it carry the tag?
 //	azguard guard -- terraform apply      # refuse unless every -var group is ours
+//	azguard region centralus              # can this region actually run the database?
 //
 // Exit codes: 0 allowed, 1 refused, 2 the guard could not tell.
 package main
@@ -57,6 +58,8 @@ func main() {
 		os.Exit(cmdCheck(os.Args[2:]))
 	case "guard":
 		os.Exit(cmdGuard(os.Args[2:]))
+	case "region":
+		os.Exit(cmdRegion(os.Args[2:]))
 	case "-h", "--help", "help":
 		usage()
 		os.Exit(0)
@@ -78,6 +81,14 @@ func usage() {
       Extract every resource group named in the command (-g, --resource-group,
       and Terraform's -var resource_group_name=) , check them, and run the
       command only if every one is ours.
+
+  azguard region [--postgres-version V] [--postgres-sku S] <location>...
+      Ask Azure whether a region can actually create this stack's PostgreSQL
+      flexible server. This is a THIRD gate, separate from quota and from Azure
+      Policy, and neither a plan nor a policy can see it: eastus on this
+      subscription returns supportedServerVersions: [] with "Provisioning is
+      restricted in this region", so an apply gets twenty six resources in and
+      then fails on the database.
 
 Exit codes: 0 allowed, 1 refused, 2 could not tell.
 `)

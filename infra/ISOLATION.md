@@ -13,7 +13,7 @@ tagged `project=antifailure`:
 | --- | --- | --- |
 | `af-dev-eastus` | Development: registry, key vault, storage, the DNS zone for previews | 400 USD per month |
 | `af-corpus-eastus` | Corpus testing: the preview cluster and its spot node pool | 600 USD per month |
-| `af-cp-eastus` | The hosted control plane | 300 USD per month |
+| `af-cp-centralus` | The hosted control plane | 300 USD per month |
 | `af-tfstate-eastus` | Terraform remote state only | negligible |
 
 These were named `-scus` when this document was written, for South Central US.
@@ -55,25 +55,79 @@ as decoration, just written in prose.
    alternative is guessing about `az group delete`.
 
    ```sh
-   go run ./tools/azguard check --tags af-cp-scus
-   go run ./tools/azguard guard -- terraform apply -var resource_group_name=af-cp-scus
+   go run ./tools/azguard check --tags af-cp-centralus
+   go run ./tools/azguard guard -- terraform apply -var resource_group_name=af-cp-centralus
    ```
 
    Its tests assert that all five foreign groups in this subscription are
    refused, in either case, along with the near-misses (`prod-af-cp`, `afcp`)
    that a substring check would wave through.
 
-3. **Identity is scoped.** *Not built.* The intent is that the workstation
-   identity and the CI federated identity hold Contributor on the working
-   groups and nothing at subscription scope, so that an operation elsewhere
-   fails with an authorization error. There is no Entra app registration yet
-   and no federated credential, so today this rests on 1 and 2 alone. Until it
-   exists, the CI plan job skips rather than passes, and says so.
+3. **Identity is scoped.** *Built, for CI.* The Entra application
+   `af-infra-ci` exists, and GitHub Actions federates into it. It holds
+   **no client secret and no certificate at all**: two federated credentials,
+   `repo:antifailure/antifailure:pull_request` and
+   `repo:antifailure/antifailure:ref:refs/heads/main`, both against
+   `https://token.actions.githubusercontent.com`. There is nothing to leak,
+   nothing to rotate, and nothing that can be committed by accident. Revoking
+   it is deleting a federated credential.
 
-4. **Terraform state is scoped.** *Partly built.* The stacks are separate, each
-   with its own state key, so one cannot reference the other's resources.
-   The remote state account itself is created by `stacks/tfstate` and does not
-   exist yet, so state is local until somebody runs it.
+   Its entire authority, and this is the whole list:
+
+   | Scope | Role | Why |
+   | --- | --- | --- |
+   | the `af-cp-centralus` group | Reader | refresh the stack, change nothing |
+   | the state storage account | Storage Blob Data Reader | read the state, never write it |
+
+   **Nothing at subscription scope**, which is also why both stacks set
+   `resource_provider_registrations = "none"`: azurerm 4.x otherwise registers
+   providers at startup, and registration is a write at subscription scope, so
+   that one default would have forced a subscription level role.
+
+   Two grants are deliberately absent and each is half of a pair:
+
+   - No **Storage Blob Data Contributor**, so the plan runs `-lock=false`. The
+     azurerm backend locks with a blob lease and a lease is a write. Granting
+     it would let any pull request corrupt the record of everything the project
+     owns, and a pull request can edit the workflow that uses the credential in
+     the same commit that runs it.
+   - No **Key Vault Secrets User**, so the plan runs `-refresh=false`.
+     Refreshing an `azurerm_key_vault_secret` reads the secret's VALUE, which
+     would put the live database URLs into a pull request job.
+
+   The workstation identity is still unscoped: applies here are run by a
+   subscription Owner. That half is *not built*.
+
+   ONE LIMITATION, STATED RATHER THAN DISCOVERED: the `pull_request` subject
+   matches ANY pull request in this repository, so anybody who can push a
+   branch can reach this identity. A fork cannot, because GitHub withholds both
+   the OIDC token and the secrets from forks. Narrowing it further means a
+   GitHub environment with required reviewers, which has not been built.
+
+4. **Terraform state is scoped.** *Built.* The stacks are separate, each with
+   its own state key, so one cannot reference the other's resources. The remote
+   state account is live in `af-tfstate-eastus`: Entra identity only with
+   `shared_access_key_enabled = false`, a private container, thirty day soft
+   delete and blob versioning. Its NAME is deliberately not written down here.
+   `storage_account_name` has no default for the same reason, because a storage
+   account name is global and this repository carries no environment's
+   identifiers; `terraform output -raw backend_hcl` is where it comes from.
+
+   IT TOOK A POLICY EXEMPTION AND THAT IS WORTH READING BEFORE JUDGING IT.
+   `bonfire-deny-public-data` forces any storage account to
+   `publicNetworkAccess = Disabled`, which is not a firewall default a network
+   rule carves an exception out of: it turns the data plane off for everything
+   that is not a private endpoint. Neither a laptop nor a hosted runner can
+   reach it, and a CI plan with no state to compare against cannot report a
+   destroy, which is the only reason that job exists.
+
+   The exemption is scoped to `af-tfstate-eastus` alone, names that one
+   assignment, is categorised `Mitigated` rather than `Waiver`, and expires.
+   `infra/terraform/stacks/tfstate/exemption.tf` lists the five settings that
+   preserve the policy's intent by other means. What it restores is
+   REACHABILITY, not readability: a read still needs an Entra identity holding
+   a data role. Delete the exemption and the next write to the account is
+   denied.
 
 ## Azure Policy is a fourth mechanism, and it is not ours
 
@@ -120,7 +174,7 @@ they belong to the environment pool, which does not exist.
 it rather than assume it:
 
 ```sh
-az resource list -g af-cp-scus -o table
+az resource list -g af-cp-centralus -o table
 ```
 
 Key Vaults are soft-deleted rather than purged on destroy, so the name is

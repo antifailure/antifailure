@@ -10,8 +10,31 @@
 
 data "azurerm_client_config" "current" {}
 
+locals {
+  # A KEY VAULT NAME IS GLOBAL AND A DELETED ONE KEEPS IT FOR A WEEK.
+  #
+  # This was `${var.name}-kv`, and that is a trap the first region move walked
+  # straight into. Soft delete holds the name for the retention period, and
+  # purge protection means it cannot be released early even by the person who
+  # owns it: that is the whole point of purge protection and it is working as
+  # designed. So a name with nothing region-specific in it makes
+  # destroy-and-recreate-elsewhere fail on the vault, seven days after the
+  # decision to move, with an error about a name conflict rather than about
+  # soft delete.
+  #
+  # Including the location fixes the move. It does NOT make a
+  # destroy-and-recreate in the SAME region within seven days work, and nothing
+  # can, because that is exactly the attack purge protection exists to stop:
+  # somebody with delete replacing the vault's contents by replacing the vault.
+  # Set `key_vault_name` yourself if you need to sidestep it deliberately.
+  key_vault_name = coalesce(
+    var.key_vault_name,
+    substr(replace("${var.name}-kv-${var.location}", "_", "-"), 0, 24),
+  )
+}
+
 resource "azurerm_key_vault" "this" {
-  name                = substr(replace("${var.name}-kv", "_", "-"), 0, 24)
+  name                = local.key_vault_name
   location            = var.location
   resource_group_name = var.resource_group_name
   tenant_id           = data.azurerm_client_config.current.tenant_id

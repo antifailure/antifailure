@@ -37,6 +37,22 @@ provider "azurerm" {
   # running apply again reproduces it exactly. `storage_use_azuread` switches
   # every data plane call, including that poll, to the caller's Entra token.
   storage_use_azuread = true
+
+  # The CI identity must never need permission at SUBSCRIPTION scope, and this
+  # is the line that decides it.
+  #
+  # azurerm 4.x defaults to registering a core set of resource providers when it
+  # starts, and registration is a write at subscription scope. That single
+  # default would force the plan job's identity to hold a subscription level
+  # role, which is exactly what infra/ISOLATION.md refuses. Every provider this
+  # stack touches is already registered on this subscription and registration is
+  # a one time act, so nothing is lost by never asking.
+  #
+  # THE TRADE, STATED: on a subscription where a provider is NOT yet registered,
+  # apply fails with a message naming the namespace. The fix is one command,
+  # `az provider register --namespace <name>`, run by somebody who is allowed
+  # to, and self-hosting/azure.md says so.
+  resource_provider_registrations = "none"
 }
 
 module "foundation" {

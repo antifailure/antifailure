@@ -188,3 +188,22 @@ variable "github_client_secret" {
   sensitive = true
 }
 variable "github_redirect_uri" { type = string }
+
+variable "key_vault_name" {
+  type        = string
+  default     = null
+  description = <<-EOT
+    Overrides the derived name, which is `<name>-kv-<location>` truncated to the
+    24 characters Azure allows.
+
+    You need this exactly when purge protection is in your way: a deleted vault
+    holds its GLOBAL name for the soft delete retention period and purge
+    protection means nobody can release it early. Recreating in the same region
+    inside that window is impossible by design, and a different name is the only
+    way through. Reach for it knowingly rather than as a reflex.
+  EOT
+  validation {
+    condition     = var.key_vault_name == null || can(regex("^[a-zA-Z][a-zA-Z0-9-]{1,22}[a-zA-Z0-9]$", coalesce(var.key_vault_name, "placeholder")))
+    error_message = "A Key Vault name is 3 to 24 characters, alphanumerics and hyphens, starts with a letter and does not end with a hyphen."
+  }
+}

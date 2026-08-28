@@ -136,6 +136,17 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # The third gate, asked BEFORE the plan rather than discovered by an apply.
+      #
+      # A region can be within quota and permitted by every policy and still
+      # refuse the database. eastus on this subscription returns
+      # supportedServerVersions: [] with "Provisioning is restricted in this
+      # region", and an apply there created twenty six of twenty seven
+      # resources before finding out. Neither a plan nor a policy can see this.
+      - name: The region can actually run the database
+        if: steps.azure.outputs.ready == 'true'
+        run: go run ./tools/azguard region centralus
+
       - name: Install Terraform
         if: steps.azure.outputs.ready == 'true'
         run: |
@@ -193,7 +204,19 @@ jobs:
           # mid write and produce a wrong plan. It can never produce a wrong
           # STATE, because this job writes nothing. A wrong plan is visible in
           # review; a corrupted state is not.
-          terraform plan -input=false -lock=false -out=plan.tfplan
+          #
+          # -refresh=false is the other half, and it is also a security
+          # decision rather than a speed one. Refreshing an
+          # azurerm_key_vault_secret reads the secret's VALUE, so a refreshing
+          # plan needs Key Vault Secrets User and would pull the live database
+          # URLs into this job on every pull request. The identity is Reader on
+          # the resource group and holds no Key Vault data role at all.
+          #
+          # What that costs: a resource deleted or altered outside Terraform
+          # will not show up here. Comparing the configuration against the
+          # recorded state is precisely the question this job exists to answer,
+          # and drift detection is a different job that has not been built.
+          terraform plan -input=false -lock=false -refresh=false -out=plan.tfplan
           terraform show -json plan.tfplan > plan.json
           terraform show -no-color plan.tfplan > plan.txt
 
