@@ -74,6 +74,13 @@ func networkPolicies(envID, namespace string, hasIngress bool) []*networkingv1.N
 	// allowance cannot escape, which is not the question: the question is
 	// whether a pod that IS allowed to reach the sidecar can reach anything
 	// else, and that has to be asked of the real rule set.
+	//
+	// Selecting the probe here is necessary and it is not sufficient, and the
+	// missing half cost a real escape. The allowance below names the sidecar
+	// with a pod selector, so it is inert until a sidecar exists. Running the
+	// probe before the sidecar therefore put it back under default-deny alone,
+	// selector or no selector. Up runs it after the sidecar for that reason;
+	// moving it earlier silently restores the hole.
 	containedSelector := metav1.LabelSelector{
 		MatchExpressions: []metav1.LabelSelectorRequirement{{
 			Key:      LabelComponent,

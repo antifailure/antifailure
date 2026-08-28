@@ -214,7 +214,8 @@ default so that the cluster is the same one whatever your k3d does.
 
 ```
 k3d cluster create af-conformance --k3s-arg "--disable=traefik@server:0"
-AF_KUBE_CONTEXT=k3d-af-conformance go test ./engine/internal/runtime/k8s/ -run TestConformance -timeout 60m
+AF_KUBE_CONTEXT=k3d-af-conformance \
+  go test ./engine/internal/runtime/k8s/ -run TestConformance -timeout 60m
 k3d cluster delete af-conformance
 ```
 

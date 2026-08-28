@@ -82,12 +82,6 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		return env, err
 	}
 
-	if !r.skipContainmentCheck {
-		if err := r.verifyContainment(ctx, spec, namespace, resolver, progress); err != nil {
-			return env, err
-		}
-	}
-
 	if spec.CACertPEM != "" {
 		if err := r.ensureCASecret(ctx, spec, namespace); err != nil {
 			return env, err
@@ -99,6 +93,42 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		return env, err
 	}
 	env.ProxyReady = true
+
+	// AFTER the sidecar and before any service image, and the order is the
+	// whole value of the check.
+	//
+	// It ran before the sidecar until a run caught it out. The rule that lets
+	// a service out at all is `af-service-egress-to-proxy`, whose peer list is
+	// a pod selector for the sidecar, and with no sidecar in the namespace
+	// that selector matches nothing. So the probe was governed by default-deny
+	// alone: it proved that a pod with NO egress allowance cannot escape,
+	// which is a question nobody was asking, while the rule a service actually
+	// runs under was never exercised.
+	//
+	// That is not hypothetical. On k3s the conformance suite caught a service
+	// reaching 1.1.1.1 on UDP 53 and getting the real public answer back,
+	// minutes after this probe had passed on the same cluster. Moving the
+	// probe here is what stopped it.
+	//
+	// What that proves and what it does not: the escape needed the rule to be
+	// present, and it went away once the probe ran with the rule present and
+	// looped until nothing got out. So the window is around the rule becoming
+	// real for a namespace that has just acquired a sidecar, and this probe
+	// now absorbs it before any service exists. Whether the CNI is briefly
+	// permissive or permanently loose about the destination on that port is
+	// NOT established here, and the difference does not change what to do:
+	// the probe has to run under the rule set a service runs under, and it has
+	// to keep asking until the answer stops changing.
+	//
+	// The sidecar having started first costs nothing that matters. It is one
+	// pod of ours, it is torn down with the namespace, and the promise this
+	// check exists to keep is that no SERVICE image runs on a cluster that
+	// does not contain it.
+	if !r.skipContainmentCheck {
+		if err := r.verifyContainment(ctx, spec, namespace, resolver, progress); err != nil {
+			return env, err
+		}
+	}
 
 	for _, s := range order {
 		running, err := r.startService(ctx, spec, s, namespace, proxyIP, journal, progress)
