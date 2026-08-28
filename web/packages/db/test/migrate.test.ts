@@ -97,13 +97,13 @@ describe('a migration that fails', { skip: hasDatabase ? false : 'no Postgres at
     // the pool. The next deploy would then block on it forever, which is a
     // worse failure than the one that started it: it has no error message at
     // all.
-    const [{ held }] = await sql<{ held: boolean }[]>`
+    const rows = await sql<{ held: boolean }[]>`
       SELECT EXISTS (
         SELECT 1 FROM pg_locks
         WHERE locktype = 'advisory'
           AND objid = (SELECT hashtext('antifailure.migrations')::oid)
       ) AS held`
-    assert.equal(held, false, 'the migration advisory lock is still held after a failed migration')
+    assert.equal(rows[0]!.held, false, 'the migration advisory lock is still held after a failed migration')
   })
 
   test('a migration that succeeds still applies and records itself', async () => {
@@ -121,9 +121,9 @@ describe('a migration that fails', { skip: hasDatabase ? false : 'no Postgres at
       const result = await migrate(sql, { dir: clean, log: () => {} })
       assert.deepEqual(result.applied, ['0001_fine.sql'])
 
-      const [{ present }] = await sql<{ present: boolean }[]>`
+      const present = await sql<{ present: boolean }[]>`
         SELECT to_regclass('a_table_that_is_created') IS NOT NULL AS present`
-      assert.equal(present, true)
+      assert.equal(present[0]!.present, true)
 
       // And it is idempotent: a second run finds it already applied.
       const again = await migrate(sql, { dir: clean, log: () => {} })

@@ -13,6 +13,7 @@ import { createServer } from './server.ts'
 import { RealGitHubClient } from './auth/github.ts'
 import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
+import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
 
 function required(name: string): string {
@@ -50,12 +51,20 @@ const github = new RealGitHubClient({
   redirectUri: required('AF_GITHUB_REDIRECT_URI'),
 })
 
+// Said out loud at startup, every time. Whether an instance is open to the
+// world is not something anybody should have to infer from a deployment
+// template, and a closed instance that quietly opened is the failure that has
+// no symptom until it has a very large one.
+const signInAllowlist = parseAllowlist(process.env.AF_SIGNIN_ALLOWLIST)
+console.log(describeAllowlist(signInAllowlist))
+
 const { app, ingestLimiter, authLimiter } = createServer({
   pool,
   github,
   clock: systemClock,
   secureCookies: process.env.AF_INSECURE_COOKIES !== '1',
   appBaseUrl: process.env.AF_APP_BASE_URL,
+  signInAllowlist,
 })
 
 // Partitions, kept ahead of the writes. Skipped when this process is not the

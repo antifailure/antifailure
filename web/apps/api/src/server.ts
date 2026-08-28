@@ -29,7 +29,13 @@ import {
   type IncomingEvent,
 } from './ingest.ts'
 import type { GitHubClient } from './auth/github.ts'
-import { beginSignIn, completeSignIn, SignInError, safeRedirect } from './auth/signin.ts'
+import {
+  beginSignIn,
+  completeSignIn,
+  SignInError,
+  safeRedirect,
+  type SignInAllowlist,
+} from './auth/signin.ts'
 import {
   CSRF_HEADER,
   SESSION_COOKIE,
@@ -52,6 +58,9 @@ export interface ServerOptions {
   secureCookies?: boolean
   /** Where the browser lands after signing in. */
   appBaseUrl?: string
+  /** Who may sign in at all. Null is open, which is the self-hosted default.
+   *  See parseAllowlist: an empty list is closed to everyone, not open. */
+  signInAllowlist?: SignInAllowlist
   ingestLimit?: { rate: number; burst: number }
   authLimit?: { rate: number; burst: number }
 }
@@ -213,7 +222,13 @@ export function createServer(options: ServerOptions) {
     }
 
     try {
-      const result = await completeSignIn(options.pool, clock, options.github, { code, state })
+      const result = await completeSignIn(
+        options.pool,
+        clock,
+        options.github,
+        { code, state },
+        options.signInAllowlist ?? null,
+      )
       // Rotation. Any session the browser already holds is destroyed, so a
       // cookie planted before sign-in cannot ride the login that follows it.
       const existing = readCookie(c.req.header('cookie'), SESSION_COOKIE)
