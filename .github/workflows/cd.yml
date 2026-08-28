@@ -11,13 +11,16 @@
 # rather than in an `if:` somebody can edit in the same pull request that
 # deploys.
 #
-# WHY THE FULL GATE AND NOT JUST THE CONTROL PLANE'S TESTS. Because `just gate`
-# is the promise the repository makes about itself, and a deploy that ran a
-# narrower check than a pull request did is a deploy that can ship something a
-# pull request would have refused. The cost is real: while main is red for a
-# reason that has nothing to do with the control plane, staging does not move.
-# That is the correct trade. Staging keeps serving the last green build, which
-# is a working system, and the fix is to fix main.
+# WHY IT WAITS FOR CI RATHER THAN CHECKING ANYTHING ITSELF. CI already runs on
+# this push and is the promise the repository makes about itself. Re-running the
+# checks here would double the work and could disagree with the first run, and
+# then nobody knows which verdict was real. So the gate job waits for CI's
+# conclusion on this exact commit and refuses anything but success.
+#
+# The cost is real and was chosen deliberately: while main is red for a reason
+# that has nothing to do with the control plane, staging does not move. Staging
+# keeps serving the last green build, which is a working system, and the fix is
+# to fix main.
 #
 # WHY OIDC. There is no Azure credential in this repository. The job exchanges a
 # GitHub-signed token for an Azure one, scoped by the federated credential to
@@ -68,36 +71,60 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     if: github.repository == 'antifailure/antifailure'
+    permissions:
+      contents: read
+      actions: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: engine/go.mod
-          cache-dependency-path: engine/go.sum
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
-
-      - name: A Postgres for the control plane's own suite
-        run: |
-          docker run -d --name cp-pg \
-            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure \
-            -p 55432:5432 postgres:17-alpine
-          for _ in $(seq 1 30); do
-            docker exec cp-pg pg_isready -U postgres >/dev/null 2>&1 && break
-            sleep 2
-          done
-
-      - name: just gate
+      # WAIT FOR CI, DO NOT RE-RUN IT.
+      #
+      # The first version of this job ran `just gate` directly and failed with
+      # exit 127 on half of it: `just gate` is a workstation command whose
+      # recipes assume vale, lychee, cspell and an npm install in three
+      # workspaces are already present. ci.yml does not use it for exactly that
+      # reason -- it runs the underlying commands with per-job setup. Copying
+      # the command without its prerequisites produced a gate that failed for
+      # reasons unrelated to the commit, which is the least useful kind of red.
+      #
+      # Waiting is also the better design. CI already runs on this push. Running
+      # it a second time here would double the work and, worse, could disagree
+      # with the first run and leave nobody sure which verdict was real.
+      #
+      # The promise Vir chose holds either way: a red main does not reach
+      # staging. It now holds by deferring to the check that already exists.
+      - name: CI must be green on this commit
         env:
-          AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:55432/antifailure
-        run: just gate
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          echo "waiting for CI on $SHA"
+          for attempt in $(seq 1 60); do
+            runs=$(gh api "repos/$REPO/actions/runs?head_sha=$SHA&per_page=50" \
+              --jq '[.workflow_runs[] | select(.name=="CI")] | .[0] | "\(.status) \(.conclusion // "-") \(.html_url)"' 2>/dev/null || true)
+            if [ -z "$runs" ] || [ "$runs" = "null" ]; then
+              echo "attempt $attempt: no CI run for this commit yet"
+              sleep 20
+              continue
+            fi
+            status=$(cut -d' ' -f1 <<<"$runs")
+            conclusion=$(cut -d' ' -f2 <<<"$runs")
+            url=$(cut -d' ' -f3 <<<"$runs")
+            echo "attempt $attempt: CI is $status ($conclusion) $url"
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" = "success" ]; then
+                echo "CI is green on $SHA: $url" >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              # Deliberately fatal. Staging keeps serving the last green build,
+              # which is a working system, and the fix is to fix main.
+              echo "::error title=CI is not green::CI concluded '$conclusion' on $SHA. Nothing is deployed. $url"
+              exit 1
+            fi
+            sleep 20
+          done
+          echo "::error title=CI did not finish::No CI conclusion for $SHA within the budget. Nothing is deployed."
+          exit 1
 
   # ---------------------------------------------------------------------------
   # One image, referenced everywhere afterwards by DIGEST.
