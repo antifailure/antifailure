@@ -86,7 +86,7 @@ resource "azurerm_container_app_job" "bootstrap" {
     content {
       name                = secret.value
       identity            = azurerm_user_assigned_identity.app.id
-      key_vault_secret_id = azurerm_key_vault_secret.this[secret.value].versionless_id
+      key_vault_secret_id = local.secret_by_name[secret.value].versionless_id
     }
   }
 
@@ -148,7 +148,7 @@ resource "azurerm_container_app_job" "maintenance" {
   secret {
     name                = "migration-database-url"
     identity            = azurerm_user_assigned_identity.app.id
-    key_vault_secret_id = azurerm_key_vault_secret.this["migration-database-url"].versionless_id
+    key_vault_secret_id = local.secret_by_name["migration-database-url"].versionless_id
   }
 
   template {
@@ -203,7 +203,7 @@ resource "azurerm_container_app" "this" {
     content {
       name                = secret.value
       identity            = azurerm_user_assigned_identity.app.id
-      key_vault_secret_id = azurerm_key_vault_secret.this[secret.value].versionless_id
+      key_vault_secret_id = local.secret_by_name[secret.value].versionless_id
     }
   }
 

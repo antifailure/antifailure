@@ -183,6 +183,41 @@ no public endpoint, a Key Vault holding every credential, a storage account for
 goldens, the bootstrap job that makes the database usable, a maintenance job
 that keeps the event partitions ahead, and the application on public HTTPS.
 
+### Grant yourself write access to the vault, once
+
+`assign_deployer_secret_officer` is **off by default** and that default is
+deliberate. A role assignment whose principal is "whoever is running Terraform"
+churns on every plan by a different caller, `principal_id` is ForceNew, and the
+pull request plan job would then report a resource that **must be replaced** on
+every single run. A plan that always carries a destroy is a plan people stop
+reading, which is precisely how a real one gets waved through.
+
+So it is one command, run once, by a human:
+
+```sh
+az role assignment create \
+  --role "Key Vault Secrets Officer" \
+  --assignee-object-id "$(az ad signed-in-user show --query id -o tsv)" \
+  --assignee-principal-type User \
+  --scope "$(terraform output -raw key_vault_id)"
+```
+
+### Plan with the same inputs you apply with
+
+Every variable the plan job passes must match the apply, or its destroy count is
+noise. That is why `TF_VAR_ci_principal_id` comes from a repository variable
+rather than being left empty: unset, the count on a role assignment goes to zero
+and every pull request reports "1 to destroy" for something nobody proposed to
+remove.
+
+The two GitHub OAuth secrets are the exception, and they are handled in the
+module rather than by discipline. Terraform seeds them once and then carries
+`ignore_changes` on the value, because it cannot know them and must not
+overwrite them: creating an OAuth application is a human act on another service.
+That is also what makes the rotation instruction in
+[the control plane page](/docs/self-hosting/control-plane/) true. Without it,
+the next apply would quietly put the placeholder back.
+
 `resource_provider_registrations = "none"` is set on the provider, so Terraform
 never tries to register a resource provider, because registration is a write at
 subscription scope and no identity here holds one. On a subscription where a

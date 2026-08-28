@@ -170,6 +170,16 @@ jobs:
           TF_VAR_github_client_id: plan-only
           TF_VAR_github_client_secret: plan-only
           TF_VAR_github_redirect_uri: https://example.invalid/auth/callback
+          # A VARIABLE RATHER THAN A SECRET, because an object id identifies a
+          # principal and unlocks nothing, and because this job's plan must be
+          # run with the SAME inputs as the apply it is reviewing.
+          #
+          # If this is unset the count on the role assignment goes to zero and
+          # the plan reports "1 to destroy" on every pull request, forever, for
+          # a resource nobody proposed to remove. Every value in this block has
+          # that property: a plan run with different inputs is a plan about a
+          # different desired state, and its destroy count is noise.
+          TF_VAR_ci_principal_id: ${{ vars.AZURE_CI_PRINCIPAL_ID }}
         run: |
           set -euo pipefail
           if [ "${{ steps.azure.outputs.remote_state }}" = "true" ]; then

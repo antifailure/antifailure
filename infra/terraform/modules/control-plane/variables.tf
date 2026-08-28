@@ -96,8 +96,25 @@ variable "key_vault_purge_protection" {
 }
 variable "assign_deployer_secret_officer" {
   type        = bool
-  default     = true
-  description = "Give whoever runs Terraform the ability to write the secrets below, scoped to this vault only. Turn off when the role is granted out of band."
+  default     = false
+  description = <<-EOT
+    Grant the caller Key Vault Secrets Officer on this vault.
+
+    OFF by default, and that default is the point. A role assignment whose
+    principal is "whoever is running Terraform" churns on every plan by a
+    different caller, and principal_id is ForceNew, so the pull request plan job
+    reports that it MUST BE REPLACED on every single run. A plan that always
+    carries a destroy is a plan people stop reading.
+
+    Turn it on only where exactly one identity ever runs this stack, or pin
+    deployer_principal_id instead.
+  EOT
+}
+
+variable "deployer_principal_id" {
+  type        = string
+  default     = null
+  description = "Pins the principal that gets Key Vault Secrets Officer, instead of taking whoever is calling. Null falls back to the caller, which is what makes assign_deployer_secret_officer caller-dependent and therefore off by default."
 }
 variable "goldens_enabled" {
   type        = bool
