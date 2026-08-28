@@ -75,6 +75,13 @@ jobs:
         # supposed to prevent.
         run: go run ./tools/gatecheck .
 
+      - name: The prose stays readable
+        # A regression guard rather than a style rule. The hardest page today
+        # averages 23 words a sentence and the limit is 28, so this fires on a
+        # page that drifted rather than on a page whose subject needs long
+        # sentences.
+        run: go run ./tools/readability . --max 28
+
       - name: No forbidden tokens in the documentation
         # The G8 scan. Documentation is a product surface, and these are the
         # tokens that say a page was never finished: a note to the author, a
