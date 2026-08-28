@@ -57,6 +57,7 @@ import {
   requestDeviceCode,
   revokeCliToken,
 } from './auth/device.ts'
+import { mountConsole } from './console/index.ts'
 import { openApiDocument } from './openapi.ts'
 import { limitFor, bucketFor, type EndpointLimit } from './limits.ts'
 
@@ -71,6 +72,8 @@ export interface ServerOptions {
   /** Who may sign in at all. Null is open, which is the self-hosted default.
    *  See parseAllowlist: an empty list is closed to everyone, not open. */
   signInAllowlist?: SignInAllowlist
+  /** Set false to serve the API alone, without the console's pages. */
+  console?: boolean
   ingestLimit?: { rate: number; burst: number }
   authLimit?: { rate: number; burst: number }
 }
@@ -657,6 +660,14 @@ export function createServer(options: ServerOptions) {
       },
     }),
   )
+
+  // The console, last, so that every API route above wins a path collision.
+  // Mounted on this app rather than a second one: the session cookie the
+  // browser holds is the session these pages read, and a separate origin would
+  // need CORS, a second cookie policy and a place to put a token in a client.
+  if (options.console !== false) {
+    mountConsole(app, { pool: options.pool, clock, secureCookies: secure })
+  }
 
   return { app, ingestLimiter, authLimiter }
 }

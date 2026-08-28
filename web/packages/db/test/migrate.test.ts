@@ -22,12 +22,27 @@
 
 import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import postgres from 'postgres'
 import { migrate } from '../src/migrate.ts'
 import { adminUrl } from './harness.ts'
+
+// A DATABASE OF ITS OWN, and this is the whole reason the setup is longer than
+// the tests.
+//
+// The first version of this suite ran against the shared test database and
+// dropped schema_migrations in its teardown. That is the ledger every other
+// suite depends on: with it gone, the next startApi() believes nothing has been
+// applied and tries to run 0001 against a database that already has every
+// table. Six suites in two packages hung, none of them anywhere near this file,
+// and the symptom was "the OAuth exchange times out".
+//
+// A test that applies migrations is a test that owns a database. It cannot
+// share one, because the thing under test is the state of the schema.
+const scratchName = `af_migrate_test_${randomUUID().replace(/-/g, '').slice(0, 12)}`
 
 const hasDatabase = await (async () => {
   const probe = postgres(adminUrl, { max: 1, connect_timeout: 3, onnotice: () => {} })
@@ -43,16 +58,28 @@ const hasDatabase = await (async () => {
 
 describe('a migration that fails', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let sql: postgres.Sql
+  let server: postgres.Sql
   let dir: string
 
   before(async () => {
-    sql = postgres(adminUrl, { max: 2, onnotice: () => {} })
+    // CREATE DATABASE cannot run inside a transaction, so it goes through its
+    // own connection to the default database rather than through the pool the
+    // tests use.
+    server = postgres(adminUrl, { max: 1, onnotice: () => {} })
+    await server.unsafe(`CREATE DATABASE ${scratchName}`)
+
+    const scratchUrl = new URL(adminUrl)
+    scratchUrl.pathname = `/${scratchName}`
+    sql = postgres(scratchUrl.toString(), { max: 2, onnotice: () => {} })
     dir = await mkdtemp(path.join(tmpdir(), 'af-migrate-'))
   })
 
   after(async () => {
-    await sql`DROP TABLE IF EXISTS schema_migrations`
     await sql.end({ timeout: 5 })
+    // WITH (FORCE) so a connection this suite failed to close does not leave a
+    // database behind on somebody's machine forever.
+    await server.unsafe(`DROP DATABASE IF EXISTS ${scratchName} WITH (FORCE)`)
+    await server.end({ timeout: 5 })
     await rm(dir, { recursive: true, force: true })
   })
 

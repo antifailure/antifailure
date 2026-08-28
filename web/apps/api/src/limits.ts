@@ -74,6 +74,76 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     reason: 'af logout. Must never be refused in practice: a sign-out that fails leaves a live credential on a machine somebody is trying to clean.',
   },
 
+  // ---------------------------------------------------------------------------
+  // The console.
+  //
+  // Pages, not API calls, and limited generously: a person clicking through a
+  // console produces a handful of requests a second at most, and refusing one
+  // of them shows somebody a rate limit error while they are reading. The
+  // limits exist because the middleware refuses any endpoint that has none,
+  // which is the right default and the reason these are written down rather
+  // than defaulted.
+  //
+  // The two that mutate are as tight as the sign-in path, because they act on a
+  // code somebody could be guessing.
+  // ---------------------------------------------------------------------------
+  'GET /': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'The console root, which redirects. Cheap and hit on every visit.',
+  },
+  'GET /console/console.css': {
+    rate: 20, burst: 120, key: 'ip',
+    reason: 'One static file, cached for five minutes. A cold page load fetches it once.',
+  },
+  'GET /console/icon.svg': {
+    rate: 20, burst: 120, key: 'ip',
+    reason: 'The favicon, cached for a day.',
+  },
+  'GET /environments': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'A page listing at most a hundred rows. One query.',
+  },
+  'GET /environments/:envId': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'Two queries, both indexed on the tenant.',
+  },
+  'GET /runs': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'A page listing at most a hundred runs, with two counts per row.',
+  },
+  'GET /runs/:runId': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'Three queries for one run and its evidence.',
+  },
+  'GET /masking': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'Attestation history, at most sixty rows.',
+  },
+  'GET /network': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'The effective policy, in the order that decides.',
+  },
+  'GET /audit': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'The hundred most recent entries, on an index by sequence.',
+  },
+  'GET /settings/members': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'One join over a table that is tens of rows, not thousands.',
+  },
+  'GET /device': {
+    rate: 2, burst: 20, key: 'ip',
+    reason: 'The approval screen. Tight, because reaching it with a code is a way of asking whether that code is real.',
+  },
+  'POST /console/device': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Looking up, approving or declining a code. This is the limit that makes guessing an eight character code hopeless rather than merely unlikely.',
+  },
+  'POST /console/signout': {
+    rate: 2, burst: 20, key: 'ip',
+    reason: 'Signing out must never be refused in practice; this only bounds a script.',
+  },
+
   'GET /openapi.json': {
     rate: 2, burst: 10, key: 'ip',
     reason: 'A static document that is fetched once by a person and cached by everything else.',
