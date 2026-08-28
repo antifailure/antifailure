@@ -595,7 +595,7 @@ errors:
     planned: true
     area: CP
     message: "The control plane at {url} could not be reached."
-    next_step: "Antifailure works without it. Unset control_plane.url to run fully locally."
+    next_step: "Antifailure works without it. Run af logout, or unset AF_CONTROL_PLANE_URL, to work fully locally."
     docs: self-hosting/control-plane
     retryable: true
     exit_code: 5

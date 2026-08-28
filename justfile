@@ -66,6 +66,7 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "documented manifests are valid" just manifestcheck
     run "prose reads like a person"      just prosecheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
@@ -415,6 +416,16 @@ forbidden:
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
+
+# Every manifest shown in the documentation is one the engine would accept.
+#
+# The gates already read style, spelling, links and repository paths, and none
+# of them knows what a manifest is. A getting started page shipped telling
+# readers to set control_plane.url, which the engine refuses with AF-MAN-002
+# because the schema closes itself so a typo cannot silently change an
+# environment.
+manifestcheck:
+    go run ./tools/manifestcheck .
 
 # This justfile runs what CI runs.
 gatecheck:

@@ -17,8 +17,8 @@ can open one, scheduling across a queue, quotas, and history.
 
 ```
 AF-CP-001 The control plane at https://cp.example.com could not be reached.
-  Next: Antifailure works without it. Unset control_plane.url to run fully
-  locally.
+  Next: Antifailure works without it. Run af logout, or unset
+  AF_CONTROL_PLANE_URL, to work fully locally.
 ```
 
 That is the design rather than a consolation. Events are buffered and delivered
@@ -75,15 +75,28 @@ endpoint:
 SELECT pg_has_role('af_app', 'antifailure_app', 'MEMBER');
 ```
 
-## Point a repository at it
+## Point this machine at it
 
-```yaml
-control_plane:
-  url: https://cp.example.com
+The control plane is not a manifest key. A manifest describes an application,
+and which control plane you happen to be signed in to is a fact about your
+machine rather than about the code, so it lives with the credential:
+
+```sh
+af login --control-plane https://cp.example.com
 ```
 
-Then set `github.mode` to `app` so environments outlive the job and a reviewer
-can open one.
+The token goes straight into the operating system's credential store. It is
+never shown, never copied through a clipboard, and never written to a shell
+history file. `AF_CONTROL_PLANE_URL` sets the same thing for a runner that
+cannot open a browser, and `af logout` removes it and revokes it everywhere.
+
+Then set `github.mode` to `app` in the manifest, which is a fact about the
+repository, so environments outlive the job and a reviewer can open one:
+
+```yaml
+github:
+  mode: app
+```
 
 Related: [the full control plane guide](/docs/self-hosting/control-plane/),
 [every variable it reads](/docs/reference/control-plane/),

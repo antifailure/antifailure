@@ -513,6 +513,15 @@ jobs:
         # the security one was a promise to researchers.
         run: go run ./tools/claimcheck .
 
+      - name: The manifests in the documentation are ones the engine accepts
+        # The gates above read style, spelling, links and repository paths. None
+        # of them knows what a manifest is, and a getting started page shipped
+        # telling readers to set control_plane.url. The engine refuses that with
+        # AF-MAN-002, "Unknown key", because the schema closes itself so that a
+        # typo cannot silently change an environment. The page was live on the
+        # site and every documentation gate was green.
+        run: go run ./tools/manifestcheck .
+
       - name: The prose reads like a person wrote it
         # The build plan asks for vale with "a custom rule that flags em dashes
         # and double hyphens in prose". This is that rule. Em dashes are the

@@ -349,7 +349,7 @@ var catalog = map[Code]Entry{
 		Code:      AFCP001,
 		Area:      "CP",
 		Message:   "The control plane at {url} could not be reached.",
-		NextStep:  "Antifailure works without it. Unset control_plane.url to run fully locally.",
+		NextStep:  "Antifailure works without it. Run af logout, or unset AF_CONTROL_PLANE_URL, to work fully locally.",
 		Docs:      "self-hosting/control-plane",
 		Retryable: true,
 		ExitCode:  ExitProvider,
