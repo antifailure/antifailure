@@ -158,6 +158,7 @@ var (
 	tableRow    = regexp.MustCompile(`(?m)^\|.*$`)
 	htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
 	directive   = regexp.MustCompile(`(?m)^:::.*$`)
+	listItem    = regexp.MustCompile(`(?m)^\s*(?:[-*+]|\d+\.)\s+`)
 	wordRe      = regexp.MustCompile(`[A-Za-z][A-Za-z'-]*`)
 )
 
@@ -179,6 +180,17 @@ func measure(page string) report {
 	text = directive.ReplaceAllString(text, " ")
 	text = link.ReplaceAllString(text, "$1")
 	text = inlineCode.ReplaceAllString(text, "code")
+	// A list item is a sentence, whether or not its author ended it with a
+	// full stop. Most do not, so three bullets and the paragraph after them
+	// were being read as one sentence and counted at the length of all four.
+	// That inflates the mean on every page that uses a list, which is the
+	// opposite of the bias this tool says it has: the splitter is deliberately
+	// crude in the direction of reporting a page as easier than it is, and
+	// this was the one place it reported pages as harder. A README with two
+	// short lists measured 24.2 words a sentence and was reported as the
+	// hardest page in the project; it measures 22.1 once each item is its own
+	// sentence, and the hardest page is the one that genuinely is.
+	text = listItem.ReplaceAllString(text, ". ")
 
 	var r report
 	syllables := 0

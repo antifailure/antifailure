@@ -369,6 +369,27 @@ examples:
       echo "  $dir"
       (cd "$dir" && npm ci --no-audit --no-fund --silent && npm run build)
     done
+    # And the ones written in Python. There is no compile step, so the check
+    # that means something is the framework's own: `manage.py check` loads the
+    # settings, the URL conf and every model, which is where a typo in any of
+    # them shows up. DATABASE_URL is a placeholder because check does not
+    # connect; the example refuses to start without one, deliberately, and this
+    # gate should not be the thing that discovers that.
+    for dir in examples/*/; do
+      [ -f "$dir/requirements.txt" ] || continue
+      echo "  $dir"
+      (
+        cd "$dir"
+        python3 -m venv .venv-gate
+        ./.venv-gate/bin/pip install -q --disable-pip-version-check -r requirements.txt
+        ./.venv-gate/bin/python -m compileall -q . -x '\.venv-gate'
+        if [ -f manage.py ]; then
+          DATABASE_URL="postgres://gate:gate@127.0.0.1:5432/gate" \
+            ./.venv-gate/bin/python manage.py check
+        fi
+        rm -rf .venv-gate
+      )
+    done
     go build -o /tmp/af-examples ./engine/cmd/af
     for dir in examples/*/; do
       [ -f "$dir/antifailure.yaml" ] || continue
