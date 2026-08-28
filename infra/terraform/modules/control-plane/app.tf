@@ -17,6 +17,26 @@ resource "azurerm_container_app_environment" "this" {
   # private because it is on its own delegated subnet with no public endpoint.
   internal_load_balancer_enabled = false
 
+  # DECLARED BECAUSE AZURE CREATES IT, NOT BECAUSE THIS MODULE ASKED FOR IT.
+  #
+  # Azure attaches a default Consumption workload profile to every managed
+  # environment. Terraform did not create it, so the next plan proposes to
+  # REMOVE it, quietly, as a `- workload_profile` block inside an otherwise
+  # uninteresting in-place update. Left undeclared, every apply forever tries to
+  # delete a profile the platform immediately puts back, so the stack never
+  # converges and every plan carries a change that is not a change. The same
+  # thing happens on the database subnet's Microsoft.Storage service endpoint,
+  # and it is declared there for the same reason.
+  #
+  # A plan that always shows a diff is a plan people stop reading, which is how
+  # a real destroy goes past a reviewer.
+  workload_profile {
+    name                  = "Consumption"
+    workload_profile_type = "Consumption"
+    maximum_count         = 0
+    minimum_count         = 0
+  }
+
   tags = var.tags
 }
 

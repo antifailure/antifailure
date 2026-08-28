@@ -247,6 +247,26 @@ private endpoint, because the retail prices API does not expose one for this
 region and the file only holds numbers that came from it, so the estimator
 reports it `UNKNOWN` rather than as free.
 
+## Two settings Azure adds that Terraform will try to remove
+
+Both of these produce a plan that never converges, and a plan that always shows
+a diff is a plan people stop reading, which is how a real destroy gets past a
+reviewer.
+
+- Creating a flexible server on a delegated subnet makes the platform attach the
+  **`Microsoft.Storage` service endpoint** to that subnet for its own backup
+  traffic.
+- Every managed environment gets a default **`Consumption` workload profile**.
+
+Terraform created neither, so it proposes to delete both, quietly, as small
+blocks inside otherwise uninteresting in-place updates. Azure then puts them
+back. Both are declared in the module for that reason, with a comment saying so,
+and the stack now plans `0 to change` against itself.
+
+If you fork these modules and see a permanent diff on a subnet or an
+environment, this is why, and the fix is to declare what the platform set rather
+than to keep deleting it.
+
 ## Isolation
 
 Everything created lives in a resource group prefixed `af-` and tagged

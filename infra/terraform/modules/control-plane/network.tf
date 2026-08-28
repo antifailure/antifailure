@@ -45,6 +45,21 @@ resource "azurerm_subnet" "database" {
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [cidrsubnet(var.vnet_cidr, 8, 16)]
 
+  # DECLARED BECAUSE AZURE ADDS IT, NOT BECAUSE THIS MODULE WANTS IT.
+  #
+  # Creating a flexible server on a delegated subnet makes the platform attach
+  # the Microsoft.Storage service endpoint itself, for the server's own backup
+  # and storage traffic. Terraform did not put it there, so the next plan
+  # proposes to REMOVE it, and it does so quietly in the middle of an unrelated
+  # diff: a two-line `~ service_endpoints` change under a subnet nobody was
+  # thinking about.
+  #
+  # Left undeclared, every future apply strips a setting the database service
+  # depends on and Azure puts it back, so the stack never converges and every
+  # plan carries a change that is not a change. Declaring it makes the plan
+  # honest and stops the fight.
+  service_endpoints = ["Microsoft.Storage"]
+
   delegation {
     name = "postgres"
     service_delegation {
