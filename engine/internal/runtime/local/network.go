@@ -97,7 +97,7 @@ func (r *Runtime) ensureOneNetwork(
 		}
 		return existing.ID, nil
 	}
-	if err := journal("network", name); err != nil {
+	if err := journal(kindNetwork, name); err != nil {
 		return "", err
 	}
 	res, err := r.cli.NetworkCreate(ctx, name, network.CreateOptions{

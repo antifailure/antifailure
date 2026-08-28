@@ -86,7 +86,7 @@ func (r *Runtime) startProxy(
 	}
 
 	name := proxyName(envID)
-	if err := journal("container", name); err != nil {
+	if err := journal(kindContainer, name); err != nil {
 		return "", err
 	}
 	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {

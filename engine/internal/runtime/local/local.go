@@ -501,3 +501,20 @@ func (r *Runtime) Logs(ctx context.Context, envID, service string, tail int) ([]
 	}
 	return out, nil
 }
+
+// The kinds this runtime journals.
+//
+// These are the stable strings from journal.Kind. A runtime is handed a
+// journal callback taking a plain string and does not import the journal,
+// which keeps the provider interface free of the engine's storage; the cost
+// is that nothing in the compiler notices a runtime that invents a kind, and
+// kinds are not validated anywhere either, so any string is stored happily.
+//
+// These two were right by luck rather than by anything checked, which stopped
+// being good enough when the cluster runtime got them wrong. Naming them and
+// asserting them in this package's tests is what makes the next one a
+// compile-and-test problem rather than a row nothing can look up.
+const (
+	kindContainer = "container"
+	kindNetwork   = "network"
+)

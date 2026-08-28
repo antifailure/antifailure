@@ -58,7 +58,7 @@ func (r *Runtime) startService(
 	}
 
 	name := containerName(spec.EnvID, s.Name)
-	if err := journal("container", name); err != nil {
+	if err := journal(kindContainer, name); err != nil {
 		return running, err
 	}
 	// A container left by an interrupted run holds the name. Reusing a running
@@ -217,7 +217,7 @@ func (r *Runtime) startIngress(
 	journal func(string, string) error,
 ) (int, error) {
 	name := ingressName(spec.EnvID, s.Name)
-	if err := journal("container", name); err != nil {
+	if err := journal(kindContainer, name); err != nil {
 		return 0, err
 	}
 	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
@@ -415,7 +415,7 @@ func (r *Runtime) runOnce(
 	journal func(string, string) error,
 ) error {
 	name := containerName(spec.EnvID, s.Name+"-migrate")
-	if err := journal("container", name); err != nil {
+	if err := journal(kindContainer, name); err != nil {
 		return err
 	}
 	id, err := r.create(ctx, spec, s, nets, proxyIP, name, command)
