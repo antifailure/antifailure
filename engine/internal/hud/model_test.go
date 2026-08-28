@@ -282,3 +282,25 @@ func TestAnySequenceOfEventsRendersWithoutPanic(t *testing.T) {
 		}
 	})
 }
+
+// A run that branches from a golden verified last week never emits
+// mask.verified, so the pane has to take the answer from the field the engine
+// attaches. Without this it called every verified golden unverified, on every
+// ordinary af up, which is the one case that happens most.
+func TestDatabasePaneTakesVerifiedFromTheEvent(t *testing.T) {
+	m := hud.New("pr-482", 80, 24)
+	e := ev(1, events.GoldenReady, map[string]any{"version": "gv_1", "verified": true})
+	e.Env = "pr-482"
+	m.Apply(e)
+
+	if !m.Database().Verified {
+		t.Error("a golden reported as verified should show as verified")
+	}
+
+	e = ev(2, events.GoldenReady, map[string]any{"version": "gv_2", "verified": false})
+	e.Env = "pr-482"
+	m.Apply(e)
+	if m.Database().Verified {
+		t.Error("a golden reported as unverified should not show as verified")
+	}
+}

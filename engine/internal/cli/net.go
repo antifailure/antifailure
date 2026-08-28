@@ -483,7 +483,9 @@ func decisionRequest(d local.Decision) string {
 		scheme = "https"
 	}
 	host := d.Host
-	if d.Port != 0 && !((d.TLS && d.Port == 443) || (!d.TLS && d.Port == 80)) {
+	// The port is shown unless it is the default one for the scheme, which
+	// everybody already knows and which would only make the line longer.
+	if d.Port != 0 && (!d.TLS || d.Port != 443) && (d.TLS || d.Port != 80) {
 		host = net.JoinHostPort(host, strconv.Itoa(d.Port))
 	}
 	return fmt.Sprintf("%s %s://%s%s", d.Method, scheme, host, d.Path)

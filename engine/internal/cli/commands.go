@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -89,30 +88,6 @@ func newVersionCommand(env *Env) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&short, "short", false, "Print only the version number")
 	return cmd
-}
-
-// commandNames returns every command path in the tree, sorted. The reference
-// generator and the completeness test both use it.
-func commandNames(root *cobra.Command) []string {
-	var out []string
-	var walk func(c *cobra.Command, prefix string)
-	walk = func(c *cobra.Command, prefix string) {
-		name := strings.TrimSpace(prefix + " " + c.Name())
-		if c.Name() != "af" {
-			out = append(out, name)
-		} else {
-			name = "af"
-		}
-		for _, sub := range c.Commands() {
-			if sub.Hidden || sub.Name() == "help" || sub.Name() == "completion" {
-				continue
-			}
-			walk(sub, name)
-		}
-	}
-	walk(root, "")
-	sort.Strings(out)
-	return out
 }
 
 // ensure the errors import stays used as commands land.

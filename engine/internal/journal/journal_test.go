@@ -432,16 +432,21 @@ func TestReplay_AnyInterleavingConvergesToZeroLiveResources(t *testing.T) {
 		ctx := context.Background()
 
 		n := rapid.IntRange(1, 8).Draw(rt, "resources")
+		// journal is the only thing the assertions need: whether this
+		// resource ever reached the journal. Whether it was then created or
+		// committed changes what replay has to do about it, not whether it
+		// has to do anything, and the aggregate checks below already prove
+		// nothing survived either way.
 		type pending struct {
-			rec  journal.Record
-			made bool
-			done bool
+			key     string
+			rec     journal.Record
+			journal bool
 		}
 		var items []*pending
 		for i := 0; i < n; i++ {
 			key := fmt.Sprintf("env_a/r-%d", i)
 			stop := rapid.IntRange(0, 3).Draw(rt, fmt.Sprintf("stop-%d", i))
-			p := &pending{}
+			p := &pending{key: key}
 			if stop == 0 {
 				items = append(items, p)
 				continue
@@ -451,17 +456,16 @@ func TestReplay_AnyInterleavingConvergesToZeroLiveResources(t *testing.T) {
 				rt.Fatalf("intent: %v", err)
 			}
 			p.rec = rec
+			p.journal = true
 			if stop >= 2 {
 				if err := h.prov.create(key); err != nil {
 					rt.Fatalf("create: %v", err)
 				}
-				p.made = true
 			}
 			if stop >= 3 {
 				if err := h.j.Commit(ctx, rec.ID, key); err != nil {
 					rt.Fatalf("commit: %v", err)
 				}
-				p.done = true
 			}
 			items = append(items, p)
 		}
@@ -482,6 +486,22 @@ func TestReplay_AnyInterleavingConvergesToZeroLiveResources(t *testing.T) {
 		}
 		if len(left) != 0 {
 			rt.Fatalf("%d records still pending after replay", len(left))
+		}
+
+		// Per resource, not only in aggregate. The counts above say nothing
+		// survived; these say replay touched the right things. The second half
+		// is the one worth having: replay works from journal records, so a
+		// resource the journal never heard of must not be deleted, and a
+		// teardown that reaches for one is reaching into somebody else's
+		// environment.
+		for _, it := range items {
+			deletes := h.prov.deleteCount(it.key)
+			if it.journal && deletes == 0 {
+				rt.Fatalf("%s was journalled and replay never tried to delete it", it.key)
+			}
+			if !it.journal && deletes != 0 {
+				rt.Fatalf("%s was never journalled and replay deleted it %d times", it.key, deletes)
+			}
 		}
 	})
 }

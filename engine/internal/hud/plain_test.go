@@ -174,3 +174,26 @@ func TestAWriteFailureIsKeptRatherThanIgnored(t *testing.T) {
 		t.Error("the first error should be the one kept")
 	}
 }
+
+// The fallback writes one line per event and the environment's name is not on
+// any of them, because every line belongs to it. A real af up --hud in a
+// pipeline spent the width of an environment id per line saying so.
+func TestPlainOmitsTheEnvironmentItIsWatching(t *testing.T) {
+	var b strings.Builder
+	p := hud.NewPlain(&b, "pr-482")
+
+	e := ev(1, events.EnvReady, map[string]any{"url": "http://127.0.0.1:8080"})
+	e.Env = "pr-482"
+	e.Msg = "ready"
+	p.Write(e)
+
+	out := b.String()
+	if strings.Contains(out, "env=") {
+		t.Errorf("the line repeats the environment it is already scoped to:\n%s", out)
+	}
+	for _, want := range []string{"env.ready", "ready", "url=http://127.0.0.1:8080"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the line dropped %q:\n%s", want, out)
+		}
+	}
+}

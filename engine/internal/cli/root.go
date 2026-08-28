@@ -135,6 +135,15 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 
 	err := root.ExecuteContext(ctx)
 	if err == nil {
+		// A command that could not write what it was asked to write did not
+		// succeed. Reporting zero here tells a script that the output it just
+		// failed to receive is complete, which is the one thing it must not
+		// be told. The error goes to stderr because stdout is the stream that
+		// is broken.
+		if writeErr := out.WriteErr(); writeErr != nil {
+			_, _ = fmt.Fprintf(opts.Stderr, "af: could not write output: %v\n", writeErr)
+			return int(aferrors.ExitFailure)
+		}
 		return int(aferrors.ExitSuccess)
 	}
 
@@ -151,7 +160,10 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	// else is ours and gets the code, cause, and next step rendering.
 	var usage *usageError
 	if aferrors.As(err, &usage) || isUsageMessage(err) {
-		fmt.Fprintln(opts.Stderr, err.Error())
+		// Not checked, for the same reason as Output.Error: this is the path
+		// that reports a failure, and a broken error stream leaves nothing to
+		// report it to. The exit code below is what the caller reads.
+		_, _ = fmt.Fprintln(opts.Stderr, err.Error())
 		return int(aferrors.ExitUsage)
 	}
 	if out.Format == FormatJSON {
@@ -300,15 +312,6 @@ recoverable by replay.`),
 		return &usageError{err: err}
 	})
 	return root
-}
-
-// notYetAvailable is what a command returns when its engine has not landed.
-//
-// It exits with a usage code and says so plainly. The alternative, a command
-// that appears to work and does nothing, is the exact failure this product
-// exists to prevent, and shipping one in our own binary would be indefensible.
-func notYetAvailable(name string) error {
-	return aferrors.Coded(aferrors.AFRUN001, "command", name)
 }
 
 // WithSignals returns a context cancelled by an interrupt, and a function that

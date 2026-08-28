@@ -67,10 +67,15 @@ gate: _reports
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
     run "prose reads like a person"      just prosecheck
+    run "no forbidden tokens in docs"    just forbidden
+    run "spelling"                       just spell
+    run "prose style"                    just vale
+    run "every link resolves"            just links
     run "gate matches CI"                just gatecheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
+    run "lint"                           just lint
     run "the gates themselves"           just test-tools
     run "engine"                         just test-engine
     run "control plane"                  just test-web
@@ -127,6 +132,11 @@ setup:
     need npm    ""        "ships with node"                                    npm --version
     need docker ""        "https://docs.docker.com/get-docker/"                docker --version
     need git    ""        "brew install git"                                   git --version
+
+    echo
+    echo "Documentation gates"
+    need vale   ""        "brew install vale , or https://vale.sh/docs/install"   vale --version
+    need lychee ""        "brew install lychee , or https://lychee.cli.rs"        lychee --version
 
     echo
     echo "Repository"
@@ -294,6 +304,39 @@ docexamples:
 prosecheck:
     go run ./tools/prosecheck .
 
+# Spelling, with the project dictionary in tools/docs/dictionary.txt.
+spell:
+    npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" README.md CONTRIBUTING.md SECURITY.md
+
+# Prose style: the Google developer documentation style, plus the rule about
+# em dashes. `vale sync` fetches the style package named in .vale.ini.
+vale:
+    vale sync
+    vale docs/src/content/docs README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
+
+# Every link on the assembled site, including fragments.
+#
+# Against the built site rather than the markdown, because the addresses a
+# reader follows are the built ones: /docs/reference/cli/#af-init is a heading
+# on a page, not a file in the tree, and only the built site knows whether it
+# exists. Offline, so a slow upstream cannot fail somebody's local run; the
+# external addresses are checked on the daily schedule.
+links:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    (cd www && npm run build)
+    (cd docs && npm run build)
+    rm -rf site && mkdir -p site
+    cp -R www/out/. site/
+    cp -R docs/dist site/docs
+    lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
+
+# The G8 forbidden token scan: notes to the author, unfilled slots, names that
+# belong to a person rather than the product, addresses that resolve only on
+# somebody's private network, and identifiers that name a real cloud tenant.
+forbidden:
+    ./tools/docs/forbidden.sh
+
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
@@ -329,20 +372,29 @@ _generated:
     set -euo pipefail
     go run ./tools/errgen
     go run ./tools/proxysrc
+    go run ./tools/schemadoc .
     (cd engine && go test ./internal/policy -update-vectors)
     (cd engine && go test ./internal/cli -update-reference)
+    (cd engine && go test ./internal/events -update-schema)
+    (cd engine && go test ./internal/masking -update-transforms)
     git diff --exit-code -- \
       engine/internal/errors/codes.gen.go \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
-      docs/src/content/docs/reference/cli.md
+      schemas/events.v1.json \
+      docs/src/content/docs/reference/cli.md \
+      docs/src/content/docs/reference/transforms.md \
+      docs/src/content/docs/reference/schemas
 
 # Regenerate and keep the result.
 generate:
     go run ./tools/errgen
     go run ./tools/proxysrc
+    go run ./tools/schemadoc .
     cd engine && go test ./internal/policy -update-vectors
     cd engine && go test ./internal/cli -update-reference
+    cd engine && go test ./internal/events -update-schema
+    cd engine && go test ./internal/masking -update-transforms
 
 # The community build does not contain or need the enterprise edition.
 edition:
@@ -422,10 +474,9 @@ vuln:
 
 # The linter set CONTRIBUTING describes.
 #
-# Not part of `just gate`. There are findings that predate the config, in
-# packages several people are editing at once, and a gate that fails every
-# branch for something none of them did is a gate people learn to route around.
-# It goes into `gate` when the count reaches zero.
+# Part of `just gate` since the count reached zero. It was kept out while there
+# were findings that predated the config, because a gate that fails every
+# branch for something none of them did is one people learn to route around.
 lint:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -433,4 +484,9 @@ lint:
       echo "golangci-lint is not installed. brew install golangci-lint"
       exit 1
     fi
-    cd engine && golangci-lint run --timeout 15m ./...
+    cd engine
+    # verify before run. `run` does not validate the config, so an invalid one
+    # passes locally and fails the moment CI's action verifies it, which is
+    # exactly what happened with an empty misspell key.
+    golangci-lint config verify
+    golangci-lint run --timeout 15m ./...

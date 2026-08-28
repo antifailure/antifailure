@@ -314,7 +314,7 @@ func TestDoctor_ExitsNonZeroWhenACheckFails(t *testing.T) {
 		Clock:  clock.NewFake(epoch), WorkDir: missing,
 	})
 	var report cli.DoctorReport
-	require.NoError(t, json.Unmarshal([]byte(out.String()), &report))
+	require.NoError(t, json.Unmarshal(out.Bytes(), &report))
 	if !report.OK {
 		require.NotZero(t, code)
 	}

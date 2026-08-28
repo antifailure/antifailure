@@ -43,11 +43,19 @@ jobs:
         # reimplements the egress decision in TypeScript and proves it matches
         # this engine against that corpus, so a stale corpus means the two have
         # quietly stopped being compared.
+        #
+        # The schema reference pages and the event envelope belong here too.
+        # Both are rendered from the schemas, and a page that has drifted from
+        # the contract it documents is worse than no page: it is a wrong answer
+        # that looks authoritative.
         run: |
           go run ./tools/errgen
           go run ./tools/proxysrc
+          go run ./tools/schemadoc .
           (cd engine && go test ./internal/policy -update-vectors)
           (cd engine && go test ./internal/cli -update-reference)
+          (cd engine && go test ./internal/events -update-schema)
+          (cd engine && go test ./internal/masking -update-transforms)
           git diff --exit-code
 
       - name: The release stamps a version that exists
@@ -66,6 +74,14 @@ jobs:
         # supposed to prevent.
         run: go run ./tools/gatecheck .
 
+      - name: No forbidden tokens in the documentation
+        # The G8 scan. Documentation is a product surface, and these are the
+        # tokens that say a page was never finished: a note to the author, a
+        # slot nobody filled, a name belonging to a person or a customer, an
+        # address that resolves only inside somebody's network, or an
+        # identifier that names a real cloud tenant.
+        run: ./tools/docs/forbidden.sh
+
       - name: The error catalog and the code agree
         # The reference page promises that a code with no entry fails the build
         # and an entry nothing returns fails it too. It promised that for a
@@ -75,6 +91,19 @@ jobs:
 
       - name: Vet
         run: cd engine && go vet ./...
+
+      - name: Lint
+        # The linter set CONTRIBUTING describes, and it is a gate rather than
+        # advice: the engine is at zero findings, and the way it stays there is
+        # a check that refuses the first one. Getting there meant migrating off
+        # four deprecated Docker SDK calls, wiring up five symbols that were
+        # defined and never used, and fixing three places where an error was
+        # formatted instead of wrapped.
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.1
+          working-directory: engine
+          args: --timeout 15m
 
       - name: The gates themselves
         # errcheck, ldcheck and the generators decide whether a build is
@@ -189,6 +218,66 @@ jobs:
             fi
           done
           exit $missing
+
+      - name: Spelling
+        # cspell owns spelling, with the project dictionary in
+        # tools/docs/dictionary.txt. Adding a word is a one line diff a
+        # reviewer can read.
+        run: npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" README.md CONTRIBUTING.md SECURITY.md
+
+      - name: Prose style
+        # The Google developer documentation style at error level, plus the
+        # rule about em dashes. Warnings are not enforced: three quarters of
+        # them are contractions and passive voice, and this documentation's
+        # voice declines both on purpose.
+        #
+        # The binary rather than the official action, because the action's
+        # files input takes one folder and this checks five paths, and because
+        # running the same command `just vale` runs is what keeps the two
+        # honest. Pinned by version and checksum.
+        run: |
+          set -euo pipefail
+          version=3.19.0
+          sha=c8f9d6c8055442bc7e9c121b2498e6f0e3fb670f4665e6ee577f1897f7665cf6
+          curl -sfLo vale.tar.gz \
+            "https://github.com/errata-ai/vale/releases/download/v${version}/vale_${version}_Linux_64-bit.tar.gz"
+          echo "${sha}  vale.tar.gz" | sha256sum -c -
+          sudo tar -xzf vale.tar.gz -C /usr/local/bin vale
+          rm vale.tar.gz
+          vale sync
+          vale docs/src/content/docs README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
+
+      - name: Assemble the site
+        # Exactly what deploy.yml publishes: the marketing site at the root and
+        # the documentation under /docs. The link check and the preview both
+        # need the real layout, because /docs/reference/cli/#af-init is only a
+        # real address once both halves are in the same tree.
+        run: |
+          rm -rf site && mkdir -p site
+          cp -R www/out/. site/
+          cp -R docs/dist site/docs
+          echo "assembled $(find site -type f | wc -l) files"
+
+      - name: Every link on the assembled site resolves
+        # Offline: internal links and fragments only. A fragment is the case
+        # worth having, because a renamed heading leaves a link that still
+        # loads a page and silently lands at the top of it. The external
+        # addresses are checked on the daily schedule, where a slow upstream
+        # cannot block a pull request.
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
+          fail: true
+
+      - name: Upload the preview
+        # The pull request preview. An artifact rather than a deployment,
+        # because a pull request from a fork must not be able to publish to the
+        # address people trust.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: site-preview
+          path: site
+          retention-days: 14
 
   control-plane:
     name: control plane

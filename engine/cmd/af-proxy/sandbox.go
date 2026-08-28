@@ -146,7 +146,9 @@ func mockMissBody(host string, req *http.Request) string {
 }
 
 func writeRawStatus(w io.Writer, status int, contentType, body string) {
-	fmt.Fprintf(w,
+	// Not checked. The only reason this fails is that the client went away,
+	// and there is no second place to tell it so.
+	_, _ = fmt.Fprintf(w,
 		"HTTP/1.1 %d %s\r\nContent-Type: %s\r\nX-Antifailure-Mock: true\r\n"+
 			"Content-Length: %d\r\nConnection: close\r\n\r\n%s",
 		status, http.StatusText(status), contentType, len(body), body)

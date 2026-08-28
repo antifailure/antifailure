@@ -76,6 +76,8 @@
   },
   "$defs": {
     "service": {
+      "title": "Service",
+      "description": "One process the environment runs. A service is built from the repository, given the variables it declared, attached to the environment's private network, and started in dependency order.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -169,6 +171,7 @@
       }
     },
     "build": {
+      "title": "Build",
       "type": "object",
       "additionalProperties": false,
       "description": "How to turn the service directory into an image. Omitted means detect: a Dockerfile if there is one, otherwise a buildpack.",
@@ -224,6 +227,8 @@
       }
     },
     "envVar": {
+      "title": "Environment variable",
+      "description": "One variable a service needs. The manifest declares the name and where the value comes from; it never holds the value itself, which is why the file is safe to commit.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -258,6 +263,8 @@
       }
     },
     "resources": {
+      "title": "Resources",
+      "description": "What one replica of a service is allowed to use. Absent means the runtime decides, which locally means no limit and on a cluster means the namespace default.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -276,6 +283,7 @@
       }
     },
     "database": {
+      "title": "Database",
       "type": "object",
       "additionalProperties": false,
       "description": "Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it.",
@@ -348,6 +356,7 @@
       }
     },
     "golden": {
+      "title": "Golden",
       "type": "object",
       "additionalProperties": false,
       "description": "The masked, verified copy every environment branches from.",
@@ -388,6 +397,7 @@
       }
     },
     "subset": {
+      "title": "Subset",
       "type": "object",
       "additionalProperties": false,
       "description": "Take a production shaped slice rather than the whole database. The closure is computed over foreign keys, so a subset always satisfies every constraint the schema declares.",
@@ -447,6 +457,7 @@
       }
     },
     "egress": {
+      "title": "Egress",
       "type": "object",
       "additionalProperties": false,
       "description": "What the environment may reach on the network. Everything leaves through the sidecar, and everything not named here is blocked.",
@@ -479,6 +490,8 @@
       }
     },
     "egressRule": {
+      "title": "Egress rule",
+      "description": "What the environment may do with one host. A rule is per host because that is the unit a person can reason about: allowed, blocked, answered from a fixture, or sent to the provider's own sandbox.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -560,6 +573,8 @@
       }
     },
     "persona": {
+      "title": "Persona",
+      "description": "One account an agent logs in as. Personas are created or reconciled in the golden by the authentication adapter, so an agent signs in the way a person does rather than through a bypass.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -611,6 +626,8 @@
       }
     },
     "workflow": {
+      "title": "Workflow",
+      "description": "One thing the agents do, written as a goal rather than a script. The runner decides the actions and verifies the outcome, so a workflow survives a redesign of the page it happens on.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -688,6 +705,8 @@
       }
     },
     "invariant": {
+      "title": "Invariant",
+      "description": "One read only statement that must hold after every workflow. Invariants are the assertions a test cannot make from the outside, checked against the database rather than the interface.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -714,6 +733,7 @@
       }
     },
     "insights": {
+      "title": "Insights",
       "type": "object",
       "additionalProperties": false,
       "description": "The Postgres native checks that turn a preview environment into a database review.",
@@ -758,6 +778,7 @@
       }
     },
     "load": {
+      "title": "Load",
       "type": "object",
       "additionalProperties": false,
       "description": "Traffic shaped like production, compared between the base branch and this one. Results are always deltas, never absolute capacity claims.",
@@ -844,6 +865,8 @@
       }
     },
     "runtime": {
+      "title": "Runtime",
+      "description": "Where and how long the environment runs. The provider decides the machinery; the rest is the lifetime, the address, and the naming the environment gets.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -887,6 +910,8 @@
       }
     },
     "github": {
+      "title": "GitHub",
+      "description": "How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
