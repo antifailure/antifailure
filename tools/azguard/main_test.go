@@ -94,3 +94,83 @@ func TestRefusalNamesTheOwner(t *testing.T) {
 		t.Errorf("refusal did not name the owner: %v", err)
 	}
 }
+
+// An ARM resource id names its group in the path. This is the form
+// `az role assignment create --scope` uses, and before this was parsed the
+// guard refused every scoped role assignment with advice that could not be
+// followed.
+func TestGroupsInResourceIDs(t *testing.T) {
+	const sub = "/subscriptions/00000000-0000-0000-0000-000000000000"
+	cases := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "role assignment scoped to a group",
+			args: []string{"az", "role", "assignment", "create", "--role", "Contributor",
+				"--scope", sub + "/resourceGroups/af-cp-centralus"},
+			want: []string{"af-cp-centralus"},
+		},
+		{
+			name: "a resource inside a group",
+			args: []string{"az", "resource", "show", "--ids",
+				sub + "/resourceGroups/af-web/providers/Microsoft.Network/dnszones/antifailure.dev"},
+			want: []string{"af-web"},
+		},
+		{
+			// ARM treats the segment case-insensitively, so a guard that did
+			// not would be bypassed by lowercasing one letter.
+			name: "lowercase segment",
+			args: []string{"az", "role", "assignment", "create", "--scope", sub + "/resourcegroups/af-cp-centralus"},
+			want: []string{"af-cp-centralus"},
+		},
+		{
+			name: "a foreign group in an id is still found, so it can be refused",
+			args: []string{"az", "role", "assignment", "create", "--scope", sub + "/resourceGroups/postiz-rg"},
+			want: []string{"postiz-rg"},
+		},
+		{
+			// Nothing to extract: handled by subscriptionScoped, not here.
+			name: "subscription scope names no group",
+			args: []string{"az", "role", "assignment", "create", "--scope", sub},
+			want: nil,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := groupsIn(c.args); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("groupsIn() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// The foreign group has to be refused through the id form too, or the parsing
+// above would be a way of finding names rather than a way of enforcing the
+// boundary.
+func TestResourceIDNamingAForeignGroupIsRefused(t *testing.T) {
+	const sub = "/subscriptions/00000000-0000-0000-0000-000000000000"
+	code := cmdGuard([]string{"--", "az", "role", "assignment", "create",
+		"--scope", sub + "/resourceGroups/postiz-rg"})
+	if code != 1 {
+		t.Fatalf("cmdGuard exit = %d, want 1: a role assignment on postiz's group must be refused", code)
+	}
+}
+
+// Subscription scope is refused, and refused for the right reason. ISOLATION.md
+// says no role is ever assigned there.
+func TestSubscriptionScopeIsRefused(t *testing.T) {
+	const sub = "/subscriptions/00000000-0000-0000-0000-000000000000"
+	if !subscriptionScoped([]string{"az", "role", "assignment", "create", "--scope", sub}) {
+		t.Error("subscriptionScoped() did not recognise a bare subscription id")
+	}
+	// A group-scoped id is not subscription scope, even though it also begins
+	// with /subscriptions/.
+	if subscriptionScoped([]string{"--scope", sub + "/resourceGroups/af-cp-centralus"}) {
+		t.Error("subscriptionScoped() called a group-scoped id subscription scope")
+	}
+	if code := cmdGuard([]string{"--", "az", "role", "assignment", "create", "--scope", sub}); code != 1 {
+		t.Fatalf("cmdGuard exit = %d, want 1", code)
+	}
+}
