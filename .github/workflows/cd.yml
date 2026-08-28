@@ -1,0 +1,258 @@
+# A commit becomes a running deployment, or it does not move at all.
+#
+# THE SHAPE
+#
+#   merge to main  ->  gate  ->  build  ->  staging          (automatic)
+#   push a v* tag  ->  gate  ->  build  ->  staging  ->  [approval]  ->  production
+#
+# Staging is not gated by a human because a gate a person clicks through fifty
+# times a day is a gate nobody reads. Production is, and the approval lives in
+# the `production` GitHub environment where the reviewer list is auditable
+# rather than in an `if:` somebody can edit in the same pull request that
+# deploys.
+#
+# WHY THE FULL GATE AND NOT JUST THE CONTROL PLANE'S TESTS. Because `just gate`
+# is the promise the repository makes about itself, and a deploy that ran a
+# narrower check than a pull request did is a deploy that can ship something a
+# pull request would have refused. The cost is real: while main is red for a
+# reason that has nothing to do with the control plane, staging does not move.
+# That is the correct trade. Staging keeps serving the last green build, which
+# is a working system, and the fix is to fix main.
+#
+# WHY OIDC. There is no Azure credential in this repository. The job exchanges a
+# GitHub-signed token for an Azure one, scoped by the federated credential to
+# `repo:antifailure/antifailure:environment:staging` (and :production), so a
+# workflow running from a fork, a branch, or without the environment cannot get
+# one at all. Nothing here has a lifetime longer than the job.
+name: cd
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Where to deploy'
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+
+# One deploy at a time, and never cancel one in flight.
+#
+# cancel-in-progress would be wrong here in a way it is not wrong for CI: a
+# cancelled deploy is a half-applied one. It can be cancelled after the
+# migration and before the traffic shift, which leaves the schema ahead of the
+# running code with nothing left to finish the job.
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/control-plane
+  RESOURCE_GROUP: af-cp-centralus
+  APP: afcp-app
+  BOOTSTRAP_JOB: afcp-bootstrap
+  STAGING_URL: https://app.dev.antifailure.dev
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Nothing deploys that would not have merged.
+  # ---------------------------------------------------------------------------
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.repository == 'antifailure/antifailure'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: extractions/setup-just@e33e0f60d0f8a86c1fc0d6d18d75d1c9e5cfdc44 # v3.0.0
+
+      - name: A Postgres for the control plane's own suite
+        run: |
+          docker run -d --name cp-pg \
+            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure \
+            -p 55432:5432 postgres:17-alpine
+          for _ in $(seq 1 30); do
+            docker exec cp-pg pg_isready -U postgres >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+      - name: just gate
+        env:
+          AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:55432/antifailure
+        run: just gate
+
+  # ---------------------------------------------------------------------------
+  # One image, referenced everywhere afterwards by DIGEST.
+  #
+  # A tag can be moved between the build and the deploy, and between staging and
+  # production. A digest cannot, so the thing production promotes is provably the
+  # thing staging tested.
+  # ---------------------------------------------------------------------------
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    needs: gate
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      ref: ${{ steps.push.outputs.ref }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push
+        id: push
+        run: |
+          set -euo pipefail
+          tag="cd-${GITHUB_SHA::12}"
+          docker build \
+            -f deploy/docker/control-plane.Dockerfile \
+            -t "${IMAGE}:${tag}" \
+            --build-arg AF_VERSION="${GITHUB_REF_NAME}" \
+            --build-arg AF_COMMIT="${GITHUB_SHA}" \
+            --build-arg AF_BUILD_DATE="$(git show -s --format=%cI HEAD)" \
+            .
+          docker push "${IMAGE}:${tag}"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:${tag}")"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "ref=${digest}" >> "$GITHUB_OUTPUT"
+          echo "built ${digest}" >> "$GITHUB_STEP_SUMMARY"
+
+      # The image has to be able to do what the deployment depends on before it
+      # is allowed near a running system. Same two checks as
+      # control-plane-image.yml, because a deploy that skipped them would be a
+      # weaker check than a pull request.
+      - name: The entrypoints exist and refuse cleanly
+        run: |
+          set -euo pipefail
+          img="${IMAGE}:cd-${GITHUB_SHA::12}"
+          test "$(docker run --rm --entrypoint sh "$img" -c 'ls bootstrap.mjs maintenance.mjs | wc -l')" = "2"
+          out="$(docker run --rm "$img" node bootstrap.mjs 2>&1)" && { echo "FAIL: bootstrap exited 0 with no credential"; exit 1; }
+          case "$out" in
+            *AF_MIGRATION_DATABASE_URL*) echo "bootstrap refuses and names the variable" ;;
+            *) echo "FAIL: bootstrap said: $out"; exit 1 ;;
+          esac
+
+  # ---------------------------------------------------------------------------
+  # Staging. Automatic, on every merge to main.
+  # ---------------------------------------------------------------------------
+  staging:
+    name: staging
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 30
+    if: github.event_name != 'workflow_dispatch' || inputs.environment == 'staging'
+    environment:
+      name: staging
+      url: https://app.dev.antifailure.dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The boundary, enforced rather than trusted. azguard refuses any command
+      # whose resource group is not one this project owns, and it fails closed.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
+      - name: The target group is ours
+        run: GOTOOLCHAIN=local go run ./tools/azguard check --tags "${RESOURCE_GROUP}"
+
+      # The digest goes through the environment rather than being interpolated
+      # into the script text. It comes from `docker inspect` and is therefore
+      # trustworthy today, but a template expansion inside `run:` is a shell
+      # injection the moment the value's provenance changes, and the provenance
+      # of a value is not visible at the place it is used.
+      - name: Deploy
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          deploy/cd/deploy.sh \
+            "${RESOURCE_GROUP}" "${APP}" "${BOOTSTRAP_JOB}" \
+            "${IMAGE_DIGEST}" "${GITHUB_SHA}" "${STAGING_URL}"
+
+      - name: What is serving
+        if: always()
+        run: |
+          {
+            echo "### staging"
+            echo
+            echo '```'
+            curl -sS -m 10 "${STAGING_URL}/readyz" || echo "no answer from ${STAGING_URL}/readyz"
+            echo
+            echo '```'
+            az containerapp ingress traffic show -n "${APP}" -g "${RESOURCE_GROUP}" -o table || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Production. Only on a version tag, and only after somebody approves it.
+  #
+  # The approval is a deployment protection rule on the `production` environment,
+  # so this job does not start until a reviewer clicks it. It deploys the same
+  # DIGEST staging tested, which is the entire reason build outputs a digest.
+  # ---------------------------------------------------------------------------
+  production:
+    name: production
+    runs-on: ubuntu-latest
+    needs: [build, staging]
+    timeout-minutes: 30
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    environment:
+      name: production
+      url: https://app.antifailure.dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # PRODUCTION DOES NOT EXIST YET, AND THIS SAYS SO RATHER THAN INVENTING IT.
+      #
+      # The approval gate, the federated credential, the digest promotion and
+      # this job are all real and wired. What is missing is the resource group
+      # and the container app to deploy into, which is a decision to spend money
+      # that has not been made. Refusing loudly here is the honest shape: the
+      # alternative is a job that deploys production to staging's app and calls
+      # it a promotion.
+      - name: Refuse until production infrastructure exists
+        run: |
+          echo "::error title=No production environment::The production deploy path is wired end to end -- approval, OIDC, and the digest staging tested -- but there is no production Container App to deploy into yet. See docs/plan/notes/hosted-loop.md."
+          exit 1
