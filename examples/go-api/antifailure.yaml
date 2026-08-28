@@ -26,8 +26,10 @@ services:
         - sum.golang.org
         - dl-cdn.alpinelinux.org
     env:
-      - name: DATABASE_URL
-        required: true
+      # DATABASE_URL is not declared here on purpose. The database block below
+      # injects it, and declaring it as well makes the secret resolver demand
+      # a value nobody has to supply. A real run refuses with AF-SEC-001, which
+      # is how this example was found to be wrong.
       - name: PORT
         value: "3000"
 
@@ -44,17 +46,23 @@ database:
     retain: 3
 
 egress:
-  # Nothing reaches the internet unless it is named here. This example names
-  # one host, and the entry is a sandbox rather than an allow: the container
-  # gets a placeholder credential and the proxy substitutes the real sandbox
-  # key, so the application's code path is exercised and the key never enters
-  # the environment.
+  # Nothing reaches the internet unless it is named here.
+  #
+  # mock, so that this example runs with nothing configured: the Stripe pack
+  # ships with the engine and answers from recorded responses. One line turns
+  # it into the stronger thing, once you have a test key to put in the store:
+  #
+  #     mode: sandbox
+  #     credential: STRIPE_SECRET_KEY
+  #
+  # Sandbox mode gives the container a placeholder and has the proxy substitute
+  # the real key on the way out, so the payment path runs and the key is never
+  # inside the environment.
   default: block
   rules:
     - host: api.stripe.com
-      mode: sandbox
-      credential: STRIPE_SECRET_KEY
-      note: "payment intents, against Stripe's own test mode"
+      mode: mock
+      note: "payment intents, answered from the pack that ships with the engine"
 
 personas:
   - name: returning-customer

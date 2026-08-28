@@ -43,12 +43,22 @@ Two columns are marked `preserve` rather than left out. A column nobody has
 classified defaults to `nullify`, so "reviewed and safe" and "not looked at
 yet" are different statements rather than the same silence.
 
-**The egress rule is a sandbox, not an allow.** The container is given a
-placeholder in `STRIPE_SECRET_KEY`. The proxy substitutes the real test-mode
-key on the way out.
+**The egress rule answers from a mock.** `api.stripe.com` is the one host this
+example names, and everything else is refused. It is set to `mock` so the
+example runs with nothing configured: the Stripe pack ships with the engine and
+answers from recorded responses.
 
-So the payment path runs, and the key is never inside the environment. It
-cannot be logged, dumped, or read out of a container somebody left running.
+Two lines turn it into the stronger thing once you have a test key:
+
+```yaml
+mode: sandbox
+credential: STRIPE_SECRET_KEY
+```
+
+Then the container is given a placeholder and the proxy substitutes the real
+key on the way out. The payment path runs, and the key is never inside the
+environment. It cannot be logged, dumped, or read out of a container somebody
+left running.
 
 **The invariants are the assertions the API cannot make.** `no-orphaned-orders`
 asks a question about the database rather than about a response. It is the one
