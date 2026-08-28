@@ -18,9 +18,10 @@ services:
     build:
       strategy: dockerfile
       dockerfile: Dockerfile
-      # The build runs under the same default deny as the environment. The Go
-      # module proxy is named because the build fetches from it; nothing else
-      # is reachable, including at build time.
+      # What this build reaches, written down. Declared rather than enforced in
+      # this release: the engine validates the list and shows it in af explain,
+      # and the local builder does not yet seal a build. It is the record of
+      # what the build needs, not a control you can rely on.
       allow_hosts:
         - proxy.golang.org
         - sum.golang.org

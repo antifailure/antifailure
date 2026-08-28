@@ -64,9 +64,10 @@ left running.
 asks a question about the database rather than about a response. It is the one
 that goes red if the masking breaks the join.
 
-**The build declares its hosts.** A build runs under the same default deny as
-the environment. `proxy.golang.org` is named because the build fetches from it,
-and nothing else is reachable, at build time or after.
+**The build declares its hosts.** `proxy.golang.org` is named because the build
+fetches from it. That list is declared rather than enforced in this release:
+the engine validates it and shows it in `af explain`, and the local builder
+does not yet seal a build. Write it as the record of what your build needs.
 
 ## What it deliberately does not have
 
