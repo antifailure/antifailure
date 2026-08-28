@@ -201,17 +201,67 @@ describe('the device grant', { skip: (await available()) ? false : 'no Postgres 
     assert.equal(res.status, 403)
   })
 
-  test('a terminal cannot ask for a scope that does not exist', async () => {
-    const started = await begin({ clientLabel: 'greedy', scopes: ['members.manage', 'not-a-scope'] })
+  test('a terminal asking only for scopes that do not exist is refused outright', async () => {
+    // Refused here rather than at the far end. Intersecting the ask down to
+    // nothing and issuing the code anyway produces a login that appears to
+    // work, prints a code, waits for a person to approve it, and hands back a
+    // token that can do nothing -- so the failure surfaces at the first real
+    // command, several minutes and one human interaction away from its cause.
+    const res = await api.fetch('/auth/device/code', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientLabel: 'greedy', scopes: ['members.manage', 'not-a-scope'] }),
+    })
+    assert.equal(res.status, 400)
+    const body = (await res.json()) as { error: string; error_description: string }
+    assert.equal(body.error, 'invalid_scope')
+    // The message names what does exist, because the caller has to pick one.
+    assert.match(body.error_description, /providers\.write/)
+  })
+
+  test('an ask that is part real is narrowed to the real part rather than refused', async () => {
+    // THE INTERSECTION ITSELF, which is the property the refusal above must not
+    // be mistaken for. A terminal naming a capability that does not exist
+    // alongside one that does must not receive the invented one.
+    const started = await begin({
+      clientLabel: 'half greedy',
+      scopes: ['runs.view', 'members.manage'],
+    })
     const admin = await signInAs(api, org, 'admin', 'device-scope')
     await approve(started.user_code, admin)
     api.clock.advance(DEVICE_POLL_INTERVAL_SECONDS * 1000 + 1000)
 
     const granted = await poll(started.device_code)
     assert.equal(granted.status, 200)
-    // Intersected with the closed list, so asking for members.manage grants
-    // nothing rather than granting members.manage.
-    assert.equal(granted.body.scope, '')
+    assert.equal(granted.body.scope, 'runs.view')
+  })
+
+  test('provider management is grantable, and is not in the default set', async () => {
+    // The gap between the two lists is the design: a plain af login cannot
+    // touch a provider key, and one that can had to say so where a person
+    // approving could read it.
+    const plain = await begin({ clientLabel: 'a laptop' })
+    const admin = await signInAs(api, org, 'admin', 'device-scope-providers')
+    await approve(plain.user_code, admin)
+    api.clock.advance(DEVICE_POLL_INTERVAL_SECONDS * 1000 + 1000)
+    const defaults = await poll(plain.device_code)
+    assert.equal(defaults.status, 200)
+    assert.ok(!String(defaults.body.scope).includes('providers.'))
+
+    const asked = await begin({ clientLabel: 'a laptop', scopes: ['providers.write'] })
+    // What the approval screen is handed. If this did not carry the scope, a
+    // person would be approving a capability they were never shown.
+    const pending = await api.fetch(`/auth/device/pending?code=${asked.user_code}`, {
+      headers: { cookie: admin.cookie },
+    })
+    assert.equal(pending.status, 200)
+    assert.deepEqual(((await pending.json()) as { scopes: string[] }).scopes, ['providers.write'])
+
+    await approve(asked.user_code, admin)
+    api.clock.advance(DEVICE_POLL_INTERVAL_SECONDS * 1000 + 1000)
+    const granted = await poll(asked.device_code)
+    assert.equal(granted.status, 200)
+    assert.equal(granted.body.scope, 'providers.write')
   })
 
   test('an unknown device code is refused without saying why', async () => {

@@ -564,20 +564,39 @@ export async function runPage(pool: Pool, viewer: Viewer, orgId: string, runId: 
 // ---------------------------------------------------------------------------
 
 export async function maskingPage(pool: Pool, viewer: Viewer, orgId: string): Promise<Html> {
+  // The columns are the ones golden_versions actually has. It had none of the
+  // ones this query first named -- no state, no verified_at, no row_count --
+  // so the page answered 500 for every organization, including one with no
+  // goldens at all, where it should have rendered its empty state.
+  //
+  // What replaced them comes out of the attestation itself, which is the point
+  // of the page: how many tables and columns a scanner read back, when it
+  // finished, and how many findings it signed for. Read in SQL rather than
+  // parsed here, because jsonb is what the column is and a hand-written cast on
+  // the way out is another chance to be wrong about a shape.
   const goldens = await pool.withTenant({ orgId }, async (db) =>
     db.execute<{
       version: string
-      state: string
-      verified_at: Date | string | null
-      attestation: unknown
+      verified: boolean
+      finished_at: string | null
+      tables: number | null
+      columns: number | null
+      rows_sampled: string | null
+      findings: number | null
+      scanner: string | null
       created_at: Date | string
-      row_count: string | null
     }>(sql`
-      SELECT version, state::text AS state, verified_at, attestation, created_at, row_count
+      SELECT version, verified, created_at,
+             attestation #>> '{report,finished_at}'                  AS finished_at,
+             (attestation #>> '{report,tables}')::int                AS tables,
+             (attestation #>> '{report,columns}')::int               AS columns,
+             attestation #>> '{report,rows_sampled}'                 AS rows_sampled,
+             coalesce(jsonb_array_length(attestation #> '{report,findings}'), 0) AS findings,
+             attestation #>> '{report,scanner}'                      AS scanner
       FROM golden_versions ORDER BY created_at DESC LIMIT 60`),
   )
 
-  const verified = goldens.filter((g) => g.verified_at !== null).length
+  const verified = goldens.filter((g) => g.verified).length
 
   return page(
     { title: 'Masking', current: 'masking', viewer, environmentLabel: 'staging' },
@@ -624,8 +643,11 @@ export async function maskingPage(pool: Pool, viewer: Viewer, orgId: string): Pr
                       <thead>
                         <tr>
                           <th scope="col">Version</th><th scope="col">State</th>
-                          <th scope="col" class="num">Rows</th>
-                          <th scope="col">Verified</th><th scope="col">Created</th>
+                          <th scope="col" class="num">Tables</th>
+                          <th scope="col" class="num">Columns</th>
+                          <th scope="col" class="num">Rows read</th>
+                          <th scope="col" class="num">Findings</th>
+                          <th scope="col">Scanned</th><th scope="col">Created</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -633,9 +655,12 @@ export async function maskingPage(pool: Pool, viewer: Viewer, orgId: string): Pr
                           (g) => html`
                             <tr>
                               <td class="mono">${g.version}</td>
-                              <td>${chip(g.verified_at ? 'verified' : g.state)}</td>
-                              <td class="num">${g.row_count ?? '—'}</td>
-                              <td class="when">${when(g.verified_at)}</td>
+                              <td>${chip(g.verified ? 'verified' : 'unverified')}</td>
+                              <td class="num">${g.tables ?? '—'}</td>
+                              <td class="num">${g.columns ?? '—'}</td>
+                              <td class="num">${g.rows_sampled ?? '—'}</td>
+                              <td class="num">${g.findings ?? '—'}</td>
+                              <td class="when">${when(g.finished_at)}</td>
                               <td class="when">${when(g.created_at)}</td>
                             </tr>
                           `,
@@ -657,14 +682,21 @@ export async function maskingPage(pool: Pool, viewer: Viewer, orgId: string): Pr
 
 export async function networkPage(pool: Pool, viewer: Viewer, orgId: string): Promise<Html> {
   const rules = await pool.withTenant({ orgId }, async (db) =>
+    // network_rules holds `paths text[]`, not a path_prefix, and naming a column
+    // that does not exist made this page a 500 rather than a page with nothing
+    // on it. Methods are shown too: a rule that allows GET and a rule that
+    // allows POST to the same host are different policies, and a table that
+    // showed only the host would render them identically.
     db.execute<{
       host: string
       mode: string
       position: number
-      path_prefix: string | null
+      paths: string[] | null
+      methods: string[] | null
       repository: string | null
     }>(sql`
-      SELECT n.host, n.mode::text AS mode, n.position, n.path_prefix, r.full_name AS repository
+      SELECT n.host, n.mode::text AS mode, n.position, n.paths, n.methods,
+             r.full_name AS repository
       FROM network_rules n LEFT JOIN repositories r ON r.id = n.repository_id
       ORDER BY n.position ASC LIMIT 200`),
   )
@@ -698,7 +730,8 @@ export async function networkPage(pool: Pool, viewer: Viewer, orgId: string): Pr
                       <thead>
                         <tr>
                           <th scope="col" class="num">#</th><th scope="col">Host</th>
-                          <th scope="col">Path</th><th scope="col">Mode</th><th scope="col">Repository</th>
+                          <th scope="col">Paths</th><th scope="col">Methods</th>
+                          <th scope="col">Mode</th><th scope="col">Repository</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -707,7 +740,8 @@ export async function networkPage(pool: Pool, viewer: Viewer, orgId: string): Pr
                             <tr>
                               <td class="num">${r.position}</td>
                               <td class="mono">${r.host}</td>
-                              <td class="mono" style="color:var(--ink-3)">${r.path_prefix ?? '*'}</td>
+                              <td class="mono" style="color:var(--ink-3)">${r.paths?.length ? r.paths.join(' ') : '*'}</td>
+                              <td class="mono" style="color:var(--ink-3)">${r.methods?.length ? r.methods.join(' ') : 'any'}</td>
                               <td>${chip(r.mode.toLowerCase())}</td>
                               <td>${r.repository ?? html`<span style="color:var(--ink-3)">all</span>`}</td>
                             </tr>
@@ -870,6 +904,10 @@ export function keysPage(input: {
   keys: { provider: string; last4: string; fingerprint: string; createdAt: Date; rotatedAt: Date | null }[]
   budgets: { provider: string; capUsd: number; spentUsd: number; remainingUsd: number; period: string }[]
   sealingConfigured: boolean
+  /** Whether this viewer may change anything here. A member who cannot is
+   *  shown the same state and no forms, rather than forms that would be
+   *  refused: a control that cannot work is worse than no control. */
+  mayManage: boolean
   notice?: { tone: 'ok' | 'bad' | 'warn'; title: string; body: string }
 }): Html {
   const { viewer } = input
@@ -901,6 +939,19 @@ export function keysPage(input: {
                 <span><strong>${input.notice.title}</strong>${input.notice.body}</span>
               </div>`
             : ''
+        }
+
+        ${
+          input.mayManage
+            ? ''
+            : html`<div class="notice warn">
+                <span>
+                  <strong>You can see these, and you cannot change them</strong>
+                  Storing, rotating and capping a key is for owners and admins. What is
+                  shown here is a last four and a fingerprint, never a key, so it is safe
+                  to read and enough to tell whether a run was refused for want of one.
+                </span>
+              </div>`
         }
 
         ${
@@ -948,6 +999,7 @@ export function keysPage(input: {
                         `
                   }
 
+                  ${input.mayManage ? html`
                   <form method="post" action="/console/keys">
                     <input type="hidden" name="csrf" value="${viewer.csrfToken}" />
                     <input type="hidden" name="provider" value="${p.id}" />
@@ -976,7 +1028,7 @@ export function keysPage(input: {
                           : ''
                       }
                     </div>
-                  </form>
+                  </form>` : ''}
                 </div>
 
                 <div class="panel-head" style="border-top:1px solid var(--hairline-soft);border-bottom:0">
@@ -1003,6 +1055,7 @@ export function keysPage(input: {
                           </p>
                         `
                   }
+                  ${input.mayManage ? html`
                   <form method="post" action="/console/keys" class="row" style="margin-top:14px">
                     <input type="hidden" name="csrf" value="${viewer.csrfToken}" />
                     <input type="hidden" name="provider" value="${p.id}" />
@@ -1013,7 +1066,7 @@ export function keysPage(input: {
                              value="${budget ? String(budget.capUsd) : ''}" placeholder="50" />
                     </div>
                     <button class="btn" type="submit">Set</button>
-                  </form>
+                  </form>` : ''}
                 </div>
               </div>
             `
@@ -1038,6 +1091,12 @@ export function keysPage(input: {
               Rotating stores the new key and revokes the old one in the same transaction. The
               old fingerprint stays in the audit log so it is possible to say which key was in
               use when, without either key being readable.
+            </p>
+            <p style="color:var(--ink-2)">
+              The same thing is reachable from a terminal with
+              <span class="mono">af provider</span>, which needs a token that asked for the
+              scope: <span class="mono">af login --scope providers.write</span>. There is no
+              command, and no scope, that reads a key back.
             </p>
           </div>
         </div>
