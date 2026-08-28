@@ -89,11 +89,79 @@ working system, and the fix is to fix `main`.
 
 ### A commit deploys itself
 
-<!-- FILL: run id, commit, and the /readyz output after the merge of #15 -->
+Run `33146545883` on `8376958`, 2026-08-28. `gate` waited for CI's conclusion on
+that commit, `build` pushed the image, `staging` deployed it.
 
-### A planted failing health check rolls back
+```
+=== migration pre-check: running afcp-bootstrap on the new image
+=== migrations applied
+=== creating revision afcp-app--c8376958b-061404 at zero traffic
+=== smoke test on the new revision only: https://afcp-app--c8376958b-061404...
+ready on commit 8376958bf1a480374c752a8b97ea5ee8f4178ebc after 1 attempt(s)
+=== shifting 100% of traffic to afcp-app--c8376958b-061404
+=== DEPLOYED: https://app.dev.antifailure.dev is serving 8376958...
+```
 
-<!-- FILL: run id, the planted commit, the traffic weights before and after -->
+Checked against the live origin rather than the workflow's own report:
+
+```
+$ git log --oneline origin/main -1
+8376958 cd: wait for CI rather than re-running it badly
+
+$ curl -s https://app.dev.antifailure.dev/readyz
+{"ready":true,"version":"main","commit":"8376958bf1a480374c752a8b97ea5ee8f4178ebc"}
+
+$ az containerapp ingress traffic show -n afcp-app -g af-cp-centralus
+afcp-app--c8376958b-061404   100
+```
+
+`GET /` went from 500 to 200 in the same deploy, because the running image
+finally had the console in it.
+
+Four attempts were needed. Three failures, all avoidable: an action pinned to a
+SHA that does not exist, a gate job running `just gate` without the vale, lychee
+and npm prerequisites that command assumes, and a federated credential created
+only in the mutable subject form when this repository presents the immutable
+one. Each time the pipeline failed at the right step and deployed nothing.
+
+### A bad build is caught and never reaches a user
+
+Run by hand with `deploy/cd/deploy.sh`, the same script CI runs, against
+`ghcr.io/antifailure/control-plane:v0.1.1` -- a real image that predates
+`/readyz` and answers it with a 500. Nothing was planted in the source: the
+image is genuinely unable to satisfy the gate, which is a better test than a
+commit written to fail.
+
+```
+=== currently serving: afcp-app--c8376958b-061404
+=== migrations applied
+=== creating revision afcp-app--c8376958b-011710 at zero traffic
+=== smoke test on the new revision only: https://afcp-app--c8376958b-011710...
+attempt 1/30: not ready - HTTP 500: {"error":"This endpoint has no declared rate limit..."}
+...
+HEALTH GATE FAILED after 30 attempts over 90s.
+=== THE NEW REVISION IS NOT HEALTHY. Traffic never moved;
+    afcp-app--c8376958b-061404 is still serving.
+```
+
+Exit 1. Throughout, and afterwards:
+
+```
+$ curl -s https://app.dev.antifailure.dev/readyz
+{"ready":true,"version":"main","commit":"8376958bf1a480374c752a8b97ea5ee8f4178ebc"}
+```
+
+**What this proves and what it does not.** It proves the property that matters
+most: a revision that cannot serve never receives a request, because the gate
+runs on the revision's own address while every real request still goes to the
+previous one. Traffic never moved, so there was nothing to move back.
+
+It does NOT exercise the post-promotion rollback, the branch where traffic has
+already shifted and the public origin then fails. Reaching that branch honestly
+needs a build that is healthy on its own address and unhealthy behind the
+ingress, and manufacturing one would test the manufacture rather than the
+deploy. That branch is written, it is read in review, and it is unproven. Said
+here rather than implied to be covered.
 
 ## What is not automated, and why
 

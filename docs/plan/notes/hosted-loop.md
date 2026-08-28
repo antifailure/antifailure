@@ -64,7 +64,11 @@ anything: a missing cap reads as zero, not unlimited.
 
 ### Continuous deployment
 
-<!-- FILL after the merge of #15 -->
+Both are in `docs/plan/notes/cd.md`. Run `33146545883` deployed commit `8376958`
+to `app.dev.antifailure.dev` on a merge to `main`, verified against the live
+origin; and a knowingly bad image was refused on the revision's own address with
+traffic never moving. The post-promotion rollback branch is written and unproven,
+and cd.md says why.
 
 ### A random GitHub account gets no access
 
