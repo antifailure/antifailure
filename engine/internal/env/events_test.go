@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/engine/internal/env"
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
@@ -109,4 +110,36 @@ func TestAddSink_IgnoresNil(t *testing.T) {
 	_, err := o.Up(context.Background())
 	require.Error(t, err)
 	require.NotEmpty(t, sink.Events(), "the real sink should still be attached")
+}
+
+// The runtime's progress lines are the only thing said during the readiness
+// wait, which is the longest part of a run, and in dashboard mode the terminal
+// reporter is silenced. They have to reach the stream or the display goes
+// quiet for minutes at the point somebody is watching it hardest.
+//
+// The name a line carries is checked against the services that exist, because
+// "error: something" is not a service called error.
+func TestRuntimeProgressLinesCarryTheServiceTheyName(t *testing.T) {
+	names := map[string]bool{"web": true, "worker": true}
+
+	cases := []struct {
+		line string
+		want string
+	}{
+		{"web: running migrations", "web"},
+		{"worker: ready (invoked on a schedule)", "worker"},
+		{"error: something went wrong", ""},
+		{"no colon here", ""},
+		{"database: branched", ""},
+	}
+	for _, c := range cases {
+		fields := env.ServiceFieldForTest(c.line, names)
+		if c.want == "" {
+			require.Empty(t, fields, "%q should not name a service", c.line)
+			continue
+		}
+		require.Len(t, fields, 1, "%q should name one service", c.line)
+		require.Equal(t, "service", fields[0].Key)
+		require.Equal(t, c.want, fields[0].Value)
+	}
 }

@@ -16,22 +16,33 @@ refused by the egress policy and you want to see which one.
 af up --hud
 ```
 
+<!-- frame:start -->
+
 ```
-antifailure  pr-482  up 14s                                              2/2 ready
-SERVICES ─────────────────────────────────────────────── NETWORK ─────────────────
-✓ web                       http://127.0.0.1:41273       allow 12   deny 1   mock 1
-✓ worker                    running                      last denied telemetry.acme
-                                                         DATABASE ────────────────
-                                                         branched
-                                                         gv_20260101_ab12cd  verified
-AGENTS ───────────────────────────────────────────────────────────────────────────
+antifailure  pr-482  up 14s                                                            2/2 ready
+▸ SERVICES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ web                               http://127.0.0.1:41273
+✓ worker                            running
+
+
+NETWORK ────────────────────────────────────────────────────────────────────────────────────────
+allow 0   deny 0   mock 0   record 0
+
+DATABASE ───────────────────────────────────────────────────────────────────────────────────────
+branched
+gv_20260101_ab12cd  verified
+AGENTS ─────────────────────────────────────────────────────────────────────────────────────────
 no agents running
 
-LOG ──────────────────────────────────────────────────────────────────────────────
-00:00:08 db.branched branched from gv_20260101_ab12cd phase=branched
-00:00:12 service.ready web is running kind=web state=running url=http://127.0.0.1:41273
-00:00:14 env.ready pr-482 is ready proxied=true url=http://127.0.0.1:41273
+
+
+LOG ────────────────────────────────────────────────────────────────────────────────────────────
+00:00:13 service.ready web is running kind=web service=web state=running url=http://127.0.0.1:4…
+00:00:14 service.ready worker is running kind=worker service=worker state=running
+00:00:15 env.ready pr-482 is ready proxied=true url=http://127.0.0.1:41273
 ```
+
+<!-- frame:end -->
 
 ## What each pane shows
 
@@ -41,9 +52,15 @@ at `1/3 ready` is waiting on a health check, not on a build.
 
 **Network** is the egress ledger for this environment: how many requests the
 policy allowed, refused, answered from a mock pack, and recorded, and the host
-of the most recent refusal. A service that appears to hang on startup is very
-often a service whose first outbound call was refused, and this is where that
-shows up rather than in the service's own logs.
+of the most recent refusal. It reads zero in the frame above, and that is
+accurate rather than a placeholder: the counts come from `egress.decision`
+events, and in this release the proxy records its decisions for `af net
+explain` without publishing them to the event stream. A refusal is still there
+to be read, with `af net explain`, and it does not yet appear here.
+
+The prose above says what the pane is for. When the decisions reach the
+stream, a service that appears to hang on startup, because its first outbound
+call was refused, will show up here rather than only in its own logs.
 
 **Database** is the golden this environment branched from, whether that golden
 passed verification, and the phase of any masking run in flight.
