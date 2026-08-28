@@ -128,3 +128,8 @@ tools/docs/styles/Google/
 # into a repository.
 __pycache__/
 *.pyc
+
+# The report `af ci --output report.md` writes. Running an example produces one
+# in that example's directory, and it is an artifact of a run rather than part
+# of the example.
+examples/*/report.md

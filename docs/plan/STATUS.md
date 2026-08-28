@@ -303,7 +303,7 @@ output it never received is complete.
 | --- | --- | --- |
 | `internal/report` | proven | written for somebody who did not ask for it and has thirty seconds |
 | `af ci` | proven | run end to end; tears down on success, on failure, and on a missing runner |
-| `examples/github-workflow.yml` | written | a template to copy; the comment is updated rather than added |
+| `examples/github-workflow.yml` | written | a template to copy; the comment is updated rather than added. The workflow itself has still never run in Actions, which is what would make this proven, but the one command it runs has: `af ci --output report.md` was run against two examples end to end today, bringing the environment up, running the workflows, writing the report and tearing down, exit 0 in 95 and 154 seconds. Two defects came out of that and neither was visible in any file. The report is written with ANSI escape bytes in it, `\x1b[2m` and `\x1b[22m`, carried through from a Playwright call log into Markdown that this template posts verbatim as a pull request comment. And `examples/go-api` declared a persona that signs in with a password against a service that serves JSON and has no sign in page, so its workflow came back blocked every time, on a locator waiting for an email field that does not exist. Blocked does not count against a change, so it would have sat there looking like a feature. |
 | GitHub App mode | planned | belongs to the control plane, phase 8 |
 
 ## Phase 10. Release
