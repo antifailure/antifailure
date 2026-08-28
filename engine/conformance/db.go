@@ -798,9 +798,18 @@ func (h *harness) healthReportsDestroyed(ctx context.Context) {
 	}
 	got, err := h.p.Health(ctx, b)
 	if err != nil {
-		// An error is acceptable, since the branch genuinely is gone. What is
-		// not acceptable is reporting it healthy.
-		return
+		// An error used to be accepted here, on the reasoning that the branch
+		// genuinely is gone. That made the suite disagree with its own
+		// catalogue, which says "unreachable rather than erroring", and the
+		// description is what a provider author reads.
+		//
+		// The catalogue is right and both shipped providers already do it:
+		// teardown asks for health, so a provider that errors on a branch it
+		// has just removed makes a successful teardown look like a failure.
+		// Gone is an answer, not a fault.
+		h.t.Fatalf("Health returned an error for a destroyed branch: %v. "+
+			"Report it unreachable instead: teardown asks for health, and an "+
+			"error here makes a successful teardown look like a failure.", err)
 	}
 	if got.Reachable {
 		h.t.Fatal("a destroyed branch reports reachable, so an environment would " +
