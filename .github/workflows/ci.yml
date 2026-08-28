@@ -56,6 +56,7 @@ jobs:
           (cd engine && go test ./internal/cli -update-reference)
           (cd engine && go test ./internal/events -update-schema)
           (cd engine && go test ./internal/masking -update-transforms)
+          (cd engine && go test ./internal/hud -update-frames)
           git diff --exit-code
 
       - name: The release stamps a version that exists

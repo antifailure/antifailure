@@ -377,6 +377,7 @@ _generated:
     (cd engine && go test ./internal/cli -update-reference)
     (cd engine && go test ./internal/events -update-schema)
     (cd engine && go test ./internal/masking -update-transforms)
+    (cd engine && go test ./internal/hud -update-frames)
     git diff --exit-code -- \
       engine/internal/errors/codes.gen.go \
       engine/internal/proxyimage/sources.gen.go \
@@ -384,6 +385,8 @@ _generated:
       schemas/events.v1.json \
       docs/src/content/docs/reference/cli.md \
       docs/src/content/docs/reference/transforms.md \
+      docs/src/content/docs/guides/dashboard.md \
+      engine/internal/hud/testdata \
       docs/src/content/docs/reference/schemas
 
 # Regenerate and keep the result.
@@ -395,6 +398,7 @@ generate:
     cd engine && go test ./internal/cli -update-reference
     cd engine && go test ./internal/events -update-schema
     cd engine && go test ./internal/masking -update-transforms
+    cd engine && go test ./internal/hud -update-frames
 
 # The community build does not contain or need the enterprise edition.
 edition:
