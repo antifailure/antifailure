@@ -290,6 +290,32 @@ az ad app federated-credential create --id <objectId> --parameters '{
 }'
 ```
 
+**The subject in that example is probably wrong for your repository, and the
+error will not say so.** GitHub has moved to *immutable* OIDC subjects, which
+carry the numeric organisation and repository ids rather than their names:
+
+```
+subject claim - repo:antifailure@321004801/antifailure@1346757509:pull_request
+```
+
+Every example on the internet, including the one above, shows the login form.
+If yours is on the immutable format, Entra answers:
+
+```
+AADSTS700213: No matching federated identity record found for presented
+assertion subject 'repo:<org>@<orgid>/<repo>@<repoid>:pull_request'
+```
+
+which is accurate and reads like a typo in your own configuration. **Read the
+subject out of the failing job's log and create a credential that matches it
+exactly.** Keeping both forms costs nothing, an application takes twenty
+federated credentials, and it means a change to the format in either direction
+does not break the job:
+
+```sh
+gh api repos/<owner>/<repo> --jq '{repo_id:.id, owner_id:.owner.id}'
+```
+
 Then set `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` as
 repository secrets, plus `AZURE_TFSTATE_RG` and `AZURE_TFSTATE_ACCOUNT` if you
 want it to read real state. None of those five is a credential; they are

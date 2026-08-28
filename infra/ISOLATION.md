@@ -72,6 +72,18 @@ as decoration, just written in prose.
    nothing to rotate, and nothing that can be committed by accident. Revoking
    it is deleting a federated credential.
 
+   FOUR credentials rather than two, because GitHub has moved to IMMUTABLE
+   OIDC subjects that carry numeric organisation and repository ids rather than
+   their names, and every example everywhere still shows the name form:
+
+       repo:antifailure/antifailure:pull_request                      (name)
+       repo:antifailure@321004801/antifailure@1346757509:pull_request (immutable)
+
+   Only the second is what this repository actually presents. Entra's refusal,
+   AADSTS700213, quotes the subject it was given and is entirely accurate, and
+   it reads exactly like a typo in your own configuration. Both forms are
+   registered so that a change in either direction does not break the job.
+
    Its entire authority, and this is the whole list:
 
    | Scope | Role | Why |
