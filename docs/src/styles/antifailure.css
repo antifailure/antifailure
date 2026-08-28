@@ -217,6 +217,28 @@ body {
   white-space: nowrap;
 }
 
+/* On a phone, a single long identifier in a cell sets the whole table's
+ * minimum width and pushes the last column off the screen. A regular
+ * expression in the manifest reference did exactly that: the table needed
+ * 571px inside a 358px column, so the Notes column was cut off mid sentence.
+ * Letting code wrap there costs a line break in an identifier and buys a table
+ * that fits. */
+@media (max-width: 50rem) {
+  .sl-markdown-content :is(th, td) code {
+    white-space: normal;
+    /* anywhere, not break-word. break-word leaves a cell's minimum width at
+     * the width of its longest word, so one regular expression still pushed
+     * the table 115px past the screen. anywhere lets everything compress,
+     * which fits, and costs the first column a floor so that the layout
+     * cannot starve it and break "egress" across two lines. */
+    overflow-wrap: anywhere;
+  }
+
+  .sl-markdown-content :is(th, td):first-child {
+    min-width: 5.5rem;
+  }
+}
+
 .sl-markdown-content th {
   font-weight: 500;
   font-size: 0.8125rem;
@@ -226,12 +248,28 @@ body {
   border-bottom-color: var(--sl-color-hairline-light);
 }
 
-/* A wide table scrolls inside itself; the page never scrolls sideways. */
+/* A wide table scrolls inside itself; the page never scrolls sideways.
+ *
+ * The shadow at each edge is there because on a phone the scrollbar is
+ * invisible until you already know to scroll, and a reference table whose
+ * Notes column is cut off mid sentence reads as a broken page rather than a
+ * scrollable one. The two pairs of gradients are the standard CSS scroll
+ * shadow: the opaque covers scroll with the content, the shadows do not, so a
+ * shadow is only visible while there is something past that edge. No script,
+ * and nothing animates. */
 .sl-markdown-content .table-wrapper,
 .sl-markdown-content > table {
   display: block;
   overflow-x: auto;
   max-width: 100%;
+  background:
+    linear-gradient(to right, var(--sl-color-bg) 30%, transparent) left center,
+    linear-gradient(to left, var(--sl-color-bg) 30%, transparent) right center,
+    radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / 0.2), transparent) left center,
+    radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / 0.2), transparent) right center;
+  background-repeat: no-repeat;
+  background-size: 2.5rem 100%, 2.5rem 100%, 0.85rem 100%, 0.85rem 100%;
+  background-attachment: local, local, scroll, scroll;
 }
 
 /* ---------------------------------------------------------------- chrome */

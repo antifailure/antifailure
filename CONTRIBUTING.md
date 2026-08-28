@@ -58,7 +58,9 @@ else's GitHub account, which is a mistake this repository has actually made.
 CI checks both, so the hooks only decide whether you find out before the push
 or after it.
 
-You need Go 1.25, Node 24 or newer, npm, and a working Docker daemon.
+You need Go 1.25, Node 24 or newer, npm, and a working Docker daemon. The
+documentation gates need two more: `vale` for prose style and `lychee` for
+links, both `brew install`.
 `just setup` reports anything missing with the command that installs it, and
 it also checks the two things about your clone that CI enforces: that the
 hooks are on and that your commit identity is set.

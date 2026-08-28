@@ -1,0 +1,262 @@
+{
+  "$id": "https://antifailure.dev/schemas/events.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One thing that happened, as it appears on the event stream. The envelope is identical across the engine, the runner, and the control plane. Generated from the Go type and the event catalog by go test ./internal/events -update-schema.",
+  "properties": {
+    "data": {
+      "description": "The type specific payload. Always an object, never a scalar or a list.",
+      "type": "object"
+    },
+    "env": {
+      "description": "The environment identifier. Absent on engine wide events, which share the empty environment's sequence.",
+      "type": "string"
+    },
+    "id": {
+      "description": "Unique for this event.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "level": {
+      "description": "Classifies the event for display and filtering.",
+      "enum": [
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ]
+    },
+    "msg": {
+      "description": "A short human readable summary, already redacted, like everything else that reaches a log or an artifact.",
+      "type": "string"
+    },
+    "seq": {
+      "description": "A monotonic counter per environment, so a consumer can order events and notice a gap.",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "ts": {
+      "description": "When it happened, from the engine's injected clock.",
+      "format": "date-time",
+      "type": "string"
+    },
+    "type": {
+      "description": "What happened. Every value in the engine's catalog is listed here, so a consumer can reject an event it was not built to understand rather than guessing from the prefix.",
+      "oneOf": [
+        {
+          "const": "agent.finished",
+          "description": "An agent run finished. The data carries the verdict counts."
+        },
+        {
+          "const": "agent.started",
+          "description": "An agent workflow has started."
+        },
+        {
+          "const": "agent.step",
+          "description": "An agent took one action. The data carries its stated intent."
+        },
+        {
+          "const": "agent.verdict",
+          "description": "A workflow reached a verdict."
+        },
+        {
+          "const": "build.failed",
+          "description": "A service build failed."
+        },
+        {
+          "const": "build.finished",
+          "description": "A service build succeeded. The data carries the image digest."
+        },
+        {
+          "const": "build.log",
+          "description": "A line of build output, redacted."
+        },
+        {
+          "const": "build.started",
+          "description": "A service build has started."
+        },
+        {
+          "const": "capture.message",
+          "description": "An outbound email or message was captured into the inbox."
+        },
+        {
+          "const": "cron.fired",
+          "description": "A scheduled job fired."
+        },
+        {
+          "const": "db.branched",
+          "description": "A database branch is ready."
+        },
+        {
+          "const": "db.branching",
+          "description": "A database branch is being created from a golden version."
+        },
+        {
+          "const": "db.destroyed",
+          "description": "A branch was destroyed."
+        },
+        {
+          "const": "db.reset",
+          "description": "A branch was reset to its golden state."
+        },
+        {
+          "const": "egress.decision",
+          "description": "The proxy decided what to do with an outbound request."
+        },
+        {
+          "const": "egress.tripwire",
+          "description": "A request carrying a live credential was blocked."
+        },
+        {
+          "const": "engine.error",
+          "description": "An operation failed. The data carries the error code."
+        },
+        {
+          "const": "engine.retry",
+          "description": "A provider call is being retried after a transient failure."
+        },
+        {
+          "const": "engine.sink_dropped",
+          "description": "A sink fell behind and dropped events. The data carries the count."
+        },
+        {
+          "const": "engine.warning",
+          "description": "Something is not right but the operation continues."
+        },
+        {
+          "const": "env.creating",
+          "description": "An environment has started being created."
+        },
+        {
+          "const": "env.destroyed",
+          "description": "Teardown finished and every recorded resource is gone."
+        },
+        {
+          "const": "env.destroying",
+          "description": "Teardown has started."
+        },
+        {
+          "const": "env.failed",
+          "description": "An environment could not be created. The data carries the error code."
+        },
+        {
+          "const": "env.ready",
+          "description": "An environment is fully built, running, and reachable."
+        },
+        {
+          "const": "env.sleeping",
+          "description": "An idle environment has been scaled to zero."
+        },
+        {
+          "const": "env.waking",
+          "description": "A sleeping environment is being woken by a request."
+        },
+        {
+          "const": "golden.collected",
+          "description": "An unreferenced golden version was garbage collected."
+        },
+        {
+          "const": "golden.failed",
+          "description": "A golden refresh failed. No version was published."
+        },
+        {
+          "const": "golden.ready",
+          "description": "A golden version is masked, verified, and available to branch from."
+        },
+        {
+          "const": "golden.refreshing",
+          "description": "A golden refresh has started."
+        },
+        {
+          "const": "insight.finding",
+          "description": "A database insight was found: a lock, a regression, or a plan change."
+        },
+        {
+          "const": "load.finished",
+          "description": "A load run finished. The data carries the comparison against main."
+        },
+        {
+          "const": "load.sample",
+          "description": "A load test metric sample."
+        },
+        {
+          "const": "mask.applied",
+          "description": "Masking finished on a golden candidate."
+        },
+        {
+          "const": "mask.finding",
+          "description": "Verification found data matching a detector. The value is never included."
+        },
+        {
+          "const": "mask.planned",
+          "description": "Masking produced a plan. The data carries affected tables and row counts."
+        },
+        {
+          "const": "mask.progress",
+          "description": "A masking chunk finished. The data carries the fraction complete."
+        },
+        {
+          "const": "mask.verified",
+          "description": "Verification passed and an attestation was signed."
+        },
+        {
+          "const": "mask.verifying",
+          "description": "The verification scanner has started reading back the golden."
+        },
+        {
+          "const": "resource.created",
+          "description": "An external resource was created and committed to the journal."
+        },
+        {
+          "const": "resource.deleted",
+          "description": "An external resource was deleted and its journal entry compensated."
+        },
+        {
+          "const": "resource.leaked",
+          "description": "The leak detector found a resource the journal does not know about."
+        },
+        {
+          "const": "service.exited",
+          "description": "A service exited. The data carries the exit code."
+        },
+        {
+          "const": "service.log",
+          "description": "A line of service output, redacted."
+        },
+        {
+          "const": "service.ready",
+          "description": "A service passed its readiness check."
+        },
+        {
+          "const": "service.restarted",
+          "description": "A service was restarted after a crash or an eviction."
+        },
+        {
+          "const": "service.starting",
+          "description": "A service container or pod is starting."
+        },
+        {
+          "const": "webhook.delivered",
+          "description": "An inbound webhook was delivered and acknowledged."
+        },
+        {
+          "const": "webhook.failed",
+          "description": "An inbound webhook could not be delivered after its retries."
+        },
+        {
+          "const": "webhook.queued",
+          "description": "An inbound webhook was queued for delivery."
+        }
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "ts",
+    "seq",
+    "type",
+    "level"
+  ],
+  "title": "Antifailure event",
+  "type": "object"
+}
