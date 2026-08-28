@@ -64,6 +64,12 @@ const (
 	// Extension {extension} is required by the golden and is not available
 	// on the target.
 	AFDB007 Code = "AF-DB-007"
+	// The database provider {provider} at {endpoint} rejected the
+	// configured credential.
+	AFDB008 Code = "AF-DB-008"
+	// The Database Lab Engine at {endpoint} has no snapshot to build a
+	// golden from: {detail}
+	AFDB009 Code = "AF-DB-009"
 	// The storage pool has {available} free and the operation needs
 	// {needed}.
 	AFDB010 Code = "AF-DB-010"
@@ -445,6 +451,24 @@ var catalog = map[Code]Entry{
 		NextStep:  "Install {extension} on the target, or remove its use from the schema before refreshing.",
 		Docs:      "providers/overview",
 		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB008: {
+		Code:      AFDB008,
+		Area:      "DB",
+		Message:   "The database provider {provider} at {endpoint} rejected the configured credential.",
+		NextStep:  "Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing.",
+		Docs:      "providers/overview",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFDB009: {
+		Code:      AFDB009,
+		Area:      "DB",
+		Message:   "The Database Lab Engine at {endpoint} has no snapshot to build a golden from: {detail}",
+		NextStep:  "Wait for the engine's own data retrieval to finish, then refresh again; its progress is at GET /instance/retrieval.",
+		Docs:      "providers/dblab",
+		Retryable: true,
 		ExitCode:  ExitProvider,
 	},
 	AFDB010: {

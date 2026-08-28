@@ -28,6 +28,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/build"
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	dblabdb "github.com/antifailure/antifailure/engine/internal/db/dblab"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
@@ -632,6 +633,39 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 		return neondb.New(neondb.Options{
 			APIKey:      key,
 			ProjectID:   db.Project,
+			Clock:       o.opts.Clock,
+			MaxBranches: db.MaxBranches,
+		})
+
+	case schema.DBDBLab:
+		db := m.Database
+		if db.Project == "" {
+			return nil, aferrors.Coded(aferrors.AFMAN002,
+				"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+				"detail", "database.provider is dblab and database.project is empty; "+
+					"the provider needs the Database Lab Engine's API root, such as "+
+					"http://127.0.0.1:2345, because the engine is self hosted and there "+
+					"is no account to discover it from")
+		}
+		name := db.APIKeyEnv
+		if name == "" {
+			name = "DBLAB_VERIFICATION_TOKEN"
+		}
+		token, _, found, err := o.secretChain().Lookup(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || token.IsZero() {
+			// Refused rather than defaulted to an empty token. The engine will
+			// run without one, and an engine with no verification token is one
+			// anybody who can reach the port can clone production data from.
+			return nil, aferrors.Coded(aferrors.AFSEC001,
+				"names", name,
+				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
+		}
+		return dblabdb.New(dblabdb.Options{
+			Endpoint:    db.Project,
+			Token:       token,
 			Clock:       o.opts.Clock,
 			MaxBranches: db.MaxBranches,
 		})
