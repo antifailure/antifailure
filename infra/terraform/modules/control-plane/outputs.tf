@@ -24,7 +24,3 @@ output "bootstrap_job_name" {
 # `terraform output` that prints a database password to a terminal is a
 # password in a shell history and in a CI log.
 
-output "registry_login_server" {
-  value       = var.registry_enabled ? azurerm_container_registry.this[0].login_server : ""
-  description = "The registry the app pulls from. Push here with `az acr login`; no password is involved on either side."
-}

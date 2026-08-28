@@ -81,9 +81,6 @@ module "control_plane" {
   image_tag        = var.image_tag
   image_digest     = var.image_digest
 
-  registry_enabled = var.registry_enabled
-  ci_principal_id  = var.ci_principal_id
-
   database_sku          = var.database_sku
   database_storage_mb   = var.database_storage_mb
   backup_retention_days = var.backup_retention_days
@@ -92,6 +89,8 @@ module "control_plane" {
   min_replicas = var.min_replicas
   max_replicas = var.max_replicas
   app_base_url = var.app_base_url
+
+  event_retention_months = var.event_retention_months
 
   github_client_id     = var.github_client_id
   github_client_secret = var.github_client_secret

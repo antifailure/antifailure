@@ -23,30 +23,10 @@ resource "azurerm_container_app_environment" "this" {
 locals {
   secret_names = ["database-url", "migration-database-url", "github-client-id", "github-client-secret", "github-redirect-uri"]
 
-  # Where the image comes from, in one place, because three resources pull it
-  # and three copies of this expression is three chances for the jobs to run a
-  # different build from the app they are bootstrapping.
-  #
-  # An explicit image_repository always wins, so an operator can point this at
-  # their own mirror. Otherwise it is the registry in registry.tf.
-  effective_repository = (
-    var.image_repository != "" ? var.image_repository :
-    var.registry_enabled ? "${azurerm_container_registry.this[0].login_server}/control-plane" : ""
-  )
-
-  image = var.image_digest != "" ? "${local.effective_repository}@${var.image_digest}" : "${local.effective_repository}:${var.image_tag}"
-}
-
-# There is no sensible default image, so an installation that turned the
-# registry off and named no repository is stopped here rather than at the point
-# where Container Apps reports that ":v1.2.3" is not a valid image reference.
-resource "terraform_data" "image_is_resolvable" {
-  lifecycle {
-    precondition {
-      condition     = local.effective_repository != ""
-      error_message = "No image to run: set image_repository, or leave registry_enabled true so the module's own registry is used."
-    }
-  }
+  # Resolved once, because three resources pull it and three copies of this
+  # expression is three chances for the bootstrap job to migrate a database for
+  # a build the application is not running.
+  image = var.image_digest != "" ? "${var.image_repository}@${var.image_digest}" : "${var.image_repository}:${var.image_tag}"
 }
 
 # ---------------------------------------------------------------------------
@@ -84,15 +64,6 @@ resource "azurerm_container_app_job" "bootstrap" {
     identity_ids = [azurerm_user_assigned_identity.app.id]
   }
 
-  # Pull by identity. See registry.tf: there is no registry password anywhere in
-  # this deployment.
-  dynamic "registry" {
-    for_each = var.registry_enabled && var.image_repository == "" ? [1] : []
-    content {
-      server   = azurerm_container_registry.this[0].login_server
-      identity = azurerm_user_assigned_identity.app.id
-    }
-  }
 
   dynamic "secret" {
     for_each = toset(["database-url", "migration-database-url"])
@@ -126,7 +97,6 @@ resource "azurerm_container_app_job" "bootstrap" {
 
   depends_on = [
     azurerm_role_assignment.app_reads_secrets,
-    azurerm_role_assignment.app_pulls_images,
     azurerm_postgresql_flexible_server_database.this,
   ]
 }
@@ -159,15 +129,6 @@ resource "azurerm_container_app_job" "maintenance" {
     identity_ids = [azurerm_user_assigned_identity.app.id]
   }
 
-  # Pull by identity. See registry.tf: there is no registry password anywhere in
-  # this deployment.
-  dynamic "registry" {
-    for_each = var.registry_enabled && var.image_repository == "" ? [1] : []
-    content {
-      server   = azurerm_container_registry.this[0].login_server
-      identity = azurerm_user_assigned_identity.app.id
-    }
-  }
 
   secret {
     name                = "migration-database-url"
@@ -199,10 +160,7 @@ resource "azurerm_container_app_job" "maintenance" {
 
   tags = var.tags
 
-  depends_on = [
-    azurerm_role_assignment.app_reads_secrets,
-    azurerm_role_assignment.app_pulls_images,
-  ]
+  depends_on = [azurerm_role_assignment.app_reads_secrets]
 }
 
 # ---------------------------------------------------------------------------
@@ -225,15 +183,6 @@ resource "azurerm_container_app" "this" {
     identity_ids = [azurerm_user_assigned_identity.app.id]
   }
 
-  # Pull by identity. See registry.tf: there is no registry password anywhere in
-  # this deployment.
-  dynamic "registry" {
-    for_each = var.registry_enabled && var.image_repository == "" ? [1] : []
-    content {
-      server   = azurerm_container_registry.this[0].login_server
-      identity = azurerm_user_assigned_identity.app.id
-    }
-  }
 
   dynamic "secret" {
     for_each = toset(["database-url", "github-client-id", "github-client-secret", "github-redirect-uri"])
@@ -329,8 +278,5 @@ resource "azurerm_container_app" "this" {
   # the first revision comes up against a schema that does not exist yet and
   # against a role with no grants, which is a CrashLoop whose cause is an
   # ordering rather than a bug.
-  depends_on = [
-    azurerm_container_app_job.bootstrap,
-    azurerm_role_assignment.app_pulls_images,
-  ]
+  depends_on = [azurerm_container_app_job.bootstrap]
 }

@@ -132,9 +132,8 @@ variable "golden_soft_delete_days" {
 
 # --- application ----------------------------------------------------------
 variable "image_repository" {
-  type        = string
-  default     = ""
-  description = "Overrides the module's own registry. Empty means the registry in registry.tf, pulled by managed identity."
+  type    = string
+  default = "ghcr.io/antifailure/control-plane"
 }
 variable "image_tag" {
   type    = string
@@ -190,23 +189,3 @@ variable "github_client_secret" {
 }
 variable "github_redirect_uri" { type = string }
 
-# --- registry --------------------------------------------------------------
-variable "registry_enabled" {
-  type        = bool
-  default     = true
-  description = "A registry in this tenant, so the pull is an identity rather than a stored password. See registry.tf for why this is not ghcr.io."
-}
-variable "registry_sku" {
-  type        = string
-  default     = "Basic"
-  description = "Basic is 10 GiB and one webhook, which is more than one image needs."
-  validation {
-    condition     = contains(["Basic", "Standard", "Premium"], var.registry_sku)
-    error_message = "registry_sku must be Basic, Standard or Premium."
-  }
-}
-variable "ci_principal_id" {
-  type        = string
-  default     = ""
-  description = "Object id of the federated CI identity, granted AcrPush on the registry alone. Empty leaves CI unable to push, which is the safe default for an installation that deploys by hand."
-}

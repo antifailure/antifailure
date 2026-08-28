@@ -62,20 +62,8 @@ variable "log_retention_days" {
 }
 
 variable "image_repository" {
-  type        = string
-  default     = ""
-  description = "Overrides the registry the module creates. Empty is the normal case: the image is pulled from that registry by managed identity."
-}
-
-variable "registry_enabled" {
-  type    = bool
-  default = true
-}
-
-variable "ci_principal_id" {
-  type        = string
-  default     = ""
-  description = "Object id of the federated CI identity. Granted AcrPush on the registry alone, so continuous deployment can publish an image and nothing else."
+  type    = string
+  default = "ghcr.io/antifailure/control-plane"
 }
 
 variable "image_tag" {
@@ -135,4 +123,10 @@ variable "github_client_secret" {
 
 variable "github_redirect_uri" {
   type = string
+}
+
+variable "event_retention_months" {
+  type        = number
+  default     = null
+  description = "Null keeps every event forever. Staging sets a year, because a partitioned table with no retention is a partition per month and no reason to ever drop one."
 }
