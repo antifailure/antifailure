@@ -17,6 +17,7 @@ import (
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 
+	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
@@ -442,4 +443,30 @@ func TestUpRefusesANamespaceItDoesNotOwn(t *testing.T) {
 		r := newRuntime(labelsFor(envID, "namespace"))
 		require.NoError(t, r.ensureNamespace(context.Background(), envID))
 	})
+}
+
+// TestJournalledKindsAreTheOnesTheJournalKnows closes the gap the layering
+// leaves open.
+//
+// A runtime is handed a journal callback taking a plain string and does not
+// import the journal, which keeps the provider interface free of the engine's
+// storage and means nothing in the compiler notices when a runtime invents a
+// kind. This one did. It wrote "namespace" while journal.KindNamespace has
+// been "k8s.namespace" since before this package existed, and "deployment"
+// when there was no constant at all.
+//
+// That is not cosmetic, because Replay picks a deleter with
+// reg.Lookup(rec.Provider, rec.Kind). A deleter correctly registered under
+// journal.KindNamespace would not have matched one row this runtime wrote, so
+// the compensation path could not have cleaned up a Kubernetes environment
+// however carefully it was written.
+//
+// A test may import what the file under test may not, which is the whole
+// reason this can be checked at all.
+func TestJournalledKindsAreTheOnesTheJournalKnows(t *testing.T) {
+	require.Equal(t, string(journal.KindNamespace), kindNamespace,
+		"the namespace kind this runtime writes is not the one the journal names, "+
+			"so nothing registered for journal.KindNamespace can ever delete it")
+	require.Equal(t, string(journal.KindDeployment), kindDeployment,
+		"the deployment kind this runtime writes is not the one the journal names")
 }

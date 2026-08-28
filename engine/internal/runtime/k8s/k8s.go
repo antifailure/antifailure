@@ -373,3 +373,22 @@ func (r *Runtime) clusterResolver(ctx context.Context) (string, error) {
 			"to forward the names inside the environment. Set runtime.resolver if this "+
 			"cluster's resolver is somewhere else")
 }
+
+// The kinds this runtime journals.
+//
+// These are the stable strings from journal.Kind, written out rather than
+// imported. A runtime does not import the journal: it is handed a callback
+// taking a plain string, which keeps the provider interface free of the
+// engine's storage. The cost of that layering is that nothing in the compiler
+// notices when a runtime invents a kind, and this runtime did. It journalled
+// "namespace" while the catalogue has said k8s.namespace since before this
+// package existed, and "deployment" when no constant existed at all, so a
+// deleter registered under journal.KindNamespace would never have matched a
+// single row this runtime wrote.
+//
+// The equality is asserted in this package's tests, which may import the
+// journal even though this file may not.
+const (
+	kindNamespace  = "k8s.namespace"
+	kindDeployment = "k8s.deployment"
+)

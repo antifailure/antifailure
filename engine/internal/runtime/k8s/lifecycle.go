@@ -72,7 +72,7 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	// report, which is a row nothing can ever act on. The Deployments are
 	// journalled as well because the inventory does report them and they are
 	// what somebody reads to see what an environment is running.
-	if err := journal("namespace", namespace); err != nil {
+	if err := journal(kindNamespace, namespace); err != nil {
 		return env, err
 	}
 	if err := r.ensureNamespace(ctx, spec.EnvID); err != nil {
@@ -190,7 +190,7 @@ func (r *Runtime) startProxy(
 	// Only the Deployment. The Secret and the Service live in the namespace
 	// and go when it goes, and a journal entry naming something the inventory
 	// does not report is a record nothing can act on.
-	if err := journal("deployment", namespace+"/"+deployment.Name); err != nil {
+	if err := journal(kindDeployment, namespace+"/"+deployment.Name); err != nil {
 		return "", err
 	}
 	if err := r.createOrReplaceSecret(ctx, namespace, secret); err != nil {
@@ -260,7 +260,7 @@ func (r *Runtime) startService(
 		}
 	}
 
-	if err := journal("deployment", namespace+"/"+s.Name); err != nil {
+	if err := journal(kindDeployment, namespace+"/"+s.Name); err != nil {
 		return running, err
 	}
 	deployment := r.deploymentFor(spec, s, namespace, resolverIP)
