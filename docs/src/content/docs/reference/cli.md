@@ -481,9 +481,16 @@ token arrives here over TLS and goes straight into the operating system's
 credential store. The credential is never shown, never copied through a
 clipboard, and never written to a shell history file.
 
-The token is scoped to reading environments and runs and writing events. It
-cannot manage members, change policy, or read a provider key, and asking for
-more is refused by the control plane rather than granted quietly.
+By default the token can read environments and runs and write events, and
+nothing else: it cannot manage members, change policy, or touch a provider key.
+
+--scope asks for more. The scope is shown on the screen where the login is
+approved, so nobody grants a capability without seeing the words:
+
+  af login --scope providers.write
+
+Nothing reads a key back. There is no scope for it, because storing a secret and
+retrieving one are different capabilities and a terminal needs only the first.
 
 Run af logout to remove it from this machine and revoke it everywhere.
 
@@ -495,6 +502,7 @@ af login [flags]
 | --- | --- | --- |
 | `--control-plane` | - | The control plane to sign in to (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
 | `--no-browser` | `false` | Do not try to open a browser; print the address instead. |
+| `--scope` | - | Ask for a capability beyond the default, e.g. providers.write. Repeatable. |
 
 ### `af logout`
 
@@ -693,6 +701,129 @@ in the decision, no matter where it sits in the file.
 ```
 af net policy
 ```
+
+### `af provider`
+
+Your own model provider keys and their monthly caps.
+
+Stores your Anthropic and OpenAI keys on the control plane, sealed with a secret
+that is not in its database, and caps what may be spent on each one per month.
+
+Runs use your key. We never see it after you save it: what any screen or any
+command here can read is the last four characters and a fingerprint.
+
+These commands need a token that asked for the capability:
+
+  af login --scope providers.write
+
+A token from a plain af login cannot reach a key, which is deliberate. The scope
+appears on the screen where the login is approved, so nobody grants this without
+seeing the words.
+
+```
+af provider
+```
+
+Subcommands:
+
+- [`af provider budget`](#af-provider-budget) Cap what may be spent on a provider this month.
+- [`af provider list`](#af-provider-list) What is stored, and what it may spend this month.
+- [`af provider rm`](#af-provider-rm) Remove a stored key.
+- [`af provider set`](#af-provider-set) Store or rotate a key, without it touching the command line.
+
+### `af provider budget`
+
+Cap what may be spent on a provider this month.
+
+Sets the monthly cap in US dollars. The cap is checked BEFORE the key is
+decrypted, so a run with no allowance never causes the key to exist in the
+control plane's memory at all. That ordering is the difference between a cap and
+a suggestion.
+
+A provider with no cap cannot spend anything. A missing cap reads as zero rather
+than as unlimited, because the alternative on somebody else's key is an
+unbounded bill.
+
+A cap of zero is allowed and means exactly that: spend nothing on this provider.
+
+```
+af provider budget <provider> <usd> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af provider list`
+
+What is stored, and what it may spend this month.
+
+Shows which providers have a key, the last four characters of each, and the
+monthly cap against what has been spent.
+
+It does not show a key, and there is no flag that would. The last four and the
+fingerprint are enough to answer the question this is usually asked to answer:
+whether the key here is the one you think it is.
+
+```
+af provider list [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af provider rm`
+
+Remove a stored key.
+
+Removes the stored key. Runs that need this provider are refused afterwards,
+with a message saying why, rather than falling back to a key of ours.
+
+This does not reach the provider. If the key leaked, revoke it there as well:
+removing it here stops us using it and stops nobody else.
+
+Removing a key that is not there is not an error. This is the command somebody
+runs in a hurry, and a retry after a timeout must not report failure for
+reaching the state they asked for.
+
+```
+af provider rm <provider> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af provider set`
+
+Store or rotate a key, without it touching the command line.
+
+Stores a key for anthropic or openai, replacing whatever was there.
+
+The key is never an argument. There is no --key flag, deliberately: a secret on
+a command line is in the shell's history file, is visible in ps to everybody
+else on the machine, and is in any recording of the terminal. So there are three
+ways to give it, and none of them put it in the argument vector:
+
+  af provider set anthropic                      asks, without echoing
+  af provider set anthropic --stdin < key.txt    reads one line
+  af provider set anthropic --from-env NAME      reads that environment variable
+
+Rotating stores the new key and revokes the old one together. If the key given
+is the one already stored, that is reported rather than accepted quietly: it is
+the mistake people make at the moment they believe they have replaced a leaked
+key.
+
+```
+af provider set <provider> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+| `--from-env` | - | Read the key from this environment variable instead of asking. |
+| `--stdin` | `false` | Read the key from standard input, one line. |
 
 ### `af runner`
 
