@@ -81,6 +81,9 @@ module "control_plane" {
   image_tag        = var.image_tag
   image_digest     = var.image_digest
 
+  registry_enabled = var.registry_enabled
+  ci_principal_id  = var.ci_principal_id
+
   database_sku          = var.database_sku
   database_storage_mb   = var.database_storage_mb
   backup_retention_days = var.backup_retention_days

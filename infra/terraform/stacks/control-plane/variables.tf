@@ -62,8 +62,20 @@ variable "log_retention_days" {
 }
 
 variable "image_repository" {
-  type    = string
-  default = "ghcr.io/antifailure/control-plane"
+  type        = string
+  default     = ""
+  description = "Overrides the registry the module creates. Empty is the normal case: the image is pulled from that registry by managed identity."
+}
+
+variable "registry_enabled" {
+  type    = bool
+  default = true
+}
+
+variable "ci_principal_id" {
+  type        = string
+  default     = ""
+  description = "Object id of the federated CI identity. Granted AcrPush on the registry alone, so continuous deployment can publish an image and nothing else."
 }
 
 variable "image_tag" {
