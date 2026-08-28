@@ -72,23 +72,11 @@ jobs:
         working-directory: docs
 
       - name: Assemble one site
-        # The marketing site at the root, the documentation under /docs. This
-        # is the step that existed only in somebody's shell history, which is
-        # why the layout is written down here rather than remembered.
-        run: |
-          set -euo pipefail
-          test -d www/out || { echo "www did not produce out/; next.config output: export may have changed"; exit 1; }
-          test -d docs/dist || { echo "docs did not produce dist/"; exit 1; }
-          rm -rf site && mkdir -p site
-          cp -R www/out/. site/
-          # Astro nests its output under `base`, so dist already contains docs/.
-          # Copy whichever shape it produced rather than assuming one.
-          if [ -d docs/dist/docs ]; then cp -R docs/dist/docs site/docs
-          else mkdir -p site/docs && cp -R docs/dist/. site/docs/
-          fi
-          test -f site/index.html || { echo "no index.html at the site root"; exit 1; }
-          test -d site/docs || { echo "no /docs in the assembled site"; exit 1; }
-          echo "assembled $(find site -type f | wc -l | tr -d ' ') files"
+        # tools/site/assemble.sh, which CI runs too. This layout used to live
+        # here and again in ci.yml, and two copies of a thing is one more than
+        # anybody keeps true: they had already drifted, and neither copy ever
+        # placed /install.sh or the schemas the product hard-codes.
+        run: tools/site/assemble.sh
 
       - name: Check the assembled site before publishing it
         # The defect that prompted all of this was 78 links pointing outside
