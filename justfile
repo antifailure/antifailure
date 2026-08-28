@@ -71,6 +71,7 @@ gate: _reports
     run "spelling"                       just spell
     run "prose style"                    just vale
     run "every link resolves"            just links
+    run "prose stays readable"           just readability
     run "gate matches CI"                just gatecheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
@@ -330,6 +331,15 @@ links:
     cp -R www/out/. site/
     cp -R docs/dist site/docs
     lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
+
+# How hard each page is to read, worst first.
+#
+# The threshold is a regression guard rather than a style rule. The hardest
+# page today averages 23 words a sentence, so 28 leaves five words of headroom:
+# it fires on a page that drifted, not on a page whose subject needs long
+# sentences. Run it with no argument to read the whole report.
+readability:
+    go run ./tools/readability . --max 28
 
 # The G8 forbidden token scan: notes to the author, unfilled slots, names that
 # belong to a person rather than the product, addresses that resolve only on
