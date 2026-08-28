@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
@@ -236,7 +237,7 @@ var ErrNotOurs = errors.New("dockerutil: the resource is not managed by Antifail
 func RemoveContainer(ctx context.Context, cli *client.Client, id string) error {
 	insp, err := cli.ContainerInspect(ctx, id)
 	if err != nil {
-		if client.IsErrNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return nil
 		}
 		return err
@@ -245,7 +246,7 @@ func RemoveContainer(ctx context.Context, cli *client.Client, id string) error {
 		return fmt.Errorf("%w: container %s", ErrNotOurs, ShortID(id))
 	}
 	err = cli.ContainerRemove(ctx, id, container.RemoveOptions{Force: true, RemoveVolumes: true})
-	if err != nil && client.IsErrNotFound(err) {
+	if err != nil && cerrdefs.IsNotFound(err) {
 		return nil
 	}
 	return err

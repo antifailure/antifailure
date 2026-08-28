@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	dockerbuild "github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -132,7 +132,7 @@ func (r *Runtime) ensureOneNetwork(
 // two line Dockerfile into a temporary directory to hand it back to the daemon
 // is a filesystem round trip for nothing, and one more thing to clean up.
 func (r *Runtime) ensureIngressImage(ctx context.Context) error {
-	if _, _, err := r.cli.ImageInspectWithRaw(ctx, ingressImage); err == nil {
+	if _, err := r.cli.ImageInspect(ctx, ingressImage); err == nil {
 		return nil
 	}
 	var buf bytes.Buffer
@@ -198,7 +198,7 @@ func (r *Runtime) disconnectForeign(ctx context.Context, networkID string) {
 	}
 	for id := range insp.Containers {
 		if err := r.cli.NetworkDisconnect(ctx, networkID, id, true); err != nil {
-			if client.IsErrNotFound(err) {
+			if cerrdefs.IsNotFound(err) {
 				continue
 			}
 		}

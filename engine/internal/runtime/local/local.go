@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
@@ -332,7 +333,7 @@ func (r *Runtime) Down(ctx context.Context, envID string) (provider.Teardown, er
 		// the network and it is reported pending forever.
 		r.disconnectForeign(ctx, n.ID)
 		if err := r.cli.NetworkRemove(ctx, n.ID); err != nil {
-			if client.IsErrNotFound(err) {
+			if cerrdefs.IsNotFound(err) {
 				continue
 			}
 			td.Pending = append(td.Pending, provider.PendingResource{

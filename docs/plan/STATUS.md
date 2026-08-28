@@ -153,7 +153,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 2.4 `af init` | proven | Validates its own output before writing. |
 | 2.5 Secrets subsystem | proven | Sources with precedence, a dotenv reader, an encrypted local store, and a resolution layer. A sandbox credential reaches the sidecar as a file and the service as a marker; proven against a running container. The OS keyring is an interface with a fake: no real credential store is wired yet. |
 | 2.6 `af doctor` | proven | |
-| 2.7 HUD | proven | Model, rendering, non-TTY fallback, the Bubble Tea program, and `af up --hud`, which is the caller it did not have. `engine/internal/hud`: reorder window that abandons a gap rather than stalling, three layouts (stacked at 80, two column at 120, three column at 160) with seven golden frames committed, keyboard navigation, resize handling, and a queue that drops and counts rather than ever applying backpressure to the bus. Wiring it end to end meant making the engine emit what the dashboard draws: `internal/env` now publishes env.creating, golden.ready, db.branching, db.branched, build.started, build.log, build.finished, build.failed, service.starting, service.ready, service.exited, env.ready, env.failed, env.destroying and env.destroyed, and `Orchestrator.AddSink` attaches a subscriber to the session bus each command opens. Before this the bus had no subscribers at all and every event the journal published was delivered to nobody. Four tests in `internal/env` prove the attachment against a real Up, with no Docker daemon, by stopping the run at the policy hook; a negative control that removes the AddSink loop turns all four red. Looking at a frame built from the real stream found three more things reading the code did not: the golden fixtures were scripted with `service.started`, which is not an event type, so six committed frames were pictures of a stream the engine cannot produce; every log line repeated `env=` for the environment named in the header; and a verified golden showed as unverified on every ordinary run, because the pane only believed mask.verified and an ordinary run branches from a golden verified days earlier. goleak found a goroutine leaked per dashboard, from a cancellation watcher receiving on a nil Done channel, and a leaked drainer in the package's own concurrency test. `Program.Close` now signals on a second channel rather than closing the one producers write to, so Send after Close is a counted drop instead of a panic, and Close is idempotent because both the bus and the command legitimately call it. Outstanding: the vhs recordings for the docs page. `docs/guides/dashboard.md` documents the panes, the keys and the fallback without them. |
+| 2.7 HUD | proven | Model, rendering, non-TTY fallback, the Bubble Tea program, and `af up --hud`, which is the caller it did not have. `engine/internal/hud`: reorder window that abandons a gap rather than stalling, three layouts (stacked at 80, two column at 120, three column at 160) with seven golden frames committed, keyboard navigation, resize handling, and a queue that drops and counts rather than ever applying backpressure to the bus. Wiring it end to end meant making the engine emit what the dashboard draws: `internal/env` now publishes env.creating, golden.ready, db.branching, db.branched, build.started, build.log, build.finished, build.failed, service.starting, service.ready, service.exited, env.ready, env.failed, env.destroying and env.destroyed, and `Orchestrator.AddSink` attaches a subscriber to the session bus each command opens. Before this the bus had no subscribers at all and every event the journal published was delivered to nobody. Four tests in `internal/env` prove the attachment against a real Up, with no Docker daemon, by stopping the run at the policy hook; a negative control that removes the AddSink loop turns all four red. Looking at a frame built from the real stream found three more things reading the code did not: the golden fixtures were scripted with `service.started`, which is not an event type, so six committed frames were pictures of a stream the engine cannot produce; every log line repeated `env=` for the environment named in the header; and a verified golden showed as unverified on every ordinary run, because the pane only believed mask.verified and an ordinary run branches from a golden verified days earlier. goleak found a goroutine leaked per dashboard, from a cancellation watcher receiving on a nil Done channel, and a leaked drainer in the package's own concurrency test. `Program.Close` now signals on a second channel rather than closing the one producers write to, so Send after Close is a counted drop instead of a panic, and Close is idempotent because both the bus and the command legitimately call it. Outstanding: the vhs recordings for the docs page. `docs/guides/dashboard.md` documents the panes, the keys and the fallback without them. Driven by a real `af up` on 2026-08-27, not only by fixtures: the non-TTY fallback rendered env.creating, golden.ready with verified=true, db.branching, ninety build.log lines, build.finished with its duration, service.starting, and a failure at error level with its reason. That run also showed what the display does not say: the runtime's progress lines went to the terminal and not to the stream, and dashboard mode silences the terminal, so the readiness wait, which is the longest part of a run, drew nothing at all. They are on the stream now, tagged with the service they name when they name one that exists. |
 | 2.8 Event sinks | proven | NDJSON with rotation, JSON, memory, and a replay reader. |
 
 ## Supporting packages
@@ -273,10 +273,29 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | --- | --- | --- |
 | `.github/workflows/ci.yml` | proven | engine with the race detector against a real daemon, runner with a real browser, edition boundary, credential scan |
 | `tools/scanrepo` | proven | uses the engine's own detector, so CI and the proxy cannot disagree |
+| `golangci-lint` | proven | zero findings across the engine, and a gate in CI and in `just gate` rather than advice |
+| `tools/gatecheck` | proven | 22 gates in CI, every one reachable from `just gate`; one exemption left, `vuln`, which security.yml owns |
 
 It found two real bugs on its first two runs: stale packaged sidecar
 sources, and a database provider that inventoried every managed container
 and so blamed itself for the runtime's.
+
+Getting the linter to zero was not a formatting exercise. It found five
+symbols that were defined and never called, which is the shape a half
+finished feature takes: a duplicate path existence check beside the one that
+runs, a command tree walker whose comment named two callers it did not have,
+a helper for commands that do not exist, a scheduler field holding a number
+already in the field beside it, and `regionCodes`, a lexicon with no
+transform to use it. The last one was a missing feature rather than a
+leftover, so `region` is now a masking transform.
+
+It also found a property test that built a record of what happened to every
+resource and asserted nothing about it, three places where an error was
+formatted into a string instead of wrapped, so `errors.Is` stopped working
+across them, and seven writes to the output stream whose failure was
+discarded. That last one is why `af` now exits non zero when it could not
+write what it was asked to write: reporting success tells a script that the
+output it never received is complete.
 
 ## Phase 9. GitHub
 
@@ -362,9 +381,12 @@ indistinguishable from one that works until somebody relies on it.
 
 | Component | State | Notes |
 | --- | --- | --- |
-| 11.2 Generated references | proven | The command reference is generated from the cobra tree and the error reference from the catalog. Both fail the build when they drift. |
+| 11.2 Generated references | proven | Five references are generated and every one fails the build when it drifts: the command reference from the cobra tree, the error reference from the catalog, the transform reference from the masking registry, and a page per JSON Schema from `tools/schemadoc`. The event envelope schema itself is generated from the Go type, with a test that walks the struct so a field added without a schema entry fails rather than ships. |
 | 11.4 Error catalog completeness | proven | Every entry is either returned somewhere or marked reserved, and a reserved entry that something returns fails too. It found 38 entries documenting errors this version cannot produce. |
-| 11.1, 11.3, 11.5, 11.6 | planned | The site, the guides, and the examples. Assigned elsewhere. |
+| 11.5 Contributing and provider authoring | written | `CONTRIBUTING.md`, `docs/contributing/provider-authoring.md`, and an ADR directory with a template and two decisions. The worked example the plan asks for exists as `engine/internal/testutil/fakes/inmemory.go` and the guide does not yet walk through it. No RFC process. |
+| 11.6 Documentation quality assurance | written | The four gates the plan names are at zero findings and run in CI: vale with the Google style at error level, cspell with a project dictionary, lychee over the assembled site including fragments, and the G8 forbidden token scan. Not built: a readability report per page, screenshot freshness by regeneration, and the scripted new user walkthrough that times the getting started path. |
+| 11.1 Information architecture and content | written | 43 pages across the fixed architecture, and the site is live. Missing what the plan names by framework: Next.js with Supabase, Next.js with Neon, Django, Rails, monorepos. Getting started has one page rather than the three the plan asks for, so the GitHub Actions and hosted paths are undocumented. |
+| 11.3 Examples and tutorials | planned | No `examples/` directory. The three minimal applications, their manifests, and the recorded tutorials do not exist. |
 
 ## What is not built, and why
 

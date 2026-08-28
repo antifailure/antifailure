@@ -910,13 +910,25 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// allow or block never terminates a connection, and asking its services to
 	// trust a certificate they will never see is a change to their trust store
 	// for no reason.
+	// The runtime's progress lines go to the event stream as well as to the
+	// terminal. They are the only thing said during the readiness wait, which
+	// is the longest part of a run, and in dashboard mode the terminal
+	// reporter is silenced, so without this the display goes quiet for
+	// minutes at exactly the point somebody is watching it.
+	names := make(map[string]bool, len(specs))
+	for _, sv := range specs {
+		names[sv.Name] = true
+	}
 	spec := provider.EnvSpec{
 		EnvID: o.envID, Branch: o.opts.Branch, Services: specs,
 		Egress:               o.opts.Manifest.Egress,
 		DatabaseURL:          insideURL,
 		MigrationDatabaseURL: insideMigrateURL,
 		Journal:              recordIntent,
-		Progress:             o.progress,
+		Progress: func(line string) {
+			o.event(s, events.ServiceLog, line, serviceField(line, names)...)
+			o.progress(line)
+		},
 	}
 	spec.SandboxCredentials = resolved.Sidecar
 	spec.ModelEnv = o.modelEnv()
@@ -995,6 +1007,21 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	res.Proxied = env.ProxyReady
 	res.Duration = o.opts.Clock.Since(started)
 	return res, nil
+}
+
+// serviceField attaches a service name to a runtime progress line when the
+// line names one.
+//
+// The runtime writes "web: running migrations", so the name is the prefix. It
+// is matched against the services this environment actually has rather than
+// split on the first colon, because "error: something" is not a service called
+// error and a row named for one would be a row nobody can explain.
+func serviceField(line string, names map[string]bool) []events.Field {
+	name, _, ok := strings.Cut(line, ": ")
+	if !ok || !names[name] {
+		return nil
+	}
+	return []events.Field{events.F("service", name)}
 }
 
 // database makes sure a verified golden exists and branches it.

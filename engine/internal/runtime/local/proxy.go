@@ -13,11 +13,10 @@ import (
 	"strings"
 	"time"
 
-	dockertypes "github.com/docker/docker/api/types"
+	cerrdefs "github.com/containerd/errdefs"
 	dockerbuild "github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
 
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 
@@ -225,7 +224,7 @@ func (r *Runtime) startedProxyIP(ctx context.Context, id, networkID string) (str
 // It is what every service is pointed at for DNS, so a sidecar without one
 // means an environment where nothing is intercepted, which would look
 // contained and would not be.
-func runningProxyIP(settings *dockertypes.NetworkSettings, networkID string) (string, error) {
+func runningProxyIP(settings *container.NetworkSettings, networkID string) (string, error) {
 	if settings != nil {
 		for _, ep := range settings.Networks {
 			if ep != nil && ep.NetworkID == networkID && ep.IPAddress != "" {
@@ -294,7 +293,7 @@ func (r *Runtime) proxyStillRunning(ctx context.Context, id, out string) error {
 // ensureProxyImage builds the sidecar image if it is not already present.
 func (r *Runtime) ensureProxyImage(ctx context.Context, progress func(string)) error {
 	tag := proxyimage.Tag()
-	if _, _, err := r.cli.ImageInspectWithRaw(ctx, tag); err == nil {
+	if _, err := r.cli.ImageInspect(ctx, tag); err == nil {
 		return nil
 	}
 	progress("building the egress proxy (once per version)")
@@ -408,7 +407,7 @@ func (r *Runtime) Decisions(ctx context.Context, envID string, limit int) ([]Dec
 	}
 	id := proxyName(envID)
 	if _, err := r.cli.ContainerInspect(ctx, id); err != nil {
-		if client.IsErrNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			// Nothing running is not an error. Somebody asking what the
 			// environment reached before bringing it up should be told that,
 			// not handed a Docker error.
@@ -525,7 +524,7 @@ func (r *Runtime) Messages(ctx context.Context, envID string, limit int) ([]Mess
 func (r *Runtime) sidecarLines(ctx context.Context, envID string, tail int) ([]string, error) {
 	id := proxyName(envID)
 	if _, err := r.cli.ContainerInspect(ctx, id); err != nil {
-		if client.IsErrNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			// Nothing running is not an error. Somebody asking what arrived
 			// before bringing the environment up should be told that, not
 			// handed a Docker error.
