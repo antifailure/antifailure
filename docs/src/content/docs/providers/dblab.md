@@ -136,7 +136,9 @@ network. The connection string handed to a service is the same one `af` uses,
 which means the host in `project` has to be a host that **a container in the
 environment can resolve and reach**, not just one this machine can.
 
-Practically: `project: http://dblab.internal:2345` or a LAN address is right.
+Practically: a name your containers can resolve, such as
+`project: http://dblab.example.com:2345`, or the address the engine's machine
+has on your network.
 `project: http://127.0.0.1:2345` is right for running the conformance suite and
 for `af golden refresh`, both of which connect from the host process, and wrong
 for `af up`, because inside a service container `127.0.0.1` is that container.
