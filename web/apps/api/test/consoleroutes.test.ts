@@ -30,6 +30,7 @@ import {
   type Org,
 } from './harness.ts'
 import type { Role } from '../src/permissions.ts'
+import { appendAudit } from '@antifailure/db'
 import { listKeys, listBudgets } from '../src/providers/store.ts'
 
 const ANTHROPIC = ['sk', 'ant', 'api03'].join('-')
@@ -479,5 +480,177 @@ describe('the evidence pages with rows in them', {
   test('a rule that applies to every repository says so', async () => {
     const body = await pageAt('/network')
     assert.match(body, />all</)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('the console with a populated organization', {
+  skip: (await available()) ? false : 'no Postgres at AF_TEST_DATABASE_URL',
+}, () => {
+  // The console has never had anything in it.
+  //
+  // There is no GitHub App yet, so no installation, so no repository, so no
+  // runs and no artifacts, and every page on the live site renders its empty
+  // state. That is exactly the condition under which a page that cannot render
+  // a ROW looks perfectly healthy: the query runs, the table is empty, the
+  // empty state appears, and nothing has exercised the loop that draws data.
+  //
+  // So this seeds one of everything and reads the rendered values back. It is
+  // written before the console is populated on purpose. The alternative is
+  // finding these the day a real repository is connected, in front of somebody.
+
+  let api: ApiHarness
+  let org: Org
+  let owner: { cookie: string }
+  let runId: string
+
+  before(async () => {
+    api = await startApi()
+    org = await seedOrg(api.admin, 'console-full')
+    owner = await signInAs(api, org, 'owner', 'console-full-owner')
+
+    const [env] = await api.admin<{ id: string }[]>`
+      SELECT id FROM environments WHERE org_id = ${org.orgId} LIMIT 1`
+
+    const [run] = await api.admin<{ id: string }[]>`
+      INSERT INTO runs (org_id, environment_id, kind, state, started_at, finished_at)
+      VALUES (${org.orgId}, ${env!.id}, 'test', 'complete',
+              now() - interval '4 minutes', now())
+      RETURNING id`
+    runId = run!.id
+
+    // Two verdicts with different values, because a page that renders one
+    // state correctly and hard-codes the chip would pass with only one.
+    await api.admin`
+      INSERT INTO verdicts (org_id, run_id, workflow, persona, value, summary, steps, duration_ms)
+      VALUES (${org.orgId}, ${runId}, 'checkout-flow', 'returning-customer', 'pass',
+              'The cart survived a reload', 12, 41000),
+             (${org.orgId}, ${runId}, 'password-reset', NULL, 'fail',
+              'The reset link 404s on the second click', 7, 9000)`
+
+    // One retained artifact and one whose bytes retention removed. The second
+    // is the interesting row: it exists so a timeline can say "not retained"
+    // rather than rendering a gap that reads as a bug.
+    await api.admin`
+      INSERT INTO artifacts (org_id, run_id, kind, step, storage_key, content_type, size_bytes, sha256, retained)
+      VALUES (${org.orgId}, ${runId}, 'screenshot', 3, 'runs/x/step-3.png', 'image/png', 184320,
+              'aa11bb22cc33dd44ee55ff6600112233445566778899aabbccddeeff00112233', true),
+             (${org.orgId}, ${runId}, 'video', 9, 'runs/x/run.webm', 'video/webm', 9437184,
+              'bb22cc33dd44ee55ff6600112233445566778899aabbccddeeff00112233aa11', false)`
+  })
+  after(async () => {
+    await dropOrg(api.admin, org.orgId)
+    await api.close()
+  })
+
+  async function pageAt(path: string) {
+    const res = await api.fetch(path, { headers: { cookie: owner.cookie } })
+    assert.equal(res.status, 200, `${path} answered ${res.status}`)
+    const body = await res.text()
+    // Every page, every time. A stringified object is a 200 with a plausible
+    // length, so nothing else catches it.
+    assert.ok(!body.includes('[object '), `${path} stringified a value into the page`)
+    return body
+  }
+
+  test('the environments page shows the environment rather than its empty state', async () => {
+    const body = await pageAt('/environments')
+    assert.ok(body.includes(org.envId), 'the environment id is not on the page')
+    assert.ok(body.includes(org.repository), 'the repository is not on the page')
+    assert.match(body, /main/)
+    assert.ok(!body.includes('No environments'), 'the empty state rendered with a row present')
+  })
+
+  test('the environment page shows one environment', async () => {
+    const body = await pageAt(`/environments/${org.envId}`)
+    assert.ok(body.includes(org.envId))
+    assert.ok(body.includes(org.repository))
+  })
+
+  test('the runs page shows the run and both verdicts', async () => {
+    const body = await pageAt('/runs')
+    assert.ok(body.includes(runId.slice(0, 8)) || body.includes(runId),
+      'the run is not identifiable on the page')
+    assert.ok(!body.includes('No runs'), 'the empty state rendered with a run present')
+  })
+
+  test('the run page shows verdicts, their summaries and their artifacts', async () => {
+    const body = await pageAt(`/runs/${runId}`)
+    assert.ok(body.includes('checkout-flow'), 'a workflow name is missing')
+    assert.ok(body.includes('password-reset'), 'the second workflow is missing')
+    assert.ok(body.includes('The cart survived a reload'), 'a verdict summary is missing')
+    // Both values render, so the chip is driven by the row rather than fixed.
+    assert.match(body, /pass/)
+    assert.match(body, /fail/)
+    // Persona, steps and duration, because a verdict that says "fail" and
+    // cannot say what failed or how far it got is a row with no use.
+    assert.ok(body.includes('returning-customer'), 'the persona is missing')
+    assert.ok(body.includes('12'), 'the step count is missing')
+    assert.ok(body.includes('41.0s'), 'the duration is missing')
+    // A verdict with no persona says who it ran as rather than leaving a blank
+    // cell, which reads as missing data.
+    assert.ok(body.includes('anybody'))
+
+    // The artifacts, including the one whose bytes are gone. A page that
+    // dropped it would show a run with a hole in its timeline.
+    assert.ok(body.includes('screenshot'), 'the screenshot artifact is missing')
+    assert.ok(body.includes('video'), 'the video artifact is missing')
+    assert.ok(body.includes('runs/x/step-3.png'), 'the storage key is missing')
+    // Sizes read as sizes. 184320 rendered raw is a number nobody reads as
+    // 180 kilobytes, and a bigint arrives from the driver as a string.
+    assert.ok(body.includes('180 kB'), 'the artifact size is not human readable')
+    assert.ok(body.includes('not retained'),
+      'an artifact whose bytes retention removed rendered as a gap')
+    assert.ok(!body.includes('9437184'), 'a raw byte count reached the page')
+  })
+
+  test('a run that does not exist is a page, not a 500', async () => {
+    const res = await api.fetch('/runs/00000000-0000-0000-0000-000000000000', {
+      headers: { cookie: owner.cookie },
+    })
+    assert.ok([200, 404].includes(res.status), `answered ${res.status}`)
+    const body = await res.text()
+    assert.match(body, /^<!doctype html>/i)
+    assert.ok(!body.includes('[object '))
+  })
+
+  test('a run id that is not a uuid is refused as a page too', async () => {
+    // The shape that turns a missing row into a 500: Postgres rejects
+    // 'not-a-uuid'::uuid with a type error rather than returning nothing, so
+    // the not-found path is never reached.
+    const res = await api.fetch('/runs/not-a-uuid', { headers: { cookie: owner.cookie } })
+    assert.ok([200, 400, 404].includes(res.status), `answered ${res.status}`)
+    assert.match(await res.text(), /^<!doctype html>/i)
+  })
+
+  test('the members page shows the member', async () => {
+    const body = await pageAt('/settings/members')
+    assert.match(body, /console-full-owner/)
+    assert.match(body, /owner/)
+  })
+
+  test('the audit page shows an entry', async () => {
+    // Written through appendAudit rather than inserted, because audit_entries
+    // is append-only with a hash chain and a raw INSERT would have to invent
+    // an entry_hash. Using the real function also means this exercises the
+    // shape the application actually writes.
+    await api.pool.withTenant({ orgId: org.orgId }, async (db) => {
+      await appendAudit(db, {
+        orgId: org.orgId,
+        actorLabel: 'console-full-owner',
+        action: 'provider_key.stored',
+        targetType: 'provider_key',
+        targetId: 'anthropic',
+        origin: 'cli',
+        detail: { provider: 'anthropic', last4: '4321' },
+        occurredAt: new Date(),
+      })
+    })
+
+    const body = await pageAt('/audit')
+    assert.ok(body.includes('provider_key.stored'), 'the action is not on the page')
+    assert.ok(body.includes('console-full-owner'), 'the actor is not on the page')
+    assert.ok(!body.includes('No entries'), 'the empty state rendered with an entry present')
   })
 })

@@ -229,6 +229,33 @@ export function chip(state: string): Html {
 }
 
 /** A timestamp a person can read, with the exact value in the title. */
+/**
+ * A byte count a person can read, from whatever the driver handed back.
+ *
+ * bigint columns arrive as strings from node-postgres, because a bigint does
+ * not fit in a JS number and the driver refuses to lose precision silently.
+ * Rendering that string raw gives "9437184", which nobody reads as nine
+ * megabytes, and Number()ing it without noticing is how a size column starts
+ * lying at four gigabytes.
+ *
+ * Null is a dash rather than "0 B": not knowing a size and knowing it is empty
+ * are different facts.
+ */
+export function bytes(value: string | number | null | undefined): Html {
+  if (value === null || value === undefined || value === '') return html`<span>—</span>`
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return html`<span>${String(value)}</span>`
+  const units = ['B', 'kB', 'MB', 'GB', 'TB']
+  let size = n
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  const shown = unit === 0 ? String(Math.round(size)) : size.toFixed(size < 10 ? 1 : 0)
+  return html`<span title="${String(value)} bytes">${shown} ${units[unit]}</span>`
+}
+
 export function when(value: Date | string | null | undefined): Html {
   if (!value) return html`<span class="chip neutral">never</span>`
   const d = value instanceof Date ? value : new Date(value)
