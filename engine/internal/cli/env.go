@@ -137,7 +137,7 @@ func controlPlaneClient(e *Env, baseURL string) (*controlplane.Client, error) {
 		// A credential stored by af login. Expiry is checked here so that the
 		// failure is "your session expired, run af login" rather than a 401
 		// from a server the user then goes and investigates.
-		if cred, err := auth.NewStore().Load(auth.Normalise(baseURL)); err == nil {
+		if cred, err := e.CredentialStore().Load(auth.Normalise(baseURL)); err == nil {
 			if !cred.Expired(e.Clock.Now()) {
 				token = cred.Token
 			}

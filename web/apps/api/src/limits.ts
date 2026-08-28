@@ -76,6 +76,26 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     reason: 'af logout. Must never be refused in practice: a sign-out that fails leaves a live credential on a machine somebody is trying to clean.',
   },
 
+  // `af provider`. Keyed by token because every caller has one, and tighter
+  // than the reads around it because each of these is a deliberate human
+  // action on somebody else's money: nobody rotates a key in a loop.
+  'GET /v1/providers': {
+    rate: 5, burst: 50, key: 'token',
+    reason: 'af provider list, and the read a script runs before deciding whether to set anything. Two small queries, so the cost is a round trip.',
+  },
+  'PUT /v1/providers/:provider': {
+    rate: 1, burst: 10, key: 'token',
+    reason: 'Storing or rotating a key. A person does this once and occasionally twice; ten at once covers a retry and a fumbled paste, and a sustained one per second is not a person.',
+  },
+  'DELETE /v1/providers/:provider': {
+    rate: 1, burst: 10, key: 'token',
+    reason: 'Removing a key, often during an incident. Same shape as storing one, and deliberately not tighter: this is the call somebody makes in a hurry when a key has leaked.',
+  },
+  'PUT /v1/providers/:provider/budget': {
+    rate: 1, burst: 10, key: 'token',
+    reason: 'Setting a monthly cap. The same human cadence as storing a key, and it writes an audit entry each time.',
+  },
+
   // ---------------------------------------------------------------------------
   // The console.
   //

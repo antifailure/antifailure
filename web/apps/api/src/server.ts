@@ -13,6 +13,7 @@
 // /auth/* is the sign-in exchange, which by definition has no session yet.
 
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import { sql as rawSql } from 'drizzle-orm'
 import { trpcServer } from '@hono/trpc-server'
 import type { Pool } from '@antifailure/db'
@@ -58,6 +59,16 @@ import {
   revokeCliToken,
 } from './auth/device.ts'
 import { mountConsole } from './console/index.ts'
+import { PROVIDERS, type Provider } from './providers/seal.ts'
+import {
+  listBudgets,
+  listKeys,
+  MAY_MANAGE_KEYS,
+  ProviderKeyError,
+  revokeKey,
+  saveKey,
+  setBudget,
+} from './providers/store.ts'
 import { openApiDocument } from './openapi.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { limitFor, bucketFor, type EndpointLimit } from './limits.ts'
@@ -91,6 +102,27 @@ export interface ServerOptions {
  * change to whatever a caller happened to send.
  */
 export const CLI_SCOPES: readonly string[] = ['environments.view', 'runs.view', 'events.write']
+
+/**
+ * Everything a CLI token may hold if somebody asks for it and approves it.
+ *
+ * Wider than the default on purpose, and the gap between the two lists is the
+ * design. `af login` with no arguments gets CLI_SCOPES: read environments and
+ * runs, write events, and nothing that can cost money or change a secret. A
+ * terminal that needs to manage provider keys has to ask, and the person
+ * approving sees exactly what was asked for on the screen where they approve.
+ *
+ * Note what is NOT here and never will be: a scope that reads a provider key
+ * back. The CLI can store one, replace one, remove one and cap its spend, and
+ * it cannot retrieve one. Storing a secret and reading a secret are different
+ * capabilities, and a terminal has no reason for the second.
+ */
+export const GRANTABLE_SCOPES: readonly string[] = [
+  ...CLI_SCOPES,
+  'providers.view',
+  'providers.write',
+]
+
 
 export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
@@ -366,8 +398,26 @@ export function createServer(options: ServerOptions) {
     // Scopes are taken from the request and recorded, but never trusted to
     // widen anything: they are intersected with what a CLI token may ever hold,
     // so a terminal cannot ask for a capability that does not exist.
+    //
+    // Asking for nothing gets the default set, which is the read-mostly one. A
+    // terminal that wants more names it, and the name reaches the approval
+    // screen, so nobody grants provider-key management without seeing the words.
     const asked = Array.isArray(body.scopes) ? body.scopes.filter((s) => typeof s === 'string') : []
-    const scopes = asked.length ? asked.filter((s) => CLI_SCOPES.includes(s)) : [...CLI_SCOPES]
+    const scopes = asked.length
+      ? asked.filter((s) => GRANTABLE_SCOPES.includes(s))
+      : [...CLI_SCOPES]
+    if (asked.length && scopes.length === 0) {
+      // Every scope asked for was refused. Issuing a code for a token that can
+      // do nothing would produce a login that appears to work and then fails at
+      // the first command, which is the worst place to learn about it.
+      return c.json(
+        {
+          error: 'invalid_scope',
+          error_description: `None of those scopes exist. Available: ${GRANTABLE_SCOPES.join(', ')}.`,
+        },
+        400,
+      )
+    }
 
     const origin = options.appBaseUrl ?? new URL(c.req.url).origin
     const issued = await requestDeviceCode(options.pool, clock, {
@@ -531,6 +581,234 @@ export function createServer(options: ServerOptions) {
     // a timeout must not be told its second attempt failed, and a token that
     // was already revoked is in exactly the state the caller asked for.
     return c.json({ revoked })
+  })
+
+  // -------------------------------------------------------------------------
+  // Provider keys, from a terminal
+  // -------------------------------------------------------------------------
+  //
+  // The same capability the console has, reachable by `af provider`. It exists
+  // because the console is not always where the person is: a key gets rotated
+  // from a laptop at the end of an incident, and telling somebody to open a
+  // browser to do it is how a rotation gets postponed.
+  //
+  // Three gates, in this order, and each one refuses for a different reason:
+  //
+  //   1. The token is a CLI token that is live and belongs to a member.
+  //   2. It carries the scope. A token minted by a plain `af login` does not,
+  //      so the capability is not silently attached to every terminal that
+  //      ever signed in -- somebody had to ask for it and approve it.
+  //   3. The person is an owner or an admin. Scope says what the TOKEN may do;
+  //      role says what the PERSON may do, and a member who cannot change a
+  //      key in the console must not be able to change one from a shell.
+  //
+  // The plaintext key travels in one direction only. There is no route here
+  // that returns a key, and there is no scope that would grant one.
+
+  interface CliCaller {
+    orgId: string
+    userId: string
+    label: string
+  }
+
+  /** Applies the three gates and answers with the reason it refused. */
+  async function providerCaller(
+    c: Context,
+    need: 'providers.view' | 'providers.write',
+  ): Promise<CliCaller | Response> {
+    const header = c.req.header('authorization') ?? ''
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+    const who = await identify(options.pool, clock, token)
+    if (!who) return c.json({ error: 'This token is not valid.' }, 401)
+
+    if (!who.scopes.includes(need)) {
+      // Named in the message, because the fix is a specific command and a
+      // caller who is told only "forbidden" will go looking for a role problem.
+      return c.json(
+        {
+          error:
+            `This token does not carry ${need}. Run: af login --scope ${need}` +
+            ` -- and approve it in the browser.`,
+          scopes: who.scopes,
+        },
+        403,
+      )
+    }
+    if (need === 'providers.write' && !MAY_MANAGE_KEYS.has(who.role)) {
+      return c.json(
+        { error: `Changing a provider key needs owner or admin. You are ${who.role}.` },
+        403,
+      )
+    }
+    return { orgId: who.orgId, userId: who.userId, label: who.login }
+  }
+
+  function isResponse(v: CliCaller | Response): v is Response {
+    return v instanceof Response
+  }
+
+  /** The provider from the path, or null. Never trusted into a query unchecked. */
+  function providerParam(raw: string): Provider | null {
+    return (PROVIDERS as string[]).includes(raw) ? (raw as Provider) : null
+  }
+
+  app.get('/v1/providers', async (c) => {
+    const caller = await providerCaller(c, 'providers.view')
+    if (isResponse(caller)) return caller
+    const [keys, budgets] = await Promise.all([
+      listKeys(options.pool, caller.orgId),
+      listBudgets(options.pool, clock, caller.orgId),
+    ])
+    return c.json({
+      // Whether a key CAN be stored at all. Reported rather than discovered on
+      // a failed write, so `af provider list` on an installation with no
+      // sealing secret says so instead of looking merely empty.
+      sealing: Boolean(options.sealingKey),
+      keys: keys.map((k) => ({
+        provider: k.provider,
+        last4: k.last4,
+        fingerprint: k.fingerprint,
+        createdAt: k.createdAt.toISOString(),
+        rotatedAt: k.rotatedAt ? k.rotatedAt.toISOString() : null,
+      })),
+      budgets: budgets.map((b) => ({
+        provider: b.provider,
+        period: b.period,
+        capUsd: b.capUsd,
+        spentUsd: b.spentUsd,
+        remainingUsd: b.remainingUsd,
+      })),
+    })
+  })
+
+  app.put('/v1/providers/:provider', async (c) => {
+    const caller = await providerCaller(c, 'providers.write')
+    if (isResponse(caller)) return caller
+    const provider = providerParam(c.req.param('provider'))
+    if (!provider) {
+      return c.json({ error: `Unknown provider. Known: ${PROVIDERS.join(', ')}.` }, 400)
+    }
+    if (!options.sealingKey) {
+      return c.json(
+        {
+          error:
+            'This control plane has no sealing secret, so a key cannot be stored. ' +
+            'Set AF_PROVIDER_KEY_SECRET and restart it.',
+        },
+        503,
+      )
+    }
+    let body: { key?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    const key = typeof body.key === 'string' ? body.key : ''
+    if (!key.trim()) return c.json({ error: 'The body needs a key.' }, 400)
+
+    try {
+      const result = await saveKey(options.pool, clock, options.sealingKey, {
+        orgId: caller.orgId,
+        provider,
+        key,
+        actorUserId: caller.userId,
+        actorLabel: caller.label,
+        origin: 'cli',
+      })
+      return c.json({
+        provider,
+        last4: result.stored.last4,
+        fingerprint: result.stored.fingerprint,
+        replaced: result.replaced,
+        // Said back rather than swallowed. Pasting the key that is already
+        // there is the mistake somebody makes at the moment they believe they
+        // have just rotated it.
+        sameAsBefore: result.sameAsBefore,
+      })
+    } catch (err) {
+      // The message is the complaint about the SHAPE of the key -- that it
+      // starts with the other provider's prefix, that a whole export line was
+      // pasted. It never contains the key.
+      if (err instanceof ProviderKeyError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+  })
+
+  app.delete('/v1/providers/:provider', async (c) => {
+    const caller = await providerCaller(c, 'providers.write')
+    if (isResponse(caller)) return caller
+    const provider = providerParam(c.req.param('provider'))
+    if (!provider) {
+      return c.json({ error: `Unknown provider. Known: ${PROVIDERS.join(', ')}.` }, 400)
+    }
+    const { revoked } = await revokeKey(options.pool, clock, {
+      orgId: caller.orgId,
+      provider,
+      actorLabel: caller.label,
+      actorUserId: caller.userId,
+      origin: 'cli',
+    })
+    // 200 whether or not there was one. Removing a key has to be idempotent:
+    // a retry after a timeout must not report failure for reaching the state
+    // the caller asked for.
+    return c.json({ provider, revoked })
+  })
+
+  app.put('/v1/providers/:provider/budget', async (c) => {
+    const caller = await providerCaller(c, 'providers.write')
+    if (isResponse(caller)) return caller
+    const provider = providerParam(c.req.param('provider'))
+    if (!provider) {
+      return c.json({ error: `Unknown provider. Known: ${PROVIDERS.join(', ')}.` }, 400)
+    }
+    let body: { capUsd?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    // Strict, and deliberately not `Number(body.capUsd)`.
+    //
+    // Number(null) is 0 and Number('') is 0, so a coercing read turns a field
+    // a caller forgot to fill -- an unset shell variable interpolated into a
+    // JSON body -- into a cap of zero dollars. Zero is a legitimate cap, which
+    // is what makes this dangerous: nothing looks wrong until every run refuses
+    // with "the budget is spent". A cap of zero has to be asked for, not
+    // inferred from an absence.
+    //
+    // A numeric string is accepted because a person using curl writes one, and
+    // it is unambiguous. Nothing else is.
+    const raw = body.capUsd
+    const cap =
+      typeof raw === 'number'
+        ? raw
+        : typeof raw === 'string' && raw.trim() !== ''
+          ? Number(raw)
+          : NaN
+    if (!Number.isFinite(cap) || cap < 0) {
+      return c.json({ error: 'capUsd has to be a number of US dollars, zero or more.' }, 400)
+    }
+    try {
+      const budget = await setBudget(options.pool, clock, {
+        orgId: caller.orgId,
+        provider,
+        capUsd: cap,
+        actorLabel: caller.label,
+        actorUserId: caller.userId,
+        origin: 'cli',
+      })
+      return c.json({
+        provider: budget.provider,
+        period: budget.period,
+        capUsd: budget.capUsd,
+        spentUsd: budget.spentUsd,
+        remainingUsd: budget.remainingUsd,
+      })
+    } catch (err) {
+      if (err instanceof ProviderKeyError) return c.json({ error: err.message }, 400)
+      throw err
+    }
   })
 
   // -------------------------------------------------------------------------

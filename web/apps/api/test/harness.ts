@@ -45,6 +45,10 @@ export interface ApiHarness {
 export interface StartApiOptions {
   /** Who may sign in. Undefined leaves the server open, which is its default. */
   signInAllowlist?: ReadonlySet<string> | null
+  /** The secret that seals provider keys. Undefined means none is configured,
+   *  which is a state the server has to serve rather than crash in, and there
+   *  are tests for that. */
+  sealingKey?: Buffer | null
 }
 
 export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
@@ -64,6 +68,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     secureCookies: false,
     appBaseUrl: 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
+    sealingKey: options.sealingKey ?? null,
   })
 
   return {

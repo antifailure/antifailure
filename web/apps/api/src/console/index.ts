@@ -30,7 +30,7 @@ import {
 } from '../auth/session.ts'
 import { approveDeviceCode, denyDeviceCode, describePending, DeviceError, normaliseUserCode } from '../auth/device.ts'
 import { PROVIDERS, type Provider } from '../providers/seal.ts'
-import { listBudgets, listKeys, ProviderKeyError, revokeKey, saveKey, setBudget } from '../providers/store.ts'
+import { listBudgets, listKeys, MAY_MANAGE_KEYS, ProviderKeyError, revokeKey, saveKey, setBudget } from '../providers/store.ts'
 import { CONSOLE_CSS, CONSOLE_ICON, html, page, type Viewer } from './layout.ts'
 import {
   keysPage,
@@ -245,8 +245,19 @@ export function mountConsole(app: Hono, options: ConsoleOptions): void {
 
   // ---- provider keys ------------------------------------------------------
 
+  // Returns the PAGE, not a Response.
+  //
+  // It returned a Response once, and `guarded` -- which takes a page and sends
+  // it -- was handed one, called toString on it, and served the seven words
+  // "[object Response]" as the whole document. The cast that made that compile
+  // was `.then((r) => r as never)`, written to silence the mismatch it was
+  // reporting. Nothing else caught it: the page's own tests render the template
+  // directly, so they never went through the route, and the route answered 200.
+  //
+  // The rule that follows: a render function returns a page and exactly one
+  // place turns a page into a Response. A cast to never in a route is a bug
+  // being told to be quiet.
   async function renderKeys(
-    c: Context,
     viewer: Viewer,
     orgId: string,
     notice?: { tone: 'ok' | 'bad' | 'warn'; title: string; body: string },
@@ -255,53 +266,70 @@ export function mountConsole(app: Hono, options: ConsoleOptions): void {
       listKeys(pool, orgId),
       listBudgets(pool, clock, orgId),
     ])
-    return send(
-      c,
-      keysPage({
-        viewer,
-        keys,
-        budgets,
-        sealingConfigured: Boolean(options.sealingKey),
-        notice,
-      }),
-    )
+    return keysPage({
+      viewer,
+      keys,
+      budgets,
+      sealingConfigured: Boolean(options.sealingKey),
+      mayManage: MAY_MANAGE_KEYS.has(viewer.role ?? ''),
+      notice,
+    })
   }
 
-  app.get('/settings/keys', guarded((c, v, org) => renderKeys(c, v, org).then((r) => r as never)))
+  app.get('/settings/keys', guarded((_c, v, org) => renderKeys(v, org)))
 
   app.post('/console/keys', async (c) => {
     const viewer = await viewerFor(c)
     if (!viewer) return send(c, signInPage(), 401)
     if (!viewer.organization) return send(c, noOrganizationPage(viewer), 403)
 
+    // Checked here and not only by hiding the form. A form that is not rendered
+    // is not a permission: the endpoint takes a POST from anything that can
+    // send one, and a member who has ever seen this page in another role knows
+    // the field names. The page hides the controls so nobody is offered an
+    // action that would fail; this line is what makes it fail.
+    if (!MAY_MANAGE_KEYS.has(viewer.role ?? '')) {
+      return send(c, await renderKeys(viewer, viewer.organization, {
+        tone: 'bad',
+        title: 'That is for owners and admins',
+        body: `You are ${viewer.role ?? 'not a member'} in this organization, so you can see which keys are set and cannot change them.`,
+      }))
+    }
+
     const form = await c.req.formData()
     if (!csrfOk(c, String(form.get('csrf') ?? ''))) {
-      return renderKeys(c, viewer, viewer.organization, {
+      return send(c, await renderKeys(viewer, viewer.organization, {
         tone: 'bad',
         title: 'That request could not be trusted',
         body: 'Reload the page and try again.',
-      })
+      }))
     }
 
     const provider = String(form.get('provider') ?? '') as Provider
     if (!PROVIDERS.includes(provider)) {
-      return renderKeys(c, viewer, viewer.organization, {
+      return send(c, await renderKeys(viewer, viewer.organization, {
         tone: 'bad',
         title: 'Unknown provider',
         body: 'Only Anthropic and OpenAI keys can be stored here.',
-      })
+      }))
     }
 
     const action = String(form.get('action') ?? '')
     try {
       if (action === 'budget') {
-        const cap = Number(form.get('cap') ?? '')
+        // Not Number(...) on its own: Number('') is 0, so submitting the
+        // form with the field left blank would set the cap to zero dollars
+        // rather than complain. Zero is a legitimate cap, which is what makes
+        // it dangerous to infer -- nothing looks wrong until every run refuses
+        // with "the budget is spent".
+        const typed = String(form.get('cap') ?? '').trim()
+        const cap = typed === '' ? NaN : Number(typed)
         if (!Number.isFinite(cap) || cap < 0) {
-          return renderKeys(c, viewer, viewer.organization, {
+          return send(c, await renderKeys(viewer, viewer.organization, {
             tone: 'bad',
             title: 'That is not a cap',
             body: 'Give a number of US dollars, zero or more.',
-          })
+          }))
         }
         const budget = await setBudget(pool, clock, {
           orgId: viewer.organization,
@@ -310,11 +338,11 @@ export function mountConsole(app: Hono, options: ConsoleOptions): void {
           actorLabel: viewer.label,
           actorUserId: viewer.userId,
         })
-        return renderKeys(c, viewer, viewer.organization, {
+        return send(c, await renderKeys(viewer, viewer.organization, {
           tone: 'ok',
           title: `The ${provider} cap is now ${budget.capUsd.toFixed(2)} USD a month`,
           body: `${budget.spentUsd.toFixed(2)} USD has been spent so far this month.`,
-        })
+        }))
       }
 
       if (action === 'revoke') {
@@ -324,31 +352,31 @@ export function mountConsole(app: Hono, options: ConsoleOptions): void {
           actorLabel: viewer.label,
           actorUserId: viewer.userId,
         })
-        return renderKeys(c, viewer, viewer.organization, {
+        return send(c, await renderKeys(viewer, viewer.organization, {
           tone: revoked ? 'ok' : 'warn',
           title: revoked ? `The ${provider} key is removed` : 'There was nothing to remove',
           body: revoked
             ? 'It cannot be used from here again. Revoke it at the provider too, because this does not reach them.'
             : `No ${provider} key was stored.`,
-        })
+        }))
       }
 
       const key = String(form.get('key') ?? '')
       if (!key.trim()) {
-        return renderKeys(c, viewer, viewer.organization, {
+        return send(c, await renderKeys(viewer, viewer.organization, {
           tone: 'bad',
           title: 'No key was given',
           body: 'Paste the key into the field before saving.',
-        })
+        }))
       }
       if (!options.sealingKey) {
         // Refused rather than stored in the clear. An installation with no
         // sealing secret has nowhere safe to put this.
-        return renderKeys(c, viewer, viewer.organization, {
+        return send(c, await renderKeys(viewer, viewer.organization, {
           tone: 'bad',
           title: 'This installation cannot store a key',
           body: 'AF_PROVIDER_KEY_SECRET is not set, so there is nothing to seal it with.',
-        })
+        }))
       }
 
       const result = await saveKey(pool, clock, options.sealingKey, {
@@ -358,7 +386,7 @@ export function mountConsole(app: Hono, options: ConsoleOptions): void {
         actorUserId: viewer.userId,
         actorLabel: viewer.label,
       })
-      return renderKeys(c, viewer, viewer.organization, {
+      return send(c, await renderKeys(viewer, viewer.organization, {
         tone: result.sameAsBefore ? 'warn' : 'ok',
         title: result.sameAsBefore
           ? 'That is the key that was already stored'
@@ -368,14 +396,14 @@ export function mountConsole(app: Hono, options: ConsoleOptions): void {
         body: result.sameAsBefore
           ? 'Nothing changed. If you meant to rotate, create a new key at the provider first.'
           : `It ends ${result.stored.last4}. It will not be shown again.`,
-      })
+      }))
     } catch (err) {
       if (err instanceof ProviderKeyError) {
-        return renderKeys(c, viewer, viewer.organization, {
+        return send(c, await renderKeys(viewer, viewer.organization, {
           tone: 'bad',
           title: 'That key was not stored',
           body: err.message,
-        })
+        }))
       }
       throw err
     }

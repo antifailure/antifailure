@@ -2,7 +2,7 @@
 title: Signing in from a terminal
 description: af login uses the device grant, so the token is never shown, copied, or typed.
 sidebar:
-  order: 11
+  order: 14
 ---
 
 `af login` signs this machine in to a control plane. It prints a short code,
@@ -46,13 +46,40 @@ over TLS and writes it straight to the credential store.
 
 ## What the token can do
 
-Reading environments and runs, and writing events. It cannot manage members,
-change policy, or read a provider key.
+By default: reading environments and runs, and writing events. It cannot manage
+members, change policy, or touch a provider key.
+
+That default is the point. A laptop signed in months ago and since lost holds a
+token that can read what happened and record what it did, and nothing that costs
+money or changes a secret.
+
+### Asking for more
+
+`--scope` asks for a capability beyond the default:
+
+```
+af login --scope providers.write
+```
+
+The scopes that exist are `environments.view`, `runs.view`, `events.write`,
+`providers.view` and `providers.write`. A name that is not one of those is
+refused in the terminal, before a code is printed, rather than producing a token
+that cannot do the thing you asked for.
+
+What you asked for is shown on the screen where the login is approved, so nobody
+grants provider-key management without reading the words.
+
+`providers.write` lets a terminal store, rotate, remove and cap a key. There is
+no scope that reads one back, and there is no route that would serve it. See
+[Your own provider keys](/docs/guides/provider-keys/).
 
 Scope is decided by the control plane from a closed list and is recorded when
-the login starts, so approving cannot widen it and asking for more grants
-nothing. The organization comes from the session of whoever approves: a
-terminal cannot ask to be let into a tenant.
+the login starts, so approving cannot widen it and asking for something that
+does not exist grants nothing. The organization comes from the session of
+whoever approves: a terminal cannot ask to be let into a tenant.
+
+Scope is also not the only check. It says what the token may do; your role says
+what you may do, and both have to allow an action for it to happen.
 
 Tokens expire after ninety days. `af whoami` says when.
 

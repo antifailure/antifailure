@@ -29,10 +29,14 @@ import (
 // used. The device grant never shows it to a person at all -- the terminal
 // receives it over TLS and puts it straight into the credential store.
 //
-// The token this receives is scoped: it can read environments and runs and
-// write events, and it cannot manage members or rotate a provider key. Scope is
-// decided by the control plane from a closed list, so asking for more here
-// achieves nothing.
+// The token this receives is scoped. By default it can read environments and
+// runs and write events, and nothing else: it cannot manage members, change
+// policy, or touch a provider key. --scope asks for more, from a closed list
+// the control plane owns, and what was asked for is shown on the screen where
+// somebody approves -- so a capability cannot be granted without being read.
+//
+// Nothing in that list reads a key back, and nothing ever will: storing a
+// secret and retrieving one are different capabilities.
 
 // defaultControlPlane is the hosted instance, used when nothing else says.
 const defaultControlPlane = "https://app.dev.antifailure.dev"
@@ -84,6 +88,7 @@ func controlPlaneFor(e *Env, flag string) string {
 func newLoginCommand(e *Env) *cobra.Command {
 	var baseURL string
 	var noBrowser bool
+	var scopes []string
 
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -96,9 +101,16 @@ token arrives here over TLS and goes straight into the operating system's
 credential store. The credential is never shown, never copied through a
 clipboard, and never written to a shell history file.
 
-The token is scoped to reading environments and runs and writing events. It
-cannot manage members, change policy, or read a provider key, and asking for
-more is refused by the control plane rather than granted quietly.
+By default the token can read environments and runs and write events, and
+nothing else: it cannot manage members, change policy, or touch a provider key.
+
+--scope asks for more. The scope is shown on the screen where the login is
+approved, so nobody grants a capability without seeing the words:
+
+  af login --scope providers.write
+
+Nothing reads a key back. There is no scope for it, because storing a secret and
+retrieving one are different capabilities and a terminal needs only the first.
 
 Run af logout to remove it from this machine and revoke it everywhere.`),
 		Args: cobra.NoArgs,
@@ -109,10 +121,19 @@ Run af logout to remove it from this machine and revoke it everywhere.`),
 			}
 			origin := controlPlaneFor(e, baseURL)
 			client := auth.NewClient(origin)
-			store := auth.NewStore()
+			store := e.CredentialStore()
+
+			// Checked before a code is printed. The server intersects what it
+			// is sent and would refuse a login asking only for scopes that do
+			// not exist, but it would do so after a person had read a code out
+			// loud, so a typo is caught here instead.
+			asked, err := checkScopes(scopes)
+			if err != nil {
+				return err
+			}
 
 			label := clientLabel(e)
-			start, err := client.Begin(ctx, label, nil)
+			start, err := client.Begin(ctx, label, asked)
 			if err != nil {
 				return fmt.Errorf("start the login: %w", err)
 			}
@@ -206,7 +227,41 @@ Run af logout to remove it from this machine and revoke it everywhere.`),
 		"The control plane to sign in to (default: AF_CONTROL_PLANE_URL, or the hosted instance)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false,
 		"Do not try to open a browser; print the address instead")
+	cmd.Flags().StringSliceVar(&scopes, "scope", nil,
+		"Ask for a capability beyond the default, e.g. providers.write. Repeatable.")
 	return cmd
+}
+
+// checkScopes refuses a name that is not a scope.
+//
+// The list it checks against mirrors the server's, and the server remains the
+// authority: this exists so that `af login --scope providers.wrote` fails in
+// the terminal rather than issuing a code, waiting for somebody to approve it
+// in a browser, and handing back a token that cannot do the thing.
+func checkScopes(asked []string) ([]string, error) {
+	if len(asked) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(asked))
+	for _, raw := range asked {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		known := false
+		for _, s := range auth.GrantableScopes {
+			if s == name {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return nil, fmt.Errorf("%q is not a scope. Available: %s",
+				name, strings.Join(auth.GrantableScopes, ", "))
+		}
+		out = append(out, name)
+	}
+	return out, nil
 }
 
 func newLogoutCommand(e *Env) *cobra.Command {
@@ -232,7 +287,7 @@ a token is dead when it is not.`),
 				ctx = context.Background()
 			}
 			origin := auth.Normalise(controlPlaneFor(e, baseURL))
-			store := auth.NewStore()
+			store := e.CredentialStore()
 
 			cred, loadErr := store.Load(origin)
 			if errors.Is(loadErr, auth.ErrNotSignedIn) {
@@ -305,7 +360,7 @@ and reporting it would tell somebody they have access they do not have.
 				ctx = context.Background()
 			}
 			origin := auth.Normalise(controlPlaneFor(e, baseURL))
-			store := auth.NewStore()
+			store := e.CredentialStore()
 
 			cred, err := store.Load(origin)
 			if errors.Is(err, auth.ErrNotSignedIn) {

@@ -26,6 +26,21 @@ import {
 
 export class ProviderKeyError extends Error {}
 
+/**
+ * Who may store, rotate, remove or cap a provider key.
+ *
+ * Here rather than at each caller, because there are two callers -- the console
+ * and `af provider` -- and a capability whose gate is written twice is a
+ * capability with two gates that will eventually disagree. The console was the
+ * one that disagreed: it had no role check at all, so any signed-in member,
+ * including a viewer, could rotate a key from a browser.
+ *
+ * Reading the LISTING is deliberately not restricted to these roles. It carries
+ * a last four and a fingerprint and no key, and a member who can see that a key
+ * is configured can tell why a run failed without asking somebody.
+ */
+export const MAY_MANAGE_KEYS: ReadonlySet<string> = new Set(['owner', 'admin'])
+
 export interface StoredKey {
   id: string
   provider: Provider
@@ -85,12 +100,25 @@ export async function listKeys(pool: Pool, orgId: string): Promise<StoredKey[]> 
 // Writing
 // ---------------------------------------------------------------------------
 
+/**
+ * Where a change came from.
+ *
+ * Recorded rather than assumed, because the console and a terminal are
+ * different exposures of the same capability and an audit reader needs to tell
+ * them apart. "Somebody rotated the Anthropic key from the console while signed
+ * in" and "a token on a build machine rotated it" are the same row without this
+ * and different incidents with it.
+ */
+export type Origin = 'web' | 'cli'
+
 export interface SaveInput {
   orgId: string
   provider: Provider
   key: string
   actorUserId: string | null
   actorLabel: string
+  /** Defaults to the console, which is where every call came from first. */
+  origin?: Origin
 }
 
 /**
@@ -151,7 +179,7 @@ export async function saveKey(
       action: previous ? 'provider_key.rotated' : 'provider_key.stored',
       targetType: 'provider_key',
       targetId: input.provider,
-      origin: 'web',
+      origin: input.origin ?? 'web',
       // The fingerprint and the last four, never the key. This record exists to
       // prove WHICH key was in use, and it is written to a table an operator
       // reads, so it must be safe to read over somebody's shoulder.
@@ -184,7 +212,13 @@ export async function saveKey(
 export async function revokeKey(
   pool: Pool,
   clock: Clock,
-  input: { orgId: string; provider: Provider; actorLabel: string; actorUserId: string | null },
+  input: {
+    orgId: string
+    provider: Provider
+    actorLabel: string
+    actorUserId: string | null
+    origin?: Origin
+  },
 ): Promise<{ revoked: boolean }> {
   return pool.withTenant({ orgId: input.orgId, userId: input.actorUserId ?? undefined }, async (db) => {
     const rows = await db.execute<{ fingerprint: string; last4: string }>(sql`
@@ -198,7 +232,7 @@ export async function revokeKey(
       action: 'provider_key.revoked',
       targetType: 'provider_key',
       targetId: input.provider,
-      origin: 'web',
+      origin: input.origin ?? 'web',
       detail: { provider: input.provider, last4: rows[0]!.last4, fingerprint: rows[0]!.fingerprint },
       occurredAt: clock.now(),
     })
@@ -315,6 +349,7 @@ export async function setBudget(
     capUsd: number
     actorLabel: string
     actorUserId: string | null
+    origin?: Origin
   },
 ): Promise<Budget> {
   if (!(input.capUsd >= 0)) throw new ProviderKeyError('A cap cannot be negative.')
@@ -334,7 +369,7 @@ export async function setBudget(
       action: 'provider_budget.set',
       targetType: 'provider_budget',
       targetId: `${input.provider}:${period}`,
-      origin: 'web',
+      origin: input.origin ?? 'web',
       detail: { provider: input.provider, capUsd: input.capUsd, period },
       occurredAt: clock.now(),
     })

@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/auth"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
@@ -45,6 +46,21 @@ type Env struct {
 	Getenv func(string) string
 	// Stdin is the input stream, for interactive prompts.
 	Stdin io.Reader
+	// Credentials is where the personal token lives. Nil means this
+	// platform's own store; read through CredentialStore, never directly.
+	Credentials *auth.Store
+}
+
+// CredentialStore is where af login put the token.
+//
+// One accessor rather than auth.NewStore() at each call site, so that a test
+// can substitute an in-memory keyring and a temporary directory in one place
+// and no command can reach past it to the real one by accident.
+func (e *Env) CredentialStore() *auth.Store {
+	if e.Credentials != nil {
+		return e.Credentials
+	}
+	return auth.NewStore()
 }
 
 // Interactive reports whether there is a terminal to ask a question on.
@@ -75,6 +91,15 @@ type Options struct {
 	// WorkDir overrides the working directory. Tests set it; the binary does
 	// not, and reads the process directory instead.
 	WorkDir string
+	// Credentials is where af login, af logout, af whoami and af provider read
+	// and write the personal token. Nil means the platform's own store.
+	//
+	// Injected for the same reason Getenv and Clock are: without it, a test of
+	// any command that reads a credential writes to the developer's keychain,
+	// prompts them for it on macOS, and leaves a token behind on a shared CI
+	// machine. So those commands had no end-to-end test at all, which is
+	// exactly the gap that lets a broken command ship looking fine.
+	Credentials *auth.Store
 }
 
 // Execute runs the command line and returns the process exit code.
@@ -103,12 +128,13 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	out.Color = DetectColor(opts.Stdout, opts.Getenv)
 
 	env := &Env{
-		Out:      out,
-		Clock:    opts.Clock,
-		Redactor: redact.New(),
-		Getenv:   opts.Getenv,
-		Stdin:    opts.Stdin,
-		WorkDir:  opts.WorkDir,
+		Out:         out,
+		Clock:       opts.Clock,
+		Redactor:    redact.New(),
+		Getenv:      opts.Getenv,
+		Stdin:       opts.Stdin,
+		WorkDir:     opts.WorkDir,
+		Credentials: opts.Credentials,
 	}
 	if env.WorkDir == "" {
 		wd, err := os.Getwd()
@@ -301,6 +327,7 @@ recoverable by replay.`),
 		newCICommand(env),
 		newRunnerCommand(env),
 		newSecretCommand(env),
+		newProviderCommand(env),
 		newLoginCommand(env),
 		newLogoutCommand(env),
 		newWhoamiCommand(env),

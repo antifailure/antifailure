@@ -408,7 +408,14 @@ export async function redeemDeviceCode(
 export interface CliIdentity {
   login: string
   name: string | null
+  /** The tenant's uuid, for the transaction any authorized call opens.
+   *  Deliberately not returned by /v1/whoami: a slug is what a person needs to
+   *  read and an internal identifier is not. */
+  orgId: string
   orgSlug: string
+  /** The person's uuid, so a write this token makes is attributed to them
+   *  rather than to "a terminal". */
+  userId: string
   role: string
   scopes: string[]
   expiresAt: Date | null
@@ -481,7 +488,9 @@ export async function identify(
     return {
       login: row.github_login,
       name: row.name,
+      orgId: found.org_id,
       orgSlug: row.slug,
+      userId: found.user_id!,
       role: row.role,
       scopes: found.scopes,
       expiresAt: found.expires_at ? asDate(found.expires_at) : null,
