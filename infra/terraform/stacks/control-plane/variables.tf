@@ -124,3 +124,21 @@ variable "github_client_secret" {
 variable "github_redirect_uri" {
   type = string
 }
+
+variable "event_retention_months" {
+  type        = number
+  default     = null
+  description = "Null keeps every event forever. Staging sets a year, because a partitioned table with no retention is a partition per month and no reason to ever drop one."
+}
+
+variable "key_vault_name" {
+  type        = string
+  default     = ""
+  description = "Overrides the computed vault name, for a vault that already exists under a different one."
+}
+
+variable "database_extensions" {
+  type        = list(string)
+  default     = ["PGCRYPTO"]
+  description = "Allow-listed in azure.extensions. Azure refuses CREATE EXTENSION for anything absent from it, and it defaults to empty."
+}

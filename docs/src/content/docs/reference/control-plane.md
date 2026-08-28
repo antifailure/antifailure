@@ -26,9 +26,65 @@ is a process that fails in production rather than at deploy time.
 | `AF_PORT` | `8080` | The port to listen on. |
 | `AF_POOL_MAX` | `10` | Connections in the application pool. |
 | `AF_APP_BASE_URL` | unset | The public origin, used to build absolute links. |
+| `AF_SIGNIN_ALLOWLIST` | unset | GitHub logins, comma or whitespace separated, that may sign in. Unset means any GitHub account may sign in, which is the right default for an installation whose network already decides who reaches it. **Set but empty means nobody**, not everybody: a deployment that lost this value should close, not open. The mode is printed at startup. |
 | `AF_INSECURE_COOKIES` | unset | Set to `1` to drop the `Secure` attribute from cookies. For local development over plain HTTP and nothing else. |
 | `AF_MIGRATE` | unset | Set to `1` to apply migrations at startup. Requires `AF_MIGRATION_DATABASE_URL`. |
 | `AF_MIGRATION_DATABASE_URL` | unset | A connection string for a role that may run DDL. |
+| `AF_VERSION` | `dev` | The build's version, reported by `/readyz`. Stamped into the image at build time; setting it by hand only makes the endpoint lie. |
+| `AF_COMMIT` | `unknown` | The commit the build came from, reported by `/readyz`. Stamped the same way. |
+| `AF_PROVIDER_KEY_SECRET` | unset | 32 bytes of base64, the secret that seals customers' Anthropic and OpenAI keys. Generate one with `openssl rand -base64 32`. Unset means keys cannot be stored at all: saving one is refused rather than written in the clear. It must not live in the same place as the database, or a database dump carries both halves. Anything other than 32 bytes stops the process at startup rather than failing later on the one action the feature exists for. |
+
+## Who may sign in
+
+Two gates, and they are not the same one.
+
+`AF_SIGNIN_ALLOWLIST` decides who may complete a GitHub sign-in at all. An
+account not on it is refused during the OAuth callback, before any row is
+written, so a refused person leaves no account behind.
+
+Membership decides what a signed-in person can see, and it is derived from
+GitHub rather than granted here: an account is a member of an organization only
+where a GitHub App installation exists for that organization. Somebody can
+therefore sign in successfully and have no tenant at all, which is what happens
+to any account added to the allowlist before it is invited anywhere.
+
+Both are needed. The allowlist is a closed door; the installation check is what
+makes an open one safe.
+
+## Health
+
+Two endpoints, answering two different questions. Point the right thing at the
+right one.
+
+| Endpoint | Answers | Touches the database |
+| --- | --- | --- |
+| `GET /health` | Is the process alive? | No |
+| `GET /readyz` | Can it serve a request? | Yes, one trivial query |
+
+`/health` is a static literal, and it stays one. A liveness probe restarts the
+container when it fails, so wiring it to the database turns a slow Postgres
+into a restart loop that makes the outage worse.
+
+`/readyz` takes a connection from the pool the application serves with and asks
+the database a question. It answers `200` with the build, or `503` with the
+reason:
+
+```json
+{ "ready": true, "version": "v0.2.0", "commit": "31ce3f7" }
+```
+
+```json
+{ "ready": false, "version": "v0.2.0", "commit": "31ce3f7",
+  "reason": "password authentication failed for user \"af_app\"" }
+```
+
+Use `/readyz` for a deploy gate, and check the `commit` as well as the status.
+The first deploy of this application to Azure answered `/health` with `200` for
+thirteen minutes while every endpoint that touched a table returned `500`: the
+schema had never applied, because the managed Postgres refused
+`CREATE EXTENSION pgcrypto`. A gate watching `/health` would have called that
+deploy a success. Checking the commit catches the other half, a rollout that
+silently did not happen and left the previous build serving.
 
 ## Schema maintenance
 

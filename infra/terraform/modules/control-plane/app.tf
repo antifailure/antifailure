@@ -23,6 +23,9 @@ resource "azurerm_container_app_environment" "this" {
 locals {
   secret_names = ["database-url", "migration-database-url", "github-client-id", "github-client-secret", "github-redirect-uri"]
 
+  # Resolved once, because three resources pull it and three copies of this
+  # expression is three chances for the bootstrap job to migrate a database for
+  # a build the application is not running.
   image = var.image_digest != "" ? "${var.image_repository}@${var.image_digest}" : "${var.image_repository}:${var.image_tag}"
 }
 
@@ -61,6 +64,7 @@ resource "azurerm_container_app_job" "bootstrap" {
     identity_ids = [azurerm_user_assigned_identity.app.id]
   }
 
+
   dynamic "secret" {
     for_each = toset(["database-url", "migration-database-url"])
     content {
@@ -91,9 +95,12 @@ resource "azurerm_container_app_job" "bootstrap" {
 
   tags = var.tags
 
+  # The extension allow-list too, and not only the database. Without it the
+  # first migration is refused and this job fails, which is exactly what it did.
   depends_on = [
     azurerm_role_assignment.app_reads_secrets,
     azurerm_postgresql_flexible_server_database.this,
+    azurerm_postgresql_flexible_server_configuration.extensions,
   ]
 }
 
@@ -124,6 +131,7 @@ resource "azurerm_container_app_job" "maintenance" {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.app.id]
   }
+
 
   secret {
     name                = "migration-database-url"
@@ -171,12 +179,25 @@ resource "azurerm_container_app" "this" {
   name                         = "${var.name}-app"
   resource_group_name          = var.resource_group_name
   container_app_environment_id = azurerm_container_app_environment.this.id
-  revision_mode                = "Single"
+
+  # Multiple, so that a rollback is a traffic shift rather than a redeploy.
+  #
+  # In Single mode the previous revision is deactivated the moment the new one
+  # is provisioned, so recovering from a bad deploy means building and starting
+  # the old image again: minutes, during which the bad revision is serving. In
+  # Multiple mode the old revision is still running with zero traffic, and
+  # rolling back is one API call that takes effect in seconds.
+  #
+  # This is what makes the post-deploy health gate in .github/workflows/cd.yml
+  # able to promise anything. A gate that detects a bad deploy and cannot undo
+  # it quickly is a notification, not a gate.
+  revision_mode = "Multiple"
 
   identity {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.app.id]
   }
+
 
   dynamic "secret" {
     for_each = toset(["database-url", "github-client-id", "github-client-secret", "github-redirect-uri"])
@@ -197,6 +218,9 @@ resource "azurerm_container_app" "this" {
     # configurable from this module at all.
     allow_insecure_connections = false
 
+    # The weights here are the INITIAL state only. Continuous deployment owns
+    # them afterwards: it puts a new revision in at zero, checks it, and then
+    # shifts. See the lifecycle block below.
     traffic_weight {
       latest_revision = true
       percentage      = 100
@@ -267,6 +291,21 @@ resource "azurerm_container_app" "this" {
   }
 
   tags = var.tags
+
+  # Terraform owns the shape of this app; the deploy pipeline owns which build
+  # is in it and how much traffic that build has.
+  #
+  # Without this, the two fight. Every `terraform apply` would reset the image
+  # to var.image_tag and hand 100 percent of traffic back to whatever that
+  # resolves to, silently undoing the last deploy, and the next deploy would
+  # show up as drift in the next plan. Splitting ownership at this line is what
+  # lets both run on their own schedule.
+  lifecycle {
+    ignore_changes = [
+      template[0].container[0].image,
+      ingress[0].traffic_weight,
+    ]
+  }
 
   # The application must not start before its database is usable. Without this
   # the first revision comes up against a schema that does not exist yet and
