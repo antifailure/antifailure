@@ -484,4 +484,9 @@ lint:
       echo "golangci-lint is not installed. brew install golangci-lint"
       exit 1
     fi
-    cd engine && golangci-lint run --timeout 15m ./...
+    cd engine
+    # verify before run. `run` does not validate the config, so an invalid one
+    # passes locally and fails the moment CI's action verifies it, which is
+    # exactly what happened with an empty misspell key.
+    golangci-lint config verify
+    golangci-lint run --timeout 15m ./...
