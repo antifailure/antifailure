@@ -199,3 +199,28 @@ resource "azurerm_role_assignment" "ci_reads_state" {
   role_definition_name = "Storage Blob Data Reader"
   principal_id         = var.ci_principal_id
 }
+
+# AND A CONTROL PLANE READ, WHICH IS THE EXACT MIRROR OF AN EARLIER SURPRISE.
+#
+# Further up this file there is a note that Owner on the subscription grants
+# nothing on the storage DATA plane. The reverse is just as true and cost just
+# as much: a data role grants nothing on the CONTROL plane. Before the azurerm
+# backend reads a single byte of state it does a control plane GET on the
+# account, to resolve its blob endpoint, and Storage Blob Data Reader does not
+# permit that:
+#
+#   AuthorizationFailed: ... does not have authorization to perform action
+#   'Microsoft.Storage/storageAccounts/read'
+#
+# The message names a read action, the identity is called a Reader, and it
+# still fails, which is why this is worth a comment rather than a line.
+#
+# Reader here is the CONTROL plane only: it can see that the account exists and
+# what its settings are, and it can read nothing inside it. The pair is what
+# makes the plan job work, and both halves are read-only.
+resource "azurerm_role_assignment" "ci_sees_the_account" {
+  count                = var.ci_principal_id == "" ? 0 : 1
+  scope                = azurerm_storage_account.state.id
+  role_definition_name = "Reader"
+  principal_id         = var.ci_principal_id
+}

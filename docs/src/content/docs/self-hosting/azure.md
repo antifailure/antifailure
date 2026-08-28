@@ -347,6 +347,15 @@ identifiers, and the whole design is that the credential does not exist.
 | --- | --- |
 | the control plane resource group | Reader |
 | the state storage account | Storage Blob Data Reader |
+| the state storage account | Reader |
+
+The last two look redundant and are not. Azure splits storage into a control
+plane and a data plane and a role on one grants nothing on the other, **in both
+directions**: Owner on the subscription cannot read a blob, and Storage Blob
+Data Reader cannot perform `Microsoft.Storage/storageAccounts/read`, which the
+`azurerm` backend does before reading any state, to resolve the blob endpoint.
+The error names a read action while the identity is called a Reader, so it takes
+a moment to see. Both roles are read-only.
 
 Nothing at subscription scope. Two grants are deliberately absent, and each is
 half of a pair with a flag in the workflow:

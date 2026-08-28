@@ -89,7 +89,17 @@ as decoration, just written in prose.
    | Scope | Role | Why |
    | --- | --- | --- |
    | the `af-cp-centralus` group | Reader | refresh the stack, change nothing |
-   | the state storage account | Storage Blob Data Reader | read the state, never write it |
+   | the state storage account | Storage Blob Data Reader | read the bytes of the state |
+   | the state storage account | Reader | see that the account exists at all |
+
+   THE LAST TWO ARE NOT REDUNDANT AND THAT IS THE POINT. Azure splits storage
+   into a control plane and a data plane, and a role on one grants nothing on
+   the other, in BOTH directions. Owner on the subscription cannot read a blob;
+   Storage Blob Data Reader cannot perform `Microsoft.Storage/storageAccounts/read`,
+   which the azurerm backend does before it reads any state at all, to resolve
+   the account's blob endpoint. The failure names a read action while the
+   identity is called a Reader, which is why it takes a moment. Both halves are
+   read-only.
 
    **Nothing at subscription scope**, which is also why both stacks set
    `resource_provider_registrations = "none"`: azurerm 4.x otherwise registers
