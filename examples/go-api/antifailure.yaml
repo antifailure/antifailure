@@ -91,6 +91,9 @@ workflows:
       - "the new order is returned with a total of 2599"
     tags: [smoke]
 
+# Declared and validated, not yet run. The engine parses these, refuses one that
+# is not read only, and shows them in af explain. Nothing executes the SQL in
+# this release, so a green run says nothing about them either way.
 invariants:
   - name: no-orphaned-orders
     description: >-

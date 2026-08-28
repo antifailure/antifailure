@@ -255,7 +255,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `runner` browser | proven | Playwright, accessibility tree, three tests against a real browser |
 | `internal/env` test | proven | `af test` end to end |
 | Model driven planning | proven | Anthropic and OpenAI; refuses a control the page does not have; falls back when the model is unreachable |
-| Invariants and insights | planned | |
+| Invariants and insights | planned | The engine parses an invariant, refuses a malformed one and shows it in `af explain`. Nothing executes the SQL, no report carries a result, and AF-AGT-010 and AF-AGT-011 are both marked planned in the catalog. That was true and the documentation did not say so: `guides/invariants` described the whole feature in the present tense, `examples/go-api` said its invariant was "the one that goes red if the masking breaks the join", and both `guides/github` and `getting-started/pull-requests` told readers the pull request comment carries "anything the invariants found, and the insights summary". A real `af ci` report carries neither. All four now say declared and validated rather than run, and the two pages describing the comment describe what it actually contains, taken from a report rather than from the plan. This is the third time today the same shape has turned up in this repository's own documentation, after `build.allow_hosts` and the egress rule nothing called. |
 
 ## Phase 7. Load
 

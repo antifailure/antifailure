@@ -98,8 +98,14 @@ environment. It cannot be logged, dumped, or read out of a container somebody
 left running.
 
 **The invariants are the assertions the API cannot make.** `no-orphaned-orders`
-asks a question about the database rather than about a response. It is the one
-that goes red if the masking breaks the join.
+asks a question about the database rather than about a response, and it is the
+one that would catch a masking run that broke the join.
+
+Declared rather than run in this release, the same as the host list below. The
+engine parses these, refuses a malformed one and shows them in `af explain`,
+and nothing executes the SQL yet, so a green run is not evidence that they
+held. They are here because the manifest is the place to write them down, not
+because this example proves them.
 
 **The build declares its hosts.** `proxy.golang.org` is named because the build
 fetches from it. That list is declared rather than enforced in this release:

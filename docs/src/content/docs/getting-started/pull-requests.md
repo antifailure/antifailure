@@ -53,9 +53,16 @@ mode becomes `app`.
 
 ## Open a pull request
 
-Push the branch and open one. The workflow runs and leaves a single comment
-carrying the environment URL where there is one, each workflow's verdict,
-anything the invariants found, and the insights summary.
+Push the branch and open one. The workflow runs and leaves a single comment.
+Taken from a real report rather than from the plan, it carries a headline
+saying what the run amounted to, the environment URL, a row per workflow with
+its verdict and the detail behind it, a collapsible set of steps for
+reproducing any workflow that did not pass, and a footer naming the branch, the
+commit, how long it took and which golden it branched from.
+
+Invariant results and the insights summary are meant to join it and do not
+appear yet, because neither is executed in this release. See
+[invariants](/docs/guides/invariants/).
 
 It edits that comment in place on the next push rather than adding another. A
 bot that comments on every push is a bot people mute, and a muted bot reports
