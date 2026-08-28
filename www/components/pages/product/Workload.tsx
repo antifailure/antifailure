@@ -147,7 +147,7 @@ assertions:
         items={[
           { href: "/product/exploratory-users", title: "Exploratory users", description: "Exploratory users inside Workload Studio, beside observed and deterministic traffic." },
           { href: "/product/oracle", title: "Differential Oracle", description: "Same compiled workload against baseline and candidate." },
-          { href: "/docs/workload", title: "Workload docs", description: "Scenario IR and traffic controls." },
+          { href: "/docs/concepts/load", title: "Load docs", description: "Scenario IR and traffic controls." },
         ]}
       />
     </PageShell>

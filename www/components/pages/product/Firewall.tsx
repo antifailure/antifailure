@@ -281,7 +281,7 @@ export function FirewallPage() {
         items={[
           { href: "/security", title: "Security", description: "Fail closed is a product principle." },
           { href: "/product/oracle", title: "Differential Oracle", description: "Third-party effects are compared." },
-          { href: "/docs/firewall", title: "Firewall docs", description: "Controls and example behavior." },
+          { href: "/docs/concepts/egress", title: "Egress docs", description: "Controls and example behavior." },
         ]}
       />
     </PageShell>
