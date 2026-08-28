@@ -23,18 +23,17 @@ import (
 // data instead, in the _antifailure schema, which is also where a branch
 // inherits it for free. See writeMeta in dblab.go.
 
-// metaMarker is the JSON key that says a snapshot is one of ours, and its
-// value is the format version. A snapshot whose message is a human's commit
-// note, or empty, or JSON from something else, is not a golden and is never
-// branched: it holds whatever the engine's retrieval brought in, which is
-// production data that nothing has masked.
-const metaMarker = "antifailure"
-
 // metaVersion is the format version written into new goldens.
 const metaVersion = 1
 
 // meta is what a golden's commit message carries.
 type meta struct {
+	// Antifailure is the key that says a snapshot is one of ours, and its
+	// value is the format version. A snapshot whose message is a human's
+	// commit note, or empty, or JSON from something else, leaves this zero and
+	// is never branched: such a snapshot holds whatever the engine's retrieval
+	// brought in, which is production data that nothing has masked. decodeMeta
+	// is where that refusal happens.
 	Antifailure int    `json:"antifailure"`
 	Version     string `json:"version"`
 	RulesHash   string `json:"rules_hash"`

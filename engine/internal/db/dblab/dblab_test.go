@@ -463,10 +463,10 @@ func TestCollectingAGoldenWaitsOutADeletedClonesStorage(t *testing.T) {
 // one rather than waited on forever.
 func TestAGoldenWithAPermanentDependentIsRefusedRatherThanHungOn(t *testing.T) {
 	p := testProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/snapshots":
+		switch r.URL.Path {
+		case "/snapshots":
 			_ = json.NewEncoder(w).Encode([]Snapshot{goldenSnapshot("pool/x@1", "gv_x")})
-		case r.URL.Path == "/clones":
+		case "/clones":
 			_ = json.NewEncoder(w).Encode([]Clone{})
 		default:
 			w.WriteHeader(http.StatusBadRequest)
@@ -485,10 +485,10 @@ func TestAGoldenWithAPermanentDependentIsRefusedRatherThanHungOn(t *testing.T) {
 func TestCollectingAGoldenNeverForces(t *testing.T) {
 	var forced bool
 	p := testProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/snapshots":
+		switch r.URL.Path {
+		case "/snapshots":
 			_ = json.NewEncoder(w).Encode([]Snapshot{goldenSnapshot("pool/x@1", "gv_x")})
-		case r.URL.Path == "/clones":
+		case "/clones":
 			_ = json.NewEncoder(w).Encode([]Clone{})
 		default:
 			if r.URL.Query().Get("force") != "" {
