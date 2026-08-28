@@ -383,6 +383,17 @@ export interface RestoreResult {
    *  and must not be pointed at. */
   problems: string[]
   targetUrl: string
+  /** The database this call created, and the only one a caller may destroy.
+   *
+   *  It exists so that dropping is authorised by evidence rather than by
+   *  statement order. `restore` refuses a database that already exists, so
+   *  anything reaching a caller's cleanup was made by this call; but that is a
+   *  property of two functions being written in a particular sequence, and the
+   *  first person to wrap the restore in a try/catch to make a drill "more
+   *  robust" would delete a live database with no test going red. A caller
+   *  that drops this field rather than the name it asked for cannot do that,
+   *  because on the path where nothing was created there is no field. */
+  created: string
 }
 
 function urlFor(base: string, database: string, user?: string, password?: string): string {
@@ -478,6 +489,9 @@ export async function restore(options: RestoreOptions): Promise<RestoreResult> {
     seconds: Number(process.hrtime.bigint() - started) / 1e9,
     problems,
     targetUrl,
+    // Only reachable past the CREATE DATABASE above, which is only reachable
+    // past the refusal of a database that already exists.
+    created: options.targetDatabase,
   }
 }
 
@@ -648,10 +662,14 @@ export async function rehearse(options: RehearsalOptions): Promise<Rehearsal> {
   }
 
   if (options.drop !== false) {
+    // restored.created, never options.targetDatabase. The two hold the same
+    // string on every path that gets here, and that is the point: the one that
+    // is only present when this run actually created a database is the one
+    // that is safe to destroy. Asking for a name is not evidence of owning it.
     const admin = postgres(options.adminUrl, { max: 1, onnotice: () => {} })
     try {
       await admin.unsafe(
-        `DROP DATABASE IF EXISTS "${options.targetDatabase.replace(/"/g, '""')}" WITH (FORCE)`,
+        `DROP DATABASE IF EXISTS "${restored.created.replace(/"/g, '""')}" WITH (FORCE)`,
       )
     } finally {
       await admin.end({ timeout: 5 })

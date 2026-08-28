@@ -27,6 +27,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -240,6 +241,61 @@ func RemoveContainer(ctx context.Context, cli *client.Client, id string) error {
 		return nil
 	}
 	return err
+}
+
+// RemoveNetwork removes a network Antifailure created, and refuses one it did
+// not.
+//
+// It exists because RemoveContainer had no counterpart and callers therefore
+// reached for cli.NetworkRemove directly, which removes whatever the name
+// resolves to. The engine's journal replay was one of those callers: it
+// addresses a resource by the name recorded before creation, which is the right
+// handle for compensating a crash and is not, on its own, evidence of
+// ownership. A name is a request; a label is a fact.
+//
+// A network that is not there is not an error. That is the ordinary state a
+// compensating delete finds, and the caller's intent is satisfied.
+func RemoveNetwork(ctx context.Context, cli *client.Client, id string) error {
+	insp, err := cli.NetworkInspect(ctx, id, network.InspectOptions{})
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if !IsOurs(insp.Labels) {
+		return fmt.Errorf("%w: network %s", ErrNotOurs, id)
+	}
+	if err := cli.NetworkRemove(ctx, id); err != nil && !client.IsErrNotFound(err) {
+		return err
+	}
+	return nil
+}
+
+// RemoveVolume removes a volume Antifailure created, and refuses one it did not.
+//
+// The same reasoning as RemoveNetwork, and it matters more here: a container can
+// be recreated and a network can be recreated, and the data in somebody else's
+// volume cannot.
+//
+// force, because a volume whose container is already gone is exactly the state a
+// compensating delete finds. It forces past the container check, never past the
+// ownership one.
+func RemoveVolume(ctx context.Context, cli *client.Client, id string) error {
+	insp, err := cli.VolumeInspect(ctx, id)
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if !IsOurs(insp.Labels) {
+		return fmt.Errorf("%w: volume %s", ErrNotOurs, id)
+	}
+	if err := cli.VolumeRemove(ctx, id, true); err != nil && !client.IsErrNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 // ShortID trims a Docker id to the twelve characters the CLI shows, which is

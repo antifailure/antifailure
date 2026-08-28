@@ -380,3 +380,69 @@ function blankManifestFields() {
     bytes: 0,
   }
 }
+
+// Lane 4 asked every lane the same question tonight: for every destructive
+// operation you own, what PROVES the thing you are about to destroy is yours?
+// The drill drops a database. This is the answer, as a test rather than as an
+// argument.
+//
+// The drill has always been safe here, because restore refuses a database that
+// already exists and the drop sits after it. But that is a property of two
+// functions being written in a particular order, and the first person to wrap
+// the restore in a try/catch to make the drill "more robust" would turn it into
+// something that deletes a live database, with nothing going red. So the drop
+// now takes the name restore reports having CREATED, which does not exist on
+// the path where nothing was created, and this asserts the observable end of
+// it: the occupied database and its contents are still there afterwards.
+test('a drill refuses a database it did not create, and leaves it standing', async (t) => {
+  const occupied = `af_occupied_${randomUUID().replace(/-/g, '').slice(0, 12)}`
+  const admin = postgres(DR_URL, { max: 1, onnotice: () => {} })
+  t.after(async () => {
+    await admin.unsafe(`DROP DATABASE IF EXISTS "${occupied}" WITH (FORCE)`).catch(() => {})
+    await admin.end({ timeout: 5 })
+  })
+
+  await admin.unsafe(`CREATE DATABASE "${occupied}"`)
+  const inside = postgres(urlInto(occupied), { max: 1, onnotice: () => {} })
+  try {
+    await inside.unsafe('CREATE TABLE not_yours (id int primary key)')
+    await inside.unsafe('INSERT INTO not_yours VALUES (1), (2), (3)')
+  } finally {
+    await inside.end({ timeout: 5 })
+  }
+
+  const workDir = await mkdtemp(path.join(tmpdir(), 'af-drill-occupied-'))
+  t.after(() => rm(workDir, { recursive: true, force: true }))
+
+  await assert.rejects(
+    rehearse({
+      adminUrl: adminUrlOf(),
+      outDir: workDir,
+      label: 'drill',
+      targetDatabase: occupied,
+      appPassword: 'app-test-password',
+    }),
+    /exist/i,
+    'the drill accepted a database it did not create',
+  )
+
+  // The refusal is not the point. This is.
+  const still = await admin<{ n: string }[]>`
+    SELECT count(*)::text AS n FROM pg_database WHERE datname = ${occupied}`
+  assert.equal(still[0]?.n, '1', 'the drill destroyed a database it did not create')
+
+  const survivor = postgres(urlInto(occupied), { max: 1, onnotice: () => {} })
+  try {
+    const rows = await survivor<{ n: string }[]>`SELECT count(*)::text AS n FROM not_yours`
+    assert.equal(rows[0]?.n, '3', 'the database survived but its contents did not')
+  } finally {
+    await survivor.end({ timeout: 5 })
+  }
+})
+
+/** The admin URL pointed at one particular database. */
+function urlInto(database: string): string {
+  const u = new URL(DR_URL)
+  u.pathname = '/' + database
+  return u.toString()
+}

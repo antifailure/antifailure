@@ -116,6 +116,17 @@ func (o *Orchestrator) deleters(s *session, cli *client.Client, cliErr error) (*
 	// resource may or may not exist, is compensated by the same call as one
 	// that was fully created. That is what makes the intent state useful
 	// rather than merely honest.
+	//
+	// A NAME IS NOT EVIDENCE OF OWNERSHIP, which is why all three deleters go
+	// through dockerutil rather than through the Docker client. A record says
+	// what this engine meant to create; what the name resolves to on the
+	// daemon today is a separate question, and on a machine where somebody has
+	// their own container called the same thing the two answers differ. Every
+	// one of these checks the managed label and refuses with ErrNotOurs
+	// otherwise, so the worst a replay can do to a resource it does not own is
+	// report it. `af down`'s label sweep has always had this property because
+	// a filter can only match what it labelled; the replay reaches resources by
+	// name and so has to assert it, and for two of these three it did not.
 	handle := func(rec journal.Record) string {
 		if rec.ExternalID != "" {
 			return rec.ExternalID
@@ -129,13 +140,11 @@ func (o *Orchestrator) deleters(s *session, cli *client.Client, cliErr error) (*
 		}))
 	reg.Register("local", journal.KindNetwork, journal.DeleterFunc(
 		func(ctx context.Context, rec journal.Record) error {
-			return ignoreMissing(cli.NetworkRemove(ctx, handle(rec)))
+			return dockerutil.RemoveNetwork(ctx, cli, handle(rec))
 		}))
 	reg.Register("local", journal.KindVolume, journal.DeleterFunc(
 		func(ctx context.Context, rec journal.Record) error {
-			// force, because a volume whose container is already gone is
-			// exactly the state a compensating delete finds.
-			return ignoreMissing(cli.VolumeRemove(ctx, handle(rec), true))
+			return dockerutil.RemoveVolume(ctx, cli, handle(rec))
 		}))
 
 	return o.databaseDeleters(reg, s), nil
@@ -163,16 +172,4 @@ func (o *Orchestrator) databaseDeleters(reg *journal.Registry, s *session) *jour
 	reg.Register("docker", journal.Kind("database"), destroy)
 	reg.Register("docker", journal.KindDatabaseBranch, destroy)
 	return reg
-}
-
-// ignoreMissing turns "it is already gone" into success.
-//
-// Every deleter has to. Replay runs after crashes and after partial teardowns,
-// so not found is at least as common as deleted, and treating it as a failure
-// would leave a record live forever describing a resource that does not exist.
-func ignoreMissing(err error) error {
-	if err == nil || client.IsErrNotFound(err) {
-		return nil
-	}
-	return err
 }
