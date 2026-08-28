@@ -51,6 +51,7 @@ const (
 	flawNamesCrossEnvironments     = "names-cross-environments"
 	flawNoLogs                     = "no-logs"
 	flawLeaksOnTeardown            = "leaks-on-teardown"
+	flawPodNeverGoverned           = "pod-never-governed"
 )
 
 // negativeControls pairs each flaw with the behavior that has to notice it.
@@ -100,6 +101,17 @@ var negativeControls = []struct {
 	// Not a behavior. The leak check runs after every behavior has passed, and
 	// it is the one assertion a green suite can still fail.
 	{flawLeaksOnTeardown, "the suite left"},
+	// The control this suite most needed and did not have.
+	//
+	// A runtime that never brings a pod under policy is not a runtime that
+	// blocks everything, but from inside the pod the two are the same
+	// observation, and every containment behavior above asserts that
+	// something was blocked. So a suite with no gate reports a clean sweep on
+	// an environment that was never contained for a moment, and reports it in
+	// exactly the words it would use for a correct one.
+	//
+	// This row is what makes the other six mean anything.
+	{flawPodNeverGoverned, "never became subject to this environment's policy"},
 }
 
 const (

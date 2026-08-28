@@ -492,6 +492,17 @@ func fakeStartOrder(services []provider.ServiceSpec, flaw string) ([]provider.Se
 func (f *fakeRuntime) runCommand(env *fakeEnv, command string) int {
 	cmd := strings.TrimSpace(command)
 
+	// The readiness gate every probe now carries. A correct runtime has its
+	// pods under policy, so the gate passes and what follows is the question;
+	// a runtime that never governs a pod leaves the gate spinning and the
+	// probe exits ungoverned without asking anything.
+	if rest, ok := strings.CutPrefix(cmd, strings.TrimSpace(governed)); ok {
+		if f.is(flawPodNeverGoverned) {
+			return ungoverned
+		}
+		cmd = strings.TrimSpace(rest)
+	}
+
 	if strings.Contains(cmd, "http://peer:8080/") && strings.Contains(cmd, markerMine) {
 		if f.is(flawNamesCrossEnvironments) {
 			return crossed

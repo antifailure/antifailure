@@ -525,12 +525,42 @@ func (h *rtHarness) mustUp(ctx context.Context, spec provider.EnvSpec) provider.
 const (
 	reached = 0
 	refused = 9
+	// ungoverned means the probe never became subject to the environment's
+	// policy, so it never asked its question.
+	//
+	// It exists because "blocked" and "not governed yet" are the same
+	// observation from inside a pod, and every containment behavior here
+	// asserts that something was blocked. Without a way to tell them apart,
+	// all of them pass on a pod whose rules were never programmed, which is a
+	// window that really exists: a policy is an object the API server accepts
+	// at once and the CNI programs for each new pod some time afterwards. A
+	// single UDP packet fits inside that window; a DNS lookup, a handshake and
+	// an HTTP exchange do not, which is exactly the selectivity a real run
+	// showed.
+	ungoverned = 7
 )
 
-// probeCmd wraps a command so that it exits reached or refused and nothing
-// else.
+// governed makes a probe wait until its own pod is subject to the policy
+// before it asks anything.
+//
+// Every environment, whatever its egress section says, is allowed to reach the
+// sidecar: that allowance is part of the base rule set and not of the user's
+// configuration. So reaching the sidecar is the one thing that is true exactly
+// when this pod's rules are live, which makes it the readiness signal a probe
+// can wait on without assuming the answer to its own question.
+//
+// The address comes from http_proxy rather than a constant, because the suite
+// is runtime agnostic and both runtimes set it. The gate runs before the
+// command, so it still sees the variable even for the probes that strip the
+// proxy variables from the command itself.
+const governed = `p=${http_proxy#*//}; i=0; ` +
+	`while [ $i -lt 60 ]; do nc -z -w 1 "${p%%:*}" "${p##*:}" >/dev/null 2>&1 && break; ` +
+	`i=$((i+1)); sleep 1; done; [ $i -lt 60 ] || exit 7; `
+
+// probeCmd wraps a command so that it exits reached, refused, or ungoverned,
+// and nothing else.
 func probeCmd(command string) string {
-	return command + " >/dev/null 2>&1 && exit 0 || exit 9"
+	return governed + command + " >/dev/null 2>&1 && exit 0 || exit 9"
 }
 
 // retrying turns a command into one that keeps trying for half a minute
@@ -564,7 +594,18 @@ func (h *rtHarness) probe(ctx context.Context, envID string, egress *schema.Egre
 		Egress:   egress,
 		Services: []provider.ServiceSpec{h.worker("prober", probeCmd(command))},
 	})
-	return h.waitForExit(ctx, envID, "prober")
+	code := h.waitForExit(ctx, envID, "prober")
+	if code == ungoverned {
+		// Failed here rather than returned, because every caller would have to
+		// remember this case and one of them would not. A probe that was never
+		// governed did not answer its question, and reporting its silence as a
+		// refusal is how a containment suite passes on an environment that was
+		// never contained.
+		h.t.Fatalf("the prober never became subject to this environment's policy: it could " +
+			"not reach the sidecar within a minute of starting, so nothing it did afterwards " +
+			"would have meant anything. Whatever this behavior asserts, it did not ask it")
+	}
+	return code
 }
 
 // waitForExit blocks until a service reports the code it exited with.
