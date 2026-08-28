@@ -95,9 +95,12 @@ resource "azurerm_container_app_job" "bootstrap" {
 
   tags = var.tags
 
+  # The extension allow-list too, and not only the database. Without it the
+  # first migration is refused and this job fails, which is exactly what it did.
   depends_on = [
     azurerm_role_assignment.app_reads_secrets,
     azurerm_postgresql_flexible_server_database.this,
+    azurerm_postgresql_flexible_server_configuration.extensions,
   ]
 }
 

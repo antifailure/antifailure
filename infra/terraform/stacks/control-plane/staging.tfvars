@@ -29,3 +29,7 @@ max_replicas = 3
 # a partitioned table means a partition per month and no reason to ever drop
 # one.
 event_retention_months = 12
+
+# The vault that already exists. Without this the module computes "afcp-kv",
+# which is a different vault, and a plan that renames a Key Vault destroys it.
+key_vault_name = "afcp-kv-centralus"

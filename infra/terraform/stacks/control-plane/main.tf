@@ -77,10 +77,13 @@ module "control_plane" {
   tags                = module.foundation.tags
   log_analytics_id    = module.foundation.log_analytics_id
 
+  key_vault_name = var.key_vault_name
+
   image_repository = var.image_repository
   image_tag        = var.image_tag
   image_digest     = var.image_digest
 
+  database_extensions   = var.database_extensions
   database_sku          = var.database_sku
   database_storage_mb   = var.database_storage_mb
   backup_retention_days = var.backup_retention_days

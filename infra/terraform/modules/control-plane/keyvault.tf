@@ -10,8 +10,17 @@
 
 data "azurerm_client_config" "current" {}
 
+# The name is overridable because a Key Vault cannot be renamed in place.
+#
+# Changing it is a destroy and a create, and Key Vault carries purge protection,
+# so the old name is unusable for seven days afterwards and every secret in it
+# goes through soft delete. A plan that renames this vault is therefore an
+# outage plus a week, and it is produced by something as small as editing the
+# expression below. This deployment's vault predates that expression and is
+# called afcp-kv-centralus; staging.tfvars says so, and that one line is the
+# difference between an apply and a replacement.
 resource "azurerm_key_vault" "this" {
-  name                = substr(replace("${var.name}-kv", "_", "-"), 0, 24)
+  name                = var.key_vault_name != "" ? var.key_vault_name : substr(replace("${var.name}-kv", "_", "-"), 0, 24)
   location            = var.location
   resource_group_name = var.resource_group_name
   tenant_id           = data.azurerm_client_config.current.tenant_id

@@ -189,3 +189,21 @@ variable "github_client_secret" {
 }
 variable "github_redirect_uri" { type = string }
 
+
+variable "database_extensions" {
+  type        = list(string)
+  default     = ["PGCRYPTO"]
+  description = <<-EOT
+    Extensions to allow-list in azure.extensions. Azure refuses CREATE EXTENSION
+    for anything absent from this parameter, and it defaults to empty, so a
+    schema that needs one cannot apply until it is named here.
+
+    pgcrypto is required: migration 0001 creates it for gen_random_uuid().
+  EOT
+}
+
+variable "key_vault_name" {
+  type        = string
+  default     = ""
+  description = "Overrides the computed vault name. Set it for an existing vault: a Key Vault cannot be renamed, so a changed name is a destroy, a create, and seven days of purge protection holding the old name."
+}
