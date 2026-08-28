@@ -98,4 +98,7 @@ module "control_plane" {
   github_client_id     = var.github_client_id
   github_client_secret = var.github_client_secret
   github_redirect_uri  = var.github_redirect_uri
+
+  signin_allowlist            = var.signin_allowlist
+  provider_key_secret_enabled = var.provider_key_secret_enabled
 }

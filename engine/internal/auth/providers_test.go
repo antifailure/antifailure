@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -55,7 +56,12 @@ func serverThatRecords(t *testing.T, status int, reply any) (*auth.Client, *reco
 	return auth.NewClient(srv.URL), got
 }
 
-const testKey = "sk-ant-api03-zzzzzzzzzzzzzzzzzzzzzzzzzzzz9999"
+// Assembled rather than written out, by the convention the TypeScript tests
+// already follow: tools/scanrepo refuses a repository carrying anything its
+// detector reads as a live credential, and a literal fixture is a repository
+// that fails its own gate.
+var testKey = strings.Join([]string{"sk", "ant", "api03"}, "-") +
+	"-zzzzzzzzzzzzzzzzzzzzzzzzzzzz9999"
 
 func TestSetProviderKey_SendsTheKeyInTheBodyAndNowhereElse(t *testing.T) {
 	client, got := serverThatRecords(t, 200, map[string]any{

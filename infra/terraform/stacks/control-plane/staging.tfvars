@@ -33,3 +33,18 @@ event_retention_months = 12
 # The vault that already exists. Without this the module computes "afcp-kv",
 # which is a different vault, and a plan that renames a Key Vault destroys it.
 key_vault_name = "afcp-kv-centralus"
+
+# Who may sign in.
+#
+# This deployment ran for its first days with no allowlist at all, which the
+# application announced in its own start-up log --
+#
+#   sign-in is OPEN: any GitHub account may sign in (AF_SIGNIN_ALLOWLIST is not set)
+#
+# -- and nobody read. The brief said "keep signups closed behind an allowlist";
+# the code for it was written, tested, and given no value.
+#
+# GitHub logins, lower-cased on read. Adding somebody is a change here and an
+# apply, which is deliberate: an allowlist that can be edited in a portal is one
+# nobody can review.
+signin_allowlist = ["virsanghavi", "maksymrajszewski"]

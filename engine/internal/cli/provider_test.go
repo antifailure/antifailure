@@ -54,7 +54,10 @@ func (m *memoryRing) Delete(service, name string) error {
 	return nil
 }
 
-const fakeKey = "sk-ant-api03-qqqqqqqqqqqqqqqqqqqqqqqqqqqq7777"
+// Assembled, not written out. See internal/auth/providers_test.go: scanrepo
+// refuses a literal that its own detector reads as a live Anthropic key.
+var fakeKey = strings.Join([]string{"sk", "ant", "api03"}, "-") +
+	"-qqqqqqqqqqqqqqqqqqqqqqqqqqqq7777"
 
 // providerHarness is a control plane that records what it was sent.
 type providerHarness struct {
