@@ -41,6 +41,39 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 50, burst: 200, key: 'ip',
     reason: 'The deploy gate polls it every two seconds for a few minutes, and a load balancer may too. It runs one trivial query, so the cost is a round trip to Postgres.',
   },
+  // The device authorization grant. See src/auth/device.ts: the short code is
+  // eight characters from a 28 character alphabet, and the arithmetic that makes
+  // guessing it hopeless assumes these limits exist. They are not a nicety here,
+  // they are the third of the three things holding that code up.
+  'POST /auth/device/code': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Starting a terminal login is a human action. Ten at once covers somebody retrying in three shells; a sustained one per second does not.',
+  },
+  'POST /auth/device/token': {
+    rate: 2, burst: 30, key: 'ip',
+    reason: 'The terminal polls every five seconds and the server tells a fast client to slow down. This bounds a client that ignores that, and is above the honest rate so a normal login is never refused.',
+  },
+  'GET /auth/device/pending': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Reading the pending request for a typed code. Deliberately as tight as approve: this endpoint would otherwise be the oracle that tells an attacker which guessed codes are real.',
+  },
+  'POST /auth/device/approve': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'A person clicking Approve once. This is the limit that makes guessing an eight character code hopeless rather than merely unlikely.',
+  },
+  'POST /auth/device/deny': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'The same action with the opposite answer, and the same reason for the same number.',
+  },
+  'GET /v1/whoami': {
+    rate: 5, burst: 50, key: 'token',
+    reason: 'af whoami, and the first call of most CLI sessions. Keyed by token because the caller always has one.',
+  },
+  'POST /v1/logout': {
+    rate: 2, burst: 20, key: 'token',
+    reason: 'af logout. Must never be refused in practice: a sign-out that fails leaves a live credential on a machine somebody is trying to clean.',
+  },
+
   'GET /openapi.json': {
     rate: 2, burst: 10, key: 'ip',
     reason: 'A static document that is fetched once by a person and cached by everything else.',

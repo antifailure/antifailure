@@ -47,6 +47,16 @@ import {
   revokeSession,
   sessionCookie,
 } from './auth/session.ts'
+import {
+  approveDeviceCode,
+  denyDeviceCode,
+  describePending,
+  DeviceError,
+  identify,
+  redeemDeviceCode,
+  requestDeviceCode,
+  revokeCliToken,
+} from './auth/device.ts'
 import { openApiDocument } from './openapi.ts'
 import { limitFor, bucketFor, type EndpointLimit } from './limits.ts'
 
@@ -64,6 +74,16 @@ export interface ServerOptions {
   ingestLimit?: { rate: number; burst: number }
   authLimit?: { rate: number; burst: number }
 }
+
+/**
+ * What a token minted by `af login` may ever hold.
+ *
+ * A closed list rather than a free string. A terminal asks for scopes and the
+ * request is intersected with this, so a client cannot invent a capability by
+ * naming one, and adding a capability is a change to this line rather than a
+ * change to whatever a caller happened to send.
+ */
+export const CLI_SCOPES: readonly string[] = ['environments.view', 'runs.view', 'events.write']
 
 export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
@@ -194,6 +214,13 @@ export function createServer(options: ServerOptions) {
 
   app.get('/openapi.json', (c) => c.json(openApiDocument()))
 
+  // Resolving the browser's session, for the routes that need one outside tRPC.
+  async function sessionFrom(cookie: string | undefined) {
+    const token = readCookie(cookie, SESSION_COOKIE)
+    if (!token) return null
+    return resolveSession(options.pool, clock, token)
+  }
+
   // -------------------------------------------------------------------------
   // Sign in
   // -------------------------------------------------------------------------
@@ -271,6 +298,197 @@ export function createServer(options: ServerOptions) {
       // it is derived from the session secret and reveals nothing about it.
       csrfToken: session.csrfToken,
     })
+  })
+
+  // -------------------------------------------------------------------------
+  // Signing in a terminal
+  //
+  // Four endpoints, and which of them needs a session is the whole design. The
+  // two the terminal calls have no session and cannot have one; the two the
+  // browser calls require one, and the organization the terminal ends up in
+  // comes from that session rather than from anything the terminal asked for.
+  // -------------------------------------------------------------------------
+
+  /** The terminal asks. No authentication: this is where a login begins. */
+  app.post('/auth/device/code', async (c) => {
+    let body: { clientLabel?: unknown; scopes?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      // A body is optional. A terminal that sends none gets the defaults.
+    }
+    const label =
+      typeof body.clientLabel === 'string' && body.clientLabel.trim()
+        ? body.clientLabel.trim()
+        : 'a terminal'
+    // Scopes are taken from the request and recorded, but never trusted to
+    // widen anything: they are intersected with what a CLI token may ever hold,
+    // so a terminal cannot ask for a capability that does not exist.
+    const asked = Array.isArray(body.scopes) ? body.scopes.filter((s) => typeof s === 'string') : []
+    const scopes = asked.length ? asked.filter((s) => CLI_SCOPES.includes(s)) : [...CLI_SCOPES]
+
+    const origin = options.appBaseUrl ?? new URL(c.req.url).origin
+    const issued = await requestDeviceCode(options.pool, clock, {
+      clientLabel: label,
+      scopes,
+      baseUrl: origin,
+    })
+    return c.json({
+      device_code: issued.deviceCode,
+      user_code: issued.userCode,
+      verification_uri: issued.verificationUri,
+      verification_uri_complete: issued.verificationUriComplete,
+      expires_in: issued.expiresIn,
+      interval: issued.interval,
+    })
+  })
+
+  /** The terminal collects. Still no session: it holds the device code. */
+  app.post('/auth/device/token', async (c) => {
+    let body: { device_code?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'invalid_request', error_description: 'The body is not JSON.' }, 400)
+    }
+    const deviceCode = typeof body.device_code === 'string' ? body.device_code : ''
+    if (!deviceCode) {
+      return c.json({ error: 'invalid_request', error_description: 'device_code is required.' }, 400)
+    }
+
+    try {
+      const token = await redeemDeviceCode(options.pool, clock, deviceCode)
+      return c.json({
+        access_token: token.accessToken,
+        token_type: token.tokenType,
+        expires_in: token.expiresIn,
+        scope: token.scopes.join(' '),
+      })
+    } catch (err) {
+      if (err instanceof DeviceError) {
+        // 400 with an error code, as RFC 8628 specifies. The CLI switches on
+        // the code: authorization_pending and slow_down mean keep going, and
+        // anything else means stop. A single generic failure would make a
+        // client either poll forever or quit on the first tick.
+        return c.json({ error: err.code, error_description: err.message }, 400)
+      }
+      throw err
+    }
+  })
+
+  /** What the browser shows before somebody approves. Needs a session. */
+  app.get('/auth/device/pending', async (c) => {
+    const session = await sessionFrom(c.req.header('cookie'))
+    if (!session) return c.json({ error: 'Sign in first.' }, 401)
+    const pending = await describePending(options.pool, clock, c.req.query('code') ?? '')
+    if (!pending) {
+      return c.json({ error: 'That code is not valid any more. Run af login again.' }, 404)
+    }
+    return c.json({
+      userCode: pending.userCode,
+      clientLabel: pending.clientLabel,
+      scopes: pending.scopes,
+      expiresAt: pending.expiresAt.toISOString(),
+      // Shown so the person approving knows which tenant they are handing over.
+      organization: session.orgId,
+    })
+  })
+
+  /** Approval. The tenant comes from the session, never from the request. */
+  app.post('/auth/device/approve', async (c) => {
+    const session = await sessionFrom(c.req.header('cookie'))
+    if (!session) return c.json({ error: 'Sign in first.' }, 401)
+    if (!session.orgId) {
+      // Signed in with no organization. Approving would have to invent a
+      // tenant, and inventing one is how a terminal ends up in the wrong
+      // company's data.
+      return c.json(
+        { error: 'You are not a member of an organization yet, so there is nothing to grant.' },
+        403,
+      )
+    }
+    if (!csrfMatches(readCookie(c.req.header('cookie'), SESSION_COOKIE)!, c.req.header(CSRF_HEADER))) {
+      return c.json({ error: `This request needs the ${CSRF_HEADER} header from GET /auth/session.` }, 403)
+    }
+
+    let body: { user_code?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    try {
+      await approveDeviceCode(options.pool, clock, {
+        userCode: String(body.user_code ?? ''),
+        userId: session.userId,
+        orgId: session.orgId,
+        actorLabel: session.label,
+      })
+      return c.json({ approved: true })
+    } catch (err) {
+      if (err instanceof DeviceError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+  })
+
+  app.post('/auth/device/deny', async (c) => {
+    const session = await sessionFrom(c.req.header('cookie'))
+    if (!session) return c.json({ error: 'Sign in first.' }, 401)
+    if (!csrfMatches(readCookie(c.req.header('cookie'), SESSION_COOKIE)!, c.req.header(CSRF_HEADER))) {
+      return c.json({ error: `This request needs the ${CSRF_HEADER} header from GET /auth/session.` }, 403)
+    }
+    let body: { user_code?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    try {
+      await denyDeviceCode(options.pool, clock, String(body.user_code ?? ''))
+      return c.json({ denied: true })
+    } catch (err) {
+      if (err instanceof DeviceError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // What a CLI token is
+  // -------------------------------------------------------------------------
+
+  /** `af whoami`. Answers for a CLI token and for nothing else. */
+  app.get('/v1/whoami', async (c) => {
+    const auth = c.req.header('authorization') ?? ''
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
+    const who = await identify(options.pool, clock, token)
+    if (!who) {
+      // The same answer for a revoked token, an expired one, a made-up one, and
+      // an engine token. An engine token is deliberately not an identity: a
+      // machine is not a person, and answering with one would put a machine's
+      // actions in somebody's name.
+      return c.json({ error: 'This token is not valid.' }, 401)
+    }
+    return c.json({
+      login: who.login,
+      name: who.name,
+      organization: who.orgSlug,
+      role: who.role,
+      scopes: who.scopes,
+      tokenPrefix: who.tokenPrefix,
+      expiresAt: who.expiresAt ? who.expiresAt.toISOString() : null,
+    })
+  })
+
+  /** `af logout`, server side. The token stops working everywhere, not just here. */
+  app.post('/v1/logout', async (c) => {
+    const auth = c.req.header('authorization') ?? ''
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
+    if (!token) return c.json({ error: 'This token is not valid.' }, 401)
+    const { revoked } = await revokeCliToken(options.pool, clock, token)
+    // 200 either way. Signing out has to be idempotent: a client retrying after
+    // a timeout must not be told its second attempt failed, and a token that
+    // was already revoked is in exactly the state the caller asked for.
+    return c.json({ revoked })
   })
 
   // -------------------------------------------------------------------------
