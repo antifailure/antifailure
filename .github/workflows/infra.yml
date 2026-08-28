@@ -173,11 +173,32 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ steps.azure.outputs.remote_state }}" = "true" ]; then
+            # use_azuread_auth IS NOT OPTIONAL AND ITS ABSENCE DOES NOT LOOK
+            # LIKE ITS ABSENCE.
+            #
+            # Without it the azurerm backend authenticates to the blob service
+            # with a STORAGE KEY, so `terraform init` calls listKeys on an
+            # account created with shared_access_key_enabled = false and gets:
+            #
+            #   AuthorizationFailed: ... 'Microsoft.Storage/storageAccounts/listKeys/action'
+            #
+            # which reads as a missing role. Adding the role would be the wrong
+            # fix twice over: it would hand a pull request a credential that
+            # bypasses every RBAC assignment on the account, and listKeys would
+            # still fail because there are no keys to list.
+            #
+            # stacks/tfstate emits a `backend_hcl` output containing exactly
+            # these settings, precisely so the two cannot disagree. This job
+            # cannot read that output, because reading it means running that
+            # stack, so it repeats them by hand. THAT REPETITION IS THE BUG
+            # THIS COMMENT EXISTS TO STOP RECURRING: if you change the backend
+            # in stacks/tfstate/outputs.tf, change it here in the same commit.
             terraform init -input=false \
               -backend-config="resource_group_name=${{ secrets.AZURE_TFSTATE_RG }}" \
               -backend-config="storage_account_name=${{ secrets.AZURE_TFSTATE_ACCOUNT }}" \
               -backend-config="container_name=tfstate" \
               -backend-config="key=control-plane.tfstate" \
+              -backend-config="use_azuread_auth=true" \
               -backend-config="use_oidc=true"
           else
             # main.tf declares an empty `backend "azurerm" {}` and Terraform
