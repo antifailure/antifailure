@@ -57,6 +57,19 @@ export interface UnscopedOptions {
   /** The GitHub organization logins the user belongs to, so the installations
    *  for those organizations can be found. */
   githubLogins?: string[]
+  /** The hash of a device code, for a terminal polling its own login. It has
+   *  no session and no tenant by definition, and it holds this. */
+  deviceCodeHash?: Buffer
+  /** The short code a person typed off a terminal, for the browser approving
+   *  it. The row has no organization until that approval happens, so it cannot
+   *  be reached by tenant. */
+  deviceUserCode?: string
+}
+
+/** What a verified webhook delivery declares it is about. */
+export interface GitHubAccountOptions {
+  /** The account login out of a delivery whose signature has been checked. */
+  login: string
 }
 
 export interface Pool {
@@ -72,6 +85,20 @@ export interface Pool {
    *  whose secret it already holds, and nothing else. Passing a hash it did not
    *  receive from a client returns nothing. */
   withoutTenant<T>(fn: (db: Db) => Promise<T>, opts?: UnscopedOptions): Promise<T>
+  /**
+   * Runs fn scoped to one GitHub account, for a webhook delivery.
+   *
+   * A delivery has no tenant: it may be the thing that CREATES one. So it
+   * cannot use withTenant, and using withoutTenant would leave it able to reach
+   * every row in the database. What it declares instead is the account the
+   * verified payload named, and the policies in 0013 confine it to that
+   * account's organization, installation and repositories.
+   *
+   * The login is lower-cased here rather than at each call site, because the
+   * policies compare lower-cased and one caller forgetting would produce
+   * statements that match nothing and raise nothing.
+   */
+  withGitHubAccount<T>(login: string, fn: (db: Db) => Promise<T>): Promise<T>
   /** The raw client, for migrations and tests only. */
   sql: postgres.Sql
   close(): Promise<void>
@@ -133,6 +160,9 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_ids': (opts?.githubIds ?? []).join(','),
           'antifailure.signin_user_id': opts?.signinUserId ?? '',
           'antifailure.github_logins': (opts?.githubLogins ?? []).join(','),
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
         },
         fn,
       )
@@ -149,6 +179,35 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_ids': (opts?.githubIds ?? []).join(','),
           'antifailure.signin_user_id': opts?.signinUserId ?? '',
           'antifailure.github_logins': (opts?.githubLogins ?? []).join(','),
+          'antifailure.device_code_hash': opts?.deviceCodeHash
+            ? opts.deviceCodeHash.toString('hex')
+            : '',
+          'antifailure.device_user_code': opts?.deviceUserCode ?? '',
+          'antifailure.github_account': '',
+        },
+        fn,
+      )
+    },
+    withGitHubAccount(login, fn) {
+      const account = login.trim().toLowerCase()
+      if (!account) {
+        // An empty setting makes every policy deny, which reads as an empty
+        // database rather than as a bug. Naming it here is the difference
+        // between a webhook that silently writes nothing and one that says why.
+        throw new Error('withGitHubAccount needs an account login')
+      }
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': account,
         },
         fn,
       )

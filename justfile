@@ -66,6 +66,7 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "documented manifests are valid" just manifestcheck
     run "prose reads like a person"      just prosecheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
@@ -80,6 +81,8 @@ gate: _reports
     run "lint"                           just lint
     run "the gates themselves"           just test-tools
     run "engine"                         just test-engine
+    run "this platform's keyring"        just keyring
+    run "the other platforms lint"       just lint-platforms
     run "control plane"                  just test-web
     run "runner"                         just test-runner
     run "edition boundary"               just edition
@@ -360,6 +363,36 @@ examples:
       # happened here twice.
       (cd "$dir" && GOWORK=off go build -o /dev/null ./... && GOWORK=off go vet ./...)
     done
+    # The same rule for the examples that are not Go. An example that does not
+    # build is worse than no example whatever it is written in, and checking
+    # only the compiled ones would have left the newest one unchecked by the
+    # gate that exists to say exactly this.
+    for dir in examples/*/; do
+      [ -f "$dir/package.json" ] || continue
+      echo "  $dir"
+      (cd "$dir" && npm ci --no-audit --no-fund --silent && npm run build)
+    done
+    # And the ones written in Python. There is no compile step, so the check
+    # that means something is the framework's own: `manage.py check` loads the
+    # settings, the URL conf and every model, which is where a typo in any of
+    # them shows up. DATABASE_URL is a placeholder because check does not
+    # connect; the example refuses to start without one, deliberately, and this
+    # gate should not be the thing that discovers that.
+    for dir in examples/*/; do
+      [ -f "$dir/requirements.txt" ] || continue
+      echo "  $dir"
+      (
+        cd "$dir"
+        python3 -m venv .venv-gate
+        ./.venv-gate/bin/pip install -q --disable-pip-version-check -r requirements.txt
+        ./.venv-gate/bin/python -m compileall -q . -x '\.venv-gate'
+        if [ -f manage.py ]; then
+          DATABASE_URL="postgres://gate:gate@127.0.0.1:5432/gate" \
+            ./.venv-gate/bin/python manage.py check
+        fi
+        rm -rf .venv-gate
+      )
+    done
     go build -o /tmp/af-examples ./engine/cmd/af
     for dir in examples/*/; do
       [ -f "$dir/antifailure.yaml" ] || continue
@@ -385,6 +418,16 @@ forbidden:
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
+
+# Every manifest shown in the documentation is one the engine would accept.
+#
+# The gates already read style, spelling, links and repository paths, and none
+# of them knows what a manifest is. A getting started page shipped telling
+# readers to set control_plane.url, which the engine refuses with AF-MAN-002
+# because the schema closes itself so a typo cannot silently change an
+# environment.
+manifestcheck:
+    go run ./tools/manifestcheck .
 
 # This justfile runs what CI runs.
 gatecheck:
@@ -444,6 +487,34 @@ generate:
     cd engine && go test ./internal/events -update-schema
     cd engine && go test ./internal/masking -update-transforms
     cd engine && go test ./internal/hud -update-frames
+
+# This machine's own credential store, against the real thing.
+#
+# The same command the keyring workflow runs, which is what lets `just gate` and
+# CI agree about it. What it actually exercises differs per platform and that is
+# the point: macOS runs the keychain tests here, Linux runs the Secret Service
+# ones, and Windows runs the Credential Manager ones. No single machine can run
+# all three, which is why that workflow has a job per platform, and why running
+# the local one here is the most a developer's gate can honestly do.
+#
+# A machine with no keyring daemon skips rather than fails. That is correct: the
+# chain's whole design is that an unavailable source is named and stepped over.
+keyring:
+    cd engine && go test ./internal/secrets/
+
+# Lint the code the other platforms compile.
+#
+# The main lint runs on one machine, so it only ever sees the files that
+# machine's build tags select. keyring_windows.go and keyring_darwin.go are
+# invisible to it, and a file nothing lints drifts: GOOS=windows found an
+# unchecked return in the Windows keyring that had been merged and green for a
+# day, because no linter on any runner had ever compiled it.
+#
+# Cross compiling for the lint costs nothing. It needs no runner of that
+# platform, since it type checks rather than runs.
+lint-platforms:
+    cd engine && GOOS=windows golangci-lint run --timeout 15m
+    cd engine && GOOS=darwin golangci-lint run --timeout 15m
 
 # The community build does not contain or need the enterprise edition.
 edition:

@@ -21,6 +21,16 @@ FROM alpine:3.20
 # talks to a 17 server perfectly well.
 RUN apk add --no-cache postgresql-client && adduser -D -u 10001 api
 USER api
+
+# The migration runs in this image, as a one shot container with the manifest's
+# migrate command in place of the entrypoint. That command names
+# migrations/0001_init.sql by a relative path, so the file has to be in the
+# image and the working directory has to be the one it is relative to. Shipping
+# psql without the migrations was half a fix: the first run then failed with
+# "No such file or directory" instead of "psql: not found".
+WORKDIR /app
+COPY migrations ./migrations
+
 COPY --from=build /out/api /usr/local/bin/api
 EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/api"]

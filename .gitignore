@@ -131,3 +131,14 @@ tools/docs/styles/Google/
 # An example builds into the directory it lives in unless you say otherwise,
 # and `go build ./...` does not say otherwise. One of these was staged.
 /examples/*/go-api
+
+# Python bytecode, from examples/django-api. Committed once by a `git add`
+# on a directory that had been run, which is exactly how build output gets
+# into a repository.
+__pycache__/
+*.pyc
+
+# The report `af ci --output report.md` writes. Running an example produces one
+# in that example's directory, and it is an artifact of a run rather than part
+# of the example.
+examples/*/report.md

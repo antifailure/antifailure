@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-37 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+36 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -229,6 +229,42 @@ The provider's concurrent branch limit ({limit}) is reached.
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/limits](/docs/providers/limits/) |
+
+### AF-DB-008
+
+The database provider {provider} at {endpoint} rejected the configured credential.
+
+**What to do.** Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/overview](/docs/providers/overview/) |
+
+### AF-DB-009
+
+The Database Lab Engine at {endpoint} has no snapshot to build a golden from: {detail}
+
+**What to do.** Wait for the engine's own data retrieval to finish, then refresh again; its progress is at GET /instance/retrieval.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [providers/dblab](/docs/providers/dblab/) |
+
+### AF-DB-011
+
+The subset could not be taken: {detail}
+
+**What to do.** Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/subsetting](/docs/concepts/subsetting/) |
 
 ## Detection
 
@@ -603,6 +639,18 @@ The variables {names} are declared in the manifest but were not found in any con
 | | |
 | --- | --- |
 | Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/secrets](/docs/guides/secrets/) |
+
+### AF-SEC-002
+
+The credential for {source} was rejected after one refresh: {detail}
+
+**What to do.** Rotate the credential and store the new value where {source} reads it. A rejection that survives a refresh is a credential that was revoked or was never right, so retrying will not help.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/secrets](/docs/guides/secrets/) |
 

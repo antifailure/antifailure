@@ -33,6 +33,15 @@ locals {
   )
 }
 
+# The name is overridable because a Key Vault cannot be renamed in place.
+#
+# Changing it is a destroy and a create, and Key Vault carries purge protection,
+# so the old name is unusable for seven days afterwards and every secret in it
+# goes through soft delete. A plan that renames this vault is therefore an
+# outage plus a week, and it is produced by something as small as editing the
+# expression below. This deployment's vault predates that expression and is
+# called afcp-kv-centralus; staging.tfvars says so, and that one line is the
+# difference between an apply and a replacement.
 resource "azurerm_key_vault" "this" {
   name                = local.key_vault_name
   location            = var.location
@@ -127,11 +136,38 @@ resource "azurerm_role_assignment" "deployer_writes_secrets" {
 #   keyvault secret set` is quietly untrue, because the next apply reverts it.
 #
 # ignore_changes on the value makes the rotation instruction true.
+# The sealing secret for provider keys.
+#
+# Generated here rather than passed in, so that no person and no workflow ever
+# holds it: it goes from the random provider into Key Vault and into the
+# container's environment, and the only copy outside the vault is in Terraform
+# state, which lives in a storage account with key access disabled.
+#
+# keepers is empty on purpose. Anything in it that changes regenerates the
+# secret, and a regenerated sealing secret means every stored provider key
+# stops opening -- silently, because a sealed value that will not decrypt looks
+# exactly like a tampered one. There is no key rotation story that starts with
+# "the infrastructure changed the secret without being asked".
+resource "random_bytes" "provider_key_secret" {
+  count = var.provider_key_secret_enabled ? 1 : 0
+  # 32 bytes, which is what sealingKeyFrom() requires -- exactly, not at least.
+  # random_bytes rather than random_password because the application wants
+  # BYTES: a password of 32 characters is 32 bytes only by accident of encoding,
+  # and base64 of 32 characters chosen from an alphabet is not 32 bytes of key
+  # material. This resource's .base64 is the value the application parses.
+  length = 32
+}
+
 locals {
-  owned_secrets = {
+  # provider-key-secret is owned rather than seeded: Terraform generates it, so
+  # a difference between configuration and vault is drift to correct, which is
+  # the definition of owned above.
+  owned_secrets = merge({
     "database-url"           = local.app_url
     "migration-database-url" = local.migration_url
-  }
+    }, var.provider_key_secret_enabled ? {
+    "provider-key-secret" = random_bytes.provider_key_secret[0].base64
+  } : {})
   seeded_secrets = {
     "github-client-id"     = var.github_client_id
     "github-client-secret" = var.github_client_secret
@@ -148,6 +184,27 @@ resource "azurerm_key_vault_secret" "owned" {
   tags         = var.tags
 
   depends_on = [azurerm_role_assignment.deployer_writes_secrets]
+}
+
+# The GitHub App's two secrets, read rather than written.
+#
+# See the variable comments: GitHub mints the private key and shows it once, so
+# Terraform cannot create it and must not manage it. A person puts both in the
+# vault; this reads them so the container app can reference them by id.
+#
+# count on github_app_id rather than on the secrets existing, so that a stack
+# with no App plans clean instead of failing on a data source for a secret that
+# is deliberately absent.
+data "azurerm_key_vault_secret" "github_app_private_key" {
+  count        = var.github_app_id == "" ? 0 : 1
+  name         = var.github_app_private_key_secret_name
+  key_vault_id = azurerm_key_vault.this.id
+}
+
+data "azurerm_key_vault_secret" "github_app_webhook_secret" {
+  count        = var.github_app_id == "" ? 0 : 1
+  name         = var.github_app_webhook_secret_name
+  key_vault_id = azurerm_key_vault.this.id
 }
 
 resource "azurerm_key_vault_secret" "seeded" {

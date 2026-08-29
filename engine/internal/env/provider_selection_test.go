@@ -7,8 +7,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	dblabdb "github.com/antifailure/antifailure/engine/internal/db/dblab"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
+	supabasedb "github.com/antifailure/antifailure/engine/internal/db/supabase"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -80,13 +82,102 @@ func TestNeonWithoutAKeySaysWhichVariableIsMissing(t *testing.T) {
 func TestAProviderThisBuildDoesNotHaveIsRefusedRatherThanSubstituted(t *testing.T) {
 	// The failure this prevents is the quiet one. Falling back to Docker gives
 	// somebody an empty preview and no reason for it.
-	for _, kind := range []schema.DBProvider{schema.DBSupabase, schema.DBDBLab, "invented"} {
+	// Both Supabase and DBLab are built after this merge, so each side's
+	// listing of the other as absent is now wrong. What is left is a provider
+	// that genuinely does not exist.
+	for _, kind := range []schema.DBProvider{"invented"} {
 		_, err := orchestrator(t, &schema.Database{Provider: kind}, nil).
 			newDatabaseProvider(context.Background())
 		require.Error(t, err, "%s was accepted", kind)
 		require.ErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002))
 		require.Contains(t, err.Error(), string(kind))
 	}
+}
+
+func TestAManifestAskingForSupabaseGetsSupabase(t *testing.T) {
+	p, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBSupabase, Project: "abcdefghijklmnopqrst", APIKeyEnv: "MY_SUPABASE_TOKEN",
+	}, map[string]string{"MY_SUPABASE_TOKEN": "sbp_whatever"}).newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	require.Equal(t, "supabase", p.Name())
+	require.IsType(t, &supabasedb.Provider{}, p)
+}
+
+func TestTheSupabaseTokenVariableDefaultsToTheOneSupabaseDocuments(t *testing.T) {
+	p, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBSupabase, Project: "abcdefghijklmnopqrst",
+	}, map[string]string{"SUPABASE_ACCESS_TOKEN": "sbp_whatever"}).
+		newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	require.Equal(t, "supabase", p.Name())
+}
+
+func TestSupabaseWithoutAProjectIsRefusedBeforeAnythingIsCreated(t *testing.T) {
+	// A Supabase branch is a running project billed by the hour, so a manifest
+	// that cannot say which project to create one in has to fail before the
+	// first API call rather than after it.
+	_, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBSupabase,
+	}, map[string]string{"SUPABASE_ACCESS_TOKEN": "sbp_whatever"}).
+		newDatabaseProvider(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002))
+	require.Contains(t, err.Error(), "database.project")
+}
+
+func TestSupabaseWithoutATokenSaysWhichVariableIsMissing(t *testing.T) {
+	_, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBSupabase, Project: "abcdefghijklmnopqrst", APIKeyEnv: "MY_SUPABASE_TOKEN",
+	}, nil).newDatabaseProvider(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFSEC001))
+	require.Contains(t, err.Error(), "MY_SUPABASE_TOKEN")
+}
+
+func TestAManifestAskingForDBLabGetsDBLab(t *testing.T) {
+	p, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBDBLab, Project: "http://dblab.internal:2345", APIKeyEnv: "MY_DBLAB_TOKEN",
+	}, map[string]string{"MY_DBLAB_TOKEN": "whatever"}).newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	require.Equal(t, "dblab", p.Name())
+	require.IsType(t, &dblabdb.Provider{}, p)
+}
+
+func TestTheDBLabTokenVariableDefaultsToTheOneTheEngineDocuments(t *testing.T) {
+	p, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBDBLab, Project: "http://dblab.internal:2345",
+	}, map[string]string{"DBLAB_VERIFICATION_TOKEN": "whatever"}).newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	require.Equal(t, "dblab", p.Name())
+}
+
+func TestDBLabWithoutAnEndpointIsRefusedBeforeAnythingIsCreated(t *testing.T) {
+	// A Database Lab Engine is self hosted, so unlike a hosted provider there
+	// is no account to enumerate and nothing to fall back to. A default would
+	// be a guess at somebody else's infrastructure.
+	_, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBDBLab,
+	}, map[string]string{"DBLAB_VERIFICATION_TOKEN": "whatever"}).newDatabaseProvider(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002))
+	require.Contains(t, err.Error(), "database.project")
+}
+
+func TestDBLabWithoutATokenIsRefusedRatherThanRunningWithoutOne(t *testing.T) {
+	// The engine itself will run with no verification token, and an engine
+	// with no verification token is one that anybody who can reach the port
+	// can create clones of production data on. Defaulting to empty here would
+	// make that the quiet path.
+	_, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBDBLab, Project: "http://dblab.internal:2345", APIKeyEnv: "MY_DBLAB_TOKEN",
+	}, nil).newDatabaseProvider(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFSEC001))
+	require.Contains(t, err.Error(), "MY_DBLAB_TOKEN")
 }
 
 func TestAnEmptyProviderIsDockerAndTheVersionFollowsTheManifest(t *testing.T) {
@@ -116,13 +207,19 @@ func TestOnlyALocalProviderIsAttachable(t *testing.T) {
 	_, ok := local.(attachable)
 	require.True(t, ok, "the Docker provider must be attachable; its branches are containers")
 
-	cloud, err := orchestrator(t, &schema.Database{
-		Provider: schema.DBNeon, Project: "p", APIKeyEnv: "K",
-	}, map[string]string{"K": "napi_x"}).newDatabaseProvider(context.Background())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = cloud.Close() })
-	_, ok = cloud.(attachable)
-	require.False(t, ok, "a cloud provider must not be attachable; there is nothing to attach")
+	for _, db := range []*schema.Database{
+		{Provider: schema.DBNeon, Project: "p", APIKeyEnv: "K"},
+		{Provider: schema.DBSupabase, Project: "p", APIKeyEnv: "K"},
+	} {
+		cloud, err := orchestrator(t, db, map[string]string{"K": "token_x"}).
+			newDatabaseProvider(context.Background())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = cloud.Close() })
+		_, ok = cloud.(attachable)
+		require.False(t, ok,
+			"%s is a cloud provider and must not be attachable; there is nothing to attach",
+			db.Provider)
+	}
 }
 
 func TestARuntimeThisBuildDoesNotHaveIsRefusedRatherThanSubstituted(t *testing.T) {

@@ -103,6 +103,88 @@ type AuditSink interface {
 	Write(ctx context.Context, entry AuditEntry) error
 }
 
+// SecretSource is somewhere else a declared variable can be looked up.
+//
+// The community engine already looks in this shell's environment, in .env, in
+// the encrypted local store, and in the system keyring. An organization that
+// keeps its credentials in Vault or in a cloud secret manager wants one more
+// place, and wants it without every developer copying values onto their laptop
+// first.
+//
+// The signature is deliberately made of nothing but standard library types.
+// The engine's own Source interface lives in engine/internal/secrets and takes
+// a secrets.Value, and an internal package is by construction unimportable from
+// outside engine/..., which is what keeps the enterprise module a separate
+// module rather than a directory with a build tag. So the value crosses this
+// boundary as a plain string and the engine wraps it in a redacting Value the
+// moment it arrives, in exactly one place, the same way it already wraps the
+// raw strings it reads out of the environment and out of a .env file.
+//
+// A source added here is asked last, after everything local. That is the same
+// ordering rule the built-in sources follow, most specific first: an export
+// somebody typed is for this run, a file is for this repository, and a company
+// secret manager is the default that both of those exist to override. A source
+// asked first would make "try it with a different key" impossible.
+type SecretSource interface {
+	// Name identifies the source in an audit record and in the message listing
+	// where a missing variable could have been, in the words somebody would
+	// use: "HashiCorp Vault at vault.internal", not "vaultsource".
+	Name() string
+	// Available reports whether the source can be used, and why not when it
+	// cannot. The reason is not decoration: AF-SEC-001 prints every source that
+	// was considered along with why each did not answer, so a source that
+	// returns false with an empty reason turns "the token expired" into
+	// "not present" and sends somebody looking in the wrong place.
+	//
+	// It takes a context because the answer can depend on one. A licence can
+	// lapse while the process is running, and a feature that checked its
+	// entitlement once at registration would keep working for an organization
+	// that stopped paying and could not be turned off without a restart.
+	Available(ctx context.Context) (bool, string)
+	// Lookup returns the value for a name.
+	//
+	// Found is separate from the value because a variable that exists and is
+	// empty is a different thing from one that does not exist, and only one of
+	// them should stop the search. An error is separate from both: a source
+	// that cannot be reached must not silently fall through to a lower priority
+	// source, because handing the application yesterday's value from somewhere
+	// else is the worst available way for this to break.
+	Lookup(ctx context.Context, name string) (value string, found bool, err error)
+}
+
+// CredentialRejectedError reports that a store refused the credential rather
+// than refusing the request.
+//
+// A distinct type because the engine renders it as a distinct error. A store
+// that is unreachable is a transient problem worth retrying; a store that says
+// the credential is not valid is a configuration problem, and telling somebody
+// to try again is telling them to wait for something that will not change.
+//
+// "After one refresh" is part of the claim and part of the contract. Every
+// cloud store here authenticates with a token that expires, so a long-lived
+// process will eventually present a stale one, and one renewal covers that
+// entirely. A second rejection is a credential that has been revoked or was
+// never right. A source that returns this without having tried a refresh, where
+// a refresh was possible, is making a statement that is not true.
+type CredentialRejectedError struct {
+	// Source names the store, as Name does, so the message says which of an
+	// organization's several credentials to rotate.
+	Source string
+	// Detail is what the store said, for the operator reading the log.
+	Detail string
+	// Err is the underlying failure, for errors.Is.
+	Err error
+}
+
+func (e *CredentialRejectedError) Error() string {
+	if e.Detail == "" {
+		return e.Source + " rejected the credential"
+	}
+	return e.Source + " rejected the credential: " + e.Detail
+}
+
+func (e *CredentialRejectedError) Unwrap() error { return e.Err }
+
 // Registry holds what has been registered.
 //
 // A value rather than only a package-level singleton, so that a test can build
@@ -112,6 +194,7 @@ type Registry struct {
 	policy    []PolicyHook
 	lifecycle []LifecycleHook
 	audit     []AuditSink
+	secrets   []SecretSource
 }
 
 // NewRegistry returns an empty registry, which is the community behaviour.
@@ -139,6 +222,30 @@ func (r *Registry) AddAuditSink(s AuditSink) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.audit = append(r.audit, s)
+}
+
+// AddSecretSource registers somewhere else a declared variable can be found.
+//
+// Order is registration order, and sources registered here are asked after
+// every built-in one. Two enterprise sources registered together are asked in
+// the order they were added, so an organization running both Vault and a cloud
+// secret manager gets a deterministic answer rather than whichever map the
+// engine happened to iterate first.
+func (r *Registry) AddSecretSource(s SecretSource) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.secrets = append(r.secrets, s)
+}
+
+// SecretSources returns the registered sources in the order they are asked.
+//
+// With nothing registered this returns nil and the engine's lookup chain is
+// byte for byte the chain it was before this hook existed, which is the
+// property the whole package is built around.
+func (r *Registry) SecretSources() []SecretSource {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return append([]SecretSource(nil), r.secrets...)
 }
 
 // CheckPolicy runs every policy hook and returns the first refusal.
@@ -215,6 +322,9 @@ func (r *Registry) Registered() []string {
 	for _, s := range r.audit {
 		out = append(out, "audit:"+s.Name())
 	}
+	for _, s := range r.secrets {
+		out = append(out, "secret-source:"+s.Name())
+	}
 	sort.Strings(out)
 	return out
 }
@@ -223,5 +333,6 @@ func (r *Registry) Registered() []string {
 func (r *Registry) Empty() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return len(r.policy) == 0 && len(r.lifecycle) == 0 && len(r.audit) == 0
+	return len(r.policy) == 0 && len(r.lifecycle) == 0 &&
+		len(r.audit) == 0 && len(r.secrets) == 0
 }

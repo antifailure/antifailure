@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,9 +32,10 @@ func newClient(t *testing.T, h http.Handler) (*controlplane.Client, *httptest.Se
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	c, err := controlplane.New(controlplane.Options{
-		BaseURL: srv.URL,
-		Token:   "aft_" + strings.Repeat("a", 40),
-		HTTP:    srv.Client(),
+		BaseURL:  srv.URL,
+		Token:    "aft_" + strings.Repeat("a", 40),
+		HTTP:     srv.Client(),
+		Redactor: redact.New(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +64,9 @@ func TestNew_AllowsPlainHTTPToTheLocalMachine(t *testing.T) {
 	// Local development runs the control plane on localhost without a
 	// certificate. Refusing that would mean nobody can try it.
 	for _, host := range []string{"http://localhost:8080", "http://127.0.0.1:8080"} {
-		if _, err := controlplane.New(controlplane.Options{BaseURL: host, Token: "aft_x"}); err != nil {
+		if _, err := controlplane.New(controlplane.Options{
+			BaseURL: host, Token: "aft_x", Redactor: redact.New(),
+		}); err != nil {
 			t.Errorf("%s: %v", host, err)
 		}
 	}
@@ -357,9 +361,18 @@ func newSink(t *testing.T, rec *recorder, capacity int) (*controlplane.Sink, *cl
 	return s, fake
 }
 
+// event builds one engine event.
+//
+// The type is the events package's own constant and not a string literal, and
+// that is deliberate rather than tidy. This helper used to say
+// Type: "env.up.ready", which is not an event the engine can emit; typeMap was
+// keyed by the same invented name, so the test and the code agreed with each
+// other and both disagreed with the engine. Nine of the map's nine keys were
+// wrong that way, and every test over the translation passed. A literal here is
+// how that happens, so there is not one left in this file.
 func event(id string, seq uint64) events.Event {
 	return events.Event{
-		ID: id, Env: "env-1", Seq: seq, Type: "env.up.ready",
+		ID: id, Env: "env-1", Seq: seq, Type: events.EnvReady,
 		Level: "info", TS: time.Unix(1700000000, 0).UTC(),
 	}
 }
@@ -515,6 +528,7 @@ func TestSink_DeliverNeverBlocksOrFails(t *testing.T) {
 	}))
 	c, err := controlplane.New(controlplane.Options{
 		BaseURL: srv.URL, Token: "aft_" + strings.Repeat("a", 40), HTTP: srv.Client(),
+		Redactor: redact.New(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -583,4 +597,100 @@ func TestSink_SatisfiesTheBusSinkInterface(t *testing.T) {
 	rec := &recorder{}
 	s, _ := newSink(t, rec, 10)
 	var _ events.Sink = s
+}
+
+// A client that could not redact is refused at construction.
+//
+// The other four writers in the engine already work this way: the spool and
+// the telemetry attachment both refuse rather than accept a nil redactor. This
+// one did not, and it is the only writer whose output leaves the machine.
+func TestNew_RefusesAClientThatCouldNotRedact(t *testing.T) {
+	_, err := controlplane.New(controlplane.Options{
+		BaseURL: "https://app.test", Token: "aft_" + strings.Repeat("a", 40),
+	})
+	if err == nil {
+		t.Fatal("a client with no redactor was allowed to exist")
+	}
+	if !strings.Contains(err.Error(), "redactor") {
+		t.Fatalf("the error does not say what is missing: %v", err)
+	}
+	if errors.Is(err, controlplane.ErrNotConfigured) {
+		t.Fatal("a missing redactor is a programming fault, not a missing token, " +
+			"and reporting it as ErrNotConfigured would send an operator to create one")
+	}
+}
+
+// Every string in a payload is scrubbed on its way to the wire, however deeply
+// it is nested, and the caller's own batch is left alone.
+//
+// The nesting matters because a payload is map[string]any: an event carrying a
+// structured detail puts a map or a slice in there, and a redaction that only
+// looked at the top level would scrub the fields somebody thought of and post
+// the rest.
+func TestSend_ScrubsThePayloadOnItsWayToTheWire(t *testing.T) {
+	// Assembled rather than written down, so this file holds no secret shaped
+	// string for a scanner to have to forgive.
+	password := "wire" + "-secret-" + "b73c01"
+	r := redact.New()
+	r.Register(password)
+
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, _ = io.ReadAll(req.Body)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"accepted":1,"duplicates":0}`))
+	}))
+	defer srv.Close()
+
+	c, err := controlplane.New(controlplane.Options{
+		BaseURL: srv.URL, Token: "aft_" + strings.Repeat("a", 40),
+		HTTP: srv.Client(), Redactor: r,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	url := "postgres://app:" + password + "@db:5432/app"
+	batch := []controlplane.Event{{
+		ID: "ev_1", Type: "environment.ready", EnvID: "env-1", Sequence: 1,
+		OccurredAt: time.Unix(1700000000, 0).UTC(),
+		Payload: map[string]any{
+			"top":    url,
+			"nested": map[string]any{"deeper": map[string]any{"url": url}},
+			"list":   []any{"fine", url, map[string]any{"url": url}},
+			"number": 7,
+			"flag":   false,
+		},
+	}}
+
+	if _, err := c.Send(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+
+	sent := string(body)
+	if sent == "" {
+		t.Fatal("nothing was sent, so this test proved nothing")
+	}
+	if strings.Contains(sent, password) {
+		t.Fatalf("the password reached the wire: %s", sent)
+	}
+	if !strings.Contains(sent, "db:5432") {
+		t.Fatalf("the host did not survive, so the event explains nothing: %s", sent)
+	}
+	// The numbers and booleans have to come through untouched, or redaction
+	// has quietly changed the data rather than only the secrets in it.
+	if !strings.Contains(sent, `"number":7`) || !strings.Contains(sent, `"flag":false`) {
+		t.Fatalf("a non-string value was altered: %s", sent)
+	}
+
+	// The caller still owns its batch. A failed send is retried from the
+	// sink's buffer and from the spool, and scrubbing in place would mean the
+	// retry sent something different from what was queued.
+	if got := batch[0].Payload["top"]; got != url {
+		t.Fatalf("the caller's batch was modified: %v", got)
+	}
+	inner := batch[0].Payload["nested"].(map[string]any)["deeper"].(map[string]any)
+	if inner["url"] != url {
+		t.Fatalf("the caller's nested payload was modified: %v", inner["url"])
+	}
 }

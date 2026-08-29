@@ -69,7 +69,15 @@ personas:
   - name: returning-customer
     email: ada@example.test
     role: customer
-    login: password
+    # none, because this service is an API and has no sign in page. It said
+    # `password` until `af ci` was actually run against it, and every run came
+    # back blocked with "locator.fill: Timeout 10000ms exceeded, waiting for
+    # getByLabel(/^(email|email address|e-mail|username or email)$/i)": the
+    # agent was looking for a login form on a service that serves JSON. A
+    # persona that cannot sign in blocks its workflow forever, and blocked does
+    # not count against a change, so it would have sat there looking like a
+    # feature.
+    login: none
 
 workflows:
   - name: place-an-order
@@ -83,6 +91,9 @@ workflows:
       - "the new order is returned with a total of 2599"
     tags: [smoke]
 
+# Declared and validated, not yet run. The engine parses these, refuses one that
+# is not read only, and shows them in af explain. Nothing executes the SQL in
+# this release, so a green run says nothing about them either way.
 invariants:
   - name: no-orphaned-orders
     description: >-

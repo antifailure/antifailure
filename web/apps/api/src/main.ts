@@ -13,6 +13,9 @@ import { createServer } from './server.ts'
 import { RealGitHubClient } from './auth/github.ts'
 import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
+import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
+import { sealingKeyFrom } from './providers/seal.ts'
+import { appConfigFrom, InstallationTokens } from './github/app.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
 
 function required(name: string): string {
@@ -44,11 +47,41 @@ if (process.env.AF_MIGRATE === '1') {
 
 const pool = createPool({ url: databaseUrl, max: Number(process.env.AF_POOL_MAX ?? 10) })
 
+// The GitHub App, if there is one. Null is a supported state: sign-in works
+// without it, and the parts that need an installation say which variables are
+// missing rather than failing on the one request they exist for.
+const appConfig = appConfigFrom(process.env)
+const installationTokens = appConfig
+  ? new InstallationTokens(appConfig, systemClock)
+  : undefined
+console.log(
+  appConfig
+    ? `GitHub App ${appConfig.appId} is configured: webhook deliveries are verified and membership can be synced`
+    : 'no GitHub App: webhook deliveries are refused and membership cannot be synced (AF_GITHUB_APP_ID is not set)',
+)
+
 const github = new RealGitHubClient({
   clientId: required('AF_GITHUB_CLIENT_ID'),
   clientSecret: required('AF_GITHUB_CLIENT_SECRET'),
   redirectUri: required('AF_GITHUB_REDIRECT_URI'),
+  installationTokens,
 })
+
+// Said out loud at startup, every time. Whether an instance is open to the
+// world is not something anybody should have to infer from a deployment
+// template, and a closed instance that quietly opened is the failure that has
+// no symptom until it has a very large one.
+const signInAllowlist = parseAllowlist(process.env.AF_SIGNIN_ALLOWLIST)
+console.log(describeAllowlist(signInAllowlist))
+
+// Read at start-up rather than on first use, so a secret of the wrong length
+// stops the process here instead of on the one request the feature exists for.
+const sealingKey = sealingKeyFrom(process.env.AF_PROVIDER_KEY_SECRET)
+console.log(
+  sealingKey
+    ? 'provider keys can be stored: AF_PROVIDER_KEY_SECRET is set'
+    : 'provider keys CANNOT be stored: AF_PROVIDER_KEY_SECRET is not set',
+)
 
 const { app, ingestLimiter, authLimiter } = createServer({
   pool,
@@ -56,6 +89,9 @@ const { app, ingestLimiter, authLimiter } = createServer({
   clock: systemClock,
   secureCookies: process.env.AF_INSECURE_COOKIES !== '1',
   appBaseUrl: process.env.AF_APP_BASE_URL,
+  signInAllowlist,
+  sealingKey,
+  githubWebhookSecret: appConfig?.webhookSecret ?? null,
 })
 
 // Partitions, kept ahead of the writes. Skipped when this process is not the

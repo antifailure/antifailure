@@ -93,10 +93,13 @@ module "control_plane" {
   tags                = module.foundation.tags
   log_analytics_id    = module.foundation.log_analytics_id
 
+  key_vault_name = var.key_vault_name
+
   image_repository = var.image_repository
   image_tag        = var.image_tag
   image_digest     = var.image_digest
 
+  database_extensions   = var.database_extensions
   database_sku          = var.database_sku
   database_storage_mb   = var.database_storage_mb
   backup_retention_days = var.backup_retention_days
@@ -106,7 +109,13 @@ module "control_plane" {
   max_replicas = var.max_replicas
   app_base_url = var.app_base_url
 
+  event_retention_months = var.event_retention_months
+
   github_client_id     = var.github_client_id
   github_client_secret = var.github_client_secret
   github_redirect_uri  = var.github_redirect_uri
+
+  signin_allowlist            = var.signin_allowlist
+  provider_key_secret_enabled = var.provider_key_secret_enabled
+  github_app_id               = var.github_app_id
 }

@@ -166,7 +166,7 @@ One account an agent logs in as. Personas are created or reconciled in the golde
 | --- | --- | --- | --- |
 | `attributes` | object | no | Extra columns to set on the persona's row, for a schema with application specific fields. Max properties 50. |
 | `email` | string | no | Login address. Defaults to name@example.test, which is a reserved domain that can never receive mail. Max length 254. |
-| `login` | `password`, `magic_link`, `email_code`, `sms_code`, `totp`, `session` | no | How this persona signs in. magic_link and email_code read the message from the captured inbox, so they work with no mail provider at all. Defaults to `password`. |
+| `login` | `none`, `password`, `magic_link`, `email_code`, `sms_code`, `totp`, `session` | no | How this persona signs in. none is for an application with no sign in, or a page that is public: the agent goes straight to start_path. magic_link and email_code read the message from the captured inbox, so they work with no mail provider at all. The runner drives none, password, magic_link, email_code and sms_code today; a persona set to totp or session is reported as blocked with the reason, rather than failing the change. Defaults to `password`. |
 | `mfa` | boolean | no | Whether to enroll a time based one time password secret, which the runner holds so that it can complete a challenge. Defaults to `false`. |
 | `name` | string | **yes** | Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `role` | string | no | Application role to provision, for example admin or member. Interpreted by the authentication adapter. Max length 64. |

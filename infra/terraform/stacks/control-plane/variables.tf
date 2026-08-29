@@ -146,6 +146,48 @@ variable "github_redirect_uri" {
   type = string
 }
 
+variable "event_retention_months" {
+  type        = number
+  default     = null
+  description = "Null keeps every event forever. Staging sets a year, because a partitioned table with no retention is a partition per month and no reason to ever drop one."
+}
+
+variable "key_vault_name" {
+  type        = string
+  default     = ""
+  description = "Overrides the computed vault name, for a vault that already exists under a different one."
+}
+
+variable "database_extensions" {
+  type        = list(string)
+  default     = ["PGCRYPTO"]
+  description = "Allow-listed in azure.extensions. Azure refuses CREATE EXTENSION for anything absent from it, and it defaults to empty."
+}
+
+# No default. See the module's variable of the same name: an unset allowlist
+# means the control plane accepts any GitHub account, and a default is a value
+# somebody gets by forgetting.
+variable "signin_allowlist" {
+  type        = list(string)
+  description = "GitHub logins that may sign in. Empty means nobody."
+}
+
+variable "provider_key_secret_enabled" {
+  type        = bool
+  default     = true
+  description = "Generate a sealing secret so customers' provider keys can be stored."
+}
+
+# Empty means no GitHub App, which is a supported state: sign-in works and the
+# webhook endpoint refuses deliveries rather than accepting unsigned ones. Set
+# it and the two secrets must already be in the vault, because GitHub mints the
+# private key and Terraform cannot.
+variable "github_app_id" {
+  type        = string
+  default     = ""
+  description = "The numeric GitHub App ID, or empty for no App."
+}
+
 variable "ci_principal_id" {
   type        = string
   default     = ""
