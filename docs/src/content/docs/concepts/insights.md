@@ -141,7 +141,7 @@ grew by that factor, is reported. So is a statement this branch runs and the
 baseline did not.
 
 `regression_min_ms`, five milliseconds by default, is the floor on the absolute change. A query going from
-0.1ms to 0.3ms is three times slower and means nothing. Without a floor the
+0.1 ms to 0.3 ms is three times slower and means nothing. Without a floor the
 report is all noise and people stop reading it. The floor applies to time per
 call and never to call counts, so the four hundred calls of a fast query that
 make up an N+1 are still reported however high the floor is set.
