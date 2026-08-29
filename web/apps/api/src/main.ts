@@ -13,6 +13,7 @@ import { createServer } from './server.ts'
 import { RealGitHubClient } from './auth/github.ts'
 import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
+import { sweepDeviceAuthorizations } from './auth/device.ts'
 import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
@@ -138,6 +139,13 @@ if (maintenanceUrl) {
 const housekeeping = setInterval(
   () => {
     void sweepSessions(pool, systemClock).catch((err) => console.error('session sweep', err))
+    // Beside the session sweep for the same reason and with the same cost:
+    // expiry is checked on every read, so being late costs table size. It was
+    // written with this comment on it and then never called from anywhere, so
+    // device_authorizations grew for the life of the process.
+    void sweepDeviceAuthorizations(pool, systemClock).catch((err) =>
+      console.error('device authorization sweep', err),
+    )
     ingestLimiter.sweep()
     authLimiter.sweep()
   },

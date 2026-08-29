@@ -286,8 +286,9 @@ function ProviderCard({
           </>
         ) : (
           <p className="max-w-[62ch] text-[13px] leading-6 text-muted">
-            You are {data.role ?? "not a member"} in this organization, so you
-            can see which keys are set and cannot change them.
+            You are {data.role ? `a ${data.role}` : "not a member"} in this
+            organization, so you can see which keys are set and cannot change
+            them.
           </p>
         )}
 

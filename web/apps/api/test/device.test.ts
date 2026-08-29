@@ -18,6 +18,7 @@ import {
   DEVICE_POLL_INTERVAL_SECONDS,
   newUserCode,
   normaliseUserCode,
+  sweepDeviceAuthorizations,
 } from '../src/auth/device.ts'
 // The header name comes from the server rather than being spelled again here.
 // Written out by hand it was wrong, every approve returned 403, and the test
@@ -349,5 +350,36 @@ describe('the device grant', { skip: (await available()) ? false : 'no Postgres 
       body: JSON.stringify({ events: [] }),
     })
     assert.notEqual(ingest.status, 401)
+  })
+
+  test('the sweeper removes finished authorizations and leaves live ones', async () => {
+    // This function was written, commented, and called from nowhere, so
+    // device_authorizations grew for the life of the process on any instance
+    // where people run af login. It is wired into the housekeeping interval in
+    // main.ts now, beside the session sweep it was clearly meant to sit next to.
+    const start = await api.fetch('/auth/device/code', { method: 'POST' })
+    assert.equal(start.status, 200)
+    const live = (await start.json()) as { user_code: string }
+
+    const stale = normaliseUserCode(newUserCode())
+    await api.admin`
+      INSERT INTO device_authorizations (device_code_hash, user_code, scopes, client_label, expires_at)
+      VALUES (${createHash('sha256').update(randomBytes(16)).digest()}, ${stale},
+              ARRAY['events:write']::text[], 'a sweeper test',
+              ${new Date(api.clock.now().getTime() - 48 * 60 * 60 * 1000).toISOString()})`
+
+    const removed = await sweepDeviceAuthorizations(api.pool, api.clock)
+    assert.ok(removed >= 1, `swept ${removed}`)
+
+    const [gone] = await api.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM device_authorizations WHERE user_code = ${stale}`
+    assert.equal(gone!.n, 0, 'an expired authorization survived the sweep')
+
+    // The negative control. A sweeper that took the live one too would break
+    // every af login that is waiting on a browser.
+    const [kept] = await api.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM device_authorizations
+      WHERE user_code = ${normaliseUserCode(live.user_code)}`
+    assert.equal(kept!.n, 1, 'the sweep removed an authorization that had not expired')
   })
 })

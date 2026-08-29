@@ -29,7 +29,13 @@ export function Page({
             <p className="mt-2 max-w-[62ch] text-[13.5px] leading-6 text-muted">{lede}</p>
           ) : null}
         </div>
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        {actions ? (
+            // max-w-full, or an actions block wider than the card -- a long
+            // error message beside a button -- is clipped by the overflow-hidden
+            // on the section and simply disappears at a phone width. shrink-0
+            // still keeps a short one from being squeezed by the title.
+            <div className="flex min-w-0 max-w-full shrink-0 items-center gap-2">{actions}</div>
+          ) : null}
       </div>
       <div className="mt-7">{children}</div>
     </div>
@@ -59,7 +65,13 @@ export function Card({
             <h2 className="text-[13px] font-semibold tracking-extra-tight text-ink">{title}</h2>
             {note ? <p className="mt-0.5 text-[12px] leading-5 text-dim">{note}</p> : null}
           </div>
-          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+          {actions ? (
+            // max-w-full, or an actions block wider than the card -- a long
+            // error message beside a button -- is clipped by the overflow-hidden
+            // on the section and simply disappears at a phone width. shrink-0
+            // still keeps a short one from being squeezed by the title.
+            <div className="flex min-w-0 max-w-full shrink-0 items-center gap-2">{actions}</div>
+          ) : null}
         </header>
       ) : null}
       {children}

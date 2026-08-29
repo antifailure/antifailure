@@ -202,17 +202,45 @@ export async function completeSignIn(
       // array, and the mistake reads as correct in every language this is
       // written in.
       const installed = logins.length
-        ? await db.execute<{ org_id: string }>(sql`
-            SELECT org_id FROM github_installations
+        ? await db.execute<{ org_id: string; installation_id: string; account_login: string }>(sql`
+            SELECT org_id, installation_id, account_login FROM github_installations
             WHERE lower(account_login) = ANY(${sql.param(logins)}::text[])
               AND suspended_at IS NULL`)
         : []
 
       for (const row of installed) {
+        // The role comes from GitHub rather than from a constant here.
+        //
+        // This used to write 'member' for everybody, which is wrong in the one
+        // case that matters most: the person who installed the App, on the
+        // organization they own, arrives as a plain member and cannot manage
+        // members, mint engine tokens, export the audit log, approve a masking
+        // or egress change, or store a provider key. Their own control plane
+        // refuses them, and the only way out was a database console.
+        //
+        // An organization owner becomes an admin rather than an owner, for the
+        // reason syncMembership gives further down: owner also holds billing,
+        // and that is this application's decision rather than GitHub's.
+        const upstream = await github
+          .roleIn(Number(row.installation_id), row.account_login, user.login)
+          .catch(() => null)
+        const role: Role = upstream === 'admin' ? 'admin' : 'member'
+
         await db.execute(sql`
           INSERT INTO members (org_id, user_id, role, source)
-          VALUES (${row.org_id}, ${userId}, 'member', 'github')
-          ON CONFLICT (org_id, user_id) DO UPDATE SET updated_at = ${clock.now().toISOString()}`)
+          VALUES (${row.org_id}, ${userId}, ${role}, 'github')
+          ON CONFLICT (org_id, user_id) DO UPDATE SET
+            -- Two things this must not do. It must not overwrite a role set by
+            -- hand in this application, which is what source = 'manual' marks.
+            -- And it must not act on a role GitHub declined to report: null is
+            -- "ask again later", not "demote them", or a rate limit during
+            -- sign-in would quietly strip an administrator of their rights.
+            role = CASE
+              WHEN members.source = 'github' AND ${upstream !== null}
+                THEN ${role}
+              ELSE members.role
+            END,
+            updated_at = ${clock.now().toISOString()}`)
       }
 
       // Memberships that already existed count too: an installation may have

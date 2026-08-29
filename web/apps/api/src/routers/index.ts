@@ -12,6 +12,8 @@ import { PolicyEngine, type Egress, type EgressRule, type Mode } from '@antifail
 import { router, publicProcedure, orgProcedure, audit, registerRouter, type OrgContext } from '../trpc.ts'
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLES, ROLE_PERMISSIONS, rolesWith } from '../permissions.ts'
 import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
+import { syncMembership, SignInError } from '../auth/signin.ts'
+import { GitHubError } from '../auth/github.ts'
 
 const uuid = z.string().uuid()
 
@@ -567,6 +569,64 @@ const membersRouter = router({
         FROM members m JOIN users u ON u.id = m.user_id
         ORDER BY m.created_at ASC`),
     )
+  }),
+
+  /**
+   * Reconciles this organization's members against GitHub's.
+   *
+   * The reason this route exists rather than the sync running only at sign-in:
+   * sign-in can only ever speak for the person signing in. Somebody added to
+   * the GitHub organization yesterday is not here until they happen to sign in,
+   * and somebody REMOVED from it keeps whatever role they had until they sign
+   * in again, which a person who has been removed has no reason to do. This is
+   * the route that acts on everybody at once, and the one that takes access
+   * away.
+   *
+   * It is also, deliberately, the caller syncMembership never had. The function
+   * was written, tested and complete, and nothing invoked it, which is a
+   * feature that reads as finished from every angle except the only one that
+   * counts.
+   */
+  sync: orgProcedure('members.manage').mutation(async ({ ctx }) => {
+    const c = ctx as OrgContext
+    const installation = await c.pool.withTenant(c.tenant, async (db) => {
+      const rows = await db.execute<{ installation_id: string; account_login: string }>(sql`
+        SELECT installation_id, account_login FROM github_installations
+        WHERE suspended_at IS NULL ORDER BY created_at ASC LIMIT 1`)
+      return rows[0] ?? null
+    })
+    if (!installation) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'This organization has no active GitHub App installation, so there is no membership ' +
+          'to read. Install the App on the organization first.',
+      })
+    }
+    try {
+      return await syncMembership(c.pool, c.clock, c.github, {
+        orgId: c.actor.orgId,
+        installationId: Number(installation.installation_id),
+        orgLogin: installation.account_login,
+        actorLabel: c.actor.label,
+      })
+    } catch (error) {
+      // Two refusals that are answers rather than faults, and both used to
+      // arrive as a 500 that reads as a bug in this control plane.
+      //
+      // SignInError: syncMembership will not apply an empty member list,
+      // because doing so would remove every owner and an outage looks exactly
+      // like an organization where everybody left.
+      //
+      // GitHubError: no App is configured, or GitHub would not answer. Its
+      // messages are written to be read by the operator who has to fix it --
+      // "Membership sync needs a GitHub App. Set AF_GITHUB_APP_ID..." -- and
+      // they are worth nothing behind a generic internal error.
+      if (error instanceof SignInError || error instanceof GitHubError) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message })
+      }
+      throw error
+    }
   }),
 
   setRole: orgProcedure('members.manage')

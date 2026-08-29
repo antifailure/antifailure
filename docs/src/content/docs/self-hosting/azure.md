@@ -183,6 +183,41 @@ no public endpoint, a Key Vault holding every credential, a storage account for
 goldens, the bootstrap job that makes the database usable, a maintenance job
 that keeps the event partitions ahead, and the application on public HTTPS.
 
+### An apply that changes the app changes nothing, until traffic moves
+
+The container app runs in `Multiple` revision mode, and ownership is split:
+Terraform owns the template, continuous deployment owns the image and the
+traffic weights. The module says so, with `ignore_changes` on
+`template[0].container[0].image` and `ingress[0].traffic_weight`, and the split
+is what lets the two run on their own schedules instead of undoing each other.
+
+The consequence is not obvious and it has already caught us once. Any Terraform
+change to the template creates a **new revision**, and because Terraform does
+not touch traffic weights, that revision comes up with **zero percent of
+traffic**. Terraform reports a successful apply. Production is still serving the
+old revision, without the change. Add an environment variable this way and the
+application will not see it, for as long as nobody deploys.
+
+So after an apply that touched the template, check what is actually serving:
+
+```sh
+az containerapp ingress traffic show -n afcp-app -g af-cp-centralus -o table
+az containerapp revision list -n afcp-app -g af-cp-centralus \
+  --query "[?properties.active].{rev:name,created:properties.createdTime}" -o table
+```
+
+If the newest revision is not the one with the weight, either run a deploy,
+which creates its own revision from the current image and shifts onto it, or
+move the traffic yourself:
+
+```sh
+az containerapp ingress traffic set -n afcp-app -g af-cp-centralus \
+  --revision-weight <newest-revision>=100
+```
+
+Moving it by hand is a traffic shift and not a rollback: both revisions run the
+same image unless a deploy happened in between.
+
 ### Grant yourself write access to the vault, once
 
 `assign_deployer_secret_officer` is **off by default** and that default is

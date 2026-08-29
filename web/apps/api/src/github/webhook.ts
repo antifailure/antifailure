@@ -128,12 +128,21 @@ export async function handleDelivery(
     }
 
     case 'repository': {
-      const account = installation?.account
       const id = installation?.id
-      const repo = payload.repository as Repo | undefined
-      if (typeof id !== 'number' || !account?.login || !repo?.full_name) {
+      const repo = payload.repository as (Repo & { owner?: Account }) | undefined
+      // NOT installation.account. Every event except `installation` and
+      // `installation_repositories` carries the MINIMAL installation object --
+      // `{ id, node_id }` and nothing else -- so reading the account off it
+      // meant this branch answered "no repository in the payload" for every
+      // repository delivery GitHub has ever sent, silently, with a 200. The
+      // owner is on the repository and on the organization, in the same signed
+      // body, and is trusted for the same reason.
+      const org = payload.organization as { login?: string } | undefined
+      const login = org?.login ?? repo?.owner?.login
+      if (typeof id !== 'number' || !login || !repo?.full_name) {
         return { event, action, handled: false, detail: 'no repository in the payload' }
       }
+      const account: Account = { login, type: repo.owner?.type ?? 'Organization' }
       const orgId = await rememberInstallation(pool, clock, account, id)
       if (action === 'deleted' || action === 'archived') {
         await archiveRepositories(pool, clock, account.login, orgId, [repo])

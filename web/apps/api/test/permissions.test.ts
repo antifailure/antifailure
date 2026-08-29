@@ -58,6 +58,7 @@ function inputsFor(org: Org): Record<string, unknown> {
     'audit.verify': {},
     'audit.export': { format: 'json' },
     'members.list': {},
+    'members.sync': {},
     'members.setRole': { githubLogin: 'nobody-here', role: 'member' },
     'tokens.list': {},
     'tokens.revoke': { id: '00000000-0000-0000-0000-000000000000' },
@@ -146,11 +147,17 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
               'FORBIDDEN',
               `${role} holds ${permission} but ${path} refused it`,
             )
-            // NOT_FOUND and BAD_REQUEST are fine: the sample input names rows
-            // that may not exist. What matters is that the permission gate let
-            // it through to the handler.
+            // NOT_FOUND, BAD_REQUEST and PRECONDITION_FAILED are fine: the
+            // sample input names rows that may not exist, and a route may need
+            // state this fixture does not set up -- members.sync wants a GitHub
+            // App installation. What this matrix asserts is that the permission
+            // gate let the call through to the handler, not what the handler
+            // then made of an organization seeded for a different purpose.
             assert.ok(
-              status === 200 || code === 'NOT_FOUND' || code === 'BAD_REQUEST',
+              status === 200 ||
+                code === 'NOT_FOUND' ||
+                code === 'BAD_REQUEST' ||
+                code === 'PRECONDITION_FAILED',
               `${role} calling ${path} got ${status} ${code}: ${JSON.stringify(body).slice(0, 200)}`,
             )
           } else {
