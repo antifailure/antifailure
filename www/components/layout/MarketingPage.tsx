@@ -35,7 +35,7 @@ export function MarketingPage({
           <p className="mt-8 max-w-[720px] text-[20px] leading-snug tracking-extra-tight text-gray-new-40 max-md:text-[17px]">
             {lead}
           </p>
-          <div className="mt-8 flex gap-x-5 max-sm:flex-col max-sm:gap-y-3">
+          <div className="mt-8 flex gap-x-5 max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full">
             <Button href="/signup">Get started</Button>
             <Button href="/docs" theme="outlined">
               Read the docs

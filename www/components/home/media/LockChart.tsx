@@ -35,9 +35,9 @@ export function LockChart({ state }: { state: 0 | 1 }) {
   );
 }
 
-export function LockChartMobile({ state }: { state: 0 | 1 }) {
+export function LockChartMobile({ state, always }: { state: 0 | 1; always?: boolean }) {
   return (
-    <div className={cn("relative hidden w-full max-md:block", state === 0 ? "hatch-red" : "hatch-green")}>
+    <div className={cn("relative w-full", !always && "hidden max-md:block", state === 0 ? "hatch-red" : "hatch-green")}>
       <div className="border-t border-gray-new-10 bg-[#CAE6D9]/90 p-5 font-mono text-[13px] text-[#285D49]">
         {state === 0
           ? "ACCESS EXCLUSIVE on subscriptions — 27.4s"

@@ -134,7 +134,7 @@ const CONTROLS = [
 
 export function FirewallPage() {
   return (
-    <PageShell>
+    <PageShell inset>
       <PageHero
         eyebrow="Side-Effect Firewall"
         title="The twin cannot act on the real world."
@@ -148,7 +148,7 @@ export function FirewallPage() {
           kicker="Attempted-effect ledger"
           title="<strong>Every outbound action is recorded.</strong> Simulate, capture, or deny — never a live processor."
         />
-        <ul className="mt-14 grid grid-cols-3 gap-5 max-lg:grid-cols-1">
+        <ul className="mt-14 grid grid-cols-3 gap-5 max-xl:grid-cols-1">
           {FEATURED.map((item) => (
             <li key={item.provider}>
               <Panel className="flex h-full flex-col rounded-[12px] bg-white p-5">
@@ -252,7 +252,7 @@ export function FirewallPage() {
             protocol, method, and operation. Unknown destinations, unresolved secrets, or missing isolation
             block the run. Convenience does not silently override containment.
           </p>
-          <ul className="mt-10 grid grid-cols-2 gap-x-8 gap-y-8 max-sm:grid-cols-1">
+          <ul className="mt-10 grid grid-cols-2 gap-x-8 gap-y-8 max-xl:grid-cols-1">
             {CONTROLS.map((item) => (
               <li key={item.title} className="min-w-0">
                 <div className="mb-3 size-2 rounded-full bg-black" />
@@ -279,7 +279,7 @@ export function FirewallPage() {
 
       <RelatedGrid
         items={[
-          { href: "/security", title: "Security", description: "Fail closed is a product principle." },
+          { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
           { href: "/product/oracle", title: "Differential Oracle", description: "Third-party effects are compared." },
           { href: "/docs/concepts/egress", title: "Egress docs", description: "Controls and example behavior." },
         ]}

@@ -276,7 +276,7 @@ export function TrustBoundaryScene() {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <div className="relative aspect-[400/336] w-full overflow-hidden">
+      <div className="relative aspect-[400/336] w-full overflow-hidden max-xl:hidden">
         <svg
           viewBox={`0 0 ${VB_W} ${VB_H}`}
           className="absolute inset-0 h-full w-full"
@@ -753,6 +753,40 @@ export function TrustBoundaryScene() {
             <QueueChip blocked={v.retryFlash === 1}>retry {v.retryFlash ? "2" : "1"}</QueueChip>
           </div>
         ) : null}
+      </div>
+      <div className="hidden overflow-hidden rounded-[12px] border border-black/[0.08] bg-white max-xl:block">
+        <div className="p-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-black/45">Hosted control plane</div>
+          <ul className="mt-3 flex flex-wrap gap-1.5">
+            {CONTROL_NODES.map((label) => (
+              <li
+                key={label}
+                className="rounded-[6px] bg-black/[0.04] px-2 py-1 font-mono text-[12px] tracking-extra-tight text-black/70"
+              >
+                {label}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="border-y border-red-700/35 px-4 py-2 font-mono text-[11px] leading-4 tracking-extra-tight text-red-700">
+          {BARRIER_COPY}
+        </div>
+        <div className="bg-[#eaf3ee] p-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-black/45">
+            Customer-hosted data plane
+          </div>
+          <ul className="mt-3 flex flex-wrap gap-1.5">
+            {DATA_NODES.map((label) => (
+              <li
+                key={label}
+                className="rounded-[6px] bg-white px-2 py-1 font-mono text-[12px] tracking-extra-tight text-black/70 ring-1 ring-black/10"
+              >
+                {label}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 font-mono text-[11px] tabular-nums tracking-extra-tight text-black/50">{DESTROY_COPY}</p>
+        </div>
       </div>
     </div>
   );

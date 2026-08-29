@@ -150,6 +150,33 @@ export function TwinLifecycleScene() {
 
   return (
     <div ref={ref} className="relative w-full select-none" aria-hidden>
+      <div className="hidden max-xl:block">
+        <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">
+          <div className="flex items-center justify-between gap-3 border-b border-black/[0.08] px-4 py-2.5">
+            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-black/45">twin lifecycle</span>
+            <span className="font-mono text-[12px] tracking-extra-tight text-[#C43D3D]">BLOCK</span>
+          </div>
+          <ol>
+            {BEATS.map((item, i) => (
+              <li
+                key={item.id}
+                className="flex items-start gap-3 border-b border-black/[0.06] px-4 py-3 last:border-0"
+              >
+                <span className="mt-0.5 size-2 shrink-0 rounded-full bg-black" />
+                <div className="min-w-0">
+                  <div className="text-[14px] tracking-extra-tight text-black">
+                    {String(i + 1).padStart(2, "0")} · {item.label}
+                  </div>
+                  <p className="mt-1 text-[13px] leading-5 tracking-extra-tight text-[#6B6F76]">
+                    {COPY[item.id].body}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+      <div className="max-xl:hidden">
       <RunWindow>
         <InnerHeader
           moon={moon}
@@ -236,8 +263,8 @@ export function TwinLifecycleScene() {
           }
           right={
             <NestedPane title={destroyedHold ? "twin destroyed" : HOST} meta="run_08f2">
-              <div className="grid min-h-0 flex-1 grid-cols-2 max-sm:grid-cols-1">
-                <div className="border-black/[0.08] p-3 max-sm:border-b sm:border-r">
+              <div className="grid min-h-0 flex-1 grid-cols-2 max-xl:grid-cols-1">
+                <div className="border-black/[0.08] p-3 max-xl:border-b xl:border-r">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <span className="text-[11px] tracking-extra-tight text-[#9B9EA5]">Production</span>
                     <span className="text-[11px] tracking-extra-tight text-[#C0C3C8]">Not in path</span>
@@ -309,6 +336,7 @@ export function TwinLifecycleScene() {
           detail="Unsafe schema migration: BLOCK. Nothing remains, and the twin never sat in the production path."
         />
       </RunWindow>
+      </div>
     </div>
   );
 }

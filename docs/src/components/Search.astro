@@ -1,0 +1,302 @@
+---
+/**
+ * Docs search. Starlight's default control stays disabled until a Vite module
+ * registers a custom element, and that module 404s when the marketing site
+ * proxies /docs in local development. This version wires the button with an
+ * inline script, then searches Pagefind when the index exists and the docs
+ * catalog when it does not.
+ */
+import { getCollection } from "astro:content";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "") || "/docs";
+const catalog = (await getCollection("docs")).map((page) => {
+  const slug = page.id.replace(/\/index$/, "");
+  const url = !slug || slug === "index" ? `${base}/` : `${base}/${slug}`;
+  return { url, title: page.data.title };
+});
+---
+
+<site-search data-base={base}>
+  <script type="application/json" data-docs-index set:html={JSON.stringify(catalog)}></script>
+  <button type="button" data-open-modal aria-label="Search" aria-keyshortcuts="Control+K">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"></circle>
+      <path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+    </svg>
+    <span class="af-search-label" aria-hidden="true">Search</span>
+    <kbd class="af-search-kbd" hidden>
+      <kbd data-mod>Ctrl</kbd><kbd>K</kbd>
+    </kbd>
+  </button>
+
+  <dialog aria-label="Search">
+    <div class="af-search-frame">
+      <form data-search-form>
+        <input type="search" data-search-input placeholder="Search the docs" autocomplete="off" />
+      </form>
+      <p data-search-empty class="af-search-hint">Type to search pages.</p>
+      <ul data-search-results class="af-search-results" hidden></ul>
+    </div>
+  </dialog>
+</site-search>
+
+<script is:inline>
+  (() => {
+    const root = document.querySelector("site-search");
+    if (!root || root.dataset.bound === "1") return;
+    root.dataset.bound = "1";
+
+    const openBtn = root.querySelector("[data-open-modal]");
+    const dialog = root.querySelector("dialog");
+    const input = root.querySelector("[data-search-input]");
+    const form = root.querySelector("[data-search-form]");
+    const list = root.querySelector("[data-search-results]");
+    const empty = root.querySelector("[data-search-empty]");
+    const mod = root.querySelector("[data-mod]");
+    const kbd = root.querySelector(".af-search-kbd");
+    const base = root.getAttribute("data-base") || "/docs";
+
+    if (kbd instanceof HTMLElement) {
+      if (mod && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+        mod.textContent = "⌘";
+        openBtn?.setAttribute("aria-keyshortcuts", "Meta+K");
+      }
+      kbd.hidden = false;
+    }
+
+    const catalog = (() => {
+      try {
+        const raw = root.querySelector("[data-docs-index]")?.textContent;
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+
+    const localIndex = () => {
+      if (catalog.length) return catalog;
+      return [...document.querySelectorAll(".sidebar-content a[href]")].map((a) => ({
+        url: a.getAttribute("href") || "",
+        title: (a.textContent || "").replace(/\s+/g, " ").trim(),
+      })).filter((item) => item.title && item.url);
+    };
+
+    let pagefind = undefined;
+    const loadPagefind = async () => {
+      if (pagefind !== undefined) return pagefind;
+      try {
+        const mod = await Promise.race([
+          import(base + "/pagefind/pagefind.js"),
+          new Promise((_, reject) => window.setTimeout(() => reject(new Error("pagefind timeout")), 400)),
+        ]);
+        await mod.init();
+        pagefind = mod;
+      } catch {
+        pagefind = null;
+      }
+      return pagefind;
+    };
+
+    const render = (rows) => {
+      if (!list || !empty) return;
+      list.innerHTML = "";
+      if (!rows.length) {
+        list.hidden = true;
+        empty.hidden = false;
+        empty.textContent = input?.value.trim() ? "No matching pages." : "Type to search pages.";
+        return;
+      }
+      empty.hidden = true;
+      list.hidden = false;
+      for (const row of rows) {
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = row.url;
+        a.textContent = row.title;
+        if (row.excerpt) {
+          const p = document.createElement("p");
+          p.textContent = row.excerpt.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          li.append(a, p);
+        } else {
+          li.append(a);
+        }
+        list.append(li);
+      }
+    };
+
+    const run = async () => {
+      const q = (input?.value || "").trim();
+      if (!q) {
+        render([]);
+        return;
+      }
+      const pf = await loadPagefind();
+      if (pf) {
+        const found = await pf.search(q);
+        const rows = await Promise.all(found.results.slice(0, 12).map((r) => r.data()));
+        render(
+          rows.map((row) => ({
+            url: row.url,
+            title: row.meta?.title || row.url,
+            excerpt: row.excerpt || "",
+          })),
+        );
+        return;
+      }
+      const needle = q.toLowerCase();
+      render(
+        localIndex()
+          .filter((item) => (item.title + " " + item.url).toLowerCase().includes(needle))
+          .slice(0, 12),
+      );
+    };
+
+    const openModal = () => {
+      if (!dialog?.open) dialog?.showModal();
+      input?.focus();
+      input?.select();
+    };
+    const closeModal = () => dialog?.close();
+
+    openBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openModal();
+    });
+    form?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const first = list?.querySelector("a");
+      if (first instanceof HTMLAnchorElement) first.click();
+    });
+    input?.addEventListener("input", () => {
+      window.clearTimeout(run._t);
+      run._t = window.setTimeout(run, 80);
+    });
+    dialog?.addEventListener("click", (event) => {
+      if (event.target === dialog) closeModal();
+    });
+    window.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        dialog?.open ? closeModal() : openModal();
+      }
+    });
+  })();
+</script>
+
+<style>
+  site-search {
+    display: flex;
+    flex: 1;
+    max-width: 34rem;
+  }
+  button[data-open-modal] {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    max-width: 22rem;
+    height: 2.5rem;
+    margin: 0;
+    padding: 0 0.5rem 0 0.75rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 3px;
+    background: var(--sl-color-black);
+    color: var(--sl-color-gray-2);
+    font: inherit;
+    font-size: 0.875rem;
+    cursor: pointer;
+  }
+  button[data-open-modal]:hover {
+    border-color: var(--sl-color-gray-2);
+    color: var(--sl-color-white);
+  }
+  .af-search-label {
+    flex: 1;
+    text-align: start;
+  }
+  .af-search-kbd {
+    display: flex;
+    gap: 0.15rem;
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    background: var(--sl-color-gray-6);
+    font-size: 0.7rem;
+  }
+  kbd {
+    font-family: inherit;
+  }
+  dialog {
+    width: min(40rem, calc(100% - 2rem));
+    max-height: min(32rem, calc(100% - 6rem));
+    margin: 12vh auto auto;
+    padding: 0;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 3px;
+    background: #fff;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.12);
+  }
+  dialog::backdrop {
+    background: rgb(0 0 0 / 0.28);
+  }
+  .af-search-frame {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+  }
+  [data-search-input] {
+    width: 100%;
+    height: 2.75rem;
+    padding: 0 0.85rem;
+    border: 1px solid var(--sl-color-hairline-light);
+    border-radius: 3px;
+    background: #fff;
+    color: var(--sl-color-gray-1);
+    font: inherit;
+    font-size: 1rem;
+  }
+  [data-search-input]:focus {
+    outline: 2px solid var(--color-neon, #33bf00);
+    outline-offset: 1px;
+  }
+  .af-search-hint {
+    margin: 0;
+    color: var(--sl-color-gray-3);
+    font-size: 0.875rem;
+  }
+  .af-search-results {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow: auto;
+  }
+  .af-search-results a {
+    display: block;
+    padding: 0.65rem 0.2rem;
+    color: var(--sl-color-gray-1);
+    font-weight: 500;
+    text-decoration: none;
+  }
+  .af-search-results a:hover {
+    color: var(--af-accent-ink, #16660a);
+  }
+  .af-search-results p {
+    margin: 0 0 0.4rem;
+    color: var(--sl-color-gray-3);
+    font-size: 0.8125rem;
+  }
+  @media (max-width: 50rem) {
+    .af-search-label,
+    .af-search-kbd {
+      display: none;
+    }
+    button[data-open-modal] {
+      width: 2.5rem;
+      max-width: 2.5rem;
+      padding: 0;
+      justify-content: center;
+    }
+  }
+</style>

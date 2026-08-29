@@ -608,7 +608,7 @@ export function IdePlay() {
   return (
     <div
       ref={ref}
-      className="relative overflow-hidden rounded-2xl border border-black/10 bg-white shadow-[0_40px_90px_rgba(0,0,0,0.12)]"
+      className="relative min-w-0 overflow-hidden rounded-2xl border border-black/10 bg-white shadow-[0_40px_90px_rgba(0,0,0,0.12)]"
     >
       <div className="flex h-[42px] items-center border-b border-black/[0.07] px-3.5 text-[12px] text-black/40">
         <div className="flex gap-[6px]">
@@ -616,10 +616,12 @@ export function IdePlay() {
           <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
           <span className="h-3 w-3 rounded-full bg-[#28c840]" />
         </div>
-        <div className="flex-1 text-center tracking-[-0.01em]">Your Code Editor</div>
+        <div className="min-w-0 flex-1 truncate px-3 text-center tracking-[-0.01em]">
+          Your Code Editor
+        </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] lg:grid-cols-[214px_1fr_minmax(270px,312px)]">
-        <div className="relative hidden border-r border-black/[0.07] bg-[#f4f4f2] py-2.5 text-[12.5px] sm:block">
+      <div className="grid min-w-0 grid-cols-1 sm:grid-cols-[minmax(0,148px)_minmax(0,1fr)] lg:grid-cols-[minmax(0,180px)_minmax(0,1fr)] xl:grid-cols-[200px_minmax(0,1fr)_minmax(0,260px)]">
+        <div className="relative hidden min-w-0 overflow-hidden border-r border-black/[0.07] bg-[#f4f4f2] py-2.5 text-[12.5px] sm:block">
           {TREE.map((f) => {
             if (!isVisible(f, collapsed)) return null;
             const isActive = !f.folder && f.id === activeFile;
@@ -629,7 +631,7 @@ export function IdePlay() {
                 key={f.id}
                 type="button"
                 title={f.path}
-                className={`flex w-full items-center gap-1.5 py-[3px] pr-2 text-left hover:bg-black/[0.04] ${
+                className={`flex min-w-0 w-full items-center gap-1.5 py-[3px] pr-2 text-left hover:bg-black/[0.04] ${
                   isActive ? "bg-black/[0.08] text-black" : "text-black/65"
                 }`}
                 style={{ paddingLeft: 10 + f.indent * 12 }}
@@ -718,12 +720,12 @@ export function IdePlay() {
                 style={{ animation: "wt-sheen 0.9s cubic-bezier(0.16,1,0.3,1) 1" }}
               />
             ) : null}
-            <div className="flex gap-5 px-3 text-[11.5px] text-black/35">
+            <div className="flex gap-5 overflow-x-auto px-3 text-[11.5px] text-black/35">
               {BOTTOM_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
-                  className={`border-b py-1.5 ${
+                  className={`shrink-0 border-b py-1.5 ${
                     bottomTab === tab.id
                       ? "border-black text-black"
                       : "border-transparent hover:text-black/70"
@@ -734,14 +736,16 @@ export function IdePlay() {
                 </button>
               ))}
             </div>
-            <pre className="min-h-[128px] px-4 pb-4 font-mono text-[12px] leading-[20px] text-black/72">{bottomBody}</pre>
+            <pre className="min-h-[128px] overflow-x-auto px-4 pb-4 font-mono text-[12px] leading-[20px] text-black/72">
+              {bottomBody}
+            </pre>
           </div>
         </div>
-        <div className="hidden bg-[#f4f4f2] p-2 lg:block">
+        <div className="hidden min-w-0 bg-[#f4f4f2] p-2 xl:block">
           <div className="flex h-full flex-col rounded-[12px] border border-black/[0.08] bg-white shadow-[0_16px_48px_rgba(0,0,0,0.08)]">
-            <div className="flex items-center justify-between px-3.5 pt-3.5 text-[13px] font-medium text-black">
-              Getting started with Antifailure
-              <span className="text-[15px] tracking-[0.2em] text-black/35">···</span>
+            <div className="flex min-w-0 items-center justify-between gap-2 px-3.5 pt-3.5 text-[13px] font-medium text-black">
+              <span className="min-w-0 leading-snug">Getting started with Antifailure</span>
+              <span className="shrink-0 text-[15px] tracking-[0.2em] text-black/35">···</span>
             </div>
             <p className="mt-3 px-3.5 text-[12px] leading-[18px] text-black/55">
               Workload Studio compiles observed traffic, deterministic journeys, and exploratory
@@ -782,7 +786,7 @@ export function IdePlay() {
                     onClick={() => inspect(i)}
                   >
                     <CheckTick on={checks > i} />
-                    {item}
+                    <span className="min-w-0">{item}</span>
                   </button>
                 </li>
               ))}
@@ -793,8 +797,8 @@ export function IdePlay() {
                 className="flex w-full flex-col rounded-[12px] border border-black/10 bg-[#f4f4f2] px-3 py-2.5 text-left hover:border-black/18"
                 onClick={replayRun}
               >
-                <span className="text-[12.5px] text-black/40">Plan, search, build anything...</span>
-                <span className="mt-2.5 flex items-center gap-2">
+                <span className="block min-w-0 text-[12.5px] text-black/40">Plan, search, build anything...</span>
+                <span className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
                   <span className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white px-2 py-[3px] text-[11px] text-black/80">
                     <Sparkle className="h-2.5 w-2.5 text-black/70" />
                     Agent
