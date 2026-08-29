@@ -158,19 +158,57 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 
 ## Supporting packages
 
-| Package | State | Coverage |
+Coverage is MEASURED now rather than asserted. Every number below came out of
+`just coverage-profile && just coverage` on 2026-08-29, statement coverage with
+`-coverpkg` over the whole module so integration tests count, which is what C.5
+asks for. `want` is the threshold C.5 sets for that package.
+
+Until that gate existed this column was a claim nothing computed, and three of
+its entries were wrong by a wide margin: `internal/secrets` said 100 and
+measures 92.8, `internal/masking` said 95 and measures 84.5, and `internal/cli`
+said 73 and measures 43.1. That is what an unenforced number does given time,
+and it is the reason the gate is worth more than the numbers.
+
+| Package | State | Coverage | Want |
+| --- | --- | --- | --- |
+| `internal/clock` | proven | 89.6 percent | 85 |
+| `internal/secrets` | proven | 92.8 percent; three real keyrings and a registered-source adapter | 100 |
+| `internal/redact` | proven | 100.0 percent | 100 |
+| `internal/errors` | proven | 100.0 percent | 85 |
+| `internal/events` | proven | 94.6 percent | 90 |
+| `internal/journal` | proven | 95.2 percent | 100 |
+| `internal/state` | proven | 84.4 percent | 90 |
+| `internal/lock` | proven | 78.6 percent | 85 |
+| `internal/manifest` | proven | 85.6 percent | 90 |
+| `internal/detect` | proven | 85.2 percent | 90 |
+| `internal/cli` | proven | 43.1 percent | 85 |
+
+## The twelve gates
+
+The build plan's A.4 defines twelve gates. This file tracked sub-phases and
+never tracked these, which is how two of them came to not exist while every
+sub-phase above them read `proven`.
+
+| Gate | What it is | State |
 | --- | --- | --- |
-| `internal/clock` | proven | 88 percent |
-| `internal/secrets` | proven | 100 percent; three real keyrings and a registered-source adapter |
-| `internal/redact` | proven | 100 percent |
-| `internal/errors` | proven | 100 percent |
-| `internal/events` | proven | 94 percent |
-| `internal/journal` | proven | 95 percent |
-| `internal/state` | proven | 83 percent |
-| `internal/lock` | proven | 78 percent |
-| `internal/manifest` | proven | 87 percent |
-| `internal/detect` | proven | 81 percent |
-| `internal/cli` | proven | 73 percent |
+| G1 | Lint: golangci-lint, biome, tsc, vale, cspell, lychee | enforced |
+| G2 | Unit and property tests | enforced |
+| G3 | Race and goroutine leak | **partial**: `-race` everywhere; goleak in 8 of the 9 packages that start goroutines. `internal/insights` is open, see QUESTIONS Q8 |
+| G4 | Coverage thresholds per package | **measured, not yet blocking**. `just coverage`. 16 of 50 packages meet C.5 today |
+| G5 | Conformance suites | enforced |
+| G6 | Fuzz | partial: the licence parser fuzzes in CI; C.5 also names the manifest, masking rules, proxy HTTP, OpenAPI, APM and trace parsers |
+| G7 | Security: gitleaks, trufflehog, gosec, semgrep, govulncheck, pnpm audit, pinned actions | partial: trivy on images and Terraform is not wired |
+| G8 | Docs | enforced |
+| G9 | Corpus: every corpus app completes up, test, down | not a gate yet |
+| G10 | Teardown: leak detector reports zero untracked | `just leaks` exists, not in `gate` |
+| G11 | Reproducibility: identical rebuilds, SBOM, cosign verify | not a gate yet |
+| G12 | Design: axe-core, visual regression, keyboard nav, CLI snapshots in four modes | not a gate yet |
+
+G4 is measured rather than blocking on purpose. Thirty four of fifty packages
+are below the threshold C.5 sets, and a blocking check that fails on its first
+run either stops everybody or gets weakened until it reports nothing. The
+measurement is the thing that was missing; the numbers are in the tables above
+and they move under a gate that can see them.
 
 ## Phase 3. Postgres data layer
 
@@ -178,8 +216,8 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | --- | --- | --- |
 | 3.1 Provider interface and conformance suite | proven | 23 behaviors in `engine/conformance`, for the DATABASE provider; the runtime suite in the same package is a separate 31. A behavior a provider cannot support is skipped explicitly, naming the capability. |
 | 3.2 Docker provider | proven | 21 behaviors pass against a real daemon, 2 skip with named reasons, zero resources left behind across repeated runs. |
-| 3.3 Masking engine | partial | The 22 transforms and the key hierarchy are proven at 95 percent. The rules model, classifier, SQL compiler, and resumable executor are next. |
-| 3.4 Verification scanner | partial | The 9 detectors are proven at 94 percent. The streaming table scan and the signed attestation are next. |
+| 3.3 Masking engine | partial | The 22 transforms and the key hierarchy are proven; the package measures 84.5 percent against C.5's 100. The rules model, classifier, SQL compiler, and resumable executor are next. |
+| 3.4 Verification scanner | partial | The 9 detectors are proven; the package measures 91.6 percent against C.5's 100. The streaming table scan and the signed attestation are next. |
 | 3.5 Subsetting | proven | A closure over the real foreign keys, executed against a real Postgres in CI and on a workstation, on a schema with a composite key, a nullable self reference, a required self reference, a two table cycle, an identity column, a generated column, a table with no primary key and a relationship the schema does not declare. Every key resolves afterwards, asserted by querying the loaded database rather than the planner. Masking is run over the result and the link groups still join. Before this the package had no callers at all. |
 | 3.6 Authentication adapters | partial | **proven**: all five login strategies (password, magic_link, email_code, sms_code, totp) sign in end to end against a real Postgres, a real application and Chromium, driving `runner/src/main.ts` over the real JSON boundary and asserting the runner's own verdict. A negative control corrupts the stored hash and requires the runner to notice. The Supabase auth schema, NextAuth and the column-configured generic adapter are proven against Supabase's real DDL, including reconciling a masked real user without duplicating, and emptying session and token tables so no live login reaches a branch. **written**: the Supabase admin API, Clerk, Auth0 and WorkOS adapters, exercised against a local server rather than the real APIs. They need a sandbox tenant and a token before they can be proven; without one they refuse with AF-DB-020 rather than create anybody. Both `af up` and `af test` provision, idempotently, so the second is a no-op; the `af up` call site itself is guarded by a unit test rather than by a full bring-up, because calling the exported entry point from inside `Up` asks for the environment lock a second time and reports AF-RUN-003 against the command's own pid. |
 | 3.7 Neon | proven | The full database conformance suite, all 23 behaviours, against the real Neon API. Found three bugs a fake would not have: `pooled` omitted means pooled, so `ConnDirect` was returning a pooled connection; a 200 with an empty body broke destroy-twice; and Neon's own branch ceiling arrived as an unexplained 422. |
@@ -190,13 +228,14 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 
 ## Supporting packages, phase 3
 
-| Package | State | Coverage |
-| --- | --- | --- |
-| `internal/masking` | proven | 95 percent |
-| `internal/verify` | proven | 94 percent |
-| `pkg/provider` | proven | interface only |
-| `engine/conformance` | proven | 23 behaviors |
-| `internal/db/docker` | proven | full suite green against a real daemon |
+| Package | State | Coverage | Want |
+| --- | --- | --- | --- |
+| `internal/masking` | proven | 84.5 percent | 100 |
+| `internal/verify` | proven | 91.6 percent | 100 |
+| `internal/subset` | proven | 86.3 percent | 100 |
+| `pkg/provider` | proven | 84.6 percent, interface only | 85 |
+| `engine/conformance` | proven | 75.5 percent, 23 behaviors | 85 |
+| `internal/db/docker` | proven | 72.2 percent, full suite green against a real daemon | 85 |
 
 ## Phase 3. Data
 

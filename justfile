@@ -80,6 +80,7 @@ gate: _reports
     run "format"                         just fmt-check
     run "lint"                           just lint
     run "the gates themselves"           just test-tools
+    run "coverage"                       just coverage
     run "engine"                         just test-engine
     run "this platform's keyring"        just keyring
     run "the other platforms lint"       just lint-platforms
@@ -249,6 +250,22 @@ test: test-engine test-tools test-web test-runner
 
 test-engine:
     cd engine && go test ./... -race -timeout 30m
+
+# G4. The coverage thresholds in the build plan's C.5, per package.
+#
+# Two recipes rather than one, because producing the profile needs the whole
+# engine suite with a Docker daemon and a Postgres and takes the better part of
+# an hour, while checking it takes a moment. A single recipe would mean nobody
+# could look at the numbers without paying for the run again.
+#
+# -coverpkg over the whole module on purpose: without it a package's number
+# counts only what its OWN tests reached, so a package exercised end to end by
+# the conformance suite reads as untested. C.5 says the integration tests count.
+coverage-profile:
+    cd engine && go test ./... -coverpkg=./... -coverprofile=../{{reports}}/coverage.out -timeout 60m
+
+coverage:
+    go run ./tools/coverage -profile {{reports}}/coverage.out
 
 test-tools:
     cd tools && go test ./... -timeout 5m
