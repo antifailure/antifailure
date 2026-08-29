@@ -5,6 +5,7 @@ import { motion } from "motion/react";
 import { EASE } from "@/lib/easing";
 import { useInViewPlay } from "@/lib/useInViewPlay";
 import { usePausedRaf } from "@/lib/usePausedRaf";
+import { LogoMark } from "@/components/icons";
 
 const u = (n: number) => `calc(${n} * var(--s))`;
 
@@ -18,12 +19,28 @@ const RULE = "rgba(16,16,16,0.10)";
 const GOLD = "#D4A017";
 const MENTION = "#5B5FEF";
 const DEL = "#D94841";
+// Dark enough on white to clear 4.5:1, which the brand green at #33bf00 does
+// not: this is text, not a logo.
+const OK = "#1E7A3A";
+
+/**
+ * Which of the two plans the panel is showing.
+ *
+ * The point of the whole visual is that a BLOCK is not a dead end: the run
+ * names the failure AND the change that passes. So the plan is a control the
+ * reader can flip, and flipping it moves the findings, the verdict and the
+ * issue's own activity feed together. One state, read by both halves, because
+ * a verdict that said READY next to an activity row that still said BLOCK
+ * would be the lie this product exists to prevent.
+ */
+type Plan = "as-written" | "safer";
 
 export function MigrationBento() {
   const root = useRef<HTMLDivElement>(null);
   const play = useInViewPlay(root, 0.2);
   const live = play.idle || play.reduced;
   const [t, setT] = useState(0);
+  const [plan, setPlan] = useState<Plan>("as-written");
 
   usePausedRaf(play.idle, (_now, elapsed) => {
     setT(Math.min(10, elapsed / 1000));
@@ -88,7 +105,7 @@ export function MigrationBento() {
               Activity
             </p>
             <ul className="relative" style={{ marginTop: u(10) }}>
-              {ACTIVITY.map((item, i) => (
+              {activityFor(plan).map((item, i) => (
                 <ActivityRow key={i} item={item} index={i} play={live} />
               ))}
             </ul>
@@ -104,7 +121,7 @@ export function MigrationBento() {
           </main>
         </div>
 
-        <AgentWindow seconds={worked} live={live} />
+        <AgentWindow seconds={worked} live={live} plan={plan} onPlan={setPlan} />
       </div>
     </div>
   );
@@ -122,11 +139,8 @@ function Sidebar({ live }: { live: boolean }) {
       }}
     >
       <div className="flex items-center" style={{ gap: u(8), paddingInline: u(6) }}>
-        <span
-          className="inline-flex items-center justify-center rounded-full"
-          style={{ width: u(16), height: u(16), background: INK, color: PAGE }}
-        >
-          <IconMark />
+        <span className="inline-flex shrink-0 items-center justify-center" style={{ width: u(16), height: u(16) }}>
+          <LogoMark className="size-full" />
         </span>
         <span style={{ fontSize: u(12.5), fontWeight: 600, color: INK, letterSpacing: "-0.02em" }}>Antifailure</span>
         <span style={{ color: DIM, width: u(10), height: u(10) }}>
@@ -278,7 +292,9 @@ type Activity = {
   body: ReactNode;
 };
 
-const ACTIVITY: Activity[] = [
+function activityFor(plan: Plan): Activity[] {
+  const safer = plan === "safer";
+  return [
   {
     kind: "system",
     time: "2min ago",
@@ -288,7 +304,18 @@ const ACTIVITY: Activity[] = [
       </>
     ),
   },
-  {
+  safer
+    ? {
+        kind: "system",
+        time: "just now",
+        body: (
+          <>
+            Policy cleared <Pill tone="block">BLOCK</Pill> · labels now <Pill tone="ok">READY</Pill> and{" "}
+            <Pill>Locks</Pill> · <span style={{ color: DIM }}>just now</span>
+          </>
+        ),
+      }
+    : {
     kind: "system",
     time: "2min ago",
     body: (
@@ -328,7 +355,12 @@ const ACTIVITY: Activity[] = [
   {
     kind: "system",
     time: "just now",
-    body: (
+    body: safer ? (
+      <>
+        Changed 3 files · nullable add, batched backfill, NOT NULL after ·{" "}
+        <span style={{ color: DIM }}>just now</span>
+      </>
+    ) : (
       <>
         Changed 2 files · nullable add, backfill later · <span style={{ color: DIM }}>just now</span>
       </>
@@ -337,13 +369,18 @@ const ACTIVITY: Activity[] = [
   {
     kind: "status",
     time: "just now",
-    body: (
+    body: safer ? (
+      <>
+        Antifailure moved from Block to Ready · <span style={{ color: DIM }}>just now</span>
+      </>
+    ) : (
       <>
         Antifailure moved from Todo to Block · <span style={{ color: DIM }}>just now</span>
       </>
     ),
   },
-];
+  ];
+}
 
 function ActivityRow({ item, index, play }: { item: Activity; index: number; play: boolean }) {
   return (
@@ -354,7 +391,15 @@ function ActivityRow({ item, index, play }: { item: Activity; index: number; pla
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.42, delay: 0.12 + index * 0.055, ease: EASE }}
     >
-      <span className="shrink-0" style={{ marginTop: u(2) }}>
+      <span
+        className="flex shrink-0 items-center justify-center"
+        style={{
+          // A system line is 12.5 * 1.45. A comment card is 8 of padding plus a
+          // 12 * 1.4 first line, so its marker centres on 16.4 -> a 32.8 box.
+          width: item.kind === "comment" ? u(22) : u(14),
+          height: item.kind === "comment" ? u(32.8) : u(18.125),
+        }}
+      >
         {item.kind === "status" ? <GoldMark /> : item.kind === "comment" ? <Avatar src={item.avatar} name={item.who ?? ""} /> : <Dot />}
       </span>
       {item.kind === "comment" ? (
@@ -377,13 +422,36 @@ function ActivityRow({ item, index, play }: { item: Activity; index: number; pla
           </p>
         </div>
       ) : (
-        <p style={{ fontSize: u(12.5), lineHeight: 1.45, color: "#3F3F3A", letterSpacing: "-0.015em" }}>{item.body}</p>
+        <p
+          className="min-w-0"
+          style={{
+            fontSize: u(12.5),
+            lineHeight: 1.45,
+            color: "#3F3F3A",
+            letterSpacing: "-0.015em",
+            // Matches the marker box, so a one-line row is centred against its
+            // dot and a wrapped row still starts on the first line.
+            minHeight: u(18.125),
+          }}
+        >
+          {item.body}
+        </p>
       )}
     </motion.li>
   );
 }
 
-function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
+function AgentWindow({
+  seconds,
+  live,
+  plan,
+  onPlan,
+}: {
+  seconds: number;
+  live: boolean;
+  plan: Plan;
+  onPlan: (plan: Plan) => void;
+}) {
   const scroller = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -414,6 +482,8 @@ function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
     setDraft("");
   }
 
+  const findings = FINDINGS[plan];
+  const verdict = VERDICT[plan];
   const height = collapsed ? 40 : expanded ? 430 : 328;
 
   return (
@@ -440,6 +510,9 @@ function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
           if (collapsed) setCollapsed(false);
         }}
       >
+        <span className="inline-flex shrink-0 items-center justify-center" style={{ width: u(14), height: u(14) }}>
+          <LogoMark className="size-full" />
+        </span>
         <span style={{ fontSize: u(12.5), fontWeight: 500, color: INK, letterSpacing: "-0.02em" }}>Antifailure</span>
         <span className="ml-auto flex items-center" style={{ gap: u(8), color: DIM }}>
           <button
@@ -455,7 +528,7 @@ function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
           </button>
           <button
             type="button"
-            aria-label="Expand"
+            aria-label={expanded ? "Restore" : "Expand"}
             onClick={(e) => {
               e.stopPropagation();
               setCollapsed(false);
@@ -467,7 +540,7 @@ function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
           </button>
           <button
             type="button"
-            aria-label="Close"
+            aria-label="Collapse"
             onClick={(e) => {
               e.stopPropagation();
               setCollapsed(true);
@@ -502,47 +575,93 @@ function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
             </div>
 
             <p className="flex items-center" style={{ marginTop: u(8), gap: u(6), fontSize: u(11.5), color: MUTED }}>
-              <span className="inline-block rounded-full" style={{ width: u(6), height: u(6), background: GOLD }} />
+              <span className="inline-block shrink-0 rounded-full" style={{ width: u(6), height: u(6), background: GOLD }} />
               <span className="font-mono">subscriptions</span> schema in this run
             </p>
             <p className="flex items-center" style={{ marginTop: u(6), gap: u(6), fontSize: u(12), color: MUTED }}>
-              <span style={{ width: u(10), height: u(10), color: DIM }}>
+              <span className="flex shrink-0 items-center justify-center" style={{ width: u(10), height: u(17.4), color: DIM }}>
                 <IconPlay />
               </span>
               Ran for {seconds}s · data stayed in-boundary
             </p>
 
-            <ul style={{ marginTop: u(10) }}>
-              {FINDINGS.map((item) => (
-                <li key={item.id} data-finding={item.id} style={{ marginBottom: u(8) }}>
+            <div
+              className="flex"
+              role="group"
+              aria-label="Which plan to show"
+              style={{ marginTop: u(10), gap: u(2), padding: u(2), borderRadius: u(5), background: "rgba(16,16,16,0.05)" }}
+            >
+              {(["as-written", "safer"] as const).map((option) => {
+                const on = plan === option;
+                return (
                   <button
+                    key={option}
                     type="button"
-                    onClick={() => setActive(item.id)}
-                    className="w-full text-left"
+                    aria-pressed={on}
+                    onClick={() => onPlan(option)}
+                    className="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black/60"
                     style={{
-                      padding: u(8),
+                      height: u(24),
                       borderRadius: u(4),
-                      boxShadow: `inset 0 0 0 1px ${active === item.id ? "rgba(16,16,16,0.22)" : RULE}`,
-                      background: active === item.id ? "#F7F7F7" : CARD,
+                      fontSize: u(11.5),
+                      letterSpacing: "-0.015em",
+                      fontWeight: on ? 600 : 400,
+                      color: on ? INK : MUTED,
+                      background: on ? CARD : "transparent",
+                      boxShadow: on ? `inset 0 0 0 1px ${RULE}` : undefined,
+                      transition: "background 0.18s, color 0.18s",
                     }}
                   >
-                    <p className="flex items-center justify-between" style={{ fontSize: u(11), color: MUTED, letterSpacing: "0.04em" }}>
-                      <span className="uppercase">{item.label}</span>
-                      <span style={{ color: item.tone === "block" ? DEL : MUTED, fontWeight: 600 }}>{item.mark}</span>
-                    </p>
-                    <p style={{ marginTop: u(4), fontSize: u(12.5), lineHeight: 1.4, color: "#2C2C28", letterSpacing: "-0.018em" }}>
-                      {item.detail}
-                    </p>
+                    {option === "as-written" ? "As written" : "Safer path"}
                   </button>
-                </li>
-              ))}
+                );
+              })}
+            </div>
+
+            <ul style={{ marginTop: u(10) }}>
+              {findings.map((item) => {
+                const on = active === item.id;
+                return (
+                  <li key={item.id} data-finding={item.id} style={{ marginBottom: u(8) }}>
+                    <button
+                      type="button"
+                      onClick={() => setActive(on ? "" : item.id)}
+                      aria-expanded={on}
+                      className="w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black/60"
+                      style={{
+                        padding: u(8),
+                        borderRadius: u(4),
+                        boxShadow: `inset 0 0 0 1px ${on ? "rgba(16,16,16,0.22)" : RULE}`,
+                        background: on ? "#F7F7F7" : CARD,
+                        transition: "background 0.18s, box-shadow 0.18s",
+                      }}
+                    >
+                      <p className="flex items-center justify-between" style={{ fontSize: u(11), color: MUTED, letterSpacing: "0.04em" }}>
+                        <span className="uppercase">{item.label}</span>
+                        <span style={{ color: item.tone === "block" ? DEL : OK, fontWeight: 600 }}>{item.mark}</span>
+                      </p>
+                      <p style={{ marginTop: u(4), fontSize: u(12.5), lineHeight: 1.4, color: "#2C2C28", letterSpacing: "-0.018em" }}>
+                        {item.detail}
+                      </p>
+                      {on ? (
+                        <p
+                          className="font-mono"
+                          style={{ marginTop: u(6), fontSize: u(10.5), lineHeight: 1.45, color: MUTED }}
+                        >
+                          {item.evidence}
+                        </p>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
 
             <button
               type="button"
               data-finding="verdict"
               onClick={() => setActive("verdict")}
-              className="w-full text-left"
+              className="w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black/60"
               style={{
                 padding: u(8),
                 borderRadius: u(4),
@@ -551,14 +670,13 @@ function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
               }}
             >
               <p style={{ fontSize: u(11.5), color: MUTED }}>
-                Verdict <span style={{ color: DEL, fontWeight: 600 }}>BLOCK</span>
+                Verdict{" "}
+                <span style={{ color: verdict.tone === "block" ? DEL : OK, fontWeight: 600 }}>{verdict.mark}</span>
               </p>
               <p style={{ marginTop: u(4), fontSize: u(12), fontWeight: 500, color: INK, letterSpacing: "-0.02em" }}>
-                Do not ship add_billing_status as written
+                {verdict.title}
               </p>
-              <p style={{ marginTop: u(4), fontSize: u(10.5), color: DIM }}>
-                Safer path: nullable add, no table rewrite, backfill in small batches
-              </p>
+              <p style={{ marginTop: u(4), fontSize: u(10.5), lineHeight: 1.45, color: DIM }}>{verdict.note}</p>
             </button>
 
             {notes.map((note, i) => (
@@ -602,7 +720,7 @@ function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
                   boxShadow: `0 8px 24px rgba(16,16,16,0.1), inset 0 0 0 1px ${RULE}`,
                 }}
               >
-                {FINDINGS.map((item) => (
+                {findings.map((item) => (
                   <button
                     key={item.id}
                     type="button"
@@ -616,7 +734,7 @@ function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
                     }}
                   >
                     <span>{item.label}</span>
-                    <span style={{ color: item.tone === "block" ? DEL : MUTED, fontSize: u(11) }}>{item.mark}</span>
+                    <span style={{ color: item.tone === "block" ? DEL : OK, fontSize: u(11) }}>{item.mark}</span>
                   </button>
                 ))}
                 <button
@@ -626,7 +744,7 @@ function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
                   style={{ height: u(28), paddingInline: u(10), fontSize: u(12), color: INK }}
                 >
                   <span>Verdict</span>
-                  <span style={{ color: DEL, fontSize: u(11) }}>BLOCK</span>
+                  <span style={{ color: verdict.tone === "block" ? DEL : OK, fontSize: u(11) }}>{verdict.mark}</span>
                 </button>
               </div>
             ) : null}
@@ -656,45 +774,128 @@ function AgentWindow({ seconds, live }: { seconds: number; live: boolean }) {
   );
 }
 
-const FINDINGS = [
-  {
-    id: "locks",
-    label: "Locks",
-    mark: "BLOCK",
-    tone: "block" as const,
-    detail: "ACCESS EXCLUSIVE on subscriptions for 27.4s. Policy is under 2s.",
-  },
-  {
-    id: "plans",
-    label: "Plans",
-    mark: "BLOCK",
-    tone: "block" as const,
-    detail: "Checkout reads fell back to Seq Scan. Planner dropped subscriptions_status_idx.",
-  },
-  {
-    id: "pool",
-    label: "Pool",
-    mark: "BLOCK",
-    tone: "block" as const,
-    detail: "20/20 connections busy, +14 waiting. Checkout p99 820ms → 6.9s.",
-  },
-  {
-    id: "rollback",
-    label: "Rollback",
-    mark: "BLOCK",
-    tone: "block" as const,
-    detail: "Old binary cannot read the new column. Rolling revert is not feasible.",
-  },
-  {
-    id: "cleanup",
-    label: "Cleanup",
-    mark: "OK",
-    tone: "ok" as const,
-    detail: "Run torn down. Production data never left the customer boundary.",
-  },
-];
+type Finding = {
+  id: string;
+  label: string;
+  mark: string;
+  tone: "block" | "ok";
+  detail: string;
+  evidence: string;
+};
 
-function Pill({ children, tone }: { children: ReactNode; tone?: "block" }) {
+// The same five checks under both plans. Selecting one shows the line the run
+// actually measured, because "BLOCK" on its own is an opinion and the number
+// under it is the argument.
+const FINDINGS: Record<Plan, Finding[]> = {
+  "as-written": [
+    {
+      id: "locks",
+      label: "Locks",
+      mark: "BLOCK",
+      tone: "block",
+      detail: "ACCESS EXCLUSIVE on subscriptions for 27.4s. Policy is under 2s.",
+      evidence: "lock_waits 41 · longest hold 27.4s · budget 2.0s",
+    },
+    {
+      id: "plans",
+      label: "Plans",
+      mark: "BLOCK",
+      tone: "block",
+      detail: "Checkout reads fell back to Seq Scan. Planner dropped subscriptions_status_idx.",
+      evidence: "checkout_by_status → Seq Scan on subscriptions · cost 84210",
+    },
+    {
+      id: "pool",
+      label: "Pool",
+      mark: "BLOCK",
+      tone: "block",
+      detail: "20/20 connections busy, +14 waiting. Checkout p99 820ms → 6.9s.",
+      evidence: "cl_waiting 14 · p99 6.9s against a 820ms baseline",
+    },
+    {
+      id: "rollback",
+      label: "Rollback",
+      mark: "BLOCK",
+      tone: "block",
+      detail: "Old binary cannot read the new column. Rolling revert is not feasible.",
+      evidence: "v412 replay → column billing_status does not exist",
+    },
+    {
+      id: "cleanup",
+      label: "Cleanup",
+      mark: "OK",
+      tone: "ok",
+      detail: "Run torn down. Production data never left the customer boundary.",
+      evidence: "clone destroyed · 0 rows crossed the boundary",
+    },
+  ],
+  safer: [
+    {
+      id: "locks",
+      label: "Locks",
+      mark: "OK",
+      tone: "ok",
+      detail: "Nullable add takes no rewrite. Longest hold 0.04s.",
+      evidence: "lock_waits 0 · longest hold 0.04s · budget 2.0s",
+    },
+    {
+      id: "plans",
+      label: "Plans",
+      mark: "OK",
+      tone: "ok",
+      detail: "Checkout keeps subscriptions_status_idx. Plan is unchanged.",
+      evidence: "checkout_by_status → Index Scan · cost 84 (was 84210)",
+    },
+    {
+      id: "pool",
+      label: "Pool",
+      mark: "OK",
+      tone: "ok",
+      detail: "Backfill in 5k batches. 7/20 connections busy at peak.",
+      evidence: "cl_waiting 0 · p99 840ms against a 820ms baseline",
+    },
+    {
+      id: "rollback",
+      label: "Rollback",
+      mark: "OK",
+      tone: "ok",
+      detail: "Old binary ignores the nullable column. Revert replayed clean.",
+      evidence: "v412 replay → 11s, no error",
+    },
+    {
+      id: "cleanup",
+      label: "Cleanup",
+      mark: "OK",
+      tone: "ok",
+      detail: "Run torn down. Production data never left the customer boundary.",
+      evidence: "clone destroyed · 0 rows crossed the boundary",
+    },
+  ],
+};
+
+const VERDICT: Record<Plan, { mark: string; tone: "block" | "ok"; title: string; note: string }> = {
+  "as-written": {
+    mark: "BLOCK",
+    tone: "block",
+    title: "Do not ship add_billing_status as written",
+    note: "Safer path: nullable add, no table rewrite, backfill in small batches",
+  },
+  safer: {
+    mark: "READY",
+    tone: "ok",
+    title: "Safe to ship add_billing_status in three steps",
+    note: "Nullable add now · backfill 5k a batch · set NOT NULL once the backfill lands",
+  },
+};
+
+function Pill({ children, tone }: { children: ReactNode; tone?: "block" | "ok" }) {
+  const color = tone === "block" ? DEL : tone === "ok" ? OK : "#3D3D38";
+  const background =
+    tone === "block"
+      ? "rgba(217,72,65,0.12)"
+      : tone === "ok"
+        ? "rgba(30,122,58,0.12)"
+        : "rgba(16,16,16,0.06)";
   return (
     <span
       style={{
@@ -705,8 +906,8 @@ function Pill({ children, tone }: { children: ReactNode; tone?: "block" }) {
         borderRadius: u(4),
         fontSize: u(10.5),
         letterSpacing: "-0.01em",
-        color: tone === "block" ? DEL : "#3D3D38",
-        background: tone === "block" ? "rgba(217,72,65,0.12)" : "rgba(16,16,16,0.06)",
+        color,
+        background,
       }}
     >
       {children}
@@ -718,9 +919,11 @@ function GoldMark() {
   return (
     <span
       className="inline-flex shrink-0 items-center justify-center rounded-full"
-      style={{ width: u(14), height: u(14), background: GOLD, color: "#fff", fontSize: u(9), fontWeight: 700 }}
+      style={{ width: u(14), height: u(14), background: GOLD, color: "#fff" }}
     >
-      ›
+      <svg viewBox="0 0 14 14" className="size-full" fill="none" aria-hidden>
+        <path d="M6 4.6 8.4 7 6 9.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
     </span>
   );
 }
@@ -767,7 +970,7 @@ const NAV = [
 const WORKSPACE = [
   { label: "Initiatives", icon: <IconHex /> },
   { label: "Projects", icon: <IconBox /> },
-  { label: "… More", icon: <IconMore /> },
+  { label: "More", icon: <IconMore /> },
 ];
 
 const FAVORITES = [
@@ -785,13 +988,6 @@ function strokeIcon(d: string) {
   );
 }
 
-function IconMark() {
-  return (
-    <svg viewBox="0 0 16 16" className="size-full" fill="none" aria-hidden>
-      <path d="M4 12 12 4" stroke="currentColor" strokeWidth="1.6" />
-    </svg>
-  );
-}
 function IconChevron() {
   return strokeIcon("M3 6l5 5 5-5");
 }
