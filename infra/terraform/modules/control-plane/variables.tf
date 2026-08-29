@@ -220,6 +220,40 @@ variable "signin_allowlist" {
 # than accepting one it cannot seal. That is the right behaviour for an
 # installation that does not want the feature -- but it is a decision, and this
 # module makes it by generating the secret, because our own instance wants it.
+# The GitHub App.
+#
+# Set the id and this module wires all three variables the application needs:
+# the id, the private key, and the webhook secret. Leave it empty and none of
+# them are set, which is a supported state -- sign-in works, and the webhook
+# endpoint answers 503 rather than accepting unsigned deliveries.
+#
+# All three or none, because the application refuses a half-configured App at
+# start-up. A webhook secret with no private key produces an endpoint that
+# verifies deliveries perfectly and can do nothing with them.
+#
+# The two secrets are NOT managed here. GitHub generates the private key and
+# shows it once; Terraform can neither create it nor recreate it, and a resource
+# that manages a value it cannot produce is a resource that will one day set it
+# to the empty string. They are put in the vault by a person and read back here,
+# which is why these are data sources rather than resources.
+variable "github_app_id" {
+  type        = string
+  default     = ""
+  description = "The numeric GitHub App ID. Empty means no App is configured."
+}
+
+variable "github_app_private_key_secret_name" {
+  type        = string
+  default     = "github-app-private-key"
+  description = "The Key Vault secret holding the App's PEM private key."
+}
+
+variable "github_app_webhook_secret_name" {
+  type        = string
+  default     = "github-app-webhook-secret"
+  description = "The Key Vault secret holding the App's webhook secret."
+}
+
 variable "provider_key_secret_enabled" {
   type        = bool
   default     = true

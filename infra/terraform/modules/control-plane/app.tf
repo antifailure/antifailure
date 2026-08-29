@@ -253,6 +253,19 @@ resource "azurerm_container_app" "this" {
     }
   }
 
+  # The App's two secrets, which this module reads rather than writes.
+  dynamic "secret" {
+    for_each = var.github_app_id == "" ? {} : {
+      "github-app-private-key"    = data.azurerm_key_vault_secret.github_app_private_key[0].versionless_id
+      "github-app-webhook-secret" = data.azurerm_key_vault_secret.github_app_webhook_secret[0].versionless_id
+    }
+    content {
+      name                = secret.key
+      identity            = azurerm_user_assigned_identity.app.id
+      key_vault_secret_id = secret.value
+    }
+  }
+
   ingress {
     external_enabled = true
     target_port      = 8080
@@ -331,6 +344,32 @@ resource "azurerm_container_app" "this" {
         content {
           name        = "AF_PROVIDER_KEY_SECRET"
           secret_name = "provider-key-secret"
+        }
+      }
+
+      # All three together. The application refuses a half-configured App at
+      # start-up, so a block that set two of these would stop the container
+      # rather than degrade, which is the behaviour we want and not a state to
+      # deploy into on purpose.
+      dynamic "env" {
+        for_each = var.github_app_id == "" ? [] : [var.github_app_id]
+        content {
+          name  = "AF_GITHUB_APP_ID"
+          value = env.value
+        }
+      }
+      dynamic "env" {
+        for_each = var.github_app_id == "" ? [] : [1]
+        content {
+          name        = "AF_GITHUB_APP_PRIVATE_KEY"
+          secret_name = "github-app-private-key"
+        }
+      }
+      dynamic "env" {
+        for_each = var.github_app_id == "" ? [] : [1]
+        content {
+          name        = "AF_GITHUB_APP_WEBHOOK_SECRET"
+          secret_name = "github-app-webhook-secret"
         }
       }
 
