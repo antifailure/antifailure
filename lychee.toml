@@ -61,6 +61,11 @@ exclude = [
   "^https?://[^/]*\\.?example\\.(com|org|net)",
   "^https?://[^/]*\\.?invalid",
   "^https?://api\\.stripe\\.com",
+  # Same case: an API endpoint the documentation shows a request going to. It
+  # answers 401 without a key, which is correct behaviour and not a dead page,
+  # and it turned the scheduled external check red where a reader would never
+  # have clicked it.
+  "^https?://api\\.resend\\.com",
   "^https?://telemetry\\.",
   # A repository address that only exists once a user has made one.
   "^https?://github\\.com/your-",
