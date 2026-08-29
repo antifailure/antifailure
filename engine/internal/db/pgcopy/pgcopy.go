@@ -13,7 +13,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,47 +93,204 @@ func Exec(ctx context.Context, conn secrets.Value, script string) error {
 	return nil
 }
 
+// CopyOptions narrows what a copy moves, for a target that is not a blank
+// database.
+//
+// The zero value is the whole database into an empty one, which is what a
+// container or a fresh branch of a project's own storage is. A managed platform
+// is the case this exists for: it owns schemas and cluster wide objects in the
+// source AND in the target, so copying everything fails on the first object
+// that is already there.
+type CopyOptions struct {
+	// ExcludeSchemas are left out of the dump entirely, for schemas the target
+	// already has and the platform owns.
+	ExcludeSchemas []string
+	// ExcludeArchiveKinds drops entries from the archive by their table of
+	// contents description, such as "EVENT TRIGGER". It exists because some
+	// objects have no pg_dump flag and cannot be restored into a target that
+	// already has them: recreating one fails on ownership rather than on
+	// existence, which no restore flag suppresses.
+	//
+	// Naming any kind changes how the copy runs. The archive has to exist as a
+	// file before its contents can be listed, so a filtered copy is dump then
+	// restore rather than dump piped into restore.
+	ExcludeArchiveKinds []string
+	// SchemaOnly copies the structure and none of the rows.
+	//
+	// It is what subsetting needs: the tables, the keys, the sequences, the
+	// indexes and the constraints have to be there before a slice of the rows
+	// can be loaded into them, and copying the rows as well would be copying
+	// the thing the subset exists to avoid copying.
+	SchemaOnly bool
+}
+
 // Copy copies a source database into a target.
 //
 // It shells out to pg_dump and pg_restore rather than reimplementing them, for
 // the reason in the package comment.
+func Copy(ctx context.Context, source, target secrets.Value) error {
+	return CopyWith(ctx, source, target, CopyOptions{})
+}
+
+// CopySchema copies a source database's structure and none of its rows.
+//
+// It is here rather than in the subsetting package for the reason in the
+// package comment. The flags are the ones Copy uses and they were each chosen
+// for a reason; a second invocation elsewhere would be a second place for one
+// of them to be forgotten.
+func CopySchema(ctx context.Context, source, target secrets.Value) error {
+	return CopyWith(ctx, source, target, CopyOptions{SchemaOnly: true})
+}
+
+// pg_dump refuses outright to dump a server newer than itself: "aborting
+// because of server version mismatch". That is not a nicety, it is a hard
+// refusal, and it is the single most likely way the golden refresh fails on a
+// machine that is otherwise set up correctly. Postgres 17 is three years old
+// and Debian, Ubuntu and the GitHub runners still ship a 16 client by default,
+// so "install the Postgres client tools" is advice that produces exactly this.
+//
+// Two things follow, and both are here rather than left to the operator.
+// Distributions install every major version side by side under a predictable
+// path and put only ONE of them on PATH, so the tool that can do the job is
+// very often already on the machine and merely not first. And when it truly is
+// not there, the error has to name the version needed and the package that
+// carries it, because the message Postgres gives names neither.
+
+// serverMajor asks a database what version it is, so the right client can be
+// chosen before anything is spawned. A failure here is not fatal: it falls back
+// to whatever is on PATH, which is the behaviour this had before.
+func serverMajor(ctx context.Context, conn secrets.Value) int {
+	db, err := sql.Open("pgx", conn.Reveal())
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = db.Close() }()
+
+	var num int
+	if err := db.QueryRowContext(ctx, "SHOW server_version_num").Scan(&num); err != nil {
+		return 0
+	}
+	// 170011 is 17.11. Versions before 10 encoded the minor in the middle
+	// digits, and none of those are supported here, so the division is safe.
+	return num / 10000
+}
+
+// searchDirs are where distributions put the versions that are not on PATH.
+// Debian and Ubuntu use the first, Homebrew the other two.
+var searchDirs = []string{
+	"/usr/lib/postgresql/*/bin",
+	"/opt/homebrew/opt/postgresql@*/bin",
+	"/usr/local/opt/postgresql@*/bin",
+}
+
+// toolFor finds a pg_dump or pg_restore new enough for the server.
+//
+// It returns the newest one it can find, and whether that one is new enough,
+// so the caller can produce a message about the actual gap rather than a
+// generic one.
+func toolFor(name string, wantMajor int) (path string, haveMajor int, err error) {
+	type candidate struct {
+		path  string
+		major int
+	}
+	var found []candidate
+
+	if p, lookErr := exec.LookPath(name); lookErr == nil {
+		found = append(found, candidate{p, toolMajor(p)})
+	}
+	for _, pattern := range searchDirs {
+		matches, _ := filepath.Glob(filepath.Join(pattern, name))
+		for _, m := range matches {
+			found = append(found, candidate{m, toolMajor(m)})
+		}
+	}
+	if len(found) == 0 {
+		return "", 0, fmt.Errorf(
+			"pgcopy: %s is not on the path and is not installed anywhere this looked. "+
+				"It is what copies a source database. Install the Postgres client tools, "+
+				"or configure a seed command instead of a source", name)
+	}
+
+	best := found[0]
+	for _, c := range found[1:] {
+		if c.major > best.major {
+			best = c
+		}
+	}
+	// Prefer the oldest that is still new enough, so a machine with several
+	// installed uses the one that matches rather than the newest for its own
+	// sake.
+	chosen := best
+	for _, c := range found {
+		if c.major >= wantMajor && (chosen.major < wantMajor || c.major < chosen.major) {
+			chosen = c
+		}
+	}
+	return chosen.path, chosen.major, nil
+}
+
+// toolMajor asks a binary its version. Zero when it will not say, which sorts
+// it below everything that will.
+func toolMajor(path string) int {
+	out, err := exec.Command(path, "--version").Output()
+	if err != nil {
+		return 0
+	}
+	// "pg_dump (PostgreSQL) 17.2" and "pg_restore (PostgreSQL) 16.15 (Ubuntu ...)".
+	fields := strings.Fields(string(out))
+	for i := len(fields) - 1; i >= 0; i-- {
+		major, _, _ := strings.Cut(fields[i], ".")
+		if n, convErr := strconv.Atoi(major); convErr == nil && n >= 8 {
+			return n
+		}
+	}
+	return 0
+}
+
+// tooOld renders the refusal Postgres gives with the parts it leaves out: what
+// is needed, what is here, and the package that closes the gap.
+func tooOld(name string, have, want int) error {
+	return fmt.Errorf(
+		"pgcopy: the source database is Postgres %d and the newest %s on this machine is %d. "+
+			"pg_dump refuses to read a server newer than itself, so this cannot be worked around. "+
+			"Install the matching client tools: on Debian or Ubuntu, "+
+			"apt-get install postgresql-client-%d; on macOS, brew install libpq or postgresql@%d",
+		want, name, have, want, want)
+}
+
+// CopyWith copies a source database into a target, narrowed by opts.
 //
 // The subprocess environment is constructed explicitly rather than inherited,
 // so that the workstation's own credentials cannot reach the child, and the
 // connection strings go through flags the child reads rather than being echoed,
 // with PGCONNECT_TIMEOUT set so that an unreachable source fails rather than
 // hangs.
-func Copy(ctx context.Context, source, target secrets.Value) error {
-	dumpPath, err := exec.LookPath("pg_dump")
-	if err != nil {
-		return fmt.Errorf(
-			"pgcopy: pg_dump is not on the path, and it is what copies a source database. " +
-				"Install the Postgres client tools, or configure a seed command instead of a source")
+func CopyWith(ctx context.Context, source, target secrets.Value, opts CopyOptions) error {
+	if len(opts.ExcludeArchiveKinds) > 0 {
+		return copyThroughArchive(ctx, source, target, opts)
 	}
-	restorePath, err := exec.LookPath("pg_restore")
+	return copyThroughPipe(ctx, source, target, opts)
+}
+
+func copyThroughPipe(ctx context.Context, source, target secrets.Value, opts CopyOptions) error {
+	want := serverMajor(ctx, source)
+	dumpPath, dumpMajor, err := toolFor("pg_dump", want)
 	if err != nil {
-		return fmt.Errorf("pgcopy: pg_restore is not on the path: %w", err)
+		return err
+	}
+	if want > 0 && dumpMajor < want {
+		return tooOld("pg_dump", dumpMajor, want)
+	}
+	restorePath, _, err := toolFor("pg_restore", want)
+	if err != nil {
+		return err
 	}
 
-	dump := exec.CommandContext(ctx, dumpPath,
-		"--format=custom",
-		"--no-owner", "--no-privileges", "--no-acl",
-		// Row level security policies are preserved rather than dropped,
-		// because a Supabase schema depends on them and restoring without them
-		// produces a database where every query returns nothing.
-		"--quote-all-identifiers",
-		"--dbname="+source.Reveal(),
-	)
+	dump := exec.CommandContext(ctx, dumpPath, append(dumpArgs(opts), "--dbname="+source.Reveal())...)
 	dump.Env = []string{"PGCONNECT_TIMEOUT=30"}
 
 	restore := exec.CommandContext(ctx, restorePath,
-		"--no-owner", "--no-privileges",
-		// A restore that stops at the first error leaves a half loaded
-		// database that looks complete. Exiting on error is what makes a
-		// failed refresh fail rather than publish something partial.
-		"--exit-on-error",
-		"--dbname="+target.Reveal(),
-	)
+		append(restoreArgs(), "--dbname="+target.Reveal())...)
 	restore.Env = []string{"PGCONNECT_TIMEOUT=30"}
 
 	pipe, err := dump.StdoutPipe()
@@ -154,6 +316,311 @@ func Copy(ctx context.Context, source, target secrets.Value) error {
 	}
 	if err := restore.Wait(); err != nil {
 		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(restoreErr.String()))
+	}
+	return nil
+}
+
+// dumpArgs builds pg_dump's flags, which are the same however the copy is
+// wired up.
+func dumpArgs(opts CopyOptions) []string {
+	args := []string{
+		"--format=custom",
+		"--no-owner", "--no-privileges", "--no-acl",
+		// Row level security policies are preserved rather than dropped,
+		// because a Supabase schema depends on them and restoring without them
+		// produces a database where every query returns nothing.
+		"--quote-all-identifiers",
+	}
+	if opts.SchemaOnly {
+		args = append(args, "--schema-only")
+	}
+	if len(opts.ExcludeSchemas) > 0 {
+		// Publications and subscriptions are cluster wide rather than owned by
+		// a schema, so excluding a platform's schemas does not exclude the
+		// publication it created, and a restore fails on one the target already
+		// has. This follows ExcludeSchemas rather than being its own option
+		// because the two are the same case: a target the platform has already
+		// furnished. A database with no platform behind it has neither, so
+		// nothing is lost by the pairing.
+		args = append(args, "--no-publications", "--no-subscriptions")
+	}
+	for _, schema := range opts.ExcludeSchemas {
+		args = append(args, "--exclude-schema="+schema)
+	}
+	return args
+}
+
+// restoreArgs builds pg_restore's flags.
+func restoreArgs() []string {
+	return []string{
+		"--no-owner", "--no-privileges",
+		// A restore that stops at the first error leaves a half loaded
+		// database that looks complete. Exiting on error is what makes a
+		// failed refresh fail rather than publish something partial. It is not
+		// a nicety: a foreign key that could not be validated is reported and
+		// skipped by default, so without this a copy can land the rows and
+		// silently omit the constraint.
+		"--exit-on-error",
+	}
+}
+
+// copyThroughArchive dumps to a file, filters the archive's table of contents,
+// and restores what is left.
+//
+// Slower than the pipe by one write of the dump to local disk, and the only way
+// to leave out an object kind pg_dump has no flag for.
+func copyThroughArchive(ctx context.Context, source, target secrets.Value, opts CopyOptions) error {
+	want := serverMajor(ctx, source)
+	dumpPath, dumpMajor, err := toolFor("pg_dump", want)
+	if err != nil {
+		return err
+	}
+	if want > 0 && dumpMajor < want {
+		return tooOld("pg_dump", dumpMajor, want)
+	}
+	restorePath, _, err := toolFor("pg_restore", want)
+	if err != nil {
+		return err
+	}
+
+	dir, err := os.MkdirTemp("", "af-pgcopy-")
+	if err != nil {
+		return fmt.Errorf("pgcopy: make a working directory: %w", err)
+	}
+	// The archive holds the source's data, so it is removed whatever happens,
+	// including when the restore fails and the caller is about to report why.
+	defer func() { _ = os.RemoveAll(dir) }()
+	archive := filepath.Join(dir, "source.dump")
+
+	dump := exec.CommandContext(ctx, dumpPath,
+		append(dumpArgs(opts), "--file="+archive, "--dbname="+source.Reveal())...)
+	dump.Env = []string{"PGCONNECT_TIMEOUT=30"}
+	var dumpErr strings.Builder
+	dump.Stderr = &dumpErr
+	if err := dump.Run(); err != nil {
+		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(dumpErr.String()))
+	}
+
+	list := exec.CommandContext(ctx, restorePath, "--list", archive)
+	var listing, listErr strings.Builder
+	list.Stdout = &listing
+	list.Stderr = &listErr
+	if err := list.Run(); err != nil {
+		return fmt.Errorf("pgcopy: read the archive's table of contents: %s", Tail(listErr.String()))
+	}
+
+	toc := filepath.Join(dir, "restore.toc")
+	if err := os.WriteFile(toc, []byte(filterTOC(listing.String(), opts.ExcludeArchiveKinds)), 0o600); err != nil {
+		return fmt.Errorf("pgcopy: write the filtered table of contents: %w", err)
+	}
+
+	restore := exec.CommandContext(ctx, restorePath,
+		append(restoreArgs(), "--use-list="+toc, "--dbname="+target.Reveal(), archive)...)
+	restore.Env = []string{"PGCONNECT_TIMEOUT=30"}
+	var restoreErr strings.Builder
+	restore.Stderr = &restoreErr
+	if err := restore.Run(); err != nil {
+		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(restoreErr.String()))
+	}
+	return nil
+}
+
+// tocEntry matches the identifying prefix of a table of contents line, which is
+// a dump identifier, a catalog pair, and then the description.
+//
+// Parsed rather than searched, because a description is matched by position:
+// looking for "EVENT TRIGGER" anywhere in the line would also match a table
+// whose owner or name contained it, and dropping a table from a restore because
+// of its name would be a data loss bug with no error message.
+var tocEntry = regexp.MustCompile(`^[0-9]+; [0-9]+ [0-9]+ (.+)$`)
+
+// filterTOC removes entries whose description begins with one of the kinds.
+func filterTOC(listing string, kinds []string) string {
+	var out strings.Builder
+	for _, line := range strings.Split(listing, "\n") {
+		if dropped(line, kinds) {
+			continue
+		}
+		out.WriteString(line)
+		out.WriteString("\n")
+	}
+	return out.String()
+}
+
+func dropped(line string, kinds []string) bool {
+	m := tocEntry.FindStringSubmatch(strings.TrimSpace(line))
+	if m == nil {
+		return false
+	}
+	for _, kind := range kinds {
+		if strings.HasPrefix(m[1], kind+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+// CopyTableData copies the ROWS of named tables into a target that already has
+// them.
+//
+// It exists for tables a platform owns and a copy therefore cannot create, but
+// whose contents an application's own foreign keys point at. The tables are
+// named schema qualified. One that does not exist in the source is skipped: a
+// source that is a plain Postgres database rather than a managed one
+// legitimately has none of them.
+//
+// The skipping is done here and not left to pg_dump, because pg_dump does not
+// do it. `--table=auth.users` against a database with no auth schema exits 1
+// with "no matching tables were found" and writes a zero byte file, so the
+// restore then fails with "input file is too short" and the real reason is two
+// errors back. Asking the source what it has is one round trip and turns that
+// into nothing happening, which is the correct outcome.
+func CopyTableData(ctx context.Context, source, target secrets.Value, tables []string) error {
+	if len(tables) == 0 {
+		return nil
+	}
+	tables, err := tablesThatExist(ctx, source, tables)
+	if err != nil {
+		return err
+	}
+	if len(tables) == 0 {
+		return nil
+	}
+	want := serverMajor(ctx, source)
+	dumpPath, dumpMajor, err := toolFor("pg_dump", want)
+	if err != nil {
+		return err
+	}
+	if want > 0 && dumpMajor < want {
+		return tooOld("pg_dump", dumpMajor, want)
+	}
+	restorePath, _, err := toolFor("pg_restore", want)
+	if err != nil {
+		return err
+	}
+
+	args := []string{"--format=custom", "--data-only", "--quote-all-identifiers"}
+	for _, t := range tables {
+		args = append(args, "--table="+t)
+	}
+	dump := exec.CommandContext(ctx, dumpPath, append(args, "--dbname="+source.Reveal())...)
+	dump.Env = []string{"PGCONNECT_TIMEOUT=30"}
+
+	restore := exec.CommandContext(ctx, restorePath,
+		append(restoreArgs(), "--data-only", "--dbname="+target.Reveal())...)
+	restore.Env = []string{"PGCONNECT_TIMEOUT=30"}
+
+	pipe, err := dump.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("pgcopy: pipe the dump: %w", err)
+	}
+	restore.Stdin = pipe
+
+	var dumpErr, restoreErr strings.Builder
+	dump.Stderr = &dumpErr
+	restore.Stderr = &restoreErr
+
+	if err := dump.Start(); err != nil {
+		return fmt.Errorf("pgcopy: start pg_dump: %w", err)
+	}
+	if err := restore.Start(); err != nil {
+		_ = dump.Process.Kill()
+		return fmt.Errorf("pgcopy: start pg_restore: %w", err)
+	}
+	if err := dump.Wait(); err != nil {
+		_ = restore.Process.Kill()
+		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(dumpErr.String()))
+	}
+	if err := restore.Wait(); err != nil {
+		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(restoreErr.String()))
+	}
+	return nil
+}
+
+// tablesThatExist narrows a list of schema qualified names to the ones the
+// database actually has.
+//
+// to_regclass rather than a catalog join, because it answers null for a name in
+// a schema that does not exist as readily as for a missing table in one that
+// does, and those are the same answer for this purpose.
+func tablesThatExist(ctx context.Context, conn secrets.Value, tables []string) ([]string, error) {
+	db, err := sql.Open("pgx", conn.Reveal())
+	if err != nil {
+		return nil, fmt.Errorf("pgcopy: open a connection: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+
+	out := make([]string, 0, len(tables))
+	for _, table := range tables {
+		var present bool
+		if err := db.QueryRowContext(ctx,
+			`SELECT to_regclass($1) IS NOT NULL`, table).Scan(&present); err != nil {
+			return nil, fmt.Errorf("pgcopy: look for %s: %w", table, err)
+		}
+		if present {
+			out = append(out, table)
+		}
+	}
+	return out, nil
+}
+
+// DumpTo writes a database's dump to a writer.
+//
+// The custom format, the same one Copy pipes, because it is the one pg_restore
+// can reorder: a plain SQL dump has to be replayed in the order it was written,
+// and the order that loads cleanly is not always the order that dumped.
+//
+// It exists so that a golden can be published somewhere other than the machine
+// that made it. The dump goes to an object store beside its attestation, and
+// RestoreFrom is the other half.
+func DumpTo(ctx context.Context, source secrets.Value, w io.Writer) error {
+	want := serverMajor(ctx, source)
+	dumpPath, dumpMajor, err := toolFor("pg_dump", want)
+	if err != nil {
+		return err
+	}
+	if want > 0 && dumpMajor < want {
+		return tooOld("pg_dump", dumpMajor, want)
+	}
+	cmd := exec.CommandContext(ctx, dumpPath,
+		"--format=custom",
+		"--no-owner", "--no-privileges", "--no-acl",
+		"--quote-all-identifiers",
+		"--dbname="+source.Reveal(),
+	)
+	cmd.Env = []string{"PGCONNECT_TIMEOUT=30"}
+	cmd.Stdout = w
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(stderr.String()))
+	}
+	return nil
+}
+
+// RestoreFrom loads a dump from a reader into a database.
+//
+// --exit-on-error for the reason Copy has it: a restore that stops at the
+// first error leaves a half loaded database that looks complete, and a golden
+// pulled from a store and silently half restored is the worst kind, because
+// everything downstream treats it as verified.
+func RestoreFrom(ctx context.Context, target secrets.Value, r io.Reader) error {
+	restorePath, _, err := toolFor("pg_restore", serverMajor(ctx, target))
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, restorePath,
+		"--no-owner", "--no-privileges",
+		"--exit-on-error",
+		"--dbname="+target.Reveal(),
+	)
+	cmd.Env = []string{"PGCONNECT_TIMEOUT=30"}
+	cmd.Stdin = r
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(stderr.String()))
 	}
 	return nil
 }

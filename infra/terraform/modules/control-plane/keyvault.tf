@@ -116,3 +116,24 @@ resource "azurerm_key_vault_secret" "this" {
 
   depends_on = [azurerm_role_assignment.deployer_writes_secrets]
 }
+
+# The GitHub App's two secrets, read rather than written.
+#
+# See the variable comments: GitHub mints the private key and shows it once, so
+# Terraform cannot create it and must not manage it. A person puts both in the
+# vault; this reads them so the container app can reference them by id.
+#
+# count on github_app_id rather than on the secrets existing, so that a stack
+# with no App plans clean instead of failing on a data source for a secret that
+# is deliberately absent.
+data "azurerm_key_vault_secret" "github_app_private_key" {
+  count        = var.github_app_id == "" ? 0 : 1
+  name         = var.github_app_private_key_secret_name
+  key_vault_id = azurerm_key_vault.this.id
+}
+
+data "azurerm_key_vault_secret" "github_app_webhook_secret" {
+  count        = var.github_app_id == "" ? 0 : 1
+  name         = var.github_app_webhook_secret_name
+  key_vault_id = azurerm_key_vault.this.id
+}

@@ -101,4 +101,5 @@ module "control_plane" {
 
   signin_allowlist            = var.signin_allowlist
   provider_key_secret_enabled = var.provider_key_secret_enabled
+  github_app_id               = var.github_app_id
 }

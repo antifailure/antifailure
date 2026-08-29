@@ -91,6 +91,23 @@ type Options struct {
 	// WorkDir overrides the working directory. Tests set it; the binary does
 	// not, and reads the process directory instead.
 	WorkDir string
+	// Extra are commands contributed by a binary that embeds this one.
+	//
+	// It exists so that the enterprise binary's own commands appear in af
+	// --help rather than being intercepted before the command tree is built. A
+	// command a user cannot discover is a command that does not exist for most
+	// of the people it was written for.
+	//
+	// Deliberately a plain struct rather than a cobra command: cobra is an
+	// implementation detail of this package and putting it in a signature an
+	// external module fills in would make it a public dependency for ever. A
+	// contributed command gets a name, help text, and a function; anything more
+	// belongs in this tree.
+	//
+	// A contributed name that collides with a built-in one is ignored, so that
+	// an embedding binary cannot replace af down with something of its own.
+	Extra []ExtraCommand
+
 	// Credentials is where af login, af logout, af whoami and af provider read
 	// and write the personal token. Nil means the platform's own store.
 	//
@@ -100,6 +117,27 @@ type Options struct {
 	// machine. So those commands had no end-to-end test at all, which is
 	// exactly the gap that lets a broken command ship looking fine.
 	Credentials *auth.Store
+}
+
+// ExtraCommand is a command contributed by an embedding binary.
+type ExtraCommand struct {
+	// Use is the command line, as "compliance <pack>".
+	Use string
+	// Short is the one line in af --help.
+	Short string
+	// Long is the help text for this command.
+	Long string
+	// Run receives the arguments after the command's own name and returns an
+	// exit code, the same contract Execute has.
+	Run func(ctx context.Context, args []string) int
+}
+
+// Name is the first word of Use, which is what the command is called.
+func (e ExtraCommand) Name() string {
+	if i := strings.IndexByte(e.Use, ' '); i > 0 {
+		return e.Use[:i]
+	}
+	return e.Use
 }
 
 // Execute runs the command line and returns the process exit code.
@@ -146,6 +184,7 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	}
 
 	root := newRootCommand(env)
+	addExtraCommands(root, opts.Extra)
 	// Never nil. Cobra treats a nil slice as "take the process's arguments",
 	// which for a function that was handed an argument list is a surprising
 	// thing to do and, inside a test binary, means the test runner's own flags
@@ -424,4 +463,42 @@ func RootForDocs() *cobra.Command {
 		Stdin:    strings.NewReader(""),
 		WorkDir:  ".",
 	})
+}
+
+// addExtraCommands attaches an embedding binary's commands.
+//
+// A name that already exists is refused rather than replaced. An embedding
+// binary that could shadow af down with its own implementation would be a
+// binary where the documented behaviour of a command depends on which build
+// somebody is holding, and there is no version of that which ends well.
+func addExtraCommands(root *cobra.Command, extra []ExtraCommand) {
+	existing := map[string]bool{}
+	for _, cmd := range root.Commands() {
+		existing[cmd.Name()] = true
+	}
+	for _, e := range extra {
+		if e.Run == nil || e.Use == "" || existing[e.Name()] {
+			continue
+		}
+		contributed := e
+		root.AddCommand(&cobra.Command{
+			Use:                contributed.Use,
+			Short:              contributed.Short,
+			Long:               contributed.Long,
+			DisableFlagParsing: true,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				if code := contributed.Run(cmd.Context(), args); code != 0 {
+					// Carried as a silent error rather than returned as a code,
+					// because Execute turns errors into codes and a second path
+					// out of a command is a second place for the exit code to
+					// be wrong. Silent because the command has already written
+					// whatever it had to say, and a second message would either
+					// duplicate it or, in JSON mode, put a second document into
+					// a stream something is parsing.
+					return &silentError{code: aferrors.ExitCode(code)}
+				}
+				return nil
+			},
+		})
+	}
 }

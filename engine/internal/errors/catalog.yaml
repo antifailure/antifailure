@@ -103,10 +103,9 @@ errors:
     retryable: false
     exit_code: 3
   - code: AF-SEC-002
-    planned: true
     area: SEC
-    message: "The credential for {source} was rejected after one refresh."
-    next_step: "Rotate the credential and store the new value where {source} reads it."
+    message: "The credential for {source} was rejected after one refresh: {detail}"
+    next_step: "Rotate the credential and store the new value where {source} reads it. A rejection that survives a refresh is a credential that was revoked or was never right, so retrying will not help."
     docs: guides/secrets
     retryable: false
     exit_code: 4
@@ -206,6 +205,13 @@ errors:
     docs: concepts/goldens
     retryable: false
     exit_code: 5
+  - code: AF-DB-011
+    area: DB
+    message: "The subset could not be taken: {detail}"
+    next_step: "Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has."
+    docs: concepts/subsetting
+    retryable: false
+    exit_code: 4
   - code: AF-DB-020
     area: DB
     message: "Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured."

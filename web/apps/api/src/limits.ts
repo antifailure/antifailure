@@ -37,6 +37,10 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 50, burst: 200, key: 'ip',
     reason: 'A liveness probe from a load balancer, plus whatever else asks. Cheap, and refusing it looks like an outage.',
   },
+  'GET /metrics': {
+    rate: 2, burst: 10, key: 'ip',
+    reason: 'A Prometheus scrape every fifteen seconds is one request per fifteen seconds per replica. Two per second leaves room for several scrapers and a person with curl, and refusing this looks like the control plane is down.',
+  },
   'GET /readyz': {
     rate: 50, burst: 200, key: 'ip',
     reason: 'The deploy gate polls it every two seconds for a few minutes, and a load balancer may too. It runs one trivial query, so the cost is a round trip to Postgres.',
@@ -200,6 +204,15 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
 
   // Engines. High volume from few callers, and the only endpoints where a
   // refusal is expected in normal operation.
+  // GitHub's own deliveries, keyed by address because a delivery carries no
+  // token. Generous: an organization adding twenty repositories at once sends a
+  // burst, and a refused delivery is one GitHub retries with backoff for a
+  // while and then abandons, which loses an installation nothing else will
+  // tell us about.
+  'POST /webhooks/github': {
+    rate: 20, burst: 200, key: 'ip',
+    reason: 'GitHub sends bursts when an installation changes, and a delivery lost to a rate limit is an installation this control plane never learns about. The signature check runs before any work, so an unsigned flood is cheap to refuse.',
+  },
   'POST /v1/events': {
     rate: 200, burst: 2000, key: 'token',
     reason: 'An engine that was offline sends its backlog at once. The burst absorbs a re-connect; the rate is what one busy CI account sustains.',
