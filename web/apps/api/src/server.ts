@@ -60,6 +60,8 @@ import {
 } from './auth/device.ts'
 import { mountConsole } from './console/index.ts'
 import { PROVIDERS, type Provider } from './providers/seal.ts'
+import { verifySignature } from './github/app.ts'
+import { handleDelivery } from './github/webhook.ts'
 import {
   listBudgets,
   listKeys,
@@ -89,6 +91,10 @@ export interface ServerOptions {
   /** The secret that seals provider keys. Null means keys cannot be stored,
    *  which the console says out loud rather than failing on submit. */
   sealingKey?: Buffer | null
+  /** The GitHub App's webhook secret. Null means no App is configured, and the
+   *  webhook endpoint refuses every delivery rather than accepting unsigned
+   *  ones. */
+  githubWebhookSecret?: string | null
   ingestLimit?: { rate: number; burst: number }
   authLimit?: { rate: number; burst: number }
   /** The build, reported as a label on af_control_plane_info so a graph can
@@ -818,6 +824,62 @@ export function createServer(options: ServerOptions) {
     } catch (err) {
       if (err instanceof ProviderKeyError) return c.json({ error: err.message }, 400)
       throw err
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // GitHub webhook deliveries
+  // -------------------------------------------------------------------------
+  //
+  // The only unauthenticated endpoint here that writes anything, so the order
+  // of what follows is the security property:
+  //
+  //   1. read the RAW body,
+  //   2. verify the HMAC over those exact bytes,
+  //   3. only then parse it.
+  //
+  // Parsing first and verifying after would mean running a JSON parser over
+  // whatever anybody on the internet sent, and deciding afterwards whether to
+  // have trusted it.
+  //
+  // It answers 2xx for anything it has decided about, including deliveries it
+  // does not act on. GitHub retries a 5xx, so answering 500 to an event this
+  // control plane will never handle produces a retry storm against an endpoint
+  // that will refuse it identically every time.
+
+  app.post('/webhooks/github', async (c) => {
+    const secret = options.githubWebhookSecret ?? null
+    if (!secret) {
+      // 503, not 401. Nothing is wrong with the request; this installation has
+      // no App configured, and a delivery arriving here is a misconfiguration
+      // worth seeing in GitHub's delivery log rather than a rejection.
+      return c.json({ error: 'This control plane has no GitHub App configured.' }, 503)
+    }
+
+    const raw = await c.req.text()
+    if (!verifySignature(secret, raw, c.req.header('x-hub-signature-256'))) {
+      // No detail. A body that says which part failed is a body that helps
+      // somebody iterate towards a valid signature.
+      return c.json({ error: 'That delivery could not be verified.' }, 401)
+    }
+
+    let payload: Record<string, unknown>
+    try {
+      payload = JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+
+    const event = c.req.header('x-github-event') ?? 'unknown'
+    try {
+      const outcome = await handleDelivery(options.pool, clock, event, payload)
+      return c.json(outcome, 200)
+    } catch (err) {
+      // A real failure on our side. 500 is right here and the retry is wanted:
+      // a database that was briefly unreachable should not lose an
+      // installation event, because nothing else will ever tell us about it.
+      const message = err instanceof Error ? err.message : String(err)
+      return c.json({ event, error: message }, 500)
     }
   })
 

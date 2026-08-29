@@ -15,6 +15,7 @@ import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
 import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
+import { appConfigFrom, InstallationTokens } from './github/app.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
 
 function required(name: string): string {
@@ -46,10 +47,24 @@ if (process.env.AF_MIGRATE === '1') {
 
 const pool = createPool({ url: databaseUrl, max: Number(process.env.AF_POOL_MAX ?? 10) })
 
+// The GitHub App, if there is one. Null is a supported state: sign-in works
+// without it, and the parts that need an installation say which variables are
+// missing rather than failing on the one request they exist for.
+const appConfig = appConfigFrom(process.env)
+const installationTokens = appConfig
+  ? new InstallationTokens(appConfig, systemClock)
+  : undefined
+console.log(
+  appConfig
+    ? `GitHub App ${appConfig.appId} is configured: webhook deliveries are verified and membership can be synced`
+    : 'no GitHub App: webhook deliveries are refused and membership cannot be synced (AF_GITHUB_APP_ID is not set)',
+)
+
 const github = new RealGitHubClient({
   clientId: required('AF_GITHUB_CLIENT_ID'),
   clientSecret: required('AF_GITHUB_CLIENT_SECRET'),
   redirectUri: required('AF_GITHUB_REDIRECT_URI'),
+  installationTokens,
 })
 
 // Said out loud at startup, every time. Whether an instance is open to the
@@ -76,6 +91,7 @@ const { app, ingestLimiter, authLimiter } = createServer({
   appBaseUrl: process.env.AF_APP_BASE_URL,
   signInAllowlist,
   sealingKey,
+  githubWebhookSecret: appConfig?.webhookSecret ?? null,
 })
 
 // Partitions, kept ahead of the writes. Skipped when this process is not the

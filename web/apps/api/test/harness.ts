@@ -73,6 +73,9 @@ export interface StartApiOptions {
    *  which is a state the server has to serve rather than crash in, and there
    *  are tests for that. */
   sealingKey?: Buffer | null
+  /** The GitHub App's webhook secret. Undefined means no App, and the webhook
+   *  endpoint refuses every delivery rather than accepting unsigned ones. */
+  githubWebhookSecret?: string | null
 }
 
 export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
@@ -101,6 +104,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     appBaseUrl: 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
     sealingKey: options.sealingKey ?? null,
+    githubWebhookSecret: options.githubWebhookSecret ?? null,
   })
 
   return {
