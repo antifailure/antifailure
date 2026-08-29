@@ -73,6 +73,8 @@ const (
 	// The storage pool has {available} free and the operation needs
 	// {needed}.
 	AFDB010 Code = "AF-DB-010"
+	// The subset could not be taken: {detail}
+	AFDB011 Code = "AF-DB-011"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API.
 	AFDB020 Code = "AF-DB-020"
@@ -232,7 +234,7 @@ const (
 	// The variables {names} are declared in the manifest but were not
 	// found in any configured source.
 	AFSEC001 Code = "AF-SEC-001"
-	// The credential for {source} was rejected after one refresh.
+	// The credential for {source} was rejected after one refresh: {detail}
 	AFSEC002 Code = "AF-SEC-002"
 	// The value supplied for {name} carries a live credential prefix, and
 	// {name} is configured for sandbox use.
@@ -479,6 +481,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
+	},
+	AFDB011: {
+		Code:      AFDB011,
+		Area:      "DB",
+		Message:   "The subset could not be taken: {detail}",
+		NextStep:  "Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has.",
+		Docs:      "concepts/subsetting",
+		Retryable: false,
+		ExitCode:  ExitAuth,
 	},
 	AFDB020: {
 		Code:      AFDB020,
@@ -1005,8 +1016,8 @@ var catalog = map[Code]Entry{
 	AFSEC002: {
 		Code:      AFSEC002,
 		Area:      "SEC",
-		Message:   "The credential for {source} was rejected after one refresh.",
-		NextStep:  "Rotate the credential and store the new value where {source} reads it.",
+		Message:   "The credential for {source} was rejected after one refresh: {detail}",
+		NextStep:  "Rotate the credential and store the new value where {source} reads it. A rejection that survives a refresh is a credential that was revoked or was never right, so retrying will not help.",
 		Docs:      "guides/secrets",
 		Retryable: false,
 		ExitCode:  ExitAuth,

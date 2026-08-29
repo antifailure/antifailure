@@ -8,7 +8,8 @@
     ".": "./src/server.ts"
   },
   "bin": {
-    "af-control-plane": "./src/main.ts"
+    "af-control-plane": "./src/main.ts",
+    "af-control-plane-backup": "./src/backup-cli.ts"
   },
   "scripts": {
     "start": "node src/main.ts",

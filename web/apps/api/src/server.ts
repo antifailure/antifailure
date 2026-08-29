@@ -71,7 +71,8 @@ import {
 } from './providers/store.ts'
 import { openApiDocument } from './openapi.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
-import { limitFor, bucketFor, type EndpointLimit } from './limits.ts'
+import { limitFor, bucketFor, ENDPOINT_LIMITS, type EndpointLimit } from './limits.ts'
+import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
 
 export interface ServerOptions {
   pool: Pool
@@ -91,6 +92,13 @@ export interface ServerOptions {
   sealingKey?: Buffer | null
   ingestLimit?: { rate: number; burst: number }
   authLimit?: { rate: number; burst: number }
+  /** The build, reported as a label on af_control_plane_info so a graph can
+   *  say which version produced a number. */
+  version?: string
+  /** Supplied by a test that wants to read the counters. Otherwise each server
+   *  gets its own, deliberately not module state: two servers in one process
+   *  sharing counters means one test passes because of another. */
+  metrics?: ControlPlaneMetrics
 }
 
 /**
@@ -127,6 +135,10 @@ export const GRANTABLE_SCOPES: readonly string[] = [
 export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
   const secure = options.secureCookies ?? true
+  const metrics = options.metrics ?? createMetrics(options.version ?? 'dev')
+  // Read once. It is the bounded set of label values, and reading it per
+  // request would be the metrics endpoint doing work proportional to traffic.
+  const declaredRoutes = Object.keys(ENDPOINT_LIMITS)
   const app = new Hono()
 
   // Two limiters with different shapes. Ingestion is high volume from few
@@ -155,6 +167,29 @@ export function createServer(options: ServerOptions) {
     }
     return limiter
   }
+
+  // Counting comes before the rate limiter, so a request refused with 429 is
+  // still counted. A metric that only sees the requests that got through
+  // cannot tell an outage from a quiet afternoon, and it is exactly the
+  // refusals an operator needs when a limit is set too low.
+  app.use('*', async (c, next) => {
+    const started = process.hrtime.bigint()
+    // The label is the declared route key that matched, never the path. See
+    // routeLabel: a path that matches GET /v1/environments/:envId is bounded
+    // only if it is reported as that pattern, and the first version of this
+    // reported the path, so every environment identifier anybody fetched became
+    // its own series.
+    const route = routeLabel(c.req.method, new URL(c.req.url).pathname, declaredRoutes)
+    try {
+      await next()
+    } finally {
+      const seconds = Number(process.hrtime.bigint() - started) / 1e9
+      const status = c.res?.status ?? 500
+      metrics.httpRequests.inc({ route, status_class: statusClass(status) })
+      metrics.httpDuration.observe(seconds, { route })
+      if (status === 429) metrics.rateLimited.inc({ route })
+    }
+  })
 
   app.use('*', async (c, next) => {
     const limit = limitFor(c.req.method, new URL(c.req.url).pathname)
@@ -252,6 +287,17 @@ export function createServer(options: ServerOptions) {
   })
 
   app.get('/openapi.json', (c) => c.json(openApiDocument()))
+
+  // Prometheus scrapes this. It reads only counters this process kept itself
+  // and touches no table, which is not laziness: tenancy here is row level
+  // security, so an aggregate across every organization would need a role that
+  // can read every organization's rows. Creating one in order to draw a graph
+  // would put the strongest read in the system on the least important path and
+  // leave it there being scraped every fifteen seconds forever.
+  app.get('/metrics', (c) => {
+    c.header('content-type', 'text/plain; version=0.0.4; charset=utf-8')
+    return c.body(metrics.registry.render())
+  })
 
   // Resolving the browser's session, for the routes that need one outside tRPC.
   async function sessionFrom(cookie: string | undefined) {
@@ -860,14 +906,17 @@ export function createServer(options: ServerOptions) {
 
     try {
       const result = await ingest(options.pool, clock, ingestLimiter, engine, events)
+      countIngestion(metrics, result, events)
       // 207 when some were rejected, so a caller that only checks the status
       // still learns that the batch was not wholly accepted.
       return c.json(result, result.rejected > 0 ? 207 : 202)
     } catch (err) {
       if (err instanceof IngestRefused) {
+        metrics.ingestBatches.inc({ outcome: 'refused' })
         if (err.retryAfterSeconds) c.header('retry-after', String(err.retryAfterSeconds))
         return c.json({ error: err.message, retryAfterSeconds: err.retryAfterSeconds }, err.status as 429)
       }
+      metrics.ingestBatches.inc({ outcome: 'error' })
       throw err
     }
   })
@@ -991,7 +1040,7 @@ export function createServer(options: ServerOptions) {
     })
   }
 
-  return { app, ingestLimiter, authLimiter }
+  return { app, ingestLimiter, authLimiter, metrics }
 }
 
 function clientKey(forwardedFor: string | undefined, userAgent: string | undefined): string {
@@ -1004,6 +1053,59 @@ function clientKey(forwardedFor: string | undefined, userAgent: string | undefin
 // buckets.
 function clientIP(forwardedFor: string | undefined): string {
   return (forwardedFor ?? '').split(',')[0]?.trim() || 'unknown'
+}
+
+/**
+ * Turns one ingested batch into the numbers the objectives are measured on.
+ *
+ * The engine reports; the control plane counts. That is the only division that
+ * works, because the engine runs on machines nothing scrapes and the events it
+ * sends are already the record of what happened. Counting here means the
+ * service level objectives are computed from the same stream the dashboard
+ * shows, rather than from a second pipeline that can disagree with it.
+ */
+function countIngestion(
+  metrics: ControlPlaneMetrics,
+  result: { accepted: number; duplicates: number; rejected: number },
+  events: IncomingEvent[],
+) {
+  metrics.ingestBatches.inc({ outcome: result.rejected > 0 ? 'partial' : 'accepted' })
+  metrics.ingestEvents.inc({ outcome: 'accepted' }, result.accepted)
+  metrics.ingestEvents.inc({ outcome: 'duplicate' }, result.duplicates)
+  metrics.ingestEvents.inc({ outcome: 'rejected' }, result.rejected)
+
+  for (const event of events) {
+    switch (event.type) {
+      case 'environment.ready':
+        metrics.environmentOutcomes.inc({ outcome: 'ready' })
+        // The engine measures this, because only the engine knows when the
+        // work started. A control plane timing it from its own clock would be
+        // measuring the network as well, and would report nothing at all for
+        // an environment created while it was unreachable.
+        if (typeof event.payload?.seconds === 'number') {
+          metrics.environmentReadySeconds.observe(event.payload.seconds)
+        }
+        break
+      case 'environment.failed':
+        metrics.environmentOutcomes.inc({
+          outcome: 'failed',
+          // The code, not the message. A dashboard can group by AF-DB-001; it
+          // cannot group by a sentence written for a terminal.
+          code: typeof event.payload?.code === 'string' ? event.payload.code : 'unknown',
+        })
+        break
+      case 'verdict.recorded':
+        metrics.runVerdicts.inc({
+          verdict: typeof event.payload?.value === 'string' ? event.payload.value : 'unknown',
+        })
+        break
+      default:
+        break
+    }
+    if (event.type.startsWith('environment.')) {
+      metrics.environmentTransitions.inc({ to_state: event.type.slice('environment.'.length) })
+    }
+  }
 }
 
 function tooMany(c: { header: (k: string, v: string) => void; json: (b: unknown, s: 429) => Response }, seconds: number) {
