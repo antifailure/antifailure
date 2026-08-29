@@ -150,6 +150,50 @@ It is left failing-open rather than silenced. `goleak.IgnoreTopFunction` on
 most worth catching in a package that talks to the daemon, which is the same
 trade this question exists to refuse.
 
+### Q9. A golden image disappears between RefreshGolden and the next Branch
+
+`TestConformance/Branch_IsIsolatedFromTheGolden` in `internal/db/docker` fails
+intermittently, on CI more often than locally, and it is now a required check
+so it blocks real pull requests.
+
+    db.go:656: Branch(gv_20260829030220_7969f160, env_conformance00005):
+    AF-DB-004: The golden version gv_20260829030220_7969f160 no longer exists.
+
+Line 656 is the FIRST `Branch`, so the window is narrow: the image is gone
+between `RefreshGolden` returning it and the `ImageInspect` at the top of
+`Branch`, with nothing of the suite's own running in between.
+
+An earlier fix gave every golden a unique id, and it is live: the `7969f160`
+above is a per-refresh sha256 rather than the constant that used to truncate to
+the same eight characters. Identifier collision is fixed and this is a second
+cause.
+
+What has been ruled out, so nobody pays for it twice:
+
+- `sweepCandidates` cannot be it. It lists containers labelled `candidate` and
+  removes containers; it never touches an image. (It does carry a separate bug:
+  `parseErr != nil || created.Before(cutoff)` removes a candidate whose created
+  label will not parse whatever its age, which can kill another process's
+  in-flight refresh. Worth fixing, but it produces a different failure.)
+- The behaviours are not parallel. There is no `t.Parallel` anywhere in
+  `internal/db/docker`, so nothing in this suite runs beside itself.
+- The conformance selftest is not a second writer. `conformance/db_selftest_test.go`
+  runs the same suite against an in-memory fake, so it commits no images.
+- `DestroyGolden` refuses a version a branch still references, and the harness
+  registers its cleanup on the subtest, so the suite's own teardown cannot run
+  in this window.
+
+What is left, in the order worth trying: another test package creating goldens
+on the same daemon while this one runs, since Go runs packages in parallel and
+the suite's own leak check already carries a comment about exactly that; a
+daemon race where a freshly committed image is not immediately inspectable; and
+`ImageRemove` with `PruneChildren: true` reaching a sibling committed from the
+same base image.
+
+**Proceeding under:** recorded, not fixed. The reproduction is a CI run, the
+window is milliseconds, and guessing at a fix for a race whose mechanism is
+unproven is how a flake becomes a flake with a plausible comment above it.
+
 ## Answered
 
 *(none yet)*
