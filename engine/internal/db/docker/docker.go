@@ -326,6 +326,33 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 	return out, nil
 }
 
+// describeGoldens names the versions that exist, for a message about one that
+// does not.
+//
+// Best effort and never an error: this runs on a path that has already failed,
+// and a listing that fails too must not replace the caller's problem with its
+// own.
+func (p *Provider) describeGoldens(ctx context.Context) string {
+	versions, err := p.ListGoldens(ctx)
+	if err != nil {
+		return "the available versions could not be listed: " + err.Error()
+	}
+	if len(versions) == 0 {
+		return "no golden versions exist on this daemon"
+	}
+	ids := make([]string, 0, len(versions))
+	for _, v := range versions {
+		ids = append(ids, v.ID)
+	}
+	// Newest first, and capped. A daemon holding fifty goldens should not turn
+	// one error into a page.
+	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
+	if len(ids) > 5 {
+		return fmt.Sprintf("%s and %d more", strings.Join(ids[:5], ", "), len(ids)-5)
+	}
+	return strings.Join(ids, ", ")
+}
+
 // DestroyGolden removes a version, refusing one a branch still depends on.
 func (p *Provider) DestroyGolden(ctx context.Context, version string) error {
 	tag := ImageRepo + ":" + version
@@ -361,7 +388,27 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 	tag := ImageRepo + ":" + version
 	if _, err := p.cli.ImageInspect(ctx, tag); err != nil {
 		if cerrdefs.IsNotFound(err) {
-			return provider.Branch{}, aferrors.Coded(aferrors.AFDB004, "version", version)
+			// What DOES exist, at the moment the missing one was asked for.
+			//
+			// For a person this is the difference between "that version is
+			// gone" and being told which versions they could have asked for
+			// instead, without running a second command.
+			//
+			// It is also the evidence the conformance suite's intermittent
+			// "the golden version no longer exists" has never produced. That
+			// failure has survived two repairs, and the thing nobody has is a
+			// listing taken at the instant it happened: whether the image is
+			// absent, or present under a different tag, or one of several that
+			// look alike. A flake that reappears with this attached is a bug
+			// with evidence rather than a third guess.
+			// Wrapped rather than added as a catalog field. The message
+			// template fills a missing field by printing the placeholder
+			// verbatim, and six other call sites raise this code without an
+			// "available" value, so putting it in the template would show
+			// those callers a literal {available}.
+			return provider.Branch{}, fmt.Errorf("%w Available: %s",
+				aferrors.Coded(aferrors.AFDB004, "version", version),
+				p.describeGoldens(ctx))
 		}
 		return provider.Branch{}, fmt.Errorf("db.docker: inspect the golden image: %w", err)
 	}
