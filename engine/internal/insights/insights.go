@@ -1,21 +1,43 @@
-// Package insights reads what the database noticed while the environment ran.
+// Package insights answers the questions a branch can answer without running
+// the application at all.
 //
-// The bugs it looks for are the ones no test catches, because the test passes:
-// the endpoint that now runs four hundred queries instead of two, the index
-// that stopped being used, the sequential scan on a table that grew. Each of
-// those is correct and slow, and correct and slow is what takes a site down
-// under load rather than in review.
+// A branch is a real database with production's shape in it, and there are
+// three of those questions. What will these migrations do to a table this
+// size. Does this branch run more queries, or slower ones, than the base did.
+// And does the planner still choose what it chose before.
 //
-// It is read only and it says what it could not see. pg_stat_statements is an
-// extension somebody has to install, and an insight that silently reports
-// nothing because the extension is missing is worse than one that says so:
-// the first looks like a clean bill of health.
+// The discipline the whole package is built on is that it says what it could
+// not see. pg_stat_statements is an extension somebody has to install, an
+// event trigger needs a superuser, and a migration in Ruby cannot be replayed
+// from here. An insight that silently reports nothing in any of those cases is
+// worse than one that says so, because the first looks like a clean bill of
+// health.
+//
+// Where each part lives:
+//
+//   - This file: reading pg_stat_statements, and CompareTo, which is the query
+//     regression diff. Statements match on Query.ID, the server's queryid,
+//     because the stored TEXT of one statement is not stable across resets.
+//   - migrations.go: which migration tool a repository uses, where its SQL is,
+//     and which migrations the database has not recorded yet.
+//   - sql.go: cutting a migration file into statements without breaking a
+//     dollar quoted function body in half.
+//   - lint.go: the six rules, and the catalogue read they need, because most
+//     of them are only true about a particular database.
+//   - rehearsal.go: applying the pending migrations and timing each statement.
+//   - rewrite.go: asking Postgres whether it rewrote a table, rather than
+//     guessing from the statement.
+//   - locks.go: what the migration held, and for how long.
+//   - plan.go: EXPLAIN before and after, and the structural comparison.
+//   - run.go: the manifest block, resolved once, and the run that honours it.
+//   - explain.go: rendering it for somebody with thirty seconds.
 package insights
 
 import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -38,6 +60,19 @@ type Report struct {
 
 // Query is one statement the database ran.
 type Query struct {
+	// ID is Postgres's own queryid: a hash of the parsed statement, which is
+	// what makes two reports comparable.
+	//
+	// The text cannot do that job, and this is not a theoretical worry. The
+	// same statement, run four times and then four hundred, came back from
+	// pg_stat_statements as "... LIMIT $2" the first time and "... LIMIT 1"
+	// the second, because the stored text is whatever source was current when
+	// the entry was created and a prepared statement is not re-parsed on
+	// every execution. Matching on text reported the busiest query in the
+	// database as a brand new one and found no N+1 at all, which is the
+	// single finding the whole feature exists for. The queryid was identical
+	// across both.
+	ID int64 `json:"id,omitempty"`
 	// Text is the normalised statement, with its parameters replaced.
 	Text string `json:"text"`
 	// Calls is how many times it ran.
@@ -68,6 +103,18 @@ type Scan struct {
 	// sequential scan is a problem: on a table of forty rows it is the right
 	// plan and flagging it is noise.
 	LiveRows int64 `json:"live_rows"`
+}
+
+// key is what two reports match a statement on.
+//
+// The queryid where there is one, because the text of the same statement is
+// not stable across resets. The text where there is not, which is a server
+// too old to report one or a row the extension could not attribute.
+func (q Query) key() string {
+	if q.ID != 0 {
+		return "id:" + strconv.FormatInt(q.ID, 10)
+	}
+	return "text:" + q.Text
 }
 
 // Ratio is the share of reads that went end to end.
@@ -120,7 +167,7 @@ func collectQueries(ctx context.Context, conn *pgx.Conn, limit int) ([]Query, er
 	// milliseconds four hundred times is the N+1 worth finding, and ordering
 	// by mean buries it under one slow report nobody runs.
 	const query = `
-SELECT query, calls, total_exec_time, mean_exec_time, rows
+SELECT COALESCE(queryid, 0), query, calls, total_exec_time, mean_exec_time, rows
 FROM pg_stat_statements
 WHERE query NOT LIKE '%pg_stat_statements%'
   AND query NOT LIKE 'COMMIT%' AND query NOT LIKE 'BEGIN%'
@@ -136,7 +183,7 @@ LIMIT $1`
 	var out []Query
 	for rows.Next() {
 		var q Query
-		if err := rows.Scan(&q.Text, &q.Calls, &q.TotalMs, &q.MeanMs, &q.Rows); err != nil {
+		if err := rows.Scan(&q.ID, &q.Text, &q.Calls, &q.TotalMs, &q.MeanMs, &q.Rows); err != nil {
 			return nil, err
 		}
 		q.Text = normalise(q.Text)
@@ -228,38 +275,56 @@ type Change struct {
 	Factor float64 `json:"factor"`
 }
 
+// Thresholds decide what counts as a regression.
+type Thresholds struct {
+	// CallGrowth is how many times more often a statement has to run.
+	CallGrowth float64
+	// TimeGrowth is how many times slower each call has to get.
+	TimeGrowth float64
+	// MinMS is the smallest absolute change worth reporting, in
+	// milliseconds. It is the manifest's regression_min_ms and it exists
+	// because a query going from 0.1ms to 0.3ms is three times slower and
+	// means nothing. Without a floor the report is all noise, and a report
+	// that is all noise is one people stop reading, which is worse than not
+	// having it.
+	MinMS float64
+}
+
 // CompareTo reports what got worse against a baseline.
 //
 // The thresholds are ratios rather than absolutes for the same reason the load
 // report uses them: a query going from two milliseconds to eight is a
-// quadrupling worth seeing, and six milliseconds of change is not.
-func (r Report) CompareTo(baseline Report, callGrowth, timeGrowth float64) Diff {
-	if callGrowth <= 0 {
-		callGrowth = 2
+// quadrupling worth seeing, and six milliseconds of change is not. The
+// absolute floor is the other half of the same idea, applied from the other
+// end.
+func (r Report) CompareTo(baseline Report, t Thresholds) Diff {
+	if t.CallGrowth <= 0 {
+		t.CallGrowth = 2
 	}
-	if timeGrowth <= 0 {
-		timeGrowth = 1.5
+	if t.TimeGrowth <= 0 {
+		t.TimeGrowth = 1.5
 	}
 
 	before := map[string]Query{}
 	for _, q := range baseline.Queries {
-		before[q.Text] = q
+		before[q.key()] = q
 	}
 
 	var diff Diff
 	for _, q := range r.Queries {
-		prior, seen := before[q.Text]
+		prior, seen := before[q.key()]
 		if !seen {
 			diff.NewQueries = append(diff.NewQueries, q)
 			continue
 		}
-		if prior.Calls > 0 && float64(q.Calls)/float64(prior.Calls) >= callGrowth {
+		if prior.Calls > 0 && float64(q.Calls)/float64(prior.Calls) >= t.CallGrowth {
 			diff.Busier = append(diff.Busier, Change{
 				Text: q.Text, Before: float64(prior.Calls), After: float64(q.Calls),
 				Factor: float64(q.Calls) / float64(prior.Calls),
 			})
 		}
-		if prior.MeanMs > 0 && q.MeanMs/prior.MeanMs >= timeGrowth {
+		if prior.MeanMs > 0 && q.MeanMs/prior.MeanMs >= t.TimeGrowth &&
+			q.MeanMs-prior.MeanMs >= t.MinMS {
 			diff.Slower = append(diff.Slower, Change{
 				Text: q.Text, Before: prior.MeanMs, After: q.MeanMs,
 				Factor: q.MeanMs / prior.MeanMs,

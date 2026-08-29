@@ -32,17 +32,24 @@ import (
 
 // testPostgresMajor is the server version this suite asks for.
 //
-// Deliberately not the newest. pg_dump REFUSES to read a server newer than
-// itself, and Debian, Ubuntu and the GitHub runners all still ship a 16 client
-// by default, so a suite that copies a schema out of a 17 server fails on a
-// correctly set up machine. 16 is readable by every client this is likely to
-// meet, and nothing being tested here is version specific: the catalogue
-// queries, COPY, generated and identity columns, composite keys, materialized
-// common table expressions and session_replication_role are all the same on 16
-// and 17. The version skew itself is the product's problem rather than the
-// test's, and pgcopy handles it by finding a client new enough for the server
-// and saying which package supplies one when there is none.
-const testPostgresMajor = 16
+// 17, matching the server this job now starts and the one `just db` starts.
+// It used to be 16, and the reason written here was that the GitHub runners
+// ship a 16 client and pg_dump refuses to read a server newer than itself.
+// That reason no longer holds: this branch gives the engine job a Postgres 17
+// and the job now installs a 17 client to go with it.
+//
+// Keeping 16 here after that change is what actually broke, and it broke from
+// the other side. The source became the 17 standing server while the golden
+// stayed 16, so pg_dump 17 read the source correctly and the dump it produced
+// carried SET transaction_timeout, which exists from 17 onward, and restoring
+// that into a 16 target failed on an unrecognized parameter. A client can be
+// too old for the source and too new for the target, and only the first of
+// those is a refusal pgcopy makes by name today.
+//
+// Nothing here is version specific: the catalogue queries, COPY, generated and
+// identity columns, composite keys, materialized common table expressions and
+// session_replication_role behave the same on both.
+const testPostgresMajor = 17
 
 // sourceSchema is small and has a foreign key, so that the subset has
 // something to close over and the restore has something to get wrong.
