@@ -32,7 +32,7 @@ package conformance
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -276,10 +276,6 @@ type harness struct {
 	masked     int
 	verified   int
 	failVerify bool
-	// refreshes counts what this harness has asked for, so that the rules hash
-	// can differ between two refreshes inside one behaviour as well as between
-	// behaviours. See rulesHash.
-	refreshes int
 }
 
 // createdSet records the resources one run of the suite made.
@@ -381,29 +377,50 @@ func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory
 	}
 }
 
-// rulesHash is different for every refresh this suite makes.
+// rulesHash is different for every refresh this suite makes, and different in
+// every process that runs it.
 //
-// It was the constant "conformance", and that made this suite intermittently
-// red in a way that pointed nowhere near itself. A golden's identifier is
-// gv_<timestamp to the second>_<first eight characters of the rules hash>, so
-// two refreshes in the same second with the same hash get the SAME identifier.
-// For a provider whose goldens are images the second commit then retags the
-// first, and one behaviour's cleanup destroys the golden another behaviour is
-// about to branch. It arrives as "the golden version no longer exists" from
-// Branch, several behaviours away from the refresh that caused it, and only on
-// machines fast enough to do two refreshes inside one second.
+// A golden's identifier is gv_<timestamp to the second>_<first eight
+// characters of the rules hash>, so two refreshes that share a second and a
+// hash get the SAME identifier. For a provider whose goldens are images the
+// second commit retags the first, and then one cleanup destroys the golden
+// something else is about to branch. It surfaces as "the golden version no
+// longer exists" from Branch, nowhere near the refresh that caused it.
 //
-// The one-second resolution is provider.NewGoldenVersionID's, and it is worth
-// fixing there as well: two refreshes in the same second is not a thing only a
-// test does. This stops the suite depending on it either way.
+// This has now been wrong twice, in the same place, for two different reasons.
+//
+// It was the constant "conformance", which collided between two refreshes in
+// one second on a fast machine. The repair derived it from the behaviour name
+// and a refresh counter, which is unique within one process and IDENTICAL
+// ACROSS PROCESSES: every package that runs this suite calls its entry point
+// TestConformance, so internal/db/docker, internal/db/dblab, internal/db/neon
+// and internal/db/supabase all produce the behaviour name
+// TestConformance/Branch_IsIsolatedFromTheGolden and therefore the same eight
+// characters, on every run for ever. The evidence was sitting in the failures:
+// two of them hours apart quoted the same hash, 7969f160, differing only in
+// the timestamp. Go runs test packages in parallel, so "unique within one
+// process" was never the property this needed.
+//
+// Four random bytes are exactly the eight hex characters that survive into an
+// identifier, which is what internal/masking's uniqueRulesHash already does
+// for the same reason. Randomness cannot collide by construction, where every
+// derivation so far has collided along an axis nobody thought about.
+//
+// The one-second resolution in provider.NewGoldenVersionID is the underlying
+// sharp edge and is still there: two refreshes in one second is not something
+// only a test does. This stops the suite depending on it either way.
 func (h *harness) rulesHash() string {
-	sum := sha256.Sum256(fmt.Appendf(nil, "%s#%d", h.t.Name(), h.refreshes))
-	return hex.EncodeToString(sum[:])[:8]
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// A fallback that returned a constant would reintroduce the collision
+		// this exists to prevent, so it is loud instead.
+		h.t.Fatalf("no randomness available for a rules hash: %v", err)
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // spec builds a refresh specification whose callbacks record what happened.
 func (h *harness) spec() provider.GoldenSpec {
-	h.refreshes++
 	return provider.GoldenSpec{
 		SourceURL: secrets.New("postgres://conformance@source/db"),
 		Version:   17,
