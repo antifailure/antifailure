@@ -254,6 +254,18 @@ The Database Lab Engine at {endpoint} has no snapshot to build a golden from: {d
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [providers/dblab](/docs/providers/dblab/) |
 
+### AF-DB-011
+
+The subset could not be taken: {detail}
+
+**What to do.** Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/subsetting](/docs/concepts/subsetting/) |
+
 ## Detection
 
 ### AF-DET-001

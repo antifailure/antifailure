@@ -185,6 +185,7 @@ Subcommands:
 
 - [`af golden gc`](#af-golden-gc) Remove old goldens, keeping the newest.
 - [`af golden list`](#af-golden-list) List the goldens that exist.
+- [`af golden pull`](#af-golden-pull) Bring a published golden onto this machine.
 - [`af golden refresh`](#af-golden-refresh) Copy production, mask it, verify it, and publish it.
 - [`af golden verify`](#af-golden-verify) Re-check a published golden.
 
@@ -192,9 +193,16 @@ Subcommands:
 
 Remove old goldens, keeping the newest.
 
-A golden that something is still branched from is never removed, and that is
-reported rather than forced: taking away the copy an environment is running on
-breaks the environment rather than tidying it.
+How many to keep comes from database.golden.retain in the manifest, so that
+every machine and every runner collects the same way. --keep overrides it for
+one run.
+
+Two versions are never removed. One is any version an environment is still
+branched from: taking away the copy something is running on breaks the
+environment rather than tidying it, and that refusal comes from the provider,
+which is the only thing that knows. The other is the newest verified golden,
+whatever the count says, because a project with nothing left to branch cannot
+bring an environment up at all, which is worse than the disk it saved.
 
 ```
 af golden gc [flags]
@@ -203,7 +211,7 @@ af golden gc [flags]
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch context to use, defaulting to the checked out one. |
-| `--keep` | `3` | How many of the newest goldens to keep. |
+| `--keep` | `0` | How many of the newest goldens to keep, overriding database.golden.retain. |
 
 ### `af golden list`
 
@@ -211,6 +219,31 @@ List the goldens that exist.
 
 ```
 af golden list [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch context to use, defaulting to the checked out one. |
+
+### `af golden pull`
+
+Bring a published golden onto this machine.
+
+One machine holds the production credential and refreshes; every other machine
+pulls what it published and never reads production at all. That is what
+database.golden.storage and storage_url are for.
+
+With no version, the newest complete one is taken. A version is complete when
+its attestation is in the store: the dump is written first and the attestation
+second, so a version with only a dump is a publish that did not finish, and it
+is invisible here rather than offered.
+
+A pulled golden is NOT trusted because it came from the store. The verification
+scan runs again, here, against the database that actually arrived. A pull that
+skipped it would make the store a way to get an unverified database branched.
+
+```
+af golden pull [version] [flags]
 ```
 
 | Flag | Default | What it does |

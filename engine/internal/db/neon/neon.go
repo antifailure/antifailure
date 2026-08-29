@@ -140,7 +140,14 @@ func (p *Provider) Capabilities() provider.Caps {
 		// Neon can create an anonymized branch, but this provider does not use
 		// it: the engine's own rules are the single implementation of masking,
 		// and a provider's masking is a claim where verification is a check.
-		ProviderMasking:       false,
+		ProviderMasking: false,
+		// A candidate here is a branch of the production project's default
+		// branch, so it holds the whole database the moment it exists and
+		// there is no empty database to load a slice into. Subsetting would
+		// have to mean deleting down, which copies everything first and so
+		// saves nothing on the one provider where the copy was already free.
+		// Declared false rather than left to look like an oversight.
+		Subsetting:            false,
 		PooledEndpoints:       true,
 		MaxConcurrentBranches: p.maxBranches,
 		// Generous, because it crosses the public internet to a compute that

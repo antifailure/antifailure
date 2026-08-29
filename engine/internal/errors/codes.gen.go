@@ -73,6 +73,8 @@ const (
 	// The storage pool has {available} free and the operation needs
 	// {needed}.
 	AFDB010 Code = "AF-DB-010"
+	// The subset could not be taken: {detail}
+	AFDB011 Code = "AF-DB-011"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API.
 	AFDB020 Code = "AF-DB-020"
@@ -479,6 +481,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
+	},
+	AFDB011: {
+		Code:      AFDB011,
+		Area:      "DB",
+		Message:   "The subset could not be taken: {detail}",
+		NextStep:  "Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has.",
+		Docs:      "concepts/subsetting",
+		Retryable: false,
+		ExitCode:  ExitAuth,
 	},
 	AFDB020: {
 		Code:      AFDB020,

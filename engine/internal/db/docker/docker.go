@@ -144,6 +144,9 @@ func (p *Provider) Capabilities() provider.Caps {
 		CopyOnWrite:     true,
 		ProviderMasking: false,
 		PooledEndpoints: false,
+		// A candidate here is an empty Postgres container that the provider
+		// fills, so a subset can be loaded into it instead of the whole source.
+		Subsetting: true,
 		// The daemon imposes no branch limit. Disk and memory do, and those
 		// surface as AF-DB-010 and AF-RUN-020 from the daemon itself, with the
 		// numbers the user needs.
@@ -277,6 +280,13 @@ func (p *Provider) sweepCandidates(ctx context.Context) {
 // loadSource fills a candidate from the source database, or from the seed when
 // there is no source.
 func (p *Provider) loadSource(ctx context.Context, target secrets.Value, spec provider.GoldenSpec) error {
+	if spec.Load != nil && !spec.SourceURL.IsZero() &&
+		!strings.Contains(spec.SourceURL.Reveal(), "@source/") {
+		// The engine is loading this one, because the manifest asked for a
+		// slice rather than the whole database. The provider's job was to
+		// produce the empty candidate, which it has.
+		return spec.Load(ctx, spec.SourceURL, target)
+	}
 	if spec.SourceURL.IsZero() || strings.Contains(spec.SourceURL.Reveal(), "@source/") {
 		// No real source. A project that has not connected production yet
 		// still needs a schema to branch, and the seed is what provides it.
