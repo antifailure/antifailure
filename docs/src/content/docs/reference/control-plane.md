@@ -71,9 +71,9 @@ holds `billing.manage`, and who pays is this application's decision rather than
 GitHub's. Promote somebody with the role control on the Members page; a role set
 that way is marked `manual` and is never overwritten by a later sign-in.
 
-Two cases where nothing changes rather than something being guessed. If GitHub
-will not say what somebody's role is -- no App configured, a rate limit, an
-outage -- an existing membership keeps the role it already had, because a
+Two cases where nothing changes rather than something being guessed. Sometimes
+GitHub will not say what somebody's role is: no App configured, a rate limit, an
+outage. An existing membership then keeps the role it already had, because a
 transient failure must not demote the only administrator out of their own
 organization. A first sign-in during the same failure gets `member`, because
 guessing upward would hand out administrative rights on a timeout.
