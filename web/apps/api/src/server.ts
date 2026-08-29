@@ -59,6 +59,7 @@ import {
   revokeCliToken,
 } from './auth/device.ts'
 import { mountConsole } from './console/index.ts'
+import type { ConsoleBuild } from './console/static.ts'
 import { PROVIDERS, type Provider } from './providers/seal.ts'
 import { verifySignature } from './github/app.ts'
 import { forward, ProxyError } from './providers/proxy.ts'
@@ -89,8 +90,12 @@ export interface ServerOptions {
   /** Who may sign in at all. Null is open, which is the self-hosted default.
    *  See parseAllowlist: an empty list is closed to everyone, not open. */
   signInAllowlist?: SignInAllowlist
-  /** Set false to serve the API alone, without the console's pages. */
+  /** Set false to serve the API alone, without the console. */
   console?: boolean
+  /** The exported console, located at start-up. Absent means the API is served
+   *  alone, which is a legitimate way to run this and is logged as such rather
+   *  than answering blank 404s that read like a routing bug. */
+  consoleBuild?: ConsoleBuild
   /** The secret that seals provider keys. Null means keys cannot be stored,
    *  which the console says out loud rather than failing on submit. */
   sealingKey?: Buffer | null
@@ -1207,11 +1212,21 @@ export function createServer(options: ServerOptions) {
   // browser holds is the session these pages read, and a separate origin would
   // need CORS, a second cookie policy and a place to put a token in a client.
   if (options.console !== false) {
+    // Mounted whether or not the build is there. The endpoints the browser
+    // needs are part of the API and do not depend on any file being present;
+    // only the pages do, and a missing build is reported by the handler rather
+    // than by these routes quietly not existing. They did quietly not exist
+    // once, for exactly as long as it took a test to ask for one.
     mountConsole(app, {
       pool: options.pool,
       clock,
       secureCookies: secure,
       sealingKey: options.sealingKey ?? null,
+      build: options.consoleBuild ?? {
+        dir: '',
+        present: false,
+        summary: 'no console build was located',
+      },
     })
   }
 

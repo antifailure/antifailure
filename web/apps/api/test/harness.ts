@@ -8,6 +8,7 @@ import { FakeClock } from '../src/clock.ts'
 import { FakeGitHub } from '../src/auth/fakegithub.ts'
 import { issueSession } from '../src/auth/session.ts'
 import type { Role } from '../src/permissions.ts'
+import { findConsoleBuild } from '../src/console/static.ts'
 
 export const adminUrl =
   process.env.AF_TEST_DATABASE_URL ?? 'postgres://postgres:test@127.0.0.1:55432/antifailure'
@@ -80,6 +81,9 @@ export interface StartApiOptions {
   modelPrices?: Record<string, { inputPerMillion: number; outputPerMillion: number }>
   /** Where the providers live, so no test reaches a real one. */
   providerBases?: Record<string, string>
+  /** A directory holding an exported console. Undefined means the server runs
+   *  without one, which is a real way to run it and has its own test. */
+  consoleDir?: string
 }
 
 export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
@@ -111,6 +115,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     githubWebhookSecret: options.githubWebhookSecret ?? null,
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
     ...(options.providerBases ? { providerBases: options.providerBases } : {}),
+    ...(options.consoleDir ? { consoleBuild: await findConsoleBuild(options.consoleDir) } : {}),
   })
 
   return {

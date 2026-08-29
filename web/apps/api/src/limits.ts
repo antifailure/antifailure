@@ -103,80 +103,41 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   // ---------------------------------------------------------------------------
   // The console.
   //
-  // Pages, not API calls, and limited generously: a person clicking through a
-  // console produces a handful of requests a second at most, and refusing one
-  // of them shows somebody a rate limit error while they are reading. The
-  // limits exist because the middleware refuses any endpoint that has none,
-  // which is the right default and the reason these are written down rather
-  // than defaulted.
-  //
-  // The two that mutate are as tight as the sign-in path, because they act on a
-  // code somebody could be guessing.
+  // The console is a static export now, so its URL space is a set of files
+  // rather than a set of endpoints, and it is declared as two classes instead
+  // of one entry per page. The pages are limited generously because a person
+  // clicking through a console produces a handful of requests a second and
+  // refusing one of them shows a rate limit error to somebody who is reading.
   // ---------------------------------------------------------------------------
-  'GET /': {
-    rate: 10, burst: 60, key: 'ip',
-    reason: 'The console root, which redirects. Cheap and hit on every visit.',
-  },
-  'GET /console/console.css': {
+  'GET /console/app/*': {
     rate: 20, burst: 120, key: 'ip',
-    reason: 'One static file, cached for five minutes. A cold page load fetches it once.',
+    reason:
+      'One page of the console, which is a file on disk. The work is a stat and a read, ' +
+      'and a cold load fetches exactly one of them.',
   },
-  'GET /console/icon.svg': {
-    rate: 20, burst: 120, key: 'ip',
-    reason: 'The favicon, cached for a day, so a browser fetches it once per session and never again.',
+  'GET /console/asset/*': {
+    rate: 40, burst: 400, key: 'ip',
+    reason:
+      'A hashed, immutable asset under /_next/static, cached for a year by anything that ' +
+      'has fetched it once. A cold load fetches a dozen and then never again.',
   },
-  'GET /environments': {
+  'GET /console/api/providers': {
     rate: 10, burst: 60, key: 'ip',
-    reason: 'A page listing at most a hundred rows. One query.',
+    reason: "Two queries for the keys and this month's budgets. Never reads a ciphertext.",
   },
-  'GET /environments/:envId': {
-    rate: 10, burst: 60, key: 'ip',
-    reason: 'Two queries, both indexed on the tenant.',
-  },
-  'GET /runs': {
-    rate: 10, burst: 60, key: 'ip',
-    reason: 'A page listing at most a hundred runs, with two counts per row.',
-  },
-  'GET /runs/:runId': {
-    rate: 10, burst: 60, key: 'ip',
-    reason: 'Three queries for one run and its evidence.',
-  },
-  'GET /masking': {
-    rate: 10, burst: 60, key: 'ip',
-    reason: 'Attestation history, at most sixty rows.',
-  },
-  'GET /network': {
-    rate: 10, burst: 60, key: 'ip',
-    reason: 'The effective policy, in the order that decides.',
-  },
-  'GET /audit': {
-    rate: 10, burst: 60, key: 'ip',
-    reason: 'The hundred most recent entries, on an index by sequence.',
-  },
-  'GET /settings/members': {
-    rate: 10, burst: 60, key: 'ip',
-    reason: 'One join over a table that is tens of rows, not thousands.',
-  },
-  'GET /device': {
-    rate: 2, burst: 20, key: 'ip',
-    reason: 'The approval screen. Tight, because reaching it with a code is a way of asking whether that code is real.',
-  },
-  'POST /console/device': {
+  'PUT /console/api/providers/:provider': {
     rate: 1, burst: 10, key: 'ip',
-    reason: 'Looking up, approving or declining a code. This is the limit that makes guessing an eight character code hopeless rather than merely unlikely.',
+    reason:
+      'Storing or rotating a key. A person does this a few times a year, and a script ' +
+      'doing it faster is not a person.',
   },
-  'POST /console/signout': {
-    rate: 2, burst: 20, key: 'ip',
-    reason: 'Signing out must never be refused in practice; this only bounds a script.',
-  },
-
-  'GET /settings/keys': {
-    rate: 10, burst: 60, key: 'ip',
-    reason: 'Two queries for the keys and this month\'s budgets. Never reads a ciphertext.',
-  },
-  'POST /console/keys': {
+  'DELETE /console/api/providers/:provider': {
     rate: 1, burst: 10, key: 'ip',
-    reason: 'Storing, rotating or removing a key, and setting a cap. A person does this a few times a year, and a script doing it faster is not a person.',
+    reason: 'Removing a key. The same human cadence as storing one, and it is audited.',
+  },
+  'PUT /console/api/providers/:provider/budget': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Setting a monthly cap. Writes an audit entry each time.',
   },
 
   'GET /openapi.json': {
@@ -316,7 +277,47 @@ export function limitFor(method: string, path: string): EndpointLimit | undefine
     if (route.method !== method) continue
     if (matches(route.path, segments)) return route.limit
   }
+
+  // Last, after every declared route and every extension route, so that a
+  // route which declares its own limit always wins. It went before the
+  // extension loop first, and a GET route registered by another edition
+  // silently inherited the console's numbers instead of the ones it declared.
+  const asConsole = consoleClass(method, path)
+  if (asConsole) return ENDPOINT_LIMITS[asConsole]
+
   return undefined
+}
+
+/**
+ * Where the API ends and the console's files begin.
+ *
+ * The console is a static export served by this process, so anything the API
+ * did not claim is a file: a page, an asset, or the 404 page. That cannot be
+ * enumerated -- a mistyped URL is a real request that has to answer 404 rather
+ * than 500 -- so it is one class, in the same spirit as `/trpc/*`.
+ *
+ * The loud refusal for an undeclared endpoint is what this must not weaken, so
+ * it is kept exactly where it earns its keep:
+ *
+ *   - every method that can change something still falls through to the
+ *     refusal, because a static file server answers GET and HEAD and nothing
+ *     else;
+ *   - and every GET under a prefix the API owns still falls through too, so a
+ *     new endpoint under /v1, /auth, /trpc, /webhooks, /byok or /console/api
+ *     added without a limit is refused as loudly as it ever was.
+ *
+ * What is left is the space a browser asks for pages in, and a page there is a
+ * stat and a read.
+ */
+const API_PREFIXES = ['/v1/', '/auth/', '/trpc/', '/webhooks/', '/byok/', '/console/api/']
+
+export function consoleClass(method: string, path: string): string | null {
+  if (method !== 'GET' && method !== 'HEAD') return null
+  if (API_PREFIXES.some((prefix) => path === prefix.slice(0, -1) || path.startsWith(prefix))) {
+    return null
+  }
+  if (path.startsWith('/_next/')) return 'GET /console/asset/*'
+  return 'GET /console/app/*'
 }
 
 /** One route pattern against one concrete path, by segment. `:name` matches

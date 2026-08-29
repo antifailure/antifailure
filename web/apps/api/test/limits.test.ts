@@ -56,7 +56,34 @@ describe('the limit catalog', () => {
   it('resolves a tRPC path through the wildcard and nothing else through it', () => {
     assert.ok(limitFor('GET', '/trpc/environments.list'))
     assert.ok(limitFor('POST', '/trpc/environments.teardown'))
-    assert.equal(limitFor('GET', '/something-new'), undefined)
+    // Not the tRPC wildcard, and not the console class either: this is a
+    // method that changes something, which is where the refusal earns its keep.
+    assert.equal(limitFor('POST', '/something-new'), undefined)
+  })
+
+  it('a GET the API did not claim is the console class, not a refusal', () => {
+    // The console is a static export served by this process, so anything the
+    // API did not claim is a file: a page, an asset, or the 404 page. That set
+    // cannot be enumerated -- a mistyped URL has to answer 404 rather than 500
+    // -- so it is one class, in the same spirit as the tRPC wildcard.
+    assert.equal(limitFor('GET', '/environments')?.reason, ENDPOINT_LIMITS['GET /console/app/*']!.reason)
+    assert.equal(limitFor('GET', '/typo')?.reason, ENDPOINT_LIMITS['GET /console/app/*']!.reason)
+    assert.equal(
+      limitFor('GET', '/_next/static/chunks/main-abc.js')?.reason,
+      ENDPOINT_LIMITS['GET /console/asset/*']!.reason,
+    )
+  })
+
+  it('and the refusal still stands where it matters', () => {
+    // Every method that can change something, and every GET under a prefix the
+    // API owns. So a new endpoint added without a limit is refused as loudly as
+    // it ever was; what changed is only the space a browser asks for pages in.
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      assert.equal(limitFor(method, '/anything-at-all'), undefined, method)
+    }
+    for (const path of ['/v1/nothing', '/auth/nothing', '/webhooks/nothing', '/byok/nothing', '/console/api/nothing']) {
+      assert.equal(limitFor('GET', path), undefined, path)
+    }
   })
 
   it('resolves a parameterised path to its pattern', () => {
@@ -126,7 +153,9 @@ describe('every endpoint the server serves is in the catalog', { skip: hasDataba
     // The safe direction. An endpoint nobody remembered to limit is the one
     // that has never been load tested, so answering with an error is a bug
     // report and leaving it open is an outage.
-    const res = await h.fetch('/some-endpoint-nobody-declared')
+    // A mutating method, because a GET the API does not claim is now served by
+    // the console's static handler and has to answer 404 rather than 500.
+    const res = await h.fetch('/some-endpoint-nobody-declared', { method: 'POST' })
     assert.equal(res.status, 500)
     const body = (await res.json()) as { error: string }
     assert.match(body.error, /no declared rate limit/)

@@ -215,6 +215,8 @@ export class Registry {
  * process do not share counters and a test cannot pass because of what an
  * earlier one did.
  */
+import { consoleClass } from './limits.ts'
+
 export interface ControlPlaneMetrics {
   registry: Registry
   info: Gauge
@@ -331,6 +333,13 @@ export function routeLabel(method: string, path: string, declared: readonly stri
     const wildcard = `${verb} /trpc/*`
     if (declared.includes(wildcard)) return wildcard
   }
+
+  // The console's files, classified exactly as the rate limiter classifies
+  // them, by calling the same function rather than keeping a second copy of
+  // the rule. A metric that disagrees with the limiter about which class a
+  // request is in cannot be used to tune the limiter.
+  const asConsole = consoleClass(verb, path)
+  if (asConsole && declared.includes(asConsole)) return asConsole
 
   const segments = path.split('/')
   for (const key of declared) {

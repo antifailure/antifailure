@@ -15,6 +15,7 @@ import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
 import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
+import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
 import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
@@ -89,6 +90,13 @@ console.log(
 const modelPrices = pricesFrom(process.env.AF_MODEL_PRICES)
 console.log(`model prices configured for ${Object.keys(modelPrices).length} models`)
 
+// Located once, here, and said out loud either way. A control plane running
+// without its console is a legitimate way to run this; a control plane that
+// silently answers 404 on every page because a COPY was dropped from a
+// Dockerfile is not, and the two are indistinguishable without this line.
+const consoleBuild = await findConsoleBuild()
+console.log(consoleBuild.summary)
+
 const { app, ingestLimiter, authLimiter } = createServer({
   pool,
   github,
@@ -99,6 +107,7 @@ const { app, ingestLimiter, authLimiter } = createServer({
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
   modelPrices,
+  consoleBuild,
 })
 
 // Partitions, kept ahead of the writes. Skipped when this process is not the

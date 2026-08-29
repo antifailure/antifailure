@@ -37,10 +37,13 @@ function inputsFor(org: Org): Record<string, unknown> {
   return {
     'health': {},
     'permissions': {},
+    'repositories.list': { includeArchived: false },
     'environments.list': { limit: 10 },
     'environments.get': { envId: org.envId },
     'environments.teardown': { envId: org.envId },
     'runs.list': { envId: org.envId },
+    'runs.recent': { limit: 10 },
+    'runs.get': { runId: '00000000-0000-0000-0000-000000000000' },
     'runs.verdicts': { runId: '00000000-0000-0000-0000-000000000000' },
     'runs.artifacts': { runId: '00000000-0000-0000-0000-000000000000' },
     'network.effective': { repository: org.repository },

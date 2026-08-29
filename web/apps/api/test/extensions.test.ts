@@ -88,7 +88,14 @@ describe('the route extension point', () => {
     const found = limitFor('POST', '/ext/acs/abc123')
     assert.equal(found?.reason, limit.reason)
     assert.equal(limitFor('POST', '/ext/acs'), undefined, 'a pattern segment matched nothing')
-    assert.equal(limitFor('GET', '/ext/acs/abc123'), undefined, 'the method was ignored')
+    // Not "undefined": a GET the API does not claim falls to the console's
+    // static class, which is what serves its pages. What matters here is that
+    // it is not the extension's limit, because the extension declared POST.
+    assert.notEqual(
+      limitFor('GET', '/ext/acs/abc123')?.reason,
+      limit.reason,
+      'the method was ignored',
+    )
   })
 
   it('enforces the declared numbers rather than a default', async () => {
@@ -177,9 +184,9 @@ describe('the route extension point', () => {
       ExtensionRefused,
     )
     assert.equal(registeredExtensions().length, 0)
-    assert.equal(
-      limitFor('GET', '/ext/fine'),
-      undefined,
+    assert.notEqual(
+      limitFor('GET', '/ext/fine')?.reason,
+      limit.reason,
       'the acceptable half of a refused extension was registered anyway',
     )
   })

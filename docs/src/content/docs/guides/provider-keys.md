@@ -45,7 +45,8 @@ like a working setup until every run is refused for having no allowance.
 
 ## In the console
 
-Organization, then Provider keys. Paste a key, save, set a cap.
+**Provider keys** in the navigation, or `/keys` on your control plane. Paste a
+key, store it, set a cap.
 
 Storing, rotating, removing and capping are for owners and admins. Everybody
 else sees the same page without the forms: the last four and the fingerprint,

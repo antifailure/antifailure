@@ -1,0 +1,26 @@
+{
+  "name": "@antifailure/console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The control plane's web application, served by the control plane itself.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev -p 3100",
+    "build": "next build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "geist": "^1.7.2",
+    "next": "^15.4.6",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.12",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.11",
+    "@types/react-dom": "^19.1.7",
+    "tailwindcss": "^4.1.12",
+    "typescript": "^5.9.2"
+  }
+}

@@ -30,6 +30,34 @@ COPY web/packages/policy/package.json ./packages/policy/
 RUN npm ci --omit=dev --ignore-scripts
 
 # ---------------------------------------------------------------------------
+# The console.
+#
+# A Next.js static export, built here and copied into the runtime image, so the
+# control plane serves its own web application from its own origin. That is the
+# security model rather than a packaging choice: the session is a SameSite=Lax
+# cookie on this origin, and a console served from a second hostname would need
+# SameSite=None and credentialed CORS on every endpoint of the API.
+#
+# Its own lockfile and its own node_modules. The console depends on React and
+# Next; the control plane must not, and putting it in the web/ workspace would
+# have put both into `npm ci --omit=dev` and into the runtime image.
+# ---------------------------------------------------------------------------
+FROM node:24-alpine AS console
+
+# Off, in the image and in CI. A build step that reports anonymous usage to a
+# third party from a machine holding this repository is not a trade anybody
+# here agreed to, and it is one line.
+ENV NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /console
+
+COPY console/package.json console/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY console/ ./
+RUN npm run build && test -f out/index.html
+
+# ---------------------------------------------------------------------------
 # Runtime.
 # ---------------------------------------------------------------------------
 FROM node:24-alpine AS runtime
@@ -76,11 +104,22 @@ COPY web/packages/policy ./packages/policy
 COPY deploy/docker/bootstrap.mjs ./bootstrap.mjs
 COPY deploy/docker/maintenance.mjs ./maintenance.mjs
 
+# The console's build. src/console/static.ts looks here by default; the path is
+# overridable with AF_CONSOLE_DIR for a self-hosted operator who serves it some
+# other way.
+COPY --from=console /console/out ./console-out
+
 # The migrations are read from disk at runtime by AF_MIGRATE=1, so they have to
 # be in the image. Asserted rather than assumed: an image whose migration
 # directory is empty fails at deploy time here instead of at three in the
 # morning when someone sets AF_MIGRATE and it silently applies nothing.
 RUN test -n "$(ls -A ./packages/db/migrations)" || (echo 'no migrations in image' && exit 1)
+
+# The same assertion for the console, for the same reason. An image whose
+# console directory is empty answers every page with a 503 that explains
+# itself -- which is far better than a blank 404 and still not something to
+# discover in production.
+RUN test -f ./console-out/index.html || (echo 'no console build in image' && exit 1)
 
 # Runs as the unprivileged `node` user that the base image already provides.
 # Nothing in the container is owned by it, so nothing in the container can be

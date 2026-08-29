@@ -29,9 +29,19 @@ file rolled back, and the application came up with no schema at all: `/health`
 answered `200` while every endpoint that touched a table returned `500`. The
 extension is now allow-listed in Terraform and the bootstrap job has run.
 
-**Sign-in is GitHub OAuth, with signups closed.** The OAuth App
-`Antifailure (staging)` exists under the `antifailure` organization. Its secret
-is in Key Vault and in a GitHub environment secret; it is in no file.
+**Sign-in is GitHub OAuth, with signups closed -- and it has never worked.**
+The OAuth App `Antifailure (staging)` exists under the `antifailure`
+organization, client id `Ov23lipGqLbu1cZJn1EF`, with the right callback. What
+was in Key Vault under `github-client-id` and `github-client-secret` was the
+literal string `PLACEHOLDER-not-a-real-oauth-app` and a 32-character
+placeholder, for the whole life of this deployment. GitHub answers 404 to an
+authorize request for a client id that does not exist, which is the "github
+auth just leads to 404" nobody could explain.
+
+An earlier version of this note said the secret was in Key Vault. It was not;
+nobody checked. The client id is now the real one. The secret is minted once by
+GitHub behind a passkey prompt, so it needs a person at the keyboard, and until
+it is set no account can sign in to this deployment at all.
 `AF_SIGNIN_ALLOWLIST` names who may sign in at all, and a refusal happens during
 the callback before any row is written, so a refused account leaves nothing
 behind. **Set but empty means nobody, not everybody**: an empty value is far
@@ -53,10 +63,15 @@ The token can read environments and runs and write events; it cannot manage
 members or read a provider key, and asking for more is intersected away rather
 than granted.
 
-**The console.** Environments, runs with verdicts and artifacts, masking
-attestation history, network policy, the audit log, members, provider keys, and
-the device approval screen. Server-rendered, no JavaScript, same origin as the
-API so the session cookie is the session the pages read.
+**The console, and it is the web application now.** `console/`, a Next.js
+static export served by the control plane from its own origin so the session
+cookie stays same-origin. Environments, runs with verdicts and artifacts,
+masking rules and attestation history, the egress policy with a way to ask it
+about one request, the audit log with its chain check, members, provider keys,
+and the device approval screen -- each with a loading, an empty and an error
+state. The 1,400 lines of hand-written HTML it replaces rendered as unstyled
+text in a real browser for a week. See `notes/console-web-application.md` for
+what the browser found that the build did not.
 
 **A GitHub App, and the code to act as it.** App JWTs backdated a minute and
 expiring in nine rather than ten, because ten is GitHub's maximum and asking for

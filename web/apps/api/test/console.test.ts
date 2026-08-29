@@ -1,139 +1,358 @@
-// The console's escaping, which is the only part of it that can be a security
-// bug rather than an ugly page.
+// The console's two server-side halves: the build it serves, and the JSON the
+// browser needs that is not tRPC.
 //
-// Almost every value these pages render arrived from somewhere else: a branch
-// name, a repository name, a client label somebody passed to af login. The
-// templates escape by default and the only way to emit markup is raw(), so
-// these tests hold that rule rather than testing the layout, which a screenshot
-// checks better than an assertion can.
+// What this file deliberately does NOT do is assert HTML. The console is a
+// Next.js application with its own build and its own tests for what it
+// renders; the claims here are the ones this process is responsible for --
+// which file a URL maps to, which headers it carries, and who is allowed to
+// change a provider key.
 
-import { test, describe } from 'node:test'
+import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { html, raw, escape, chip, when, empty } from '../src/console/layout.ts'
-import { devicePage, signInPage } from '../src/console/pages.ts'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { available, seedOrg, signInAs, startApi, type ApiHarness, type Org } from './harness.ts'
 
-const viewer = {
-  userId: '00000000-0000-0000-0000-000000000000',
-  label: 'Somebody',
-  organization: 'antifailure',
-  role: 'admin',
-  csrfToken: 'csrf-value',
+/**
+ * A stand-in for the export.
+ *
+ * Not the real console build: making this suite depend on a Next.js build
+ * would mean the API's tests could not run without one, and the claim being
+ * tested here is the mapping, not the markup. What proves the real build has
+ * these files is the CI step that checks console/out after building it, and
+ * the image that refuses to be built without index.html.
+ */
+async function fakeBuild(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'af-console-'))
+  await writeFile(join(dir, 'index.html'), '<!doctype html><title>index</title>')
+  await writeFile(join(dir, 'runs.html'), '<!doctype html><title>runs</title>')
+  await writeFile(join(dir, 'keys.html'), '<!doctype html><title>keys</title>')
+  await writeFile(join(dir, '404.html'), '<!doctype html><title>not found</title>')
+  await mkdir(join(dir, '_next', 'static', 'chunks'), { recursive: true })
+  await writeFile(join(dir, '_next', 'static', 'chunks', 'main-abc123.js'), 'console.log(1)')
+  return dir
 }
 
-describe('escaping', () => {
-  test('an interpolated value cannot open a tag', () => {
-    const nasty = '<script>alert(1)</script>'
-    const out = String(html`<p>${nasty}</p>`)
-    assert.equal(out, '<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>')
-    assert.doesNotMatch(out, /<script>/)
+const ok = await available()
+
+describe('serving the console build', { skip: ok ? false : 'no database' }, () => {
+  let h: ApiHarness
+  let dir: string
+
+  before(async () => {
+    dir = await fakeBuild()
+    h = await startApi({ consoleDir: dir })
+  })
+  after(async () => {
+    await h.close()
+    await rm(dir, { recursive: true, force: true })
   })
 
-  test('an interpolated value cannot break out of an attribute', () => {
-    // The shape that matters most: a value inside quotes closing them and
-    // adding an event handler.
-    //
-    // The assertion is about the QUOTE, not about the word. `onload=` survives
-    // as text inside the attribute value and is inert there; asserting its
-    // absence would be asserting the wrong thing, and it would pass for an
-    // escaper that only stripped that one word. What makes the attack fail is
-    // that the value can no longer close the attribute.
-    const nasty = '" onload="alert(1)'
-    const out = String(html`<img alt="${nasty}">`)
-    assert.equal(out, '<img alt="&quot; onload=&quot;alert(1)">')
-    // Exactly two real quotes in the output: the ones this template wrote.
-    assert.equal((out.match(/"/g) ?? []).length, 2)
+  test('/ is the application, not JSON', async () => {
+    const res = await h.fetch('/')
+    assert.equal(res.status, 200)
+    assert.match(res.headers.get('content-type') ?? '', /text\/html/)
+    assert.match(await res.text(), /<title>index<\/title>/)
   })
 
-  test('single quotes are escaped too, for single-quoted attributes', () => {
-    assert.match(String(html`<a title='${"it's"}'>`), /&#39;/)
+  test('an extensionless route maps to the file the export wrote for it', async () => {
+    const res = await h.fetch('/runs')
+    assert.equal(res.status, 200)
+    assert.match(await res.text(), /<title>runs<\/title>/)
   })
 
-  test('arrays are escaped element by element', () => {
-    const out = String(html`<ul>${['<b>a</b>', '<i>b</i>']}</ul>`)
-    assert.doesNotMatch(out, /<b>|<i>/)
+  test('a static asset is served with its own type and cached forever', async () => {
+    const res = await h.fetch('/_next/static/chunks/main-abc123.js')
+    assert.equal(res.status, 200)
+    assert.match(res.headers.get('content-type') ?? '', /javascript/)
+    // The filename carries a content hash, so the URL can never mean anything
+    // else. A page cannot say this: it is one URL for every build.
+    assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, immutable')
   })
 
-  test('raw is the only way through, and it is deliberate', () => {
-    assert.equal(String(html`${raw('<b>bold</b>')}`), '<b>bold</b>')
+  test('a page is never cached, because it is rendered for whoever is signed in', async () => {
+    assert.equal((await h.fetch('/')).headers.get('cache-control'), 'no-store')
   })
 
-  test('null and undefined render as nothing, not as the words', () => {
-    // A page reading "undefined" where a branch name should be is the most
-    // common way a template says "this data is missing" without meaning to.
-    assert.equal(escape(null), '')
-    assert.equal(escape(undefined), '')
-    assert.equal(String(html`<td>${null}</td>`), '<td></td>')
-  })
-})
-
-describe('pages', () => {
-  test('a hostile client label is escaped on the approval screen', () => {
-    // af login sends this, and it is whatever the machine's hostname and user
-    // are. On a machine somebody else named, that is attacker-controlled.
-    const out = String(
-      devicePage({
-        viewer,
-        code: 'BCDF-GHJK',
-        pending: {
-          clientLabel: '<img src=x onerror=alert(1)>',
-          scopes: ['environments.view'],
-          expiresAt: new Date('2026-08-28T05:00:00Z'),
-        },
-      }),
-    )
-    assert.doesNotMatch(out, /<img src=x/)
-    assert.match(out, /&lt;img src=x/)
+  test('an unknown path is the application’s own 404, not a blank one', async () => {
+    const res = await h.fetch('/nothing-here')
+    assert.equal(res.status, 404)
+    assert.match(await res.text(), /<title>not found<\/title>/)
   })
 
-  test('every page declares a charset, a viewport and a title', () => {
-    for (const out of [String(signInPage()), String(devicePage({ viewer, code: '', pending: null }))]) {
-      assert.match(out, /<meta charset="utf-8"/)
-      assert.match(out, /name="viewport"/)
-      assert.match(out, /<title>[^<]+ — Antifailure<\/title>/)
-      // Not indexed: this is somebody's tenant, not a marketing page.
-      assert.match(out, /name="robots" content="noindex"/)
+  test('a path that climbs out of the build is refused', async () => {
+    // Encoded as well as plain, because the two take different paths through
+    // the router and only one of them is normalised on the way in.
+    for (const attack of ['/../package.json', '/%2e%2e/package.json', '/_next/../../package.json']) {
+      const res = await h.fetch(attack)
+      const body = await res.text()
+      assert.ok(!body.includes('"name"'), `${attack} served something from outside the build`)
+      assert.equal(res.status, 404)
     }
   })
 
-  test('every page has a skip link, because keyboard users land on the rail', () => {
-    assert.match(String(signInPage()), /class="skip" href="#main"/)
-  })
-
-  test('the sign-in page has no session-bearing content', () => {
-    // It is rendered for somebody with no session, so it must not carry a CSRF
-    // token or a name. A page that did would be a page cached for one person
-    // and served to another.
-    const out = String(signInPage())
-    assert.doesNotMatch(out, /csrf/i)
-  })
-
-  test('the approval form carries the CSRF token', () => {
-    const out = String(
-      devicePage({
-        viewer,
-        code: 'BCDF-GHJK',
-        pending: { clientLabel: 'a laptop', scopes: [], expiresAt: new Date() },
-      }),
+  test('every page carries the headers that make it safe to serve', async () => {
+    const res = await h.fetch('/')
+    const csp = res.headers.get('content-security-policy') ?? ''
+    // Asserted whole rather than by a fragment. The bug this replaces was a
+    // policy that still contained "default-src 'none'" and had lost its
+    // style-src, so a test matching that fragment passed while every page in
+    // a real browser rendered as unstyled text.
+    assert.equal(
+      csp,
+      "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'; " +
+        "connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     )
-    assert.match(out, /name="csrf" value="csrf-value"/)
+    assert.equal(res.headers.get('x-frame-options'), 'DENY')
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff')
+    assert.equal(res.headers.get('referrer-policy'), 'strict-origin-when-cross-origin')
+  })
+
+  test('the policy allows the stylesheet and the script the export actually ships', async () => {
+    // The two directives whose absence is invisible in a status code and fatal
+    // in a browser, named individually so a future edit that drops one fails
+    // here rather than in somebody's tab.
+    const csp = (await h.fetch('/')).headers.get('content-security-policy') ?? ''
+    assert.match(csp, /style-src 'self'/)
+    assert.match(csp, /script-src 'self' 'unsafe-inline'/)
+    assert.match(csp, /connect-src 'self'/)
+  })
+
+  test('a second request with the same etag gets a 304 and no body', async () => {
+    const first = await h.fetch('/')
+    const etag = first.headers.get('etag')
+    assert.ok(etag)
+    const second = await h.fetch('/', { headers: { 'if-none-match': etag } })
+    assert.equal(second.status, 304)
+    assert.equal(await second.text(), '')
+  })
+
+  test('an API route still wins over the application', async () => {
+    // The console is Hono's not-found handler rather than a wildcard route
+    // precisely so that this cannot regress: every declared route, wherever it
+    // is declared, is matched first.
+    const res = await h.fetch('/health')
+    assert.equal(res.status, 200)
+    assert.match(res.headers.get('content-type') ?? '', /json/)
+  })
+
+  test('a POST to a path with no route never reaches the console at all', async () => {
+    // A static file server answers GET and HEAD. Everything else still falls
+    // through to the undeclared-endpoint refusal, which is the property that
+    // makes a new mutating endpoint impossible to add without a limit -- and
+    // the reason the console is classified only for GET.
+    const res = await h.fetch('/nothing-here', { method: 'POST' })
+    assert.equal(res.status, 500)
+    assert.match(res.headers.get('content-type') ?? '', /json/)
+    assert.match(((await res.json()) as { error: string }).error, /no declared rate limit/)
   })
 })
 
-describe('state is never colour alone', () => {
-  test('a chip carries the word as well as the tone', () => {
-    // About one man in twelve cannot tell the red one from the green one.
-    for (const s of ['running', 'failed', 'flaky', 'torn_down']) {
-      assert.match(String(chip(s)), new RegExp(`>${s}<`))
+describe('running without a console build', { skip: ok ? false : 'no database' }, () => {
+  let h: ApiHarness
+  before(async () => {
+    h = await startApi()
+  })
+  after(async () => h.close())
+
+  test('the API serves normally', async () => {
+    assert.equal((await h.fetch('/health')).status, 200)
+  })
+
+  test('a page says the build is missing rather than answering a blank 404', async () => {
+    // A blank 404 on every page is indistinguishable from a routing bug. This
+    // is the one state where saying so out loud is worth a non-standard status.
+    const res = await h.fetch('/environments')
+    assert.equal(res.status, 503)
+    assert.match(await res.text(), /without the console build/)
+  })
+})
+
+describe('provider keys from a browser', { skip: ok ? false : 'no database' }, () => {
+  let h: ApiHarness
+  let org: Org
+  const sealing = Buffer.alloc(32, 7)
+
+  before(async () => {
+    h = await startApi({ sealingKey: sealing })
+    org = await seedOrg(h.admin, 'console-keys')
+  })
+  after(async () => h.close())
+
+  /**
+   * A signed-in session, and a minute on the clock.
+   *
+   * The mutating endpoints here share one bucket of ten, and the harness clock
+   * only moves when a test moves it. Without this the suite's own volume
+   * exhausts the limiter partway through and later tests fail with 429s that
+   * have nothing to do with what they are checking -- which reads exactly like
+   * a real bug in whichever test happens to be last.
+   */
+  async function as(role: 'owner' | 'admin' | 'member' | 'viewer') {
+    h.clock.advance(60_000)
+    return signInAs(h, org, role)
+  }
+
+  test('signed out, nothing is readable', async () => {
+    assert.equal((await h.fetch('/console/api/providers')).status, 401)
+  })
+
+  test('a viewer can see which keys are set and is told they cannot change them', async () => {
+    const v = await as('viewer')
+    const res = await h.fetch('/console/api/providers', { headers: { cookie: v.cookie } })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { mayManage: boolean; role: string; sealing: boolean }
+    assert.equal(body.mayManage, false)
+    assert.equal(body.role, 'viewer')
+    assert.equal(body.sealing, true)
+  })
+
+  test('a viewer with a valid CSRF token still cannot store a key', async () => {
+    // The role check is not the hidden form. This request is exactly what the
+    // page would send if the controls were rendered.
+    const v = await as('viewer')
+    const res = await h.fetch('/console/api/providers/anthropic', {
+      method: 'PUT',
+      headers: { cookie: v.cookie, 'x-antifailure-csrf': v.csrfToken, 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'sk-ant-should-never-be-stored' }),
+    })
+    assert.equal(res.status, 403)
+    const list = await (
+      await h.fetch('/console/api/providers', { headers: { cookie: v.cookie } })
+    ).json()
+    assert.equal((list as { keys: unknown[] }).keys.length, 0)
+  })
+
+  test('a request with no CSRF header changes nothing', async () => {
+    const o = await as('owner')
+    const res = await h.fetch('/console/api/providers/anthropic', {
+      method: 'PUT',
+      headers: { cookie: o.cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'sk-ant-no-csrf' }),
+    })
+    assert.equal(res.status, 403)
+  })
+
+  test('storing, then rotating, then storing the same key again', async () => {
+    const o = await as('owner')
+    const put = (key: string) => {
+      h.clock.advance(60_000)
+      return h.fetch('/console/api/providers/anthropic', {
+        method: 'PUT',
+        headers: { cookie: o.cookie, 'x-antifailure-csrf': o.csrfToken, 'content-type': 'application/json' },
+        body: JSON.stringify({ key }),
+      })
+    }
+
+    const first = (await (await put('sk-ant-aaaaaaaaaaaaaaaaaaaa1111')).json()) as {
+      last4: string
+      replaced: boolean
+      sameAsBefore: boolean
+    }
+    assert.equal(first.replaced, false)
+    assert.equal(first.sameAsBefore, false)
+    assert.equal(first.last4, '1111')
+
+    const second = (await (await put('sk-ant-bbbbbbbbbbbbbbbbbbbb2222')).json()) as {
+      replaced: boolean
+      sameAsBefore: boolean
+    }
+    assert.equal(second.replaced, true)
+    assert.equal(second.sameAsBefore, false)
+
+    const again = (await (await put('sk-ant-bbbbbbbbbbbbbbbbbbbb2222')).json()) as {
+      sameAsBefore: boolean
+    }
+    assert.equal(again.sameAsBefore, true, 'rotating to the same key should say so')
+  })
+
+  test('no route returns the key, including the one that lists them', async () => {
+    const o = await as('owner')
+    const body = await (
+      await h.fetch('/console/api/providers', { headers: { cookie: o.cookie } })
+    ).text()
+    assert.ok(!body.includes('sk-ant-bbbbbbbbbbbbbbbbbbbb2222'), 'the key was echoed')
+    assert.ok(!body.includes('sk-ant-b'), 'a prefix of the key was echoed')
+  })
+
+  test('a blank cap is refused rather than read as zero dollars', async () => {
+    // Number('') and Number(null) are both 0. A cap of zero is legitimate,
+    // which is what makes inferring it dangerous: nothing looks wrong until
+    // every run refuses as overspent.
+    const o = await as('owner')
+    for (const body of [{}, { capUsd: '' }, { capUsd: null }, { capUsd: 'x' }, { capUsd: -1 }]) {
+      h.clock.advance(60_000)
+      const res = await h.fetch('/console/api/providers/anthropic/budget', {
+        method: 'PUT',
+        headers: { cookie: o.cookie, 'x-antifailure-csrf': o.csrfToken, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      assert.equal(res.status, 400, `${JSON.stringify(body)} should not have set a cap`)
     }
   })
 
-  test('a missing timestamp says never rather than rendering blank', () => {
-    assert.match(String(when(null)), />never</)
+  test('a cap of zero can still be asked for on purpose', async () => {
+    const o = await as('owner')
+    const res = await h.fetch('/console/api/providers/openai/budget', {
+      method: 'PUT',
+      headers: { cookie: o.cookie, 'x-antifailure-csrf': o.csrfToken, 'content-type': 'application/json' },
+      body: JSON.stringify({ capUsd: 0 }),
+    })
+    assert.equal(res.status, 200)
+    assert.equal(((await res.json()) as { capUsd: number }).capUsd, 0)
   })
 
-  test('an empty state says what it is and why it is empty', () => {
-    const out = String(empty('No environments yet', 'An environment appears here when af up runs.'))
-    assert.match(out, /No environments yet/)
-    assert.match(out, /appears here/)
+  test('an unknown provider is refused', async () => {
+    const o = await as('owner')
+    const res = await h.fetch('/console/api/providers/notaprovider', {
+      method: 'PUT',
+      headers: { cookie: o.cookie, 'x-antifailure-csrf': o.csrfToken, 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'sk-whatever' }),
+    })
+    assert.equal(res.status, 400)
+  })
+
+  test('removing is idempotent, so a retry after a timeout is not a failure', async () => {
+    const o = await as('owner')
+    const del = () => {
+      h.clock.advance(60_000)
+      return h.fetch('/console/api/providers/anthropic', {
+        method: 'DELETE',
+        headers: { cookie: o.cookie, 'x-antifailure-csrf': o.csrfToken },
+      })
+    }
+    const first = (await (await del()).json()) as { revoked: boolean }
+    assert.equal(first.revoked, true)
+    const second = await del()
+    assert.equal(second.status, 200)
+    assert.equal(((await second.json()) as { revoked: boolean }).revoked, false)
+  })
+})
+
+describe('a control plane with no sealing secret', { skip: ok ? false : 'no database' }, () => {
+  let h: ApiHarness
+  let org: Org
+  before(async () => {
+    h = await startApi({ sealingKey: null })
+    org = await seedOrg(h.admin, 'console-nosealing')
+  })
+  after(async () => h.close())
+
+  test('says so, rather than storing a key in the clear', async () => {
+    const o = await signInAs(h, org, 'owner')
+    const list = (await (
+      await h.fetch('/console/api/providers', { headers: { cookie: o.cookie } })
+    ).json()) as { sealing: boolean }
+    assert.equal(list.sealing, false)
+
+    const res = await h.fetch('/console/api/providers/anthropic', {
+      method: 'PUT',
+      headers: { cookie: o.cookie, 'x-antifailure-csrf': o.csrfToken, 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'sk-ant-would-be-plaintext' }),
+    })
+    assert.equal(res.status, 503)
+    assert.match(((await res.json()) as { error: string }).error, /AF_PROVIDER_KEY_SECRET/)
   })
 })

@@ -49,10 +49,65 @@ fi
 cp install.sh site/install.sh
 mkdir -p site/schemas && cp schemas/*.json site/schemas/
 
+# The Static Web Apps configuration, generated rather than written.
+#
+# Two things it fixes, both of which were live for as long as the site was.
+#
+# A 404 served Microsoft's page -- their logo, their wording, a Bootstrap CDN
+# stylesheet -- while www/app/not-found.tsx sat in the build at /404.html with
+# nothing pointing at it. A designed page nothing routes to is the same dead
+# capability as a function with no callers, and it looked like our site had
+# been abandoned to a hosting default.
+#
+# And every page answered on two addresses: /pricing and /pricing.html both
+# returned 200, because a static export writes files and SWA additionally
+# resolves the extensionless form. Two URLs for one page is a duplicate for a
+# crawler and a .html in the address bar for anyone who ever lands on the file
+# form. Each page therefore redirects its file form to its clean form.
+#
+# Generated from what the build actually produced, so a page added later is
+# covered without anybody remembering this file exists. The docs tree is left
+# alone on purpose: Astro serves it from directory indexes with its own
+# trailing-slash convention, and rewriting that from here would be guessing at
+# another build's contract.
+{
+  echo '{'
+  echo '  "routes": ['
+  first=1
+  while IFS= read -r page; do
+    clean="${page%.html}"
+    [ "$clean" = "/index" ] && clean="/"
+    [ $first -eq 1 ] || echo ','
+    first=0
+    printf '    { "route": "%s", "redirect": "%s", "statusCode": 301 }' "$page" "$clean"
+  done < <(cd site && find . -maxdepth 3 -name '*.html' -not -path './docs/*' -not -name '404.html' | sed 's|^\.||' | sort)
+  echo ''
+  echo '  ],'
+  echo '  "responseOverrides": {'
+  echo '    "404": { "rewrite": "/404.html", "statusCode": 404 }'
+  echo '  },'
+  echo '  "globalHeaders": {'
+  echo '    "x-content-type-options": "nosniff",'
+  echo '    "referrer-policy": "strict-origin-when-cross-origin"'
+  echo '  },'
+  echo '  "mimeTypes": {'
+  echo '    ".json": "application/json",'
+  echo '    ".sh": "text/plain"'
+  echo '  }'
+  echo '}'
+} > site/staticwebapp.config.json
+
+python3 -c 'import json,sys; json.load(open("site/staticwebapp.config.json"))' || {
+  echo "the generated staticwebapp.config.json is not valid JSON"
+  exit 1
+}
+
 # Assert the promises, rather than trusting the copies above. Each of these is
 # an address something already shipped points at.
 for required in \
   index.html \
+  404.html \
+  staticwebapp.config.json \
   install.sh \
   schemas/manifest.v1.json \
   schemas/events.v1.json

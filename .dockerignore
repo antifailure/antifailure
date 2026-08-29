@@ -19,6 +19,14 @@ web/node_modules
 web/**/node_modules
 web/**/test
 **/*.test.ts
+
+# www is a different artifact. console/ is NOT: the control plane serves it, so
+# its source has to reach the build context. Its own node_modules and previous
+# output must not, because the image builds them from the lockfile.
+www
+console/node_modules
+console/.next
+console/out
 **/.env
 **/.env.*
 *.md

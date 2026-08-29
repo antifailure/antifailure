@@ -319,7 +319,9 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: www/package-lock.json
+          cache-dependency-path: |
+            www/package-lock.json
+            console/package-lock.json
 
       - run: npm ci --no-audit --no-fund
         working-directory: www
@@ -337,6 +339,33 @@ jobs:
       - name: Build the documentation site
         run: npm run build
         working-directory: docs
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: console
+
+      - name: Build the console
+        # The control plane serves this build from its own origin, and the
+        # image asserts the directory is not empty. Building it here means a
+        # type error in the console fails the pull request rather than the
+        # image build twenty minutes later.
+        run: npm run build
+        working-directory: console
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+
+      - name: The console exported the routes the control plane routes to
+        # A static export writes one file per route. If a page stops exporting
+        # -- which is what a stray server-only import does -- the route it
+        # backs starts answering with the 404 page and nothing else notices.
+        run: |
+          missing=0
+          for route in index environments runs masking network audit members keys device 404; do
+            if [ ! -f "console/out/$route.html" ]; then
+              echo "::error::console/out/$route.html was not exported"
+              missing=1
+            fi
+          done
+          exit $missing
 
       - name: Every documented error path has a page at the URL the engine prints
         # errors.go builds "https://antifailure.dev/docs/" + the catalog's docs

@@ -96,17 +96,30 @@ describe('metrics', { skip: hasDatabase ? false : 'no Docker daemon to stand a d
   })
 
   it('collapses everything undeclared into one series', async () => {
+    // The property is bounded cardinality, not the name of the bucket. An
+    // unknown GET is the console's static class, because that is what serves
+    // it; an unknown POST is "other". Either way a scanner trying a thousand
+    // URLs adds one series, not a thousand.
     await h.fetch(`/not/a/route/${randomUUID()}`)
     await h.fetch(`/also/not/${randomUUID()}`)
+    await h.fetch(`/nor/this/${randomUUID()}`, { method: 'POST' })
+    await h.fetch(`/nor/that/${randomUUID()}`, { method: 'POST' })
 
-    const body = await scrape()
-    const other = body
+    const lines = (await scrape())
       .split('\n')
-      .filter((l) => l.startsWith('af_http_requests_total{') && l.includes('"GET other"'))
-    assert.equal(
-      other.length,
-      1,
-      'a scanner trying a thousand URLs would add a thousand series: ' + other.join(' | '),
+      .filter((l) => l.startsWith('af_http_requests_total{'))
+    for (const label of ['"GET /console/app/*"', '"POST other"']) {
+      const series = lines.filter((l) => l.includes(label))
+      assert.equal(
+        series.length,
+        1,
+        `${label} should be one series, got: ${series.join(' | ')}`,
+      )
+    }
+    // And no series carries a path somebody made up.
+    assert.ok(
+      !lines.some((l) => l.includes('/not/a/route/') || l.includes('/nor/this/')),
+      'a made-up path reached a metric label',
     )
   })
 

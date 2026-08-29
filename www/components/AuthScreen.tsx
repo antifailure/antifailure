@@ -41,6 +41,15 @@ function GitHubMark({ className }: { className?: string }) {
  * if you have not. The page said "there is no hosted control plane to sign in
  * to yet" for as long as there was one, which reads to an invited person as
  * being turned away.
+ *
+ * And the two are kept independent, which they were not. Joining the waitlist
+ * used to replace the entire screen with a confirmation, remembered in local
+ * storage, so from then on this page had no sign-in on it at all. Both people
+ * on the allowlist had joined the waitlist months earlier, which meant the
+ * only two accounts this instance admits were shown "you are already on the
+ * list" and no way in. Being on a waitlist is not a reason to hide a door you
+ * hold the key to: the GitHub button is always rendered, and the confirmation
+ * takes the place of the form under it rather than the page around it.
  */
 function AuthCover() {
   return (
@@ -114,61 +123,62 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
 
         <div className="flex flex-1 items-center justify-center py-10">
           <div className="w-full max-w-[400px]">
-            {done ? (
-              <>
-                <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black max-sm:text-[28px]">
-                  {already ? "You are already on the list" : "You are on the list"}
-                </h1>
-                <p className="mt-4 text-[14px] leading-6 text-black/55">
-                  We have {done}. You will hear from us when there is an
-                  environment you can connect a repository to, and not before.
-                  No newsletter.
-                </p>
-                <p className="mt-4 text-[14px] leading-6 text-black/55">
-                  In the meantime the engine is open source and runs entirely on
-                  your own machine. The{" "}
+            <>
+              <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black max-sm:text-[28px]">
+                {mode === "signup" ? "Get started" : "Sign in"}
+              </h1>
+              <p className="mt-4 text-[14px] leading-6 text-black/55">
+                The hosted control plane is invitation only while it is in
+                development. If your account has been invited, sign in with
+                GitHub. If it has not, leave an address below and we will tell
+                you when it opens.
+              </p>
+
+              <a
+                href={CONTROL_PLANE + "/auth/github"}
+                className="mt-6 flex h-12 w-full items-center justify-center gap-2.5 rounded-full bg-black text-[15px] font-medium text-white hover:bg-[#292929]"
+              >
+                <GitHubMark className="h-[18px] w-[18px]" />
+                Continue with GitHub
+              </a>
+
+              <div className="mt-7 flex items-center gap-4" aria-hidden>
+                <span className="h-px flex-1 bg-black/10" />
+                <span className="text-[12px] text-black/40">
+                  {done ? "already on the list" : "not invited yet"}
+                </span>
+                <span className="h-px flex-1 bg-black/10" />
+              </div>
+
+              {done ? (
+                <div role="status">
+                  <p className="mt-6 text-[14px] leading-6 text-black/55">
+                    {already ? "We already had " : "Added "}
+                    {done}. You will hear from us when there is an environment
+                    you can connect a repository to, and not before. No
+                    newsletter.
+                  </p>
+                  <p className="mt-4 text-[14px] leading-6 text-black/55">
+                    In the meantime the engine is open source and runs entirely
+                    on your own machine. The{" "}
+                    <a
+                      className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
+                      href="/docs/getting-started/quickstart"
+                    >
+                      quickstart
+                    </a>{" "}
+                    goes from nothing to a working environment without an
+                    account.
+                  </p>
                   <a
-                    className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
-                    href="/docs/getting-started/quickstart"
+                    href="/docs"
+                    className="mt-7 flex h-12 w-full items-center justify-center rounded-full border border-black/15 bg-white text-[15px] font-medium text-black hover:border-black/35"
                   >
-                    quickstart
-                  </a>{" "}
-                  goes from nothing to a working environment without an account.
-                </p>
-                <a
-                  href="/docs"
-                  className="mt-8 flex h-12 w-full items-center justify-center rounded-full bg-black text-[15px] font-medium text-white hover:bg-[#292929]"
-                >
-                  Read the documentation
-                </a>
-              </>
-            ) : (
-              <form onSubmit={submit} noValidate>
-                <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black max-sm:text-[28px]">
-                  Sign in
-                </h1>
-                <p className="mt-4 text-[14px] leading-6 text-black/55">
-                  The hosted control plane is invitation only while it is in
-                  development. If your account has been invited, sign in with
-                  GitHub. If it has not, leave an address below and we will tell
-                  you when it opens.
-                </p>
-
-                <a
-                  href={CONTROL_PLANE + "/auth/github"}
-                  className="mt-6 flex h-12 w-full items-center justify-center gap-2.5 rounded-full bg-black text-[15px] font-medium text-white hover:bg-[#292929]"
-                >
-                  <GitHubMark className="h-[18px] w-[18px]" />
-                  Continue with GitHub
-                </a>
-
-                <div className="mt-7 flex items-center gap-4" aria-hidden>
-                  <span className="h-px flex-1 bg-black/10" />
-                  <span className="text-[12px] text-black/40">
-                    not invited yet
-                  </span>
-                  <span className="h-px flex-1 bg-black/10" />
+                    Read the documentation
+                  </a>
                 </div>
+              ) : (
+              <form onSubmit={submit} noValidate>
                 <p className="mt-6 text-[14px] leading-6 text-black/55">
                   The engine itself needs none of this. It is open source, it
                   runs locally, and the{" "}
@@ -227,7 +237,8 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
                   .
                 </p>
               </form>
-            )}
+              )}
+            </>
           </div>
         </div>
       </div>
