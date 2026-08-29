@@ -307,7 +307,7 @@ func otlpValueOf(v attribute.Value) otlpValue {
 		// Everything else is rendered as a string, including the slice types.
 		// The protocol has array values; nothing in this engine produces one,
 		// and a shape nothing exercises is a shape nothing has proved.
-		s := v.Emit()
+		s := v.String()
 		return otlpValue{StringValue: &s}
 	}
 }

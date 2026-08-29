@@ -43,7 +43,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
           {
             title: "Workload Studio",
             href: "/product/workload",
-            description: "Observed, deterministic, and Crowdi traffic",
+            description: "Observed, deterministic, and exploratory traffic",
           },
           {
             title: "Migration Safety",
@@ -176,8 +176,8 @@ export const HEADER_MENUS: HeaderMenu[] = [
             description: "Customer agent, adapters, cleanup",
           },
           {
-            title: "Crowdi",
-            href: "/product/crowdi",
+            title: "Exploratory users",
+            href: "/product/exploratory-users",
             description: "Exploratory users inside Workload Studio",
           },
         ],

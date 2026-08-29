@@ -66,15 +66,19 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "documented manifests are valid" just manifestcheck
     run "prose reads like a person"      just prosecheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
     run "prose style"                    just vale
     run "every link resolves"            just links
+    run "prose stays readable"           just readability
+    run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
+    run "lint"                           just lint
     run "the gates themselves"           just test-tools
     run "engine"                         just test-engine
     run "control plane"                  just test-web
@@ -305,13 +309,13 @@ prosecheck:
 
 # Spelling, with the project dictionary in tools/docs/dictionary.txt.
 spell:
-    npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" README.md CONTRIBUTING.md SECURITY.md
+    npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" "examples/**/*.md" README.md CONTRIBUTING.md SECURITY.md
 
 # Prose style: the Google developer documentation style, plus the rule about
 # em dashes. `vale sync` fetches the style package named in .vale.ini.
 vale:
     vale sync
-    vale docs/src/content/docs README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
+    vale docs/src/content/docs examples README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
 
 # Every link on the assembled site, including fragments.
 #
@@ -330,6 +334,79 @@ links:
     cp -R docs/dist site/docs
     lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
 
+# The getting started path, run in order and timed.
+#
+# Not in `just gate`. It needs a Docker daemon and it takes minutes, because it
+# really does build an image, branch a database, and wait for a service to
+# answer. The daily schedule in .github/workflows/walkthrough.yml is where it
+# runs unattended; run it here before changing anything a new user touches.
+walkthrough:
+    go run ./tools/walkthrough .
+
+# The examples build and their manifests are valid.
+#
+# An example that does not compile is worse than no example: it is the first
+# thing a user copies. They are separate modules, outside the workspace on
+# purpose, so that an example's dependencies never enter the engine's module
+# graph, which means `go build ./...` at the root does not see them and this
+# recipe is the only thing that does.
+examples:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for dir in examples/*/; do
+      [ -f "$dir/go.mod" ] || continue
+      echo "  $dir"
+      # -o /dev/null, because a bare `go build ./...` writes the binary into
+      # the example directory and the next `git add -A` stages it. That has
+      # happened here twice.
+      (cd "$dir" && GOWORK=off go build -o /dev/null ./... && GOWORK=off go vet ./...)
+    done
+    # The same rule for the examples that are not Go. An example that does not
+    # build is worse than no example whatever it is written in, and checking
+    # only the compiled ones would have left the newest one unchecked by the
+    # gate that exists to say exactly this.
+    for dir in examples/*/; do
+      [ -f "$dir/package.json" ] || continue
+      echo "  $dir"
+      (cd "$dir" && npm ci --no-audit --no-fund --silent && npm run build)
+    done
+    # And the ones written in Python. There is no compile step, so the check
+    # that means something is the framework's own: `manage.py check` loads the
+    # settings, the URL conf and every model, which is where a typo in any of
+    # them shows up. DATABASE_URL is a placeholder because check does not
+    # connect; the example refuses to start without one, deliberately, and this
+    # gate should not be the thing that discovers that.
+    for dir in examples/*/; do
+      [ -f "$dir/requirements.txt" ] || continue
+      echo "  $dir"
+      (
+        cd "$dir"
+        python3 -m venv .venv-gate
+        ./.venv-gate/bin/pip install -q --disable-pip-version-check -r requirements.txt
+        ./.venv-gate/bin/python -m compileall -q . -x '\.venv-gate'
+        if [ -f manage.py ]; then
+          DATABASE_URL="postgres://gate:gate@127.0.0.1:5432/gate" \
+            ./.venv-gate/bin/python manage.py check
+        fi
+        rm -rf .venv-gate
+      )
+    done
+    go build -o /tmp/af-examples ./engine/cmd/af
+    for dir in examples/*/; do
+      [ -f "$dir/antifailure.yaml" ] || continue
+      (cd "$dir" && /tmp/af-examples explain > /dev/null)
+      echo "  $dir manifest is valid"
+    done
+
+# How hard each page is to read, worst first.
+#
+# The threshold is a regression guard rather than a style rule. The hardest
+# page today averages 23 words a sentence, so 28 leaves five words of headroom:
+# it fires on a page that drifted, not on a page whose subject needs long
+# sentences. Run it with no argument to read the whole report.
+readability:
+    go run ./tools/readability . --max 28
+
 # The G8 forbidden token scan: notes to the author, unfilled slots, names that
 # belong to a person rather than the product, addresses that resolve only on
 # somebody's private network, and identifiers that name a real cloud tenant.
@@ -339,6 +416,16 @@ forbidden:
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
+
+# Every manifest shown in the documentation is one the engine would accept.
+#
+# The gates already read style, spelling, links and repository paths, and none
+# of them knows what a manifest is. A getting started page shipped telling
+# readers to set control_plane.url, which the engine refuses with AF-MAN-002
+# because the schema closes itself so a typo cannot silently change an
+# environment.
+manifestcheck:
+    go run ./tools/manifestcheck .
 
 # This justfile runs what CI runs.
 gatecheck:
@@ -375,12 +462,17 @@ _generated:
     (cd engine && go test ./internal/policy -update-vectors)
     (cd engine && go test ./internal/cli -update-reference)
     (cd engine && go test ./internal/events -update-schema)
+    (cd engine && go test ./internal/masking -update-transforms)
+    (cd engine && go test ./internal/hud -update-frames)
     git diff --exit-code -- \
       engine/internal/errors/codes.gen.go \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
       schemas/events.v1.json \
       docs/src/content/docs/reference/cli.md \
+      docs/src/content/docs/reference/transforms.md \
+      docs/src/content/docs/guides/dashboard.md \
+      engine/internal/hud/testdata \
       docs/src/content/docs/reference/schemas
 
 # Regenerate and keep the result.
@@ -391,6 +483,8 @@ generate:
     cd engine && go test ./internal/policy -update-vectors
     cd engine && go test ./internal/cli -update-reference
     cd engine && go test ./internal/events -update-schema
+    cd engine && go test ./internal/masking -update-transforms
+    cd engine && go test ./internal/hud -update-frames
 
 # The community build does not contain or need the enterprise edition.
 edition:
@@ -470,10 +564,9 @@ vuln:
 
 # The linter set CONTRIBUTING describes.
 #
-# Not part of `just gate`. There are findings that predate the config, in
-# packages several people are editing at once, and a gate that fails every
-# branch for something none of them did is a gate people learn to route around.
-# It goes into `gate` when the count reaches zero.
+# Part of `just gate` since the count reached zero. It was kept out while there
+# were findings that predated the config, because a gate that fails every
+# branch for something none of them did is one people learn to route around.
 lint:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -481,4 +574,9 @@ lint:
       echo "golangci-lint is not installed. brew install golangci-lint"
       exit 1
     fi
-    cd engine && golangci-lint run --timeout 15m ./...
+    cd engine
+    # verify before run. `run` does not validate the config, so an invalid one
+    # passes locally and fails the moment CI's action verifies it, which is
+    # exactly what happened with an empty misspell key.
+    golangci-lint config verify
+    golangci-lint run --timeout 15m ./...

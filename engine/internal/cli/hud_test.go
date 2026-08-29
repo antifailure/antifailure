@@ -126,3 +126,39 @@ func TestUp_RefusesTheDashboardAndJSONTogether(t *testing.T) {
 	require.NotZero(t, code, "the conflict should be an error, not a silent choice")
 	require.Contains(t, errW.String()+out.String(), "--hud")
 }
+
+// failingWriter refuses everything, the way a full disk or a closed pipe does.
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+// A command that could not write its output did not succeed. Reporting zero
+// would tell a script that the output it never received is complete, and that
+// is the one thing it must not be told.
+func TestExecute_ReportsFailureWhenTheOutputStreamIsBroken(t *testing.T) {
+	var errW bytes.Buffer
+	broken := failingWriter{err: errors.New("no space left on device")}
+
+	code := Execute(context.Background(), []string{"version"}, Options{
+		Stdout: broken, Stderr: &errW, Stdin: strings.NewReader(""),
+		Getenv: func(string) string { return "" },
+		Clock:  clock.New(), WorkDir: t.TempDir(),
+	})
+
+	require.NotZero(t, code, "a command whose output went nowhere reported success")
+	require.Contains(t, errW.String(), "could not write output")
+	require.Contains(t, errW.String(), "no space left on device",
+		"the reason has to reach the person, not just the exit code")
+}
+
+// The ordinary case is unchanged: a working stream still exits zero.
+func TestExecute_StillSucceedsWhenTheOutputStreamWorks(t *testing.T) {
+	var out, errW bytes.Buffer
+	code := Execute(context.Background(), []string{"version"}, Options{
+		Stdout: &out, Stderr: &errW, Stdin: strings.NewReader(""),
+		Getenv: func(string) string { return "" },
+		Clock:  clock.New(), WorkDir: t.TempDir(),
+	})
+	require.Zero(t, code, errW.String())
+	require.Contains(t, out.String(), "antifailure")
+}

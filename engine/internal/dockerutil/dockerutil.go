@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
@@ -228,7 +229,7 @@ var ErrNotOurs = errors.New("dockerutil: the resource is not managed by Antifail
 func RemoveContainer(ctx context.Context, cli *client.Client, id string) error {
 	insp, err := cli.ContainerInspect(ctx, id)
 	if err != nil {
-		if client.IsErrNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return nil
 		}
 		return err
@@ -237,7 +238,7 @@ func RemoveContainer(ctx context.Context, cli *client.Client, id string) error {
 		return fmt.Errorf("%w: container %s", ErrNotOurs, ShortID(id))
 	}
 	err = cli.ContainerRemove(ctx, id, container.RemoveOptions{Force: true, RemoveVolumes: true})
-	if err != nil && client.IsErrNotFound(err) {
+	if err != nil && cerrdefs.IsNotFound(err) {
 		return nil
 	}
 	return err
@@ -258,7 +259,7 @@ func RemoveContainer(ctx context.Context, cli *client.Client, id string) error {
 func RemoveNetwork(ctx context.Context, cli *client.Client, id string) error {
 	insp, err := cli.NetworkInspect(ctx, id, network.InspectOptions{})
 	if err != nil {
-		if client.IsErrNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return nil
 		}
 		return err
@@ -266,7 +267,7 @@ func RemoveNetwork(ctx context.Context, cli *client.Client, id string) error {
 	if !IsOurs(insp.Labels) {
 		return fmt.Errorf("%w: network %s", ErrNotOurs, id)
 	}
-	if err := cli.NetworkRemove(ctx, id); err != nil && !client.IsErrNotFound(err) {
+	if err := cli.NetworkRemove(ctx, id); err != nil && !cerrdefs.IsNotFound(err) {
 		return err
 	}
 	return nil
@@ -284,7 +285,7 @@ func RemoveNetwork(ctx context.Context, cli *client.Client, id string) error {
 func RemoveVolume(ctx context.Context, cli *client.Client, id string) error {
 	insp, err := cli.VolumeInspect(ctx, id)
 	if err != nil {
-		if client.IsErrNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return nil
 		}
 		return err
@@ -292,7 +293,7 @@ func RemoveVolume(ctx context.Context, cli *client.Client, id string) error {
 	if !IsOurs(insp.Labels) {
 		return fmt.Errorf("%w: volume %s", ErrNotOurs, id)
 	}
-	if err := cli.VolumeRemove(ctx, id, true); err != nil && !client.IsErrNotFound(err) {
+	if err := cli.VolumeRemove(ctx, id, true); err != nil && !cerrdefs.IsNotFound(err) {
 		return err
 	}
 	return nil

@@ -1,100 +1,104 @@
 "use client";
 
-import { Caret } from "@/components/motion/Caret";
+import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/cn";
-import {
-  fmtHMS,
-  span,
-  typed,
-  useHeroFilmClock,
-  type FilmProps,
-} from "./clock";
-
-export type { FilmProps };
+import { span, useHeroFilmClock, type FilmProps } from "./clock";
+import { easeInOut, Label, Meta, Pill, moveStyle, smooth } from "./linear";
 
 const LOOP = 8;
-const HOST = "fix-billing-184.preview.internal";
-const TTL0 = 761;
 
-export function TwinFilm({ active }: FilmProps) {
-  const { ref, t, playing } = useHeroFilmClock({
+const STACK = ["api", "worker", "postgres"] as const;
+
+export function TwinFilm({ active, hovered }: FilmProps) {
+  const { ref, t } = useHeroFilmClock({
     loop: LOOP,
     active,
-    hovered: false,
-    stillT: 5.2,
-    reducedT: 5.2,
+    hovered,
+    stillT: 0,
+    reducedT: 0,
   });
 
-  const host = typed(HOST, t, 1.0, 22);
-  const hostDone = host.length >= HOST.length;
-  const inset = span(t, 0.35, 1.0);
-  const ttlSec = t < 1.0 ? TTL0 : Math.max(0, TTL0 - (t - 1) * 4);
+  const page = easeInOut(span(t, 3.1, 4.25));
+  const isolated = smooth(span(t, 5.2, 6.0));
 
   return (
-    <div ref={ref} className="absolute inset-0 flex flex-col gap-2 p-3 font-sans select-none" aria-hidden>
-      <EnvWindow
-        label="baseline"
-        host="prod.internal"
-        ttl={fmtHMS(TTL0)}
-        dim
-      />
-      <EnvWindow
-        label="candidate"
-        host={host}
-        ttl={fmtHMS(ttlSec)}
-        live={hostDone}
-        caret={playing && t >= 1.0 && !hostDone}
-        inset={inset}
-      />
+    <div ref={ref} className="absolute inset-0 overflow-hidden font-sans select-none" aria-hidden>
+      <div
+        className="absolute inset-3.5"
+        style={moveStyle({ opacity: 1 - page, scale: 1 + page * 0.22, y: page * 8 })}
+      >
+        <EnvCard
+          className="absolute inset-x-1 top-0 h-[58%]"
+          label="baseline"
+          host="prod.internal"
+          ttl="12:41"
+          dim
+        />
+        <div className="absolute inset-x-0 bottom-0 top-7">
+          <EnvCard label="candidate" host="fix-billing-184" ttl="12:38" live />
+        </div>
+      </div>
+
+      <div
+        className="absolute inset-3.5"
+        style={moveStyle({ opacity: page, y: (1 - page) * 14, scale: 0.94 + page * 0.06 })}
+      >
+        <EnvCard className="h-full" label="candidate" host="fix-billing-184" ttl="12:38" live>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {STACK.map((name, i) => {
+              const show = smooth(span(t, 4.15 + i * 0.22, 4.85 + i * 0.22));
+              return (
+                <span key={name} style={moveStyle({ opacity: show, y: (1 - show) * 5 })}>
+                  <Pill>{name}</Pill>
+                </span>
+              );
+            })}
+            <span style={moveStyle({ opacity: isolated, y: (1 - isolated) * 5 })}>
+              <Pill tone="ok">isolated</Pill>
+            </span>
+          </div>
+        </EnvCard>
+      </div>
     </div>
   );
 }
 
-function EnvWindow({
+function EnvCard({
   label,
   host,
   ttl,
   dim,
   live,
-  caret,
-  inset = 0,
+  className,
+  style,
+  children,
 }: {
   label: string;
   host: string;
   ttl: string;
   dim?: boolean;
   live?: boolean;
-  caret?: boolean;
-  inset?: number;
+  className?: string;
+  style?: CSSProperties;
+  children?: ReactNode;
 }) {
   return (
     <div
       className={cn(
-        "relative flex min-h-0 flex-1 flex-col justify-between overflow-hidden rounded-[2px] px-2.5 py-2",
-        dim ? "bg-white/40 ring-1 ring-black/10" : "bg-white/70 ring-1 ring-black/10",
+        "flex h-full flex-col justify-between rounded-[10px] border border-black/[0.08] bg-white px-2.5 py-2",
+        dim && "bg-[#F7F7F8]",
+        className,
       )}
-      style={
-        dim
-          ? { opacity: 0.55 }
-          : { boxShadow: "inset 0 0 0 1px #33BF00", opacity: 0.7 + inset * 0.3 }
-      }
+      style={style}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="font-sans text-[10px] tracking-extra-tight text-black/45">{label}</span>
-        {live ? (
-          <span className="font-sans text-[10px] tracking-extra-tight text-[#33BF00]">live</span>
-        ) : (
-          <span className="font-sans text-[10px] tracking-extra-tight text-black/35">idle</span>
-        )}
+        <Label>{label}</Label>
+        <Meta className={live ? "text-[#1A1A1A]" : undefined}>{live ? "live" : "idle"}</Meta>
       </div>
       <div className="min-w-0">
-        <div className="break-all font-sans text-[11px] tracking-extra-tight text-[#285D49]">
-          {host}
-          {caret ? <Caret className="bg-black" /> : null}
-        </div>
-        <div className="mt-1 font-sans text-[10px] tabular-nums tracking-extra-tight text-black/45">
-          ttl {ttl}
-        </div>
+        <div className="truncate text-[12px] tracking-extra-tight text-[#1A1A1A]">{host}</div>
+        <Meta className="mt-0.5 block tabular-nums">ttl {ttl}</Meta>
+        {children}
       </div>
     </div>
   );

@@ -13,6 +13,7 @@
 // /auth/* is the sign-in exchange, which by definition has no session yet.
 
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import { sql as rawSql } from 'drizzle-orm'
 import { trpcServer } from '@hono/trpc-server'
 import type { Pool } from '@antifailure/db'
@@ -29,7 +30,13 @@ import {
   type IncomingEvent,
 } from './ingest.ts'
 import type { GitHubClient } from './auth/github.ts'
-import { beginSignIn, completeSignIn, SignInError, safeRedirect } from './auth/signin.ts'
+import {
+  beginSignIn,
+  completeSignIn,
+  SignInError,
+  safeRedirect,
+  type SignInAllowlist,
+} from './auth/signin.ts'
 import {
   CSRF_HEADER,
   SESSION_COOKIE,
@@ -41,6 +48,27 @@ import {
   revokeSession,
   sessionCookie,
 } from './auth/session.ts'
+import {
+  approveDeviceCode,
+  denyDeviceCode,
+  describePending,
+  DeviceError,
+  identify,
+  redeemDeviceCode,
+  requestDeviceCode,
+  revokeCliToken,
+} from './auth/device.ts'
+import { mountConsole } from './console/index.ts'
+import { PROVIDERS, type Provider } from './providers/seal.ts'
+import {
+  listBudgets,
+  listKeys,
+  MAY_MANAGE_KEYS,
+  ProviderKeyError,
+  revokeKey,
+  saveKey,
+  setBudget,
+} from './providers/store.ts'
 import { openApiDocument } from './openapi.ts'
 import { limitFor, bucketFor, ENDPOINT_LIMITS, type EndpointLimit } from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
@@ -53,6 +81,14 @@ export interface ServerOptions {
   secureCookies?: boolean
   /** Where the browser lands after signing in. */
   appBaseUrl?: string
+  /** Who may sign in at all. Null is open, which is the self-hosted default.
+   *  See parseAllowlist: an empty list is closed to everyone, not open. */
+  signInAllowlist?: SignInAllowlist
+  /** Set false to serve the API alone, without the console's pages. */
+  console?: boolean
+  /** The secret that seals provider keys. Null means keys cannot be stored,
+   *  which the console says out loud rather than failing on submit. */
+  sealingKey?: Buffer | null
   ingestLimit?: { rate: number; burst: number }
   authLimit?: { rate: number; burst: number }
   /** The build, reported as a label on af_control_plane_info so a graph can
@@ -63,6 +99,37 @@ export interface ServerOptions {
    *  sharing counters means one test passes because of another. */
   metrics?: ControlPlaneMetrics
 }
+
+/**
+ * What a token minted by `af login` may ever hold.
+ *
+ * A closed list rather than a free string. A terminal asks for scopes and the
+ * request is intersected with this, so a client cannot invent a capability by
+ * naming one, and adding a capability is a change to this line rather than a
+ * change to whatever a caller happened to send.
+ */
+export const CLI_SCOPES: readonly string[] = ['environments.view', 'runs.view', 'events.write']
+
+/**
+ * Everything a CLI token may hold if somebody asks for it and approves it.
+ *
+ * Wider than the default on purpose, and the gap between the two lists is the
+ * design. `af login` with no arguments gets CLI_SCOPES: read environments and
+ * runs, write events, and nothing that can cost money or change a secret. A
+ * terminal that needs to manage provider keys has to ask, and the person
+ * approving sees exactly what was asked for on the screen where they approve.
+ *
+ * Note what is NOT here and never will be: a scope that reads a provider key
+ * back. The CLI can store one, replace one, remove one and cap its spend, and
+ * it cannot retrieve one. Storing a secret and reading a secret are different
+ * capabilities, and a terminal has no reason for the second.
+ */
+export const GRANTABLE_SCOPES: readonly string[] = [
+  ...CLI_SCOPES,
+  'providers.view',
+  'providers.write',
+]
+
 
 export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
@@ -173,7 +240,51 @@ export function createServer(options: ServerOptions) {
     c.header('x-frame-options', 'DENY')
   })
 
+  // Liveness. Deliberately a static literal that touches nothing: it answers
+  // "is this process running", and it is not allowed to imply more.
   app.get('/health', (c) => c.json({ ok: true }))
+
+  // Readiness, which is a different question, and the difference is not
+  // academic.
+  //
+  // The first deploy of this application to Azure answered /health with 200 for
+  // thirteen minutes while every endpoint that touched a table returned 500.
+  // The schema had never applied, because the managed Postgres refused
+  // CREATE EXTENSION pgcrypto, and nothing that was being monitored could tell.
+  // A health check that cannot fail for the most common cause of an unusable
+  // deploy is decoration.
+  //
+  // So this one takes a connection out of the pool the application actually
+  // serves with and asks the database a question. It reports the build as well,
+  // because the second thing a deploy gate needs to know, after "is it well",
+  // is "is it the build I just deployed" -- otherwise a rollout that silently
+  // did not happen passes every check.
+  app.get('/readyz', async (c) => {
+    const build = {
+      version: process.env.AF_VERSION ?? 'dev',
+      commit: process.env.AF_COMMIT ?? 'unknown',
+    }
+    try {
+      await options.pool.withoutTenant(async (db) => {
+        await db.execute(rawSql`SELECT 1`)
+      })
+    } catch (err) {
+      // 503, not 500. This is "not ready to receive traffic", which is what a
+      // load balancer and a deploy gate both act on, and it is what makes an
+      // automatic rollback fire rather than a page at three in the morning.
+      return c.json(
+        {
+          ready: false,
+          ...build,
+          // The message and not the stack. A readiness endpoint is unauthenticated.
+          reason: err instanceof Error ? err.message : 'the database did not answer',
+        },
+        503,
+      )
+    }
+    return c.json({ ready: true, ...build })
+  })
+
   app.get('/openapi.json', (c) => c.json(openApiDocument()))
 
   // Prometheus scrapes this. It reads only counters this process kept itself
@@ -186,6 +297,13 @@ export function createServer(options: ServerOptions) {
     c.header('content-type', 'text/plain; version=0.0.4; charset=utf-8')
     return c.body(metrics.registry.render())
   })
+
+  // Resolving the browser's session, for the routes that need one outside tRPC.
+  async function sessionFrom(cookie: string | undefined) {
+    const token = readCookie(cookie, SESSION_COOKIE)
+    if (!token) return null
+    return resolveSession(options.pool, clock, token)
+  }
 
   // -------------------------------------------------------------------------
   // Sign in
@@ -215,7 +333,13 @@ export function createServer(options: ServerOptions) {
     }
 
     try {
-      const result = await completeSignIn(options.pool, clock, options.github, { code, state })
+      const result = await completeSignIn(
+        options.pool,
+        clock,
+        options.github,
+        { code, state },
+        options.signInAllowlist ?? null,
+      )
       // Rotation. Any session the browser already holds is destroyed, so a
       // cookie planted before sign-in cannot ride the login that follows it.
       const existing = readCookie(c.req.header('cookie'), SESSION_COOKIE)
@@ -258,6 +382,443 @@ export function createServer(options: ServerOptions) {
       // it is derived from the session secret and reveals nothing about it.
       csrfToken: session.csrfToken,
     })
+  })
+
+  // -------------------------------------------------------------------------
+  // Signing in a terminal
+  //
+  // Four endpoints, and which of them needs a session is the whole design. The
+  // two the terminal calls have no session and cannot have one; the two the
+  // browser calls require one, and the organization the terminal ends up in
+  // comes from that session rather than from anything the terminal asked for.
+  // -------------------------------------------------------------------------
+
+  /** The terminal asks. No authentication: this is where a login begins. */
+  app.post('/auth/device/code', async (c) => {
+    let body: { clientLabel?: unknown; scopes?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      // A body is optional. A terminal that sends none gets the defaults.
+    }
+    const label =
+      typeof body.clientLabel === 'string' && body.clientLabel.trim()
+        ? body.clientLabel.trim()
+        : 'a terminal'
+    // Scopes are taken from the request and recorded, but never trusted to
+    // widen anything: they are intersected with what a CLI token may ever hold,
+    // so a terminal cannot ask for a capability that does not exist.
+    //
+    // Asking for nothing gets the default set, which is the read-mostly one. A
+    // terminal that wants more names it, and the name reaches the approval
+    // screen, so nobody grants provider-key management without seeing the words.
+    const asked = Array.isArray(body.scopes) ? body.scopes.filter((s) => typeof s === 'string') : []
+    const scopes = asked.length
+      ? asked.filter((s) => GRANTABLE_SCOPES.includes(s))
+      : [...CLI_SCOPES]
+    if (asked.length && scopes.length === 0) {
+      // Every scope asked for was refused. Issuing a code for a token that can
+      // do nothing would produce a login that appears to work and then fails at
+      // the first command, which is the worst place to learn about it.
+      return c.json(
+        {
+          error: 'invalid_scope',
+          error_description: `None of those scopes exist. Available: ${GRANTABLE_SCOPES.join(', ')}.`,
+        },
+        400,
+      )
+    }
+
+    const origin = options.appBaseUrl ?? new URL(c.req.url).origin
+    const issued = await requestDeviceCode(options.pool, clock, {
+      clientLabel: label,
+      scopes,
+      baseUrl: origin,
+    })
+    return c.json({
+      device_code: issued.deviceCode,
+      user_code: issued.userCode,
+      verification_uri: issued.verificationUri,
+      verification_uri_complete: issued.verificationUriComplete,
+      expires_in: issued.expiresIn,
+      interval: issued.interval,
+    })
+  })
+
+  /** The terminal collects. Still no session: it holds the device code. */
+  app.post('/auth/device/token', async (c) => {
+    let body: { device_code?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'invalid_request', error_description: 'The body is not JSON.' }, 400)
+    }
+    const deviceCode = typeof body.device_code === 'string' ? body.device_code : ''
+    if (!deviceCode) {
+      return c.json({ error: 'invalid_request', error_description: 'device_code is required.' }, 400)
+    }
+
+    try {
+      const token = await redeemDeviceCode(options.pool, clock, deviceCode)
+      return c.json({
+        access_token: token.accessToken,
+        token_type: token.tokenType,
+        expires_in: token.expiresIn,
+        scope: token.scopes.join(' '),
+      })
+    } catch (err) {
+      if (err instanceof DeviceError) {
+        // 400 with an error code, as RFC 8628 specifies. The CLI switches on
+        // the code: authorization_pending and slow_down mean keep going, and
+        // anything else means stop. A single generic failure would make a
+        // client either poll forever or quit on the first tick.
+        return c.json({ error: err.code, error_description: err.message }, 400)
+      }
+      throw err
+    }
+  })
+
+  /** What the browser shows before somebody approves. Needs a session. */
+  app.get('/auth/device/pending', async (c) => {
+    const session = await sessionFrom(c.req.header('cookie'))
+    if (!session) return c.json({ error: 'Sign in first.' }, 401)
+    const pending = await describePending(options.pool, clock, c.req.query('code') ?? '')
+    if (!pending) {
+      return c.json({ error: 'That code is not valid any more. Run af login again.' }, 404)
+    }
+    return c.json({
+      userCode: pending.userCode,
+      clientLabel: pending.clientLabel,
+      scopes: pending.scopes,
+      expiresAt: pending.expiresAt.toISOString(),
+      // Shown so the person approving knows which tenant they are handing over.
+      organization: session.orgId,
+    })
+  })
+
+  /** Approval. The tenant comes from the session, never from the request. */
+  app.post('/auth/device/approve', async (c) => {
+    const session = await sessionFrom(c.req.header('cookie'))
+    if (!session) return c.json({ error: 'Sign in first.' }, 401)
+    if (!session.orgId) {
+      // Signed in with no organization. Approving would have to invent a
+      // tenant, and inventing one is how a terminal ends up in the wrong
+      // company's data.
+      return c.json(
+        { error: 'You are not a member of an organization yet, so there is nothing to grant.' },
+        403,
+      )
+    }
+    if (!csrfMatches(readCookie(c.req.header('cookie'), SESSION_COOKIE)!, c.req.header(CSRF_HEADER))) {
+      return c.json({ error: `This request needs the ${CSRF_HEADER} header from GET /auth/session.` }, 403)
+    }
+
+    let body: { user_code?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    try {
+      await approveDeviceCode(options.pool, clock, {
+        userCode: String(body.user_code ?? ''),
+        userId: session.userId,
+        orgId: session.orgId,
+        actorLabel: session.label,
+      })
+      return c.json({ approved: true })
+    } catch (err) {
+      if (err instanceof DeviceError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+  })
+
+  app.post('/auth/device/deny', async (c) => {
+    const session = await sessionFrom(c.req.header('cookie'))
+    if (!session) return c.json({ error: 'Sign in first.' }, 401)
+    if (!csrfMatches(readCookie(c.req.header('cookie'), SESSION_COOKIE)!, c.req.header(CSRF_HEADER))) {
+      return c.json({ error: `This request needs the ${CSRF_HEADER} header from GET /auth/session.` }, 403)
+    }
+    let body: { user_code?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    try {
+      await denyDeviceCode(options.pool, clock, String(body.user_code ?? ''))
+      return c.json({ denied: true })
+    } catch (err) {
+      if (err instanceof DeviceError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // What a CLI token is
+  // -------------------------------------------------------------------------
+
+  /** `af whoami`. Answers for a CLI token and for nothing else. */
+  app.get('/v1/whoami', async (c) => {
+    const auth = c.req.header('authorization') ?? ''
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
+    const who = await identify(options.pool, clock, token)
+    if (!who) {
+      // The same answer for a revoked token, an expired one, a made-up one, and
+      // an engine token. An engine token is deliberately not an identity: a
+      // machine is not a person, and answering with one would put a machine's
+      // actions in somebody's name.
+      return c.json({ error: 'This token is not valid.' }, 401)
+    }
+    return c.json({
+      login: who.login,
+      name: who.name,
+      organization: who.orgSlug,
+      role: who.role,
+      scopes: who.scopes,
+      tokenPrefix: who.tokenPrefix,
+      expiresAt: who.expiresAt ? who.expiresAt.toISOString() : null,
+    })
+  })
+
+  /** `af logout`, server side. The token stops working everywhere, not just here. */
+  app.post('/v1/logout', async (c) => {
+    const auth = c.req.header('authorization') ?? ''
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
+    if (!token) return c.json({ error: 'This token is not valid.' }, 401)
+    const { revoked } = await revokeCliToken(options.pool, clock, token)
+    // 200 either way. Signing out has to be idempotent: a client retrying after
+    // a timeout must not be told its second attempt failed, and a token that
+    // was already revoked is in exactly the state the caller asked for.
+    return c.json({ revoked })
+  })
+
+  // -------------------------------------------------------------------------
+  // Provider keys, from a terminal
+  // -------------------------------------------------------------------------
+  //
+  // The same capability the console has, reachable by `af provider`. It exists
+  // because the console is not always where the person is: a key gets rotated
+  // from a laptop at the end of an incident, and telling somebody to open a
+  // browser to do it is how a rotation gets postponed.
+  //
+  // Three gates, in this order, and each one refuses for a different reason:
+  //
+  //   1. The token is a CLI token that is live and belongs to a member.
+  //   2. It carries the scope. A token minted by a plain `af login` does not,
+  //      so the capability is not silently attached to every terminal that
+  //      ever signed in -- somebody had to ask for it and approve it.
+  //   3. The person is an owner or an admin. Scope says what the TOKEN may do;
+  //      role says what the PERSON may do, and a member who cannot change a
+  //      key in the console must not be able to change one from a shell.
+  //
+  // The plaintext key travels in one direction only. There is no route here
+  // that returns a key, and there is no scope that would grant one.
+
+  interface CliCaller {
+    orgId: string
+    userId: string
+    label: string
+  }
+
+  /** Applies the three gates and answers with the reason it refused. */
+  async function providerCaller(
+    c: Context,
+    need: 'providers.view' | 'providers.write',
+  ): Promise<CliCaller | Response> {
+    const header = c.req.header('authorization') ?? ''
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+    const who = await identify(options.pool, clock, token)
+    if (!who) return c.json({ error: 'This token is not valid.' }, 401)
+
+    if (!who.scopes.includes(need)) {
+      // Named in the message, because the fix is a specific command and a
+      // caller who is told only "forbidden" will go looking for a role problem.
+      return c.json(
+        {
+          error:
+            `This token does not carry ${need}. Run: af login --scope ${need}` +
+            ` -- and approve it in the browser.`,
+          scopes: who.scopes,
+        },
+        403,
+      )
+    }
+    if (need === 'providers.write' && !MAY_MANAGE_KEYS.has(who.role)) {
+      return c.json(
+        { error: `Changing a provider key needs owner or admin. You are ${who.role}.` },
+        403,
+      )
+    }
+    return { orgId: who.orgId, userId: who.userId, label: who.login }
+  }
+
+  function isResponse(v: CliCaller | Response): v is Response {
+    return v instanceof Response
+  }
+
+  /** The provider from the path, or null. Never trusted into a query unchecked. */
+  function providerParam(raw: string): Provider | null {
+    return (PROVIDERS as string[]).includes(raw) ? (raw as Provider) : null
+  }
+
+  app.get('/v1/providers', async (c) => {
+    const caller = await providerCaller(c, 'providers.view')
+    if (isResponse(caller)) return caller
+    const [keys, budgets] = await Promise.all([
+      listKeys(options.pool, caller.orgId),
+      listBudgets(options.pool, clock, caller.orgId),
+    ])
+    return c.json({
+      // Whether a key CAN be stored at all. Reported rather than discovered on
+      // a failed write, so `af provider list` on an installation with no
+      // sealing secret says so instead of looking merely empty.
+      sealing: Boolean(options.sealingKey),
+      keys: keys.map((k) => ({
+        provider: k.provider,
+        last4: k.last4,
+        fingerprint: k.fingerprint,
+        createdAt: k.createdAt.toISOString(),
+        rotatedAt: k.rotatedAt ? k.rotatedAt.toISOString() : null,
+      })),
+      budgets: budgets.map((b) => ({
+        provider: b.provider,
+        period: b.period,
+        capUsd: b.capUsd,
+        spentUsd: b.spentUsd,
+        remainingUsd: b.remainingUsd,
+      })),
+    })
+  })
+
+  app.put('/v1/providers/:provider', async (c) => {
+    const caller = await providerCaller(c, 'providers.write')
+    if (isResponse(caller)) return caller
+    const provider = providerParam(c.req.param('provider'))
+    if (!provider) {
+      return c.json({ error: `Unknown provider. Known: ${PROVIDERS.join(', ')}.` }, 400)
+    }
+    if (!options.sealingKey) {
+      return c.json(
+        {
+          error:
+            'This control plane has no sealing secret, so a key cannot be stored. ' +
+            'Set AF_PROVIDER_KEY_SECRET and restart it.',
+        },
+        503,
+      )
+    }
+    let body: { key?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    const key = typeof body.key === 'string' ? body.key : ''
+    if (!key.trim()) return c.json({ error: 'The body needs a key.' }, 400)
+
+    try {
+      const result = await saveKey(options.pool, clock, options.sealingKey, {
+        orgId: caller.orgId,
+        provider,
+        key,
+        actorUserId: caller.userId,
+        actorLabel: caller.label,
+        origin: 'cli',
+      })
+      return c.json({
+        provider,
+        last4: result.stored.last4,
+        fingerprint: result.stored.fingerprint,
+        replaced: result.replaced,
+        // Said back rather than swallowed. Pasting the key that is already
+        // there is the mistake somebody makes at the moment they believe they
+        // have just rotated it.
+        sameAsBefore: result.sameAsBefore,
+      })
+    } catch (err) {
+      // The message is the complaint about the SHAPE of the key -- that it
+      // starts with the other provider's prefix, that a whole export line was
+      // pasted. It never contains the key.
+      if (err instanceof ProviderKeyError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+  })
+
+  app.delete('/v1/providers/:provider', async (c) => {
+    const caller = await providerCaller(c, 'providers.write')
+    if (isResponse(caller)) return caller
+    const provider = providerParam(c.req.param('provider'))
+    if (!provider) {
+      return c.json({ error: `Unknown provider. Known: ${PROVIDERS.join(', ')}.` }, 400)
+    }
+    const { revoked } = await revokeKey(options.pool, clock, {
+      orgId: caller.orgId,
+      provider,
+      actorLabel: caller.label,
+      actorUserId: caller.userId,
+      origin: 'cli',
+    })
+    // 200 whether or not there was one. Removing a key has to be idempotent:
+    // a retry after a timeout must not report failure for reaching the state
+    // the caller asked for.
+    return c.json({ provider, revoked })
+  })
+
+  app.put('/v1/providers/:provider/budget', async (c) => {
+    const caller = await providerCaller(c, 'providers.write')
+    if (isResponse(caller)) return caller
+    const provider = providerParam(c.req.param('provider'))
+    if (!provider) {
+      return c.json({ error: `Unknown provider. Known: ${PROVIDERS.join(', ')}.` }, 400)
+    }
+    let body: { capUsd?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    // Strict, and deliberately not `Number(body.capUsd)`.
+    //
+    // Number(null) is 0 and Number('') is 0, so a coercing read turns a field
+    // a caller forgot to fill -- an unset shell variable interpolated into a
+    // JSON body -- into a cap of zero dollars. Zero is a legitimate cap, which
+    // is what makes this dangerous: nothing looks wrong until every run refuses
+    // with "the budget is spent". A cap of zero has to be asked for, not
+    // inferred from an absence.
+    //
+    // A numeric string is accepted because a person using curl writes one, and
+    // it is unambiguous. Nothing else is.
+    const raw = body.capUsd
+    const cap =
+      typeof raw === 'number'
+        ? raw
+        : typeof raw === 'string' && raw.trim() !== ''
+          ? Number(raw)
+          : NaN
+    if (!Number.isFinite(cap) || cap < 0) {
+      return c.json({ error: 'capUsd has to be a number of US dollars, zero or more.' }, 400)
+    }
+    try {
+      const budget = await setBudget(options.pool, clock, {
+        orgId: caller.orgId,
+        provider,
+        capUsd: cap,
+        actorLabel: caller.label,
+        actorUserId: caller.userId,
+        origin: 'cli',
+      })
+      return c.json({
+        provider: budget.provider,
+        period: budget.period,
+        capUsd: budget.capUsd,
+        spentUsd: budget.spentUsd,
+        remainingUsd: budget.remainingUsd,
+      })
+    } catch (err) {
+      if (err instanceof ProviderKeyError) return c.json({ error: err.message }, 400)
+      throw err
+    }
   })
 
   // -------------------------------------------------------------------------
@@ -429,6 +990,19 @@ export function createServer(options: ServerOptions) {
       },
     }),
   )
+
+  // The console, last, so that every API route above wins a path collision.
+  // Mounted on this app rather than a second one: the session cookie the
+  // browser holds is the session these pages read, and a separate origin would
+  // need CORS, a second cookie policy and a place to put a token in a client.
+  if (options.console !== false) {
+    mountConsole(app, {
+      pool: options.pool,
+      clock,
+      secureCookies: secure,
+      sealingKey: options.sealingKey ?? null,
+    })
+  }
 
   return { app, ingestLimiter, authLimiter, metrics }
 }

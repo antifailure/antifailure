@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/auth"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
@@ -45,6 +46,21 @@ type Env struct {
 	Getenv func(string) string
 	// Stdin is the input stream, for interactive prompts.
 	Stdin io.Reader
+	// Credentials is where the personal token lives. Nil means this
+	// platform's own store; read through CredentialStore, never directly.
+	Credentials *auth.Store
+}
+
+// CredentialStore is where af login put the token.
+//
+// One accessor rather than auth.NewStore() at each call site, so that a test
+// can substitute an in-memory keyring and a temporary directory in one place
+// and no command can reach past it to the real one by accident.
+func (e *Env) CredentialStore() *auth.Store {
+	if e.Credentials != nil {
+		return e.Credentials
+	}
+	return auth.NewStore()
 }
 
 // Interactive reports whether there is a terminal to ask a question on.
@@ -75,6 +91,15 @@ type Options struct {
 	// WorkDir overrides the working directory. Tests set it; the binary does
 	// not, and reads the process directory instead.
 	WorkDir string
+	// Credentials is where af login, af logout, af whoami and af provider read
+	// and write the personal token. Nil means the platform's own store.
+	//
+	// Injected for the same reason Getenv and Clock are: without it, a test of
+	// any command that reads a credential writes to the developer's keychain,
+	// prompts them for it on macOS, and leaves a token behind on a shared CI
+	// machine. So those commands had no end-to-end test at all, which is
+	// exactly the gap that lets a broken command ship looking fine.
+	Credentials *auth.Store
 }
 
 // Execute runs the command line and returns the process exit code.
@@ -103,12 +128,13 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	out.Color = DetectColor(opts.Stdout, opts.Getenv)
 
 	env := &Env{
-		Out:      out,
-		Clock:    opts.Clock,
-		Redactor: redact.New(),
-		Getenv:   opts.Getenv,
-		Stdin:    opts.Stdin,
-		WorkDir:  opts.WorkDir,
+		Out:         out,
+		Clock:       opts.Clock,
+		Redactor:    redact.New(),
+		Getenv:      opts.Getenv,
+		Stdin:       opts.Stdin,
+		WorkDir:     opts.WorkDir,
+		Credentials: opts.Credentials,
 	}
 	if env.WorkDir == "" {
 		wd, err := os.Getwd()
@@ -135,6 +161,15 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 
 	err := root.ExecuteContext(ctx)
 	if err == nil {
+		// A command that could not write what it was asked to write did not
+		// succeed. Reporting zero here tells a script that the output it just
+		// failed to receive is complete, which is the one thing it must not
+		// be told. The error goes to stderr because stdout is the stream that
+		// is broken.
+		if writeErr := out.WriteErr(); writeErr != nil {
+			_, _ = fmt.Fprintf(opts.Stderr, "af: could not write output: %v\n", writeErr)
+			return int(aferrors.ExitFailure)
+		}
 		return int(aferrors.ExitSuccess)
 	}
 
@@ -151,7 +186,10 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	// else is ours and gets the code, cause, and next step rendering.
 	var usage *usageError
 	if aferrors.As(err, &usage) || isUsageMessage(err) {
-		fmt.Fprintln(opts.Stderr, err.Error())
+		// Not checked, for the same reason as Output.Error: this is the path
+		// that reports a failure, and a broken error stream leaves nothing to
+		// report it to. The exit code below is what the caller reads.
+		_, _ = fmt.Fprintln(opts.Stderr, err.Error())
 		return int(aferrors.ExitUsage)
 	}
 	if out.Format == FormatJSON {
@@ -289,6 +327,10 @@ recoverable by replay.`),
 		newCICommand(env),
 		newRunnerCommand(env),
 		newSecretCommand(env),
+		newProviderCommand(env),
+		newLoginCommand(env),
+		newLogoutCommand(env),
+		newWhoamiCommand(env),
 		newLicenseCommand(env),
 		newVersionCommand(env),
 	)
@@ -300,15 +342,6 @@ recoverable by replay.`),
 		return &usageError{err: err}
 	})
 	return root
-}
-
-// notYetAvailable is what a command returns when its engine has not landed.
-//
-// It exits with a usage code and says so plainly. The alternative, a command
-// that appears to work and does nothing, is the exact failure this product
-// exists to prevent, and shipping one in our own binary would be indefensible.
-func notYetAvailable(name string) error {
-	return aferrors.Coded(aferrors.AFRUN001, "command", name)
 }
 
 // WithSignals returns a context cancelled by an interrupt, and a function that

@@ -74,7 +74,7 @@ func TestASecretInAnEventNeverReachesASpanAttribute(t *testing.T) {
 	var seen []string
 	for _, e := range spans[0].Events {
 		for _, a := range e.Attributes {
-			seen = append(seen, a.Value.Emit())
+			seen = append(seen, a.Value.String())
 		}
 	}
 	for _, v := range seen {

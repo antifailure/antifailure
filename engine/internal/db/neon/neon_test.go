@@ -106,8 +106,8 @@ func TestClientTreatsSkippedAsSuccess(t *testing.T) {
 	// Neon skips work already in the state it was asked for. Treating that as
 	// a failure would break every retry, which is the path this is on.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodDelete:
+		switch r.Method {
+		case http.MethodDelete:
 			writeJSON(w, map[string]any{
 				"operations": []map[string]any{{"id": "op-1", "action": "delete_timeline", "status": "skipped"}},
 			})

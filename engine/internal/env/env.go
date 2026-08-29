@@ -28,6 +28,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/build"
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	dblabdb "github.com/antifailure/antifailure/engine/internal/db/dblab"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
@@ -696,6 +697,39 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 		}
 		return p, nil
 
+	case schema.DBDBLab:
+		db := m.Database
+		if db.Project == "" {
+			return nil, aferrors.Coded(aferrors.AFMAN002,
+				"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+				"detail", "database.provider is dblab and database.project is empty; "+
+					"the provider needs the Database Lab Engine's API root, such as "+
+					"http://127.0.0.1:2345, because the engine is self hosted and there "+
+					"is no account to discover it from")
+		}
+		name := db.APIKeyEnv
+		if name == "" {
+			name = "DBLAB_VERIFICATION_TOKEN"
+		}
+		token, _, found, err := o.secretChain().Lookup(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || token.IsZero() {
+			// Refused rather than defaulted to an empty token. The engine will
+			// run without one, and an engine with no verification token is one
+			// anybody who can reach the port can clone production data from.
+			return nil, aferrors.Coded(aferrors.AFSEC001,
+				"names", name,
+				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
+		}
+		return dblabdb.New(dblabdb.Options{
+			Endpoint:    db.Project,
+			Token:       token,
+			Clock:       o.opts.Clock,
+			MaxBranches: db.MaxBranches,
+		})
+
 	default:
 		// Named in the schema and not built here. Saying so is better than
 		// quietly falling back to Docker, which would hand somebody an empty
@@ -890,13 +924,32 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// allow or block never terminates a connection, and asking its services to
 	// trust a certificate they will never see is a change to their trust store
 	// for no reason.
+	// The runtime's progress lines go to the event stream as well as to the
+	// terminal. They are the only thing said during the readiness wait, which
+	// is the longest part of a run, and in dashboard mode the terminal
+	// reporter is silenced, so without this the display goes quiet for
+	// minutes at exactly the point somebody is watching it.
+	names := make(map[string]bool, len(specs))
+	for _, sv := range specs {
+		names[sv.Name] = true
+	}
 	spec := provider.EnvSpec{
 		EnvID: o.envID, Branch: o.opts.Branch, Services: specs,
 		Egress:               o.opts.Manifest.Egress,
 		DatabaseURL:          insideURL,
 		MigrationDatabaseURL: insideMigrateURL,
 		Journal:              recordIntent,
-		Progress:             o.progress,
+		Progress: func(line string) {
+			// engine.progress, not service.log. A real run showed why: the
+			// non-TTY fallback folds service.log away as noise, correctly,
+			// because a service writes thousands of lines and a build log is
+			// not the place for them. These are lifecycle steps rather than
+			// service output, they arrive perhaps four times in a run, and
+			// folding them away restored exactly the silence this exists to
+			// end.
+			o.event(s, events.Progress, line, serviceField(line, names)...)
+			o.progress(line)
+		},
 	}
 	spec.SandboxCredentials = resolved.Sidecar
 	spec.ModelEnv = o.modelEnv()
@@ -962,10 +1015,13 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		if !svc.Ready {
 			t, level = events.ServiceExited, events.LevelError
 		}
+		// Empty fields are left off rather than sent empty. A real run showed
+		// "service.ready web is running detail= " on every line, because a
+		// service that started cleanly has no detail to give, and a key with
+		// nothing after it is noise in the one place a reader is scanning.
 		o.emit(s, level, t, svc.Name+" is "+orDefault(svc.State, "unknown"),
-			events.F("service", svc.Name), events.F("kind", svc.Kind),
-			events.F("url", svc.URL), events.F("state", svc.State),
-			events.F("detail", svc.Detail))
+			nonEmpty("service", svc.Name, "kind", svc.Kind,
+				"url", svc.URL, "state", svc.State, "detail", svc.Detail)...)
 	}
 	if err != nil {
 		return result, err
@@ -1033,6 +1089,38 @@ func codeOf(err error) aferrors.Code {
 		return e.Code()
 	}
 	return ""
+}
+
+// nonEmpty builds fields from key and value pairs, leaving out the values that
+// are empty.
+//
+// Variadic strings rather than a map so the order is the caller's: the display
+// sorts by key, but the NDJSON sink and anything reading the file get them as
+// written, and "service" first is what a person scanning a log wants.
+func nonEmpty(kv ...string) []events.Field {
+	out := make([]events.Field, 0, len(kv)/2)
+	for i := 0; i+1 < len(kv); i += 2 {
+		if kv[i+1] == "" {
+			continue
+		}
+		out = append(out, events.F(kv[i], kv[i+1]))
+	}
+	return out
+}
+
+// serviceField attaches a service name to a runtime progress line when the
+// line names one.
+//
+// The runtime writes "web: running migrations", so the name is the prefix. It
+// is matched against the services this environment actually has rather than
+// split on the first colon, because "error: something" is not a service called
+// error and a row named for one would be a row nobody can explain.
+func serviceField(line string, names map[string]bool) []events.Field {
+	name, _, ok := strings.Cut(line, ": ")
+	if !ok || !names[name] {
+		return nil
+	}
+	return []events.Field{events.F("service", name)}
 }
 
 // database makes sure a verified golden exists and branches it.

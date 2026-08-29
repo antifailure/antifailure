@@ -76,8 +76,9 @@ func usage() {
 
   azguard guard [--tags] -- <command> [args...]
       Extract every resource group named in the command (-g, --resource-group,
-      and Terraform's -var resource_group_name=) , check them, and run the
-      command only if every one is ours.
+      Terraform's -var resource_group_name=, and the resourceGroups segment of
+      any ARM resource id, which is how --scope and --ids name one), check
+      them, and run the command only if every one is ours.
 
 Exit codes: 0 allowed, 1 refused, 2 could not tell.
 `)
@@ -162,6 +163,12 @@ func cmdGuard(args []string) int {
 	}
 
 	groups := groupsIn(rest)
+	if len(groups) == 0 && subscriptionScoped(rest) {
+		fmt.Fprintf(os.Stderr, "azguard: refusing %q because it is scoped to the whole subscription.\n", strings.Join(rest, " "))
+		fmt.Fprintln(os.Stderr, "  ISOLATION.md: no role is ever assigned at subscription scope, and this")
+		fmt.Fprintln(os.Stderr, "  subscription holds other projects. Scope it to a resource group this project owns.")
+		return 1
+	}
 	if len(groups) == 0 {
 		// Fails closed. A command naming no group might be harmless, and it
 		// might be `az group delete` reading a name from somewhere this guard
@@ -216,9 +223,58 @@ func groupsIn(args []string) []string {
 			add(varGroup(next()))
 		case strings.HasPrefix(a, "-var="):
 			add(varGroup(strings.TrimPrefix(a, "-var=")))
+		default:
+			// An ARM resource id names its group in the path rather than in a
+			// flag, and that is how `az role assignment create --scope` and
+			// every `--ids` command name one. Matched on the value's own shape
+			// rather than on the flag in front of it, because the flags that
+			// carry one are open-ended: --scope, --scopes, --id, --ids, and
+			// whatever the next command group adds.
+			if g, ok := groupInResourceID(a); ok {
+				add(g)
+			}
 		}
 	}
 	return found
+}
+
+// subscriptionScoped reports whether the command line carries an ARM id that
+// stops at the subscription. ISOLATION.md says no role is ever assigned at
+// subscription scope, and such an id names no resource group at all, so
+// without this it would be refused by the generic "names no group" path with a
+// message telling the operator to name a group -- advice that cannot be
+// followed, because naming one is precisely what they were trying not to do.
+func subscriptionScoped(args []string) bool {
+	for _, a := range args {
+		lower := strings.ToLower(a)
+		if !strings.HasPrefix(lower, "/subscriptions/") {
+			continue
+		}
+		if _, ok := groupInResourceID(a); !ok {
+			return true
+		}
+	}
+	return false
+}
+
+// groupInResourceID pulls the resource group out of an ARM resource id.
+//
+// The segment is spelled resourceGroups by the portal, resourcegroups by some
+// SDKs, and ResourceGroups by at least one generator. ARM treats all three as
+// the same path, so a case-sensitive match here would be a hole rather than a
+// stricter check.
+func groupInResourceID(v string) (string, bool) {
+	parts := strings.Split(v, "/")
+	for i, p := range parts {
+		if strings.EqualFold(p, "resourceGroups") && i+1 < len(parts) {
+			name := strings.TrimSpace(parts[i+1])
+			if name == "" {
+				return "", false
+			}
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // varGroup reads `resource_group_name=af-cp-scus`, with or without the quotes

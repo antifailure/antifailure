@@ -334,7 +334,7 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 	}
 	rec.Duration = time.Since(started).String()
 	p.emit(rec)
-	return resp.Close == false && req.Close == false
+	return !resp.Close && !req.Close
 }
 
 // hopByHop are the headers that belong between two endpoints of a connection

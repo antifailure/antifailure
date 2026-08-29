@@ -71,7 +71,7 @@ export const OPEN_SOURCE_PAGE: MarketingContent = {
   related: [
     { href: "/product/architecture", title: "Architecture", description: "What stays in the customer cloud." },
     { href: "/pricing", title: "Pricing", description: "Community, team cloud, and enterprise." },
-    { href: "/docs/", title: "Open-source docs", description: "Planned surface in full." },
+    { href: "/docs/contributing/provider-authoring", title: "Provider authoring", description: "Writing a provider against the open interface." },
   ],
   body: (
     <>
@@ -161,8 +161,8 @@ export const PRICING_PAGE: MarketingContent = {
         <li>Support level</li>
       </ul>
       <p>
-        Do not charge primarily for the number of AI personalities. Crowdi is a feature. The
-        product is the deployment decision.
+        Do not charge primarily for the number of AI personalities. Exploratory users are a
+        Workload Studio feature. The product is the deployment decision.
       </p>
       <h2>Free usage</h2>
       <p>
@@ -176,7 +176,7 @@ export const PRICING_PAGE: MarketingContent = {
 export const COMPANY_PAGE: MarketingContent = {
   eyebrow: "Company",
   title: "Answer one question better than any individual tool.",
-  lead: "Is this deployment safe to ship under the conditions that actually matter? That is why the company exists. Crowdi, sanitization, E2E execution, and preview deploy are components. None of them alone defines the company.",
+  lead: "Is this deployment safe to ship under the conditions that actually matter? That is why the company exists. Exploratory users, sanitization, E2E execution, and preview deploy are components. None of them alone defines the company.",
   description: "Antifailure is an open-core pre-production deployment safety platform.",
   features: [
     { title: "Category", body: "Pre-production deployment safety. Not AI QA, not staging, not load testing." },

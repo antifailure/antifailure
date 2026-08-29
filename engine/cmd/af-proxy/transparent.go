@@ -324,7 +324,9 @@ func parseServerName(b []byte) (string, error) {
 // served by net/http.
 func writeRefusalRaw(conn net.Conn, d policy.Decision, req policy.Request) {
 	body := refusalBody(d, req)
-	fmt.Fprintf(conn,
+	// Not checked: the refusal is best effort on a connection that is about
+	// to be closed either way.
+	_, _ = fmt.Fprintf(conn,
 		"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\n"+
 			"Content-Length: %d\r\nX-Antifailure-Decision: %s\r\nConnection: close\r\n\r\n%s",
 		len(body), d.Mode, body)
@@ -332,14 +334,16 @@ func writeRefusalRaw(conn net.Conn, d policy.Decision, req policy.Request) {
 
 // writeRawForbidden writes a refusal body onto a raw connection.
 func writeRawForbidden(conn io.Writer, body string) {
-	fmt.Fprintf(conn,
+	// Not checked: best effort onto a connection that closes either way.
+	_, _ = fmt.Fprintf(conn,
 		"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\n"+
 			"Content-Length: %d\r\nX-Antifailure-Decision: block\r\nConnection: close\r\n\r\n%s",
 		len(body), body)
 }
 
 func writeRawError(conn net.Conn, status int, message string) {
-	fmt.Fprintf(conn,
+	// Not checked, for the same reason as writeRawForbidden.
+	_, _ = fmt.Fprintf(conn,
 		"HTTP/1.1 %d %s\r\nContent-Type: text/plain; charset=utf-8\r\n"+
 			"Content-Length: %d\r\nConnection: close\r\n\r\n%s",
 		status, http.StatusText(status), len(message)+1, message+"\n")

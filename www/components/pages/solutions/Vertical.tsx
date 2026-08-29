@@ -670,7 +670,7 @@ function WorkflowPage() {
           items={[
             { title: "Jobs in the twin", body: "Background workers and scheduled tasks against sanitized state." },
             { title: "Long-tail records", body: "Malformed historical state that fixtures never include." },
-            { title: "Multi-tab behavior", body: "Crowdi personas that abandon, resume, and retry — compiled into deterministic scenarios." },
+            { title: "Multi-tab behavior", body: "Exploratory personas that abandon, resume, and retry — compiled into deterministic scenarios." },
           ]}
         />
       </PageSection>
@@ -696,16 +696,16 @@ assertions:
         >
           <PageHeading title="<strong>Schedules are production behavior.</strong> They belong in the proving ground." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Crowdi explores abandon-and-resume and multi-tab edits. The deterministic runner proves them at
-            scale, including the reconcile job that must stay idempotent. Crowdi is a Workload Studio feature,
-            not the product.
+            Exploratory users try abandon-and-resume and multi-tab edits. The deterministic runner proves them at
+            scale, including the reconcile job that must stay idempotent. They live in Workload Studio beside
+            observed and deterministic traffic.
           </p>
         </Split>
       </PageSection>
       <RelatedGrid
         items={[
           { href: "/product/workload", title: "Workload Studio", description: "Observed, deterministic, exploratory." },
-          { href: "/product/crowdi", title: "Crowdi", description: "Exploratory users inside Workload Studio." },
+          { href: "/product/exploratory-users", title: "Exploratory users", description: "Exploratory users inside Workload Studio." },
           { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
         ]}
       />
