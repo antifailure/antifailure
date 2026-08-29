@@ -64,7 +64,7 @@ func (b *dockerBranch) AttachToNetwork(
 	return 5432, err
 }
 
-func requireBranchContainer(t *testing.T, name string) (*dockerBranch, func()) {
+func requireBranchContainer(t *testing.T, name string) *dockerBranch {
 	t.Helper()
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
 		t.Skip("skipped: AF_SKIP_DOCKER is set")
@@ -73,7 +73,21 @@ func requireBranchContainer(t *testing.T, name string) (*dockerBranch, func()) {
 	if err != nil {
 		skipOrFail(t, "no Docker daemon is reachable: %v", err)
 	}
+	// Registered first so that it runs LAST, because t.Cleanup is LIFO and
+	// every other cleanup here and in waitForBranch talks to this client.
+	//
+	// This used to be returned as a stop function the tests called with
+	// `defer`, which put it in the wrong order by construction: a deferred
+	// call in a test body runs BEFORE any t.Cleanup, so the client was closed
+	// and waitForBranch's cleanup then asked it to disconnect and remove a
+	// network. Those calls dial again, and nothing closes what they dial: a
+	// connection per test outliving the process, reported by the leak detector
+	// as net/http readLoop and writeLoop pairs with no frame from this
+	// repository in them.
+	t.Cleanup(func() { _ = cli.Close() })
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	t.Cleanup(cancel)
 
 	full := "af-lane6-" + name
 	_ = dockerutil.RemoveContainer(ctx, cli, full)
@@ -88,19 +102,14 @@ func requireBranchContainer(t *testing.T, name string) (*dockerBranch, func()) {
 		&container.HostConfig{RestartPolicy: container.RestartPolicy{Name: "no"}},
 		nil, nil, full)
 	if err != nil {
-		cancel()
-		_ = cli.Close()
 		skipOrFail(t, "the branch container could not be created: %v", err)
 	}
-	stop := func() {
+	t.Cleanup(func() {
 		c, done := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer done()
 		_ = dockerutil.RemoveContainer(c, cli, created.ID)
-		_ = cli.Close()
-		cancel()
-	}
+	})
 	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
-		stop()
 		skipOrFail(t, "the branch container could not be started: %v", err)
 	}
 
@@ -110,7 +119,7 @@ func requireBranchContainer(t *testing.T, name string) (*dockerBranch, func()) {
 	// rewrites the host anyway, so the string only has to carry the
 	// credential and the database name.
 	b.url = secrets.New("postgres://postgres:test@127.0.0.1:1/postgres?sslmode=disable")
-	return b, stop
+	return b
 }
 
 // waitForBranch blocks until Postgres inside the container answers, asked from
@@ -175,20 +184,15 @@ func runOnNetwork(
 	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
 		return -1, err.Error()
 	}
-	statusCh, errCh := cli.ContainerWait(ctx, created.ID, container.WaitConditionNotRunning)
-	select {
-	case err := <-errCh:
+	code, err := dockerutil.AwaitExit(ctx, cli, created.ID)
+	if err != nil {
 		return -1, fmt.Sprint(err)
-	case status := <-statusCh:
-		return status.StatusCode, ""
-	case <-ctx.Done():
-		return -1, "timed out"
 	}
+	return code, ""
 }
 
 func TestContainerApplier_RunsTheProjectsOwnMigrateCommandInItsImage(t *testing.T) {
-	b, done := requireBranchContainer(t, "applier")
-	defer done()
+	b := requireBranchContainer(t, "applier")
 	probeNet := waitForBranch(t, b)
 	ctx := context.Background()
 
@@ -218,8 +222,7 @@ func TestContainerApplier_RunsTheProjectsOwnMigrateCommandInItsImage(t *testing.
 }
 
 func TestContainerApplier_ReportsTheToolsOwnOutputWhenItFails(t *testing.T) {
-	b, done := requireBranchContainer(t, "applierfail")
-	defer done()
+	b := requireBranchContainer(t, "applierfail")
 	waitForBranch(t, b)
 
 	// A migration tool explains its failure far better than an exit code
@@ -239,8 +242,7 @@ func TestContainerApplier_ReportsTheToolsOwnOutputWhenItFails(t *testing.T) {
 }
 
 func TestContainerApplier_HasNoRouteOffTheMachine(t *testing.T) {
-	b, done := requireBranchContainer(t, "appliersealed")
-	defer done()
+	b := requireBranchContainer(t, "appliersealed")
 	waitForBranch(t, b)
 
 	// The product's whole premise is that an environment has nowhere to send
@@ -276,8 +278,7 @@ func TestContainerApplier_RefusesWithNothingToRun(t *testing.T) {
 }
 
 func TestContainerApplier_LeavesNothingBehind(t *testing.T) {
-	b, done := requireBranchContainer(t, "applierclean")
-	defer done()
+	b := requireBranchContainer(t, "applierclean")
 	waitForBranch(t, b)
 	ctx := context.Background()
 

@@ -296,6 +296,11 @@ func uncalledByGate(just string) []string {
 		// the whole engine suite with -coverpkg and takes the better part of an
 		// hour. `coverage`, which is the gate, IS in `gate`.
 		"coverage-profile": true,
+		// Turns this repository's commit hooks on. It writes to the clone's git
+		// config, which is the definition of a convenience here, and the
+		// property it helps with -- every commit carrying a sign-off -- is
+		// already a gate in CI that does not depend on anybody having run it.
+		"hooks": true,
 	}
 
 	recipeRe := regexp.MustCompile(`^([a-z][\w-]*)(?: [\w"=]+)*:`)

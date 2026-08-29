@@ -152,7 +152,7 @@ setup:
     if [ "$(git config core.hooksPath || true)" = ".githooks" ]; then
       echo "on"
     else
-      echo "off            run: git config core.hooksPath .githooks"
+      echo "off            run: just hooks"
       missing=$((missing+1))
     fi
     printf '  %-12s' "identity"
@@ -178,6 +178,32 @@ setup:
       echo "Everything this repository needs is here. Next: just gate"
     else
       echo "$missing things to fix, each with its command above."
+      exit 1
+    fi
+
+# CONTRIBUTING.md has always required a Developer Certificate of Origin
+# trailer, and `just setup` has always been able to tell you the hook was off.
+# Neither turned it on, and the gap between knowing and doing is how an
+# unsigned commit reached main: the author's clone had never run the one line,
+# nothing local objected, and the check that would have caught it is a check
+# that runs after the commit exists.
+#
+# Local config rather than anything global, so it cannot affect another
+# repository on this machine.
+[doc("Point git at this repository's hooks, so commits carry a sign-off.")]
+hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git config core.hooksPath .githooks
+    echo "hooks       on   .githooks"
+    printf 'identity    '
+    if email=$(git config user.email) && [ -n "$email" ]; then
+      echo "$email"
+    else
+      echo "UNSET -- run: git config user.email you@example.com"
+      echo
+      echo "The sign-off trailer is built from this, so a commit made without" >&2
+      echo "one cannot be signed off." >&2
       exit 1
     fi
 
@@ -621,7 +647,7 @@ authorship:
       fi
     done
     if [ "$missing" -gt 0 ]; then
-      echo "Add one with 'git commit -s', or: git config core.hooksPath .githooks"
+      echo "Add one with 'git commit -s', or turn the hook on once: just hooks"
       exit 1
     fi
     echo "attributed and signed off"

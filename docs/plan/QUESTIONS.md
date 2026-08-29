@@ -135,20 +135,38 @@ reports nothing, which is worse than the gap.
 Four are done and clean, in CI as well as locally: `cmd/af-proxy`,
 `conformance`, `internal/load` and `internal/subset`.
 
-`internal/insights` is the open one. It passes on a workstation and fails in
-CI, with two `net/http` `persistConn` `readLoop` and `writeLoop` pairs still in
-IO wait at exit. The stacks carry no frame from this repository; they are idle
-keep-alive connections held by an `http.Transport`. What has been audited and
-is not the cause: every `dockerutil.Client()` in the package and its tests is
-closed, including on the error paths, and the one streaming response it reads,
-`ContainerLogs` in `lastLines`, goes through `dockerutil.Discard`, which drains
-before closing. That leaves either a leak below the audited code or the known
-race where `CloseIdleConnections` returns before those goroutines unwind.
+**Answered, on the second try, and the first try is worth reading.**
+`internal/insights` verifies now. The stacks with no frame from this repository
+were this package's after all, and the audit that cleared every
+`dockerutil.Client()` was correct and beside the point: the connections were
+not idle, so `Client.Close` could not reclaim them, because
+`CloseIdleConnections` only touches connections that are idle.
 
-It is left failing-open rather than silenced. `goleak.IgnoreTopFunction` on
-`net/http` would make it green and simultaneously blind it to the leak class
-most worth catching in a package that talks to the daemon, which is the same
-trade this question exists to refuse.
+The FIRST answer was wrong, and the wrongness was instructive. `ContainerWait`
+returns an UNBUFFERED result channel and a goroutine that closes the response
+body only after handing its result over, and both call sites here also selected
+on `ctx.Done()`, so a deadline arriving at the same moment as a result could
+park that goroutine forever. That is a real hazard, it is fixed in
+`dockerutil.AwaitExit`, and it was not this. The check went back on with that
+fix in and CI failed in exactly the same way. A mechanism that could explain
+the symptom is not evidence that it did.
+
+What it actually was: `requireBranchContainer` handed back a stop function and
+the tests called it with `defer`. A deferred call in a test body runs BEFORE
+any `t.Cleanup`, so the client was closed first and `waitForBranch`'s cleanup
+then asked that same closed client to disconnect and remove a network. Those
+calls dial again, and by then nothing remains to close what they dial. One
+connection per test, outliving the process.
+
+Two things made this hard to see for a week. It cannot be reproduced on a
+workstation: it was chased with a full run, a `-short` run, and a run against a
+daemon with the image deliberately missing, and all three were clean. And the
+leaked goroutines carry no frame from this repository, so every stack says
+`net/http` and invites the conclusion that it is somebody else's.
+
+The evidence that closed it is the `edition boundary` job, which reproduces the
+failure in twenty four seconds and went from fail to pass across that one
+commit, with the check on and nothing else changed.
 
 ### Q9. A golden image disappears between RefreshGolden and the next Branch
 
@@ -241,6 +259,52 @@ committed image is not immediately inspectable, and `ImageRemove` with
 instrumentation inside `RefreshGolden` and `Branch` rather than more reading:
 log the image id at commit, list it back immediately, and log again at the
 `ImageInspect` that fails.
+
+**Answered, and it was the first candidate on that list.** Another test package
+was destroying this one's goldens.
+
+The evidence was in the failure text and neither earlier pass read it. The
+message names the versions that DO exist, and on 2026-08-29 at 12:37 it named
+exactly one:
+
+    Branch(gv_20260829123613_c2f585fe, env_conformance00001): AF-DB-004:
+    The golden version gv_20260829123613_c2f585fe no longer exists.
+    Available: gv_20260829123601_store-te
+
+`store-te` is not a hash. It is the first eight characters of the literal
+`store-test`, which `internal/env/goldenstore_test.go` passes as its
+`RulesHash`. So at the moment `internal/db/docker` could not find the golden it
+had committed twelve seconds earlier, the only golden on the daemon belonged to
+a different package.
+
+The cause is that package's teardown, which listed every golden on the daemon
+and destroyed all of them:
+
+    goldens, listErr := o.Goldens(c)
+    if listErr == nil {
+        for _, g := range goldens {
+            _ = o.DestroyGolden(c, g.ID)
+        }
+    }
+
+Its comment said "whatever this machine made, it takes away", which is exactly
+what it did, on a machine shared with every other package `go test ./...` runs
+in parallel. The window it hit is the one between a conformance behaviour
+refreshing a golden and branching from it, because `DestroyGolden` refuses a
+version a branch already references. That is also why its own `store-te` golden
+survived its own sweep: a branch was pinning it.
+
+The teardown now removes only the versions that orchestrator created, and
+`TestOrchestratorTeardown_LeavesGoldensItDidNotCreate` asserts both halves: a
+golden it did not create survives, and one it did create does not, so the test
+cannot pass by the teardown quietly removing nothing. Against the old teardown
+that test fails with the first assertion, which is the negative control this
+answer rests on rather than a green run.
+
+Still open underneath it, unchanged: `provider.NewGoldenVersionID` resolves to
+the second, so two refreshes inside one second still depend on their hashes
+differing. And `sweepCandidates` still removes a candidate whose `created`
+label will not parse whatever its age.
 
 ### Q10. Six call sites raise AF-DB-004 without the field its message names
 

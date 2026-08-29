@@ -436,22 +436,16 @@ func (r *Runtime) runOnce(
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("starting the %s migration: %v", s.Name, err))
 	}
-	statusCh, errCh := r.cli.ContainerWait(ctx, id, container.WaitConditionNotRunning)
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return aferrors.Wrap(err, aferrors.AFRUN040,
-				"detail", fmt.Sprintf("waiting for the %s migration: %v", s.Name, err))
-		}
-	case status := <-statusCh:
-		if status.StatusCode != 0 {
-			output = r.lastLogLines(ctx, id)
-			return aferrors.Coded(aferrors.AFRUN005,
-				"service", s.Name+" migration",
-				"code", strconv.FormatInt(status.StatusCode, 10)+"\n"+output)
-		}
-	case <-ctx.Done():
-		return ctx.Err()
+	code, waitErr := dockerutil.AwaitExit(ctx, r.cli, id)
+	if waitErr != nil {
+		return aferrors.Wrap(waitErr, aferrors.AFRUN040,
+			"detail", fmt.Sprintf("waiting for the %s migration: %v", s.Name, waitErr))
+	}
+	if code != 0 {
+		output = r.lastLogLines(ctx, id)
+		return aferrors.Coded(aferrors.AFRUN005,
+			"service", s.Name+" migration",
+			"code", strconv.FormatInt(code, 10)+"\n"+output)
 	}
 	return nil
 }

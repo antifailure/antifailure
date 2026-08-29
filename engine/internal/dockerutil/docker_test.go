@@ -130,6 +130,27 @@ func create(t *testing.T, cli *client.Client, labels map[string]string) string {
 	return resp.ID
 }
 
+// createRunning makes a container with a command of its own, for tests about
+// waiting rather than about labels, and guarantees its removal.
+func createRunning(t *testing.T, cli *client.Client, cmd []string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	resp, err := cli.ContainerCreate(ctx,
+		&container.Config{
+			Image: testImage, Cmd: cmd,
+			Labels: dockerutil.Managed(dockerutil.KindService, "await-exit", time.Now()),
+		},
+		&container.HostConfig{}, nil, nil, "")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_ = cli.ContainerRemove(c, resp.ID, container.RemoveOptions{Force: true, RemoveVolumes: true})
+	})
+	return resp.ID
+}
+
 func TestRemoveContainer_RemovesOurOwn(t *testing.T) {
 	cli := requireDaemon(t)
 	ctx := context.Background()

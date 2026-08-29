@@ -193,7 +193,7 @@ sub-phase above them read `proven`.
 | --- | --- | --- |
 | G1 | Lint: golangci-lint, biome, tsc, vale, cspell, lychee | enforced |
 | G2 | Unit and property tests | enforced |
-| G3 | Race and goroutine leak | **partial**: `-race` everywhere; goleak in 8 of the 9 packages that start goroutines. `internal/insights` is open, see QUESTIONS Q8 |
+| G3 | Race and goroutine leak | **met**: `-race` everywhere; goleak in all 9 packages that start goroutines. The last one, `internal/insights`, cost a real leak to close: a daemon client closed before the cleanups that still used it, see QUESTIONS Q8 |
 | G4 | Coverage thresholds per package | **measured, not yet blocking**. `just coverage`. 16 of 50 packages meet C.5 today |
 | G5 | Conformance suites | enforced |
 | G6 | Fuzz | partial: the licence, manifest and detection parsers each fuzz 60s in CI. The manifest target covers the masking rules, which are a section of it. Still unfuzzed: proxy HTTP, OpenAPI specs, APM responses, Playwright trace ingestion |

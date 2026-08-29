@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/antifailure/antifailure/engine/internal/insights"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -102,25 +103,28 @@ func TestMain(m *testing.M) {
 		}
 		return m.Run()
 	}()
-	// G3 is NOT verified here yet, and the reason is written down in
-	// docs/plan/QUESTIONS.md as Q8 rather than left as an absence somebody has
-	// to rediscover.
+	// G3, after the teardown above rather than instead of it. goleak.
+	// VerifyTestMain cannot be used here because this package already owns
+	// TestMain, and the check has to run once the deferred provider teardown
+	// has closed its containers and connections, or every run would report the
+	// suite's own fixtures as leaks.
 	//
-	// goleak.Find here passes on a workstation and fails in CI with two
-	// net/http persistConn readLoop and writeLoop pairs still in IO wait. The
-	// stacks contain no frame from this repository: they are idle keep-alive
-	// connections held by an http.Transport. Every Docker client this package
-	// opens is closed, and the one streaming response it reads goes through
-	// dockerutil.Discard, which drains before closing. So this is either a
-	// leak somewhere below the code audited so far, or the known race where
-	// CloseIdleConnections returns before the connection's goroutines have
-	// finished unwinding.
-	//
-	// Reaching for goleak.IgnoreTopFunction on net/http would make this green
-	// while making the check unable to see the class of leak most worth
-	// catching here, which is the sidecar and provider clients. Four of the
-	// five packages G3 was missing verify and are clean; this one is left
-	// honest and open.
+	// This was taken out once, when it passed on a workstation and failed in
+	// CI with net/http persistConn readLoop and writeLoop pairs whose stacks
+	// carried no frame from this repository. They were this package's, by a
+	// longer route than reading it suggests: waiting on the rehearsal
+	// container abandoned the wait when the deadline landed at the same moment
+	// as the result, which parks the goroutine that closes the response body
+	// and strands its connection where Client.Close cannot reach it. That is
+	// fixed at the source, in dockerutil.AwaitExit, which no caller can
+	// abandon. The check belongs back here now, because a check that is off is
+	// a check that finds nothing.
+	if code == 0 {
+		if err := goleak.Find(); err != nil {
+			fmt.Fprintf(os.Stderr, "goroutines outlived the suite: %v\n", err)
+			code = 1
+		}
+	}
 	os.Exit(code)
 }
 
