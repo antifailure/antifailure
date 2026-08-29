@@ -1194,6 +1194,7 @@ export function createServer(options: ServerOptions) {
         const context: TrpcContext = {
           pool: options.pool,
           clock,
+          github: options.github,
           actor,
           origin: 'web',
           ip: c.req.header('x-forwarded-for') ?? undefined,

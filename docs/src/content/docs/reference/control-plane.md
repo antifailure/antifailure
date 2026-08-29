@@ -60,6 +60,32 @@ to any account added to the allowlist before it is invited anywhere.
 Both are needed. The allowlist is a closed door; the installation check is what
 makes an open one safe.
 
+## What role somebody gets
+
+The role comes from GitHub, read at sign-in with an installation token: an
+organization owner on GitHub becomes an `admin` here, and everybody else
+becomes a `member`.
+
+An owner on GitHub deliberately does not become an `owner` here. That role also
+holds `billing.manage`, and who pays is this application's decision rather than
+GitHub's. Promote somebody with the role control on the Members page; a role set
+that way is marked `manual` and is never overwritten by a later sign-in.
+
+Two cases where nothing changes rather than something being guessed. If GitHub
+will not say what somebody's role is -- no App configured, a rate limit, an
+outage -- an existing membership keeps the role it already had, because a
+transient failure must not demote the only administrator out of their own
+organization. A first sign-in during the same failure gets `member`, because
+guessing upward would hand out administrative rights on a timeout.
+
+Sign-in can only ever speak for the person signing in. **Sync from GitHub** on
+the Members page reconciles everybody at once, and it is the only thing that
+takes access away: somebody removed from the GitHub organization keeps their
+role until it runs, because a person who has been removed has no reason to come
+back and sign in. It needs `members.manage`, it refuses an empty member list
+from GitHub rather than removing every owner, and it records what it changed in
+the audit log.
+
 ## Health
 
 Two endpoints, answering two different questions. Point the right thing at the

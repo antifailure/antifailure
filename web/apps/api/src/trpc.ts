@@ -16,6 +16,7 @@ import { appendAudit, type AuditInput } from '@antifailure/db'
 import type { Permission, Role } from './permissions.ts'
 import { permits } from './permissions.ts'
 import type { Clock } from './clock.ts'
+import type { GitHubClient } from './auth/github.ts'
 
 /** Who is making the request, once the session cookie has been resolved. */
 export interface Actor {
@@ -28,6 +29,13 @@ export interface Actor {
 export interface Context {
   pool: Pool
   clock: Clock
+  /**
+   * The GitHub client, for the routes that have to ask GitHub something rather
+   * than read it back from a table. Required rather than optional so that a new
+   * construction site cannot forget it and leave a route that compiles, ships,
+   * and then throws the first time somebody presses the button.
+   */
+  github: GitHubClient
   /** Null for an unauthenticated request. */
   actor: Actor | null
   /** Where the request came from, recorded on every audit entry. */

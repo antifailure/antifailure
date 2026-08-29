@@ -37,6 +37,20 @@ export interface GitHubClient {
     installationId: number,
     orgLogin: string,
   ): Promise<{ user: GitHubUser; role: 'admin' | 'member' }[]>
+  /**
+   * The role GitHub reports for one person in one organization.
+   *
+   * Null means "could not be established", which is deliberately not the same
+   * answer as "member". Sign-in leans on the difference: it writes `member` for
+   * somebody who has no membership row yet, and leaves an existing role exactly
+   * as it was when this returns null, so a rate limit cannot demote an
+   * administrator out of their own organization.
+   */
+  roleIn(
+    installationId: number,
+    orgLogin: string,
+    login: string,
+  ): Promise<'admin' | 'member' | null>
 }
 
 export interface GitHubConfig {
@@ -194,7 +208,7 @@ export class RealGitHubClient implements GitHubClient {
         // it on the membership resource rather than in the list. Worth the
         // calls: without it every member syncs as a plain member and an
         // organization owner loses their own admin rights on first sync.
-        const role = await this.roleOf(token, base, orgLogin, m.login)
+        const role = (await this.roleOf(token, base, orgLogin, m.login)) ?? 'member'
         members.push({
           user: {
             id: m.id,
@@ -214,12 +228,37 @@ export class RealGitHubClient implements GitHubClient {
     return members
   }
 
+  async roleIn(
+    installationId: number,
+    orgLogin: string,
+    login: string,
+  ): Promise<'admin' | 'member' | null> {
+    const tokens = this.config.installationTokens
+    // No App, no installation token, no way to read a membership. Null rather
+    // than 'member', because the caller's fallback is its own decision to make.
+    if (!tokens) return null
+    try {
+      const token = await tokens.for(installationId)
+      const base = this.config.apiBase ?? 'https://api.github.com'
+      return await this.roleOf(token, base, orgLogin, login)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Null when GitHub would not say, rather than a guess.
+   *
+   * membersOf reads that null as 'member', which is the safe direction for a
+   * list that is about to be reconciled. roleIn passes it through, because the
+   * safe direction there is "change nothing".
+   */
   private async roleOf(
     token: string,
     base: string,
     orgLogin: string,
     login: string,
-  ): Promise<'admin' | 'member'> {
+  ): Promise<'admin' | 'member' | null> {
     const res = await fetch(
       new URL(`/orgs/${encodeURIComponent(orgLogin)}/memberships/${encodeURIComponent(login)}`, base),
       {
@@ -233,7 +272,7 @@ export class RealGitHubClient implements GitHubClient {
     )
     // Anything but a clear "admin" is a member. Guessing upward on a failed
     // read would hand somebody administrative rights because of a rate limit.
-    if (!res.ok) return 'member'
+    if (!res.ok) return null
     const body = (await res.json()) as { role?: string }
     return body.role === 'admin' ? 'admin' : 'member'
   }

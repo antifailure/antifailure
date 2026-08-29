@@ -373,6 +373,85 @@ describe('what a delivery writes', {
     assert.deepEqual(rows.map((r) => r.slug), ['delivery-test-org', 'other-org'])
   })
 
+  test('a repository event carries no installation.account, and is handled anyway', async () => {
+    // The shape this got wrong for its whole life. GitHub sends the FULL
+    // installation object -- the one with `account` on it -- only on
+    // `installation` and `installation_repositories`. Every other event, this
+    // one included, carries the minimal `{ id, node_id }`. Reading the account
+    // off it meant every repository delivery answered "no repository in the
+    // payload", with a 200, so nothing retried and nothing was logged as
+    // wrong. Real deliveries from the staging App confirmed it: installation
+    // keys were exactly ['id', 'node_id'].
+    //
+    // The owner is on the repository and on the organization, in the same
+    // signed body, and is trusted for exactly the same reason.
+    const out = await handleDelivery(api.pool, clock, 'repository', {
+      action: 'edited',
+      installation: { id: 900123, node_id: 'MDIzOk...' },
+      organization: { login: 'delivery-test-org' },
+      repository: {
+        id: 77,
+        full_name: 'delivery-test-org/renamed',
+        private: false,
+        default_branch: 'trunk',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    })
+    assert.equal(out.handled, true, out.detail)
+
+    const [row] = await api.admin<{ full_name: string; default_branch: string }[]>`
+      SELECT full_name, default_branch FROM repositories
+      WHERE full_name = 'delivery-test-org/renamed'`
+    assert.ok(row, 'the repository event wrote nothing')
+    assert.equal(row!.default_branch, 'trunk')
+  })
+
+  test('a repository event with only repository.owner still names its account', async () => {
+    // A repository owned by a personal account has no `organization` on the
+    // payload at all. The owner on the repository is the fallback, and it is
+    // the reason this reads two places rather than one.
+    const out = await handleDelivery(api.pool, clock, 'repository', {
+      action: 'created',
+      installation: { id: 900123, node_id: 'x' },
+      repository: {
+        id: 78,
+        full_name: 'delivery-test-org/second',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    })
+    assert.equal(out.handled, true, out.detail)
+    const [row] = await api.admin<{ full_name: string }[]>`
+      SELECT full_name FROM repositories WHERE full_name = 'delivery-test-org/second'`
+    assert.ok(row)
+  })
+
+  test('a repository event that names no owner at all is answered, not thrown', async () => {
+    const out = await handleDelivery(api.pool, clock, 'repository', {
+      action: 'edited',
+      installation: { id: 900123, node_id: 'x' },
+      repository: { id: 79, full_name: 'nobody/nothing' },
+    })
+    assert.equal(out.handled, false)
+    assert.match(out.detail, /no repository/)
+  })
+
+  test('a repository event archives on delete', async () => {
+    await handleDelivery(api.pool, clock, 'repository', {
+      action: 'deleted',
+      installation: { id: 900123, node_id: 'x' },
+      organization: { login: 'delivery-test-org' },
+      repository: {
+        id: 78,
+        full_name: 'delivery-test-org/second',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    })
+    const [row] = await api.admin<{ archived_at: Date | null }[]>`
+      SELECT archived_at FROM repositories WHERE full_name = 'delivery-test-org/second'`
+    assert.ok(row, 'the row was deleted rather than archived')
+    assert.notEqual(row!.archived_at, null)
+  })
+
   test('an event this control plane does not act on is answered, not failed', async () => {
     // GitHub retries a 5xx. Answering 500 to an event that will be refused
     // identically every time is a retry storm.
