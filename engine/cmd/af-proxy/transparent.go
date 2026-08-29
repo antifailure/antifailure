@@ -102,6 +102,7 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 	if d.RateLimit != "" {
 		if waited := p.limits.wait(d.RuleHost, d.RateLimit); waited > 0 {
 			rec.WaitedMs = waited.Milliseconds()
+			rec.Limit = describeRate(d.RateLimit)
 		}
 	}
 

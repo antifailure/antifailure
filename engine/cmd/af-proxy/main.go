@@ -282,6 +282,11 @@ type record struct {
 	// request that took a second is a request somebody will otherwise blame
 	// on the application.
 	WaitedMs int64 `json:"waited_ms,omitempty"`
+	// Limit is that rate in words, "10 a second, bursting to 10". The
+	// milliseconds alone say a request was slow and not what slowed it, and
+	// the rule's raw spec is in the manifest rather than in front of whoever
+	// is reading the log.
+	Limit string `json:"limit,omitempty"`
 	// Credentials counts the sandbox values loaded, on the ready line.
 	Credentials int `json:"credentials,omitempty"`
 	// Pack and Fixture name what answered a mocked request. A mock that
