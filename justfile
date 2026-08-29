@@ -66,6 +66,7 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "documented manifests are valid" just manifestcheck
     run "prose reads like a person"      just prosecheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
@@ -362,6 +363,36 @@ examples:
       # happened here twice.
       (cd "$dir" && GOWORK=off go build -o /dev/null ./... && GOWORK=off go vet ./...)
     done
+    # The same rule for the examples that are not Go. An example that does not
+    # build is worse than no example whatever it is written in, and checking
+    # only the compiled ones would have left the newest one unchecked by the
+    # gate that exists to say exactly this.
+    for dir in examples/*/; do
+      [ -f "$dir/package.json" ] || continue
+      echo "  $dir"
+      (cd "$dir" && npm ci --no-audit --no-fund --silent && npm run build)
+    done
+    # And the ones written in Python. There is no compile step, so the check
+    # that means something is the framework's own: `manage.py check` loads the
+    # settings, the URL conf and every model, which is where a typo in any of
+    # them shows up. DATABASE_URL is a placeholder because check does not
+    # connect; the example refuses to start without one, deliberately, and this
+    # gate should not be the thing that discovers that.
+    for dir in examples/*/; do
+      [ -f "$dir/requirements.txt" ] || continue
+      echo "  $dir"
+      (
+        cd "$dir"
+        python3 -m venv .venv-gate
+        ./.venv-gate/bin/pip install -q --disable-pip-version-check -r requirements.txt
+        ./.venv-gate/bin/python -m compileall -q . -x '\.venv-gate'
+        if [ -f manage.py ]; then
+          DATABASE_URL="postgres://gate:gate@127.0.0.1:5432/gate" \
+            ./.venv-gate/bin/python manage.py check
+        fi
+        rm -rf .venv-gate
+      )
+    done
     go build -o /tmp/af-examples ./engine/cmd/af
     for dir in examples/*/; do
       [ -f "$dir/antifailure.yaml" ] || continue
@@ -387,6 +418,16 @@ forbidden:
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
+
+# Every manifest shown in the documentation is one the engine would accept.
+#
+# The gates already read style, spelling, links and repository paths, and none
+# of them knows what a manifest is. A getting started page shipped telling
+# readers to set control_plane.url, which the engine refuses with AF-MAN-002
+# because the schema closes itself so a typo cannot silently change an
+# environment.
+manifestcheck:
+    go run ./tools/manifestcheck .
 
 # This justfile runs what CI runs.
 gatecheck:

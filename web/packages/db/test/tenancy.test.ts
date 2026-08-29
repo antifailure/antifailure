@@ -71,6 +71,11 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       ['users', 'identity is global; visibility is by shared membership'],
       ['organizations', 'isolated by id rather than by org_id'],
       ['oauth_states', 'no tenant exists yet; rows are single-use secrets deleted on use'],
+      [
+        'device_authorizations',
+        'no tenant until somebody approves it; a row is reachable only by the device code ' +
+          'or the user code the caller already holds, the same shape as oauth_states',
+      ],
       ['schema_migrations', "the schema's own bookkeeping, not tenant data"],
     ])
 

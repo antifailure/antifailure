@@ -266,7 +266,7 @@ export function ArchitecturePage() {
         items={[
           { href: "/security", title: "Security", description: "Fail closed. Data stays in your boundary." },
           { href: "/open-source", title: "Open source", description: "The inspectable surface inside the boundary." },
-          { href: "/docs/architecture", title: "Architecture docs", description: "Lifecycle and isolation in full." },
+          { href: "/docs/concepts/journal", title: "Journal docs", description: "Lifecycle and isolation in full." },
         ]}
       />
     </PageShell>

@@ -28,6 +28,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/build"
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	dblabdb "github.com/antifailure/antifailure/engine/internal/db/dblab"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
@@ -657,6 +658,39 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 			MaxBranches: db.MaxBranches,
 		})
 
+	case schema.DBDBLab:
+		db := m.Database
+		if db.Project == "" {
+			return nil, aferrors.Coded(aferrors.AFMAN002,
+				"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+				"detail", "database.provider is dblab and database.project is empty; "+
+					"the provider needs the Database Lab Engine's API root, such as "+
+					"http://127.0.0.1:2345, because the engine is self hosted and there "+
+					"is no account to discover it from")
+		}
+		name := db.APIKeyEnv
+		if name == "" {
+			name = "DBLAB_VERIFICATION_TOKEN"
+		}
+		token, _, found, err := o.secretChain().Lookup(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || token.IsZero() {
+			// Refused rather than defaulted to an empty token. The engine will
+			// run without one, and an engine with no verification token is one
+			// anybody who can reach the port can clone production data from.
+			return nil, aferrors.Coded(aferrors.AFSEC001,
+				"names", name,
+				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
+		}
+		return dblabdb.New(dblabdb.Options{
+			Endpoint:    db.Project,
+			Token:       token,
+			Clock:       o.opts.Clock,
+			MaxBranches: db.MaxBranches,
+		})
+
 	default:
 		// Named in the schema and not built here. Saying so is better than
 		// quietly falling back to Docker, which would hand somebody an empty
@@ -980,6 +1014,37 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			break
 		}
 	}
+
+	// A cron expression on a laptop has nothing to fire it, so the next
+	// command that would use a golden asks whether one was due since the last
+	// refresh. That is what makes database.golden.schedule and max_age
+	// settings rather than documentation: without this they parse, validate,
+	// take defaults, print under `af explain`, and change nothing.
+	//
+	// A refresh here reads production, which is slow and which the person
+	// running `af up` did not explicitly ask for, so the reason is printed
+	// before it starts rather than after.
+	if version != "" {
+		why, dueErr := o.RefreshDue(ctx, s, goldens)
+		if dueErr != nil {
+			return "", zero, secrets.Value{}, secrets.Value{}, dueErr
+		}
+		if why != "" {
+			o.progress("refreshing the golden first: " + why)
+			res, refreshErr := o.refreshWithin(ctx, s)
+			switch {
+			case refreshErr != nil:
+				// Not fatal. An environment branched from yesterday's golden
+				// is worth more than no environment at all, and the reason it
+				// could not be refreshed is said rather than swallowed.
+				o.progress("the refresh did not finish, so this environment " +
+					"branches the golden that is already there: " + refreshErr.Error())
+			case res.Version != "":
+				version = res.Version
+			}
+		}
+	}
+
 	if version == "" {
 		o.progress("no golden yet, creating one")
 		o.event(s, events.GoldenRefreshing, "no golden yet, creating one",

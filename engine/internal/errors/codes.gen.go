@@ -64,9 +64,17 @@ const (
 	// Extension {extension} is required by the golden and is not available
 	// on the target.
 	AFDB007 Code = "AF-DB-007"
+	// The database provider {provider} at {endpoint} rejected the
+	// configured credential.
+	AFDB008 Code = "AF-DB-008"
+	// The Database Lab Engine at {endpoint} has no snapshot to build a
+	// golden from: {detail}
+	AFDB009 Code = "AF-DB-009"
 	// The storage pool has {available} free and the operation needs
 	// {needed}.
 	AFDB010 Code = "AF-DB-010"
+	// The subset could not be taken: {detail}
+	AFDB011 Code = "AF-DB-011"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API.
 	AFDB020 Code = "AF-DB-020"
@@ -343,7 +351,7 @@ var catalog = map[Code]Entry{
 		Code:      AFCP001,
 		Area:      "CP",
 		Message:   "The control plane at {url} could not be reached.",
-		NextStep:  "Antifailure works without it. Unset control_plane.url to run fully locally.",
+		NextStep:  "Antifailure works without it. Run af logout, or unset AF_CONTROL_PLANE_URL, to work fully locally.",
 		Docs:      "self-hosting/control-plane",
 		Retryable: true,
 		ExitCode:  ExitProvider,
@@ -447,6 +455,24 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitProvider,
 	},
+	AFDB008: {
+		Code:      AFDB008,
+		Area:      "DB",
+		Message:   "The database provider {provider} at {endpoint} rejected the configured credential.",
+		NextStep:  "Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing.",
+		Docs:      "providers/overview",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFDB009: {
+		Code:      AFDB009,
+		Area:      "DB",
+		Message:   "The Database Lab Engine at {endpoint} has no snapshot to build a golden from: {detail}",
+		NextStep:  "Wait for the engine's own data retrieval to finish, then refresh again; its progress is at GET /instance/retrieval.",
+		Docs:      "providers/dblab",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
 	AFDB010: {
 		Code:      AFDB010,
 		Area:      "DB",
@@ -455,6 +481,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
+	},
+	AFDB011: {
+		Code:      AFDB011,
+		Area:      "DB",
+		Message:   "The subset could not be taken: {detail}",
+		NextStep:  "Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has.",
+		Docs:      "concepts/subsetting",
+		Retryable: false,
+		ExitCode:  ExitAuth,
 	},
 	AFDB020: {
 		Code:      AFDB020,
