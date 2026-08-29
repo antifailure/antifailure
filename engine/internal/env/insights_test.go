@@ -82,7 +82,15 @@ func TestRunInsightsRehearsesOnItsOwnBranchAndTakesItAway(t *testing.T) {
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
 		t.Skip("skipped: AF_SKIP_DOCKER is set")
 	}
-	p, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: 46900})
+	// 46100 rather than 46900, which goldenstore_test.go in this same package
+	// already starts from. Two providers in one test binary handing out host
+	// ports from the same base means the second one connects to the first
+	// one's container, and because these two ask for different Postgres
+	// majors the symptom is a source database reporting the wrong version
+	// rather than a port that is busy. Every other suite has its own base:
+	// 44000 conformance, 46500 masking, 46700 subset, 46900 the golden
+	// store, 47000 chaos.
+	p, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: 46100})
 	if err != nil {
 		skipOrFail(t, "no Docker daemon is reachable: %v", err)
 	}
