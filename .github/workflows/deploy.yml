@@ -47,6 +47,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # www/lib/lastmod.ts asks git when the files behind each route last
+          # changed, and writes that into the sitemap. The default shallow
+          # fetch leaves every file looking like it was created in one commit,
+          # which collapses every lastmod to the same value and turns a
+          # freshness signal into noise.
+          fetch-depth: 0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -77,6 +84,15 @@ jobs:
         # anybody keeps true: they had already drifted, and neither copy ever
         # placed /install.sh or the schemas the product hard-codes.
         run: tools/site/assemble.sh
+
+      - name: Check the SEO and GEO surfaces
+        # Every one of these was missing from production when the check was
+        # written: no sitemap, no robots.txt, no canonical, no OpenGraph, no
+        # structured data, and an og:image that had 404'd since the day the
+        # documentation site first referenced it. None of it broke a build.
+        # That is exactly why it needs a test rather than a habit.
+        run: npm run check:seo
+        working-directory: www
 
       - name: Check the assembled site before publishing it
         # The defect that prompted all of this was 78 links pointing outside

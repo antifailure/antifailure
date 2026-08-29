@@ -64,6 +64,7 @@ export function SecurityPage() {
   return (
     <PageShell>
       <PageHero
+        path="/security"
         eyebrow="Security"
         title="Fail closed. Data stays in your boundary."
         lead="The twin runs where production data already lives. Unknown egress is blocked. Cleanup is proven. Open source does not bypass compliance."

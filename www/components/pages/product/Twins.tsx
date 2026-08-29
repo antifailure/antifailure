@@ -138,6 +138,7 @@ export function TwinsPage() {
   return (
     <PageShell>
       <PageHero
+        path="/product/twins"
         eyebrow="Twin Orchestrator"
         title="A disposable production twin for every risky change."
         lead="Build the candidate, deploy a baseline for comparison, isolate the network, inject clone-specific configuration, replace production credentials, and tear everything down when the report is done."

@@ -90,6 +90,7 @@ function SaasPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/saas"
         eyebrow="Solutions · B2B SaaS"
         title="Daily deploys. Expanding schemas. Staging that drifted years ago."
         lead="The first twin should catch the migration that locks subscriptions during peak traffic — against sanitized tenant-shaped state, not a fixture dump."
@@ -174,6 +175,7 @@ function FintechPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/fintech"
         eyebrow="Solutions · Fintech"
         title="Billing, ledgers, and side effects that must never hit live processors."
         lead="The firewall simulates Stripe. Safe State masks account identifiers. The oracle compares ledger writes. Duplicate events are incidents — they belong in a report, not in production."
@@ -241,6 +243,7 @@ function EcommercePage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/ecommerce"
         eyebrow="Solutions · E-commerce"
         title="Checkout under production-shaped load."
         lead="A twin with production-shaped carts and long-tail SKUs. Payments and email stay captured. Locks on orders are measured while equivalent traffic hits baseline and candidate."
@@ -301,6 +304,7 @@ function MarketplacesPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/marketplaces"
         eyebrow="Solutions · Marketplaces"
         title="Queues, workers, dual-writes, matching logic staging never reproduces."
         lead="The twin includes workers and queues. Production webhooks are blocked. Impatient retries and multi-tab checkout become deterministic scenarios."
@@ -369,6 +373,7 @@ function DevtoolsPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/devtools"
         eyebrow="Solutions · Developer tools"
         title="Schema changes on large tables."
         lead="The flagship wedge, felt first by teams whose users notice p99 immediately. Measure lock duration, blocked statements, and whether old instances can still read the new schema."
@@ -429,6 +434,7 @@ function PlatformPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/platform"
         eyebrow="Solutions · Platform engineering"
         title="Replace fragile shared staging with policy-controlled ephemeral validation."
         lead="Give every developer an isolated environment without a platform-team ticket. Destroy temporary infrastructure automatically and cap its cost."
@@ -499,6 +505,7 @@ function MigrationsPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/migrations"
         eyebrow="Solutions · Schema migrations"
         title="The failure mode staging never catches."
         lead="Long exclusive locks, full table rewrites, pool exhaustion, plan regressions, rare constraint failures, and rollback that is no longer safe."
@@ -575,6 +582,7 @@ function ReleaseGatesPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/release-gates"
         eyebrow="Solutions · Release gates"
         title="Evidence-backed pass, warning, or block."
         lead="Attach a report to the pull request. Enforce organizational release policy. Do not ship on a green preview URL alone."
@@ -650,6 +658,7 @@ function WorkflowPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/workflow"
         eyebrow="Solutions · Workflow products"
         title="Workers, schedules, and long-tail state."
         lead="Timing among services, queues, and workers is a dimension staging drops. The twin includes background jobs and scheduled tasks against sanitized historical state."

@@ -1,4 +1,6 @@
 import {
+  Faq,
+  type FaqItem,
   PageHeading,
   PageHero,
   PageSection,
@@ -82,10 +84,61 @@ const BLOCK_METRICS: { k: string; v: string }[] = [
   { k: "rollback", v: "unsafe" },
 ];
 
+/**
+ * Every answer here is a claim this repository already makes somewhere else:
+ * the trust boundary from the privacy notice, the five egress modes and the
+ * five verdicts from the README, the provider list from "Where it runs", and
+ * the licence split from the licence section. Nothing is invented for the
+ * page, because an answer engine quoting a page is quoting it as fact.
+ */
+const PRODUCT_FAQ: FaqItem[] = [
+  {
+    question: "Does production data leave my infrastructure?",
+    answer:
+      "No. The hosted control plane holds organizations, policy, aggregated reports, and billing. Raw snapshots, secrets, and captured request bodies stay in your cloud by default.",
+  },
+  {
+    question: "How do I know the masking actually worked?",
+    answer:
+      "A scanner reads back every column of every table looking for anything that still parses as an email, a card number, a phone number, or a key, then signs an attestation. An unverified golden cannot be branched, and that is enforced in code rather than in a checklist.",
+  },
+  {
+    question: "What stops a test run from emailing real customers or charging a real card?",
+    answer:
+      "Every environment gets a sidecar that owns its network namespace, and nothing leaves except through it. Each host gets a mode: BLOCK, ALLOW, SANDBOX with test credentials and a tripwire if a live key appears, CAPTURE into a searchable inbox, or MOCK from a stateful offline pack. An unlisted host fails closed.",
+  },
+  {
+    question: "Can a run complete with no network access at all?",
+    answer:
+      "Yes, for the covered surface. The Stripe pack is complete enough to run checkout, subscribe, renew, and cancel with signed webhooks and no network.",
+  },
+  {
+    question: "What happens when a check fails because the tooling broke, not my code?",
+    answer:
+      "It is classified as such. A run returns pass, fail, flaky, blocked, or unverified, and a failure caused by the runner is never counted against your application.",
+  },
+  {
+    question: "Which databases and platforms does it support?",
+    answer:
+      "Postgres, sourced from Docker, Neon, Supabase, or DBLab thin clones in front of any Postgres including RDS, Cloud SQL, and Azure Database. It runs locally on Docker, in GitHub Actions, or on your own Kubernetes.",
+  },
+  {
+    question: "Is it open source?",
+    answer:
+      "The repository is MIT licensed except for the ee/ directory, which is under the Antifailure Enterprise License. That directory is never compiled into the community binary, images, or Helm chart.",
+  },
+  {
+    question: "Is it production ready?",
+    answer:
+      "Not yet. It is pre-1.0, and docs/plan/STATUS.md gives the honest answer per component rather than one claim for the whole system, marking each one proven, written, or planned.",
+  },
+];
+
 export function OverviewPage() {
   return (
     <PageShell>
       <PageHero
+        path="/product"
         eyebrow="Product"
         title="A disposable production twin that proves whether a deployment is safe."
         lead="Connect a repository and cloud environment. For every risky change, the platform creates an isolated production twin, fills it with safe production-shaped state, exercises it, and reports whether the deployment is safe to ship."
@@ -284,6 +337,19 @@ export function OverviewPage() {
             One click perfectly clones every cloud. Exploratory users live in Workload Studio, not as the category.
           </p>
         </div>
+      </PageSection>
+
+      {/* Phrased the way the questions are actually asked, not the way a
+          feature list would put them. These are the eight things people want
+          settled before they will read the documentation, and each answer is
+          self-contained so it survives being lifted out of the page on its
+          own. FAQ carries the matching FAQPage markup from the same array. */}
+      <PageSection>
+        <PageHeading
+          kicker="Questions"
+          title="<strong>What people ask first.</strong> Answered here rather than in a sales call."
+        />
+        <Faq path="/product" items={PRODUCT_FAQ} />
       </PageSection>
 
       <RelatedGrid

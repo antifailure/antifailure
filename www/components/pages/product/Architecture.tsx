@@ -179,6 +179,7 @@ export function ArchitecturePage() {
   return (
     <PageShell>
       <PageHero
+        path="/product/architecture"
         eyebrow="Architecture"
         title="Hosted control plane. Customer-hosted data plane."
         lead="Organizations, policy, and reports live in the control plane. Snapshots, secrets, sanitization, provisioning, egress, and cleanup stay in the customer boundary. The agent is outbound-only, authenticated with short-lived mTLS."

@@ -38,6 +38,7 @@ export function CompanyPage() {
   return (
     <PageShell>
       <PageHero
+        path="/company"
         eyebrow="Company"
         title="Answer one question better than any individual tool."
         lead="Is this deployment safe to ship under the conditions that actually matter? Exploratory users, sanitization, E2E execution, and preview deploy are components. None of them alone defines the company."

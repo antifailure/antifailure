@@ -54,6 +54,7 @@ export function OpenSourcePage() {
   return (
     <PageShell>
       <PageHero
+        path="/open-source"
         eyebrow="Open source"
         title="The pieces that sit in your boundary should be inspectable."
         lead="The software handles cloud permissions, production-derived state, secrets, networking, and expensive infrastructure. Inspectability matters inside the trust boundary — it does not bypass compliance."

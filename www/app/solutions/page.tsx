@@ -1,10 +1,7 @@
+import { pageMetadata } from "@/lib/seo";
 import { SolutionsHubPage } from "@/components/pages/solutions/Hub";
-import type { Metadata } from "next";
 
-export const metadata: Metadata = {
-  title: "Solutions — Antifailure",
-  description: "Pre-production deployment safety for SaaS, fintech, commerce, marketplaces, and developer tools.",
-};
+export const metadata = pageMetadata("/solutions");
 
 export default function Page() {
   return <SolutionsHubPage />;

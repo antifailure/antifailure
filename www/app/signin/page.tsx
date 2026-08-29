@@ -1,11 +1,8 @@
-import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { AuthScreen } from "@/components/AuthScreen";
 import { ChromeProvider } from "@/components/Chrome";
 
-export const metadata: Metadata = {
-  title: "Join the waitlist — Antifailure",
-  description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
-};
+export const metadata = pageMetadata("/signin");
 
 export default function SignInPage() {
   return (
