@@ -47,7 +47,7 @@ export default function Error({
           </p>
         ) : null}
 
-        <div className="mt-10 flex flex-wrap items-center gap-3">
+        <div className="mt-10 flex flex-wrap items-center gap-3 max-sm:flex-col max-sm:items-stretch">
           <button
             type="button"
             onClick={reset}

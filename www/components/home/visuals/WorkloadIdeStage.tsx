@@ -10,7 +10,7 @@ export function WorkloadIdeStage() {
   const { story } = useInViewPlay(glow, 0.15);
 
   return (
-    <div className="relative overflow-hidden border border-black/12 bg-[#f7f7f5]">
+    <div className="relative min-w-0 overflow-hidden border border-black/12 bg-[#f7f7f5]">
       <div className="pointer-events-none absolute inset-0" aria-hidden>
         <div
           className="absolute inset-0"
@@ -56,36 +56,17 @@ export function WorkloadIdeStage() {
         />
       </div>
 
-      <div className="relative px-6 pb-8 pt-[72px] sm:px-10 lg:px-12 lg:pb-10 lg:pt-[88px]">
-        <div className="pointer-events-none absolute inset-x-6 top-[88px] hidden h-px bg-black/15 lg:block lg:inset-x-12" />
-        <div
-          className="pointer-events-none absolute left-[16%] top-5 hidden items-start gap-2 lg:flex"
-          aria-hidden
-        >
-          <span className="h-[56px] w-px bg-black/25" />
-          <span className="pt-0.5 text-[12px] leading-4 text-black/45">
-            Observed patterns compiled into journeys
-          </span>
-        </div>
-        <div
-          className="pointer-events-none absolute right-[14%] top-5 hidden items-start gap-2 lg:flex"
-          aria-hidden
-        >
-          <span className="h-[56px] w-px bg-black/25" />
-          <span className="pt-0.5 text-[12px] leading-4 text-black/45">
-            Exploratory users discover. Deterministic runs at scale.
-          </span>
-        </div>
-        <div className="pointer-events-none absolute bottom-8 left-12 hidden h-px w-16 bg-black/15 lg:block" />
-        <div className="pointer-events-none absolute right-12 bottom-8 hidden h-px w-16 bg-black/15 lg:block" />
+      <div className="relative px-5 pb-6 pt-6 sm:px-8 sm:pb-8 sm:pt-8 lg:px-12 lg:pb-10">
         <IdePlay />
       </div>
 
-      <div className="relative flex flex-wrap items-center justify-between gap-4 bg-[#18191b] px-6 py-5 sm:px-10 lg:px-12">
-        <p className="text-[18px] tracking-[-0.015em] text-white max-sm:text-[15px]">
+      <div className="relative flex flex-col items-stretch justify-between gap-4 bg-[#18191b] px-5 py-5 sm:flex-row sm:flex-wrap sm:items-center sm:px-10 lg:px-12">
+        <p className="min-w-0 text-[18px] tracking-[-0.015em] text-pretty text-white max-sm:text-[15px]">
           Try for yourself, start proving a change before it ships.
         </p>
-        <CopyCli command="$ curl -fsSL https://antifailure.dev/install.sh | sh" variant="mint" />
+        <div className="min-w-0 max-w-full">
+          <CopyCli command="$ curl -fsSL https://antifailure.dev/install.sh | sh" variant="mint" />
+        </div>
       </div>
     </div>
   );
