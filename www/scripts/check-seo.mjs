@@ -88,13 +88,26 @@ if (has("sitemap.xml")) {
     !sitemap.includes("/signin") && !sitemap.includes("/signup"),
     "sitemap excludes the noindex waitlist routes",
   );
-  const lastmods = new Set(sitemap.match(/<lastmod>([^<]+)<\/lastmod>/g) ?? []);
+  // The property that matters is that lastmod came from content history, not
+  // from the clock. Requiring several distinct values was the first version of
+  // this check and it was wrong: a repository where every page legitimately
+  // changed in one commit would fail it, which is exactly what happened the
+  // first time these files were committed together.
+  //
+  // A build-clock fallback is detectable directly instead. contentLastModified
+  // returns `new Date()` when git is unavailable, so any timestamp within a few
+  // minutes of now is that fallback rather than a commit date.
+  const stamps = [...sitemap.matchAll(/<lastmod>([^<]+)<\/lastmod>/g)].map((m) => new Date(m[1]));
+  const freshlyStamped = stamps.filter((d) => Date.now() - d.getTime() < 10 * 60 * 1000);
   assert(
-    lastmods.size > 1,
-    `sitemap has ${lastmods.size} distinct lastmod values`,
-    lastmods.size <= 1
-      ? "every page sharing one timestamp means it is the build clock, not real change; freshness stops being a signal once it is always true"
-      : "",
+    stamps.length > 0 && freshlyStamped.length === 0,
+    `sitemap lastmod comes from git history (${new Set(stamps.map(String)).size} distinct across ${stamps.length} URLs)`,
+    freshlyStamped.length > 0
+      ? `${freshlyStamped.length} URLs are stamped within 10 minutes of now, which is the build clock rather than a commit date. ` +
+        "Usually a shallow checkout: set fetch-depth: 0 on actions/checkout."
+      : stamps.length === 0
+        ? "no lastmod at all"
+        : "",
   );
 }
 
