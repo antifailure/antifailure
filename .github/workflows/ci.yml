@@ -179,6 +179,32 @@ jobs:
             echo "These files are not formatted:"; echo "$unformatted"; exit 1
           fi
 
+      - name: A pg_dump new enough to read that Postgres
+        # The step below starts a Postgres 17, matching `just db` so local and
+        # CI agree. The runner ships a 16 client, and pg_dump refuses outright
+        # to read a server newer than itself. pgcopy detects that and refuses
+        # by name rather than failing obscurely, which is why the symptom is a
+        # clear message rather than a mystery, but every suite that copies a
+        # database still fails.
+        #
+        # Installing the matching client is exactly what that message tells a
+        # person to do, and STATUS.md records the same thing: a golden refresh
+        # from a Postgres 17 source needs a 17 client, and the runners ship 16.
+        # toolFor already looks in /usr/lib/postgresql/*/bin, which is where
+        # this puts it.
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          # Proof, not hope: the version that will actually be chosen.
+          pg_dump --version
+          test -x /usr/lib/postgresql/17/bin/pg_dump
+
       - name: A Postgres the database suites can use
         # This job had none, and the failure that produced is the one this
         # repository keeps finding: every test in engine/internal/insights that
