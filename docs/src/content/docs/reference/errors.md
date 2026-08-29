@@ -652,6 +652,42 @@ Service {service} depends on {missing}, which the manifest does not declare.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/manifest](/docs/reference/manifest/) |
 
+### AF-RUN-043
+
+This cluster is not containing the environment: {detail}
+
+**What to do.** Use a cluster whose CNI enforces NetworkPolicy rather than only accepting it, then run 'af up' again.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
+### AF-RUN-044
+
+This runtime cannot do that: {detail}
+
+**What to do.** Use the runtime that supports it, or run the command against an environment placed by one that does.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
+### AF-RUN-045
+
+{kind} {name} was not created by this runtime, so it was not removed.
+
+**What to do.** Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
 ## Secrets
 
 ### AF-SEC-001

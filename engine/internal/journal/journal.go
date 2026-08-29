@@ -69,6 +69,7 @@ const (
 	KindImage          Kind = "image"
 	KindZFSDataset     Kind = "zfs.dataset"
 	KindNamespace      Kind = "k8s.namespace"
+	KindDeployment     Kind = "k8s.deployment"
 	KindDNSRecord      Kind = "dns.record"
 	KindStorageObject  Kind = "storage.object"
 	KindWebhook        Kind = "webhook.registration"

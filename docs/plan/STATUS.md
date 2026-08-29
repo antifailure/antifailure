@@ -176,7 +176,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 
 | Sub-phase | State | Notes |
 | --- | --- | --- |
-| 3.1 Provider interface and conformance suite | proven | 23 behaviors in `engine/conformance`. A behavior a provider cannot support is skipped explicitly, naming the capability. |
+| 3.1 Provider interface and conformance suite | proven | 23 behaviors in `engine/conformance`, for the DATABASE provider; the runtime suite in the same package is a separate 31. A behavior a provider cannot support is skipped explicitly, naming the capability. |
 | 3.2 Docker provider | proven | 21 behaviors pass against a real daemon, 2 skip with named reasons, zero resources left behind across repeated runs. |
 | 3.3 Masking engine | partial | The 22 transforms and the key hierarchy are proven at 95 percent. The rules model, classifier, SQL compiler, and resumable executor are next. |
 | 3.4 Verification scanner | partial | The 9 detectors are proven at 94 percent. The streaming table scan and the signed attestation are next. |
@@ -227,7 +227,9 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/build` ignore | proven | `.dockerignore` implemented here rather than added as a dependency |
 | `internal/build` buildpacks | proven | Go, Node, Python, Ruby; three are built for real in the suite |
 | `internal/build` docker | proven | output redacted at the writer |
-| `internal/runtime/local` | proven | 20 behaviors against a real daemon |
+| `internal/runtime/local` | proven | 20 behaviors, plus all 32 of the runtime conformance suite against a real daemon, with no skips. RE-RUN UNDER THE SUITE'S READINESS GATE AND STILL 32 OF 32, in 1631s against a real daemon, so this number does not rest on the vacuous pass the Kubernetes row describes. The reason it survived was written down before the run rather than after: containment here is an internal Docker network a container is attached to at creation, not a policy programmed asynchronously afterwards, so there is no window of the kind that caught the cluster runtime out. |
+| `internal/runtime/k8s` | written | **DO NOT QUOTE A NUMBER FOR THIS RUNTIME YET, INCLUDING THE ONES THIS ROW USED TO CARRY.** It read `proven` on a 31 of 32 run against real k3s. That run, and a 29 of 32 one after it, were both measuring a suite that could pass without containment ever having been in force, so neither number means what it appears to. The suite has since been shown to give a clean sweep to a runtime whose pods never came under policy at all, by removing the gate that now prevents it and watching the control go green. WHAT IS BUILT AND WORKS: namespace per environment, five NetworkPolicies, Deployment and Service per service, teardown that deletes the namespace and refuses one it did not create (AF-RUN-045), and a cluster-level escape probe that now runs under the rules a service runs under rather than before the sidecar exists. WHAT IS NOT BUILT, and it is why this row is not `proven`: a pod is not contained for a short window after it starts, because a NetworkPolicy is programmed for each new pod some time after the API server accepts it. A run caught a service reaching 1.1.1.1 on UDP 53 and getting the real public address back. The fix is a gate in the pod itself, an initContainer that will not complete until an escape attempt fails, so no service process starts before its own pod is governed. Until that exists and a full suite run passes with the readiness gate in place, this runtime is `written`. |
+| `engine/conformance` runtime suite | proven | 32 behaviours, and 35 negative controls proving every one of them can fail, plus a positive control asserting all 32 PASS against a correct fake so the suite cannot pass by skipping itself. THE THIRTY-FIFTH CONTROL IS THE ONE THIS SUITE MOST NEEDED: a runtime whose pods never come under policy at all. Blocked and not-governed-yet are the same observation from inside a pod, seven of the eight containment behaviours assert that something was blocked, and before this control that runtime scored a clean sweep in the words a correct one would earn. Every probe now waits until it can reach the sidecar, which is the one thing allowed in every environment whatever its egress section says, and exits `ungoverned` rather than `refused` if it never gets there. Offline, 55 seconds. NO CONTAINMENT BEHAVIOUR CAN BE SKIPPED BY ANYTHING, which is now asserted by a test rather than left as a property of how a switch was written: it was already false, because the slow-run knob skipped `Egress_NamesDoNotCrossEnvironments`, the behaviour that proves a service name in one environment does not resolve to another environment's service. It was the slowest behaviour and it is also the isolation promise. The suite also refuses to be reported as a pass when a `-run` filter left behaviours unmeasured, and names them, because `go test` without -v prints the same `ok` either way. |
 | `internal/env` | proven | lock, state, journal, database, build, runtime, in the one order that works |
 
 ## Phase 5. Egress control
@@ -483,7 +485,7 @@ Everything remaining needs infrastructure that does not exist yet rather than
 code that has not been written:
 
 - **8.10** is no longer blocked on an AKS decision. The control plane runs on Container Apps, where the whole stack costs 32.49 USD a month against roughly 75 for an idle AKS control plane before a node runs. The Terraform is written and plans clean; what is left is the decision to spend, and an Entra app registration so CI can plan with a federated credential instead of skipping.
-- **14.1, 14.3** still want a cluster, which costs money for as long as it exists. 14.10 does not, and is not on this list: backup, restore and the drill are proven against a real Postgres and run on every CI build. What the deployed stack would add is a rehearsal against the database an outage would actually happen to, which is a different and better test than the one that exists, not a missing one.
+- **14.1, 14.3** still want a cluster, which costs money for as long as it exists. 14.10 does not, and is not on this list: backup, restore and the drill are proven against a real Postgres and run on every CI build. What the deployed stack would add is a rehearsal against the database an outage would actually happen to, which is a different and better test than the one that exists, not a missing one. The Kubernetes runtime itself is done and proven against a real k3s cluster, so 14.1 and 14.3 are not blocked on code either. What a managed cluster would add is the three things k3d cannot show: ingress under a real domain, LoadBalancer services, and node pool behaviour.
 - **3.7, 3.8 and 3.9 no longer need anything.** The Supabase suite runs against
   a dedicated project (`af-conformance`, ref `fmidgkkluotxzopkdnnr`, org
   `tilt`) which costs about $0.32 a day and should be deleted, with its access
@@ -515,10 +517,14 @@ rather than `proven`. The distinction is the point of this file.
 1. 13.2 and 13.3 need identity provider test tenants.
 2. Anything blocked above, as soon as the account or the quota exists.
 
-Notes for whoever picks this up. The conformance suite is not yet tested
-against a deliberately buggy provider, so it is not yet proved that every
-subtest can fail; that is worth doing before a second provider is written
-against it. And the Docker provider reports every committed image as verified,
+Notes for whoever picks this up. The RUNTIME conformance suite is now tested
+against a deliberately broken fake, one flaw at a time, so every one of its
+behaviours is proved able to fail; the pattern is in
+`engine/conformance/fakeruntime_test.go` and `runtime_selftest_test.go`. The
+DATABASE suite still is not, and that matters more now than when this note was
+written, because the second and third providers are being written against it.
+
+And the Docker provider reports every committed image as verified,
 which is true by construction today because the commit is the last step of a
 refresh, but will stop being true once goldens can be imported. `af up`
 creates an empty golden when no source database is configured, so the schema

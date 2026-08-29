@@ -223,13 +223,16 @@ func TestOnlyALocalProviderIsAttachable(t *testing.T) {
 }
 
 func TestARuntimeThisBuildDoesNotHaveIsRefusedRatherThanSubstituted(t *testing.T) {
-	// The same silent fallback as the database provider had, in the other
-	// half of the manifest. A repository configured for a cluster that quietly
-	// got containers on whichever laptop ran af is a difference nobody notices
-	// until they go looking for their environment in the cluster.
+	// This used to name kubernetes, because this build did not have it. It
+	// does now, so the test names something no build will ever have: the
+	// property being checked is that an unrecognised runtime is REFUSED, not
+	// that any particular one is missing. A repository configured for a
+	// cluster that quietly got containers on whichever laptop ran af is a
+	// difference nobody notices until they go looking for their environment
+	// in the cluster.
 	o, err := New(Options{
 		Root:     t.TempDir(),
-		Manifest: &schema.Manifest{Name: "app", Runtime: &schema.Runtime{Provider: schema.RuntimeKubernetes}},
+		Manifest: &schema.Manifest{Name: "app", Runtime: &schema.Runtime{Provider: "nomad"}},
 		Branch:   "main",
 		Clock:    clock.New(),
 	})
@@ -238,8 +241,40 @@ func TestARuntimeThisBuildDoesNotHaveIsRefusedRatherThanSubstituted(t *testing.T
 	_, err = o.newRuntime()
 	require.Error(t, err)
 	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002))
-	require.Contains(t, err.Error(), "kubernetes")
+	require.Contains(t, err.Error(), "nomad")
 	require.Contains(t, err.Error(), "local", "the message does not say what to do instead")
+	require.Contains(t, err.Error(), "kubernetes", "the message does not list the runtimes there are")
+}
+
+func TestTheKubernetesRuntimeIsBuiltRatherThanRefused(t *testing.T) {
+	o, err := New(Options{
+		Root:     t.TempDir(),
+		Manifest: &schema.Manifest{Name: "app", Runtime: &schema.Runtime{Provider: schema.RuntimeKubernetes}},
+		Branch:   "main",
+		Clock:    clock.New(),
+	})
+	require.NoError(t, err)
+
+	// Deliberately not asserting success. Whether a cluster is reachable from
+	// the machine running this test is not something the test can arrange,
+	// and a test that needed one would skip on most machines and prove
+	// nothing on the rest. What IS asserted is the thing this build changed:
+	// kubernetes is no longer refused as a runtime this build does not have.
+	// Anything else it fails with is a fact about the machine.
+	rt, err := o.newRuntime()
+	if err != nil {
+		require.NotErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002),
+			"kubernetes was refused as a runtime this build does not have, and it has it")
+		return
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	require.Equal(t, "kubernetes", rt.Name())
+
+	// Building the runtime must not have built the sidecar image. That is a
+	// container build of a minute or more on a cold cache, and af status, af
+	// logs and af down all come through here.
+	require.False(t, rt.Capabilities().AttachesLocalDatabase,
+		"a cluster cannot reach a database container on this machine")
 }
 
 func TestAnUnsetRuntimeIsLocal(t *testing.T) {
