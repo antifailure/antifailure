@@ -9,17 +9,46 @@
 
 import type { Message, InboxSource, Match } from './inbox.ts';
 import { waitFor } from './inbox.ts';
+import { totpCode, secondsIntoWindow, PERIOD } from './totp.ts';
 
-/** How a persona signs in. */
-export type LoginStrategy = 'password' | 'magic_link' | 'email_code' | 'sms_code' | 'none';
+/** How a persona signs in.
+ *
+ * These are the values engine/pkg/schema's LoginStrategy emits, and that is
+ * the point of the list rather than a detail of it. It used to carry a value
+ * the engine could never send ('none') and to be missing two the engine does
+ * send ('totp' and 'session'), so a manifest declaring either fell through to
+ * the default branch and the run was blocked with "the runner does not know
+ * how to drive it". 'none' is still accepted, because an older job document
+ * may carry it and refusing to sign somebody in is a poor way to handle a
+ * spelling change.
+ */
+export type LoginStrategy =
+  | 'password'
+  | 'magic_link'
+  | 'email_code'
+  | 'sms_code'
+  | 'totp'
+  | 'session'
+  | 'none';
 
 /** Who is signing in. */
 export interface Persona {
   readonly name: string;
   readonly email: string;
+  /** The number an sms code is sent to. Present only for sms_code, and the
+   *  reason it exists at all: the inbox routes a captured text by recipient,
+   *  and the recipient of a text is a number rather than an address. Waiting
+   *  on the email address for an sms code is waiting for a message that will
+   *  never match. */
+  readonly phone?: string;
   readonly password?: string;
   readonly role?: string;
   readonly login: LoginStrategy;
+  /** The base32 TOTP secret the engine enrolled for this persona, present
+   *  when the persona has a second factor. The runner holds it so that it can
+   *  complete a challenge, which is what the manifest schema's `mfa` field
+   *  says happens. */
+  readonly totpSecret?: string;
 }
 
 /** The part of a browser page this needs.
@@ -59,6 +88,20 @@ const STILL_OUT = [
   /invalid|incorrect|wrong password/i, /try again/i, /couldn.t sign you in/i,
 ];
 
+/** What a page asking for a second factor says.
+ *
+ * Unanchored, unlike FIELD.code, and that difference is the whole point of it
+ * being a separate constant. FIELD.code is matched against one element's
+ * accessible name by getByLabel, so it is anchored with ^ and $. These are
+ * matched against the whole page's text by waitForAny, where an anchored
+ * pattern can only match a page whose entire body is the word "Code", which is
+ * to say never.
+ */
+const CHALLENGED = [
+  /verification code/i, /one.time code/i, /two.factor/i, /authentication code/i,
+  /enter the code/i, /6.digit code/i, /security code/i,
+];
+
 /** Fields and controls, matched by accessible name.
  *
  * Ordered from most specific to least, because "email" matches a newsletter
@@ -66,6 +109,7 @@ const STILL_OUT = [
  */
 export const FIELD = {
   email: /^(email|email address|e-mail|username or email)$/i,
+  phone: /^(phone|phone number|mobile|mobile number|telephone)$/i,
   password: /^(password|your password)$/i,
   code: /^(code|verification code|one time code|otp|confirmation code)$/i,
 } as const;
@@ -85,11 +129,17 @@ export async function signIn(
     readonly inbox?: InboxSource;
     readonly timeoutMs?: number;
     readonly after?: number;
+    /** now overrides the clock, so a test can pin down a TOTP window instead
+     *  of being flaky once every thirty seconds. */
+    readonly now?: () => number;
   },
 ): Promise<LoginResult> {
   const timeoutMs = options.timeoutMs ?? 30_000;
-  if (persona.login === 'none') {
-    return { ok: true, blocked: false, detail: 'This persona does not sign in.' };
+  if (persona.login === 'session' || persona.login === 'none') {
+    // The environment provides the session rather than the agent typing
+    // credentials, so there is no form to drive and the workflow starts where
+    // it starts.
+    return { ok: true, blocked: false, detail: 'This persona does not sign in through a form.' };
   }
 
   await page.goto(join(options.baseURL, options.signInPath ?? '/login'));
@@ -100,8 +150,11 @@ export async function signIn(
     case 'magic_link':
       return signInWithLink(page, persona, options.inbox, timeoutMs, options.after ?? 0);
     case 'email_code':
+      return signInWithCode(page, persona, options.inbox, timeoutMs, options.after ?? 0);
     case 'sms_code':
       return signInWithCode(page, persona, options.inbox, timeoutMs, options.after ?? 0);
+    case 'totp':
+      return signInWithTOTP(page, persona, timeoutMs, options.now);
     default:
       return {
         ok: false, blocked: true,
@@ -171,22 +224,116 @@ async function signInWithCode(
       detail: `The persona ${persona.name} signs in with a code, and no inbox is available to read it from.`,
     };
   }
-  await page.fill(FIELD.email, persona.email);
+
+  // A text is addressed to a number and mail is addressed to an address, and
+  // the inbox routes both by recipient. Waiting on the email address for an
+  // sms code waits for a message that can never match, which reads as "the
+  // code never arrived" and is really "we asked the wrong question".
+  const recipient = persona.login === 'sms_code' ? persona.phone : persona.email;
+  if (!recipient) {
+    return {
+      ok: false, blocked: true,
+      detail: `The persona ${persona.name} signs in with an SMS code and has no phone number set.`,
+    };
+  }
+
+  await page.fill(persona.login === 'sms_code' ? FIELD.phone : FIELD.email, recipient);
   await page.click(CONTROL.sendLink);
 
   let message: Message;
   try {
-    message = await waitFor(inbox, { to: persona.email, hasCode: true }, { timeoutMs, after });
+    message = await waitFor(inbox, { to: recipient, hasCode: true }, { timeoutMs, after });
   } catch (err) {
     return { ok: false, blocked: true, detail: err instanceof Error ? err.message : String(err) };
   }
   if (!message.code) {
     return {
       ok: false, blocked: true,
-      detail: `The message to ${persona.email} carried no code to enter.`,
+      detail: `The message to ${recipient} carried no code to enter.`,
     };
   }
   await page.fill(FIELD.code, message.code);
+  await page.click(CONTROL.signIn);
+  return settle(page, timeoutMs, persona);
+}
+
+async function signInWithTOTP(
+  page: Page, persona: Persona, timeoutMs: number, now?: () => number,
+): Promise<LoginResult> {
+  if (!persona.totpSecret) {
+    // The environment's problem, not the application's. A persona that signs
+    // in with a second factor and has no secret enrolled is an environment
+    // that has not finished.
+    return {
+      ok: false, blocked: true,
+      detail: `The persona ${persona.name} signs in with a one time code and has no secret enrolled.`,
+    };
+  }
+  if (!persona.password) {
+    return {
+      ok: false, blocked: true,
+      detail: `The persona ${persona.name} signs in with a password and a one time code, and has no password set.`,
+    };
+  }
+
+  // A second factor comes after the password, which is the flow every
+  // application implements: credentials, then the challenge.
+  await page.fill(FIELD.email, persona.email);
+  await page.fill(FIELD.password, persona.password);
+  await page.click(CONTROL.signIn);
+
+  // The challenge field is what says the password was accepted. Waiting for
+  // either it or a refusal distinguishes "wrong password" from "no second
+  // factor was asked for", which are different bugs.
+  const asked = await page.waitForAny([...CHALLENGED, ...STILL_OUT, ...SIGNED_IN], timeoutMs);
+  if (asked === null) {
+    return {
+      ok: false, blocked: false,
+      detail:
+        `After entering the password for ${persona.name}, the page asked for no code and showed ` +
+        `no error. The last address was ${page.url()}.`,
+    };
+  }
+  if (STILL_OUT.some((p) => p.source === asked.source)) {
+    return {
+      ok: false, blocked: false,
+      detail: `Signing in as ${persona.name} was refused by the application.`,
+    };
+  }
+  if (SIGNED_IN.some((p) => p.source === asked.source)) {
+    // Signed in without being challenged. The application did not enforce the
+    // second factor, and that is worth reporting as a finding rather than
+    // quietly passing, because "mfa: true" in the manifest says it should
+    // have been asked for.
+    return {
+      ok: false, blocked: false,
+      detail:
+        `${persona.name} has a second factor enrolled and the application signed them in ` +
+        `without asking for it.`,
+    };
+  }
+
+  const clock = now ?? Date.now;
+  // A code produced at the very end of a window is one the application may
+  // reject by the time it is typed. Waiting out the last two seconds is much
+  // cheaper than a failed sign in that reads as a real bug.
+  const remaining = PERIOD - secondsIntoWindow(clock());
+  if (remaining <= 2) {
+    await new Promise((resolve) => setTimeout(resolve, (remaining + 1) * 1000));
+  }
+
+  let code: string;
+  try {
+    code = totpCode(persona.totpSecret, clock());
+  } catch (err) {
+    return {
+      ok: false, blocked: true,
+      detail: `The secret enrolled for ${persona.name} is not usable: ` +
+        (err instanceof Error ? err.message : String(err)),
+    };
+  }
+
+  await page.fill(FIELD.code, code);
   await page.click(CONTROL.signIn);
   return settle(page, timeoutMs, persona);
 }

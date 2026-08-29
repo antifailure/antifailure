@@ -9,6 +9,12 @@ output "database_fqdn" {
 }
 
 output "key_vault_name" { value = azurerm_key_vault.this.name }
+
+# The scope for the one-time `az role assignment create` that gives an operator
+# write access to the vault. self-hosting/azure.md names this command, and an
+# output is what makes that instruction followable instead of an exercise in
+# assembling a resource id by hand.
+output "key_vault_id" { value = azurerm_key_vault.this.id }
 output "goldens_account" {
   value       = var.goldens_enabled ? azurerm_storage_account.goldens[0].name : null
   description = "Null unless goldens_enabled. Nothing in the control plane reads blob storage yet."

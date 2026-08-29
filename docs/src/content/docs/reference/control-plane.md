@@ -32,6 +32,11 @@ is a process that fails in production rather than at deploy time.
 | `AF_MIGRATION_DATABASE_URL` | unset | A connection string for a role that may run DDL. |
 | `AF_VERSION` | `dev` | The build's version, reported by `/readyz`. Stamped into the image at build time; setting it by hand only makes the endpoint lie. |
 | `AF_COMMIT` | `unknown` | The commit the build came from, reported by `/readyz`. Stamped the same way. |
+| `AF_GITHUB_APP_ID` | unset | The numeric App ID from the GitHub App's settings page. Needed together with the private key and the webhook secret; setting some and not others stops the process at startup rather than producing a half-working App. |
+| `AF_GITHUB_APP_PRIVATE_KEY` | unset | The PEM GitHub generated when the App's private key was created, or that PEM base64 encoded. Literal `\n` sequences are turned back into newlines, because most ways of getting a multi-line value into a container flatten it, and the resulting key fails with a message about DECODER routines that sends you somewhere else entirely. |
+| `AF_GITHUB_APP_WEBHOOK_SECRET` | unset | The webhook secret set on the App. Every delivery is verified against it before its body is parsed. Unset means `/webhooks/github` answers 503 rather than accepting unsigned deliveries. |
+| `AF_GITHUB_API_BASE` | `https://api.github.com` | Where the GitHub API lives. For GitHub Enterprise Server, and for tests. |
+| `AF_MODEL_PRICES` | unset | What a model costs, as `model=input/output` in US dollars per million tokens, comma separated: `claude-sonnet-5=3/15,gpt-4.1=2/8`. Adds to the built-in defaults rather than replacing them. A model with no price is **refused** rather than charged nothing, because a request that spends money and adds nothing to the total is a spend cap that does not cap spending. A malformed entry stops the process at startup rather than being skipped, since a skipped entry is a model silently falling back to another price. |
 | `AF_PROVIDER_KEY_SECRET` | unset | 32 bytes of base64, the secret that seals customers' Anthropic and OpenAI keys. Generate one with `openssl rand -base64 32`. Unset means keys cannot be stored at all: saving one is refused rather than written in the clear. It must not live in the same place as the database, or a database dump carries both halves. Anything other than 32 bytes stops the process at startup rather than failing later on the one action the feature exists for. |
 
 ## Who may sign in
@@ -44,7 +49,10 @@ written, so a refused person leaves no account behind.
 
 Membership decides what a signed-in person can see, and it is derived from
 GitHub rather than granted here: an account is a member of an organization only
-where a GitHub App installation exists for that organization. Somebody can
+where a GitHub App installation exists for that organization. That installation
+row is written by `/webhooks/github` when somebody installs the App, so a
+control plane with no App configured has no installations, and everybody who
+signs in lands with no tenant. Somebody can
 therefore sign in successfully and have no tenant at all, which is what happens
 to any account added to the allowlist before it is invited anywhere.
 

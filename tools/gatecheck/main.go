@@ -347,6 +347,25 @@ var exemptFromGate = map[string]string{
 		"which is where a scan whose input is a moving database belongs. Run it by " +
 		"hand with `just vuln`.",
 
+	"tool azguard": "" +
+		"Its answer is a property of the SUBSCRIPTION, not of the tree. " +
+		"`azguard region` asks Azure whether a region can actually create this " +
+		"stack's PostgreSQL flexible server, and that is a third gate beyond " +
+		"quota and Azure Policy which neither a plan nor a policy can see: " +
+		"eastus returns supportedServerVersions: [] with \"Provisioning is " +
+		"restricted in this region\", and an apply there got twenty six of " +
+		"twenty seven resources in before finding out. The same question " +
+		"answered on a laptop with no cloud account is not an answer, and " +
+		"`just gate` has to work on a plane. " +
+		"What IS a function of the tree is the decision the tool makes about a " +
+		"capability document, and `go test ./tools/azguard` covers it inside " +
+		"`gate`: the restricted-region document is refused with Azure's own " +
+		"reason quoted, an unavailable version and an unavailable SKU are " +
+		"refused, four separate ways of not knowing are each refused rather " +
+		"than passed, and a positive control asserts a good region IS allowed " +
+		"so that a guard which refuses everything cannot pass the suite. " +
+		"It runs in infra.yml's plan job, which has a credential.",
+
 	"tool cost": "" +
 		"Its input is not in the tree. tools/cost reads a Terraform plan, and a " +
 		"plan only exists after authenticating to Azure and resolving every " +

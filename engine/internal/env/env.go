@@ -31,6 +31,7 @@ import (
 	dblabdb "github.com/antifailure/antifailure/engine/internal/db/dblab"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
+	supabasedb "github.com/antifailure/antifailure/engine/internal/db/supabase"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
@@ -220,6 +221,10 @@ type Result struct {
 	Proxied bool
 	// Rules is how many egress rules the sidecar is enforcing.
 	Rules int
+	// Personas counts the accounts provisioned, so a caller can say that the
+	// environment has somebody to sign in as rather than leaving it to be
+	// discovered when a sign in fails.
+	Personas int
 }
 
 // session holds everything Up opens and must close.
@@ -718,6 +723,35 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 		}
 		return p, nil
 
+	case schema.DBSupabase:
+		db := m.Database
+		if db.Project == "" {
+			return nil, aferrors.Coded(aferrors.AFMAN002,
+				"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+				"detail", "database.provider is supabase and database.project is empty; "+
+					"the provider needs the Supabase project reference to create branches in")
+		}
+		name := db.APIKeyEnv
+		if name == "" {
+			name = "SUPABASE_ACCESS_TOKEN"
+		}
+		token, _, found, err := o.secretChain().Lookup(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || token.IsZero() {
+			return nil, aferrors.Coded(aferrors.AFSEC001,
+				"names", name,
+				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
+		}
+		return supabasedb.New(supabasedb.Options{
+			Token:       token,
+			ProjectRef:  db.Project,
+			Clock:       o.opts.Clock,
+			Version:     databaseVersion(m),
+			MaxBranches: db.MaxBranches,
+		})
+
 	case schema.DBDBLab:
 		db := m.Database
 		if db.Project == "" {
@@ -1046,6 +1080,24 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	}
 	if err != nil {
 		return result, err
+	}
+
+	// After the services, because the migrations run as part of bringing them
+	// up and a persona is a row in a table those migrations create. Before
+	// this, running af up and then opening the application by hand gave you an
+	// environment with no accounts in it, and the sign in page had nothing to
+	// accept. Provisioning is idempotent, so af test reconciling the same
+	// personas afterwards is a no-op rather than a second set.
+	//
+	// A failure here does not fail af up. The environment is running and can
+	// be browsed; what is missing is the accounts, and that is worth saying
+	// loudly rather than tearing down everything that did work. af test, where
+	// a missing persona genuinely blocks the agents, still treats it as fatal.
+	if provisioned, perr := o.provisionPersonas(ctx, s); perr != nil {
+		o.progress("the personas could not be created, so signing in will not work: " +
+			o.opts.Redactor.String(perr.Error()))
+	} else if provisioned != nil {
+		result.Personas = len(provisioned.Accounts)
 	}
 
 	result.URL = env.URL()

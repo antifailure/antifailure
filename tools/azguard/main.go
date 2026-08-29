@@ -11,9 +11,10 @@
 // deliberately paranoid: it fails closed, so an error talking to Azure is a
 // refusal rather than an assumption that the target was fine.
 //
-//	azguard check af-cp-scus              # is this group ours?
-//	azguard check --tags af-cp-scus       # ...and does it carry the tag?
+//	azguard check af-cp-centralus         # is this group ours?
+//	azguard check --tags af-cp-centralus  # ...and does it carry the tag?
 //	azguard guard -- terraform apply      # refuse unless every -var group is ours
+//	azguard region centralus              # can this region actually run the database?
 //
 // Exit codes: 0 allowed, 1 refused, 2 the guard could not tell.
 package main
@@ -57,6 +58,8 @@ func main() {
 		os.Exit(cmdCheck(os.Args[2:]))
 	case "guard":
 		os.Exit(cmdGuard(os.Args[2:]))
+	case "region":
+		os.Exit(cmdRegion(os.Args[2:]))
 	case "-h", "--help", "help":
 		usage()
 		os.Exit(0)
@@ -80,6 +83,14 @@ func usage() {
       any ARM resource id, which is how --scope and --ids name one), check
       them, and run the command only if every one is ours.
 
+  azguard region [--postgres-version V] [--postgres-sku S] <location>...
+      Ask Azure whether a region can actually create this stack's PostgreSQL
+      flexible server. This is a THIRD gate, separate from quota and from Azure
+      Policy, and neither a plan nor a policy can see it: eastus on this
+      subscription returns supportedServerVersions: [] with "Provisioning is
+      restricted in this region", so an apply gets twenty six resources in and
+      then fails on the database.
+
 Exit codes: 0 allowed, 1 refused, 2 could not tell.
 `)
 }
@@ -92,6 +103,23 @@ func nameIsOurs(group string) error {
 	}
 	if owner, ok := knownForeign[strings.ToLower(group)]; ok {
 		return fmt.Errorf("%s belongs to %s, not to Antifailure. ISOLATION.md lists it as a group this project never touches", group, owner)
+	}
+	// AZURE CREATES RESOURCE GROUPS THIS PROJECT DID NOT ASK FOR, and refusing
+	// them with "belongs to another project" would be a confident, wrong answer.
+	//
+	// A Container Apps environment produces a second group called
+	// ME_<environment>_<group>_<location> holding the platform's own
+	// infrastructure. It is created and deleted by Azure, its `managedBy` points
+	// back at the environment, and it inherits the environment's tags, so a
+	// cleanup scoped to project=antifailure DOES reach it even though the name
+	// rule cannot. Deleting the environment deletes it; touching it directly is
+	// how a running environment gets broken.
+	//
+	// This is still a REFUSAL. The message is the whole difference: it says why
+	// the group exists and what to operate on instead.
+	if strings.HasPrefix(group, "ME_") {
+		return fmt.Errorf("%s is created and owned by Azure, not by this project: it holds the infrastructure for a Container Apps environment and its lifecycle belongs to that environment. Delete the environment instead. It inherits the environment's tags, so a cleanup scoped to %s=%s reaches it even though its name cannot start with %s",
+			group, requiredTagKey, requiredTagVal, requiredPrefix)
 	}
 	if !strings.HasPrefix(group, requiredPrefix) {
 		return fmt.Errorf("%s is not prefixed %q. Antifailure creates and operates on resource groups it owns and nothing else; this subscription holds other projects' groups", group, requiredPrefix)

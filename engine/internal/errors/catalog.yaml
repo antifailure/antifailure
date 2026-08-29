@@ -213,13 +213,19 @@ errors:
     retryable: false
     exit_code: 4
   - code: AF-DB-020
-    planned: true
     area: DB
-    message: "Personas cannot be provisioned because {provider} creates users only through its own API."
-    next_step: "Configure SANDBOX mode for {provider} so that personas are created in its sandbox tenant."
+    message: "Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured."
+    next_step: "Point auth.url or auth.domain at a sandbox, development or staging tenant and set auth.sandbox: true, so that personas are never created in production."
     docs: guides/personas
     retryable: false
     exit_code: 3
+  - code: AF-DB-021
+    area: DB
+    message: "{provider} rejected the admin token used to create personas."
+    next_step: "Check that the variable named by auth.token_env holds a key for the sandbox tenant with permission to create users."
+    docs: guides/personas
+    retryable: false
+    exit_code: 4
   - code: AF-DB-030
     area: DB
     message: "Migrations failed on the branch: {detail}"

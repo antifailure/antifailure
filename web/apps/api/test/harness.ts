@@ -73,6 +73,13 @@ export interface StartApiOptions {
    *  which is a state the server has to serve rather than crash in, and there
    *  are tests for that. */
   sealingKey?: Buffer | null
+  /** The GitHub App's webhook secret. Undefined means no App, and the webhook
+   *  endpoint refuses every delivery rather than accepting unsigned ones. */
+  githubWebhookSecret?: string | null
+  /** What each model costs, for the budgeted model proxy. */
+  modelPrices?: Record<string, { inputPerMillion: number; outputPerMillion: number }>
+  /** Where the providers live, so no test reaches a real one. */
+  providerBases?: Record<string, string>
 }
 
 export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
@@ -101,6 +108,9 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     appBaseUrl: 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
     sealingKey: options.sealingKey ?? null,
+    githubWebhookSecret: options.githubWebhookSecret ?? null,
+    ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
+    ...(options.providerBases ? { providerBases: options.providerBases } : {}),
   })
 
   return {

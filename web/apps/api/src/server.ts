@@ -60,6 +60,10 @@ import {
 } from './auth/device.ts'
 import { mountConsole } from './console/index.ts'
 import { PROVIDERS, type Provider } from './providers/seal.ts'
+import { verifySignature } from './github/app.ts'
+import { forward, ProxyError } from './providers/proxy.ts'
+import { PricingError, type Price } from './providers/pricing.ts'
+import { handleDelivery } from './github/webhook.ts'
 import {
   listBudgets,
   listKeys,
@@ -89,6 +93,15 @@ export interface ServerOptions {
   /** The secret that seals provider keys. Null means keys cannot be stored,
    *  which the console says out loud rather than failing on submit. */
   sealingKey?: Buffer | null
+  /** The GitHub App's webhook secret. Null means no App is configured, and the
+   *  webhook endpoint refuses every delivery rather than accepting unsigned
+   *  ones. */
+  githubWebhookSecret?: string | null
+  /** What each model costs, for charging a budget. */
+  modelPrices?: Record<string, Price>
+  /** Where the providers live. Overridden in tests so nothing reaches a real
+   *  one; unset means the real addresses. */
+  providerBases?: Record<string, string>
   ingestLimit?: { rate: number; burst: number }
   authLimit?: { rate: number; burst: number }
   /** The build, reported as a label on af_control_plane_info so a graph can
@@ -818,6 +831,154 @@ export function createServer(options: ServerOptions) {
     } catch (err) {
       if (err instanceof ProviderKeyError) return c.json({ error: err.message }, 400)
       throw err
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // Model calls against a budget
+  // -------------------------------------------------------------------------
+  //
+  // These paths are the providers' own, on purpose. Both callers in this
+  // repository build their URL by concatenating a base onto the provider's
+  // path and take that base from an environment variable, so answering here
+  // means neither of them changes: point ANTHROPIC_BASE_URL at
+  // `<origin>/byok/anthropic`, put an Antifailure token where the provider key
+  // used to go, and the same code now spends against a cap.
+  //
+  // The token arrives in whichever header that provider's client sends it in,
+  // for the same reason. Anthropic's client sends x-api-key; OpenAI's sends an
+  // Authorization bearer. Insisting on one shape would mean editing both
+  // callers to satisfy a preference of ours.
+
+  async function byokCaller(c: Context, provider: string): Promise<string | Response> {
+    if (!(PROVIDERS as string[]).includes(provider)) {
+      return c.json({ error: { message: `Unknown provider ${provider}.` } }, 404)
+    }
+    if (!options.sealingKey) {
+      return c.json(
+        { error: { message: 'This control plane cannot hold provider keys: AF_PROVIDER_KEY_SECRET is not set.' } },
+        503,
+      )
+    }
+    const bearer = c.req.header('authorization') ?? ''
+    const token = bearer.startsWith('Bearer ')
+      ? bearer.slice(7).trim()
+      : (c.req.header('x-api-key') ?? '').trim()
+    if (!token) {
+      return c.json({ error: { message: 'No Antifailure token was sent.' } }, 401)
+    }
+
+    // Either kind of token. An engine on a build machine has an engine token
+    // and no person attached; a terminal has a personal one. Both are asking
+    // the same organization to spend its own money, so both are accepted, and
+    // the organization comes from the token rather than from the request.
+    const engine = await authenticateEngine(options.pool, clock, token)
+    if (engine) return engine.orgId
+    const who = await identify(options.pool, clock, token)
+    if (who) return who.orgId
+
+    return c.json({ error: { message: 'That token is not valid.' } }, 401)
+  }
+
+  async function byok(c: Context, provider: string): Promise<Response> {
+    const caller = await byokCaller(c, provider)
+    if (caller instanceof Response) return caller
+
+    const body = await c.req.text()
+    try {
+      const result = await forward(
+        {
+          pool: options.pool,
+          clock,
+          sealingKey: options.sealingKey!,
+          prices: options.modelPrices ?? {},
+          ...(options.providerBases ? { bases: options.providerBases } : {}),
+        },
+        provider as Provider,
+        caller,
+        body,
+      )
+      // The provider's own status and body, unchanged. A caller that knows how
+      // to read an Anthropic error should keep being able to.
+      c.header('content-type', 'application/json')
+      // Said out loud so a run can show what it spent without asking again.
+      if (result.costUsd !== null) c.header('x-antifailure-cost-usd', result.costUsd.toFixed(6))
+      return c.body(result.body, result.status as 200)
+    } catch (err) {
+      // The provider's error shape, so a client library parses our refusal the
+      // same way it parses theirs rather than throwing on an unexpected body.
+      if (err instanceof ProxyError) {
+        return c.json({ error: { message: err.message, type: 'antifailure_refused' } }, err.status as 400)
+      }
+      if (err instanceof ProviderKeyError) {
+        // 402: the request is fine and there is no allowance. Distinct from a
+        // 401, because retrying with a different token will not help and a
+        // client that treats it as auth will loop.
+        return c.json({ error: { message: err.message, type: 'antifailure_budget' } }, 402)
+      }
+      if (err instanceof PricingError) {
+        return c.json({ error: { message: err.message, type: 'antifailure_unpriced' } }, 400)
+      }
+      throw err
+    }
+  }
+
+  app.post('/byok/anthropic/v1/messages', (c) => byok(c, 'anthropic'))
+  app.post('/byok/openai/v1/chat/completions', (c) => byok(c, 'openai'))
+
+  // -------------------------------------------------------------------------
+  // GitHub webhook deliveries
+  // -------------------------------------------------------------------------
+  //
+  // The only unauthenticated endpoint here that writes anything, so the order
+  // of what follows is the security property:
+  //
+  //   1. read the RAW body,
+  //   2. verify the HMAC over those exact bytes,
+  //   3. only then parse it.
+  //
+  // Parsing first and verifying after would mean running a JSON parser over
+  // whatever anybody on the internet sent, and deciding afterwards whether to
+  // have trusted it.
+  //
+  // It answers 2xx for anything it has decided about, including deliveries it
+  // does not act on. GitHub retries a 5xx, so answering 500 to an event this
+  // control plane will never handle produces a retry storm against an endpoint
+  // that will refuse it identically every time.
+
+  app.post('/webhooks/github', async (c) => {
+    const secret = options.githubWebhookSecret ?? null
+    if (!secret) {
+      // 503, not 401. Nothing is wrong with the request; this installation has
+      // no App configured, and a delivery arriving here is a misconfiguration
+      // worth seeing in GitHub's delivery log rather than a rejection.
+      return c.json({ error: 'This control plane has no GitHub App configured.' }, 503)
+    }
+
+    const raw = await c.req.text()
+    if (!verifySignature(secret, raw, c.req.header('x-hub-signature-256'))) {
+      // No detail. A body that says which part failed is a body that helps
+      // somebody iterate towards a valid signature.
+      return c.json({ error: 'That delivery could not be verified.' }, 401)
+    }
+
+    let payload: Record<string, unknown>
+    try {
+      payload = JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+
+    const event = c.req.header('x-github-event') ?? 'unknown'
+    try {
+      const outcome = await handleDelivery(options.pool, clock, event, payload)
+      return c.json(outcome, 200)
+    } catch (err) {
+      // A real failure on our side. 500 is right here and the retry is wanted:
+      // a database that was briefly unreachable should not lose an
+      // installation event, because nothing else will ever tell us about it.
+      const message = err instanceof Error ? err.message : String(err)
+      return c.json({ event, error: message }, 500)
     }
   })
 

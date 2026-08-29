@@ -485,6 +485,26 @@ jobs:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
 
+      - name: A pg_dump new enough for the servers those suites build
+        # The same step the engine job carries, and for the same reason. This
+        # job runs the engine's own suites too, and several of them build a
+        # Postgres 17 and copy a schema out of it. The runner ships a 16
+        # client, pg_dump refuses to read a server newer than itself, and the
+        # failure lands in this job rather than in the one people expect.
+        #
+        # Two jobs repeating it is the honest cost of not having a composite
+        # action here. If you change one, change the other.
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          test -x /usr/lib/postgresql/17/bin/pg_dump
+
       - name: The community build does not need ee
         # The proof rather than the assertion. ee is deleted and everything
         # still builds and passes, which is what the community binary is built
