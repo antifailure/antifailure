@@ -135,42 +135,38 @@ reports nothing, which is worse than the gap.
 Four are done and clean, in CI as well as locally: `cmd/af-proxy`,
 `conformance`, `internal/load` and `internal/subset`.
 
-**Answered.** `internal/insights` verifies too, and the stacks with no frame
-from this repository were this package's after all.
+**Answered, on the second try, and the first try is worth reading.**
+`internal/insights` verifies now. The stacks with no frame from this repository
+were this package's after all, and the audit that cleared every
+`dockerutil.Client()` was correct and beside the point: the connections were
+not idle, so `Client.Close` could not reclaim them, because
+`CloseIdleConnections` only touches connections that are idle.
 
-They were two `net/http` `persistConn` `readLoop` and `writeLoop` pairs in IO
-wait. The audit that cleared every `dockerutil.Client()` was correct and beside
-the point: the connection was not idle, so `Client.Close` could not reclaim it,
-because `CloseIdleConnections` only touches connections that are idle.
+The FIRST answer was wrong, and the wrongness was instructive. `ContainerWait`
+returns an UNBUFFERED result channel and a goroutine that closes the response
+body only after handing its result over, and both call sites here also selected
+on `ctx.Done()`, so a deadline arriving at the same moment as a result could
+park that goroutine forever. That is a real hazard, it is fixed in
+`dockerutil.AwaitExit`, and it was not this. The check went back on with that
+fix in and CI failed in exactly the same way. A mechanism that could explain
+the symptom is not evidence that it did.
 
-`ContainerWait` is what left it that way. It returns two channels and a
-goroutine that sends exactly one value, and the result channel is UNBUFFERED;
-the goroutine closes the response body in a defer that runs only after that
-send. Both call sites here also selected on `ctx.Done()`. When a deadline
-landed at the same moment as a result, select chose at random between two ready
-cases, and choosing the deadline parked that goroutine on the send for good:
-body never closed, connection never returned to the pool, `readLoop` and
-`writeLoop` outliving the process. Two abandoned waits, two pairs.
+What it actually was: `requireBranchContainer` handed back a stop function and
+the tests called it with `defer`. A deferred call in a test body runs BEFORE
+any `t.Cleanup`, so the client was closed first and `waitForBranch`'s cleanup
+then asked that same closed client to disconnect and remove a network. Those
+calls dial again, and by then nothing remains to close what they dial. One
+connection per test, outliving the process.
 
-That also explains why it only ever failed in CI. It needs the deadline and the
-container exit to coincide, which needs a loaded machine.
+Two things made this hard to see for a week. It cannot be reproduced on a
+workstation: it was chased with a full run, a `-short` run, and a run against a
+daemon with the image deliberately missing, and all three were clean. And the
+leaked goroutines carry no frame from this repository, so every stack says
+`net/http` and invites the conclusion that it is somebody else's.
 
-The repair is `dockerutil.AwaitExit`, which receives from both channels and has
-no `ctx.Done()` case at all, so no caller can abandon a wait. Dropping that
-case is safe because the wait request is made with the same context: cancelling
-it fails the request the goroutine is reading, and the goroutine reports that
-on the error channel.
-`TestAwaitExit_ADeadlineEndsTheWaitAndLeavesNothingParked` holds that contract,
-because the risk of removing a `ctx.Done()` case is a hang rather than a leak.
-
-Honest about the strength of this: the parked-goroutine mechanism is proven by
-reading `ContainerWait` and is real, and the abandonment it needs is gone by
-construction rather than made less likely. What is NOT proven is a
-reproduction: the race needs two events inside the same instant and did not
-reproduce on a workstation, so a first attempt at a regression test passed
-against the unfixed code and was rewritten rather than kept. The check is back
-on in CI, which is where the failure lives and where the evidence will come
-from.
+The evidence that closed it is the `edition boundary` job, which reproduces the
+failure in twenty four seconds and went from fail to pass across that one
+commit, with the check on and nothing else changed.
 
 ### Q9. A golden image disappears between RefreshGolden and the next Branch
 
