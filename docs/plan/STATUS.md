@@ -141,7 +141,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 1.8 Azure foundation (Terraform) | written | `infra/terraform` with a foundation module (resource group, budget on forecast as well as actual, Log Analytics) and a control plane stack. `terraform plan` against the real subscription is clean at 30 to add, 0 to change, 0 to destroy. That sentence used to end "nothing has been applied, so this is not `proven`", and it went stale without anybody noticing. Checked directly rather than assumed: the stack is applied, `afcp-bootstrap` has 15 executions rather than the zero it had this morning, and the deployed application answers `/readyz` with `{"ready":true,"version":"main","commit":"7611e7d"}`, which is this repository's tip, so continuous deployment reaches Azure on every push. Whether that makes this row `proven` is for whoever owns the stack to say, Whether that makes this row `proven` is for whoever owns the stack to say. `tools/azguard` and `tools/cost` are `proven`: the guard refuses all five foreign resource groups in this subscription and fails closed, and the estimator reports 32.49 USD a month from prices read out of the Azure retail API. Q4 is narrower now: what remains is the Entra app registration and federated credential, without which the CI plan job skips rather than passes. |
 | 1.9 Test infrastructure and fakes | proven | The database conformance suite is now PROVED ABLE TO FAIL. `engine/conformance/db_selftest_test.go` points the suite at a provider that violates exactly one guarantee and requires it to go red in the named behaviour, in a subprocess, with no database: the property being false is arranged in the fake, and a negative control that needs infrastructure gets skipped, which is a false green rather than a proof (that correction is lane 4's). A positive control asserts the same nine behaviours PASS against a correct provider and did not SKIP, because a suite can otherwise pass by skipping itself. **Running it for the first time found two holes in the suite, both recorded in `knownGaps` with a guard that fails if they stop being real.** `Branch_RefusesAnUnverifiedGolden` puts its whole assertion inside `if err == nil && gv.ID != ""`, which a provider that correctly refuses to PUBLISH an unverified version never satisfies, so the body never runs and the product's central promise is unchecked on the branch side. `Health_ReportsADestroyedBranch` was declared as "unreachable rather than erroring" while its implementation accepted an error, so the suite and its own catalogue disagreed. **That one is closed.** The catalogue was right and both shipped providers already answer that way: teardown asks for health, so a provider that errors on a branch it has just removed makes a successful teardown look like a failure. The suite enforces the description now, and reverting the fix turns the self-test red in the named fault, which is how I know it is enforced rather than merely written. Five faults still need Postgres because their behaviours read rows, and the test names which. `fakes` also carries `InMemoryDatabase`, `NewRuntime`/`BreakRuntime` and a clock. |
 | 1.10 Events, logging, and redaction | proven | 100 percent coverage on redaction, 454 ns/op with no allocations. |
-| 1.11 Local state store and journal | proven | Crash injection at every step, plus a property test over random interleavings. |
+| 1.11 Local state store and journal | proven | Crash injection at every step, plus a property test over random interleavings. The journal is now also read: `af down` replays it after the label sweep, which nothing did until phase 14, so the records had gone in and never come out. |
 
 ## Phase 2. Engine core and CLI
 
@@ -151,17 +151,17 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 2.2 Manifest loader and validator | proven | Fuzzed. Unknown keys are errors with a line and a suggestion. |
 | 2.3 Detection engine | proven | Twelve analyzers. Deterministic, bounded, fuzzed, never executes repository code. |
 | 2.4 `af init` | proven | Validates its own output before writing. |
-| 2.5 Secrets subsystem | proven | Sources with precedence, a dotenv reader, an encrypted local store, and a resolution layer. A sandbox credential reaches the sidecar as a file and the service as a marker; proven against a running container. The OS keyring is an interface with a fake: no real credential store is wired yet. |
+| 2.5 Secrets subsystem | proven | Sources with precedence, a dotenv reader, an encrypted local store, and a resolution layer. A sandbox credential reaches the sidecar as a file and the service as a marker; proven against a running container. All three system keyrings are `proven`, each against the real credential store on its own platform: the macOS keychain on a workstation, Linux against a real gnome-keyring behind a real D-Bus in a container, where the run corrected two guesses, and Windows against the real Credential Manager in a windows-latest job, whose first run found a real limit nothing documents. Windows will not store a secret longer than 1280 characters, because CRED_MAX_CREDENTIAL_BLOB_SIZE is 2560 bytes and the blob is UTF-16, and a PEM private key goes past it. It is now refused before the call with a message naming the limit and pointing at the encrypted local store, rather than passing through advapi32's own "The stub received bad data". A registered source can add a store from outside the module through engine/pkg/extension. |
 | 2.6 `af doctor` | proven | |
 | 2.7 HUD | proven | Model, rendering, non-TTY fallback, the Bubble Tea program, and `af up --hud`, which is the caller it did not have. `engine/internal/hud`: reorder window that abandons a gap rather than stalling, three layouts (stacked at 80, two column at 120, three column at 160) with seven golden frames committed, keyboard navigation, resize handling, and a queue that drops and counts rather than ever applying backpressure to the bus. Wiring it end to end meant making the engine emit what the dashboard draws: `internal/env` now publishes env.creating, golden.ready, db.branching, db.branched, build.started, build.log, build.finished, build.failed, service.starting, service.ready, service.exited, env.ready, env.failed, env.destroying and env.destroyed, and `Orchestrator.AddSink` attaches a subscriber to the session bus each command opens. Before this the bus had no subscribers at all and every event the journal published was delivered to nobody. Four tests in `internal/env` prove the attachment against a real Up, with no Docker daemon, by stopping the run at the policy hook; a negative control that removes the AddSink loop turns all four red. Looking at a frame built from the real stream found three more things reading the code did not: the golden fixtures were scripted with `service.started`, which is not an event type, so six committed frames were pictures of a stream the engine cannot produce; every log line repeated `env=` for the environment named in the header; and a verified golden showed as unverified on every ordinary run, because the pane only believed mask.verified and an ordinary run branches from a golden verified days earlier. goleak found a goroutine leaked per dashboard, from a cancellation watcher receiving on a nil Done channel, and a leaked drainer in the package's own concurrency test. `Program.Close` now signals on a second channel rather than closing the one producers write to, so Send after Close is a counted drop instead of a panic, and Close is idempotent because both the bus and the command legitimately call it. Outstanding: the vhs recordings for the docs page. `docs/guides/dashboard.md` documents the panes, the keys and the fallback without them. Driven by a real `af up` on 2026-08-27, not only by fixtures: the non-TTY fallback rendered env.creating, golden.ready with verified=true, db.branching, ninety build.log lines, build.finished with its duration, service.starting, and a failure at error level with its reason. That run also showed what the display does not say: the runtime's progress lines went to the terminal and not to the stream, and dashboard mode silences the terminal, so the readiness wait, which is the longest part of a run, drew nothing at all. They are on the stream now, tagged with the service they name when they name one that exists. Run end to end three times on 2026-08-27 against a real daemon, and each run found something the run before it hid. The first proved the wiring: env.creating through env.ready, 105 seconds, service answering 200. The second showed `service.ready web is running detail=` on every line, because an empty field was attached whatever its value, and `env=` repeated on a line already scoped to that environment. The third showed the readiness wait still silent, because the runtime's progress lines were emitted as service.log, which the fallback correctly folds away as noise: a service writes thousands of lines and a build log is not the place for them. `engine.progress` is a new type for exactly that, a step in a long running operation with no more specific event, and the run after it reads `engine.progress egress proxy ready with 0 rules` and `engine.progress web: ready at http://127.0.0.1:46000`, where thirty seconds of nothing used to be. |
-| 2.8 Event sinks | proven | NDJSON with rotation, JSON, memory, and a replay reader. |
+| 2.8 Event sinks | proven | NDJSON with rotation, JSON, memory, and a replay reader. Attached to a bus by `internal/telemetry` since phase 14; before that every constructor here had zero callers outside a test, so the log this row describes was never written on any machine. |
 
 ## Supporting packages
 
 | Package | State | Coverage |
 | --- | --- | --- |
 | `internal/clock` | proven | 88 percent |
-| `internal/secrets` | proven | 100 percent |
+| `internal/secrets` | proven | 100 percent; three real keyrings and a registered-source adapter |
 | `internal/redact` | proven | 100 percent |
 | `internal/errors` | proven | 100 percent |
 | `internal/events` | proven | 94 percent |
@@ -356,7 +356,56 @@ environment ending at the right sequence, and `af env pull` reading it back.
 | 13.5 Audit export and SIEM streaming | proven | The hash chain is in the control plane's audit log. Forwarding is a bounded queue that cannot fail or slow the action it audits, with signed batch manifests carrying the chain head so a batch in an object store verifies on its own. Splunk, Event Hubs, an object store, and a signed webhook, at 31 tests. |
 | 13.6 Organization policy enforcement | proven | 100 percent. A property test over five hundred random policies proves a stricter policy never permits more. |
 | 13.4 Advanced access control and approvals | proven | 42 tests. The role model and scopes, approval policies that one person cannot complete alone, and the model as a reviewable file with a dry run that refuses a file leaving a required approval unreachable. |
-| 13.2, 13.3, 13.7 to 13.14 | planned | Single sign on, SCIM, multi-cluster, secrets adapters, billing, dashboard, support tooling, compliance, deployment. |
+| 13.8 Enterprise secret stores | mixed | The contract, the conformance suite, and four adapters. Two of the four are `proven` against the real service. HashiCorp Vault: twelve conformance behaviours against a real Vault in a container, nothing skipped, on every pull request. Azure Key Vault: the same twelve against a real vault in a real subscription, nothing skipped, and the first live run failed and found a real fault described below. AWS is `mixed`: its Signature Version 4 implementation is `proven` against the worked example AWS publishes, and everything needing an account is `written`. Google is `written`: the service account assertion is signed with a real RSA key and verified with its public half, but it has never been run against Secret Manager. See the note below. |
+| 13.12 Compliance packs | proven | SOC 2 and HIPAA, run end to end against a real control plane: migrations applied to a real Postgres, an audit chain written by the control plane's own appendAudit, seventeen tables checked for row level security, and the real grants on the audit log. Then a privileged connection altered one entry and deleted another and the report named both at the right sequence numbers and exited 6. The Go chain verifier is proved to agree byte for byte with web/packages/db/src/audit.ts by running that TypeScript, and the attestation verifier against attestations the engine signed. |
+| 13.2, 13.3, 13.7, 13.9 to 13.11, 13.13, 13.14 | planned | Single sign on, SCIM, multi-cluster, billing, dashboard, support tooling, deployment. |
+
+`13.8` is the one row on this page that is not a single word, because a single
+word would be a lie in either direction. "Tested against a local server speaking
+the documented wire format" proves what the adapter does with each response and
+proves nothing about whether the service accepts the request, so the two are
+tracked separately and only the second earns `proven`.
+
+Azure is the case that shows why the distinction is worth the extra words. The
+adapter passed every behaviour against a local server standing in for Key Vault,
+and failed on the first run against a real vault. `Reach` acquired a Microsoft
+Entra token and never touched the vault, so a vault behind a firewall, a private
+endpoint, or a typo handed back a good token and the source reported itself
+usable. AF-SEC-001 would have listed Key Vault as a place the value could have
+come from while nothing there could be read, which is the exact failure this
+contract exists to prevent. The fake could not have caught it, because it is one
+process serving the token endpoint and the vault, so a dead address broke them
+together and the token failure hid the vault failure.
+
+AWS and Google are both blocked on a payment method rather than on work, and it
+is worth naming which so nobody re-derives it. There is no AWS account here at
+all. Google is authenticated and a throwaway project exists, but Secret Manager
+refuses to enable without billing (`UREQ_PROJECT_BILLING_NOT_FOUND`), and the
+one billing account on the tenant reports `open: false`, so linking it leaves
+`billingEnabled: false`. Both rows become `proven` the day there are credentials
+to run them with; the suites are written and the setup is scripted.
+
+## The enterprise binary
+
+`ee/engine/cmd/af` is the enterprise edition, and before it existed everything
+under `ee/engine` compiled, was tested, and could not be run by anything:
+`policyenforce.NewHook` had no non-test caller and neither did `feature.With`.
+An enterprise binary has to register its hooks and then run the CLI, and the
+CLI is `engine/internal/cli`, which Go's internal rule makes unimportable from a
+separate module, so there was no import path that resolved.
+
+`engine/pkg/afcli` is the other half of the socket: one function that runs the
+command tree, the signal handling so control C means the same thing in both
+binaries, and a way to contribute a command so an enterprise command appears in
+`af --help`. `engine/pkg/edition` lets the running binary say which edition it
+is, so `af license status` no longer reports "This is the community edition"
+from inside the enterprise one.
+
+| Piece | State | Notes |
+| --- | --- | --- |
+| `engine/pkg/afcli` | proven | Built and run: the enterprise binary resolves a variable out of a real Vault under a real signed licence, and reports it as unavailable with the reason when the licence is removed. |
+| `engine/pkg/edition` | proven | `af license status` in the enterprise binary reports the organization, the plan, the expiry and the features the evaluated licence permits, which differ from the claims for an expired or revoked one. |
+| `ee/engine/cmd/af` | proven | Registers the secret sources, attaches the licence to the context, contributes `af compliance`. |
 
 The boundary is a separate Go module rather than a build tag. The community
 build cannot resolve an enterprise import path at all, so a mistaken import is
@@ -376,7 +425,46 @@ indistinguishable from one that works until somebody relies on it.
 | 14.2 Environment scheduler | proven | 98.6 percent. Ten thousand runs across fifty organizations plan in 12 ms against a one-second budget, with no limit exceeded and every organization served. |
 | 14.9 Retention and archival | proven | Events partitioned by month on `occurred_at`, kept ahead by a daily pass, archived to newline delimited JSON before a drop. Proven against a real Postgres, including the ordering where the job stopped and the writes went to the default partition. The negative control, partitioning on `received_at` instead, makes the retry test fail. See `docs/plan/14.9-partitioning.md`. |
 | 14.7 Rate limiting, quotas, kill switch | proven | Every public endpoint has a declared limit, checked against the server's own route table. An endpoint with none is refused rather than served unbounded. |
-| 14.1, 14.3 to 14.6, 14.8 to 14.10 | planned | Horizontal scaling, multi-cluster pools, incremental goldens, runner pools, observability, chaos, archival, disaster recovery. |
+| 14.6 Observability | proven | The engine's event stream reaches a local NDJSON log and a control plane, which it never had before: nothing in the engine had ever called `Bus.AddSink`, no sink constructor had a caller outside a test, and `controlplane.NewSink` had none at all. The control plane serves `/metrics` in the Prometheus text format from counters it keeps itself and no query, because an aggregate across tenants would need a role that can read every tenant's rows. Alert rules and a Grafana dashboard live in `observability/` and a test fails on any metric they name that nothing exports. A sixth defect, found last by auditing the writers rather than the callers: the control plane sink sent event payloads unredacted, so a connection string in an event field reached the network in the clear while the local log, the spool, span attributes and the OTLP bytes were all scrubbed. The one writer of the five that leaves the machine was the one with no redactor. Fixed at `Client.Send`, the single point both the live path and the spool drain pass through, and a client with no redactor is now refused at construction the way the spool and the attachment already were. Two tests, each proved able to fail by removing the fix. |
+| 14.8 Platform chaos testing | proven | Four claims the repository made in prose. Two were false. See `engine/chaos`, whose package doc carries the table. Two later corrections, both to the suite rather than to the product, and both the same shape as what the suite exists to find. `ok` for this package meant less than it looked like: `go test` without -v discards a passing package's output, so the tally printed nothing on a green run, and the only count assertion was that at least one scenario ran. A roster of the ten names compared as a set now makes `ok` mean these ten, by name. And the three attempt retry around a busy Docker daemon could not retry, because all three attempts shared one deadline that the first one spent; each has its own budget now, and a blown budget is reported as a fact about the machine rather than as a provider fault. |
+| 14.10 Disaster recovery | proven | Backup, restore, and a drill that runs both against a real Postgres and reports the recovery time it measured: under two seconds to restore a small database on a continuous integration runner, and 20 to 160 seconds on a laptop with a dozen other containers on it. Two consecutive runs on the same runner reported 1.8 seconds and 0.6, which is why the operations page tells an operator to quote their own measurement rather than this one. The restore is checked against a manifest taken at backup time and then asked, through the unprivileged role, to refuse a cross-tenant read. The verification states its own scope, which a recovery plan needs and a row saying only `proven` does not: every check reads the `public` schema, where all 21 of the control plane's tables live today. Anything outside it is recorded in the manifest as unverified and reported by both the restore and the drill as a table the check cannot speak for, so the day this database grows a schema the drill says so instead of quietly verifying a subset and reporting a clean restore. |
+| 14.4 Incremental goldens | planned | Not attempted rather than unfinished. It lands entirely in `internal/env/golden.go` and `internal/golden`, which another lane rebuilt in the same session; writing it unwired would be another instance of the bug this phase spent its time finding. The fingerprint design is recorded in the pull request. |
+| 14.5 Runner pools | planned | Needs the Kubernetes runtime and the runner's own model and artifact paths. Worth recording while it is fresh: `artifact.stored` is an event type the control plane accepts and nothing produces, because artifact upload does not exist yet. |
+| 14.1, 14.3 | planned | Horizontal scaling and multi-cluster pools. |
+
+Three bugs on that path were each invisible for the same reason, and are
+worth stating because the shape recurs. `typeMap` translated nine engine event
+names to the control plane's and not one of the nine was a name the engine can
+emit, so every event would have arrived as a type the control plane stores and
+acts on not at all, leaving every environment displayed at whatever state it
+was first reported in. The test that covered the translation passed, because
+its helper built events with the same invented names. The per-environment
+sequence restarted at zero in every process, and the control plane advances a
+row only where the sequence is ahead of it, so every event after the first
+command would have been refused. And `Journal.Replay`, `journal.NewRegistry`
+and `Journal.Commit` each had zero callers, so the compensating half of
+"everything that is created has a recorded, compensating deletion" had never
+run.
+
+Two smaller ones fell out of the chaos tests. `af down` segfaulted whenever
+the Docker daemon was unreachable, because `newDatabaseProvider` returned a
+typed nil inside a non-nil interface; it now reports AF-RUN-002. And the api
+test harness decided whether a database existed with a three second connect
+timeout, which on a loaded machine meant whole suites skipped and reported
+green.
+
+What is `written` rather than `proven` here, and why. OTLP trace export is
+posted as JSON to a real HTTP endpoint in the tests and decoded back, so the
+wire format, the identifier encoding, the integers-as-strings rule and the
+redaction of the actual bytes are all proven; what is not is a real
+OpenTelemetry Collector accepting them, which needs one running.
+Chaos scenario 2 needs a real golden and fails on a saturated laptop inside the
+provider's readiness window; it is proven on continuous integration and not
+here. `events.EgressDecision` and `events.EgressTripwire` are declared,
+described, and emitted by nothing, so the control plane has no record of a
+single egress decision: the proxy is a separate process in a sidecar and
+nothing bridges its decisions back to the bus. That is a real gap rather than
+an oversight in this lane, and it is named here so it is not found again.
 
 ## Phase 11. Documentation site
 
@@ -395,7 +483,7 @@ Everything remaining needs infrastructure that does not exist yet rather than
 code that has not been written:
 
 - **8.10** is no longer blocked on an AKS decision. The control plane runs on Container Apps, where the whole stack costs 32.49 USD a month against roughly 75 for an idle AKS control plane before a node runs. The Terraform is written and plans clean; what is left is the decision to spend, and an Entra app registration so CI can plan with a federated credential instead of skipping.
-- **14.1, 14.3, 14.10** still want a cluster, which costs money for as long as it exists.
+- **14.1, 14.3** still want a cluster, which costs money for as long as it exists. 14.10 does not, and is not on this list: backup, restore and the drill are proven against a real Postgres and run on every CI build. What the deployed stack would add is a rehearsal against the database an outage would actually happen to, which is a different and better test than the one that exists, not a missing one.
 - **3.8** needs a Supabase account. 3.7 no longer does. **3.9 never needed one**:
   a Database Lab Engine is self hosted, so the only cost is a machine with ZFS
   and a copy of production. `docs/providers/dblab` says how to stand one up,

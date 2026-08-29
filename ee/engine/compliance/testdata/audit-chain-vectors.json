@@ -1,0 +1,64 @@
+[
+  {
+    "seq": 1,
+    "orgId": "11111111-1111-1111-1111-111111111111",
+    "actorUserId": null,
+    "actorLabel": "a",
+    "action": "b.c",
+    "targetType": "organization",
+    "targetId": null,
+    "origin": "web",
+    "detail": {},
+    "occurredAt": "2026-08-27T00:00:00.000Z",
+    "prevHash": null,
+    "canonicalDetail": "{}",
+    "hash": "b21ea2594b604ccbea0465d6ca1b415ee1d9f9935205d9ed9851532102c203ac"
+  },
+  {
+    "seq": 2,
+    "orgId": "11111111-1111-1111-1111-111111111111",
+    "actorUserId": "22222222-2222-2222-2222-222222222222",
+    "actorLabel": "ab",
+    "action": ".c",
+    "targetType": "environment",
+    "targetId": "env-1",
+    "origin": "engine",
+    "detail": {
+      "z": 1,
+      "a": "x",
+      "nested": {
+        "b": true,
+        "a": [
+          1,
+          2,
+          "three"
+        ]
+      },
+      "n": null
+    },
+    "occurredAt": "2026-08-27T12:34:56.789Z",
+    "prevHash": "deadbeef",
+    "canonicalDetail": "{\"a\":\"x\",\"n\":null,\"nested\":{\"a\":[1,2,\"three\"],\"b\":true},\"z\":1}",
+    "hash": "6da2252012d65dd8daef28d058551d11872d29270b6cc23a0c0ae2c4789ed5aa"
+  },
+  {
+    "seq": 3,
+    "orgId": "11111111-1111-1111-1111-111111111111",
+    "actorUserId": null,
+    "actorLabel": "unicode päßwörd 日本語",
+    "action": "member.removed",
+    "targetType": "user",
+    "targetId": "33333333-3333-3333-3333-333333333333",
+    "origin": "scim",
+    "detail": {
+      "big": 1234567890123,
+      "float": 1.5,
+      "whole": 2,
+      "s": "quote\"and\\backslash"
+    },
+    "occurredAt": "2026-01-02T03:04:05.060Z",
+    "prevHash": "cafe",
+    "canonicalDetail": "{\"big\":1234567890123,\"float\":1.5,\"s\":\"quote\\\"and\\\\backslash\",\"whole\":2}",
+    "hash": "7f5c404f3eeb872f25a4946ab95cb1745c3bc02083f6dba468628c48efa3d137"
+  }
+]

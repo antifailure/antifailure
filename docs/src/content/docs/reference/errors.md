@@ -654,6 +654,18 @@ The variables {names} are declared in the manifest but were not found in any con
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/secrets](/docs/guides/secrets/) |
 
+### AF-SEC-002
+
+The credential for {source} was rejected after one refresh: {detail}
+
+**What to do.** Rotate the credential and store the new value where {source} reads it. A rejection that survives a refresh is a credential that was revoked or was never right, so retrying will not help.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/secrets](/docs/guides/secrets/) |
+
 ### AF-SEC-003
 
 The value supplied for {name} carries a live credential prefix, and {name} is configured for sandbox use.
