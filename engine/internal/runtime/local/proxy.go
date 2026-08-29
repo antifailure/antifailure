@@ -394,6 +394,16 @@ type Decision struct {
 	// Substituted marks a request whose credential the sidecar replaced on
 	// the way out, so a reader can tell a sandbox call from a live one.
 	Substituted bool `json:"substituted"`
+	// WaitedMs and Limit are how long a rate limit held this request and what
+	// that limit is in words.
+	//
+	// The sidecar has always written both halves of this and nothing read
+	// them: waited_ms was absent from this struct, so it was decoded into
+	// nothing, and the limit was never written at all because describeRate
+	// had no caller outside its own test. A request shaped for half a second
+	// looked in af net log exactly like a slow application.
+	WaitedMs int64  `json:"waited_ms"`
+	Limit    string `json:"limit"`
 }
 
 // Decisions reads the sidecar's decision log for an environment.

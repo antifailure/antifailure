@@ -492,16 +492,35 @@ func decisionRequest(d local.Decision) string {
 }
 
 func outcomeOf(d local.Decision) string {
+	out := ""
 	switch {
 	case d.Error != "":
-		return d.Error
+		out = d.Error
 	case d.Status == 0:
-		return ""
+		out = ""
 	case d.Bytes > 0:
-		return fmt.Sprintf("%d, %s", d.Status, humanBytes(uint64(d.Bytes)))
+		out = fmt.Sprintf("%d, %s", d.Status, humanBytes(uint64(d.Bytes)))
 	default:
-		return strconv.Itoa(d.Status)
+		out = strconv.Itoa(d.Status)
 	}
+	// A shaped request says so, here rather than nowhere.
+	//
+	// The sidecar has always recorded the wait and nothing showed it, so a
+	// request the policy deliberately slowed by half a second was
+	// indistinguishable in this table from an application that is simply
+	// slow. That is the wrong answer to give somebody debugging latency,
+	// because it sends them to profile their own code.
+	if d.WaitedMs > 0 {
+		held := fmt.Sprintf("held %dms", d.WaitedMs)
+		if d.Limit != "" {
+			held += " by " + d.Limit
+		}
+		if out == "" {
+			return held
+		}
+		return out + ", " + held
+	}
+	return out
 }
 
 // shortTime keeps the clock time and drops the date, because every line in one

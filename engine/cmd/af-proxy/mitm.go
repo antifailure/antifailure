@@ -305,6 +305,7 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 		// host being down.
 		if waited := p.limits.wait(d.RuleHost, d.RateLimit); waited > 0 {
 			rec.WaitedMs = waited.Milliseconds()
+			rec.Limit = describeRate(d.RateLimit)
 		}
 	}
 
