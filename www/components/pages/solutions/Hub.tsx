@@ -22,12 +22,6 @@ const TEAMS = [
     metric: "Stripe simulated · fail closed",
   },
   {
-    href: "/solutions/ecommerce",
-    title: "E-commerce",
-    body: "Checkout, inventory, and promotions under production-shaped load. The SKU that breaks the constraint is never in the fixture dump.",
-    metric: "Checkout p99 · orders locks",
-  },
-  {
     href: "/solutions/marketplaces",
     title: "Marketplaces",
     body: "Queues, workers, dual-writes, and matching logic staging never reproduces. Timing is the bug.",
@@ -38,29 +32,6 @@ const TEAMS = [
     title: "Developer tools",
     body: "Schema changes on large tables. Users notice p99 immediately. Locks, plans, and pool pressure show up here first.",
     metric: "Locks · plans · pools",
-  },
-];
-
-const JOBS = [
-  {
-    href: "/solutions/platform",
-    title: "Platform engineering",
-    body: "Ephemeral twins from the pull request. No shared-staging ticket.",
-  },
-  {
-    href: "/solutions/migrations",
-    title: "Schema migrations",
-    body: "Exclusive locks, rewrites, and rollback that is no longer safe.",
-  },
-  {
-    href: "/solutions/release-gates",
-    title: "Release gates",
-    body: "Evidence-backed pass, warning, or block — not a preview URL.",
-  },
-  {
-    href: "/solutions/workflow",
-    title: "Workflow products",
-    body: "Workers, schedules, and long-tail state the twin actually runs.",
   },
 ];
 
@@ -87,13 +58,6 @@ export function SolutionsHubPage() {
         <SectionHeading title="<strong>Teams.</strong> Postgres, frequent deploys, and a platform engineer who owns reliability." />
         <div className={AFTER_HEADING}>
           <DirectoryList items={TEAMS} />
-        </div>
-      </PageSection>
-
-      <PageSection tone="sage">
-        <SectionHeading title="<strong>Jobs.</strong> Isolated environments, migration evidence, release policy." />
-        <div className={AFTER_HEADING}>
-          <DirectoryList items={JOBS} />
         </div>
       </PageSection>
 

@@ -18,7 +18,6 @@ export const SOLUTION_OVERVIEW: MarketingContent = {
     { title: "E-commerce", body: "Checkout, inventory, and promotions under production-shaped load." },
     { title: "Marketplaces", body: "Queues, workers, dual-writes, and matching logic staging never reproduces." },
     { title: "Developer tools", body: "Schema changes on large tables, pools, and query-plan regressions." },
-    { title: "Platform engineering", body: "Policy-controlled ephemeral validation instead of a shared staging ticket." },
   ],
   related: RELATED,
   body: (
@@ -133,34 +132,6 @@ export const SOLUTION_PAGES: Record<string, MarketingContent> = {
       </>
     ),
   },
-  ecommerce: {
-    eyebrow: "Solutions · E-commerce",
-    title: "Checkout under production-shaped load.",
-    lead: "A twin with production-shaped carts and long-tail SKUs. Side effects to email and payments stay captured. Migration safety watches exclusive locks on orders.",
-    description: "Pre-production deployment safety for checkout, inventory, and promotions.",
-    features: [
-      { title: "Long-tail catalogs", body: "Toy product fixtures miss the SKU that breaks a constraint." },
-      { title: "Checkout p99", body: "Equivalent traffic against baseline and candidate, with lock timing." },
-      { title: "Promotions and email", body: "Rendered and captured. Never delivered to customers." },
-    ],
-    related: RELATED,
-    body: (
-      <>
-        <h2>What fails in production</h2>
-        <p>
-          A defaulted column on orders, a full table rewrite during a sale, connection-pool
-          exhaustion, and query-plan regressions on the hottest checkout paths. Staging with a
-          handful of SKUs will not show it.
-        </p>
-        <h2>Workers and side effects</h2>
-        <p>
-          Inventory workers, confirmation emails, and payment capture all run inside the twin.
-          The firewall keeps them off the real world. The oracle compares journey outcomes:
-          confirmation visible, one payment attempt, stock consistent.
-        </p>
-      </>
-    ),
-  },
   marketplaces: {
     eyebrow: "Solutions · Marketplaces",
     title: "Queues, workers, dual-writes, and matching logic staging never reproduces.",
@@ -215,129 +186,6 @@ export const SOLUTION_PAGES: Record<string, MarketingContent> = {
           GitHub-hosted Next.js or generic Docker, Postgres or Supabase, Stripe and email contained,
           Playwright exploration, deterministic scenarios, lock instrumentation, GitHub check,
           automatic TTL teardown. Not every cloud, not MongoDB, not a guarantee of every incident.
-        </p>
-      </>
-    ),
-  },
-  platform: {
-    eyebrow: "Solutions · Platform engineering",
-    title: "Replace fragile shared staging with policy-controlled ephemeral validation.",
-    lead: "Give every developer an isolated environment without a platform-team ticket. Destroy temporary infrastructure automatically and cap its cost.",
-    description: "Ephemeral production twins for platform and infrastructure teams.",
-    features: [
-      { title: "No ticket", body: "Create Wind Tunnel from the pull request. The adapter is chosen for you." },
-      { title: "Policy", body: "Isolation, cost, retention, and release gates are organization-wide." },
-      { title: "Cleanup", body: "TTL, cost ceiling, independent reaper, verifiable destruction record." },
-    ],
-    related: RELATED,
-    body: (
-      <>
-        <h2>Platform-engineering message</h2>
-        <p>
-          Replace fragile shared staging with policy-controlled, ephemeral deployment validation
-          inside your cloud. The customer currently chooses between assembling several tools,
-          maintaining an expensive staging environment, testing directly in production, or accepting
-          the risk.
-        </p>
-        <h2>Setup</h2>
-        <ol>
-          <li>Install the GitHub application and select a repository.</li>
-          <li>Install a customer-hosted runner or grant a narrowly scoped cloud role.</li>
-          <li>Connect a Postgres source or approved backup.</li>
-          <li>Review sensitive fields and discovered outbound services.</li>
-          <li>Approve isolation, cost, and retention policies.</li>
-          <li>Run a baseline against the current production version.</li>
-        </ol>
-        <p>
-          The platform generates a repository configuration file. The standard path should not
-          require hand-authoring YAML.
-        </p>
-      </>
-    ),
-  },
-  migrations: {
-    eyebrow: "Solutions · Schema migrations",
-    title: "The failure mode staging never catches.",
-    lead: "Long exclusive locks, full table rewrites, pool exhaustion, plan regressions, rare constraint failures, and rollback that is no longer safe.",
-    description: "Automated safety validation for risky Postgres schema migrations.",
-    features: [
-      { title: "Clear failure mode", body: "A lock you can measure. A p99 you can compare. A rollback you can call unsafe." },
-      { title: "Technical buyer", body: "Staff platform, DRE, senior backend, or DevOps lead." },
-      { title: "Measurable value", body: "Incidents prevented, unsafe migrations detected, cleanup reliability." },
-    ],
-    related: RELATED,
-    body: (
-      <>
-        <h2>Why this is the start</h2>
-        <p>
-          Database migrations create failures conventional tests miss. The initial wedge is
-          automated safety validation for risky Postgres-backed web deployments, especially schema
-          migrations — not universal multicloud cloning.
-        </p>
-        <h2>Land and expand</h2>
-        <ol>
-          <li>One application and one critical migration</li>
-          <li>All schema migrations for that repository</li>
-          <li>Every risky pull request</li>
-          <li>Multiple applications and teams</li>
-          <li>Organization-wide release policy</li>
-          <li>Enterprise governance and evidence retention</li>
-        </ol>
-      </>
-    ),
-  },
-  "release-gates": {
-    eyebrow: "Solutions · Release gates",
-    title: "Evidence-backed pass, warning, or block.",
-    lead: "Attach a report to the pull request. Enforce organizational release policy. Do not ship on a green preview URL alone.",
-    description: "Release policy for pass, warning, or block on every risky change.",
-    features: [
-      { title: "Pass / warning / block", body: "The only output that matters is the deployment decision." },
-      { title: "Policy packs", body: "Locks, error rate, unknown egress, latency, fidelity thresholds." },
-      { title: "Audit", body: "Videos, traces, queries, remediations, cleanup proof." },
-    ],
-    related: RELATED,
-    body: (
-      <>
-        <h2>Example policies</h2>
-        <ul>
-          <li>Block if candidate error rate exceeds baseline by 1 percentage point</li>
-          <li>Block if an exclusive lock exceeds 2 seconds on a critical table</li>
-          <li>Block if unknown external egress is attempted</li>
-          <li>Warn if p95 latency increases by more than 15%</li>
-          <li>Require approval if fidelity is below 80%</li>
-        </ul>
-        <h2>Executive message</h2>
-        <p>
-          Reduce the probability and blast radius of high-risk releases by validating them under
-          production-shaped conditions before rollout. That is not a zero-rollback guarantee.
-        </p>
-      </>
-    ),
-  },
-  workflow: {
-    eyebrow: "Solutions · Workflow products",
-    title: "Workers, schedules, and long-tail state.",
-    lead: "Timing among services, queues, and workers is a dimension staging drops. The twin includes background jobs and scheduled tasks.",
-    description: "Deployment safety for workflow and collaboration products.",
-    features: [
-      { title: "Jobs in the twin", body: "Background workers and scheduled tasks run against sanitized state." },
-      { title: "Long-tail records", body: "Malformed historical state that fixtures never include." },
-      { title: "Multi-tab behavior", body: "Exploratory personas that abandon, resume, and retry." },
-    ],
-    related: RELATED,
-    body: (
-      <>
-        <h2>Good verticals</h2>
-        <p>
-          Workflow and collaboration products, and data-heavy internal platforms, sit alongside B2B
-          SaaS, fintech, e-commerce, marketplaces, and developer tools as initial ideal customers.
-          They share Postgres, frequent deploys, and workers that staging does not run the same way.
-        </p>
-        <h2>What gets compared</h2>
-        <p>
-          Event and queue emissions, third-party effects, trace topology, and user-journey outcomes.
-          Duplicate events and irreversible writes show up in the oracle, not after the deploy.
         </p>
       </>
     ),

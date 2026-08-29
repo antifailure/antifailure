@@ -83,24 +83,14 @@ function TwinIsolationMap() {
   const beat = beatIndex(t);
   const destroying = t >= 9.05;
   const gone = t >= 10.4;
-  const alive = SLOTS.reduce((n, _s, i) => n + (slotFill(t, i) > 0.08 ? 1 : 0), 0);
-  const journal = gone ? 14 : Math.min(14, Math.round(alive * 2 + (destroying ? eased(t, 9.1, 10.4) * 6 : 0)));
 
   return (
     <div ref={ref} className="relative select-none" aria-hidden>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-black/40">Isolated twin</p>
-          <p className="mt-1 text-[22px] tracking-[-0.03em] text-black max-sm:text-[18px]">
-            {gone ? "Nothing remains" : destroying ? "Tearing down" : "Production not in path"}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-[12px] tracking-tight text-black/45">
-          <span className="rounded-full bg-white/80 px-2.5 py-1 ring-1 ring-black/10">TTL 45m</span>
-          <span className="rounded-full bg-white/80 px-2.5 py-1 ring-1 ring-black/10">
-            {gone ? "14/14 attested" : `${alive}/4 live`}
-          </span>
-        </div>
+      <div>
+        <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-black/40">Isolated twin</p>
+        <p className="mt-1 text-[22px] tracking-[-0.03em] text-black max-sm:text-[18px]">
+          {gone ? "Nothing remains" : destroying ? "Tearing down" : "Production not in path"}
+        </p>
       </div>
 
       <ol className="mt-6 flex gap-1">
@@ -130,7 +120,7 @@ function TwinIsolationMap() {
       </ol>
 
       <div className="mt-6 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)_minmax(0,1.35fr)]">
-        <article className="rounded-[3px] border border-black/10 bg-white/55 p-4 backdrop-blur-[2px]">
+        <article className="rounded-[12px] border border-black/10 bg-white p-4">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-[13px] tracking-tight text-black/55">Production</h3>
             <span className="text-[11px] tracking-tight text-[#C43D3D]">Not in path</span>
@@ -157,7 +147,7 @@ function TwinIsolationMap() {
           </ul>
         </article>
 
-        <article className="relative overflow-hidden rounded-[3px] border border-black/10 bg-white p-4 shadow-[0_18px_40px_rgba(0,0,0,0.06)]">
+        <article className="relative overflow-hidden rounded-[12px] border border-black/10 bg-white p-4 shadow-[0_18px_40px_rgba(0,0,0,0.06)]">
           <h3 className="text-[13px] tracking-tight text-black">Containment</h3>
           <p className="mt-1 text-[12px] leading-snug tracking-tight text-black/45">
             The twin cannot reach live keys or the public internet.
@@ -184,7 +174,7 @@ function TwinIsolationMap() {
           </ul>
         </article>
 
-        <article className="rounded-[3px] border border-black/10 bg-white p-4 shadow-[0_18px_40px_rgba(0,0,0,0.06)]">
+        <article className="rounded-[12px] border border-black/10 bg-white p-4 shadow-[0_18px_40px_rgba(0,0,0,0.06)]">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-[13px] tracking-tight text-black">Disposable twin</h3>
             <span className="text-[11px] tracking-tight text-black/40">{gone ? "empty" : "live"}</span>
@@ -216,30 +206,13 @@ function TwinIsolationMap() {
         </article>
       </div>
 
-      <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="text-[13px] tracking-tight text-black">Cleanup proof</div>
-          <p className="mt-0.5 text-[12px] tracking-tight text-black/45">
-            {gone
-              ? "Every resource journaled, destroyed, and attested."
-              : "Resources are journaled as they come up. Nothing outlives the run."}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="grid grid-cols-7 gap-1">
-            {Array.from({ length: 14 }, (_, i) => (
-              <span
-                key={i}
-                className="size-1.5 rounded-full"
-                style={{
-                  background: i < journal ? (gone ? "#33bf00" : "#1a1a1a") : "rgba(0,0,0,0.12)",
-                  transition: `background 500ms ${FILM}`,
-                }}
-              />
-            ))}
-          </div>
-          <span className="text-[12px] tabular-nums tracking-tight text-black/50">{journal}/14</span>
-        </div>
+      <div className="mt-6">
+        <div className="text-[13px] tracking-tight text-black">Cleanup proof</div>
+        <p className="mt-0.5 text-[12px] tracking-tight text-black/45">
+          {gone
+            ? "Every resource journaled, destroyed, and attested."
+            : "Resources are journaled as they come up. Nothing outlives the run."}
+        </p>
       </div>
     </div>
   );

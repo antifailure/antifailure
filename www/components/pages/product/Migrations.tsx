@@ -182,7 +182,7 @@ rolling rollback is unsafe`}
 
       <RelatedGrid
         items={[
-          { href: "/solutions/migrations", title: "Schema migrations", description: "Why this is the starting wedge." },
+          { href: "/solutions", title: "Solutions", description: "The teams who feel this first." },
           { href: "/product/report", title: "Safety Report", description: "How the lock becomes a GitHub check." },
           { href: "/docs/guides/invariants", title: "Invariants docs", description: "The subscriptions demo in full." },
         ]}

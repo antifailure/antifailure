@@ -296,7 +296,7 @@ export function ReportPage() {
         items={[
           { href: "/product/oracle", title: "Differential Oracle", description: "Where comparisons are produced." },
           { href: "/product/fidelity", title: "Fidelity Graph", description: "What the twin actually reproduced." },
-          { href: "/solutions/release-gates", title: "Release gates", description: "Organization-wide ship policy." },
+          { href: "/product/migrations", title: "Migration Safety", description: "The lock that becomes a GitHub check." },
         ]}
       />
     </PageShell>

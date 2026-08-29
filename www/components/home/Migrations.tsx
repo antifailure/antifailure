@@ -13,7 +13,10 @@ export function Migrations() {
         size="1600"
       >
         <div className="min-w-0">
-          <Heading title="<strong>Migration Safety.</strong> Catch exclusive locks before they take checkout down. Locks, plans, and rollback feasibility before it ships." />
+          <Heading
+            icon="migrations"
+            title="<strong>Migration Safety.</strong> Catch exclusive locks before they take checkout down. Locks, plans, and rollback feasibility before it ships."
+          />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <MigrationBento />
           </div>
