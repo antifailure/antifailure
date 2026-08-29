@@ -1,0 +1,19 @@
+{
+  "report": {
+    "scanner": "antifailure/masking",
+    "started_at": "2026-08-27T09:00:00Z",
+    "finished_at": "2026-08-27T09:00:41Z",
+    "tables": 42,
+    "columns": 318,
+    "rows_sampled": 318000,
+    "sample_size": 1000,
+    "findings": null,
+    "skipped": [
+      "public.large_blob.payload: column is bytea"
+    ]
+  },
+  "golden": "gv_20260827090041",
+  "rules_hash": "sha256:abc123",
+  "public_key": "t4k6WNEDVK04GLmCS3fgbwmoeDScvvChiSyZ4tlFRFo=",
+  "signature": "cjZM2bTibkVsiqskEFCz8Tp5kPFsrsEFc8fVk6gAnJM9c8BkbbwNtXnguM9RzKRiTiNkQwTLjIAKHTk25xULCA=="
+}

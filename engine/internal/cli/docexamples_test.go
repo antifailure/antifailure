@@ -58,9 +58,26 @@ func TestEveryCommandInTheDocsExists(t *testing.T) {
 			continue
 		}
 
+		enterprisePage := strings.HasPrefix(rel, "enterprise"+string(filepath.Separator))
+
 		for _, match := range afLine.FindAllStringSubmatch(string(body), -1) {
 			line := strings.TrimSpace(match[1])
 			if line == "" {
+				continue
+			}
+			// A page about the enterprise edition may show a command the
+			// enterprise binary contributes, and this tree does not have those
+			// by construction: the community build cannot resolve the module
+			// they live in. Allowed by name rather than by page, so that an
+			// enterprise page showing a misspelled community command is still
+			// caught, and only on an enterprise page, so that a community page
+			// cannot quietly document something most users do not have.
+			//
+			// The allowance is not a free pass. ee/engine has a test asserting
+			// that every name here is a command the enterprise binary actually
+			// contributes, so an entry for something that does not exist fails
+			// there rather than silently excusing a typo.
+			if enterprisePage && enterpriseOnly[firstWord(line)] {
 				continue
 			}
 			checked++
@@ -77,6 +94,23 @@ func TestEveryCommandInTheDocsExists(t *testing.T) {
 	require.Empty(t, problems,
 		"these examples name something the command tree does not have:\n  %s",
 		strings.Join(problems, "\n  "))
+}
+
+// enterpriseOnly are commands the enterprise binary contributes, which this
+// command tree does not have and cannot have: they live in a separate module
+// that the community build has no import path to.
+//
+// Kept in step by a test in ee/engine, which asserts that every name here is
+// contributed by that binary.
+var enterpriseOnly = map[string]bool{
+	"compliance": true,
+}
+
+func firstWord(line string) string {
+	if i := strings.IndexByte(line, ' '); i > 0 {
+		return line[:i]
+	}
+	return line
 }
 
 // checkInvocation resolves a command path and its flags, returning what is

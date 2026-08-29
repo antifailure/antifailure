@@ -1,0 +1,28 @@
+{
+  "report": {
+    "scanner": "antifailure/masking",
+    "started_at": "2026-08-27T09:00:00Z",
+    "finished_at": "2026-08-27T09:00:41Z",
+    "tables": 42,
+    "columns": 318,
+    "rows_sampled": 318000,
+    "sample_size": 1000,
+    "findings": [
+      {
+        "schema": "public",
+        "table": "users",
+        "column": "email",
+        "detector": "email",
+        "example": "a***@e******.com",
+        "rows": 37
+      }
+    ],
+    "skipped": [
+      "public.large_blob.payload: column is bytea"
+    ]
+  },
+  "golden": "gv_20260827100000",
+  "rules_hash": "sha256:abc123",
+  "public_key": "t4k6WNEDVK04GLmCS3fgbwmoeDScvvChiSyZ4tlFRFo=",
+  "signature": "Fys1VqOXJgSInq4PykRa1POIkNqo56DRUGuS1wM8gz/z3kX3Pfuuua8Wb/LJMBpwDI/eToFuLmnFEsA+UT1UAg=="
+}

@@ -241,7 +241,7 @@ const (
 	// The variables {names} are declared in the manifest but were not
 	// found in any configured source.
 	AFSEC001 Code = "AF-SEC-001"
-	// The credential for {source} was rejected after one refresh.
+	// The credential for {source} was rejected after one refresh: {detail}
 	AFSEC002 Code = "AF-SEC-002"
 	// The value supplied for {name} carries a live credential prefix, and
 	// {name} is configured for sandbox use.
@@ -1050,8 +1050,8 @@ var catalog = map[Code]Entry{
 	AFSEC002: {
 		Code:      AFSEC002,
 		Area:      "SEC",
-		Message:   "The credential for {source} was rejected after one refresh.",
-		NextStep:  "Rotate the credential and store the new value where {source} reads it.",
+		Message:   "The credential for {source} was rejected after one refresh: {detail}",
+		NextStep:  "Rotate the credential and store the new value where {source} reads it. A rejection that survives a refresh is a credential that was revoked or was never right, so retrying will not help.",
 		Docs:      "guides/secrets",
 		Retryable: false,
 		ExitCode:  ExitAuth,

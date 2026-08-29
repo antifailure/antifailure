@@ -201,6 +201,31 @@ func (b *Bus) Drops() map[string]uint64 {
 	return out
 }
 
+// ResumeSequence continues an environment's numbering from a durable value.
+//
+// The counter is in memory, and one environment is the work of several
+// commands: `af up`, `af test`, `af down`. Each is a process, each starts a new
+// bus, and without this each would number its events from one. The control
+// plane advances an environment's row only where last_sequence is behind the
+// event's sequence, which is the correct out-of-order defence and which means
+// the second command's events all arrive stale and change nothing. The row
+// would sit at whatever state the first command left it in, permanently, while
+// every event was accepted and stored. Nothing would look broken except the
+// only thing anybody looks at.
+//
+// It only ever raises the counter. Lowering it would reissue numbers that have
+// already been used, which is the failure this exists to prevent, so a caller
+// that passes a stale value is ignored rather than obeyed. It is meant to be
+// called before the first event is emitted; called later it takes effect from
+// the next one, and the gap is visible rather than silent.
+func (b *Bus) ResumeSequence(env string, from uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if from > b.seqByEnv[env] {
+		b.seqByEnv[env] = from
+	}
+}
+
 // Seq reports the last sequence number issued for an environment.
 func (b *Bus) Seq(env string) uint64 {
 	b.mu.RLock()

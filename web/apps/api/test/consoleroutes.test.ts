@@ -277,7 +277,11 @@ describe('every console page answers with a page', {
 
   /** Every console GET the server declares, with parameters filled in. */
   function consolePaths(): string[] {
-    const skip = ['/v1', '/auth', '/trpc', '/health', '/readyz', '/openapi.json', '/console']
+    // /metrics sits with /health and /readyz: an operational endpoint, not a
+    // console page. It serves text/plain to a scraper and has no session, so
+    // every assertion below about documents and sign-in is the wrong question
+    // to ask of it.
+    const skip = ['/v1', '/auth', '/trpc', '/health', '/readyz', '/metrics', '/openapi.json', '/console']
     const paths = new Set<string>()
     for (const route of api.app.routes) {
       if (route.method !== 'GET') continue
