@@ -188,3 +188,59 @@ variable "github_client_secret" {
   sensitive = true
 }
 variable "github_redirect_uri" { type = string }
+
+# Who may sign in at all.
+#
+# REQUIRED, with no default, and that is the point. The application reads
+# AF_SIGNIN_ALLOWLIST and treats an UNSET variable as "open: any GitHub account
+# may sign in". It said so in its own start-up log on the day this deployment
+# went up, and nobody read the log, so a control plane on a public address
+# accepted any GitHub account in the world for a week.
+#
+# A variable with a default would have the same failure mode: whoever forgets it
+# gets the default, and the default that is convenient is the one that is wrong.
+# So there is no default. A plan cannot be produced without somebody deciding
+# who may sign in.
+#
+# An EMPTY list is a real answer and means nobody, which is what to set on an
+# instance nobody should be signing in to yet. It is not the same as unset.
+variable "signin_allowlist" {
+  type        = list(string)
+  description = "GitHub logins that may sign in. Empty means nobody. There is no value that means everybody."
+}
+
+# The secret that seals customers' provider keys, 32 bytes.
+#
+# Not a variable anybody types. Terraform generates it, Key Vault holds it, and
+# it is never in a tfvars file, a workflow, or a person's terminal. Rotating it
+# means every stored key stops opening, so it is created once and kept.
+#
+# Empty is a valid state: the application serves normally, says in its start-up
+# log and in the console that keys cannot be stored, and refuses a save rather
+# than accepting one it cannot seal. That is the right behaviour for an
+# installation that does not want the feature -- but it is a decision, and this
+# module makes it by generating the secret, because our own instance wants it.
+variable "provider_key_secret_enabled" {
+  type        = bool
+  default     = true
+  description = "Generate and store a sealing secret so provider keys can be saved."
+}
+
+
+variable "database_extensions" {
+  type        = list(string)
+  default     = ["PGCRYPTO"]
+  description = <<-EOT
+    Extensions to allow-list in azure.extensions. Azure refuses CREATE EXTENSION
+    for anything absent from this parameter, and it defaults to empty, so a
+    schema that needs one cannot apply until it is named here.
+
+    pgcrypto is required: migration 0001 creates it for gen_random_uuid().
+  EOT
+}
+
+variable "key_vault_name" {
+  type        = string
+  default     = ""
+  description = "Overrides the computed vault name. Set it for an existing vault: a Key Vault cannot be renamed, so a changed name is a destroy, a create, and seven days of purge protection holding the old name."
+}

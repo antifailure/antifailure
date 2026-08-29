@@ -1,14 +1,19 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/hud"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -60,19 +65,40 @@ type PendingJSON struct {
 	Reason string `json:"reason"`
 }
 
+// lifecycleOptions are the choices a command makes before the orchestrator
+// exists. A struct rather than three positional booleans, because the next
+// person to add one should not have to read every call site to find out which
+// bool is which.
+type lifecycleOptions struct {
+	branch  string
+	rebuild bool
+	// silent suppresses the prose progress lines. The dashboard owns the
+	// screen when it is running, and a Printf into a Bubble Tea frame corrupts
+	// it, so the same information travels as events instead.
+	silent bool
+}
+
 // orchestrator loads the manifest and prepares the lifecycle for this repo.
 func orchestrator(env2 *Env, branch string, rebuild bool) (*env.Orchestrator, error) {
-	o, _, err := orchestratorWithManifest2(env2, branch, rebuild)
+	o, _, err := orchestratorWithManifest2(env2, lifecycleOptions{branch: branch, rebuild: rebuild})
+	return o, err
+}
+
+// orchestratorWithManifest3 builds an orchestrator from the full set of
+// lifecycle choices, for the one command that makes more than two of them.
+func orchestratorWithManifest3(env2 *Env, opts lifecycleOptions) (*env.Orchestrator, error) {
+	o, _, err := orchestratorWithManifest2(env2, opts)
 	return o, err
 }
 
 // orchestratorWithManifest also returns the manifest, for commands that read
 // it directly rather than through the lifecycle.
 func orchestratorWithManifest(env2 *Env, branch string) (*env.Orchestrator, *schema.Manifest, error) {
-	return orchestratorWithManifest2(env2, branch, false)
+	return orchestratorWithManifest2(env2, lifecycleOptions{branch: branch})
 }
 
-func orchestratorWithManifest2(env2 *Env, branch string, rebuild bool) (*env.Orchestrator, *schema.Manifest, error) {
+func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestrator, *schema.Manifest, error) {
+	branch, rebuild := opts.branch, opts.rebuild
 	path, err := manifest.Find(env2.WorkDir)
 	if err != nil {
 		return nil, nil, err
@@ -92,7 +118,11 @@ func orchestratorWithManifest2(env2 *Env, branch string, rebuild bool) (*env.Orc
 		Rebuild: rebuild, Redactor: r, Verbose: env2.Out.Verbose, Getenv: env2.Getenv,
 		Progress: func(line string) {
 			// Progress is prose, not data, so it is suppressed in JSON mode
-			// rather than interleaved into a document a script is parsing.
+			// rather than interleaved into a document a script is parsing,
+			// and in dashboard mode, where it would be written over a frame.
+			if opts.silent {
+				return
+			}
 			env2.Out.Printf("  %s\n", r.String(line))
 		},
 	})
@@ -125,9 +155,83 @@ func currentBranch(root string) string {
 	return branch
 }
 
+// dashboard is the live view attached to a run, or nothing.
+//
+// One of program and plain is set when it is in use, never both: a terminal
+// gets the full frame, and anything else gets the line per event fallback,
+// because drawing a Bubble Tea frame into a CI log produces a file of cursor
+// escapes and no information.
+type dashboard struct {
+	program *hud.Program
+	plain   *hud.Plain
+}
+
+// attachDashboard wires the HUD to an orchestrator and reports what it built.
+//
+// The choice is made from the output stream rather than from a flag, because
+// the person who typed --hud in a pipeline wants the events, and refusing them
+// a display for want of a terminal would be a worse answer than the fallback
+// that was written for exactly this.
+func attachDashboard(e *Env, o *env.Orchestrator) *dashboard {
+	if width, height, ok := terminalSize(e.Out.Out); ok {
+		p := hud.NewProgram(hud.New(o.EnvID(), width, height), e.Stdin, e.Out.Out)
+		o.AddSink(hud.Sink(p))
+		return &dashboard{program: p}
+	}
+	pl := hud.NewPlain(e.Out.Out, o.EnvID())
+	o.AddSink(hud.PlainSink(pl))
+	return &dashboard{plain: pl}
+}
+
+// run performs the lifecycle with the display attached, and returns once both
+// the work and the display have finished.
+func (d *dashboard) run(ctx context.Context, work func() error) error {
+	if d == nil || d.program == nil {
+		return work()
+	}
+	done := make(chan error, 1)
+	go func() {
+		err := work()
+		// Unconditional, and safe because Close is idempotent. The bus closes
+		// the sink at the end of a successful run, but a failure before the
+		// bus exists closes nothing, and without this the dashboard would
+		// draw an empty frame forever on exactly the runs that failed worst.
+		d.program.Close()
+		done <- err
+	}()
+	// Bubble Tea holds the terminal, so it runs here rather than in the
+	// goroutine: it restores the screen on the way out, and a program that
+	// exits while its restore is still queued leaves the terminal in the
+	// alternate screen with no cursor.
+	runErr := d.program.Run(ctx)
+	workErr := <-done
+	if workErr != nil {
+		return workErr
+	}
+	return runErr
+}
+
+// terminalSize reports the size of a writer that is a terminal.
+//
+// The boolean is the whole point: a writer that is a file, a pipe, or a test
+// buffer has no size, and guessing one produces a frame laid out for a screen
+// that does not exist.
+func terminalSize(w io.Writer) (int, int, bool) {
+	f, ok := w.(*os.File)
+	if !ok {
+		return 0, 0, false
+	}
+	width, height, err := term.GetSize(int(f.Fd()))
+	if err != nil || width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+	return width, height, true
+}
+
 func newUpCommand(e *Env) *cobra.Command {
 	var branch string
 	var rebuild bool
+	var live bool
 	cmd := &cobra.Command{
 		Use:   "up",
 		Short: "Create an environment for the current branch",
@@ -140,12 +244,37 @@ cannot fight over it, and every resource is journaled before it is made, so an
 interrupt at any point leaves something af down can clean up.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			o, err := orchestrator(e, branch, rebuild)
+			if live && e.Out.Format == FormatJSON {
+				return fmt.Errorf(
+					"up: --hud draws a dashboard and --format json writes a document, " +
+						"and one stream cannot be both; drop one of them")
+			}
+			o, err := orchestratorWithManifest3(e, lifecycleOptions{
+				branch: branch, rebuild: rebuild, silent: live,
+			})
 			if err != nil {
 				return err
 			}
-			e.Out.Section("Bringing up " + o.EnvID())
-			res, upErr := o.Up(cmd.Context())
+
+			var view *dashboard
+			if live {
+				view = attachDashboard(e, o)
+			} else {
+				e.Out.Section("Bringing up " + o.EnvID())
+			}
+
+			var res *env.Result
+			var upErr error
+			runErr := view.run(cmd.Context(), func() error {
+				res, upErr = o.Up(cmd.Context())
+				// The lifecycle error is carried out in upErr rather than
+				// returned, because it is the command's answer and not a
+				// reason to treat the display as broken.
+				return nil
+			})
+			if runErr != nil {
+				return runErr
+			}
 			if upErr != nil {
 				renderServices(e, res.Services)
 				return upErr
@@ -178,6 +307,8 @@ interrupt at any point leaves something af down can clean up.`),
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to create the environment for, defaulting to the checked out one")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Build every image again, even when an identical one exists")
+	cmd.Flags().BoolVar(&live, "hud", false,
+		"Watch the run on a live dashboard, or a line per event where there is no terminal")
 	return cmd
 }
 

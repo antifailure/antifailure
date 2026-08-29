@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
@@ -138,7 +138,7 @@ func isNoSpace(err error) bool {
 
 // ensureImage pulls an image if the daemon does not already have it.
 func (p *Provider) ensureImage(ctx context.Context, ref string) error {
-	if _, _, err := p.cli.ImageInspectWithRaw(ctx, ref); err == nil {
+	if _, err := p.cli.ImageInspect(ctx, ref); err == nil {
 		return nil
 	}
 	rc, err := p.cli.ImagePull(ctx, ref, image.PullOptions{})
@@ -148,7 +148,7 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	// The stream has to be drained before the pull is finished, or the image
 	// is only partly present when the next call inspects it.
 	dockerutil.Discard(rc)
-	if _, _, err := p.cli.ImageInspectWithRaw(ctx, ref); err != nil {
+	if _, err := p.cli.ImageInspect(ctx, ref); err != nil {
 		return fmt.Errorf("db.docker: %s is not present after pulling it: %w", ref, err)
 	}
 	return nil
@@ -162,7 +162,7 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 func (p *Provider) stop(ctx context.Context, ref string) error {
 	timeout := 30
 	if err := p.cli.ContainerStop(ctx, ref, container.StopOptions{Timeout: &timeout}); err != nil {
-		if client.IsErrNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("db.docker: stop %s: %w", ref, err)
@@ -180,7 +180,7 @@ func (p *Provider) remove(ctx context.Context, ref string) error {
 		// tool fills a laptop's disk.
 		RemoveVolumes: true,
 	})
-	if err == nil || client.IsErrNotFound(err) {
+	if err == nil || cerrdefs.IsNotFound(err) {
 		return nil
 	}
 	// A removal already in progress is the same outcome as a removal, and

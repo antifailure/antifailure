@@ -96,6 +96,7 @@ const (
 	LoadFinished   Type = "load.finished"
 
 	// Engine internals worth surfacing
+	Progress    Type = "engine.progress"
 	Warning     Type = "engine.warning"
 	Error       Type = "engine.error"
 	Retry       Type = "engine.retry"
@@ -166,6 +167,7 @@ var typeDocs = map[Type]string{
 	InsightFinding:   "A database insight was found: a lock, a regression, or a plan change.",
 	LoadSample:       "A load test metric sample.",
 	LoadFinished:     "A load run finished. The data carries the comparison against main.",
+	Progress:         "A step in a long running operation, for work with no more specific event of its own.",
 	Warning:          "Something is not right but the operation continues.",
 	Error:            "An operation failed. The data carries the error code.",
 	Retry:            "A provider call is being retried after a transient failure.",

@@ -3,16 +3,20 @@ package dockerutil_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 )
@@ -22,28 +26,83 @@ import (
 // between create and remove.
 const testImage = "alpine:3.20"
 
+// asked and skipped count how many tests wanted the daemon and how many did
+// not get it. TestMain reads them.
+var asked, skipped atomic.Int64
+
+// silentFullSkip reports whether a run proved nothing and said so quietly.
+//
+// A pure function so it can be tested, which a TestMain cannot be. The
+// condition is narrow on purpose: some tests skipping is a machine being
+// slow on one operation, and no tests asking is a package with nothing to
+// skip. Every test asking and every one skipping is the case where `ok` is a
+// lie, and it is the only case that fails.
+func silentFullSkip(asked, skipped int64, optedOut bool) bool {
+	return !optedOut && asked > 0 && skipped == asked
+}
+
+// TestMain refuses a run in which every test that needed the daemon skipped.
+//
+// requireDaemon skips one test at a time, and a package where every one of
+// them skipped still prints ok. This package holds the ownership rule the leak
+// detector rests on: whether a resource carries our label decides whether
+// teardown may delete it, and a green check that never ran is worse than a red
+// one. Set AF_SKIP_DOCKER to say out loud that this machine has no daemon.
+func TestMain(m *testing.M) {
+	code := m.Run()
+
+	// Both checks live here because a package gets one TestMain. Leaks first:
+	// a goroutine left behind by a Docker client is the failure this package
+	// is most likely to introduce, and it only shows up once everything has
+	// finished.
+	if code == 0 {
+		if err := goleak.Find(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			code = 1
+		}
+	}
+
+	a, s := asked.Load(), skipped.Load()
+	if a > 0 {
+		fmt.Fprintf(os.Stderr, "dockerutil: %d of %d daemon tests ran\n", a-s, a)
+	}
+	if code == 0 && silentFullSkip(a, s, os.Getenv("AF_SKIP_DOCKER") != "") {
+		fmt.Fprintf(os.Stderr,
+			"dockerutil: every one of the %d daemon tests skipped, so this package "+
+				"proved nothing about resource ownership. Start Docker, or set "+
+				"AF_SKIP_DOCKER=1 to accept that.\n", a)
+		code = 1
+	}
+	os.Exit(code)
+}
+
 func requireDaemon(t *testing.T) *client.Client {
 	t.Helper()
+	asked.Add(1)
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
+		skipped.Add(1)
 		t.Skip("skipped: AF_SKIP_DOCKER is set")
 	}
 	cli, err := dockerutil.Client()
 	if err != nil {
+		skipped.Add(1)
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := cli.Ping(ctx); err != nil {
 		_ = cli.Close()
+		skipped.Add(1)
 		t.Skipf("skipped: the Docker daemon did not respond: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
 
 	pullCtx, pullCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer pullCancel()
-	if _, _, err := cli.ImageInspectWithRaw(pullCtx, testImage); err != nil {
+	if _, err := cli.ImageInspect(pullCtx, testImage); err != nil {
 		rc, pullErr := cli.ImagePull(pullCtx, testImage, image.PullOptions{})
 		if pullErr != nil {
+			skipped.Add(1)
 			t.Skipf("skipped: %s could not be pulled: %v", testImage, pullErr)
 		}
 		dockerutil.Discard(rc)
@@ -77,7 +136,7 @@ func TestRemoveContainer_RemovesOurOwn(t *testing.T) {
 	require.NoError(t, dockerutil.RemoveContainer(ctx, cli, id))
 
 	_, err := cli.ContainerInspect(ctx, id)
-	require.True(t, client.IsErrNotFound(err), "the container is gone")
+	require.True(t, cerrdefs.IsNotFound(err), "the container is gone")
 }
 
 func TestRemoveContainer_RefusesAContainerThatIsNotOurs(t *testing.T) {
@@ -176,4 +235,29 @@ func TestFilter_FindsAResourceStampedByAnOlderRelease(t *testing.T) {
 	require.Contains(t, ids, id)
 	require.NoError(t, dockerutil.RemoveContainer(ctx, cli, id),
 		"and it can be removed, which is the point of finding it")
+}
+
+// The guard's own decision, checked directly. A TestMain cannot be tested, so
+// the condition it acts on is a function that can be.
+func TestSilentFullSkipOnlyFiresWhenNothingRan(t *testing.T) {
+	cases := []struct {
+		name           string
+		asked, skipped int64
+		optedOut       bool
+		want           bool
+	}{
+		{"everything skipped", 5, 5, false, true},
+		{"everything ran", 5, 0, false, false},
+		{"some skipped", 5, 2, false, false},
+		{"nothing asked", 0, 0, false, false},
+		{"everything skipped, said out loud", 5, 5, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := silentFullSkip(c.asked, c.skipped, c.optedOut); got != c.want {
+				t.Errorf("silentFullSkip(%d, %d, %v) = %v, want %v",
+					c.asked, c.skipped, c.optedOut, got, c.want)
+			}
+		})
+	}
 }

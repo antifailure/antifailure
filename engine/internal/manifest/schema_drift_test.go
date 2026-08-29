@@ -66,7 +66,7 @@ func (d *schemaDoc) resolve(root *schemaDoc) *schemaDoc {
 // goFields returns the JSON field names a Go struct declares, and the nested
 // struct each one leads to.
 func goFields(t reflect.Type) map[string]reflect.Type {
-	for t.Kind() == reflect.Ptr || t.Kind() == reflect.Slice {
+	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {

@@ -1,6 +1,6 @@
 "use client";
 
-/** 19s PR safety-report film. Truth is BLOCK. Nested: 1.2s elapsed, 3.0s oracle log. */
+/** 19s PR safety-report film. Truth is BLOCK. Checks and evidence start together. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { EASE_OUT_CUBIC, clamp } from "@/lib/easing";
@@ -47,9 +47,12 @@ const SUBCHECKS: { at: number; label: string }[] = [
   { at: 4.55, label: "oracle comparing" },
 ];
 
-const DRAWER_AT = [9.0, 9.82, 10.64, 11.46, 12.28, 13.1] as const;
+const DRAWER_AT = [3.5, 4.32, 5.14, 5.96, 6.78, 7.6] as const;
 const DRAWER_H = [52, 68, 58, 44, 40, 86] as const;
-const POLICY_AT = [14.05, 14.6, 15.15, 15.7] as const;
+const POLICY_AT = [8.55, 9.1, 9.65, 10.2] as const;
+const TITLE_START = 0.02;
+const CLAUSE_START = 0.96;
+const ACTION_START = 2.0;
 
 const LOCK_SPARK = (() => {
   const pts: string[] = [];
@@ -349,26 +352,24 @@ function ChecksColumn({ t, blocked, running }: { t: number; blocked: boolean; ru
   );
 }
 
-function EvidenceColumn({ t, blocked }: { t: number; blocked: boolean }) {
-  const stamp = ramp(t, 5.5, 0.28);
+function EvidenceColumn({ t }: { t: number }) {
+  const evidenceOn = t > 0;
+  const stamp = ramp(t, 0, 0.28);
   const pol = POLICY_AT.map((at) => t >= at);
-  const titleStart = 5.52;
-  const c1 = 6.46;
-  const actionStart = 7.5;
-  const shownTitle = blocked ? typed(TITLE, t, titleStart, 38) : "";
-  const titleBusy = blocked && typing(TITLE, t, titleStart, 38);
-  const clauseShown = CLAUSES.map((c, i) => typed(c, t, c1 + i * 0.4, 92));
-  const clauseBusy = CLAUSES.map((c, i) => typing(c, t, c1 + i * 0.4, 92));
+  const shownTitle = evidenceOn ? typed(TITLE, t, TITLE_START, 38) : "";
+  const titleBusy = evidenceOn && typing(TITLE, t, TITLE_START, 38);
+  const clauseShown = CLAUSES.map((c, i) => typed(c, t, CLAUSE_START + i * 0.4, 92));
+  const clauseBusy = CLAUSES.map((c, i) => typing(c, t, CLAUSE_START + i * 0.4, 92));
   const activeClause = clauseBusy.findIndex(Boolean);
-  const shownAction = blocked ? typed(ACTION, t, actionStart, 52) : "";
-  const actionBusy = blocked && typing(ACTION, t, actionStart, 52);
+  const shownAction = evidenceOn ? typed(ACTION, t, ACTION_START, 52) : "";
+  const actionBusy = evidenceOn && typing(ACTION, t, ACTION_START, 52);
   const caretOn = titleBusy ? "title" : activeClause >= 0 ? `c${activeClause}` : actionBusy ? "action" : null;
 
   return (
     <div className="flex min-h-0 flex-col">
       <div className="flex items-center justify-between px-3 py-2">
         <MonoLabel className="uppercase">evidence</MonoLabel>
-        {blocked ? (
+        {evidenceOn ? (
           <span
             className="origin-right"
             style={{
@@ -384,7 +385,7 @@ function EvidenceColumn({ t, blocked }: { t: number; blocked: boolean }) {
       </div>
       <Hairline />
 
-      {!blocked ? (
+      {!evidenceOn ? (
         <div className="flex flex-1 items-center justify-center px-4">
           <span className="font-mono text-[10px] tracking-extra-tight text-black/20">awaiting oracle</span>
         </div>
@@ -403,7 +404,7 @@ function EvidenceColumn({ t, blocked }: { t: number; blocked: boolean }) {
                 </p>
               ))}
             </div>
-            {t >= actionStart ? (
+            {t >= ACTION_START ? (
               <div className="mt-2.5">
                 <MonoLabel className="mb-1 block uppercase">suggested action</MonoLabel>
                 <p>
@@ -460,7 +461,7 @@ function EvidenceColumn({ t, blocked }: { t: number; blocked: boolean }) {
             </div>
           </Drawer>
 
-          {t >= 14 ? (
+          {t >= 8.5 ? (
             <div className="mt-1 border-t border-black/10 px-2.5 py-2">
             <MonoLabel className="mb-1.5 block uppercase">policy</MonoLabel>
             <ul className="space-y-1">
@@ -565,7 +566,7 @@ export function ReportScene() {
           <div className="grid min-h-[632px] grid-cols-[minmax(300px,0.92fr)_1.2fr]">
             <ChecksColumn t={playhead} blocked={blocked} running={running} />
             <div className="relative flex flex-col border-l border-black/10">
-              <EvidenceColumn t={playhead} blocked={blocked} />
+              <EvidenceColumn t={playhead} />
             </div>
           </div>
         </Panel>

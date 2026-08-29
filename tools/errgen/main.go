@@ -355,8 +355,24 @@ func renderDocs(es []entry) []byte {
 			fmt.Fprintf(&b, "| | |\n| --- | --- |\n")
 			fmt.Fprintf(&b, "| Exit code | `%d` |\n", e.ExitCode)
 			fmt.Fprintf(&b, "| Retryable | %s |\n", retry)
-			fmt.Fprintf(&b, "| More | [%s](/docs/%s/) |\n\n", e.Docs, e.Docs)
+			fmt.Fprintf(&b, "| More | [%s](%s) |\n\n", e.Docs, docsURL(e.Docs))
 		}
 	}
 	return b.Bytes()
+}
+
+// docsURL turns a catalog docs field into the address the built site serves.
+//
+// The trailing slash goes on the path, not on the end of the string. Two codes
+// point at a heading rather than a page, and appending the slash blindly built
+// /docs/reference/cli#af-init/, whose fragment is "af-init/" and matches no
+// heading. The link resolved, landed at the top of a long page, and looked
+// like it worked.
+func docsURL(docs string) string {
+	path, fragment, hasFragment := strings.Cut(docs, "#")
+	url := "/docs/" + path + "/"
+	if hasFragment {
+		url += "#" + fragment
+	}
+	return url
 }

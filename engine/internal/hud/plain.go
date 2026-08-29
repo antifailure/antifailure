@@ -101,7 +101,10 @@ func (p *Plain) Write(e events.Event) {
 		b.WriteString(strings.ToUpper(string(e.Level)))
 		b.WriteString(" ")
 	}
-	b.WriteString(e.String())
+	// Same reason as the dashboard's log pane: every line in this stream
+	// belongs to the environment the run is for, and repeating its name on
+	// each one costs the width of an environment id per line for nothing.
+	b.WriteString(logLine(e, p.env))
 	if _, err := fmt.Fprintln(p.w, b.String()); err != nil && p.err == nil {
 		p.err = err
 	}

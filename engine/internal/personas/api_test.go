@@ -105,16 +105,16 @@ func TestTheAdminTokenNeverReachesAURL(t *testing.T) {
 func TestAnExistingAccountIsReconciledRatherThanDuplicated(t *testing.T) {
 	var created, updated atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet:
+		switch r.Method {
+		case http.MethodGet:
 			// Clerk answers a list query with a bare array rather than an
 			// object, which is the kind of difference that only shows up
 			// against the real API.
 			_, _ = w.Write([]byte(`[{"id":"user_existing"}]`))
-		case r.Method == http.MethodPost:
+		case http.MethodPost:
 			created.Add(1)
 			_, _ = w.Write([]byte(`{"id":"user_new"}`))
-		case r.Method == http.MethodPatch:
+		case http.MethodPatch:
 			updated.Add(1)
 			require.Contains(t, r.URL.Path, "user_existing")
 			_, _ = w.Write([]byte(`{"id":"user_existing"}`))

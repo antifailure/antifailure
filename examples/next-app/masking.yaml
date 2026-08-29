@@ -1,0 +1,51 @@
+# What is replaced before anyone can branch from a copy of production.
+#
+# Read this beside the schema in migrations/. Every column that holds something
+# about a person is named, and the two that are not are named as well, because
+# `nullify` is the default for a column nobody has classified and a column
+# somebody looked at and passed is a different fact from a column nobody read.
+
+rules:
+  - table: customers
+    column: email
+    transform: email
+    why: "customer addresses, and the synthetic ones are at example.test, which cannot receive mail"
+
+  - table: customers
+    column: name
+    transform: name
+    why: "customer names"
+
+  - table: customers
+    column: phone
+    transform: phone
+    why: "kept in the same shape, so a form that validates a number still validates this one"
+
+  # The join. customers.id and orders.customer_id have to become the same new
+  # value or every order in the environment belongs to nobody, and the API's
+  # only interesting query returns an empty list. `link` is what keeps them
+  # together.
+  - table: customers
+    column: id
+    transform: int_fpe
+    link: customer
+    why: "remapped, and linked so the foreign key still joins"
+
+  - table: orders
+    column: customer_id
+    transform: int_fpe
+    link: customer
+    why: "the other half of the join"
+
+  # Reviewed and left alone. An order's value and its timestamp are the shape
+  # of the business, not a fact about a person, and masking them would make
+  # every report in the environment meaningless.
+  - table: orders
+    column: total_cents
+    transform: preserve
+    why: "an amount is not personal, and the reports are the point of having data"
+
+  - table: orders
+    column: placed_at
+    transform: preserve
+    why: "the distribution over time is what load and insights measure"

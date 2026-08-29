@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/auth"
 	"github.com/antifailure/antifailure/engine/internal/controlplane"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
@@ -113,9 +114,17 @@ engine tokens.`),
 
 // controlPlaneClient builds a client, or explains what is missing.
 //
-// The token comes from the environment and nowhere else. A token in a
-// configuration file is a token that ends up committed, and a token this
-// process could write is a token it could put in a support bundle.
+// The environment first, then the credential `af login` stored. In that order
+// on purpose: a token exported into a shell is somebody deliberately overriding
+// what is on the machine, usually because they are debugging or because they
+// are in CI, and the explicit thing must win.
+//
+// The stored credential is the OS keyring where there is one, and a file with
+// mode 0600 where there is not. NEITHER IS A CONFIGURATION FILE IN THE
+// REPOSITORY, which is what the older version of this comment was guarding
+// against and is still the rule: nothing here reads or writes a token inside
+// the working tree, so there is nothing for a commit or a support bundle to
+// pick up.
 func controlPlaneClient(e *Env, baseURL string) (*controlplane.Client, error) {
 	if baseURL == "" {
 		baseURL = e.Getenv("AF_CONTROL_PLANE_URL")
@@ -124,6 +133,16 @@ func controlPlaneClient(e *Env, baseURL string) (*controlplane.Client, error) {
 		v := e.Getenv(k)
 		return v, v != ""
 	})
+	if token == "" && baseURL != "" {
+		// A credential stored by af login. Expiry is checked here so that the
+		// failure is "your session expired, run af login" rather than a 401
+		// from a server the user then goes and investigates.
+		if cred, err := e.CredentialStore().Load(auth.Normalise(baseURL)); err == nil {
+			if !cred.Expired(e.Clock.Now()) {
+				token = cred.Token
+			}
+		}
+	}
 
 	client, err := controlplane.New(controlplane.Options{
 		BaseURL:  baseURL,

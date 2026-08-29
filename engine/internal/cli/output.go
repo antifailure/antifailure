@@ -46,7 +46,30 @@ type Output struct {
 	Verbose bool
 	// Width is the terminal width, clamped to a usable range.
 	Width int
+	// writeErr is the first failure writing to Out.
+	//
+	// Kept rather than returned, because a print helper that returned an
+	// error would put an if at four hundred call sites and every one of them
+	// would ignore it. Execute asks once, at the end, and a command that could
+	// not write what it was asked to write does not report success. A full
+	// disk or a closed pipe is exactly when a script needs to be told.
+	writeErr error
 }
+
+// note records the first write failure and discards the rest. The first one
+// is the one that explains what happened; the ones after it are consequences.
+func (o *Output) note(_ int, err error) {
+	if err != nil && o.writeErr == nil {
+		o.writeErr = err
+	}
+}
+
+// WriteErr reports the first failure writing to the output stream, if any.
+//
+// Named for what it reports rather than for the field, because Err is already
+// the error stream and a command that confused the two would be reporting a
+// failure to the thing that failed.
+func (o *Output) WriteErr() error { return o.writeErr }
 
 // NewOutput returns an Output configured from the environment.
 func NewOutput(out, errW io.Writer) *Output {
@@ -61,7 +84,7 @@ func (o *Output) Printf(format string, args ...any) {
 	if o.Format == FormatJSON || o.Quiet {
 		return
 	}
-	fmt.Fprintf(o.Out, format, args...)
+	o.note(fmt.Fprintf(o.Out, format, args...))
 }
 
 // Println writes a line in text mode.
@@ -69,12 +92,12 @@ func (o *Output) Println(s string) {
 	if o.Format == FormatJSON || o.Quiet {
 		return
 	}
-	fmt.Fprintln(o.Out, s)
+	o.note(fmt.Fprintln(o.Out, s))
 }
 
 // Raw writes to the output stream regardless of format or quiet. It is for
 // content the user asked for, such as a rendered manifest or a log line.
-func (o *Output) Raw(s string) { fmt.Fprint(o.Out, s) }
+func (o *Output) Raw(s string) { o.note(fmt.Fprint(o.Out, s)) }
 
 // JSON writes a document in JSON mode, and nothing in text mode.
 func (o *Output) JSON(v any) error {
@@ -84,6 +107,7 @@ func (o *Output) JSON(v any) error {
 	enc := json.NewEncoder(o.Out)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
+		o.note(0, err)
 		return fmt.Errorf("cli: encode output: %w", err)
 	}
 	return nil
@@ -151,7 +175,7 @@ func (o *Output) Status(symbol, label, detail string) {
 	case SymbolSkip:
 		style = StyleDim
 	}
-	fmt.Fprintf(o.Out, "  %-5s %-28s %s\n", o.S(style, symbol), label, o.S(StyleDim, detail))
+	o.note(fmt.Fprintf(o.Out, "  %-5s %-28s %s\n", o.S(style, symbol), label, o.S(StyleDim, detail)))
 }
 
 // Section prints a heading.
@@ -159,7 +183,7 @@ func (o *Output) Section(title string) {
 	if o.Format == FormatJSON || o.Quiet {
 		return
 	}
-	fmt.Fprintf(o.Out, "\n%s\n", o.S(StyleBold, title))
+	o.note(fmt.Fprintf(o.Out, "\n%s\n", o.S(StyleBold, title)))
 }
 
 // Table renders aligned columns. Rows are rendered in the order given; the
@@ -186,7 +210,7 @@ func (o *Output) Table(headers []string, rows [][]string) {
 			b.WriteString("  ")
 		}
 	}
-	fmt.Fprintln(o.Out, o.S(StyleDim, strings.TrimRight(b.String(), " ")))
+	o.note(fmt.Fprintln(o.Out, o.S(StyleDim, strings.TrimRight(b.String(), " "))))
 	for _, r := range rows {
 		var rb strings.Builder
 		for i := range headers {
@@ -199,7 +223,7 @@ func (o *Output) Table(headers []string, rows [][]string) {
 				rb.WriteString("  ")
 			}
 		}
-		fmt.Fprintln(o.Out, strings.TrimRight(rb.String(), " "))
+		o.note(fmt.Fprintln(o.Out, strings.TrimRight(rb.String(), " ")))
 	}
 }
 
@@ -220,19 +244,23 @@ func (o *Output) Error(err error) {
 	if err == nil {
 		return
 	}
+	// Writes here are not recorded and not checked, unlike the ones to the
+	// output stream. This is the error path: if the error stream is broken
+	// there is nowhere left to say so, and the exit code already carries the
+	// failure to whatever is watching.
 	var coded *aferrors.Error
 	if !aferrors.As(err, &coded) {
-		fmt.Fprintf(o.Err, "%s %s\n", o.S(StyleBad, "Error:"), err.Error())
+		_, _ = fmt.Fprintf(o.Err, "%s %s\n", o.S(StyleBad, "Error:"), err.Error())
 		return
 	}
-	fmt.Fprintf(o.Err, "%s %s\n", o.S(StyleBad, string(coded.Code())), coded.Message())
+	_, _ = fmt.Fprintf(o.Err, "%s %s\n", o.S(StyleBad, string(coded.Code())), coded.Message())
 	if next := coded.NextStep(); next != "" {
-		fmt.Fprintf(o.Err, "  %s %s\n", o.S(StyleBold, "Next:"), next)
+		_, _ = fmt.Fprintf(o.Err, "  %s %s\n", o.S(StyleBold, "Next:"), next)
 	}
-	fmt.Fprintf(o.Err, "  %s %s\n", o.S(StyleDim, "More:"), o.S(StyleDim, coded.DocsURL()))
+	_, _ = fmt.Fprintf(o.Err, "  %s %s\n", o.S(StyleDim, "More:"), o.S(StyleDim, coded.DocsURL()))
 	if o.Verbose {
 		if cause := aferrors.Unwrap(coded); cause != nil {
-			fmt.Fprintf(o.Err, "  %s %v\n", o.S(StyleDim, "Cause:"), cause)
+			_, _ = fmt.Fprintf(o.Err, "  %s %v\n", o.S(StyleDim, "Cause:"), cause)
 		}
 	}
 }

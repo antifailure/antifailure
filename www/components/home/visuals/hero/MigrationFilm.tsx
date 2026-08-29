@@ -1,71 +1,83 @@
 "use client";
 
-import { Caret } from "@/components/motion/Caret";
-import { cn } from "@/lib/cn";
-import { span, typed, useHeroFilmClock, type FilmProps } from "./clock";
+import { span, useHeroFilmClock, type FilmProps } from "./clock";
+import { Bar, Hairline, Label, Meta, Pill, StatusMoon, easeInOut, moveStyle, smooth, ticks } from "./linear";
 
 const LOOP = 8;
-const SQL = "ALTER TABLE subscriptions ADD COLUMN access_tier text";
 
-function p99of(t: number) {
-  if (t < 2.4) return 820;
-  if (t < 3.2) return 1240;
-  if (t < 4.2) return 3100;
-  return 6900;
-}
-
-function fmtMs(ms: number) {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
-}
+const STEPS = ["LOCK", "QUEUE", "POOL", "BLOCK"] as const;
 
 export function MigrationFilm({ active, hovered }: FilmProps) {
-  const { ref, t, playing } = useHeroFilmClock({
+  const { ref, t } = useHeroFilmClock({
     loop: LOOP,
     active,
     hovered,
-    stillT: 6.6,
-    reducedT: 6.6,
+    stillT: 0,
+    reducedT: 0,
   });
 
-  const sql = typed(SQL, t, 0.15, 18);
-  const sqlDone = sql.length >= SQL.length;
-  const wait = Math.pow(span(t, 1.1, 5.4), 1.8);
-  const blocked = t >= 5.4;
-  const p99 = p99of(t);
+  const lock = smooth(span(t, 0.9, 3.05));
+  const blocked = lock > 0.72;
+  const page = easeInOut(span(t, 3.45, 4.6));
+  const p99 = smooth(span(t, 4.85, 5.8));
 
   return (
-    <div ref={ref} className="absolute inset-0 flex flex-col p-3 font-sans select-none" aria-hidden>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="font-sans text-[10px] tracking-extra-tight text-black/45">migration</span>
-        <span
-          className={cn(
-            "inline-flex items-center rounded-[2px] px-1.5 py-0.5 font-sans text-[10px] tracking-extra-tight uppercase ring-1",
-            blocked ? "text-red-700 ring-red-600/50" : "text-black/35 ring-black/15",
-          )}
+    <div ref={ref} className="absolute inset-0 overflow-hidden font-sans select-none" aria-hidden>
+      <div
+        className="absolute inset-3.5 flex flex-col"
+        style={moveStyle({ opacity: 1 - page, y: page * -8, scale: 1 + page * 0.12 })}
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <Label>migration</Label>
+          <StatusMoon tone={blocked ? "block" : "progress"} />
+        </div>
+        <div
+          className="flex min-h-0 flex-1 flex-col justify-center rounded-[10px] border border-black/[0.08] bg-white px-2.5 py-2"
         >
-          {blocked ? "BLOCK" : "watch"}
-        </span>
-      </div>
-      <div className="min-w-0 font-sans text-[11px] leading-4 tracking-extra-tight text-[#285D49]">
-        {sql}
-        {playing && !sqlDone ? <Caret className="bg-black" /> : null}
-      </div>
-      <div className="mt-3">
-        <div className="mb-1 flex items-center justify-between">
-          <span className="font-sans text-[10px] tracking-extra-tight text-black/45">lock wait</span>
-          <span className="font-sans text-[10px] tabular-nums tracking-extra-tight text-[#285D49]">
-            {(wait * 27.4).toFixed(1)}s
-          </span>
-        </div>
-        <div className="h-1 overflow-hidden rounded-[2px] bg-black/10">
-          <div
-            className={cn("h-full", blocked ? "bg-red-600" : "bg-[#285D49]")}
-            style={{ width: `${Math.max(4, wait * 100)}%` }}
-          />
+          <div className="flex items-center gap-2">
+            <Meta className="w-8 shrink-0">When</Meta>
+            <Pill>exclusive lock</Pill>
+          </div>
+          <Bar className="mt-2" value={lock} tone={blocked ? "block" : "neutral"} />
+          <Meta className="mt-1 block tabular-nums">{ticks(0, 27.4, lock)}s</Meta>
+          <Hairline className="my-2" />
+          <div className="flex items-center gap-2">
+            <Meta className="w-8 shrink-0">Then</Meta>
+            <Pill tone={blocked ? "block" : "neutral"}>{blocked ? "BLOCK" : "watch"}</Pill>
+          </div>
         </div>
       </div>
-      <div className="mt-auto pt-3 font-sans text-[10px] tabular-nums tracking-extra-tight text-[#285D49]">
-        p99 820ms → {fmtMs(p99)}
+
+      <div
+        className="absolute inset-3.5 flex flex-col"
+        style={moveStyle({ opacity: page, y: (1 - page) * 14, scale: 0.96 + page * 0.04 })}
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <Label>plan</Label>
+          <StatusMoon tone="block" />
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col justify-center rounded-[10px] border border-black/[0.08] bg-white px-2.5 py-2">
+          <div className="flex items-center justify-between gap-1">
+            {STEPS.map((step, i) => {
+              const show = smooth(span(t, 4.45 + i * 0.18, 5.0 + i * 0.18));
+              const hot = step === "BLOCK";
+              return (
+                <span
+                  key={step}
+                  className={`text-[9px] tracking-extra-tight ${hot ? "text-[#C43D3D]" : "text-[#9B9EA5]"}`}
+                  style={moveStyle({ opacity: 0.25 + show * 0.75, y: (1 - show) * 4 })}
+                >
+                  {step}
+                </span>
+              );
+            })}
+          </div>
+          <Hairline className="my-2" />
+          <div className="flex items-center gap-1.5" style={moveStyle({ opacity: p99, y: (1 - p99) * 5 })}>
+            <Pill tone="block">BLOCK</Pill>
+            <Meta className="tabular-nums">27.4s · p99 6.9s</Meta>
+          </div>
+        </div>
       </div>
     </div>
   );

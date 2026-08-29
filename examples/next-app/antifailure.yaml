@@ -1,0 +1,54 @@
+version: 1
+name: next-orders
+
+# The second example, and deliberately a different shape from examples/go-api.
+# That one is a compiled binary with three endpoints. This one has a framework
+# with a build step, server rendered pages, and the two problems that come with
+# them: a build that must not need a database, and a runtime that must.
+
+services:
+  - name: web
+    kind: web
+    path: .
+    port: 3000
+    health_path: /api/health
+    # Runs against the branch rather than the golden, so a pull request that
+    # adds a column gets it and nobody else's environment does.
+    migrate: "psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/0001_init.sql"
+    build:
+      strategy: dockerfile
+      dockerfile: Dockerfile
+      # What this build reaches, written down. Declared rather than enforced in
+      # this release: the engine validates the list and shows it in af explain,
+      # and the local builder does not yet seal a build. It is the record of
+      # what the build needs, not a control you can rely on.
+      allow_hosts:
+        - registry.npmjs.org
+        - dl-cdn.alpinelinux.org
+    env:
+      # DATABASE_URL is not declared here on purpose. The database block below
+      # injects it, and declaring it as well makes the secret resolver demand a
+      # value nobody has to supply.
+      - name: PORT
+        value: "3000"
+      - name: NODE_ENV
+        value: "production"
+
+database:
+  provider: docker
+  version: 17
+  masking_rules: masking.yaml
+  golden:
+    schedule: "0 3 * * *"
+    max_age: 168h
+    retain: 3
+
+egress:
+  # This application calls nothing, and the policy says so rather than leaving
+  # it open in case it one day does. An allowance nobody needs is an allowance
+  # nobody reviews.
+  #
+  # examples/go-api is where to look for a rule that is used: it takes a
+  # payment through api.stripe.com, answered by the pack that ships with the
+  # engine.
+  default: block

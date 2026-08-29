@@ -142,3 +142,22 @@ cannot be branched at all, which is enforced in code rather than in a checklist.
 [Building services](/docs/guides/build) covers what happens when detection
 guessed wrong about how your services are built, which is the most common reason
 a first `af up` does not go cleanly.
+
+[Watching a run](/docs/guides/dashboard) is the live view: `af up --hud` draws
+the same run as a dashboard, and where there is no terminal it writes one line
+per event instead.
+
+## Running it somewhere other than your laptop
+
+Everything above is the same wherever the engine runs, and there are two other
+places to run it.
+
+[An environment per pull request](/docs/guides/github) is Antifailure inside
+GitHub Actions: the same `af up`, in a workflow, with one comment on the pull
+request that is updated in place rather than appended to. Nothing else is
+needed, and in particular no server.
+
+[The control plane](/docs/self-hosting/control-plane) is the optional hosted
+piece, and the page opens by saying what still works without it, which is all
+of it. Read that one when you want environments that outlive a workflow run, a
+shared address for them, or a record across repositories.

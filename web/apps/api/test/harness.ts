@@ -42,7 +42,16 @@ export interface ApiHarness {
   close(): Promise<void>
 }
 
-export async function startApi(): Promise<ApiHarness> {
+export interface StartApiOptions {
+  /** Who may sign in. Undefined leaves the server open, which is its default. */
+  signInAllowlist?: ReadonlySet<string> | null
+  /** The secret that seals provider keys. Undefined means none is configured,
+   *  which is a state the server has to serve rather than crash in, and there
+   *  are tests for that. */
+  sealingKey?: Buffer | null
+}
+
+export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
   const admin = postgres(adminUrl, { max: 4, connect_timeout: 10, onnotice: () => {} })
   await migrate(admin)
   await admin.unsafe(`ALTER ROLE antifailure_app LOGIN PASSWORD 'app-test-password'`)
@@ -58,6 +67,8 @@ export async function startApi(): Promise<ApiHarness> {
     // back. Production defaults the other way and there is a test for that.
     secureCookies: false,
     appBaseUrl: 'http://app.test/',
+    signInAllowlist: options.signInAllowlist ?? null,
+    sealingKey: options.sealingKey ?? null,
   })
 
   return {

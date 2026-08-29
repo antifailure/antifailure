@@ -33,8 +33,13 @@ reading the results.
 than adding a new one per push. A bot that adds a comment on every push is a
 bot people mute, and a muted bot reports nothing.
 
-The comment carries the environment URL where there is one, each workflow's
-verdict, anything the invariants found, and the insights summary.
+The comment carries a headline saying what the run amounted to, the
+environment URL, a row per workflow with its verdict and the detail behind it,
+steps for reproducing anything that did not pass, and a footer naming the
+branch, the commit, the duration and the golden it branched from.
+
+Invariant results and the insights summary are meant to join it and do not
+appear yet, because neither is executed in this release.
 
 ## Forks
 

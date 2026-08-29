@@ -11,14 +11,13 @@ import {
   PageShell,
   RelatedGrid,
   Split,
-  Stage,
 } from "@/components/pages/kit";
 import { cn } from "@/lib/cn";
 
 const MIX = [
   { key: "Obs", pct: 41, fill: "rgba(0,0,0,0.18)" },
-  { key: "Det", pct: 39, fill: "#34D59A" },
-  { key: "Crowdi", pct: 20, fill: "#00E599" },
+  { key: "Det", pct: 39, fill: "#33BF00" },
+  { key: "Exploratory", pct: 20, fill: "#285D49" },
 ] as const;
 
 const CONCURRENCY = [2, 4, 8, 16] as const;
@@ -53,18 +52,18 @@ const SOURCES = [
   },
   {
     letter: "C",
-    accent: "bg-[#00E599]",
-    label: "Crowdi",
+    accent: "bg-[#285D49]",
+    label: "Exploratory",
     title: "Exploratory users that discover.",
-    body: "Agents pursue goals, not selectors. They find paths and friction; the runner proves them. A feature here — not the product.",
+    body: "Agents pursue goals, not selectors. They find paths and friction; the runner proves them. They live here beside observed and deterministic traffic.",
     rows: [
       ["goal", "upgrade to Pro", "impatient"],
       ["trait", "double-click, retry", "34%"],
       ["out", "compile to scenario", "v3"],
     ],
-    chip: "feature, not the product",
-    href: "/product/crowdi",
-    hrefLabel: "Open Crowdi",
+    chip: "discover, then compile",
+    href: "/product/exploratory-users",
+    hrefLabel: "Open exploratory users",
   },
 ] as const;
 
@@ -74,12 +73,8 @@ export function WorkloadPage() {
       <PageHero
         eyebrow="Workload Studio"
         title="Exercise the twin the way production actually behaves."
-        lead="Three traffic sources on an isolated twin: observed patterns, deterministic journeys, and Crowdi exploratory users. Capture is asynchronous. Live requests stay on their own path."
-        visual={
-          <Stage>
-            <WorkloadScene />
-          </Stage>
-        }
+        lead="Three traffic sources on an isolated twin: observed patterns, deterministic journeys, and exploratory users. Capture is asynchronous. Live requests stay on their own path."
+        visual={<WorkloadScene />}
       />
 
       <PageSection>
@@ -93,12 +88,18 @@ export function WorkloadPage() {
       <PageSection tone="white">
         <PageHeading
           kicker="Three sources"
-          title="<strong>Observed. Deterministic. Crowdi.</strong> Compile what matters. Scale what repeats."
+          title="<strong>Observed. Deterministic. Exploratory.</strong> Compile what matters. Scale what repeats."
         />
-        <div className="mt-14 grid grid-cols-3 gap-5 max-lg:grid-cols-1">
-          {SOURCES.map((source) => (
-            <SourceColumn key={source.letter} source={source} />
-          ))}
+        <div className="relative mt-14">
+          <ul className="grid grid-cols-3 gap-x-16 max-lg:grid-cols-1 max-lg:gap-y-10">
+            {SOURCES.map((source) => (
+              <li key={source.letter} className="min-w-0">
+                <SourceColumn source={source} />
+              </li>
+            ))}
+          </ul>
+          <span className="pointer-events-none absolute inset-y-0 left-[calc(33.333%-32px)] w-px bg-black/12 max-lg:hidden" />
+          <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-lg:hidden" />
         </div>
       </PageSection>
 
@@ -122,14 +123,14 @@ assertions:
         >
           <PageHeading title="<strong>No LLM at each step.</strong> The deterministic runner executes the compiled journey." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Crowdi can intervene when the interface changes or an unexplained state is encountered. Useful
-            discoveries compile into this IR, then run without a model call.
+            Exploratory users can intervene when the interface changes or an unexplained state is
+            encountered. Useful discoveries compile into this IR, then run without a model call.
           </p>
           <Link
-            href="/product/crowdi"
+            href="/product/exploratory-users"
             className="mt-8 inline-block text-[15px] tracking-extra-tight text-black underline decoration-black/20 underline-offset-4"
           >
-            Crowdi, the exploratory-user feature →
+            Exploratory users in Workload Studio →
           </Link>
         </Split>
       </PageSection>
@@ -144,9 +145,9 @@ assertions:
 
       <RelatedGrid
         items={[
-          { href: "/product/crowdi", title: "Crowdi", description: "The exploratory-user feature inside Workload Studio, not the product." },
+          { href: "/product/exploratory-users", title: "Exploratory users", description: "Exploratory users inside Workload Studio, beside observed and deterministic traffic." },
           { href: "/product/oracle", title: "Differential Oracle", description: "Same compiled workload against baseline and candidate." },
-          { href: "/docs/workload", title: "Workload docs", description: "Scenario IR and traffic controls." },
+          { href: "/docs/concepts/load", title: "Load docs", description: "Scenario IR and traffic controls." },
         ]}
       />
     </PageShell>
@@ -155,7 +156,7 @@ assertions:
 
 function TrafficMixer() {
   return (
-    <Panel className="mt-14 rounded-[12px] bg-[#f7f7f5] tabular-nums">
+    <Panel className="mt-14 rounded-[12px] bg-white tabular-nums">
       <header className="flex h-10 items-center justify-between gap-3 px-4">
         <div className="flex min-w-0 items-center gap-2">
           <span className="size-1.5 shrink-0 bg-[#33BF00]" />
@@ -199,7 +200,7 @@ function TrafficMixer() {
                 )}
               >
                 {n <= ACTIVE_CONC ? (
-                  <span className="absolute inset-0 bg-[linear-gradient(90deg,rgba(51,191,0,0.28),rgba(0,229,153,0.5))]" />
+                  <span className="absolute inset-0 bg-[#33BF00]/25" />
                 ) : null}
                 <span className="relative">{n}</span>
               </div>
@@ -208,7 +209,7 @@ function TrafficMixer() {
         </MixerCell>
 
         <MixerCell label="observed | synthetic mix" rule>
-          <div className="flex h-2 w-full overflow-hidden ring-1 ring-black/10">
+          <div className="flex h-2 w-full overflow-hidden border border-black/[0.08]">
             {MIX.map((band) => (
               <span key={band.key} className="h-full" style={{ width: `${band.pct}%`, background: band.fill }} />
             ))}
@@ -231,7 +232,7 @@ function TrafficMixer() {
             <span className="font-mono text-[28px] leading-none tracking-tighter text-black">50</span>
             <MonoLabel>/ 50</MonoLabel>
           </div>
-          <div className="mt-4 flex h-2 overflow-hidden ring-1 ring-black/10">
+          <div className="mt-4 flex h-2 overflow-hidden border border-black/[0.08]">
             <span className="h-full w-1/2 bg-black/20" />
             <span className="h-full w-1/2 bg-[#33BF00]/70" />
           </div>
@@ -286,42 +287,32 @@ function MixerCell({
 
 function SourceColumn({ source }: { source: (typeof SOURCES)[number] }) {
   return (
-    <Panel className="flex h-full flex-col rounded-[12px] bg-[#f7f7f5]">
-      <header className="flex h-10 items-center justify-between gap-3 px-4">
-        <div className="flex items-center gap-2">
-          <span className={cn("size-1.5 shrink-0", source.accent)} />
-          <MonoLabel className="text-black/70">{source.letter}</MonoLabel>
-          <span className="text-black/20">·</span>
-          <MonoLabel className="text-black/55">{source.label}</MonoLabel>
-        </div>
-        <QueueChip>{source.chip}</QueueChip>
-      </header>
-      <Hairline />
-      <div className="flex min-h-0 flex-1 flex-col px-4 py-5">
-        <h3 className="text-[18px] leading-snug tracking-extra-tight text-black">{source.title}</h3>
-        <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">{source.body}</p>
-        <ul className="mt-5 space-y-1.5 font-mono text-[11px] tracking-extra-tight">
-          {source.rows.map(([k, v, meta]) => (
-            <li key={`${k}-${v}`} className="flex items-baseline justify-between gap-3 text-black/70">
-              <span className="min-w-0 truncate">
-                <span className="text-black/40">{k}</span>
-                <span className="ml-2 text-black">{v}</span>
-              </span>
-              <span className="shrink-0 tabular-nums text-black/45">{meta}</span>
-            </li>
-          ))}
-        </ul>
-        {"href" in source && source.href ? (
-          <Link
-            href={source.href}
-            className="mt-auto pt-5 text-[13px] tracking-extra-tight text-black/70 transition-colors hover:text-black"
-          >
-            {source.hrefLabel} →
-          </Link>
-        ) : (
-          <div className="mt-auto pt-5" />
-        )}
+    <div className="flex h-full min-w-0 flex-col">
+      <div className="flex items-center gap-2">
+        <span className={cn("size-1.5 shrink-0", source.accent)} />
+        <MonoLabel className="text-black/55">{source.label}</MonoLabel>
       </div>
-    </Panel>
+      <h3 className="mt-4 text-[18px] leading-snug tracking-extra-tight text-black">{source.title}</h3>
+      <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">{source.body}</p>
+      <ul className="mt-5 space-y-1.5 font-mono text-[11px] tracking-extra-tight">
+        {source.rows.map(([k, v, meta]) => (
+          <li key={`${k}-${v}`} className="flex items-baseline justify-between gap-3 text-black/70">
+            <span className="min-w-0 truncate">
+              <span className="text-black/40">{k}</span>
+              <span className="ml-2 text-black">{v}</span>
+            </span>
+            <span className="shrink-0 tabular-nums text-black/45">{meta}</span>
+          </li>
+        ))}
+      </ul>
+      {"href" in source && source.href ? (
+        <Link
+          href={source.href}
+          className="mt-auto pt-5 text-[13px] tracking-extra-tight text-black/70 transition-colors hover:text-black"
+        >
+          {source.hrefLabel} →
+        </Link>
+      ) : null}
+    </div>
   );
 }

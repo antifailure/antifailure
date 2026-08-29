@@ -138,7 +138,7 @@ function WorkloadDemo({ active }: { active: boolean }) {
           </div>
         </div>
         <pre className="absolute top-10 left-3 right-3 font-mono text-[9px] leading-4 text-[#9cdcfe]">
-          <span className="text-[#6a9955]"># observed · deterministic · crowdi</span>
+          <span className="text-[#6a9955]"># observed · deterministic · exploratory</span>
           {"\n"}
           <span className="text-[#c586c0]">contain</span>: [stripe, email]
           {"\n"}
@@ -148,7 +148,7 @@ function WorkloadDemo({ active }: { active: boolean }) {
           {active ? <span className="film-caret">▍</span> : null}
         </pre>
         <div className="absolute right-3 bottom-16 left-3 space-y-2">
-          {["observed 42%", "deterministic 38%", "crowdi 20%"].map((row, i) => (
+          {["observed 42%", "deterministic 38%", "exploratory 20%"].map((row, i) => (
             <div key={row}>
               <div className="mb-1 font-mono text-[8px] uppercase tracking-extra-tight text-white/40">{row}</div>
               <div className="h-1 overflow-hidden bg-white/10">

@@ -138,7 +138,7 @@ func (s *SeedAdapter) Provision(
 			return nil, fmt.Errorf(
 				"the seed command for persona %q did not finish within %s", p.Name, s.timeout)
 		}
-		return nil, fmt.Errorf("the seed command for persona %q failed: %v: %s",
+		return nil, fmt.Errorf("the seed command for persona %q failed: %w: %s",
 			p.Name, err, detail)
 	}
 

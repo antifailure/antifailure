@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { cn } from "@/lib/cn";
+import { useEffect, useRef, useState } from "react";
 import { MiniFilm } from "./visuals/hero";
+
+const PLAY_MS = 6400;
+const OVERLAP_MS = 500;
+const STAGGER_MS = PLAY_MS - OVERLAP_MS;
 
 export const HERO_SERVICES = [
   {
@@ -22,7 +25,7 @@ export const HERO_SERVICES = [
   },
   {
     title: "Workload Studio",
-    description: "Observed patterns, deterministic journeys, and Crowdi users.",
+    description: "Observed patterns, deterministic journeys, and exploratory users.",
     kind: "workload" as const,
   },
   {
@@ -34,19 +37,31 @@ export const HERO_SERVICES = [
 
 export function HeroServices() {
   const [autoPlayIndex, setAutoPlayIndex] = useState(0);
+  const [trailingIndex, setTrailingIndex] = useState<number | null>(null);
+  const playIndexRef = useRef(0);
   const items = HERO_SERVICES;
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      setAutoPlayIndex((i) => (i + 1) % items.length);
-    }, 2800);
+      const current = playIndexRef.current;
+      const next = (current + 1) % items.length;
+      setTrailingIndex(current);
+      playIndexRef.current = next;
+      setAutoPlayIndex(next);
+    }, STAGGER_MS);
     return () => window.clearInterval(id);
   }, [items.length]);
+
+  useEffect(() => {
+    if (trailingIndex == null) return;
+    const id = window.setTimeout(() => setTrailingIndex(null), OVERLAP_MS);
+    return () => window.clearTimeout(id);
+  }, [trailingIndex]);
 
   return (
     <ul className="grid grid-cols-5 grid-rows-[auto_auto] gap-x-16 gap-y-8 max-xl:gap-x-6 max-xl:gap-y-6 max-lg:-mx-5 max-lg:flex max-lg:snap-x max-lg:snap-mandatory max-lg:scroll-px-5 max-lg:gap-x-8 max-lg:gap-y-0 max-lg:overflow-x-auto max-lg:px-5 max-lg:no-scrollbars max-md:gap-x-6">
       {items.map((item, index) => {
-        const isActive = autoPlayIndex === index;
+        const isActive = autoPlayIndex === index || trailingIndex === index;
         return (
           <li
             key={item.title}
@@ -55,17 +70,14 @@ export function HeroServices() {
             <p className="block max-w-sm text-base tracking-extra-tight text-pretty text-gray-new-50 max-xl:text-sm/normal max-lg:text-base">
               <span className="font-semibold text-black">{item.title}.</span> {item.description}
             </p>
-            <span className="relative block aspect-[5/4] w-full overflow-hidden bg-[#f1f1ef] font-sans ring-1 ring-black/10">
+            <span className="relative block aspect-[5/4] w-full overflow-hidden rounded-[12px] border border-black/[0.08] bg-white font-sans shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-[border-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] [@media(hover:hover)]:group-hover:border-black/[0.16]">
               <MiniFilm kind={item.kind} active={isActive} hovered={false} />
               <span
-                className="noise pointer-events-none absolute inset-0 opacity-[0.16] mix-blend-multiply"
-                aria-hidden
-              />
-              <span
-                className={cn(
-                  "pointer-events-none absolute inset-0 bg-black/0 transition-colors duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
-                  "[@media(hover:hover)]:group-hover:bg-black/45",
-                )}
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  background:
+                    "linear-gradient(to right, transparent 62%, #f7f7f5 100%), linear-gradient(to bottom, transparent 70%, #f7f7f5 100%)",
+                }}
                 aria-hidden
               />
             </span>
