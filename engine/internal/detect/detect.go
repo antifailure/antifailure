@@ -354,6 +354,7 @@ func DefaultAnalyzers() []Analyzer {
 		&MigrationAnalyzer{},
 		&EnvAnalyzer{},
 		&ThirdPartyAnalyzer{},
+		&AuthAnalyzer{},
 		&ScheduleAnalyzer{},
 	}
 }
