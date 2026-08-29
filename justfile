@@ -89,6 +89,7 @@ gate: _reports
     run "edition boundary"               just edition
     run "enterprise"                     just test-ee
     run "license parser fuzz"            just fuzz-license
+    run "engine parser fuzz"             just fuzz-engine
     run "authorship and sign-off"        just authorship
 
     echo
@@ -466,6 +467,21 @@ typecheck:
 # with extra steps. Sixty seconds here, longer in a nightly run.
 fuzz-license seconds="60":
     cd ee/engine && GOWORK=off go test ./license -run FuzzParse -fuzz FuzzParse -fuzztime {{seconds}}s
+
+# G6, for the two parsers that read untrusted input from the customer's side.
+#
+# The manifest is a file from the repository under test and the detection
+# engine reads that repository's contents, so both are parsing bytes somebody
+# else wrote. C.7 says the customer's repository is data and never code; a
+# parser that panics on a crafted file is the cheapest way to break that.
+#
+# These targets already existed and were never fuzzed. `go test ./...` runs a
+# fuzz target against its committed seed corpus only, which is a unit test
+# wearing a fuzzer's name: it proves the seeds still pass and explores nothing.
+# Sixty seconds each here, matching the licence parser, longer in a nightly.
+fuzz-engine seconds="60":
+    cd engine && go test ./internal/manifest -run FuzzParse -fuzz FuzzParse -fuzztime {{seconds}}s
+    cd engine && go test ./internal/detect -run FuzzAnalyzers -fuzz FuzzAnalyzers -fuzztime {{seconds}}s
 
 # Regenerate everything that is generated, then prove nothing changed.
 #
