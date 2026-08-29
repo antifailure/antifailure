@@ -353,7 +353,12 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	return secrets.NewChain(
+	registry := o.opts.Extensions
+	if registry == nil {
+		registry = extension.Default
+	}
+
+	local := []secrets.Source{
 		&secrets.EnvSource{
 			Label: "this shell's environment",
 			Getenv: func(name string) (string, bool) {
@@ -366,11 +371,16 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 			filepath.Join(o.opts.Root, ".antifailure", "secrets.enc"),
 			secrets.StorePassphrase(getenv),
 		),
-		// Last, and only where the platform has one. A keyring entry is the
-		// long lived default on a workstation; everything above it is a way to
-		// override that for one run.
+		// Last of the local sources, and only where the platform has one. A
+		// keyring entry is the long lived default on a workstation; everything
+		// above it is a way to override that for one run.
 		secrets.NewKeyringSource(secrets.NewSystemKeyring(), secrets.DefaultKeyringService),
-	)
+	}
+	// Anything an enterprise build registered comes after every local source,
+	// for the same reason the keyring comes after .env: a company secret
+	// manager is the default the local ones exist to override. With nothing
+	// registered this appends nothing and the chain is unchanged.
+	return secrets.NewChain(append(local, secrets.Registered(registry)...)...)
 }
 
 // resolveSecrets looks up everything the manifest declares.
@@ -402,6 +412,17 @@ func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, e
 			// to that provider, which is the opposite of what sandbox mode is
 			// for and charges real cards.
 			return nil, aferrors.Coded(aferrors.AFSEC003, "name", live.Name)
+		}
+		var rejected *extension.CredentialRejectedError
+		if errors.As(err, &rejected) {
+			// A store that refused the credential, after the one refresh it is
+			// allowed. Its own code, because the next step differs: an
+			// unreachable store is worth retrying and a refused credential is a
+			// configuration problem that will refuse again for ever. Telling
+			// somebody to try again would be telling them to wait for something
+			// that is not going to change.
+			return nil, aferrors.Coded(aferrors.AFSEC002,
+				"source", rejected.Source, "detail", rejected.Detail)
 		}
 		return nil, err
 	}

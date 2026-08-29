@@ -1,0 +1,155 @@
+name: Keyrings
+
+# The two platforms this development loop cannot reach.
+#
+# The macOS keychain is tested on the machine that writes the code, against the
+# real keychain, so it needs nothing here. Linux and Windows do not have that:
+# there is no Windows machine in this loop at all, and a macOS machine has no
+# freedesktop Secret Service. Without this job the Windows Credential Manager
+# implementation would be code nobody had ever executed, which is a claim about
+# behaviour rather than a report of it.
+#
+# Separate from ci.yml on purpose. These runners are slower and rarer than
+# ubuntu-latest, this runs only when the code it covers changes, and mixing it
+# into the main gate would make every unrelated pull request wait for a Windows
+# runner.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'engine/internal/secrets/**'
+      - '.github/workflows/keyring.yml'
+  pull_request:
+    paths:
+      - 'engine/internal/secrets/**'
+      - '.github/workflows/keyring.yml'
+  # Runnable by hand, because a change elsewhere in the engine can still break
+  # a platform this only checks when the secrets package itself moves.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read, and only read. Every action is pinned to a commit rather than a tag,
+# because a tag is mutable and pinning is what makes the reviewed thing the run
+# thing.
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows Credential Manager
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      # Scoped to the keyring tests rather than the whole package. This job
+      # exists to prove one thing, against the real Credential Manager, and a
+      # broad run here would be a second and much slower copy of a gate that
+      # already runs on Linux for everything that is not platform specific.
+      #
+      # CGO_ENABLED=0, because that is how the binary ships: the implementation
+      # reaches advapi32 through LazyDLL precisely so it needs no cgo, and a job
+      # that proved it works WITH cgo would be proving the wrong thing.
+      - name: The real Credential Manager
+        working-directory: engine
+        env:
+          CGO_ENABLED: '0'
+          GOTOOLCHAIN: local
+        run: >
+          go test ./internal/secrets/ -count=1 -v
+          -run 'SystemKeyringRoundTrips|AValueWithAwkwardCharactersSurvives|NonASCIIAndAstral|AMultiLineValueAndTrailingNewline|AValueAtTheLimit|ARealisticallyLongValue|AnEmptyValueIsPresent'
+
+  crosslint:
+    name: The other platforms lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      # The main lint runs on one machine, so it only ever sees the files that
+      # machine's build tags select. keyring_windows.go and keyring_darwin.go
+      # are invisible to it, and a file nothing lints drifts: GOOS=windows found
+      # an unchecked return in the Windows keyring that had been merged and
+      # green for a day, because no linter on any runner had compiled it.
+      #
+      # On ubuntu-latest rather than on a runner of each platform, because this
+      # type checks rather than runs. Cross compiling for the lint costs a
+      # minute and needs no scarce runner.
+      - name: Lint what the other platforms compile
+        working-directory: engine
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.13.1/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.13.1
+          for target in windows darwin; do
+            echo "::group::GOOS=$target"
+            GOOS="$target" "$(go env GOPATH)/bin/golangci-lint" run --timeout 15m
+            echo "::endgroup::"
+          done
+
+  linux:
+    name: Linux Secret Service
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      # The real daemon and the real client, not a stand-in for either.
+      # dbus-run-session gives them a session bus without an X server or a login
+      # session, which is what makes this runnable on a runner at all.
+      - name: A real keyring daemon
+        run: sudo apt-get update && sudo apt-get install -y libsecret-tools gnome-keyring dbus-x11
+
+      # The password guards a keyring that exists for the length of one job and
+      # holds nothing but the test's own values, so it is a literal here rather
+      # than a secret. A passphrase that guards nothing is not a secret, and
+      # generating one would only make the step harder to read.
+      #
+      # The whole run is inside dbus-run-session because every part of it needs
+      # the same bus: a step that started its own would talk to a different
+      # daemon than the one that was unlocked.
+      - name: The real Secret Service
+        working-directory: engine
+        env:
+          CGO_ENABLED: '0'
+          GOTOOLCHAIN: local
+        run: |
+          dbus-run-session -- bash -c '
+            set -euo pipefail
+            eval "$(printf test | gnome-keyring-daemon --unlock --components=secrets)"
+            export GNOME_KEYRING_CONTROL
+            # The harness proves itself first. Without this, a broken daemon
+            # makes every Go test skip and the job reports success having
+            # verified nothing, which is the exact failure this whole file
+            # exists to prevent.
+            printf harness | secret-tool store --label=harness service af-harness account probe
+            test "$(secret-tool lookup service af-harness account probe)" = harness
+            secret-tool clear service af-harness account probe
+            # No -race. The race detector needs cgo and this job runs with
+            # CGO_ENABLED=0 deliberately, because that is how the binary ships
+            # and it is the configuration the keyring implementations exist to
+            # work under. The engine job already runs the whole tree under the
+            # race detector on a normal build.
+            go test ./internal/secrets/... -count=1
+          '

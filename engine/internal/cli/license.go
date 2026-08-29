@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/pkg/edition"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
@@ -53,6 +54,15 @@ type LicenseJSON struct {
 	// that an operator can tell an unmodified build from one that is not.
 	Extensions []string `json:"extensions"`
 	Message    string   `json:"message"`
+	// The fields below are present only when a licence is installed, which is
+	// only ever in the enterprise binary. Omitted rather than empty, so a
+	// community installation's JSON is exactly what it always was and nothing
+	// parsing it has to learn a new shape.
+	Org       string   `json:"org,omitempty"`
+	Plan      string   `json:"plan,omitempty"`
+	Features  []string `json:"features,omitempty"`
+	Warning   string   `json:"warning,omitempty"`
+	ExpiresAt string   `json:"expires_at,omitempty"`
 }
 
 func newLicenseStatusCommand(e *Env) *cobra.Command {
@@ -60,20 +70,64 @@ func newLicenseStatusCommand(e *Env) *cobra.Command {
 		Use:   "status",
 		Short: "What this installation is licensed for",
 		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			const message = "This is the community edition. It has no license and needs none."
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			const communityMessage = "This is the community edition. It has no license and needs none."
 			registered := extension.Default.Registered()
+
+			// The running binary declares what it is. A community build
+			// attaches nothing and gets the sentence this command has always
+			// printed; the enterprise binary attaches what it worked out at
+			// startup. Without this the enterprise binary reports itself as the
+			// community edition, which is not a cosmetic problem: it is the one
+			// command an administrator runs to find out whether their licence
+			// is working, answering that they do not have one.
+			status, declared := edition.From(cmd.Context())
+			if !declared {
+				status = edition.Status{Name: "community", State: "none", Message: communityMessage}
+			}
 
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(LicenseJSON{
-					Edition: "community", State: "none",
-					Extensions: registered, Message: message,
+					Edition: status.Name, State: status.State,
+					Extensions: registered, Message: status.Message,
+					Org: status.Org, Plan: status.Plan, Features: status.Features,
+					Warning: status.Warning, ExpiresAt: status.ExpiresAt,
 				})
 			}
 
-			e.Out.Println("  " + message)
+			e.Out.Println("  " + status.Message)
+			if status.Warning != "" {
+				e.Out.Println("")
+				e.Out.Println("  " + status.Warning)
+			}
 			e.Out.Println("")
-			e.Out.Println("  Everything the engine does is here and does not expire.")
+			if declared && status.Name != "community" {
+				if status.Org != "" {
+					e.Out.Printf("  Licensed to %s", status.Org)
+					if status.Plan != "" {
+						e.Out.Printf(" on the %s plan", status.Plan)
+					}
+					e.Out.Println("")
+				}
+				if status.ExpiresAt != "" {
+					e.Out.Printf("  Expires %s\n", status.ExpiresAt)
+					e.Out.Println("")
+				}
+				// Listed, and an empty list is listed as empty rather than
+				// omitted. An expired licence permits nothing and preserves
+				// every setting, and saying so is the difference between an
+				// administrator who renews and one who opens a support ticket
+				// about features that vanished.
+				e.Out.Println("  Features:")
+				if len(status.Features) == 0 {
+					e.Out.Println("    none are permitted right now")
+				}
+				for _, f := range status.Features {
+					e.Out.Printf("    %s\n", f)
+				}
+			} else {
+				e.Out.Println("  Everything the engine does is here and does not expire.")
+			}
 			if len(registered) > 0 {
 				// Worth printing. A build with something registered at the
 				// extension points is not the stock community build, and an
@@ -86,8 +140,12 @@ func newLicenseStatusCommand(e *Env) *cobra.Command {
 				}
 			}
 			e.Out.Println("")
-			e.Out.Println("  Enterprise features need the enterprise binary, built from ee/.")
-			e.Out.Println("  See https://antifailure.dev/docs/enterprise/licensing")
+			if declared && status.Name != "community" {
+				e.Out.Println("  See https://antifailure.dev/docs/enterprise/licensing")
+			} else {
+				e.Out.Println("  Enterprise features need the enterprise binary, built from ee/.")
+				e.Out.Println("  See https://antifailure.dev/docs/enterprise/licensing")
+			}
 			return nil
 		},
 	}
@@ -98,7 +156,19 @@ func newLicenseInstallCommand(e *Env) *cobra.Command {
 		Use:   "install <key>",
 		Short: "Install an enterprise license key",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if status, declared := edition.From(cmd.Context()); declared && status.Name != "community" {
+				// The enterprise binary reads its key from the environment and
+				// stores nothing, so this says that rather than pretending to
+				// have saved something. A command that claims to have installed
+				// a key and has not is how somebody discovers, during the
+				// rollout they bought the licence for, that it was never on.
+				e.Out.Println("  This binary reads its license key from AF_LICENSE_KEY and stores nothing.")
+				e.Out.Println("")
+				e.Out.Println("  Set AF_LICENSE_KEY and AF_ORG where the engine runs, then run")
+				e.Out.Println("  'af license status' to see what it permits.")
+				return nil
+			}
 			// Refused rather than accepted and ignored. Storing a key this
 			// binary can never act on would leave somebody believing their
 			// enterprise features are on, and they would find out otherwise
@@ -119,7 +189,14 @@ func newLicenseRemoveCommand(e *Env) *cobra.Command {
 		Use:   "remove",
 		Short: "Remove the installed license key",
 		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if status, declared := edition.From(cmd.Context()); declared && status.Name != "community" {
+				e.Out.Println("  Nothing is stored to remove: this binary reads AF_LICENSE_KEY.")
+				e.Out.Println("")
+				e.Out.Println("  Unset it and every enterprise feature falls back to the community")
+				e.Out.Println("  behaviour, with every enterprise setting preserved.")
+				return nil
+			}
 			e.Out.Println("  There is no license installed. This is the community edition.")
 			return nil
 		},
