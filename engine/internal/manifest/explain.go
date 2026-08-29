@@ -124,6 +124,19 @@ func Explain(m *schema.Manifest) string {
 			}
 			fmt.Fprintf(&b, "  %-20s %-28s %s%s\n", p.Name, p.Email, p.Login, mfa)
 		}
+		if m.Auth != nil && m.Auth.Adapter != "" {
+			how := string(m.Auth.Adapter)
+			if m.Auth.Adapter == schema.AuthAuto {
+				how = "auto (chosen from the dependencies and the schema)"
+			}
+			fmt.Fprintf(&b, "  %-20s %s\n", "created by", how)
+			if m.Auth.Adapter == schema.AuthSeed && m.Auth.Seed != "" {
+				fmt.Fprintf(&b, "  %-20s %s\n", "", m.Auth.Seed)
+			}
+			if m.Auth.Sandbox {
+				fmt.Fprintf(&b, "  %-20s %s\n", "", "in a sandbox tenant")
+			}
+		}
 		b.WriteString("\n")
 	}
 

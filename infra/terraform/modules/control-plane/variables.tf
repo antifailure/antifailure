@@ -96,8 +96,25 @@ variable "key_vault_purge_protection" {
 }
 variable "assign_deployer_secret_officer" {
   type        = bool
-  default     = true
-  description = "Give whoever runs Terraform the ability to write the secrets below, scoped to this vault only. Turn off when the role is granted out of band."
+  default     = false
+  description = <<-EOT
+    Grant the caller Key Vault Secrets Officer on this vault.
+
+    OFF by default, and that default is the point. A role assignment whose
+    principal is "whoever is running Terraform" churns on every plan by a
+    different caller, and principal_id is ForceNew, so the pull request plan job
+    reports that it MUST BE REPLACED on every single run. A plan that always
+    carries a destroy is a plan people stop reading.
+
+    Turn it on only where exactly one identity ever runs this stack, or pin
+    deployer_principal_id instead.
+  EOT
+}
+
+variable "deployer_principal_id" {
+  type        = string
+  default     = null
+  description = "Pins the principal that gets Key Vault Secrets Officer, instead of taking whoever is calling. Null falls back to the caller, which is what makes assign_deployer_secret_officer caller-dependent and therefore off by default."
 }
 variable "goldens_enabled" {
   type        = bool
@@ -275,6 +292,19 @@ variable "database_extensions" {
 
 variable "key_vault_name" {
   type        = string
-  default     = ""
-  description = "Overrides the computed vault name. Set it for an existing vault: a Key Vault cannot be renamed, so a changed name is a destroy, a create, and seven days of purge protection holding the old name."
+  default     = null
+  description = <<-EOT
+    Overrides the derived name, which is `<name>-kv-<location>` truncated to the
+    24 characters Azure allows.
+
+    You need this exactly when purge protection is in your way: a deleted vault
+    holds its GLOBAL name for the soft delete retention period and purge
+    protection means nobody can release it early. Recreating in the same region
+    inside that window is impossible by design, and a different name is the only
+    way through. Reach for it knowingly rather than as a reflex.
+  EOT
+  validation {
+    condition     = var.key_vault_name == null || var.key_vault_name == "" || can(regex("^[a-zA-Z][a-zA-Z0-9-]{1,22}[a-zA-Z0-9]$", var.key_vault_name))
+    error_message = "A Key Vault name is 3 to 24 characters, alphanumerics and hyphens, starts with a letter and does not end with a hyphen."
+  }
 }

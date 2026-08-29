@@ -17,17 +17,24 @@ resource "azurerm_container_app_environment" "this" {
   # private because it is on its own delegated subnet with no public endpoint.
   internal_load_balancer_enabled = false
 
-  # Declared because it exists.
+  # DECLARED BECAUSE AZURE CREATES IT, NOT BECAUSE THIS MODULE ASKED FOR IT.
   #
-  # Azure creates a Consumption profile on every environment whether or not one
-  # is asked for, so a configuration that is silent about it plans to REMOVE it
-  # on every apply -- against the profile the app and both jobs are running on.
-  # Saying it here makes the plan quiet and honest instead of quiet and lucky.
+  # Azure attaches a default Consumption workload profile to every managed
+  # environment. Terraform did not create it, so the next plan proposes to
+  # REMOVE it, quietly, as a `- workload_profile` block inside an otherwise
+  # uninteresting in-place update. Left undeclared, every apply forever tries to
+  # delete a profile the platform immediately puts back, so the stack never
+  # converges and every plan carries a change that is not a change. The same
+  # thing happens on the database subnet's Microsoft.Storage service endpoint,
+  # and it is declared there for the same reason.
+  #
+  # A plan that always shows a diff is a plan people stop reading, which is how
+  # a real destroy goes past a reviewer.
   workload_profile {
     name                  = "Consumption"
     workload_profile_type = "Consumption"
-    minimum_count         = 0
     maximum_count         = 0
+    minimum_count         = 0
   }
 
   tags = var.tags
@@ -86,7 +93,7 @@ resource "azurerm_container_app_job" "bootstrap" {
     content {
       name                = secret.value
       identity            = azurerm_user_assigned_identity.app.id
-      key_vault_secret_id = azurerm_key_vault_secret.this[secret.value].versionless_id
+      key_vault_secret_id = local.secret_by_name[secret.value].versionless_id
     }
   }
 
@@ -173,7 +180,7 @@ resource "azurerm_container_app_job" "maintenance" {
   secret {
     name                = "migration-database-url"
     identity            = azurerm_user_assigned_identity.app.id
-    key_vault_secret_id = azurerm_key_vault_secret.this["migration-database-url"].versionless_id
+    key_vault_secret_id = local.secret_by_name["migration-database-url"].versionless_id
   }
 
   template {
@@ -249,7 +256,7 @@ resource "azurerm_container_app" "this" {
     content {
       name                = secret.value
       identity            = azurerm_user_assigned_identity.app.id
-      key_vault_secret_id = azurerm_key_vault_secret.this[secret.value].versionless_id
+      key_vault_secret_id = local.secret_by_name[secret.value].versionless_id
     }
   }
 

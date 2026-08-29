@@ -58,6 +58,17 @@ attestation history, network policy, the audit log, members, provider keys, and
 the device approval screen. Server-rendered, no JavaScript, same origin as the
 API so the session cookie is the session the pages read.
 
+**A GitHub App, and the code to act as it.** App JWTs backdated a minute and
+expiring in nine rather than ten, because ten is GitHub's maximum and asking for
+exactly it is asking to be refused the moment either clock disagrees. Cached
+installation tokens, expired a minute early so one cannot be valid here and
+expired at GitHub. A webhook that verifies the HMAC over the raw body *before*
+parsing it, and row-level security that confines a delivery to the account it
+names.
+
+Not yet configured on the running deployment: the private key is missing. See
+below.
+
 **Bring your own key, as far as storing one goes.** Anthropic and OpenAI keys
 sealed with AES-256-GCM under a secret held outside the database and bound to the
 organization and provider, so a row copied between tenants does not open. A
@@ -177,14 +188,31 @@ rather than a wiring one:
 Each produces materially different work and a different security posture, and
 picking one on my own would be picking for Vir. Asked rather than assumed.
 
-**The console is live but empty.** There is no GitHub App, so no installation
-exists, so no repository is connected, so there are no environments, runs or
-artifacts to show. The pages render their empty states, which say what would
-appear and why nothing has. This is the largest remaining gap against the brief,
-which asked for a populated console including the dogfood repository, one
-environment, one run with artifacts, and network decisions. Creating a GitHub App
-needs the web UI and a passkey; the OAuth App was created that way and the same
-session can create this one.
+**The console is live and still empty, for one remaining reason.** The GitHub
+App now exists and is installed, and the code that turns a delivery into rows is
+written and tested. What is missing is the App's private key: GitHub shows it
+once as a file download, and it is not yet in Key Vault, so the control plane
+runs with no App configured and `/webhooks/github` answers 503.
+
+Until that is in, `github_installations` stays empty, and that single empty
+table is why every page renders an empty state. Sign-in reads it to decide which
+organizations a person may enter, so with no row there, everybody who signs in
+lands with no tenant at all.
+
+What is already done for it:
+
+| | |
+| --- | --- |
+| App | `Antifailure Staging`, App ID `4756201` |
+| Installed on | `antifailure`, installation `157378382` |
+| Scope | `antifailure/antifailure` only, not all repositories |
+| Permissions | metadata, contents and members read; pull requests write |
+| Events | `repository`, `member`, `organization`, plus the implicit installation ones |
+| Webhook | `https://app.dev.antifailure.dev/webhooks/github`, secret in Key Vault |
+
+The events list is deliberately short. `push` and `pull_request` are not
+subscribed, because nothing handles them yet and an event nobody consumes is
+delivery-log noise; adding them later is an edit rather than a reinstall.
 
 **No live BYOK run.** The storage, the budget enforcement, the rotation and the
 console are built and tested, and the live control plane can now store a key:

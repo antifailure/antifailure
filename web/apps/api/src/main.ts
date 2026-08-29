@@ -16,6 +16,7 @@ import { sweepSessions } from './auth/session.ts'
 import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
+import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
 
 function required(name: string): string {
@@ -83,6 +84,11 @@ console.log(
     : 'provider keys CANNOT be stored: AF_PROVIDER_KEY_SECRET is not set',
 )
 
+// Read at start-up so a malformed price stops the process here rather than on
+// the first model call, which is the one request where being wrong costs money.
+const modelPrices = pricesFrom(process.env.AF_MODEL_PRICES)
+console.log(`model prices configured for ${Object.keys(modelPrices).length} models`)
+
 const { app, ingestLimiter, authLimiter } = createServer({
   pool,
   github,
@@ -92,6 +98,7 @@ const { app, ingestLimiter, authLimiter } = createServer({
   signInAllowlist,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
+  modelPrices,
 })
 
 // Partitions, kept ahead of the writes. Skipped when this process is not the
