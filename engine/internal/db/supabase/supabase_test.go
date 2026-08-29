@@ -151,8 +151,8 @@ func (f *fakeAPI) serve() *httptest.Server {
 		}
 
 		id := strings.TrimPrefix(r.URL.Path, "/branches/")
-		switch {
-		case r.Method == http.MethodDelete:
+		switch r.Method {
+		case http.MethodDelete:
 			if f.deleted[id] {
 				w.WriteHeader(http.StatusNotFound)
 				_, _ = w.Write([]byte(`{"message":"Not Found"}`))
@@ -165,7 +165,7 @@ func (f *fakeAPI) serve() *httptest.Server {
 			}
 			f.deleted[id] = true
 			_, _ = w.Write([]byte(`{"message":"ok"}`))
-		case r.Method == http.MethodPatch:
+		case http.MethodPatch:
 			var body map[string]any
 			require.NoError(f.t, json.NewDecoder(r.Body).Decode(&body))
 			if v, ok := body["persistent"].(bool); ok {
