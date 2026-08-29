@@ -135,20 +135,42 @@ reports nothing, which is worse than the gap.
 Four are done and clean, in CI as well as locally: `cmd/af-proxy`,
 `conformance`, `internal/load` and `internal/subset`.
 
-`internal/insights` is the open one. It passes on a workstation and fails in
-CI, with two `net/http` `persistConn` `readLoop` and `writeLoop` pairs still in
-IO wait at exit. The stacks carry no frame from this repository; they are idle
-keep-alive connections held by an `http.Transport`. What has been audited and
-is not the cause: every `dockerutil.Client()` in the package and its tests is
-closed, including on the error paths, and the one streaming response it reads,
-`ContainerLogs` in `lastLines`, goes through `dockerutil.Discard`, which drains
-before closing. That leaves either a leak below the audited code or the known
-race where `CloseIdleConnections` returns before those goroutines unwind.
+**Answered.** `internal/insights` verifies too, and the stacks with no frame
+from this repository were this package's after all.
 
-It is left failing-open rather than silenced. `goleak.IgnoreTopFunction` on
-`net/http` would make it green and simultaneously blind it to the leak class
-most worth catching in a package that talks to the daemon, which is the same
-trade this question exists to refuse.
+They were two `net/http` `persistConn` `readLoop` and `writeLoop` pairs in IO
+wait. The audit that cleared every `dockerutil.Client()` was correct and beside
+the point: the connection was not idle, so `Client.Close` could not reclaim it,
+because `CloseIdleConnections` only touches connections that are idle.
+
+`ContainerWait` is what left it that way. It returns two channels and a
+goroutine that sends exactly one value, and the result channel is UNBUFFERED;
+the goroutine closes the response body in a defer that runs only after that
+send. Both call sites here also selected on `ctx.Done()`. When a deadline
+landed at the same moment as a result, select chose at random between two ready
+cases, and choosing the deadline parked that goroutine on the send for good:
+body never closed, connection never returned to the pool, `readLoop` and
+`writeLoop` outliving the process. Two abandoned waits, two pairs.
+
+That also explains why it only ever failed in CI. It needs the deadline and the
+container exit to coincide, which needs a loaded machine.
+
+The repair is `dockerutil.AwaitExit`, which receives from both channels and has
+no `ctx.Done()` case at all, so no caller can abandon a wait. Dropping that
+case is safe because the wait request is made with the same context: cancelling
+it fails the request the goroutine is reading, and the goroutine reports that
+on the error channel.
+`TestAwaitExit_ADeadlineEndsTheWaitAndLeavesNothingParked` holds that contract,
+because the risk of removing a `ctx.Done()` case is a hang rather than a leak.
+
+Honest about the strength of this: the parked-goroutine mechanism is proven by
+reading `ContainerWait` and is real, and the abandonment it needs is gone by
+construction rather than made less likely. What is NOT proven is a
+reproduction: the race needs two events inside the same instant and did not
+reproduce on a workstation, so a first attempt at a regression test passed
+against the unfixed code and was rewritten rather than kept. The check is back
+on in CI, which is where the failure lives and where the evidence will come
+from.
 
 ### Q9. A golden image disappears between RefreshGolden and the next Branch
 
@@ -241,6 +263,52 @@ committed image is not immediately inspectable, and `ImageRemove` with
 instrumentation inside `RefreshGolden` and `Branch` rather than more reading:
 log the image id at commit, list it back immediately, and log again at the
 `ImageInspect` that fails.
+
+**Answered, and it was the first candidate on that list.** Another test package
+was destroying this one's goldens.
+
+The evidence was in the failure text and neither earlier pass read it. The
+message names the versions that DO exist, and on 2026-08-29 at 12:37 it named
+exactly one:
+
+    Branch(gv_20260829123613_c2f585fe, env_conformance00001): AF-DB-004:
+    The golden version gv_20260829123613_c2f585fe no longer exists.
+    Available: gv_20260829123601_store-te
+
+`store-te` is not a hash. It is the first eight characters of the literal
+`store-test`, which `internal/env/goldenstore_test.go` passes as its
+`RulesHash`. So at the moment `internal/db/docker` could not find the golden it
+had committed twelve seconds earlier, the only golden on the daemon belonged to
+a different package.
+
+The cause is that package's teardown, which listed every golden on the daemon
+and destroyed all of them:
+
+    goldens, listErr := o.Goldens(c)
+    if listErr == nil {
+        for _, g := range goldens {
+            _ = o.DestroyGolden(c, g.ID)
+        }
+    }
+
+Its comment said "whatever this machine made, it takes away", which is exactly
+what it did, on a machine shared with every other package `go test ./...` runs
+in parallel. The window it hit is the one between a conformance behaviour
+refreshing a golden and branching from it, because `DestroyGolden` refuses a
+version a branch already references. That is also why its own `store-te` golden
+survived its own sweep: a branch was pinning it.
+
+The teardown now removes only the versions that orchestrator created, and
+`TestOrchestratorTeardown_LeavesGoldensItDidNotCreate` asserts both halves: a
+golden it did not create survives, and one it did create does not, so the test
+cannot pass by the teardown quietly removing nothing. Against the old teardown
+that test fails with the first assertion, which is the negative control this
+answer rests on rather than a green run.
+
+Still open underneath it, unchanged: `provider.NewGoldenVersionID` resolves to
+the second, so two refreshes inside one second still depend on their hashes
+differing. And `sweepCandidates` still removes a candidate whose `created`
+label will not parse whatever its age.
 
 ### Q10. Six call sites raise AF-DB-004 without the field its message names
 
