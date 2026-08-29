@@ -132,6 +132,24 @@ a statement that it found none. Adding all five at once and reaching for
 `goleak.IgnoreTopFunction` on whatever turned red would produce a gate that
 reports nothing, which is worse than the gap.
 
+Four are done and clean, in CI as well as locally: `cmd/af-proxy`,
+`conformance`, `internal/load` and `internal/subset`.
+
+`internal/insights` is the open one. It passes on a workstation and fails in
+CI, with two `net/http` `persistConn` `readLoop` and `writeLoop` pairs still in
+IO wait at exit. The stacks carry no frame from this repository; they are idle
+keep-alive connections held by an `http.Transport`. What has been audited and
+is not the cause: every `dockerutil.Client()` in the package and its tests is
+closed, including on the error paths, and the one streaming response it reads,
+`ContainerLogs` in `lastLines`, goes through `dockerutil.Discard`, which drains
+before closing. That leaves either a leak below the audited code or the known
+race where `CloseIdleConnections` returns before those goroutines unwind.
+
+It is left failing-open rather than silenced. `goleak.IgnoreTopFunction` on
+`net/http` would make it green and simultaneously blind it to the leak class
+most worth catching in a package that talks to the daemon, which is the same
+trade this question exists to refuse.
+
 ## Answered
 
 *(none yet)*
