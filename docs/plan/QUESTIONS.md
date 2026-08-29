@@ -242,6 +242,29 @@ instrumentation inside `RefreshGolden` and `Branch` rather than more reading:
 log the image id at commit, list it back immediately, and log again at the
 `ImageInspect` that fails.
 
+### Q10. Six call sites raise AF-DB-004 without the field its message names
+
+`fill` renders a placeholder it has no value for by printing it verbatim, so an
+error raised without every field its template names reaches a reader with
+`{version}` in it.
+
+AF-DB-004's message is "The golden version {version} no longer exists." Six
+sites raise it with an `env` field and no `version`: `internal/env/insights.go`
+twice, and `internal/env/golden.go` four times. Every one of those prints the
+literal `{version}` to somebody whose environment has just failed.
+
+Found while adding the available-versions listing to the same code, which is
+why that listing is wrapped onto the error rather than added as a catalog
+field: adding `{available}` to the template would have given those six a second
+placeholder to leak.
+
+**Proceeding under:** recorded, not fixed. The repair is either passing the
+right field at each site or making `fill` refuse a template it cannot complete,
+and the second is the better one: a placeholder that reaches a user is always a
+bug, so the catalog should not be able to produce one. That is a change to how
+every error in the product renders and wants its own pass rather than being
+tacked onto this one.
+
 ## Answered
 
 *(none yet)*
