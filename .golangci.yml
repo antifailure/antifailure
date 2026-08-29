@@ -42,18 +42,18 @@ linters:
       # error is conventional and correct.
       exclude-functions:
         - (io.Closer).Close
-    misspell:
-      # No locale, deliberately. misspell's locale option is a dialect
-      # converter rather than a spell checker: set it to US and it reports
-      # fifty British spellings, set it to UK and it reports fifty American
-      # ones, and this repository contains both. Neither list is a list of
-      # mistakes, and a rule whose output is entirely correct English is one
-      # people learn to run with their eyes closed.
-      #
-      # Unset, it catches the thing it is actually good at, which is a genuine
-      # typo like recieve or occured. Which dialect the prose should use is a
-      # decision for a person, in one pass, not a gate that argues about it on
-      # every commit.
+    # misspell has no settings block on purpose, and the key is absent rather
+    # than empty because an empty key parses as null and `golangci-lint config
+    # verify` rejects it. `run` does not verify, so the invalid config passed
+    # locally for days and failed the moment CI ran the linter.
+    #
+    # No locale, deliberately. misspell's locale option is a dialect converter
+    # rather than a spell checker: set it to US and it reports fifty British
+    # spellings, set it to UK and it reports fifty American ones, and this
+    # repository contains both. Neither list is a list of mistakes, and a rule
+    # whose output is entirely correct English is one people learn to run with
+    # their eyes closed. Unset, it catches the thing it is good at, which is a
+    # genuine typo like recieve or occured.
 
   exclusions:
     rules:

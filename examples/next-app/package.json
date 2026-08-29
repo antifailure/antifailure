@@ -1,0 +1,22 @@
+{
+  "name": "antifailure-example-next-app",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "15.5.23",
+    "pg": "8.16.3",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.1",
+    "@types/pg": "8.15.5",
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}

@@ -17,9 +17,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 
+	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/golden"
+	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/masking"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/internal/subset"
 	"github.com/antifailure/antifailure/engine/internal/verify"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
@@ -145,6 +149,128 @@ type GoldenResult struct {
 	Report   verify.Report
 	// Attestation is the signed statement, as JSON.
 	Attestation string
+	// Subset is what the subsetter did, when the manifest asked for one. Nil
+	// when it did not, which is how a caller tells "took a slice of nothing"
+	// from "took the whole thing".
+	Subset *subset.Stats
+	// SubsetPlan is the plan that was run, for the explanation.
+	SubsetPlan *subset.Plan
+	// Published names the store the golden was copied to, empty when this
+	// project publishes nowhere.
+	Published string
+	// PublishError is why the copy did not happen, when a store was
+	// configured. It is reported rather than returned: the golden exists and
+	// can be branched here, and failing the whole refresh would throw away the
+	// part that read production.
+	PublishError string
+}
+
+// subsetConfig turns the manifest's subset block into the subsetter's config,
+// and reports whether one was asked for at all.
+func (o *Orchestrator) subsetConfig() (subset.Config, bool) {
+	db := o.opts.Manifest.Database
+	if db == nil || db.Subset == nil || !db.Subset.Enabled {
+		return subset.Config{}, false
+	}
+	cfg := subset.Config{
+		SeedTable: db.Subset.SeedTable,
+		SeedWhere: db.Subset.SeedWhere,
+		MaxRows:   db.Subset.MaxRows,
+	}
+	if db.Subset.FollowDependents != nil {
+		cfg.FollowDependents = *db.Subset.FollowDependents
+	}
+	for _, r := range db.Subset.VirtualRelationships {
+		// The manifest writes a relationship as schema.table.column on each
+		// side, which is the same shape the masking rules use and the only one
+		// the validator accepts. Composite virtual relationships are not
+		// expressible in that form; the schema's own composite keys are read
+		// from the catalog and are unaffected.
+		from, fromCol, okFrom := splitRef(r.From)
+		to, toCol, okTo := splitRef(r.To)
+		if !okFrom || !okTo {
+			continue
+		}
+		cfg.Virtual = append(cfg.Virtual, subset.ForeignKey{
+			Name:        "virtual",
+			From:        from,
+			FromColumns: []string{fromCol},
+			To:          to,
+			ToColumns:   []string{toCol},
+		})
+	}
+	return cfg, true
+}
+
+// splitRef reads schema.table.column, and table.column as public.table.column,
+// which is what somebody writes when every table they have is in public.
+func splitRef(ref string) (table, column string, ok bool) {
+	parts := strings.Split(ref, ".")
+	switch len(parts) {
+	case 3:
+		return parts[0] + "." + parts[1], parts[2], true
+	case 2:
+		return "public." + parts[0], parts[1], true
+	default:
+		return "", "", false
+	}
+}
+
+// loadSubset is what a provider calls instead of copying the whole source.
+//
+// It is a method on the orchestrator rather than a closure built inline
+// because it is the one place the plan and the execution meet, and because a
+// caller reading RefreshGolden should see that the manifest's subset block
+// reaches a provider rather than having to work out whether it does.
+func (o *Orchestrator) loadSubset(
+	ctx context.Context, cfg subset.Config, sourceURL, candidateURL secrets.Value,
+) (*subset.Plan, *subset.Stats, error) {
+	// The structure first, and none of the rows. The rows are what a subset
+	// exists not to copy, so copying them and then narrowing would be doing
+	// the expensive part anyway.
+	o.progress("copying the schema into the candidate")
+	if err := pgcopy.CopySchema(ctx, sourceURL, candidateURL); err != nil {
+		return nil, nil, aferrors.Wrap(err, aferrors.AFDB002, "host", "the source database")
+	}
+
+	src, err := pgx.Connect(ctx, sourceURL.Reveal())
+	if err != nil {
+		return nil, nil, aferrors.Wrap(err, aferrors.AFDB002, "host", "the source database")
+	}
+	cat, err := subset.ReadCatalog(ctx, src)
+	closeErr := src.Close(context.WithoutCancel(ctx))
+	if err != nil {
+		return nil, nil, aferrors.Wrap(err, aferrors.AFDB011, "detail", err.Error())
+	}
+	_ = closeErr
+
+	plan, err := subset.Build(cat, cfg)
+	if err != nil {
+		return nil, nil, aferrors.Coded(aferrors.AFDB011, "detail", err.Error())
+	}
+	for _, w := range plan.Warnings {
+		o.progress("subset: " + w)
+	}
+	if len(plan.Unreachable) > 0 {
+		// Reported, not refused. A table nothing reaches arrives empty, and a
+		// table that arrives empty and should not have is a bug somebody finds
+		// three days later in a test that returns nothing.
+		o.progress(fmt.Sprintf(
+			"subset: nothing connects %d tables to the seed, so they arrive empty: %s",
+			len(plan.Unreachable), strings.Join(plan.Unreachable, ", ")))
+	}
+
+	stats, err := subset.Execute(ctx, subset.Options{
+		SourceURL: sourceURL.Reveal(),
+		TargetURL: candidateURL.Reveal(),
+		Plan:      plan,
+		Progress:  func(line string) { o.progress("subset: " + line) },
+		Now:       o.opts.Clock.Now,
+	})
+	if err != nil {
+		return &plan, stats, aferrors.Coded(aferrors.AFDB011, "detail", err.Error())
+	}
+	return &plan, stats, nil
 }
 
 // RefreshGolden copies, masks, verifies, and publishes a golden.
@@ -154,7 +280,20 @@ func (o *Orchestrator) RefreshGolden(ctx context.Context) (*GoldenResult, error)
 		return nil, err
 	}
 	defer s.close()
+	return o.refreshWithin(ctx, s)
+}
 
+// refreshWithin does the refresh on a session that is already open.
+//
+// Split out because `af up` refreshes a stale golden before branching it, and
+// it is already holding the session. Opening a second would take the same lock
+// and wait on the one this call is holding, which is a deadlock that looks
+// exactly like another process being in the way.
+//
+// That lock is also what makes two refreshes not overlap: a second process
+// that tries while one is running does not start a competing copy of
+// production, it waits or is refused.
+func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenResult, error) {
 	key, err := o.MaskingKey(ctx, s)
 	if err != nil {
 		return nil, err
@@ -166,11 +305,12 @@ func (o *Orchestrator) RefreshGolden(ctx context.Context) (*GoldenResult, error)
 
 	result := &GoldenResult{}
 	started := o.opts.Clock.Now()
+	source := o.sourceURL()
 
 	spec := provider.GoldenSpec{
 		Version:   databaseVersion(o.opts.Manifest),
 		RulesHash: hash,
-		SourceURL: o.sourceURL(),
+		SourceURL: source,
 		Mask: func(ctx context.Context, url secrets.Value) error {
 			rows, tables, maskErr := o.maskDatabase(ctx, url, key, rules, hash)
 			result.Rows, result.Tables = rows, tables
@@ -187,13 +327,173 @@ func (o *Orchestrator) RefreshGolden(ctx context.Context) (*GoldenResult, error)
 		},
 	}
 
+	if cfg, wanted := o.subsetConfig(); wanted {
+		switch {
+		case source.IsZero():
+			// Nothing to take a slice of. Refusing would make `af up` on a
+			// project that has not connected production yet impossible, and
+			// the golden it gets is empty anyway, so the block is reported as
+			// having no effect rather than silently having none.
+			o.progress("the manifest asks for a subset and no source database is configured, " +
+				"so there is nothing to take a slice of; set database.source_url_env")
+		case !s.dbProv.Capabilities().Subsetting:
+			// The manifest asked for something this provider cannot do.
+			// Accepting it and copying everything is exactly the failure this
+			// whole change exists to remove: a key that reads as
+			// configuration and behaves as decoration.
+			return result, aferrors.Coded(aferrors.AFDB011,
+				"detail", fmt.Sprintf(
+					"the provider %q builds a golden by branching the source rather than by "+
+						"filling an empty database, so there is nowhere to load a slice into. "+
+						"Remove database.subset, or use a provider that can: %s",
+					s.dbProv.Name(), "docker"))
+		default:
+			spec.Load = func(ctx context.Context, src, candidate secrets.Value) error {
+				plan, stats, loadErr := o.loadSubset(ctx, cfg, src, candidate)
+				result.SubsetPlan, result.Subset = plan, stats
+				return loadErr
+			}
+		}
+	}
+
+	store, err := o.goldenStore()
+	if err != nil {
+		return result, err
+	}
+
 	gv, err := s.dbProv.RefreshGolden(ctx, spec)
 	result.Version, result.Verified = gv.ID, gv.Verified
 	result.Duration = o.opts.Clock.Since(started)
 	if err != nil {
 		return result, err
 	}
+	if err := o.recordRefresh(ctx, s); err != nil {
+		return result, err
+	}
+	// Published after the version exists locally, never instead of it. A
+	// publish that fails leaves a golden this machine can still branch, and
+	// the failure is reported rather than turned into a failed refresh: the
+	// expensive part, reading production, already succeeded.
+	if store != nil {
+		if pubErr := o.publishGolden(ctx, s, store, gv, result.Attestation); pubErr != nil {
+			result.PublishError = pubErr.Error()
+			o.progress("the golden was made and could not be published: " + pubErr.Error())
+		} else {
+			result.Published = store.Name()
+		}
+	}
+	result.Duration = o.opts.Clock.Since(started)
 	return result, nil
+}
+
+// lastRefreshMeta is when a refresh last finished, so that a schedule can be
+// honoured on a laptop with no daemon to run it: the next command that would
+// use a golden asks whether one was due since then.
+const lastRefreshMeta = "golden.last_refresh"
+
+// recordRefresh notes that a refresh finished.
+func (o *Orchestrator) recordRefresh(ctx context.Context, s *session) error {
+	return s.db.SetMeta(ctx, lastRefreshMeta,
+		o.opts.Clock.Now().UTC().Format(time.RFC3339))
+}
+
+// lastRefresh reads when one last did, and the zero time when none has.
+func (o *Orchestrator) lastRefresh(ctx context.Context, s *session) time.Time {
+	raw, err := s.db.Meta(ctx, lastRefreshMeta)
+	if err != nil || raw == "" {
+		return time.Time{}
+	}
+	when, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return when
+}
+
+// GoldenPolicy is the manifest's lifecycle settings, read once and validated.
+//
+// The manifest validator already refuses a schedule that is not a cron
+// expression and a maximum age that is not a duration, so a failure to parse
+// here would mean the two disagreed. It is still returned rather than ignored,
+// because "the validator would have caught it" is how a second parser drifts
+// from the first.
+type GoldenPolicy struct {
+	Schedule golden.Schedule
+	MaxAge   time.Duration
+	Retain   int
+}
+
+// GoldenPolicy reads the lifecycle settings out of the manifest.
+func (o *Orchestrator) GoldenPolicy() (GoldenPolicy, error) {
+	var p GoldenPolicy
+	db := o.opts.Manifest.Database
+	if db == nil || db.Golden == nil {
+		return p, nil
+	}
+	if db.Golden.Schedule != "" {
+		s, err := golden.ParseSchedule(db.Golden.Schedule)
+		if err != nil {
+			return p, aferrors.Coded(aferrors.AFDB011, "detail", err.Error())
+		}
+		p.Schedule = s
+	}
+	if db.Golden.MaxAge != "" {
+		d, err := manifest.ParseDuration(db.Golden.MaxAge)
+		if err != nil {
+			return p, aferrors.Coded(aferrors.AFDB011, "detail",
+				fmt.Sprintf("the golden's max_age %q is not a duration: %v", db.Golden.MaxAge, err))
+		}
+		p.MaxAge = d
+	}
+	p.Retain = db.Golden.Retain
+	return p, nil
+}
+
+// RefreshDue reports whether the schedule or the maximum age says a refresh
+// should happen before this environment comes up, and why.
+//
+// This is what a cron expression means on a laptop. There is no daemon to fire
+// it, so the next command that would use a golden asks whether one was due
+// since the last refresh, which gives a project the refresh it asked for
+// without a background process nobody started.
+func (o *Orchestrator) RefreshDue(
+	ctx context.Context, s *session, versions []provider.GoldenVersion,
+) (string, error) {
+	policy, err := o.GoldenPolicy()
+	if err != nil {
+		return "", err
+	}
+	if o.sourceURL().IsZero() {
+		// No production to refresh from. The empty golden `af up` makes is not
+		// stale in any meaningful sense, and refreshing it on a timer would be
+		// a message about nothing.
+		return "", nil
+	}
+
+	var known []golden.Version
+	for _, v := range versions {
+		known = append(known, golden.Version{ID: v.ID, CreatedAt: v.CreatedAt, Verified: v.Verified})
+	}
+	newest, haveOne := golden.Newest(known)
+
+	if policy.MaxAge > 0 && haveOne &&
+		golden.Stale(newest.CreatedAt, policy.MaxAge, o.opts.Clock.Now()) {
+		return fmt.Sprintf("the newest golden is %s old and max_age is %s",
+			o.opts.Clock.Now().Sub(newest.CreatedAt).Round(time.Minute), policy.MaxAge), nil
+	}
+	if !policy.Schedule.Zero() {
+		last := o.lastRefresh(ctx, s)
+		if last.IsZero() && haveOne {
+			// A golden exists from before this was recorded. Its creation time
+			// is the honest stand-in, and using the zero time instead would
+			// refresh once, immediately, for every existing project.
+			last = newest.CreatedAt
+		}
+		if policy.Schedule.Due(last, o.opts.Clock.Now()) {
+			return "the schedule " + policy.Schedule.String() + " came due", nil
+		}
+	}
+	return "", nil
 }
 
 // sourceURL is the production database to copy, when one is configured.

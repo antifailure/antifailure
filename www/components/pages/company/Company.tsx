@@ -40,7 +40,7 @@ export function CompanyPage() {
       <PageHero
         eyebrow="Company"
         title="Answer one question better than any individual tool."
-        lead="Is this deployment safe to ship under the conditions that actually matter? Crowdi, sanitization, E2E execution, and preview deploy are components. None of them alone defines the company."
+        lead="Is this deployment safe to ship under the conditions that actually matter? Exploratory users, sanitization, E2E execution, and preview deploy are components. None of them alone defines the company."
       />
       <PageSection>
         <PageHeading

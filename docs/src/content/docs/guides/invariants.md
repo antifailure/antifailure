@@ -5,9 +5,19 @@ sidebar:
   order: 9
 ---
 
-An invariant is a read only query that must return no rows. It runs against the
-branch while the workflows run, so a flow that appears to succeed while
+An invariant is a read only query that must return no rows, asked of the branch
+while the workflows run, so that a flow which appears to succeed while
 corrupting data is caught by the data rather than by the screen.
+
+:::caution[Declared and validated, not yet run]
+This release does not execute invariants. The engine parses them, refuses a
+malformed one, and shows them in `af explain`, and that is where it stops:
+nothing runs the SQL and no report carries a result. The error codes quoted
+below are reserved for when it does, which is why you will not see one today.
+
+Write them anyway if you want them in the manifest, but do not count a green
+run as evidence that they held. Nothing checked.
+:::
 
 ```yaml
 invariants:
@@ -38,9 +48,9 @@ AF-AGT-011 Invariant no-orphan-orders is not read only.
   Next: Use a SELECT; an invariant observes the database and never changes it.
 ```
 
-Enforced rather than trusted. A check that modified the data would change the
-thing the next check is about, and a run whose result depends on check order is
-not a result.
+To be enforced rather than trusted, once they run. A check that modified the
+data would change the thing the next check is about, and a run whose result
+depends on check order is not a result.
 
 ## Timeouts
 
@@ -66,6 +76,7 @@ WHERE s.status = 'active' AND p.id IS NULL
 ```
 
 Write one the first time a bug of that shape reaches production. It is the
-cheapest possible regression test and it runs against every branch afterwards.
+cheapest possible regression test, and the intent is that it runs against every
+branch afterwards.
 
 Related: [agents](/docs/concepts/agents/), [insights](/docs/concepts/insights/).

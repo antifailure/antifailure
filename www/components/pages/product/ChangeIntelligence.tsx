@@ -6,7 +6,6 @@ import {
   PageShell,
   RelatedGrid,
   Split,
-  Stage,
 } from "@/components/pages/kit";
 import {
   CheckRow,
@@ -51,25 +50,21 @@ const FIDELITY_ROWS = [
 
 const FLOW = [
   {
-    n: "01",
     title: "Analyze",
     body: "Code, infrastructure, and migration diff. Risk profile assigned.",
     kind: "analyze" as const,
   },
   {
-    n: "02",
     title: "Create",
     body: "Create Wind Tunnel, or policy triggers it. Isolated twin.",
     kind: "create" as const,
   },
   {
-    n: "03",
     title: "Exercise",
     body: "Baseline and candidate receive equivalent workloads.",
     kind: "exercise" as const,
   },
   {
-    n: "04",
     title: "Decide",
     body: "Report attached. Pass, warning, or block. Then destroy.",
     kind: "decide" as const,
@@ -93,7 +88,7 @@ function FidBar({ fill }: { fill: number }) {
 
 function RiskPlanMock() {
   return (
-    <Panel className="h-full min-h-[400px] ring-0" aria-hidden>
+    <Panel className="h-full min-h-[400px] rounded-[12px] bg-white ring-0" aria-hidden>
       <div className="flex items-start justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -118,16 +113,9 @@ function RiskPlanMock() {
           {DIFF_FILES.map((file) => (
             <li
               key={file.path}
-              className={cn(
-                "flex items-center gap-2 px-1.5 py-1 font-mono text-[11px] tracking-extra-tight",
-                file.hot && "bg-red-600/[0.06]",
-              )}
+              className="flex items-center gap-2 px-1.5 py-1 font-mono text-[11px] tracking-extra-tight"
             >
-              {file.hot ? (
-                <span className="w-px self-stretch bg-red-600/70" aria-hidden />
-              ) : (
-                <span className="w-px self-stretch bg-transparent" aria-hidden />
-              )}
+              <span className="w-px self-stretch bg-transparent" aria-hidden />
               <span className={cn("min-w-0 flex-1 truncate", file.hot ? "text-black" : "text-black/55")}>
                 {file.path}
               </span>
@@ -183,10 +171,9 @@ function RiskPlanMock() {
       <div className="px-4 py-3">
         <MonoLabel className="uppercase">Validation plan</MonoLabel>
         <ul className="mt-2 flex flex-col gap-1">
-          {PLAN.map((step, i) => (
+          {PLAN.map((step) => (
             <li key={step}>
               <CheckRow ok="run" className="text-black/70">
-                <span className="text-black/35">{String(i + 1).padStart(2, "0")}</span>
                 <span>{step}</span>
               </CheckRow>
             </li>
@@ -197,7 +184,7 @@ function RiskPlanMock() {
           {["checkout", "upgrade", "billing worker"].map((w) => (
             <span
               key={w}
-              className="inline-flex items-center px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight text-black/60 ring-1 ring-black/10"
+              className="inline-flex items-center border border-black/[0.08] px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight text-black/60"
             >
               {w}
             </span>
@@ -210,7 +197,7 @@ function RiskPlanMock() {
 
 function ScopePanel() {
   return (
-    <Panel className="rounded-[12px]">
+    <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between px-5 py-3">
         <MonoLabel className="uppercase">Test what this change needs</MonoLabel>
         <StatusPill tone="WARN">HIGH</StatusPill>
@@ -330,7 +317,7 @@ function MiniDecide() {
 
 function FlowMini({ kind }: { kind: (typeof FLOW)[number]["kind"] }) {
   return (
-    <div className="mt-5 min-h-[88px] bg-white/70 p-3 ring-1 ring-black/10">
+    <div className="mt-5 min-h-[88px] border border-black/[0.08] bg-white p-3">
       {kind === "analyze" ? <MiniAnalyze /> : null}
       {kind === "create" ? <MiniCreate /> : null}
       {kind === "exercise" ? <MiniExercise /> : null}
@@ -341,24 +328,11 @@ function FlowMini({ kind }: { kind: (typeof FLOW)[number]["kind"] }) {
 
 function FlowRail() {
   return (
-    <ol className="relative mt-16 grid grid-cols-4 gap-8 max-xl:grid-cols-2 max-md:mt-10 max-md:grid-cols-1">
-      {FLOW.map((step, i) => (
-        <li key={step.title} className="relative min-w-0">
-          {i < FLOW.length - 1 ? (
-            <span
-              className="pointer-events-none absolute top-[18px] left-9 right-[-2rem] h-px bg-black/30 max-xl:hidden"
-              aria-hidden
-            />
-          ) : null}
-          <div
-            className={cn(
-              "relative z-10 flex size-9 items-center justify-center font-mono text-[11px] tracking-extra-tight ring-1",
-              i === 0 ? "bg-black text-white ring-black" : "bg-[#E4F1EB] text-black/55 ring-black/20",
-            )}
-          >
-            {step.n}
-          </div>
-          <h3 className="mt-5 text-[18px] tracking-extra-tight text-black">{step.title}</h3>
+    <ol className="relative mt-16 grid grid-cols-4 gap-x-16 gap-y-10 max-xl:grid-cols-2 max-md:mt-10 max-md:grid-cols-1">
+      {FLOW.map((step) => (
+        <li key={step.title} className="min-w-0">
+          <div className="mb-4 size-2 rounded-full bg-black" />
+          <h3 className="text-[18px] tracking-extra-tight text-black">{step.title}</h3>
           <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">{step.body}</p>
           <FlowMini kind={step.kind} />
         </li>
@@ -374,11 +348,7 @@ export function ChangeIntelligencePage() {
         eyebrow="Change Intelligence"
         title="Test what matters for this change."
         lead="Analyze the pull request for affected services, migrations, infrastructure, APIs, events, and critical workflows. Recommend twin fidelity and a validation plan."
-        visual={
-          <Stage>
-            <RiskPlanMock />
-          </Stage>
-        }
+        visual={<RiskPlanMock />}
       />
       <PageSection>
         <Split visual={<ScopePanel />}>

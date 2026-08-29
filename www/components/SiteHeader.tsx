@@ -15,7 +15,7 @@ const productItems: MenuItem[] = [
   { title: "Isolated Twin", sub: "Temporary copy of the application stack", href: "/#twins" },
   { title: "Safe State", sub: "Sanitized production-shaped Postgres", href: "/#cards" },
   { title: "Side-Effect Firewall", sub: "Simulators instead of real-world side effects", href: "/#firewall" },
-  { title: "Workload Studio", sub: "Observed, deterministic, and Crowdi traffic", href: "/#cards" },
+  { title: "Workload Studio", sub: "Observed, deterministic, and exploratory traffic", href: "/#cards" },
   { title: "Migration Safety", sub: "Locks, plans, rollback feasibility", href: "/#migration" },
   { title: "Safety Report", sub: "Pass, warning, or block on the PR", href: "/#dashboard" },
 ];

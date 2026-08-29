@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/engine/internal/env"
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
@@ -109,4 +110,57 @@ func TestAddSink_IgnoresNil(t *testing.T) {
 	_, err := o.Up(context.Background())
 	require.Error(t, err)
 	require.NotEmpty(t, sink.Events(), "the real sink should still be attached")
+}
+
+// The runtime's progress lines are the only thing said during the readiness
+// wait, which is the longest part of a run, and in dashboard mode the terminal
+// reporter is silenced. They have to reach the stream or the display goes
+// quiet for minutes at the point somebody is watching it hardest.
+//
+// The name a line carries is checked against the services that exist, because
+// "error: something" is not a service called error.
+func TestRuntimeProgressLinesCarryTheServiceTheyName(t *testing.T) {
+	names := map[string]bool{"web": true, "worker": true}
+
+	cases := []struct {
+		line string
+		want string
+	}{
+		{"web: running migrations", "web"},
+		{"worker: ready (invoked on a schedule)", "worker"},
+		{"error: something went wrong", ""},
+		{"no colon here", ""},
+		{"database: branched", ""},
+	}
+	for _, c := range cases {
+		fields := env.ServiceFieldForTest(c.line, names)
+		if c.want == "" {
+			require.Empty(t, fields, "%q should not name a service", c.line)
+			continue
+		}
+		require.Len(t, fields, 1, "%q should name one service", c.line)
+		require.Equal(t, "service", fields[0].Key)
+		require.Equal(t, c.want, fields[0].Value)
+	}
+}
+
+// A service that started cleanly has no detail to give, and a real run put
+// "service.ready web is running detail= " on the screen because the field was
+// attached whatever its value. A key with nothing after it is noise in the one
+// place a reader is scanning.
+func TestEmptyFieldsAreLeftOffRatherThanSentEmpty(t *testing.T) {
+	got := env.NonEmptyForTest("service", "web", "kind", "web", "url", "", "detail", "")
+
+	require.Len(t, got, 2, "an empty value should not become a field")
+	require.Equal(t, "service", got[0].Key)
+	require.Equal(t, "web", got[0].Value)
+	require.Equal(t, "kind", got[1].Key)
+
+	require.Empty(t, env.NonEmptyForTest("url", "", "detail", ""))
+	require.Empty(t, env.NonEmptyForTest())
+
+	// An odd number of arguments is a caller's mistake, and dropping the last
+	// one is better than a field with no value or a panic in the middle of a
+	// run.
+	require.Len(t, env.NonEmptyForTest("service", "web", "kind"), 1)
 }

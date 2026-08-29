@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json",
+  "version": "0.2",
+  "language": "en-GB,en-US",
+  "dictionaries": [
+    "softwareTerms",
+    "typescript",
+    "go",
+    "node",
+    "npm",
+    "bash",
+    "docker",
+    "html",
+    "css",
+    "companies",
+    "filetypes",
+    "fullstack",
+    "antifailure"
+  ],
+  "dictionaryDefinitions": [
+    {
+      "name": "antifailure",
+      "path": "./tools/docs/dictionary.txt",
+      "addWords": true,
+      "description": "Words this project uses that no general dictionary has: its own vocabulary, the names of the tools it drives, and the identifiers that appear in prose."
+    }
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.astro/**",
+    "docs/plan/**",
+    "THIRD_PARTY_NOTICES.md",
+    "CODE_OF_CONDUCT.md"
+  ],
+  "ignoreRegExpList": [
+    "/`[^`]*`/",
+    "/```[\\s\\S]*?```/",
+    "/https?:\\/\\/[^\\s)]+/",
+    "/AF-[A-Z]+-[0-9]+/"
+  ],
+  "words": []
+}
