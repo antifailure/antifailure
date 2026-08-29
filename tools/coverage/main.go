@@ -57,6 +57,7 @@ func main() {
 	profile := flag.String("profile", "coverage.out", "coverage profile to read")
 	rules := flag.String("thresholds", "", "thresholds file (default beside this tool)")
 	module := flag.String("module", "github.com/antifailure/antifailure/engine", "module path to strip")
+	all := flag.Bool("all", false, "list every package, not only the ones below their threshold")
 	flag.Parse()
 
 	if *rules == "" {
@@ -76,7 +77,7 @@ func main() {
 			"Produce it with `just coverage-profile` rather than by hand.", *profile)
 	}
 
-	report(cfg, byPkg)
+	report(cfg, byPkg, *all)
 }
 
 func fail(format string, args ...any) {
@@ -210,7 +211,7 @@ func thresholdFor(cfg config, pkg string) (float64, string) {
 	return best, name
 }
 
-func report(cfg config, byPkg map[string]counts) {
+func report(cfg config, byPkg map[string]counts, all bool) {
 	pkgs := make([]string, 0, len(byPkg))
 	for p := range byPkg {
 		pkgs = append(pkgs, p)
@@ -242,6 +243,23 @@ func report(cfg config, byPkg map[string]counts) {
 		if round1(got) < want {
 			below = append(below, shortfall{p, got, want, tier, c.total - c.covered})
 		}
+	}
+
+	if all {
+		fmt.Printf("  %-42s %8s %8s  %s\n", "package", "have", "want", "tier")
+		for _, p := range pkgs {
+			c := byPkg[p]
+			if c.total == 0 {
+				continue
+			}
+			want, tier := thresholdFor(cfg, p)
+			mark := " "
+			if round1(c.percent()) < want {
+				mark = "!"
+			}
+			fmt.Printf("%s %-42s %7.1f%% %7.0f%%  %s\n", mark, p, c.percent(), want, tier)
+		}
+		fmt.Println()
 	}
 
 	fmt.Printf("coverage: %d packages measured against C.5\n", checked)
