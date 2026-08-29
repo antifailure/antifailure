@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/antifailure/antifailure/engine/internal/insights"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -102,6 +103,17 @@ func TestMain(m *testing.M) {
 		}
 		return m.Run()
 	}()
+	// G3, after the teardown above rather than instead of it. goleak.
+	// VerifyTestMain cannot be used here because this package already owns
+	// TestMain, and the check has to run once the deferred provider teardown
+	// has closed its containers and connections, or every run would report the
+	// suite's own fixtures as leaks.
+	if code == 0 {
+		if err := goleak.Find(); err != nil {
+			fmt.Fprintf(os.Stderr, "goroutines outlived the suite: %v\n", err)
+			code = 1
+		}
+	}
 	os.Exit(code)
 }
 

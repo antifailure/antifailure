@@ -1,0 +1,62 @@
+# Coverage thresholds, transcribed from the build plan's C.5.
+#
+# G4 is one of the twelve mandatory gates and it was the only one with nothing
+# behind it. docs/plan/STATUS.md carried a coverage column and quoted a number
+# per package, but no command computed those numbers and no gate compared them
+# to anything, so they were a claim that could only ever drift. Several of them
+# were already below the floor the plan sets.
+#
+# ON "BRANCH" COVERAGE
+#
+# C.5 asks for "100 percent branch coverage" on the strictest packages. Go does
+# not measure branch coverage. `go test -cover` instruments statements, so a
+# statement containing `a && b` counts once however many ways it can be reached,
+# and `if err != nil { return err }` counts as covered when the error path never
+# ran, as long as the line above it did.
+#
+# This file therefore records STATEMENT coverage, which is what Go can actually
+# tell us, and says so rather than labelling it branch coverage and being wrong.
+# The strict packages are held at 100 percent statements, which is a real and
+# demanding bar and is not the same bar. Closing the gap needs a branch-coverage
+# tool, and that is written down in docs/plan/QUESTIONS.md rather than papered
+# over here.
+#
+# `mode` is only a label for the report. `min` is what is enforced.
+
+# 100 percent in the plan. The packages where a missed line is a masking,
+# isolation, or redaction failure.
+strict:
+  mode: statement, standing in for the plan's branch requirement
+  min: 100
+  packages:
+    - internal/masking
+    - internal/subset
+    - internal/verify
+    - internal/policy
+    - internal/journal
+    - internal/redact
+    - internal/secrets
+    - internal/webhook
+
+# 90 percent line coverage in the plan.
+high:
+  mode: statement
+  min: 90
+  packages:
+    - internal/proxy
+    - internal/manifest
+    - internal/detect
+    - internal/events
+    - internal/lifecycle
+    - internal/state
+    - internal/capture
+    - internal/mock
+    - internal/sandbox
+    - internal/insights
+    - internal/load
+    - internal/apm
+
+# "All other engine packages at 85 percent."
+default:
+  mode: statement
+  min: 85

@@ -88,6 +88,50 @@ against, it can be made to fail on purpose, and it does not depend on an
 upstream project's release schedule. The real applications are added on top,
 not instead.
 
+### Q7. Go cannot measure the branch coverage C.5 asks for
+
+C.5 sets "100 percent branch coverage" on `masking`, `subset`, `verify`,
+`policy`, `journal`, `redact`, `secrets` and `webhook`, and G4 makes it a gate.
+Go does not measure branch coverage. `go test -cover` instruments statements,
+so `if err != nil { return err }` counts as covered when the error path never
+ran, and `a && b` counts once however many ways it was reached. The number the
+Go toolchain can produce is not the number the plan names.
+
+The options are a third party branch-coverage tool, which for Go means
+rewriting the instrumentation and none of the candidates are widely used, or
+holding those packages at 100 percent STATEMENT coverage and being explicit
+that it is a weaker bar, or dropping the requirement.
+
+**Proceeding under:** 100 percent statement coverage for those packages, with
+`tools/coverage/thresholds.yaml` saying in as many words that it is standing in
+for the branch requirement rather than satisfying it. A gate that measures
+something real and says what it measures is worth more than one that claims a
+number nothing computes, which is the state this replaced.
+
+### Q8. G3 asks for goleak in every package that starts goroutines, and five do not have it
+
+G3 reads "`goleak` verifies no goroutine leaks in every package that starts
+goroutines". Nine packages contain a real `go` statement outside their tests,
+and five of them call `goleak` nowhere: `cmd/af-proxy`, `conformance`,
+`internal/insights`, `internal/load` and `internal/subset`. The other four,
+`internal/cli`, `internal/controlplane`, `internal/events` and `internal/hud`,
+already verify.
+
+Counted with a parser rather than a grep. The obvious `grep -l 'go '` says
+nineteen packages, because it matches prose: "spans go anywhere" and "events
+that go to the control plane" are comments, not goroutines. The wrong number
+was written here first and is recorded because the correction is the useful
+part.
+
+This is not a formality. `goleak` in `internal/hud` found a goroutine leaked
+per dashboard, from a cancellation watcher receiving on a nil `Done` channel,
+which is exactly the shape that costs a long running `af up` its memory.
+
+**Proceeding under:** added package by package, each with the leak it found or
+a statement that it found none. Adding all five at once and reaching for
+`goleak.IgnoreTopFunction` on whatever turned red would produce a gate that
+reports nothing, which is worse than the gap.
+
 ## Answered
 
 *(none yet)*

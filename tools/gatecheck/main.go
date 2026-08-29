@@ -290,6 +290,12 @@ func uncalledByGate(just string) []string {
 		"default": true, "setup": true, "db": true, "db-down": true, "deps": true,
 		"build": true, "build-release": true, "test": true, "test-short": true,
 		"fmt": true, "generate": true, "clean": true, "gate": true, "leaks": true,
+		// Produces the coverage profile that `coverage` then checks, which
+		// makes it the same kind of thing as `generate`: it writes an artifact
+		// rather than deciding anything. It is out of `gate` because it runs
+		// the whole engine suite with -coverpkg and takes the better part of an
+		// hour. `coverage`, which is the gate, IS in `gate`.
+		"coverage-profile": true,
 	}
 
 	recipeRe := regexp.MustCompile(`^([a-z][\w-]*)(?: [\w"=]+)*:`)
