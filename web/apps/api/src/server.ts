@@ -248,10 +248,24 @@ export function createServer(options: ServerOptions) {
     await next()
     c.header('x-content-type-options', 'nosniff')
     c.header('referrer-policy', 'strict-origin-when-cross-origin')
-    // The API returns JSON and never renders anything, so the strictest
-    // possible policy is also the correct one.
-    c.header('content-security-policy', "default-src 'none'; frame-ancestors 'none'")
     c.header('x-frame-options', 'DENY')
+
+    // The API's own policy, applied only where a route has not set its own.
+    //
+    // This used to be unconditional, with a comment explaining that the API
+    // returns JSON and never renders anything. That stopped being true the day
+    // the console was added, and because this middleware runs AFTER the route,
+    // it overwrote the console's policy with one that has no style-src. The
+    // effect on a real browser: `default-src 'none'` blocked the stylesheet,
+    // and every console page rendered as unstyled text. It answered 200 with
+    // the right HTML and the right headers by its own account, which is why
+    // nothing caught it.
+    //
+    // Set rather than replaced, so a route that has thought about its own
+    // policy keeps it, and one that has not still gets the strict default.
+    if (!c.res.headers.get('content-security-policy')) {
+      c.header('content-security-policy', "default-src 'none'; frame-ancestors 'none'")
+    }
   })
 
   // Liveness. Deliberately a static literal that touches nothing: it answers
