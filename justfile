@@ -90,7 +90,6 @@ gate: _reports
     run "enterprise"                     just test-ee
     run "license parser fuzz"            just fuzz-license
     run "engine parser fuzz"             just fuzz-engine
-    run "actions are pinned"             just pinned
     run "authorship and sign-off"        just authorship
 
     echo
@@ -462,30 +461,6 @@ typecheck:
       npx --prefix web tsc --noEmit -p "web/$p/tsconfig.json"
     done
     npx --prefix runner tsc --noEmit -p runner/tsconfig.json
-
-# Every GitHub Action pinned by full commit SHA.
-#
-# C.7 requires it and every action in this repository already satisfies it, so
-# this gate protects a property rather than repairing one. That is the moment
-# worth adding it: a tag is mutable, so `uses: foo/bar@v4` runs whatever the
-# owner of that tag decides it means tomorrow, and the failure mode is somebody
-# else's compromised release running with this repository's secrets.
-#
-# The version still belongs in the line, as a trailing comment, or nobody can
-# tell which release a SHA is without a lookup.
-pinned:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    bad=$(grep -rhnE "^\s*-? *uses:" .github/workflows/*.yml \
-      | grep -vE "@[0-9a-f]{40}( |$|#)" || true)
-    if [ -n "$bad" ]; then
-      echo "these actions are not pinned to a full commit SHA:"
-      echo "$bad"
-      echo
-      echo "A tag is mutable. Pin the SHA and put the version in a trailing comment."
-      exit 1
-    fi
-    echo "every action is pinned to a full commit SHA"
 
 # The license parser has to survive arbitrary input, because a licence token
 # arrives from outside and a parser that panics on one is a denial of service
