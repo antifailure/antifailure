@@ -97,7 +97,16 @@ describe('every endpoint the server serves is in the catalog', { skip: hasDataba
       .filter((r) => r.method !== 'ALL' && !r.path.endsWith('/*'))
       .map((r) => `${r.method} ${r.path}`)
 
-    const undeclared = [...new Set(routes)].filter((r) => !(r in ENDPOINT_LIMITS))
+    // Through limitFor rather than against ENDPOINT_LIMITS directly, because
+    // the catalog is no longer the only place a limit can be declared: a route
+    // another edition registers carries its own. The property is unchanged and
+    // the coverage is wider, which is the point: an extension route mounted
+    // without a limit would be served 500 forever, and this is where that
+    // shows up.
+    const undeclared = [...new Set(routes)].filter((r) => {
+      const space = r.indexOf(' ')
+      return !limitFor(r.slice(0, space), r.slice(space + 1))
+    })
     assert.deepEqual(
       undeclared,
       [],

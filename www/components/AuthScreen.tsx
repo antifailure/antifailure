@@ -6,6 +6,23 @@ import { LogoMark } from "./icons";
 import { joinWaitlist, rememberedEmail } from "@/lib/waitlist";
 
 /**
+ * Where the hosted control plane is.
+ *
+ * A constant rather than a build-time variable, because this is a static export
+ * and an unset NEXT_PUBLIC_ variable would silently produce a link to
+ * "undefined/auth/github" in the published site.
+ */
+const CONTROL_PLANE = "https://app.dev.antifailure.dev";
+
+function GitHubMark({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
+}
+
+/**
  * There is no account system yet, so this screen does not pretend there is one.
  *
  * It previously rendered an email field, a password field with a show/hide
@@ -17,8 +34,13 @@ import { joinWaitlist, rememberedEmail } from "@/lib/waitlist";
  * account to attach it to, and people reuse passwords.
  *
  * What is real is the waitlist, and it is now actually a waitlist: the address
- * goes to the server and is stored. That is the whole product surface, so that
- * is the whole screen.
+ * goes to the server and is stored.
+ *
+ * There is now also a hosted control plane, invitation only, so the screen
+ * offers both: sign in with GitHub if you have been invited, join the waitlist
+ * if you have not. The page said "there is no hosted control plane to sign in
+ * to yet" for as long as there was one, which reads to an invited person as
+ * being turned away.
  */
 function AuthCover() {
   return (
@@ -123,14 +145,31 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
             ) : (
               <form onSubmit={submit} noValidate>
                 <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black max-sm:text-[28px]">
-                  Join the waitlist
+                  Sign in
                 </h1>
                 <p className="mt-4 text-[14px] leading-6 text-black/55">
-                  There is no hosted control plane to sign in to yet, so there is
-                  nothing here to create an account for. Leave an address and we
-                  will tell you when there is.
+                  The hosted control plane is invitation only while it is in
+                  development. If your account has been invited, sign in with
+                  GitHub. If it has not, leave an address below and we will tell
+                  you when it opens.
                 </p>
-                <p className="mt-3 text-[14px] leading-6 text-black/55">
+
+                <a
+                  href={CONTROL_PLANE + "/auth/github"}
+                  className="mt-6 flex h-12 w-full items-center justify-center gap-2.5 rounded-full bg-black text-[15px] font-medium text-white hover:bg-[#292929]"
+                >
+                  <GitHubMark className="h-[18px] w-[18px]" />
+                  Continue with GitHub
+                </a>
+
+                <div className="mt-7 flex items-center gap-4" aria-hidden>
+                  <span className="h-px flex-1 bg-black/10" />
+                  <span className="text-[12px] text-black/40">
+                    not invited yet
+                  </span>
+                  <span className="h-px flex-1 bg-black/10" />
+                </div>
+                <p className="mt-6 text-[14px] leading-6 text-black/55">
                   The engine itself needs none of this. It is open source, it
                   runs locally, and the{" "}
                   <a
@@ -142,7 +181,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
                   works today.
                 </p>
 
-                <label className="mt-8 block text-[13px] text-black/55" htmlFor="email">
+                <label className="mt-7 block text-[13px] text-black/55" htmlFor="email">
                   Email
                 </label>
                 <input

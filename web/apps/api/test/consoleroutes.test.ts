@@ -355,7 +355,20 @@ describe('every console page answers with a page', {
       // to another out of a shared cache.
       assert.match(res.headers.get('cache-control') ?? '', /no-store/, where)
       assert.equal(res.headers.get('x-frame-options'), 'DENY', where)
-      assert.match(res.headers.get('content-security-policy') ?? '', /default-src 'none'/, where)
+      // The WHOLE policy, not a fragment of it.
+      //
+      // This asserted only `default-src 'none'` once, which the API's own
+      // policy also satisfies. So when a middleware overwrote the console's
+      // policy with the API's, this test kept passing and every page in a real
+      // browser rendered as unstyled text: `default-src 'none'` with no
+      // style-src blocks the stylesheet.
+      //
+      // A page that cannot load its own stylesheet is the failure, so the
+      // assertion is that style-src is there.
+      const csp = res.headers.get('content-security-policy') ?? ''
+      assert.match(csp, /default-src 'none'/, where)
+      assert.match(csp, /style-src 'self'/, `${where}: no style-src, so the stylesheet is blocked`)
+      assert.match(csp, /frame-ancestors 'none'/, where)
     }
   })
 })

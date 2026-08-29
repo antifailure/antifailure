@@ -30,8 +30,8 @@ export function signInPage(reason?: string): Html {
               Continue with GitHub
             </a>
             <p class="hint" style="margin-top:16px">
-              Sign-ups are closed while this is in development. If your account is not on
-              the allowlist you will be turned away, and nothing about you is recorded.
+              This instance is invitation only while it is in development. If your
+              account has not been invited, nothing about you is recorded.
             </p>
           </div>
         </div>

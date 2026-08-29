@@ -224,6 +224,13 @@ const (
 	// Service {service} depends on {missing}, which the manifest does not
 	// declare.
 	AFRUN042 Code = "AF-RUN-042"
+	// This cluster is not containing the environment: {detail}
+	AFRUN043 Code = "AF-RUN-043"
+	// This runtime cannot do that: {detail}
+	AFRUN044 Code = "AF-RUN-044"
+	// {kind} {name} was not created by this runtime, so it was not
+	// removed.
+	AFRUN045 Code = "AF-RUN-045"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -515,7 +522,7 @@ var catalog = map[Code]Entry{
 		Code:      AFDB030,
 		Area:      "DB",
 		Message:   "Migrations failed on the branch: {detail}",
-		NextStep:  "Read the migration log at {location}, fix the migration, and push again.",
+		NextStep:  "The rehearsal names the statement that failed and times the ones before it. Fix the migration and push again: a migration that fails on a branch with production's shape is one that would have failed in production.",
 		Docs:      "concepts/insights",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -994,6 +1001,33 @@ var catalog = map[Code]Entry{
 		Message:   "Service {service} depends on {missing}, which the manifest does not declare.",
 		NextStep:  "Add a service called {missing}, or correct the depends_on entry.",
 		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN043: {
+		Code:      AFRUN043,
+		Area:      "RUN",
+		Message:   "This cluster is not containing the environment: {detail}",
+		NextStep:  "Use a cluster whose CNI enforces NetworkPolicy rather than only accepting it, then run 'af up' again.",
+		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN044: {
+		Code:      AFRUN044,
+		Area:      "RUN",
+		Message:   "This runtime cannot do that: {detail}",
+		NextStep:  "Use the runtime that supports it, or run the command against an environment placed by one that does.",
+		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN045: {
+		Code:      AFRUN045,
+		Area:      "RUN",
+		Message:   "{kind} {name} was not created by this runtime, so it was not removed.",
+		NextStep:  "Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns.",
+		Docs:      "guides/kubernetes-runtime",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},

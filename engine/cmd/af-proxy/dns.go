@@ -302,6 +302,14 @@ func refused(query []byte) []byte {
 }
 
 // dockerResolver is where Docker's embedded DNS listens inside a container.
+//
+// It is the default rather than the only answer. The sidecar forwards internal
+// names to whatever already resolves them, and that is Docker's embedded
+// resolver on a container runtime and the cluster's own resolver on
+// Kubernetes, where 127.0.0.11 is nothing at all. Hardcoding it here made
+// every service name in a cluster fail to resolve, which reads as an
+// environment whose services cannot find each other rather than as a DNS
+// setting.
 const dockerResolver = "127.0.0.11:53"
 
 func describeDNS(self net.IP, internal []string) string {

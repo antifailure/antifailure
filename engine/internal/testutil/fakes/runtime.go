@@ -116,6 +116,18 @@ func NewRuntime() *Runtime {
 
 func (r *Runtime) Name() string { return "fake" }
 
+// Capabilities declares what this fake supports.
+//
+// Added when provider.Runtime gained the method, so that a behaviour a runtime
+// cannot support is skipped by name rather than passing silently. The fake
+// claims ingress because it reports a URL, and does not claim log reading or a
+// local database attachment, because it implements neither. Claiming either
+// would be the exact fault this package exists to inject, in the package
+// itself.
+func (r *Runtime) Capabilities() provider.RuntimeCaps {
+	return provider.RuntimeCaps{Ingress: true}
+}
+
 // Journaled returns the resources the runtime reported, in order.
 func (r *Runtime) Journaled() []string {
 	r.mu.Lock()

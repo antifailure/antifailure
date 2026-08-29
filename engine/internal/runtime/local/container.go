@@ -58,7 +58,7 @@ func (r *Runtime) startService(
 	}
 
 	name := containerName(spec.EnvID, s.Name)
-	if err := journal("container", name); err != nil {
+	if err := journal(kindContainer, name); err != nil {
 		return running, err
 	}
 	// A container left by an interrupted run holds the name. Reusing a running
@@ -143,6 +143,7 @@ func (r *Runtime) create(
 ) (string, error) {
 	labels := dockerutil.Managed(dockerutil.KindService, spec.EnvID, r.clock.Now())
 	labels[dockerutil.LabelService] = s.Name
+	labels[dockerutil.LabelServiceKind] = s.Kind
 
 	cfg := &container.Config{
 		Image:  s.Image,
@@ -216,7 +217,7 @@ func (r *Runtime) startIngress(
 	journal func(string, string) error,
 ) (int, error) {
 	name := ingressName(spec.EnvID, s.Name)
-	if err := journal("container", name); err != nil {
+	if err := journal(kindContainer, name); err != nil {
 		return 0, err
 	}
 	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
@@ -322,9 +323,23 @@ func (r *Runtime) envList(spec provider.EnvSpec, s provider.ServiceSpec) []strin
 	// Traffic inside the environment must not be sent to the proxy: a service
 	// calling another service, or the database, is not egress, and routing it
 	// through the sidecar would make every internal call a policy decision.
-	noProxy := strings.Join([]string{
-		"localhost", "127.0.0.1", "::1", DatabaseAlias, ProxyAlias,
-	}, ",")
+	//
+	// That is what this list is for, and for a long time it did not contain
+	// the services. It named localhost, the database and the sidecar, so a
+	// manifest that said http://api:3000 from one service to another had that
+	// request sent to the proxy and decided against the egress policy, which
+	// on any environment with the usual default refused it. The decision log
+	// then showed a blocked request to a host called "api", which reads as
+	// the environment being broken rather than as a variable being short.
+	// Nothing caught it because nothing had two services talking to each
+	// other until the runtime conformance suite did.
+	internal := []string{"localhost", "127.0.0.1", "::1", DatabaseAlias, ProxyAlias}
+	for _, other := range spec.Services {
+		if other.Name != "" {
+			internal = append(internal, other.Name)
+		}
+	}
+	noProxy := strings.Join(internal, ",")
 	vars["NO_PROXY"] = noProxy
 	vars["no_proxy"] = noProxy
 
@@ -400,7 +415,7 @@ func (r *Runtime) runOnce(
 	journal func(string, string) error,
 ) error {
 	name := containerName(spec.EnvID, s.Name+"-migrate")
-	if err := journal("container", name); err != nil {
+	if err := journal(kindContainer, name); err != nil {
 		return err
 	}
 	id, err := r.create(ctx, spec, s, nets, proxyIP, name, command)

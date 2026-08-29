@@ -97,7 +97,7 @@ func (r *Runtime) ensureOneNetwork(
 		}
 		return existing.ID, nil
 	}
-	if err := journal("network", name); err != nil {
+	if err := journal(kindNetwork, name); err != nil {
 		return "", err
 	}
 	res, err := r.cli.NetworkCreate(ctx, name, network.CreateOptions{
@@ -107,9 +107,17 @@ func (r *Runtime) ensureOneNetwork(
 	})
 	if err != nil {
 		// Two Up calls racing produce this, and the loser should use the
-		// network the winner made rather than fail.
+		// network the winner made rather than fail. The winner still has to
+		// be us: the inspect above checked that, and a network created in the
+		// window between it and this create has not been checked by anything.
+		// One branch of a function testing an invariant and the other not is
+		// how the invariant stops being one.
 		if strings.Contains(err.Error(), "already exists") {
 			if existing, insErr := r.cli.NetworkInspect(ctx, name, network.InspectOptions{}); insErr == nil {
+				if !dockerutil.IsOurs(existing.Labels) {
+					return "", aferrors.Coded(aferrors.AFRUN040,
+						"detail", fmt.Sprintf("a network called %s exists and is not managed by Antifailure", name))
+				}
 				return existing.ID, nil
 			}
 		}

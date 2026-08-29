@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-35 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+34 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -289,6 +289,18 @@ Personas cannot be provisioned because {provider} creates users only through its
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/personas](/docs/guides/personas/) |
+
+### AF-DB-030
+
+Migrations failed on the branch: {detail}
+
+**What to do.** The rehearsal names the statement that failed and times the ones before it. Fix the migration and push again: a migration that fails on a branch with production's shape is one that would have failed in production.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/insights](/docs/concepts/insights/) |
 
 ## Detection
 
@@ -651,6 +663,42 @@ Service {service} depends on {missing}, which the manifest does not declare.
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/manifest](/docs/reference/manifest/) |
+
+### AF-RUN-043
+
+This cluster is not containing the environment: {detail}
+
+**What to do.** Use a cluster whose CNI enforces NetworkPolicy rather than only accepting it, then run 'af up' again.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
+### AF-RUN-044
+
+This runtime cannot do that: {detail}
+
+**What to do.** Use the runtime that supports it, or run the command against an environment placed by one that does.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
+### AF-RUN-045
+
+{kind} {name} was not created by this runtime, so it was not removed.
+
+**What to do.** Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
 
 ## Secrets
 

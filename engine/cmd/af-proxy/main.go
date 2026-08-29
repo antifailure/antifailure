@@ -58,6 +58,14 @@ type Config struct {
 	// Credentials maps a rule's credential name to the sandbox value the
 	// sidecar substitutes. Values never appear in a log line.
 	Credentials map[string]string `json:"credentials,omitempty"`
+	// Resolver is where internal names are forwarded, as host:port.
+	//
+	// Empty means Docker's embedded resolver, which is correct for the local
+	// runtime and meaningless anywhere else. It is a name to forward to and
+	// never a route out: an external name is still answered by this sidecar
+	// whatever this is set to, so pointing it somewhere unexpected cannot
+	// turn into a way around the policy.
+	Resolver string `json:"resolver,omitempty"`
 	// CACert and CAKey are the environment's certificate authority, in PEM.
 	//
 	// Present only when something in the policy needs to read inside TLS. An
@@ -126,7 +134,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("af-proxy: %v", err)
 	}
-	dns := newDNSServer(self, cfg.Internal, dockerResolver, p.emit)
+	resolver := cfg.Resolver
+	if resolver == "" {
+		resolver = dockerResolver
+	}
+	dns := newDNSServer(self, cfg.Internal, resolver, p.emit)
 
 	// Every listener is started before anything is announced as ready, so a
 	// service that begins its first outbound call the instant it starts finds

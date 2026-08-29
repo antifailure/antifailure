@@ -40,6 +40,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/redact"
+	"github.com/antifailure/antifailure/engine/internal/runtime/k8s"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/state"
@@ -235,7 +236,7 @@ type session struct {
 	tel     *telemetry.Telemetry
 	journal *journal.Journal
 	dbProv  provider.Database
-	runtime *local.Runtime
+	runtime provider.Runtime
 	builder *build.DockerBuilder
 }
 
@@ -633,23 +634,97 @@ func needsInspection(e *schema.Egress) bool {
 // difference nobody would notice until they went looking for their environment
 // in a cluster.
 //
-// Only the local runtime ships today, so this returns a concrete type rather
-// than an interface. An interface with one implementation is scaffolding that
-// has to be maintained before anything needs it; the day a second runtime
-// exists is the day to introduce one, and this function is where it goes.
-func (o *Orchestrator) newRuntime() (*local.Runtime, error) {
+// Every path that needs a runtime comes through here, and that is load
+// bearing rather than tidy. For a long time this was the only runtime aware
+// constructor in the engine and eight other places built the local one
+// directly, so the day a second runtime existed, af up would have placed an
+// environment in a cluster while af status, af logs, af net log, af inbox and
+// af webhook trigger all asked this machine's Docker daemon about it and
+// found nothing. They agreed only because this function refused everything
+// except local.
+func (o *Orchestrator) newRuntime() (provider.Runtime, error) {
 	kind := schema.RuntimeLocal
-	if m := o.opts.Manifest; m != nil && m.Runtime != nil && m.Runtime.Provider != "" {
-		kind = m.Runtime.Provider
+	var cfg *schema.Runtime
+	if m := o.opts.Manifest; m != nil && m.Runtime != nil {
+		cfg = m.Runtime
+		if cfg.Provider != "" {
+			kind = cfg.Provider
+		}
 	}
-	if kind != schema.RuntimeLocal {
+	switch kind {
+	case schema.RuntimeLocal:
+		return local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	case schema.RuntimeKubernetes:
+		return o.newKubernetesRuntime(cfg)
+	default:
 		return nil, aferrors.Coded(aferrors.AFMAN002,
 			"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
 			"detail", fmt.Sprintf(
-				"runtime.provider is %q, and this build has only the local runtime. "+
-					"Remove the field or set it to local", kind))
+				"runtime.provider is %q, and this build has the local and kubernetes "+
+					"runtimes. Remove the field or set it to one of those", kind))
 	}
-	return local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+}
+
+// Runtime builds the runtime this manifest asks for.
+//
+// Exported for the commands that inventory a machine rather than act on one
+// environment, which need the same selection and are not part of a lifecycle.
+func (o *Orchestrator) Runtime() (provider.Runtime, error) { return o.newRuntime() }
+
+// newKubernetesRuntime builds the cluster runtime, including finding it a
+// sidecar image.
+//
+// The sidecar is compiled from source carried in this binary, so something has
+// to build it, and the only thing that can is a container daemon on this
+// machine. A cluster cannot see that daemon, so the image is built here and
+// either copied into a development cluster or, for a real one, named by
+// AF_PROXY_IMAGE and pulled from wherever it was published. Those are the only
+// two honest answers, and an environment with no sidecar is not a third: it
+// would have no egress policy at all.
+func (o *Orchestrator) newKubernetesRuntime(cfg *schema.Runtime) (provider.Runtime, error) {
+	opts := k8s.Options{
+		Clock:    o.opts.Clock,
+		Redactor: o.opts.Redactor,
+		// Resolved when something needs it, which is only ever bringing an
+		// environment up. Building it here instead made af status, af logs
+		// and af down each compile the sidecar before answering, which on a
+		// cold cache is a quarter of an hour to be told what is running.
+		ResolveProxyImage: o.resolveProxyImage,
+	}
+	if cfg != nil {
+		opts.Context = cfg.KubeconfigContext
+		opts.NamespacePrefix = cfg.NamespacePrefix
+		opts.Domain = cfg.Domain
+	}
+	return k8s.New(opts)
+}
+
+// resolveProxyImage produces the sidecar image the cluster needs.
+//
+// The sidecar is compiled from source carried in this binary, so something has
+// to build it, and the only thing that can is a container daemon on this
+// machine. A cluster cannot see that daemon, so the image is built here and
+// either copied into a development cluster or, for a real one, named by
+// AF_PROXY_IMAGE and pulled from wherever it was published. Those are the only
+// two honest answers, and an environment with no sidecar is not a third: it
+// would have no egress policy at all.
+func (o *Orchestrator) resolveProxyImage(ctx context.Context) (string, error) {
+	getenv := o.opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if image := getenv("AF_PROXY_IMAGE"); image != "" {
+		return image, nil
+	}
+	builder, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	if err != nil {
+		return "", aferrors.Coded(aferrors.AFRUN044, "detail",
+			"the egress sidecar image is built on a local container daemon and none "+
+				"is reachable. Either start one, or publish the sidecar image and "+
+				"name it in AF_PROXY_IMAGE")
+	}
+	defer func() { _ = builder.Close() }()
+	return builder.EnsureProxyImage(ctx, o.progress)
 }
 
 // newDatabaseProvider builds the provider the manifest asked for.
@@ -929,6 +1004,15 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	}
 	result.Built, result.Cached = built, cached
 
+	// The runtime names itself rather than being named "local" here.
+	//
+	// The journal's provider field is not a label: Replay looks a deleter up
+	// by it, so a record filed under the wrong runtime is a resource the
+	// compensation path either hands to something that cannot delete it or
+	// skips entirely. It was a true constant for as long as there was one
+	// runtime, and it became a stored lie the moment there were two.
+	runtimeName := s.runtime.Name()
+
 	// The runtime records every resource here before it creates it.
 	//
 	// There is deliberately no matching commit, because the contract has no
@@ -944,7 +1028,7 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// addressable. That is a change to provider.EnvSpec and belongs with
 	// whoever owns the runtime contract rather than here.
 	recordIntent := func(kind, id string) error {
-		_, jerr := s.journal.Intent(ctx, o.envID, "local", journal.Kind(kind), id, nil)
+		_, jerr := s.journal.Intent(ctx, o.envID, runtimeName, journal.Kind(kind), id, nil)
 		return jerr
 	}
 
@@ -954,18 +1038,50 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// database by its alias on this network. Attaching after the services
 	// started would hand every one of them an address that did not resolve
 	// when it read it, which is what the first run of this actually did.
-	networkID, err := s.runtime.EnsureNetworks(ctx, o.envID, recordIntent)
-	if err != nil {
-		return result, err
-	}
 	// Only a provider whose branches are local containers has anything to
 	// attach. A cloud provider's connection string already works from inside a
 	// container, so the URL handed to the services is the one it gave us. The
 	// interface says as much; this is where that becomes true rather than a
 	// comment.
 	insideURL, insideMigrateURL := dbURL, migrateURL
-	if attachable, ok := s.dbProv.(local.Attachable); ok {
-		insideURL, err = s.runtime.AttachDatabase(ctx, attachable, branch.ProviderRef, networkID, dbURL)
+	attachable, isLocalBranch := s.dbProv.(local.Attachable)
+	switch {
+	case !isLocalBranch:
+		// Nothing to do. The provider handed over an address that already
+		// works from wherever the services are going to run.
+	case !s.runtime.Capabilities().AttachesLocalDatabase:
+		// A database that is a container on this machine and a runtime that
+		// is not on this machine. Every service would come up holding a
+		// connection string pointing at an address inside a daemon its
+		// cluster cannot route to, and the failure would arrive later as an
+		// application that cannot reach its database, which sends people
+		// looking at their own code.
+		return result, aferrors.Coded(aferrors.AFRUN044, "detail", fmt.Sprintf(
+			"the database provider makes branches as containers on this machine and the "+
+				"%s runtime cannot reach them. Use a database provider the environment "+
+				"can already reach", s.runtime.Name()))
+	default:
+		networked, ok := s.runtime.(interface {
+			EnsureNetworks(context.Context, string, func(string, string) error) (string, error)
+			AttachDatabase(context.Context, local.Attachable, string, string, secrets.Value) (secrets.Value, error)
+		})
+		if !ok {
+			return result, aferrors.Coded(aferrors.AFRUN044, "detail", fmt.Sprintf(
+				"the %s runtime declares that it attaches a local database and does not "+
+					"implement it", s.runtime.Name()))
+		}
+		// The network comes before the database, and the database before the
+		// services, and the order is not arbitrary. A service reads
+		// DATABASE_URL out of its environment at creation time, and that
+		// string names the database by its alias on this network. Attaching
+		// after the services started would hand every one of them an address
+		// that did not resolve when it read it, which is what the first run of
+		// this actually did.
+		networkID, err := networked.EnsureNetworks(ctx, o.envID, recordIntent)
+		if err != nil {
+			return result, err
+		}
+		insideURL, err = networked.AttachDatabase(ctx, attachable, branch.ProviderRef, networkID, dbURL)
 		if err != nil {
 			return result, err
 		}
@@ -1616,7 +1732,7 @@ func (o *Orchestrator) observe(ctx context.Context, event extension.LifecycleEve
 
 // Status reports what is currently running.
 func (o *Orchestrator) Status(ctx context.Context) (*Result, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	rt, err := o.newRuntime()
 	if err != nil {
 		return nil, err
 	}
@@ -1637,11 +1753,11 @@ func (o *Orchestrator) Status(ctx context.Context) (*Result, error) {
 
 // Decisions returns what the environment's egress proxy has decided.
 func (o *Orchestrator) Decisions(ctx context.Context, limit int) ([]local.Decision, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	rt, err := o.sidecarRuntime()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rt.Close() }()
+	defer rt.close()
 	// No lock, for the same reason Status takes none: the moment somebody most
 	// wants to know what the environment reached is while it is doing it.
 	return rt.Decisions(ctx, o.envID, limit)
@@ -1649,11 +1765,11 @@ func (o *Orchestrator) Decisions(ctx context.Context, limit int) ([]local.Decisi
 
 // Messages returns what the environment captured instead of sending.
 func (o *Orchestrator) Messages(ctx context.Context, limit int) ([]local.Message, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	rt, err := o.sidecarRuntime()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rt.Close() }()
+	defer rt.close()
 	return rt.Messages(ctx, o.envID, limit)
 }
 
@@ -1661,11 +1777,11 @@ func (o *Orchestrator) Messages(ctx context.Context, limit int) ([]local.Message
 func (o *Orchestrator) WaitForMessage(
 	ctx context.Context, to, subject string, timeout time.Duration,
 ) (local.Message, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	rt, err := o.sidecarRuntime()
 	if err != nil {
 		return local.Message{}, err
 	}
-	defer func() { _ = rt.Close() }()
+	defer rt.close()
 
 	return rt.WaitForMessage(ctx, o.envID, func(m local.Message) bool {
 		if to != "" {
@@ -1691,20 +1807,70 @@ func (o *Orchestrator) WaitForMessage(
 func (o *Orchestrator) DeliverWebhook(
 	ctx context.Context, service, path string, body []byte, headers map[string]string,
 ) (local.Delivery, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	rt, err := o.sidecarRuntime()
 	if err != nil {
 		return local.Delivery{}, err
 	}
-	defer func() { _ = rt.Close() }()
+	defer rt.close()
 	return rt.Deliver(ctx, o.envID, service, path, body, headers)
 }
 
 // Logs returns recent output from the environment's services.
-func (o *Orchestrator) Logs(ctx context.Context, service string, tail int) ([]local.LogLine, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+func (o *Orchestrator) Logs(ctx context.Context, service string, tail int) ([]provider.LogLine, error) {
+	rt, err := o.newRuntime()
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rt.Close() }()
-	return rt.Logs(ctx, o.envID, service, tail)
+
+	reader, ok := rt.(provider.LogReader)
+	if !ok {
+		return nil, aferrors.Coded(aferrors.AFRUN044, "detail", fmt.Sprintf(
+			"the %s runtime cannot read logs", rt.Name()))
+	}
+	return reader.Logs(ctx, o.envID, service, tail)
+}
+
+// sidecarObserver is a runtime whose egress sidecar can be questioned.
+//
+// Optional rather than part of provider.Runtime, because these four are the
+// engine asking the sidecar what it saw and what it captured, and how you
+// reach a sidecar is the thing that differs most between a container on this
+// machine and a pod in a cluster. A runtime that cannot answer says so by not
+// implementing it, and the command that wanted an answer names the runtime
+// that could not give one. That is the whole point of the interface: the
+// alternative, which is what this code did before, was to build a local
+// runtime regardless and quietly report on the wrong machine's containers.
+type sidecarObserver interface {
+	Decisions(ctx context.Context, envID string, limit int) ([]local.Decision, error)
+	Messages(ctx context.Context, envID string, limit int) ([]local.Message, error)
+	WaitForMessage(ctx context.Context, envID string, match func(local.Message) bool,
+		timeout time.Duration) (local.Message, error)
+	Deliver(ctx context.Context, envID, service, path string, body []byte,
+		headers map[string]string) (local.Delivery, error)
+}
+
+// observingRuntime is a sidecarObserver with the runtime it came from, so the
+// caller can close it.
+type observingRuntime struct {
+	sidecarObserver
+	close func()
+}
+
+// sidecarRuntime builds the selected runtime and requires that it can answer
+// questions about its sidecar.
+func (o *Orchestrator) sidecarRuntime() (observingRuntime, error) {
+	rt, err := o.newRuntime()
+	if err != nil {
+		return observingRuntime{}, err
+	}
+	observer, ok := rt.(sidecarObserver)
+	if !ok {
+		_ = rt.Close()
+		return observingRuntime{}, aferrors.Coded(aferrors.AFRUN044, "detail", fmt.Sprintf(
+			"the %s runtime cannot report what its egress sidecar decided or captured, "+
+				"so af net log, af inbox and af webhook trigger have nothing to read",
+			rt.Name()))
+	}
+	return observingRuntime{sidecarObserver: observer, close: func() { _ = rt.Close() }}, nil
 }

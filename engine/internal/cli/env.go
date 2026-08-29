@@ -13,6 +13,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/controlplane"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
 // af env answers the question somebody asks a week later: what is still
@@ -166,7 +167,7 @@ type environment struct {
 }
 
 func listEnvironments(cmd *cobra.Command, e *Env) ([]environment, error) {
-	rt, err := local.New(local.Options{Clock: e.Clock})
+	rt, err := inventoryRuntime(e)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +289,7 @@ at it is the kind of help nobody wants.`),
 				return nil
 			}
 
-			rt, err := local.New(local.Options{Clock: e.Clock})
+			rt, err := inventoryRuntime(e)
 			if err != nil {
 				return err
 			}
@@ -355,4 +356,21 @@ func contains(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// inventoryRuntime builds the runtime that would be holding this machine's
+// environments.
+//
+// af env list and af env prune are the two commands that are about a machine
+// rather than about one environment, and they still have to ask the right
+// runtime: with runtime.provider set to kubernetes, the environments are
+// namespaces on a cluster and there is nothing on the local daemon to find. A
+// manifest is what says which, so it is read when there is one.
+func inventoryRuntime(e *Env) (provider.Runtime, error) {
+	if o, _, err := orchestratorWithManifest(e, ""); err == nil {
+		return o.Runtime()
+	}
+	// Outside a repository there is no manifest to ask, and the only runtime
+	// that could be holding anything on this machine is the local one.
+	return local.New(local.Options{Clock: e.Clock})
 }
