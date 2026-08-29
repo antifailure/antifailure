@@ -1,3 +1,5 @@
+import { POSTS_BY_DATE } from "./blog";
+
 /**
  * Every page this site publishes, declared once.
  *
@@ -14,7 +16,7 @@
  * llms.txt, so it says what the page answers rather than selling it.
  */
 
-export type RouteSection = "root" | "product" | "solutions" | "company" | "legal" | "utility";
+export type RouteSection = "root" | "product" | "solutions" | "company" | "writing" | "legal" | "utility";
 
 export type Route = {
   /** Site-relative path, no trailing slash. "/" for the home page. */
@@ -340,6 +342,19 @@ export const ROUTES: readonly Route[] = [
     parent: "/",
   },
 
+  // Writing
+  {
+    path: "/blog",
+    title: "Writing — Antifailure",
+    description:
+      "Notes on shipping schema changes without taking production down: what staging cannot measure, and what a test environment should do with an outbound call.",
+    summary: "Index of the writing.",
+    section: "writing",
+    indexable: true,
+    priority: 0.7,
+    parent: "/",
+  },
+
   // Legal
   {
     path: "/privacy",
@@ -387,10 +402,31 @@ export const ROUTES: readonly Route[] = [
   },
 ];
 
-/** Routes that belong in the sitemap and may be indexed. */
-export const INDEXABLE_ROUTES = ROUTES.filter((r) => r.indexable);
+/**
+ * Blog posts, derived from the post registry rather than typed out again.
+ *
+ * Appending them here is what makes the sitemap, llms.txt, llms-full.txt, the
+ * breadcrumb trail and the SEO check all cover the blog without any of them
+ * being taught what a blog is. A post added to lib/blog.ts appears in every
+ * one of those on the next build.
+ */
+const POST_ROUTES: Route[] = POSTS_BY_DATE.map((post) => ({
+  path: `/blog/${post.slug}`,
+  title: `${post.title} — Antifailure`,
+  description: post.dek,
+  summary: post.summary,
+  section: "writing" as const,
+  indexable: true,
+  priority: 0.6,
+  parent: "/blog",
+}));
 
-const BY_PATH = new Map(ROUTES.map((r) => [r.path, r]));
+const ALL_ROUTES: readonly Route[] = [...ROUTES, ...POST_ROUTES];
+
+/** Routes that belong in the sitemap and may be indexed. */
+export const INDEXABLE_ROUTES = ALL_ROUTES.filter((r) => r.indexable);
+
+const BY_PATH = new Map(ALL_ROUTES.map((r) => [r.path, r]));
 
 export function getRoute(path: string): Route | undefined {
   return BY_PATH.get(path);

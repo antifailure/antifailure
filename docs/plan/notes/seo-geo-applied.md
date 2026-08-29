@@ -93,6 +93,45 @@ of which restate claims this repository already makes elsewhere.
 and a TechArticle node tied to the same Organization `@id` as the marketing
 site.
 
+## The blog, and blog.antifailure.dev
+
+The writing lives at `antifailure.dev/blog`. `blog.antifailure.dev` resolves and
+sends one 301 there.
+
+That split is deliberate. A subdomain is commonly treated as a separate site,
+so a blog on one starts from nothing and earns authority that never reaches the
+product pages. A subfolder shares the domain outright, which for a domain
+registered this year is most of the available upside. Keeping the subdomain
+working costs nothing and means a link somebody has already shared does not
+break.
+
+What was built:
+
+- `/blog` and `/blog/<slug>`, static, with three posts whose every factual
+  claim about the product restates something this repository already says.
+- Posts are registered in `lib/blog.ts` and appended to the route registry, so
+  the sitemap, `llms.txt`, `llms-full.txt`, the breadcrumb trail, the markdown
+  twins and `check:seo` all cover them without any of those being taught what
+  a blog is. Adding a post to one file reaches all of them.
+- `BlogPosting` JSON-LD per post, linked to the same Organization and WebSite
+  `@id` as the rest of the site, with `datePublished` and `dateModified`.
+- `og:type: article` with `publishedTime`, which is what puts a date into a
+  link preview.
+- An RSS feed at `/blog/rss.xml`. Unfashionable and cheap, and the things that
+  still read one, aggregators and crawlers learning a site has published, are
+  worth reaching.
+
+Infrastructure, in Azure rather than GoDaddy: the `antifailure.dev` zone is
+Azure DNS in the `af-web` resource group, and GoDaddy is at most the registrar.
+
+- `af-blog`, a second Free Static Web App, serving only a 301. `af-site` is on
+  the Free tier, which allows two custom domains, and the apex and `www` use
+  both.
+- A `blog` CNAME to that app, and `blog.antifailure.dev` bound to it with a
+  managed certificate.
+- `deploy/blog-redirect/` holds the two files that app serves, so the redirect
+  is version controlled rather than living only in a portal.
+
 ## Needs an account. Cannot be done from here.
 
 These are the items in the catalog that require logging in as somebody. Each

@@ -180,6 +180,11 @@ export const HEADER_MENUS: HeaderMenu[] = [
             href: "/product/exploratory-users",
             description: "Exploratory users inside Workload Studio",
           },
+          {
+            title: "Writing",
+            href: "/blog",
+            description: "Notes on migrations, masking, and containment",
+          },
         ],
       },
       {
@@ -237,6 +242,7 @@ export const FOOTER_MENUS = [
     items: [
       { text: "Docs", href: "/docs" },
       { text: "Quickstart", href: "/docs/getting-started/quickstart" },
+      { text: "Writing", href: "/blog" },
       { text: "Architecture", href: "/product/architecture" },
       { text: "Solutions", href: "/solutions" },
       { text: "Privacy Notice", href: "/privacy" },

@@ -36,11 +36,12 @@ const SECTION_TITLES: Record<RouteSection, string> = {
   product: "Product",
   solutions: "Solutions",
   company: "Company",
+  writing: "Writing",
   legal: "Legal",
   utility: "Utility",
 };
 
-const ORDER: RouteSection[] = ["root", "product", "solutions", "company", "legal"];
+const ORDER: RouteSection[] = ["root", "product", "solutions", "writing", "company", "legal"];
 
 export function GET() {
   const lines: string[] = [];
