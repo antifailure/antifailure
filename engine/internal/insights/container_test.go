@@ -175,15 +175,11 @@ func runOnNetwork(
 	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
 		return -1, err.Error()
 	}
-	statusCh, errCh := cli.ContainerWait(ctx, created.ID, container.WaitConditionNotRunning)
-	select {
-	case err := <-errCh:
+	code, err := dockerutil.AwaitExit(ctx, cli, created.ID)
+	if err != nil {
 		return -1, fmt.Sprint(err)
-	case status := <-statusCh:
-		return status.StatusCode, ""
-	case <-ctx.Done():
-		return -1, "timed out"
 	}
+	return code, ""
 }
 
 func TestContainerApplier_RunsTheProjectsOwnMigrateCommandInItsImage(t *testing.T) {

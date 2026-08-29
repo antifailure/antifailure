@@ -156,6 +156,40 @@ func Discard(r io.ReadCloser) {
 	_ = r.Close()
 }
 
+// AwaitExit blocks until a container exits and returns its exit code.
+//
+// It exists so that no caller has to know the sharp edge in ContainerWait, and
+// so that none of them can abandon a wait.
+//
+// ContainerWait hands back two channels and a goroutine that sends exactly one
+// value on one of them. The result channel is UNBUFFERED, and the goroutine
+// closes the response body in a defer that runs only after that send. A caller
+// that also selects on ctx.Done() can therefore walk away at the moment the
+// result is being handed over -- select picks at random between two ready
+// cases -- and park the goroutine on the send for good. The body is never
+// closed, so the connection never goes back into the transport's idle pool,
+// and Client.Close cannot reclaim it, because CloseIdleConnections only
+// touches connections that are idle. readLoop and writeLoop then outlive the
+// process, which is what a leak detector reports, in a stack with no frame
+// from this repository.
+//
+// Both call sites in this repository were written that way. The fix is not to
+// drain the abandoned channels afterwards but to never abandon them: the wait
+// request is made with this same context, so cancelling it fails the request
+// the goroutine is reading, and the goroutine reports that on the error
+// channel. Receiving from both channels and nothing else therefore returns
+// promptly when the deadline passes AND leaves nothing parked, which is why
+// there is no ctx.Done() case here and must not be one.
+func AwaitExit(ctx context.Context, cli *client.Client, id string) (int64, error) {
+	statusCh, errCh := cli.ContainerWait(ctx, id, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		return 0, err
+	case status := <-statusCh:
+		return status.StatusCode, nil
+	}
+}
+
 // PortAllocator hands out free localhost ports.
 //
 // Probing for a free port and then binding it is a race with everything else

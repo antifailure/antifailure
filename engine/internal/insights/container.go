@@ -174,23 +174,17 @@ func (a *ContainerApplier) Apply(
 		return nil, fmt.Errorf("insights: start the rehearsal container: %w", err)
 	}
 
-	statusCh, errCh := cli.ContainerWait(ctx, created.ID, container.WaitConditionNotRunning)
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return nil, fmt.Errorf("insights: waiting for the migration: %w", err)
-		}
-	case status := <-statusCh:
-		if status.StatusCode != 0 {
-			// The tool's own output is the finding. A migration tool explains
-			// its failure far better than an exit code does, and discarding
-			// that in favour of "exit 1" would make the report useless in
-			// exactly the case it exists for.
-			return nil, fmt.Errorf("the migration command exited %d: %s",
-				status.StatusCode, lastLines(ctx, cli, created.ID))
-		}
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	code, err := dockerutil.AwaitExit(ctx, cli, created.ID)
+	if err != nil {
+		return nil, fmt.Errorf("insights: waiting for the migration: %w", err)
+	}
+	if code != 0 {
+		// The tool's own output is the finding. A migration tool explains
+		// its failure far better than an exit code does, and discarding
+		// that in favour of "exit 1" would make the report useless in
+		// exactly the case it exists for.
+		return nil, fmt.Errorf("the migration command exited %d: %s",
+			code, lastLines(ctx, cli, created.ID))
 	}
 	// The applier does not know what it ran; the server does.
 	return nil, nil
