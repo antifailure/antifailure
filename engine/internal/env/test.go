@@ -45,7 +45,37 @@ type TestReport struct {
 	Flaky      int              `json:"flaky"`
 	Blocked    int              `json:"blocked"`
 	Unverified int              `json:"unverified"`
-	Duration   time.Duration    `json:"-"`
+	// Invariants is what the data said after the workflows ran. Filled by the
+	// engine rather than by the runner, which never sees the database.
+	Invariants []InvariantResult `json:"invariants,omitempty"`
+	Duration   time.Duration     `json:"-"`
+}
+
+// InvariantsViolated counts the invariants shown to be broken.
+func (r TestReport) InvariantsViolated() int {
+	n := 0
+	for _, inv := range r.Invariants {
+		if inv.Violated() {
+			n++
+		}
+	}
+	return n
+}
+
+// InvariantsBlocked counts the invariants that produced no verdict.
+//
+// Named blocked rather than failed for the same reason a workflow is: the
+// check not happening is a fact about us, and counting it against the
+// application would make an incomplete environment indistinguishable from
+// broken data.
+func (r TestReport) InvariantsBlocked() int {
+	n := 0
+	for _, inv := range r.Invariants {
+		if inv.Error != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // WorkflowResult is one workflow's outcome.
@@ -73,7 +103,14 @@ type WorkflowResult struct {
 // Blocked does not, and that is deliberate: an incomplete environment must not
 // be indistinguishable from a broken application, or people stop reading
 // either.
-func (r TestReport) AnyFailed() bool { return r.Failed > 0 }
+//
+// A violated invariant does count, and it is the reason invariants exist. A
+// workflow that signed in, placed an order and saw a success page has passed
+// on the screen; if that order now has no user, the run is a failure and the
+// screen was never going to say so.
+func (r TestReport) AnyFailed() bool {
+	return r.Failed > 0 || r.InvariantsViolated() > 0
+}
 
 // jobDocument is what the runner reads.
 type jobDocument struct {
@@ -190,6 +227,28 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 			"detail", "the runner's output could not be read: "+err.Error())
 	}
 	report.Duration = o.opts.Clock.Since(started)
+
+	// Asked after the workflows, of the rows they left behind. This is the
+	// only part of a run that looks at the data rather than at the screen, and
+	// until it was here the manifest's invariants were parsed, validated,
+	// shown in `af explain` and never executed, so a green run said nothing
+	// whatsoever about whether they held.
+	//
+	// A failure to run them does not fail the run. The workflows have already
+	// produced a real result and discarding it because a follow up check could
+	// not be made would throw away the more expensive answer of the two; the
+	// invariants that could not be asked are reported as blocked instead.
+	invs, invErr := o.RunInvariants(ctx)
+	if invErr != nil {
+		for _, inv := range o.opts.Manifest.Invariants {
+			invs = append(invs, InvariantResult{
+				Name:        inv.Name,
+				Description: inv.Description,
+				Error:       o.opts.Redactor.String(invErr.Error()),
+			})
+		}
+	}
+	report.Invariants = invs
 
 	// A non zero exit with a readable report is a test failure, which the
 	// caller decides about. Only an unreadable one is an error here.

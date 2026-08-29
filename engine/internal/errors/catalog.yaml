@@ -556,7 +556,6 @@ errors:
     retryable: true
     exit_code: 1
   - code: AF-AGT-010
-    planned: true
     area: AGT
     message: "Invariant {invariant} did not finish within {timeout}."
     next_step: "Make the invariant cheaper; it runs after every workflow and must be a quick read."
@@ -564,13 +563,19 @@ errors:
     retryable: false
     exit_code: 8
   - code: AF-AGT-011
-    planned: true
     area: AGT
     message: "Invariant {invariant} is not read only."
     next_step: "Rewrite it as a single SELECT; invariants run inside a read only transaction."
     docs: guides/invariants
     retryable: false
     exit_code: 3
+  - code: AF-AGT-012
+    area: AGT
+    message: "Invariant {invariant} does not hold: {detail}"
+    next_step: "The rows the statement returned are the violation. Run it against the branch to see them all."
+    docs: guides/invariants
+    retryable: false
+    exit_code: 8
 
   # Load
   - code: AF-LOD-010

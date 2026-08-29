@@ -660,6 +660,11 @@ func (v *validator) invariants(m *schema.Manifest) {
 				fmt.Sprintf("The invariant %q is not read only: %s", inv.Name, err),
 				"Write it as a single SELECT that returns the violating rows. It runs inside a read only transaction, so a write would be refused at run time as well.")
 		}
+		if alwaysReturnsARow(inv.SQL) {
+			v.add(base+".sql",
+				fmt.Sprintf("The invariant %q counts the violations instead of returning them, so it can never hold.", inv.Name),
+				"An invariant holds when its statement returns no rows, and a bare count returns one row saying zero. Select the offending rows themselves: SELECT id FROM ... WHERE ... rather than SELECT count(*) FROM ... WHERE ....")
+		}
 	}
 }
 
@@ -858,6 +863,43 @@ func validateReadOnlySQL(sql string) error {
 		}
 	}
 	return nil
+}
+
+// alwaysReturnsARow reports whether the statement is a bare aggregate, which
+// returns exactly one row whatever the data says and so describes an invariant
+// that can never hold.
+//
+// This is the mistake everybody makes first, including this repository's own
+// example, which said `SELECT count(*) AS violations FROM orders o LEFT JOIN
+// ...` and would have been red on every run from the day invariants started
+// running. Counting the violations feels like the natural way to ask, and the
+// contract is that the rows ARE the answer.
+//
+// Deliberately narrow. It fires only when the select list opens with an
+// aggregate call and the statement has no GROUP BY or HAVING to make the row
+// count depend on the data. That leaves `SELECT id FROM t WHERE x > (SELECT
+// avg(y) FROM t)` alone, which mentions an aggregate and is a perfectly good
+// invariant, because refusing a correct manifest is worse than missing a
+// wrong one.
+func alwaysReturnsARow(sql string) bool {
+	lower := strings.ToLower(strings.TrimSpace(stripSQLComments(sql)))
+	if !strings.HasPrefix(lower, "select") {
+		return false
+	}
+	// A grouped or filtered aggregate returns a row per group, and no groups
+	// when nothing matches, which is exactly the shape that works.
+	if containsKeyword(lower, "group by") || containsKeyword(lower, "having ") {
+		return false
+	}
+	list := strings.TrimSpace(strings.TrimPrefix(lower, "select"))
+	list = strings.TrimPrefix(list, "distinct ")
+	for _, fn := range []string{"count(", "sum(", "avg(", "min(", "max(",
+		"bool_and(", "bool_or(", "every("} {
+		if strings.HasPrefix(strings.TrimSpace(list), fn) {
+			return true
+		}
+	}
+	return false
 }
 
 // containsKeyword looks for a keyword at a word boundary, so that a column

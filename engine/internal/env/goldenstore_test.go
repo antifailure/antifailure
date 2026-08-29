@@ -241,7 +241,16 @@ func sourceInItsOwnContainer(t *testing.T, ctx context.Context) (string, func())
 	require.NoError(t, err, "Docker is here, so a source that will not start is a failure "+
 		"rather than a reason to skip")
 
-	branch, err := p.Branch(ctx, gv.ID, "storesource")
+	// Unique per run, for the same reason the standing server path names its
+	// database af_store_source_<nanos>. A fixed name is reused rather than
+	// created when a container of that name is still there, and the schema is
+	// then applied to a branch that already has it: "relation regions already
+	// exists", on every subsequent run, until somebody notices a stray
+	// container. That is not hypothetical. This test takes minutes, so a run
+	// killed by a test timeout or a control C skips its cleanup and leaves
+	// af-db-storesource behind, and the next run of the suite fails for a
+	// reason that has nothing to do with the change being tested.
+	branch, err := p.Branch(ctx, gv.ID, fmt.Sprintf("storesource%d", time.Now().UnixNano()%1e9))
 	require.NoError(t, err)
 	url, err := p.ConnString(ctx, branch, provider.ConnDirect)
 	require.NoError(t, err)

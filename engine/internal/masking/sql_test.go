@@ -131,7 +131,20 @@ func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 		_ = p.Close()
 		t.Skipf("skipped: no golden could be made: %v", err)
 	}
-	branch, err := p.Branch(ctx, gv.ID, "maskingtest")
+	// Unique per call, for the same reason the rules hash above is.
+	//
+	// That comment fixed half of this. The golden id is unique now, and the
+	// BRANCH name was still the constant "maskingtest", which the Docker
+	// provider turns into a container named af-db-maskingtest. A container of
+	// that name still running is reused rather than created, so the schema
+	// below is applied to a branch that already has it and every test in this
+	// file fails with "relation customers already exists".
+	//
+	// It gets left behind whenever a run does not reach its cleanup, which for
+	// a suite that takes ten minutes means any control C and any test timeout.
+	// One interrupted run then breaks every later run until somebody finds the
+	// stray container, and the error names a table rather than the cause.
+	branch, err := p.Branch(ctx, gv.ID, fmt.Sprintf("maskingtest%d", time.Now().UnixNano()%1e9))
 	require.NoError(t, err)
 
 	url, err := p.ConnString(ctx, branch, provider.ConnDirect)
