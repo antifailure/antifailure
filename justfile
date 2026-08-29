@@ -88,6 +88,7 @@ gate: _reports
     run "runner"                         just test-runner
     run "edition boundary"               just edition
     run "enterprise"                     just test-ee
+    run "builds are reproducible"        just reproducible
     run "license parser fuzz"            just fuzz-license
     run "engine parser fuzz"             just fuzz-engine
     run "authorship and sign-off"        just authorship
@@ -238,7 +239,7 @@ build-release version="dev":
     cd engine && go build -trimpath -ldflags "-s -w \
       -X github.com/antifailure/antifailure/engine/internal/cli.Version={{version}} \
       -X github.com/antifailure/antifailure/engine/internal/cli.Commit=$(git rev-parse HEAD) \
-      -X github.com/antifailure/antifailure/engine/internal/cli.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      -X github.com/antifailure/antifailure/engine/internal/cli.BuildDate=$(git show -s --format=%cI HEAD)" \
       -o ../bin/af ./cmd/af
     @./bin/af version
 
@@ -461,6 +462,34 @@ typecheck:
       npx --prefix web tsc --noEmit -p "web/$p/tsconfig.json"
     done
     npx --prefix runner tsc --noEmit -p runner/tsconfig.json
+
+# G11. Two builds of one commit produce the same binary.
+#
+# It did not. The release recipe stamped BuildDate with $(date -u), so every
+# build of the same commit differed, and release.yml carried the identical
+# line: the shipping path was non-reproducible, not just the local one. The
+# date comes from the commit now, which is deterministic and still means
+# something to whoever reads `af version`.
+#
+# A gate rather than a note, because this is the kind of property that is true
+# until somebody adds one more -X flag.
+reproducible version="v0.0.0-gate":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-release {{version}} > /dev/null
+    a=$(shasum -a 256 bin/af | cut -d' ' -f1)
+    just build-release {{version}} > /dev/null
+    b=$(shasum -a 256 bin/af | cut -d' ' -f1)
+    if [ "$a" != "$b" ]; then
+      echo "two builds of this commit differ:"
+      echo "  $a"
+      echo "  $b"
+      echo
+      echo "Something in the build embeds the moment it ran. The usual cause is a"
+      echo "timestamp in an -X flag; derive it from the commit instead."
+      exit 1
+    fi
+    echo "two builds of this commit are identical: $a"
 
 # The license parser has to survive arbitrary input, because a licence token
 # arrives from outside and a parser that panics on one is a denial of service
