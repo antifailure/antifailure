@@ -1,6 +1,7 @@
 package env
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -8,12 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/image"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
+	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/golden"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -85,10 +88,13 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	storeDir := t.TempDir()
 
 	// Machine one. It has the production credential and a subset block.
-	first, stopFirst := requireOrchestrator(t, "publisher", sourceURL, storeDir)
+	first, firstGoldens, stopFirst := requireOrchestrator(t, "publisher", sourceURL, storeDir)
 	defer stopFirst()
 
 	refreshed, err := first.RefreshGolden(ctx)
+	// Registered before the error check: a refresh that fails partway can
+	// still have committed the image, and the teardown has to know about it.
+	firstGoldens.add(refreshed.Version)
 	require.NoError(t, err)
 	require.True(t, refreshed.Verified)
 	require.NotEmpty(t, refreshed.Version)
@@ -110,7 +116,7 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	// Machine two. Same manifest, same store, and NO production credential at
 	// all, which is the point: a runner that cannot reach production is
 	// exactly what this is for.
-	second, stopSecond := requireOrchestrator(t, "puller", "", storeDir)
+	second, secondGoldens, stopSecond := requireOrchestrator(t, "puller", "", storeDir)
 	defer stopSecond()
 
 	// The two machines share this laptop's Docker daemon, so they share its
@@ -120,6 +126,7 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	// source_url_env, so it could not refresh even if it wanted to, and the
 	// only way it can end up with data is through the store.
 	pulled, err := second.PullGolden(ctx, "")
+	secondGoldens.add(pulled.Version)
 	require.NoError(t, err)
 	require.Equal(t, refreshed.Version, pulled.From, "the newest complete version was taken")
 	require.True(t, pulled.Verified,
@@ -170,7 +177,7 @@ func TestPull_RefusesAVersionWhosePublishDidNotFinish(t *testing.T) {
 	require.NoError(t, store.Put(ctx, golden.DumpName("gv_halfpublished"), 3,
 		strings.NewReader("abc")))
 
-	o, stop := requireOrchestrator(t, "puller", "", storeDir)
+	o, _, stop := requireOrchestrator(t, "puller", "", storeDir)
 	defer stop()
 
 	_, err = o.PullGolden(ctx, "gv_halfpublished")
@@ -279,7 +286,9 @@ func replaceDatabase(url, name string) string {
 
 // requireOrchestrator builds one machine's engine: its own state directory,
 // its own Docker provider namespace, and a manifest pointing at the store.
-func requireOrchestrator(t *testing.T, name, sourceURL, storeDir string) (*Orchestrator, func()) {
+func requireOrchestrator(
+	t *testing.T, name, sourceURL, storeDir string,
+) (*Orchestrator, *ownGoldens, func()) {
 	t.Helper()
 	env := map[string]string{"AF_GOLDEN_STORE": storeDir}
 	db := &schema.Database{
@@ -317,18 +326,40 @@ func requireOrchestrator(t *testing.T, name, sourceURL, storeDir string) (*Orche
 	})
 	require.NoError(t, err)
 
-	return o, func() {
+	mine := &ownGoldens{}
+	return o, mine, func() {
 		c, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		// Whatever this machine made, it takes away. A test that leaves a
-		// golden image behind makes the next run of the leak detector blame
-		// somebody else.
-		goldens, listErr := o.Goldens(c)
-		if listErr == nil {
-			for _, g := range goldens {
-				_ = o.DestroyGolden(c, g.ID)
-			}
+		// Whatever THIS orchestrator made, it takes away, and nothing else.
+		//
+		// This used to list every golden on the daemon and destroy all of
+		// them. The daemon is shared: `go test ./...` runs packages in
+		// parallel, so internal/db/docker's conformance suite is refreshing
+		// and branching its own goldens on the same image store at the same
+		// time. This teardown deleted them, and a conformance behaviour that
+		// had refreshed a golden but not yet branched it failed with AF-DB-004
+		// naming a version it had just created. That is the intermittent
+		// failure of TestConformance/Branch_ReadsAKnownRow, and it was
+		// misdiagnosed twice as a name collision: the one golden that ever
+		// survived the sweep was this test's own, protected only because a
+		// branch already pinned it and DestroyGolden refuses those.
+		//
+		// A leak here is now a leak the detector reports, which is the right
+		// place for it. Deleting somebody else's golden to keep our own house
+		// tidy trades a visible leak for an invisible flake.
+		for _, id := range mine.ids {
+			_ = o.DestroyGolden(c, id)
 		}
+	}
+}
+
+// ownGoldens records the golden versions one orchestrator created, so its
+// teardown can remove exactly those on a daemon it shares with other packages.
+type ownGoldens struct{ ids []string }
+
+func (g *ownGoldens) add(id string) {
+	if id != "" {
+		g.ids = append(g.ids, id)
 	}
 }
 
@@ -353,3 +384,71 @@ func requireBranch(t *testing.T, ctx context.Context, o *Orchestrator, version s
 }
 
 var _ = fmt.Sprintf
+
+// TestOrchestratorTeardown_LeavesGoldensItDidNotCreate is the regression test
+// for the flake that outlasted two wrong diagnoses.
+//
+// This teardown used to list every golden on the daemon and destroy all of
+// them. `go test ./...` runs packages in parallel and they share one Docker
+// daemon, so this deleted goldens belonging to internal/db/docker's
+// conformance suite while that suite was mid-behaviour, and
+// TestConformance/Branch_ReadsAKnownRow failed with AF-DB-004 naming a version
+// it had itself created seconds earlier.
+//
+// The check is both halves. A golden this orchestrator never made survives its
+// teardown, and one it did make does not, so the test cannot pass by the
+// teardown having quietly stopped removing anything at all.
+func TestOrchestratorTeardown_LeavesGoldensItDidNotCreate(t *testing.T) {
+	if os.Getenv("AF_SKIP_DOCKER") != "" {
+		t.Skip("skipped: AF_SKIP_DOCKER is set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cli, err := dockerutil.Client()
+	if err != nil {
+		t.Skipf("no Docker daemon is reachable: %v", err)
+	}
+	defer func() { _ = cli.Close() }()
+
+	// Two goldens that stand in for another package's work and for this
+	// orchestrator's own. They are empty images rather than real Postgres
+	// commits because what is under test is which tags the teardown chooses,
+	// not what is inside them, and an empty import takes milliseconds.
+	stamp := time.Now().UnixNano()
+	foreign := fmt.Sprintf("gv_%d_foreign0", stamp)
+	ours := fmt.Sprintf("gv_%d_ours0000", stamp)
+	for _, id := range []string{foreign, ours} {
+		ref := dockerdb.ImageRepo + ":" + id
+		body, importErr := cli.ImageImport(ctx,
+			image.ImportSource{Source: bytes.NewReader(make([]byte, 1024)), SourceName: "-"},
+			ref, image.ImportOptions{})
+		if importErr != nil {
+			t.Skipf("this daemon will not import a scratch image: %v", importErr)
+		}
+		dockerutil.Discard(body)
+		t.Cleanup(func() {
+			c, done := context.WithTimeout(context.Background(), time.Minute)
+			defer done()
+			_, _ = cli.ImageRemove(c, ref, image.RemoveOptions{Force: true})
+		})
+	}
+
+	o, mine, stop := requireOrchestrator(t, "teardown", "", t.TempDir())
+	// Only one of the two is claimed, which is the whole point.
+	mine.add(ours)
+	stop()
+
+	after, err := o.Goldens(ctx)
+	require.NoError(t, err)
+	ids := make(map[string]bool, len(after))
+	for _, g := range after {
+		ids[g.ID] = true
+	}
+	require.True(t, ids[foreign],
+		"the teardown destroyed a golden this orchestrator never created; on a shared "+
+			"daemon that is another package's environment disappearing under it")
+	require.False(t, ids[ours],
+		"the teardown left behind a golden it did create, so this test would pass "+
+			"even if teardown removed nothing at all")
+}
