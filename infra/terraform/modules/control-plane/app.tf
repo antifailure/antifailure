@@ -17,12 +17,23 @@ resource "azurerm_container_app_environment" "this" {
   # private because it is on its own delegated subnet with no public endpoint.
   internal_load_balancer_enabled = false
 
+  # Declared because it exists.
+  #
+  # Azure creates a Consumption profile on every environment whether or not one
+  # is asked for, so a configuration that is silent about it plans to REMOVE it
+  # on every apply -- against the profile the app and both jobs are running on.
+  # Saying it here makes the plan quiet and honest instead of quiet and lucky.
+  workload_profile {
+    name                  = "Consumption"
+    workload_profile_type = "Consumption"
+    minimum_count         = 0
+    maximum_count         = 0
+  }
+
   tags = var.tags
 }
 
 locals {
-  secret_names = ["database-url", "migration-database-url", "github-client-id", "github-client-secret", "github-redirect-uri"]
-
   # Resolved once, because three resources pull it and three copies of this
   # expression is three chances for the bootstrap job to migrate a database for
   # a build the application is not running.
@@ -51,6 +62,11 @@ resource "azurerm_container_app_job" "bootstrap" {
   location                     = var.location
   resource_group_name          = var.resource_group_name
   container_app_environment_id = azurerm_container_app_environment.this.id
+
+  # Named because Azure assigns it. Left unsaid, every apply plans to unset
+  # the profile this is actually running on -- noise in a plan that has to be
+  # read in full to be safe, which is how a real change gets skimmed past.
+  workload_profile_name = "Consumption"
 
   replica_timeout_in_seconds = 600
   replica_retry_limit        = 2
@@ -95,6 +111,22 @@ resource "azurerm_container_app_job" "bootstrap" {
 
   tags = var.tags
 
+  # The same split of ownership the app has, for the same reason, and it was
+  # missing here.
+  #
+  # Continuous deployment points this job at the image it is about to deploy and
+  # runs it, so the image on this job is the deploy pipeline's, not Terraform's.
+  # Without this line every apply plans to put it back to var.image_tag: the
+  # plan that added the sign-in allowlist also proposed reverting the migration
+  # job to v0.1.1, which is a build from before /readyz existed.
+  #
+  # It would have healed itself on the next deploy, and that is not a defence.
+  # An apply that silently rolls back the thing that migrates the database is
+  # exactly the shape of the drift that has now bitten this stack three times.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+
   # The extension allow-list too, and not only the database. Without it the
   # first migration is refused and this job fails, which is exactly what it did.
   depends_on = [
@@ -118,6 +150,11 @@ resource "azurerm_container_app_job" "maintenance" {
   location                     = var.location
   resource_group_name          = var.resource_group_name
   container_app_environment_id = azurerm_container_app_environment.this.id
+
+  # Named because Azure assigns it. Left unsaid, every apply plans to unset
+  # the profile this is actually running on -- noise in a plan that has to be
+  # read in full to be safe, which is how a real change gets skimmed past.
+  workload_profile_name = "Consumption"
 
   replica_timeout_in_seconds = 900
   replica_retry_limit        = 2
@@ -180,6 +217,11 @@ resource "azurerm_container_app" "this" {
   resource_group_name          = var.resource_group_name
   container_app_environment_id = azurerm_container_app_environment.this.id
 
+  # Named because Azure assigns it. Left unsaid, every apply plans to unset
+  # the profile this is actually running on -- noise in a plan that has to be
+  # read in full to be safe, which is how a real change gets skimmed past.
+  workload_profile_name = "Consumption"
+
   # Multiple, so that a rollback is a traffic shift rather than a redeploy.
   #
   # In Single mode the previous revision is deactivated the moment the new one
@@ -200,7 +242,10 @@ resource "azurerm_container_app" "this" {
 
 
   dynamic "secret" {
-    for_each = toset(["database-url", "github-client-id", "github-client-secret", "github-redirect-uri"])
+    for_each = toset(concat(
+      ["database-url", "github-client-id", "github-client-secret", "github-redirect-uri"],
+      var.provider_key_secret_enabled ? ["provider-key-secret"] : [],
+    ))
     content {
       name                = secret.value
       identity            = azurerm_user_assigned_identity.app.id
@@ -266,6 +311,26 @@ resource "azurerm_container_app" "this" {
         content {
           name  = "AF_APP_BASE_URL"
           value = env.value
+        }
+      }
+
+      # Who may sign in. ALWAYS set, including when the list is empty.
+      #
+      # The distinction is the whole feature: the application reads an unset
+      # variable as "open to every GitHub account" and an empty one as "nobody".
+      # So this is not a dynamic block that disappears when the list is empty --
+      # that would turn the most restrictive intent into the least restrictive
+      # deployment, which is how this went wrong the first time.
+      env {
+        name  = "AF_SIGNIN_ALLOWLIST"
+        value = join(",", var.signin_allowlist)
+      }
+
+      dynamic "env" {
+        for_each = var.provider_key_secret_enabled ? [1] : []
+        content {
+          name        = "AF_PROVIDER_KEY_SECRET"
+          secret_name = "provider-key-secret"
         }
       }
 

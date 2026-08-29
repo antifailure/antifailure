@@ -142,3 +142,17 @@ variable "database_extensions" {
   default     = ["PGCRYPTO"]
   description = "Allow-listed in azure.extensions. Azure refuses CREATE EXTENSION for anything absent from it, and it defaults to empty."
 }
+
+# No default. See the module's variable of the same name: an unset allowlist
+# means the control plane accepts any GitHub account, and a default is a value
+# somebody gets by forgetting.
+variable "signin_allowlist" {
+  type        = list(string)
+  description = "GitHub logins that may sign in. Empty means nobody."
+}
+
+variable "provider_key_secret_enabled" {
+  type        = bool
+  default     = true
+  description = "Generate a sealing secret so customers' provider keys can be stored."
+}

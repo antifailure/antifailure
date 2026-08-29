@@ -7,7 +7,7 @@
 
 import { sql } from 'drizzle-orm'
 import type { Pool } from '@antifailure/db'
-import { bare, chip, empty, html, page, raw, when, type Html, type Viewer } from './layout.ts'
+import { bare, bytes, chip, empty, html, page, raw, when, type Html, type Viewer } from './layout.ts'
 
 // ---------------------------------------------------------------------------
 // Signing in
@@ -463,23 +463,44 @@ export async function runPage(pool: Pool, viewer: Viewer, orgId: string, runId: 
     const run = runs[0]
     if (!run) return null
 
+    // The columns verdicts actually has. It has `value` and `summary`; this
+    // query asked for `outcome` and `detail`, which meant this page answered
+    // 500 for any run that existed. It answered correctly for a run that did
+    // NOT exist, because the query above returns nothing first and the handler
+    // returns not-found before reaching here, which is how it passed a smoke
+    // test on an empty console for as long as the console was empty.
+    //
+    // persona, steps and duration come with it, because a verdict without them
+    // is a row that says "fail" and cannot say what failed or how far it got.
     const verdicts = await db.execute<{
       workflow: string
-      outcome: string
-      detail: string | null
+      persona: string | null
+      value: string
+      summary: string | null
+      steps: number
+      duration_ms: number | null
     }>(sql`
-      SELECT workflow, outcome::text AS outcome, detail FROM verdicts
-      WHERE run_id = ${runId}::uuid ORDER BY workflow`)
+      SELECT workflow, persona, value::text AS value, summary, steps, duration_ms
+      FROM verdicts WHERE run_id = ${runId}::uuid ORDER BY workflow`)
 
+    // Likewise: artifacts holds storage_key and size_bytes, not path and bytes.
+    //
+    // `retained` is read because a row whose bytes retention removed still
+    // exists on purpose, so the timeline can say "not retained" rather than
+    // rendering a gap that looks like a bug. Dropping it from the query would
+    // have made this page do the exact thing the schema comment says not to.
     const artifacts = await db.execute<{
       id: string
       kind: string
-      path: string
-      bytes: string | null
+      step: number | null
+      storage_key: string
+      content_type: string | null
+      size_bytes: string | null
+      retained: boolean
       created_at: Date | string
     }>(sql`
-      SELECT id, kind, path, bytes, created_at FROM artifacts
-      WHERE run_id = ${runId}::uuid ORDER BY created_at`)
+      SELECT id, kind, step, storage_key, content_type, size_bytes, retained, created_at
+      FROM artifacts WHERE run_id = ${runId}::uuid ORDER BY step NULLS LAST, created_at`)
 
     return page(
       { title: `Run ${run.id.slice(0, 8)}`, current: 'runs', viewer, environmentLabel: 'staging' },
@@ -500,15 +521,24 @@ export async function runPage(pool: Pool, viewer: Viewer, orgId: string, runId: 
                     <div class="scroll-x">
                       <table>
                         <thead>
-                          <tr><th scope="col">Workflow</th><th scope="col">Outcome</th><th scope="col">Detail</th></tr>
+                          <tr>
+                            <th scope="col">Workflow</th><th scope="col">Persona</th>
+                            <th scope="col">Outcome</th>
+                            <th scope="col" class="num">Steps</th>
+                            <th scope="col" class="num">Took</th>
+                            <th scope="col">Summary</th>
+                          </tr>
                         </thead>
                         <tbody>
                           ${verdicts.map(
                             (v) => html`
                               <tr>
                                 <td>${v.workflow}</td>
-                                <td>${chip(v.outcome)}</td>
-                                <td style="color:var(--ink-3)">${v.detail ?? '—'}</td>
+                                <td style="color:var(--ink-3)">${v.persona ?? 'anybody'}</td>
+                                <td>${chip(v.value)}</td>
+                                <td class="num">${v.steps}</td>
+                                <td class="num">${v.duration_ms === null ? '—' : `${(v.duration_ms / 1000).toFixed(1)}s`}</td>
+                                <td style="color:var(--ink-3)">${v.summary ?? '—'}</td>
                               </tr>
                             `,
                           )}
@@ -532,17 +562,24 @@ export async function runPage(pool: Pool, viewer: Viewer, orgId: string, runId: 
                       <table>
                         <thead>
                           <tr>
-                            <th scope="col">Kind</th><th scope="col">Path</th>
-                            <th scope="col" class="num">Bytes</th><th scope="col">Recorded</th>
+                            <th scope="col" class="num">Step</th>
+                            <th scope="col">Kind</th><th scope="col">Stored at</th>
+                            <th scope="col" class="num">Size</th>
+                            <th scope="col">Recorded</th>
                           </tr>
                         </thead>
                         <tbody>
                           ${artifacts.map(
                             (a) => html`
                               <tr>
+                                <td class="num">${a.step ?? '—'}</td>
                                 <td>${chip(a.kind)}</td>
-                                <td class="mono">${a.path}</td>
-                                <td class="num">${a.bytes ?? '—'}</td>
+                                <td class="mono">${a.storage_key}</td>
+                                <td class="num">${
+                                  a.retained
+                                    ? bytes(a.size_bytes)
+                                    : html`<span style="color:var(--ink-3)">not retained</span>`
+                                }</td>
                                 <td class="when">${when(a.created_at)}</td>
                               </tr>
                             `,

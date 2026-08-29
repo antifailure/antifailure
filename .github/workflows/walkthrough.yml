@@ -24,9 +24,18 @@ permissions:
 
 jobs:
   walkthrough:
-    name: the getting started path
+    name: the getting started path (${{ matrix.example }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      # All three, and none of them cancels the others. They fail for
+      # different reasons: go-api is a compiled binary with a mocked egress
+      # rule, next-app is a framework with a build step, django-api is a
+      # framework whose own migration system owns the schema. A run that
+      # stopped at the first failure would hide the others for a day.
+      fail-fast: false
+      matrix:
+        example: [go-api, next-app, django-api]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -38,7 +47,7 @@ jobs:
       - name: Walk it
         # The budget is generous on purpose. It is there to catch a path that
         # broke into a timeout, not to police a runner having a slow morning.
-        run: go run ./tools/walkthrough . --budget 20m
+        run: go run ./tools/walkthrough . --example ${{ matrix.example }} --budget 20m
 
       - name: Nothing was left behind
         # The walkthrough tears down its own environment. This checks that it

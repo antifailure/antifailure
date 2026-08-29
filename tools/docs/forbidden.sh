@@ -114,7 +114,14 @@ report() {
   hits=$((hits + 1))
 }
 
-files=$(find "${present[@]}" -type f \( -name '*.md' -o -name '*.mdx' \) | sort)
+# Installed dependencies and build output are pruned rather than scanned.
+# An example with a package.json puts thousands of other people's READMEs
+# under node_modules, and this scan is about the documentation this project
+# ships. Left in, the first JavaScript example turned a clean run into 98
+# documents and five problems, none of them ours.
+files=$(find "${present[@]}" \
+  \( -type d \( -name node_modules -o -name .next -o -name dist -o -name vendor \) -prune \) -o \
+  -type f \( -name '*.md' -o -name '*.mdx' \) -print | sort)
 count=$(printf '%s\n' "$files" | grep -c . || true)
 
 for rule in "${rules[@]}"; do

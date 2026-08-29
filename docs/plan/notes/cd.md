@@ -65,7 +65,7 @@ The reasoning: the control plane is one web process and a Postgres. The cheapest
 always-on AKS control plane is about 75 USD a month before a node runs; this
 whole stack is roughly 32. The Terraform already targeted Container Apps and
 `afcp-env` already existed. The guarantees the Helm wording asks for are all
-here — migration pre-check, post-deploy health gate, automatic rollback — and
+here: a migration pre-check, a post-deploy health gate, automatic rollback. And
 the rollback is better than `helm rollback`, because the previous revision is
 still running rather than being rebuilt.
 
@@ -135,7 +135,7 @@ one. Each time the pipeline failed at the right step and deployed nothing.
 ### A bad build is caught and never reaches a user
 
 Run by hand with `deploy/cd/deploy.sh`, the same script CI runs, against
-`ghcr.io/antifailure/control-plane:v0.1.1` -- a real image that predates
+`ghcr.io/antifailure/control-plane:v0.1.1`, a real image that predates
 `/readyz` and answers it with a 500. Nothing was planted in the source: the
 image is genuinely unable to satisfy the gate, which is a better test than a
 commit written to fail.
