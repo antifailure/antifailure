@@ -411,6 +411,14 @@ resource "azurerm_container_app" "this" {
   # resolves to, silently undoing the last deploy, and the next deploy would
   # show up as drift in the next plan. Splitting ownership at this line is what
   # lets both run on their own schedule.
+  #
+  # THE COST OF THE SPLIT, which has already caught us once. This app runs in
+  # Multiple revision mode, so a change to the template below creates a new
+  # revision, and traffic is not ours to move. The new revision comes up at zero
+  # percent, terraform reports a successful apply, and production keeps serving
+  # the old one. Add an environment variable here and the application does not
+  # see it until somebody deploys. Check what is actually serving after an apply
+  # that touched the template; the self-hosting guide has the two commands.
   lifecycle {
     ignore_changes = [
       template[0].container[0].image,
