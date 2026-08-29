@@ -55,6 +55,39 @@ variable "budget_alert_thresholds" {
 }
 
 variable "budget_contact_emails" {
-  type    = list(string)
-  default = []
+  type        = list(string)
+  default     = []
+  sensitive   = true
+  description = <<-EOT
+    Who gets the budget alert.
+
+    MARKED SENSITIVE BECAUSE A PLAN IS PUBLISHED, NOT BECAUSE AN EMAIL IS A
+    CREDENTIAL. Terraform prints attribute values in plan output, and this
+    repository runs `terraform plan` on every pull request with the result in a
+    step summary. On a public repository that summary is world readable, so an
+    address supplied here appeared in a public log the first time a plan
+    proposed to change the notification blocks. Nobody typed it into a document;
+    it arrived through a variable and left through a diff.
+
+    `sensitive` makes Terraform redact it everywhere it flows, including into
+    the resource's own plan diff.
+
+    Supply the SAME value to the plan job as to the apply. Left empty in CI, a
+    plan proposes to delete every notification block, which reads as a small
+    in-place update and would silently switch off the budget alerts this module
+    exists to create.
+  EOT
+}
+
+variable "budget_contact_roles" {
+  type        = list(string)
+  default     = ["Owner"]
+  description = <<-EOT
+    Subscription roles that receive the budget alert. The DEFAULT way this
+    module notifies anybody, in preference to contact_emails, because a role is
+    resolved by Azure at alert time and no personal address ends up in the
+    configuration, the state, or a public plan summary.
+
+    Set to [] if you genuinely want addresses only.
+  EOT
 }
