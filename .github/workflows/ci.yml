@@ -59,6 +59,29 @@ jobs:
           (cd engine && go test ./internal/hud -update-frames)
           git diff --exit-code
 
+      - name: Every action is pinned to a commit
+        # C.7 requires it and every action here already satisfies it, so this
+        # protects a property rather than repairing one. A tag is mutable:
+        # `uses: foo/bar@v4` runs whatever the owner of that tag decides it
+        # means tomorrow, and the failure mode is somebody else's compromised
+        # release running with this repository's secrets.
+        #
+        # Inlined rather than `just pinned`. ci.yml does not use the justfile
+        # at all, on purpose: the recipes assume tools each job installs for
+        # itself, so calling one here would fail on a missing binary rather
+        # than on the property being checked. `just pinned` runs the same test.
+        run: |
+          set -uo pipefail
+          bad=$(grep -rhnE "^\s*-? *uses:" .github/workflows/*.yml \
+            | grep -vE "@[0-9a-f]{40}( |$|#)" || true)
+          if [ -n "$bad" ]; then
+            echo "these actions are not pinned to a full commit SHA:"
+            echo "$bad"
+            echo "A tag is mutable. Pin the SHA and put the version in a trailing comment."
+            exit 1
+          fi
+          echo "every action is pinned to a full commit SHA"
+
       - name: The engine's parsers survive arbitrary input
         # The manifest is a file from the repository under test, and the
         # detection engine reads that repository's contents, so both parse

@@ -197,10 +197,10 @@ sub-phase above them read `proven`.
 | G4 | Coverage thresholds per package | **measured, not yet blocking**. `just coverage`. 16 of 50 packages meet C.5 today |
 | G5 | Conformance suites | enforced |
 | G6 | Fuzz | partial: the licence, manifest and detection parsers each fuzz 60s in CI. The manifest target covers the masking rules, which are a section of it. Still unfuzzed: proxy HTTP, OpenAPI specs, APM responses, Playwright trace ingestion |
-| G7 | Security: gitleaks, trufflehog, gosec, semgrep, govulncheck, pnpm audit, pinned actions | partial: trivy on images and Terraform is not wired |
+| G7 | Security | **weaker than this row used to claim**. Wired: `govulncheck`, `tools/scanrepo` for secrets, and every action pinned to a commit SHA, now enforced rather than merely true. NOT wired: gosec, semgrep, gitleaks, trufflehog, pnpm audit, trivy. Those four appear in this repository only in the spelling dictionary and in prose |
 | G8 | Docs | enforced |
 | G9 | Corpus: every corpus app completes up, test, down | not a gate yet |
-| G10 | Teardown: leak detector reports zero untracked | `just leaks` exists, not in `gate` |
+| G10 | Teardown: leak detector reports zero untracked | enforced. The engine job's "Nothing was left behind" step counts managed containers and networks after the suites, and `just leaks` runs the same check. It is deliberately out of `just gate`, because a developer with an environment up would fail it every time and learn to skip the whole gate |
 | G11 | Reproducibility: identical rebuilds, SBOM, cosign verify | not a gate yet |
 | G12 | Design: axe-core, visual regression, keyboard nav, CLI snapshots in four modes | not a gate yet |
 
