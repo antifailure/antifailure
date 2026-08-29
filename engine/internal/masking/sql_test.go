@@ -2,6 +2,8 @@ package masking_test
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -54,6 +56,47 @@ INSERT INTO audit_log (actor_email, detail) VALUES
   ('ada@lovelace-analytics.co.uk', 'signed in'), ('grace@hopper-systems.io', 'changed plan');
 `
 
+// uniqueRulesHash returns eight hex characters, because that is how many of it
+// survive into a golden version id.
+func uniqueRulesHash() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Cannot happen on any platform this runs on, and a fallback that
+		// returned a constant would reintroduce the collision it exists to
+		// avoid, so it is loud instead.
+		panic("masking test: no randomness available: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// The bug this file had, encoded so it cannot come back.
+//
+// Needs no Docker and no database, which is the point: the failure it describes
+// only ever appeared on a machine fast enough to publish two goldens inside one
+// second, so a test that needs the slow path to reproduce it is a test that
+// passes everywhere except where the bug is.
+func TestGoldenIDsFromThisHelperDoNotCollideWithinASecond(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 29, 1, 22, 58, 0, time.UTC)
+
+	// What it used to do. A constant rules hash truncates to its first eight
+	// characters, so every golden published in the same second got one id.
+	first := provider.NewGoldenVersionID(at, "masking-test")
+	second := provider.NewGoldenVersionID(at, "masking-test")
+	require.Equal(t, first, second,
+		"the collision this test exists for is supposed to be reproducible")
+	require.Equal(t, "gv_20260829012258_masking-", first,
+		"the id in the CI failure, reproduced exactly")
+
+	// What it does now.
+	seen := map[string]bool{}
+	for i := 0; i < 500; i++ {
+		id := provider.NewGoldenVersionID(at, uniqueRulesHash())
+		require.False(t, seen[id], "two goldens in the same second shared an id: %s", id)
+		seen[id] = true
+	}
+}
+
 func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 	t.Helper()
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
@@ -65,8 +108,21 @@ func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 
+	// A UNIQUE rules hash per call, and it has to be unique in its first eight
+	// characters.
+	//
+	// NewGoldenVersionID builds gv_<timestamp to the second>_<hash[:8]>, so a
+	// constant like "masking-test" truncates to "masking-" and every golden this
+	// helper makes inside the same second gets the SAME id. Two tests in this
+	// package that land in one second then share a golden: the first one's
+	// cleanup drops it, and the second fails with "the golden version
+	// gv_..._masking- no longer exists".
+	//
+	// It passed locally and failed in CI for exactly that reason. The local run
+	// takes minutes and the tests fall in different seconds; a CI runner puts
+	// them in the same one.
 	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
-		Version: 17, RulesHash: "masking-test",
+		Version: 17, RulesHash: uniqueRulesHash(),
 		Mask:   func(context.Context, secrets.Value) error { return nil },
 		Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
 	})
