@@ -1,0 +1,32 @@
+-- The sweeper that could not sweep.
+--
+-- sweepDeviceAuthorizations was written to keep device_authorizations from
+-- growing without bound on an instance where people run `af login` all day. It
+-- carried a comment saying exactly that, and it had two independent reasons it
+-- had never removed a single row: nothing in the process called it, and the
+-- three policies on this table each key on a value the caller declares, the
+-- device code or the user code, so a sweeper that declares neither matches
+-- nothing. The DELETE ran, reported success, and deleted zero rows, forever.
+--
+-- The existing policies are right and stay as they are. A terminal may touch
+-- the row whose device code it holds, a browser the row whose user code a
+-- person typed, and neither may enumerate the table. Housekeeping is a third
+-- thing and it needs a third policy rather than a hole in the other two.
+--
+-- WHY THIS IS FOR ALL AND NOT FOR DELETE. A DELETE that names a column in its
+-- WHERE clause reads rows to find them, so Postgres applies the SELECT policies
+-- to that scan as well as the DELETE ones. A delete-only policy therefore
+-- deletes nothing: the plan ANDs the SELECT policies in, none of them match,
+-- and the statement reports DELETE 0. That was the first version of this file
+-- and it looked correct in every way except the one that counts.
+--
+-- What the row restriction gives back is most of the narrowness. This permits
+-- nothing on a live authorization: only rows that expired more than a day ago,
+-- which can no longer be polled, approved or redeemed. It is reachable only by
+-- the application role, which is the process rather than any person; every path
+-- a user can reach still goes through a declared device code or user code. The
+-- day of margin is deliberate, because expiry is enforced on every read and the
+-- sweeper exists for table size rather than for correctness.
+CREATE POLICY device_sweep ON device_authorizations
+  FOR ALL TO antifailure_app
+  USING (expires_at < now() - interval '24 hours');
