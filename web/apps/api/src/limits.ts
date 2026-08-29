@@ -204,6 +204,23 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
 
   // Engines. High volume from few callers, and the only endpoints where a
   // refusal is expected in normal operation.
+  // Model calls against a budget. Keyed by token, because the thing worth
+  // bounding is one organization's spend rate rather than one machine's.
+  //
+  // Deliberately not tight. A workflow with twenty steps makes twenty calls in
+  // a burst, and refusing one turns a run into a flake. The real bound on this
+  // endpoint is the budget, which is checked before the key is decrypted; the
+  // limit here only stops a loop from turning into a bill faster than anybody
+  // can notice.
+  'POST /byok/anthropic/v1/messages': {
+    rate: 5, burst: 60, key: 'token',
+    reason: 'One model call per planner step, in bursts of a workflow. The budget is what caps spend; this caps the rate at which a runaway loop can reach it.',
+  },
+  'POST /byok/openai/v1/chat/completions': {
+    rate: 5, burst: 60, key: 'token',
+    reason: 'The same shape of caller against the other provider, and the same reasoning.',
+  },
+
   // GitHub's own deliveries, keyed by address because a delivery carries no
   // token. Generous: an organization adding twenty repositories at once sends a
   // burst, and a refused delivery is one GitHub retries with backoff for a
