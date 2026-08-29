@@ -39,9 +39,25 @@ authorize request for a client id that does not exist, which is the "github
 auth just leads to 404" nobody could explain.
 
 An earlier version of this note said the secret was in Key Vault. It was not;
-nobody checked. The client id is now the real one. The secret is minted once by
-GitHub behind a passkey prompt, so it needs a person at the keyboard, and until
-it is set no account can sign in to this deployment at all.
+nobody checked.
+
+Both are real now. The client id is `Ov23lipGqLbu1cZJn1EF` and a freshly minted
+secret sits beside it, written straight from the clipboard so it was never in a
+file or a shell history. The pair is verified against GitHub itself rather than
+by inspection: `POST /applications/{client_id}/token` with those credentials and
+a made-up token answers 404, "no such token", where a wrong secret answers 401.
+The serving replica restarted 20 minutes after the secret was written, so it is
+the value the process holds.
+
+The App has exactly one client secret now. There were three by the end -- one
+from yesterday, one minted during the passkey session whose plaintext went
+nowhere, and this one -- and the two that nothing could use were deleted, both
+"Never used".
+
+What has not happened is one human click. GitHub disables the Authorize button
+until its own timer says the window is in front of a person, which is an
+anti-clickjacking control and not something to defeat. So the consent screen is
+the last step, it takes two seconds, and it is Vir's to make.
 `AF_SIGNIN_ALLOWLIST` names who may sign in at all, and a refusal happens during
 the callback before any row is written, so a refused account leaves nothing
 behind. **Set but empty means nobody, not everybody**: an empty value is far
