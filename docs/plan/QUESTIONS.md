@@ -221,6 +221,27 @@ so two refreshes in one second still depend on their hashes differing. That is
 production code, not test code, and two refreshes in a second is not something
 only a test does.
 
+**The flake survived the fix.** On 2026-08-29 at 11:12, after the random hash
+was on main, the same behaviour failed again:
+
+    Branch(gv_20260829111232_ebaff111, env_conformance00005):
+    AF-DB-004: The golden version gv_20260829111232_ebaff111 no longer exists.
+
+`ebaff111` is random, not the repeated `7969f160`, so the fix is live and the
+identifier collision really is gone. It was simply not the cause of this. The
+commit that made the change said in as many words that one green run of an
+intermittent failure is not evidence and that if the failure returned the cause
+was elsewhere. It returned; the cause is elsewhere.
+
+That leaves the ruled-out list above plus one entry: identifier collision, now
+impossible by construction rather than merely unlikely. The remaining
+candidates, in the order worth trying, are a daemon race where a freshly
+committed image is not immediately inspectable, and `ImageRemove` with
+`PruneChildren: true` reaching an image committed from the same base. Both want
+instrumentation inside `RefreshGolden` and `Branch` rather than more reading:
+log the image id at commit, list it back immediately, and log again at the
+`ImageInspect` that fails.
+
 ## Answered
 
 *(none yet)*
