@@ -182,6 +182,18 @@ variable "provider_key_secret_enabled" {
 # webhook endpoint refuses deliveries rather than accepting unsigned ones. Set
 # it and the two secrets must already be in the vault, because GitHub mints the
 # private key and Terraform cannot.
+variable "assign_deployer_secret_officer" {
+  type        = bool
+  default     = false
+  description = "Whether this stack manages the Key Vault Secrets Officer grant on the human or identity that runs Terraform. See deployer_principal_id: leaving that null makes the grant caller-dependent, which is why the module defaults this off."
+}
+
+variable "deployer_principal_id" {
+  type        = string
+  default     = null
+  description = "Pins the principal that gets Key Vault Secrets Officer instead of taking whoever is calling, so two identities planning the same stack do not each propose to replace the other's grant."
+}
+
 variable "github_app_id" {
   type        = string
   default     = ""

@@ -227,3 +227,54 @@ locals {
   # One map so callers do not have to know which half a name lives in.
   secret_by_name = merge(azurerm_key_vault_secret.owned, azurerm_key_vault_secret.seeded)
 }
+
+# ---------------------------------------------------------------------------
+# The rename, declared instead of executed.
+#
+# `azurerm_key_vault_secret.this` was split into `.owned` and `.seeded` so that
+# Terraform could stop overwriting the values an operator sets by hand. The
+# split changed the resource ADDRESSES and nothing moved the state, so every
+# plan since has proposed to destroy all six secrets and create six new ones
+# with the same names.
+#
+# That is not a cosmetic diff. `terraform apply` on that plan deletes the live
+# github-client-secret and writes back whatever the caller passed in
+# TF_VAR_github_client_secret -- and infra.yml passes the literal string
+# "plan-only". It is the most plausible explanation for how this vault came to
+# hold "PLACEHOLDER-not-a-real-oauth-app" in the first place, and it would have
+# done it again to the real secret on the next apply by anybody.
+#
+# `moved` rather than `terraform state mv`, because a state move fixes one
+# person's copy and this fixes it in the repository: every plan, in CI and on
+# every machine, reads these and treats the rename as a rename.
+# ---------------------------------------------------------------------------
+
+moved {
+  from = azurerm_key_vault_secret.this["database-url"]
+  to   = azurerm_key_vault_secret.owned["database-url"]
+}
+
+moved {
+  from = azurerm_key_vault_secret.this["migration-database-url"]
+  to   = azurerm_key_vault_secret.owned["migration-database-url"]
+}
+
+moved {
+  from = azurerm_key_vault_secret.this["provider-key-secret"]
+  to   = azurerm_key_vault_secret.owned["provider-key-secret"]
+}
+
+moved {
+  from = azurerm_key_vault_secret.this["github-client-id"]
+  to   = azurerm_key_vault_secret.seeded["github-client-id"]
+}
+
+moved {
+  from = azurerm_key_vault_secret.this["github-client-secret"]
+  to   = azurerm_key_vault_secret.seeded["github-client-secret"]
+}
+
+moved {
+  from = azurerm_key_vault_secret.this["github-redirect-uri"]
+  to   = azurerm_key_vault_secret.seeded["github-redirect-uri"]
+}
