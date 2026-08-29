@@ -8,13 +8,16 @@
   },
   "workspaces": [
     "rbac",
-    "audit"
+    "audit",
+    "sso",
+    "scim"
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
+    "@hono/node-server": "^2.1.1",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0"
   }

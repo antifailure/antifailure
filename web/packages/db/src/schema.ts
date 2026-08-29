@@ -52,11 +52,16 @@ export const verdictValue = pgEnum('verdict_value', [
   'pass', 'fail', 'flaky', 'blocked', 'unverified',
 ])
 
+// githubId and githubLogin are optional because GitHub is no longer the only
+// way an account can exist: a member provisioned by SCIM or created
+// just-in-time from an assertion has neither. See migrations/0012. The unique
+// index still stands; Postgres permits any number of NULLs in one.
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
-  githubId: bigint('github_id', { mode: 'number' }).notNull(),
-  githubLogin: text('github_login').notNull(),
+  githubId: bigint('github_id', { mode: 'number' }),
+  githubLogin: text('github_login'),
   email: text('email').notNull(),
+  identitySource: text('identity_source').notNull().default('github'),
   name: text('name'),
   avatarUrl: text('avatar_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -343,6 +348,167 @@ export const auditEntries = pgTable('audit_entries', {
   entryHash: text('entry_hash').notNull(),
 }, (t) => [index('audit_org_idx').on(t.orgId, t.seq)])
 
+// ---------------------------------------------------------------------------
+// Single sign-on and SCIM
+//
+// Written by the enterprise edition's single sign-on and provisioning packages,
+// and typed here because the schema drift suite requires every table in the
+// database to be typed: a table nothing types is a table whose columns drift
+// silently. See migrations/0012_sso_and_scim.sql for the isolation, which is
+// the part that cannot be expressed here.
+//
+// Naming the enterprise directory in a comment here would fail the edition
+// boundary gate, which greps this tree for that path. That gate is blunt on
+// purpose and it is right to be: a comment naming a dependency is how a
+// dependency starts.
+// ---------------------------------------------------------------------------
+
+export const ssoConnections = pgTable('sso_connections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  handle: text('handle').notNull(),
+  kind: text('kind').notNull(),
+  displayName: text('display_name').notNull(),
+  enabled: boolean('enabled').notNull().default(false),
+  enforced: boolean('enforced').notNull().default(false),
+  defaultRole: memberRole('default_role').notNull().default('member'),
+  idpEntityId: text('idp_entity_id'),
+  idpSsoUrl: text('idp_sso_url'),
+  idpCertificates: textArray('idp_certificates').notNull().default([]),
+  oidcIssuer: text('oidc_issuer'),
+  oidcClientId: text('oidc_client_id'),
+  oidcAuthorizationEndpoint: text('oidc_authorization_endpoint'),
+  oidcTokenEndpoint: text('oidc_token_endpoint'),
+  oidcJwksUri: text('oidc_jwks_uri'),
+  groupRoleMap: jsonb('group_role_map').notNull().default({}),
+  clockSkewSeconds: integer('clock_skew_seconds').notNull().default(300),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('sso_connections_handle_key').on(t.handle),
+  index('sso_connections_org_idx').on(t.orgId),
+])
+
+// Deliberately its own table. Row-level security is row level, so the policy
+// that lets an unauthenticated callback find a connection by its handle would
+// expose every column of that row. Nothing unauthenticated reaches this one.
+export const ssoConnectionSecrets = pgTable('sso_connection_secrets', {
+  connectionId: uuid('connection_id').primaryKey(),
+  orgId: uuid('org_id').notNull(),
+  oidcClientSecret: bytea('oidc_client_secret'),
+  spPrivateKey: bytea('sp_private_key'),
+  spCertificate: text('sp_certificate'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const ssoDomains = pgTable('sso_domains', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  connectionId: uuid('connection_id').notNull(),
+  domain: text('domain').notNull(),
+  verificationToken: text('verification_token').notNull(),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('sso_domains_org_id_domain_key').on(t.orgId, t.domain),
+  index('sso_domains_org_idx').on(t.orgId),
+])
+
+export const ssoLoginStates = pgTable('sso_login_states', {
+  state: text('state').primaryKey(),
+  orgId: uuid('org_id').notNull(),
+  connectionId: uuid('connection_id').notNull(),
+  nonce: text('nonce'),
+  codeVerifier: text('code_verifier'),
+  requestId: text('request_id'),
+  relayState: text('relay_state'),
+  redirectTo: text('redirect_to'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (t) => [index('sso_login_states_expiry_idx').on(t.expiresAt)])
+
+export const ssoAssertionsSeen = pgTable('sso_assertions_seen', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  connectionId: uuid('connection_id').notNull(),
+  assertionId: text('assertion_id').notNull(),
+  seenAt: timestamp('seen_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (t) => [
+  uniqueIndex('sso_assertions_seen_connection_id_assertion_id_key')
+    .on(t.connectionId, t.assertionId),
+  index('sso_assertions_seen_expiry_idx').on(t.expiresAt),
+])
+
+export const ssoBreakGlassCodes = pgTable('sso_break_glass_codes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  codeHash: bytea('code_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  usedBy: uuid('used_by'),
+}, (t) => [uniqueIndex('sso_break_glass_codes_org_id_code_hash_key').on(t.orgId, t.codeHash)])
+
+export const scimTokens = pgTable('scim_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  name: text('name').notNull(),
+  tokenHash: bytea('token_hash').notNull(),
+  prefix: text('prefix').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (t) => [
+  uniqueIndex('scim_tokens_token_hash_key').on(t.tokenHash),
+  index('scim_tokens_org_idx').on(t.orgId),
+])
+
+export const scimResources = pgTable('scim_resources', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  userId: uuid('user_id'),
+  externalId: text('external_id'),
+  userName: text('user_name').notNull(),
+  active: boolean('active').notNull().default(true),
+  givenName: text('given_name'),
+  familyName: text('family_name'),
+  displayName: text('display_name'),
+  version: integer('version').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('scim_resources_org_id_user_name_key').on(t.orgId, t.userName),
+  index('scim_resources_user_idx').on(t.userId),
+])
+
+export const scimGroups = pgTable('scim_groups', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  externalId: text('external_id'),
+  displayName: text('display_name').notNull(),
+  role: memberRole('role'),
+  version: integer('version').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex('scim_groups_org_id_display_name_key').on(t.orgId, t.displayName)])
+
+// resourceId is nullable on purpose, and it is the ordering this whole feature
+// gets wrong most often: Okta and Entra ID both send group membership naming
+// users they have not created yet. The reference is kept as it arrived and
+// resolved when the user turns up.
+export const scimGroupMembers = pgTable('scim_group_members', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  groupId: uuid('group_id').notNull(),
+  memberRef: text('member_ref').notNull(),
+  resourceId: uuid('resource_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('scim_group_members_group_id_member_ref_key').on(t.groupId, t.memberRef),
+  index('scim_group_members_resource_idx').on(t.resourceId),
+])
+
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
@@ -350,4 +516,7 @@ export const tenantScopedTables = [
   members, githubInstallations, repositories, environments, goldenVersions,
   runs, verdicts, artifacts, maskingRules, networkRules, engineTokens, events,
   auditEntries, providerKeys, providerBudgets,
+  ssoConnections, ssoConnectionSecrets, ssoDomains, ssoLoginStates,
+  ssoAssertionsSeen, ssoBreakGlassCodes,
+  scimTokens, scimResources, scimGroups, scimGroupMembers,
 ] as const

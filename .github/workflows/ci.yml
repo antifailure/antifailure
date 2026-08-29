@@ -540,7 +540,33 @@ jobs:
   enterprise:
     name: enterprise
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+
+    # A real Postgres, for the same reason the control plane job has one. The
+    # enterprise web packages carry integration suites that drive single sign-on
+    # and provisioning through the real server against the real row-level
+    # security policies, and there is no version of that against a fake: the
+    # property under test is what Postgres refuses.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: antifailure
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/antifailure
+      # Every one of these suites skips itself when there is no database, which
+      # is right on a laptop and wrong here. Without this the job can go green
+      # having run none of them.
+      AF_REQUIRE_DATABASE: '1'
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -568,12 +594,17 @@ jobs:
         # install cannot pull enterprise code in by accident. It depends on the
         # community API for the permission catalog and the community API
         # depends on nothing here, which the boundary check below asserts.
+        #
+        # Fanned out over the workspaces list rather than naming each package.
+        # The previous version named rbac and audit by hand, so a package added
+        # later was neither typechecked nor tested and this job went green
+        # having not run it. That is the silent gap this repository keeps
+        # finding, in the gate meant to catch it.
         run: |
           npm --prefix web ci --no-audit --no-fund
           npm --prefix ee/web install --no-audit --no-fund
-          npx --prefix ee/web tsc --noEmit -p ee/web/rbac/tsconfig.json
-          node --test ee/web/rbac/test/*.test.ts ee/web/audit/test/*.test.ts
-          npx --prefix ee/web tsc --noEmit -p ee/web/audit/tsconfig.json
+          npm --prefix ee/web run typecheck
+          npm --prefix ee/web test
 
       - name: Nothing in the community web depends on the enterprise one
         run: |
@@ -670,7 +701,23 @@ jobs:
           wrong='potatogreenbean204@gmail.com'
 
           if [ -n "${BASE:-}" ]; then
-            range="$BASE..HEAD"
+            # On a pull request the checkout is the MERGE commit, so ^1 is the
+            # base branch tip and ^2 is this branch, and the commits the pull
+            # request ADDS are the ones reachable from ^2 but not from ^1.
+            #
+            # This used to be "$BASE..HEAD", where BASE is the base sha as it
+            # was when the pull request was OPENED. That range grows every time
+            # the base branch moves, so it ends up containing commits the pull
+            # request did not write. An unsigned commit landed on main and this
+            # check then failed on every open pull request whose base predated
+            # it, blaming each author for somebody else's commit. The comment
+            # above already promised "only the commits this push or pull
+            # request added"; this makes that true.
+            if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
+              range="HEAD^1..HEAD^2"
+            else
+              range="$BASE..HEAD"
+            fi
           elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
                && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             range="$BEFORE..HEAD"
@@ -709,7 +756,23 @@ jobs:
           set -euo pipefail
 
           if [ -n "${BASE:-}" ]; then
-            range="$BASE..HEAD"
+            # On a pull request the checkout is the MERGE commit, so ^1 is the
+            # base branch tip and ^2 is this branch, and the commits the pull
+            # request ADDS are the ones reachable from ^2 but not from ^1.
+            #
+            # This used to be "$BASE..HEAD", where BASE is the base sha as it
+            # was when the pull request was OPENED. That range grows every time
+            # the base branch moves, so it ends up containing commits the pull
+            # request did not write. An unsigned commit landed on main and this
+            # check then failed on every open pull request whose base predated
+            # it, blaming each author for somebody else's commit. The comment
+            # above already promised "only the commits this push or pull
+            # request added"; this makes that true.
+            if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
+              range="HEAD^1..HEAD^2"
+            else
+              range="$BASE..HEAD"
+            fi
           elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
                && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             range="$BEFORE..HEAD"

@@ -29,6 +29,7 @@ ndjson
 neon
 pgbouncer
 pgvector
+PKCE
 pooler
 postgres
 reprovision
