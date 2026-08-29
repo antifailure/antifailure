@@ -12,11 +12,11 @@ import SiteFooter from "./SiteFooter.astro";
 <SiteFooter />
 
 <style>
+  /* The site footer is full width; Starlight's content column is not, so it
+     is pulled back out to the edges. */
   :global(.af-site-footer) {
-    margin-top: 2rem;
-  }
-
-  :global(footer.sl-flex .meta) {
-    margin-top: 2rem;
+    margin-top: 4rem;
+    margin-inline: calc(-1 * var(--sl-content-pad-x, 1.5rem));
+    width: auto;
   }
 </style>

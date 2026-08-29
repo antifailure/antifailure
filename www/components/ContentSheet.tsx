@@ -112,11 +112,11 @@ export function ContentSheet({
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4 max-sm:px-3 max-sm:py-6"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4"
       onClick={onClose}
     >
       <div
-        className="max-h-[min(88dvh,720px)] w-full max-w-[480px] overflow-y-auto rounded-2xl border border-black/10 bg-white p-6 shadow-2xl"
+        className="max-h-[min(88vh,720px)] w-full max-w-[480px] overflow-y-auto rounded-2xl border border-black/10 bg-white p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-[15px] font-medium">{sheet.title}</div>

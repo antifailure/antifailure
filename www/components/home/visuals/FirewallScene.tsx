@@ -620,7 +620,7 @@ export function FirewallScene() {
 
   return (
     <div ref={ref} className="relative w-full">
-      <Panel className="overflow-hidden max-xl:hidden">
+      <Panel className="overflow-hidden">
         <div className="pointer-events-none relative select-none" aria-hidden>
           <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" aria-hidden>
             <rect x="0.5" y="0.5" width={W - 1} height={H - 1} fill="none" stroke="rgba(0,0,0,0.06)" />
@@ -1214,35 +1214,6 @@ export function FirewallScene() {
               </div>
             </div>
           ) : null}
-        </div>
-      </Panel>
-      <Panel className="hidden overflow-hidden max-xl:block">
-        <div className="flex items-center justify-between gap-3 border-b border-black/10 px-4 py-2.5">
-          <MonoLabel className="uppercase tracking-[0.12em]">side-effect firewall</MonoLabel>
-          <StatusPill tone="BLOCK">BLOCK</StatusPill>
-        </div>
-        <ul>
-          {LEDGER.map((row) => (
-            <li
-              key={row.id}
-              className="flex items-start justify-between gap-3 border-b border-black/[0.06] px-4 py-2.5 last:border-0"
-            >
-              <span className="min-w-0 font-mono text-[12px] leading-5 tracking-extra-tight text-black/70">
-                {row.body}
-              </span>
-              <span
-                className={cn(
-                  "shrink-0 font-mono text-[11px] tabular-nums tracking-extra-tight",
-                  row.tone === "block" ? "text-red-700" : "text-black/40",
-                )}
-              >
-                {row.receipt}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <div className="border-t border-red-600/40 bg-white px-4 py-3 font-mono text-[12px] tracking-extra-tight text-red-700">
-          unknown egress · run blocked by policy.
         </div>
       </Panel>
     </div>

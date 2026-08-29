@@ -26,7 +26,7 @@ export function RunWindow({
             "radial-gradient(ellipse 90% 70% at 50% 0%, rgba(255,255,255,0.72), transparent 62%)",
         }}
       >
-        <div className="relative flex h-[552px] flex-col overflow-hidden rounded-[12px] border border-black/[0.08] bg-white font-sans shadow-[0_1px_0_rgba(0,0,0,0.04),0_24px_48px_rgba(0,0,0,0.08)] max-xl:h-auto max-xl:min-h-[420px] max-xl:overflow-visible">
+        <div className="relative flex h-[552px] flex-col overflow-hidden rounded-[12px] border border-black/[0.08] bg-white font-sans shadow-[0_1px_0_rgba(0,0,0,0.04),0_24px_48px_rgba(0,0,0,0.08)] max-md:h-[800px]">
           {children}
           <div
             className="pointer-events-none absolute inset-0 bg-[#f7f7f5]"
@@ -131,11 +131,11 @@ export function InnerSplit({
   right: ReactNode;
 }) {
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)] overflow-hidden max-xl:flex-none max-xl:grid-cols-1 max-xl:overflow-visible">
-      <div className="min-h-0 min-w-0 overflow-hidden border-black/[0.08] px-5 py-4 xl:border-r max-xl:overflow-visible max-xl:border-b max-xl:px-4 max-xl:py-3.5">
+    <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)] overflow-hidden max-md:grid-cols-1 max-md:overflow-y-auto">
+      <div className="min-h-0 min-w-0 overflow-hidden border-black/[0.08] px-5 py-4 max-md:border-b max-md:px-4 max-md:py-3.5 md:border-r">
         {left}
       </div>
-      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden p-3 max-xl:overflow-visible max-xl:p-2.5">{right}</div>
+      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden p-3 max-md:p-2.5">{right}</div>
     </div>
   );
 }

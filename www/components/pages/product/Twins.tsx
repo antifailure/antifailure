@@ -136,7 +136,7 @@ function railLabel(name: LifecycleState): string[] {
 
 export function TwinsPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         eyebrow="Twin Orchestrator"
         title="A disposable production twin for every risky change."
@@ -200,6 +200,7 @@ export function TwinsPage() {
 
       <PageSection>
         <Split
+          reverse
           visual={
             <Panel className="rounded-[12px] bg-white">
               <div className="flex items-center justify-between gap-3 px-5 py-3">
@@ -240,7 +241,7 @@ export function TwinsPage() {
             Every environment has a TTL, a cost ceiling, an independent cleanup path, and a verifiable
             destruction record. Incomplete cleanup policies fail closed. Nothing outlives the run.
           </p>
-          <div className="mt-8 grid grid-cols-2 gap-x-8 gap-y-5 max-xl:grid-cols-1">
+          <div className="mt-8 grid grid-cols-2 gap-x-8 gap-y-5 max-sm:grid-cols-1">
             <div>
               <MonoLabel className="uppercase tracking-[0.14em]">ttl</MonoLabel>
               <p className="mt-1.5 text-[15px] leading-6 tracking-extra-tight text-black">
@@ -281,7 +282,7 @@ function LifecycleRail() {
       </div>
       <Hairline />
       <div className="relative overflow-x-auto">
-        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white xl:hidden" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white md:hidden" />
         <ol className="flex min-w-[920px] px-3 pt-6 pb-4">
           {LIFECYCLE_STATES.map((name, i) => {
             const terminal = name === "DESTROYED";
@@ -316,11 +317,11 @@ function LifecycleRail() {
         </ol>
       </div>
       <Hairline />
-      <div className="grid grid-cols-4 max-xl:grid-cols-2 max-md:grid-cols-1">
+      <div className="grid grid-cols-4 max-lg:grid-cols-2 max-md:grid-cols-1">
         {PHASES.map((phase, i) => (
           <div key={phase.name} className="relative px-5 py-5">
             {i < PHASES.length - 1 ? (
-              <Hairline vertical className="absolute top-5 right-0 bottom-5 hidden h-auto xl:block" />
+              <Hairline vertical className="absolute top-5 right-0 bottom-5 hidden h-auto lg:block" />
             ) : null}
             <MonoLabel className="uppercase tracking-[0.14em]">{phase.name}</MonoLabel>
             <div className="mt-2 font-mono text-[11px] tracking-extra-tight text-black tabular-nums">
@@ -342,23 +343,27 @@ function IsolationSpec() {
   return (
     <Panel className="mt-14 rounded-[12px] bg-white max-md:mt-10">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
-        <div className="flex min-w-0 items-center gap-4">
+        <div className="flex items-center gap-4">
           <MonoLabel className="uppercase tracking-[0.14em]">isolation model</MonoLabel>
           <Node label="run_08f2" lit />
         </div>
         <StatusPill tone="BLOCK">fail closed</StatusPill>
       </div>
       <Hairline />
-      <div className="grid grid-cols-5 max-xl:grid-cols-1">
+      <div className="grid grid-cols-5 max-xl:grid-cols-3 max-md:grid-cols-1">
         {ISOLATION.map((item, i) => {
           const lastInRowXl = (i + 1) % 5 === 0 || i === ISOLATION.length - 1;
+          const lastInRowLg = (i + 1) % 3 === 0 || i === ISOLATION.length - 1;
           return (
             <div
               key={item.title}
-              className="relative px-5 py-6 max-xl:border-t max-xl:border-black/10 max-xl:first:border-t-0 xl:border-black/10 xl:[&:nth-child(n+6)]:border-t"
+              className="relative px-5 py-6 max-xl:border-black/10 max-md:border-t md:max-xl:[&:nth-child(n+4)]:border-t xl:[&:nth-child(n+6)]:border-t xl:border-black/10"
             >
               {!lastInRowXl ? (
                 <Hairline vertical className="absolute top-5 right-0 bottom-5 hidden h-auto xl:block" />
+              ) : null}
+              {!lastInRowLg ? (
+                <Hairline vertical className="absolute top-5 right-0 bottom-5 hidden h-auto max-xl:block max-md:hidden" />
               ) : null}
               <MonoLabel className="uppercase tracking-[0.14em]">{item.kicker}</MonoLabel>
               <h3 className="mt-3 text-[16px] leading-snug tracking-extra-tight text-black">{item.title}</h3>

@@ -31,7 +31,7 @@ export function HeroFilm() {
         <div className="hero-scan pointer-events-none absolute inset-0" />
       </div>
       <Image
-        className="relative left-1/2 hidden w-[min(752px,180%)] max-w-none -translate-x-1/2 max-sm:block"
+        className="relative left-[40%] hidden w-188 max-w-none -translate-x-1/2 max-sm:block"
         src="/home/hero-aurora.png"
         width={752}
         height={326}

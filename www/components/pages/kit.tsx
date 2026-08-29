@@ -7,24 +7,10 @@ import { SectionLabel } from "@/components/layout/SectionLabel";
 import { Cta } from "@/components/home/Cta";
 import { cn } from "@/lib/cn";
 
-export function PageShell({
-  children,
-  inset = false,
-}: {
-  children: ReactNode;
-  inset?: boolean;
-}) {
+export function PageShell({ children }: { children: ReactNode }) {
   return (
     <SiteLayout overlay={false}>
-      <div
-        className={
-          inset
-            ? "mx-[10%] [&_.page-measure]:!max-w-none [&_.page-measure]:!px-0"
-            : undefined
-        }
-      >
-        {children}
-      </div>
+      {children}
       <Cta />
     </SiteLayout>
   );
@@ -47,7 +33,7 @@ export function PageHero({
 }) {
   return (
     <section className="pt-28 pb-16 safe-paddings max-lg:pt-16 max-md:pt-12 max-md:pb-10">
-      <Container size="1600" className="page-measure">
+      <Container size="1600">
         <SectionLabel>{eyebrow}</SectionLabel>
         <h1 className="mt-5 max-w-[1100px] text-[64px] leading-dense tracking-tighter max-xl:max-w-[920px] max-xl:text-[52px] max-lg:text-[44px] max-md:text-[34px] max-sm:text-[32px]">
           {title}
@@ -55,7 +41,7 @@ export function PageHero({
         <p className="mt-8 max-w-[640px] text-[20px] leading-snug tracking-extra-tight text-gray-new-40 max-md:text-[17px]">
           {lead}
         </p>
-        <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
+        <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-sm:flex-col max-sm:gap-y-3">
           {actions ?? (
             <>
               <Button href="/signup" theme="filled">
@@ -70,11 +56,11 @@ export function PageHero({
         {visual ? (
           framed ? (
             <div className="relative mt-16 max-md:mt-12">
-              <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white md:max-xl:overflow-visible">
+              <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">
                 {visual}
               </div>
               <div
-                className="pointer-events-none absolute inset-0 rounded-[12px] max-xl:hidden"
+                className="pointer-events-none absolute inset-0 rounded-[12px]"
                 style={{
                   background:
                     "linear-gradient(to right, transparent 72%, #f7f7f5 100%), linear-gradient(to bottom, transparent 78%, #f7f7f5 100%)",
@@ -110,9 +96,7 @@ export function PageSection({
         className,
       )}
     >
-      <Container size="1600" className="page-measure">
-        {children}
-      </Container>
+      <Container size="1600">{children}</Container>
     </section>
   );
 }
@@ -144,7 +128,7 @@ export function FeatureGrid({
 }) {
   return (
     <div className="relative mt-16 max-md:mt-10">
-      <ul className="grid grid-cols-3 gap-x-16 gap-y-14 max-xl:grid-cols-2 max-xl:gap-x-10 max-md:grid-cols-1 max-md:gap-y-8">
+      <ul className="grid grid-cols-3 gap-x-16 gap-y-14 max-lg:grid-cols-2 max-md:grid-cols-1 max-md:gap-y-8">
         {items.map((item) => (
           <li key={item.title} className="min-w-0">
             <svg viewBox="0 0 16 16" className="mb-4 size-4 text-black" fill="none" aria-hidden>
@@ -157,8 +141,8 @@ export function FeatureGrid({
           </li>
         ))}
       </ul>
-      <span className="pointer-events-none absolute inset-y-0 left-[calc(33.333%-32px)] w-px bg-black/12 max-xl:left-1/2 max-md:hidden" />
-      <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-xl:hidden" />
+      <span className="pointer-events-none absolute inset-y-0 left-[calc(33.333%-32px)] w-px bg-black/12 max-lg:left-1/2 max-md:hidden" />
+      <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-lg:hidden" />
     </div>
   );
 }
@@ -175,11 +159,11 @@ export function Split({
   return (
     <div
       className={cn(
-        "grid grid-cols-2 items-center gap-x-16 gap-y-10 max-xl:grid-cols-1",
-        reverse && "[&>*:first-child]:max-xl:order-2",
+        "grid grid-cols-2 items-center gap-x-16 gap-y-10 max-lg:grid-cols-1",
+        reverse && "[&>*:first-child]:max-lg:order-2",
       )}
     >
-      <div className={cn("min-w-0", reverse && "xl:order-2")}>{children}</div>
+      <div className={cn("min-w-0", reverse && "lg:order-2")}>{children}</div>
       <div className="min-w-0">{visual}</div>
     </div>
   );
@@ -204,13 +188,11 @@ export function SpecTable({ rows }: { rows: [string, string][] }) {
       <table className="w-full text-left">
         <tbody>
           {rows.map(([k, v]) => (
-            <tr key={k} className="border-b border-black/[0.08] last:border-0 max-md:flex max-md:flex-col">
-              <th className="w-[38%] px-5 py-4 text-[14px] font-medium tracking-extra-tight text-black max-md:w-full max-md:pb-0">
+            <tr key={k} className="border-b border-black/[0.08] last:border-0">
+              <th className="w-[38%] px-5 py-4 text-[14px] font-medium tracking-extra-tight text-black">
                 {k}
               </th>
-              <td className="px-5 py-4 text-[14px] leading-6 tracking-extra-tight text-gray-new-40 max-md:pt-1">
-                {v}
-              </td>
+              <td className="px-5 py-4 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">{v}</td>
             </tr>
           ))}
         </tbody>
@@ -284,7 +266,7 @@ export function RelatedGrid({
       <div className="mb-8">
         <SectionLabel>Keep reading</SectionLabel>
       </div>
-      <ul className="grid grid-cols-3 gap-x-16 gap-y-10 max-xl:grid-cols-2 max-xl:gap-x-10 max-md:grid-cols-1">
+      <ul className="grid grid-cols-3 gap-x-16 gap-y-10 max-lg:grid-cols-2 max-md:grid-cols-1">
         {items.map((item) => (
           <li key={item.href}>
             <Link href={item.href} className="group block min-w-0">
@@ -300,15 +282,6 @@ export function RelatedGrid({
         ))}
       </ul>
     </PageSection>
-  );
-}
-
-export function CompactSwap({ desktop, compact }: { desktop: ReactNode; compact: ReactNode }) {
-  return (
-    <>
-      <div className="max-xl:hidden">{desktop}</div>
-      <div className="hidden max-xl:block">{compact}</div>
-    </>
   );
 }
 

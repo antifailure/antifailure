@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "./Button";
 import { Container } from "./Container";
 import { Logo } from "./Logo";
@@ -10,31 +10,6 @@ import { cn } from "@/lib/cn";
 import { FOOTER_MENUS, GITHUB_URL, HEADER_MENUS } from "@/lib/nav";
 import { HeaderMini, ProductMiniStyles } from "@/components/home/visuals/headerMinis";
 import { Chevron, DiscordIcon, GitHubIcon } from "../icons";
-
-function HeaderLink({
-  href,
-  className,
-  onClick,
-  children,
-}: {
-  href: string;
-  className?: string;
-  onClick?: () => void;
-  children: ReactNode;
-}) {
-  if (href === "/docs" || href.startsWith("/docs/")) {
-    return (
-      <a href={href} className={className} onClick={onClick}>
-        {children}
-      </a>
-    );
-  }
-  return (
-    <Link href={href} className={className} onClick={onClick}>
-      {children}
-    </Link>
-  );
-}
 
 export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
   const pathname = usePathname();
@@ -82,15 +57,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
       return;
     }
     const panel = panelRefs.current[open];
-    if (!panel) {
-      setHeight(0);
-      return;
-    }
-    const measure = () => setHeight(panel.scrollHeight);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(panel);
-    return () => ro.disconnect();
+    setHeight(panel?.scrollHeight ?? 0);
   }, [open]);
 
   useEffect(() => {
@@ -108,28 +75,19 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
     };
   }, [mobile]);
 
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1280px)");
-    const onChange = () => {
-      if (mq.matches) closeNow();
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, [closeNow]);
-
   return (
-    <div className={cn("sticky top-0 z-50", overlay && "-mb-16 max-xl:-mb-14")}>
+    <div className={cn("sticky top-0 z-50", overlay && "-mb-16")}>
       <ProductMiniStyles />
       <header
         className={cn(
-          "header relative z-50 flex h-16 w-full items-center bg-white max-xl:h-14",
+          "header relative z-50 flex h-16 w-full items-center bg-white max-lg:h-14",
           "after:absolute after:right-0 after:bottom-0 after:left-0 after:h-px after:bg-gray-new-90",
         )}
       >
         <Container className="static z-10 flex w-full items-center justify-between max-md:px-8 max-sm:px-5" size="1920">
           <div className="flex items-center gap-x-[92px] xl:gap-x-10">
             <Logo />
-            <nav className="group/main-nav max-xl:hidden" aria-label="Main">
+            <nav className="group/main-nav max-lg:hidden" aria-label="Main">
               <ul className="flex items-center">
                 {HEADER_MENUS.map((menu, index) => {
                   const hasSubmenu = Boolean(menu.sections?.length);
@@ -142,7 +100,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                       onMouseLeave={leaveMenu}
                     >
                       {menu.href && !hasSubmenu ? (
-                        <HeaderLink
+                        <Link
                           href={menu.href}
                           className={cn(
                             "relative flex h-16 items-center gap-x-1 rounded-sm px-3.5 text-[15px] font-normal leading-normal tracking-snug whitespace-pre text-black/70 transition-colors duration-200 hover:text-black xl:px-2.5",
@@ -151,7 +109,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                           )}
                         >
                           {menu.text}
-                        </HeaderLink>
+                        </Link>
                       ) : (
                         <button
                           type="button"
@@ -180,7 +138,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
             </nav>
           </div>
 
-          <div className="flex items-center gap-x-8 max-xl:hidden">
+          <div className="flex items-center gap-x-8 max-lg:hidden">
             <div className="flex items-center gap-x-6">
               <a
                 href={GITHUB_URL}
@@ -211,7 +169,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
 
           <button
             type="button"
-            className="hidden size-11 items-center justify-center max-xl:flex"
+            className="hidden size-8 items-center justify-center max-lg:flex"
             aria-label={mobile ? "Close menu" : "Open menu"}
             aria-expanded={mobile}
             onClick={() => setMobile((v) => !v)}
@@ -226,12 +184,12 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
 
       <div
         className={cn(
-          "main-navigation-submenu absolute top-full left-0 z-40 w-full overflow-hidden border-b border-gray-new-90 bg-white transition-[height] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] max-xl:hidden",
+          "main-navigation-submenu absolute top-full left-0 z-40 w-full overflow-hidden border-b border-gray-new-90 bg-white transition-[height] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] max-lg:hidden",
           open === null ? "pointer-events-none border-transparent" : "pointer-events-auto",
         )}
         style={{ height: `${height}px` }}
         onMouseEnter={clearClose}
-        onMouseLeave={leaveMenu}
+        onMouseLeave={() => setOpen(null)}
       >
         <div className="relative w-full">
           {HEADER_MENUS.map((menu, index) => {
@@ -251,38 +209,36 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
               >
                 {sections.length > 0 && (
                   <Container
-                    className="flex w-full items-start justify-between gap-x-12 overflow-visible pt-8 pb-10 xl:gap-x-8"
+                    className="flex w-full items-start justify-between gap-x-12 overflow-visible pt-7 pb-10 xl:gap-x-8"
                     size="1920"
                   >
                     <ul className="flex flex-1 gap-x-[128px] pl-[195px] xl:gap-x-14 xl:pl-[143px] max-xl:pl-0">
                       {sections.map((section) => (
-                        <li key={section.title} className={cn(menu.text === "Product" ? "w-[320px] min-w-[280px]" : "min-w-[220px]")}>
+                        <li key={section.title} className={cn(menu.text === "Product" ? "min-w-[280px]" : "min-w-[220px]")}>
                           <span className="mb-6 block text-[10px] font-medium uppercase leading-none tracking-snug text-gray-new-50">
                             {section.title}
                           </span>
-                          <ul className={cn("flex flex-col", menu.text === "Product" ? "gap-y-3" : "gap-y-3.5")}>
+                          <ul className="flex flex-col gap-y-3.5">
                             {section.items.map((item) => {
                               const withMini = menu.text === "Product";
                               return (
                               <li key={item.href}>
-                                <HeaderLink
+                                <Link
                                   href={item.href}
                                   className={cn(
-                                    "main-navigation-submenu-link group block text-[15px] leading-none tracking-extra-tight text-black transition-colors duration-200",
-                                    withMini
-                                      ? "flex w-full items-center gap-3.5 rounded-[4px] py-0.5 pr-3 hover:bg-black/[0.03]"
-                                      : "hover:text-black/60",
+                                    "main-navigation-submenu-link group block text-[15px] leading-none tracking-extra-tight text-black hover:text-black/60",
+                                    withMini && "flex items-center gap-3",
                                   )}
                                   onClick={closeNow}
                                 >
                                   {withMini ? <HeaderMini title={item.title} /> : null}
-                                  <span className="min-w-0">
+                                  <span className="min-w-0 pr-2">
                                     {item.title}
                                     <span className="mt-1.5 block text-[13px] leading-snug text-gray-new-50">
                                       {item.description}
                                     </span>
                                   </span>
-                                </HeaderLink>
+                                </Link>
                               </li>
                               );
                             })}
@@ -320,21 +276,21 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
       </div>
 
       {mobile ? (
-        <div className="fixed inset-0 top-14 z-40 hidden overflow-y-auto bg-white px-5 pt-6 pb-[max(4rem,env(safe-area-inset-bottom))] max-xl:block">
+        <div className="fixed inset-0 top-14 z-40 hidden overflow-y-auto bg-white px-5 pt-6 pb-16 max-lg:block">
           <div className="flex flex-col">
             {HEADER_MENUS.map((menu, index) => {
               const hasSubmenu = Boolean(menu.sections?.length);
               const expanded = mobileSection === index;
               if (!hasSubmenu && menu.href) {
                 return (
-                  <HeaderLink
+                  <Link
                     key={menu.text}
                     href={menu.href}
                     className="border-b border-gray-new-90 py-4 text-[18px] tracking-tighter"
                     onClick={closeNow}
                   >
                     {menu.text}
-                  </HeaderLink>
+                  </Link>
                 );
               }
               return (
@@ -357,7 +313,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                           </div>
                           <div className="flex flex-col gap-3">
                             {section.items.map((item) => (
-                              <HeaderLink
+                              <Link
                                 key={item.href}
                                 href={item.href}
                                 className="text-[16px] tracking-extra-tight"
@@ -365,7 +321,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                               >
                                 {item.title}
                                 <span className="mt-0.5 block text-[13px] text-gray-new-50">{item.description}</span>
-                              </HeaderLink>
+                              </Link>
                             ))}
                           </div>
                         </div>

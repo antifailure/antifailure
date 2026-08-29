@@ -225,7 +225,7 @@ function PrCheckChrome() {
 
 export function ReportPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         eyebrow="Safety Report and Release Gate"
         title="Pass, warning, or block. With evidence."
@@ -246,7 +246,7 @@ export function ReportPage() {
           “Error rate increased” is insufficient. The report connects the change, the behavior, the
           affected workflow, the evidence, and the safer pattern — then marks the check.
         </p>
-        <div className="mt-12 grid grid-cols-3 gap-5 max-xl:grid-cols-1">
+        <div className="mt-12 grid grid-cols-3 gap-5 max-lg:grid-cols-1">
           {GATES.map((gate) => (
             <GateCard key={gate.pr} {...gate} />
           ))}
@@ -262,7 +262,7 @@ export function ReportPage() {
           Reports that are noisy get ignored. Baseline comparisons, expected-difference declarations, and
           severity policies keep the gate useful. Enforce them organization-wide.
         </p>
-        <div className="mt-12 grid grid-cols-2 gap-5 max-xl:grid-cols-1">
+        <div className="mt-12 grid grid-cols-2 gap-5 max-md:grid-cols-1">
           {POLICIES.map((policy) => (
             <Panel key={policy.rule} className="rounded-[12px] bg-white">
               <div className="flex items-center justify-between gap-3 px-5 py-3">

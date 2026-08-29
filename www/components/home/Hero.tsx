@@ -6,7 +6,7 @@ import { HeroServices } from "./HeroServices";
 
 export function Hero() {
   return (
-    <section className="hero relative mt-16 safe-paddings max-xl:mt-14">
+    <section className="hero relative mt-16 safe-paddings max-lg:mt-14">
       <Container className="relative z-30 pt-96 pb-10 max-xl:pt-54 max-lg:pt-52 max-md:pt-53 max-md:pb-8" size="1600">
         <SectionLabel>Pre-production deployment safety</SectionLabel>
         <h1 className="mt-5 max-w-[1240px] text-[68px] leading-dense tracking-tighter max-xl:max-w-[1100px] max-xl:text-[60px] max-lg:max-w-[920px] max-lg:text-[48px] max-md:mt-4 max-md:max-w-full max-md:text-[42px] max-sm:text-[32px]">
@@ -16,7 +16,7 @@ export function Hero() {
           <br className="max-xl:hidden" />{" "}
           on a disposable production twin.
         </h1>
-        <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-lg:gap-x-4 max-md:flex-col max-md:gap-y-3 max-md:[&_a]:w-full">
+        <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-lg:gap-x-4">
           <Button href="/signup" theme="filled">
             Get started
           </Button>

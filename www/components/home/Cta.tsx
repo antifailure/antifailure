@@ -18,7 +18,7 @@ import { CtaBackdrop } from "./visuals/CtaBackdrop";
  */
 export function Cta() {
   return (
-    <section className="cta relative isolate overflow-hidden bg-black safe-paddings">
+    <section className="cta relative isolate overflow-hidden bg-[#0d0e0f] safe-paddings">
       <CtaBackdrop className="pointer-events-none absolute inset-0 -z-10 h-full w-full" />
 
       <Container
@@ -43,7 +43,7 @@ export function Cta() {
               variant is a fixed percentage of the viewport, which truncated a
               fifty character command down to "curl -fsS…". */}
           <div className="flex shrink-0 flex-col items-end gap-y-4 max-lg:w-full max-lg:items-stretch">
-            <div className="flex items-center gap-4 max-md:flex-col max-md:items-stretch max-md:gap-y-3 max-md:[&_a]:w-full">
+            <div className="flex items-center gap-4 max-md:flex-col max-md:items-stretch max-md:gap-y-3">
               <Button href="/signup" theme="white">
                 Get started
               </Button>

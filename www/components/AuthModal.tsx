@@ -89,7 +89,7 @@ export function AuthModal({
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4 max-sm:px-3 max-sm:py-6"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4"
       onMouseDown={(e) => {
         // mousedown rather than click, so a drag that starts inside the panel
         // and ends outside it does not dismiss the dialog mid-selection.
@@ -101,7 +101,7 @@ export function AuthModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="waitlist-title"
-        className="w-full max-w-[400px] rounded-2xl border border-black/10 bg-white p-6 shadow-2xl max-sm:max-h-[min(90dvh,100%)] max-sm:overflow-y-auto"
+        className="w-full max-w-[400px] rounded-2xl border border-black/10 bg-white p-6 shadow-2xl"
       >
         {done ? (
           <>

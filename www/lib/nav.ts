@@ -154,71 +154,95 @@ export const HEADER_MENUS: HeaderMenu[] = [
       title: "Give us one nervous deploy",
       description:
         "The design-partner offer is a real upcoming migration, not a generic demo. We show what staging missed.",
-      href: "/signup",
+      href: "/design-partners",
       cta: "Design-partner offer",
+    },
+  },
+  {
+    text: "Resources",
+    sections: [
+      {
+        title: "Learn",
+        items: [
+          { title: "Docs", href: "/docs", description: "How a twin run works" },
+          {
+            title: "Security",
+            href: "/security",
+            description: "Fail closed. Data stays in your boundary",
+          },
+          {
+            title: "Open source",
+            href: "/open-source",
+            description: "Customer agent, adapters, cleanup",
+          },
+          {
+            title: "Exploratory users",
+            href: "/product/exploratory-users",
+            description: "Exploratory users inside Workload Studio",
+          },
+        ],
+      },
+      {
+        title: "Company",
+        items: [
+          { title: "About", href: "/company", description: "Why this company exists" },
+          { title: "Pricing", href: "/pricing", description: "Community, team, and enterprise" },
+          {
+            title: "Design partners",
+            href: "/design-partners",
+            description: "One real risky migration",
+          },
+          { title: "Privacy", href: "/privacy", description: "What we collect and what we never take" },
+        ],
+      },
+    ],
+    featured: {
+      title: "Fail closed by default",
+      description:
+        "Unknown egress, unresolved secrets, or incomplete cleanup blocks the run. Convenience does not override containment.",
+      href: "/security",
+      cta: "Read the trust model",
     },
   },
   { text: "Docs", href: "/docs" },
   { text: "Pricing", href: "/pricing" },
 ];
 
-export const GITHUB_URL = "https://github.com/antifailure/antifailure";
-
 export const FOOTER_MENUS = [
-  {
-    heading: "Product",
-    items: [
-      { text: "Overview", href: "/product" },
-      { text: "Isolated Twin", href: "/product/twins" },
-      { text: "Safe State", href: "/product/safe-state" },
-      { text: "Workload Studio", href: "/product/workload" },
-      { text: "Pricing", href: "/pricing" },
-      { text: "Architecture", href: "/product/architecture" },
-    ],
-  },
-  {
-    heading: "Features",
-    items: [
-      { text: "Side-Effect Firewall", href: "/product/firewall" },
-      { text: "Migration Safety", href: "/product/migrations" },
-      { text: "Safety Report", href: "/product/report" },
-      { text: "Change Intelligence", href: "/product/change-intelligence" },
-      { text: "Differential Oracle", href: "/product/oracle" },
-      { text: "Fidelity Graph", href: "/product/fidelity" },
-      { text: "Exploratory users", href: "/product/exploratory-users" },
-      { text: "Insights", href: "/docs/concepts/insights" },
-    ],
-  },
   {
     heading: "Company",
     items: [
-      { text: "Solutions", href: "/solutions" },
-      { text: "B2B SaaS", href: "/solutions/saas" },
-      { text: "Fintech", href: "/solutions/fintech" },
-      { text: "E-commerce", href: "/solutions/ecommerce" },
-      { text: "Marketplaces", href: "/solutions/marketplaces" },
-      { text: "Developer tools", href: "/solutions/devtools" },
+      { text: "About", href: "/company" },
+      { text: "Pricing", href: "/pricing" },
+      { text: "Security", href: "/security" },
+      { text: "Open source", href: "/open-source" },
+      { text: "Design partners", href: "/design-partners" },
       { text: "Sign up", href: "/signup" },
+    ],
+  },
+  {
+    heading: "Product",
+    items: [
+      { text: "Product overview", href: "/product" },
+      { text: "Isolated Twin", href: "/product/twins" },
+      { text: "Safe State", href: "/product/safe-state" },
+      { text: "Firewall", href: "/product/firewall" },
+      { text: "Workload Studio", href: "/product/workload" },
+      { text: "Migrations", href: "/product/migrations" },
+      { text: "Safety report", href: "/product/report" },
     ],
   },
   {
     heading: "Resources",
     items: [
-      { text: "Documentation", href: "/docs" },
+      { text: "Docs", href: "/docs" },
       { text: "Quickstart", href: "/docs/getting-started/quickstart" },
-      { text: "Manifest", href: "/docs/reference/manifest" },
-      { text: "Error reference", href: "/docs/reference/errors" },
-      { text: "Enterprise", href: "/docs/enterprise/licensing" },
-      { text: "Platform engineering", href: "/solutions/platform" },
-    ],
-  },
-  {
-    heading: "Connect",
-    items: [
-      { text: "GitHub", href: GITHUB_URL },
-      { text: "Discord", href: "/signup" },
-      { text: "Log in", href: "/signin" },
-      { text: "Sign up", href: "/signup" },
+      { text: "Architecture", href: "/product/architecture" },
+      { text: "Solutions", href: "/solutions" },
+      { text: "Privacy Notice", href: "/privacy" },
+      { text: "Terms of Use", href: "/terms" },
     ],
   },
 ];
+
+export const GITHUB_URL = "https://github.com/antifailure/antifailure";

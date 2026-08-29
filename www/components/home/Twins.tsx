@@ -1,6 +1,6 @@
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
-import { TwinIdeStage } from "./visuals/TwinIdeStage";
+import { TwinLifecycleScene } from "./visuals/TwinLifecycleScene";
 
 const FEATURES = [
   {
@@ -46,7 +46,7 @@ const FEATURES = [
 export function Twins() {
   return (
     <section
-      className="relative scroll-mt-[60px] overflow-hidden pt-8 pb-4 safe-paddings max-xl:pt-6 max-xl:pb-4 max-lg:scroll-mt-0 max-lg:pt-5 max-lg:pb-3 max-md:pt-4 max-md:pb-2"
+      className="relative scroll-mt-[60px] overflow-hidden pt-40 pb-60 safe-paddings max-xl:py-[136px] max-lg:scroll-mt-0 max-lg:pt-20 max-lg:pb-[104px] max-md:pt-16 max-md:pb-20"
       id="twins"
     >
       <Container
@@ -58,10 +58,10 @@ export function Twins() {
             icon="twins"
             title="<strong>A disposable production twin.</strong> Build the candidate, restore safe state, contain side effects, and destroy everything when the report is done."
           />
-          <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
-            <TwinIdeStage />
+          <div className="mt-14 max-xl:mt-12 max-lg:mt-10">
+            <TwinLifecycleScene />
           </div>
-          <ul className="mt-10 grid grid-cols-3 gap-x-16 max-xl:mt-8 max-xl:grid-cols-1 max-xl:gap-y-7 max-lg:mt-10">
+          <ul className="mt-10 grid grid-cols-3 gap-x-16 max-xl:mt-8 max-lg:mt-10 max-lg:gap-x-8 max-md:mt-8 max-md:grid-cols-1 max-md:gap-y-7">
             {FEATURES.map((item) => (
               <li key={item.title}>
                 <div className="text-black">{item.icon}</div>

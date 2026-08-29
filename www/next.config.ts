@@ -1,29 +1,12 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 
-const isDev = process.env.NODE_ENV !== "production";
-
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: path.resolve(__dirname),
   turbopack: {
     root: path.resolve(__dirname),
   },
-
-  // Local only. Production does not use this: deploy.yml builds the Starlight
-  // site separately and assemble.sh places it at /docs. `next dev` has no such
-  // step, so without a proxy the Docs link 404s. Omitted from the export build
-  // because `output: "export"` refuses rewrites.
-  ...(isDev
-    ? {
-        async rewrites() {
-          return [
-            { source: "/docs", destination: "http://127.0.0.1:4321/docs" },
-            { source: "/docs/:path*", destination: "http://127.0.0.1:4321/docs/:path*" },
-          ];
-        },
-      }
-    : {}),
 
   // The site is served as static files by Azure Static Web Apps, alongside the
   // documentation build at /docs and the installer at /install.sh. Nothing on

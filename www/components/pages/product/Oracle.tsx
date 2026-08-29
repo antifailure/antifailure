@@ -63,8 +63,8 @@ const CAUSAL_PATH = ["failure", "call", "query", "lock", "migration", "effect"] 
 function CompareBoard() {
   return (
     <Panel className="rounded-[12px] bg-white">
-      <div className="grid grid-cols-2 max-xl:grid-cols-1">
-        <div className="border-r border-black/10 px-6 py-5 max-xl:border-r-0 max-xl:border-b">
+      <div className="grid grid-cols-2 max-md:grid-cols-1">
+        <div className="border-r border-black/10 px-6 py-5 max-md:border-r-0 max-md:border-b">
           <MonoLabel>BASELINE</MonoLabel>
           <div className="mt-4 flex items-end justify-between gap-4">
             <div>
@@ -105,22 +105,22 @@ function CompareBoard() {
 
       <Hairline className="block" />
 
-      <div className="grid grid-cols-[minmax(0,1.4fr)_1fr_1fr_minmax(72px,0.7fr)_auto] items-center gap-x-3 px-6 py-2.5 max-xl:grid-cols-[1fr_1fr_auto] max-md:hidden">
+      <div className="grid grid-cols-[minmax(0,1.4fr)_1fr_1fr_minmax(72px,0.7fr)_auto] items-center gap-x-3 px-6 py-2.5 max-md:grid-cols-[1fr_1fr_auto]">
         <MonoLabel>signal</MonoLabel>
-        <MonoLabel className="max-xl:hidden">baseline</MonoLabel>
+        <MonoLabel className="max-md:hidden">baseline</MonoLabel>
         <MonoLabel>candidate</MonoLabel>
-        <MonoLabel className="max-xl:hidden">delta</MonoLabel>
+        <MonoLabel className="max-md:hidden">delta</MonoLabel>
         <MonoLabel className="text-right">gate</MonoLabel>
       </div>
 
-      <Hairline className="block max-md:hidden" />
+      <Hairline className="block" />
 
       <ul>
         {COMPARE_ROWS.map((row) => (
           <li
             key={row.signal}
             className={cn(
-              "grid grid-cols-[minmax(0,1.4fr)_1fr_1fr_minmax(72px,0.7fr)_auto] items-center gap-x-3 border-b border-black/8 px-6 py-3 last:border-0 max-xl:grid-cols-[1fr_1fr_auto] max-md:grid-cols-1 max-md:gap-y-1",
+              "grid grid-cols-[minmax(0,1.4fr)_1fr_1fr_minmax(72px,0.7fr)_auto] items-center gap-x-3 border-b border-black/8 px-6 py-3 last:border-0 max-md:grid-cols-[1fr_1fr_auto]",
               row.declared && "bg-[#33bf00]/8",
             )}
           >
@@ -130,7 +130,7 @@ function CompareBoard() {
                 <div className="mt-0.5 font-mono text-[10px] tracking-extra-tight text-black/35">{row.unit}</div>
               ) : null}
             </div>
-            <div className="font-mono text-[13px] tabular-nums tracking-extra-tight text-black/45 max-xl:hidden">
+            <div className="font-mono text-[13px] tabular-nums tracking-extra-tight text-black/45 max-md:hidden">
               {row.baseline}
             </div>
             <div
@@ -143,7 +143,7 @@ function CompareBoard() {
             </div>
             <div
               className={cn(
-                "font-mono text-[12px] tabular-nums tracking-extra-tight max-xl:hidden",
+                "font-mono text-[12px] tabular-nums tracking-extra-tight max-md:hidden",
                 row.declared ? "text-[#0a7a56]" : row.tone === "BLOCK" ? "text-red-700" : "text-black/35",
               )}
             >
@@ -183,8 +183,8 @@ function LinkageTrace() {
 
       <div className="flex flex-wrap">
         {LINKAGE.map((field, i) => (
-          <div key={field.id} className="flex min-w-[140px] flex-1 items-stretch max-xl:min-w-[50%] max-md:min-w-full">
-            {i > 0 ? <Hairline vertical className="max-xl:hidden" /> : null}
+          <div key={field.id} className="flex min-w-[140px] flex-1 items-stretch max-md:min-w-[50%]">
+            {i > 0 ? <Hairline vertical className="max-md:hidden" /> : null}
             <div
               className={cn(
                 "min-w-0 flex-1 px-5 py-4",
@@ -220,7 +220,7 @@ function LinkageTrace() {
 
 export function OraclePage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         eyebrow="Differential Oracle"
         title="Same state. Same behavior. Two versions."

@@ -5,7 +5,7 @@ import { WorkloadIdeStage } from "./visuals/WorkloadIdeStage";
 export function Workload() {
   return (
     <section
-      className="relative scroll-mt-[60px] overflow-hidden pt-12 pb-16 safe-paddings max-xl:pt-10 max-xl:pb-14 max-lg:scroll-mt-0 max-lg:pt-8 max-lg:pb-12 max-md:pt-8 max-md:pb-12"
+      className="relative scroll-mt-[60px] overflow-hidden pt-40 pb-32 safe-paddings max-xl:pt-[137px] max-xl:pb-24 max-lg:scroll-mt-0 max-lg:pt-[120px] max-lg:pb-20 max-md:pt-24 max-md:pb-16"
       id="workload"
     >
       <Container
@@ -14,7 +14,7 @@ export function Workload() {
       >
         <div className="min-w-0">
           <Heading title="<strong>Workload Studio for the change that matters.</strong> Observed patterns, deterministic journeys, and exploratory users. Not production traffic diverted." />
-          <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
+          <div className="relative mt-14 max-xl:mt-12 max-xl:-mr-8 max-lg:-mx-8 max-lg:mt-10 max-lg:px-0 max-md:mx-0 max-sm:mt-11">
             <WorkloadIdeStage />
           </div>
         </div>

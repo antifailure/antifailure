@@ -24,8 +24,6 @@ export default defineConfig({
       components: {
         Header: "./src/components/Header.astro",
         Footer: "./src/components/Footer.astro",
-        Pagination: "./src/components/Pagination.astro",
-        Search: "./src/components/Search.astro",
       },
       social: [
         {
@@ -34,6 +32,10 @@ export default defineConfig({
           href: "https://github.com/antifailure/antifailure",
         },
       ],
+      editLink: {
+        baseUrl:
+          "https://github.com/antifailure/antifailure/edit/main/docs/",
+      },
       lastUpdated: true,
       pagination: true,
       head: [

@@ -79,7 +79,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
     // a phone. This scrolls.
     <div className="grid min-h-dvh w-full bg-[#f7f7f5] lg:grid-cols-[2fr_3fr]">
       <AuthCover />
-      <div className="relative flex flex-col bg-[#f7f7f5] px-6 py-8 sm:px-8 lg:px-16 max-sm:pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className="relative flex flex-col bg-[#f7f7f5] px-6 py-8 sm:px-8 lg:px-16">
         <a
           href="/"
           className="inline-flex w-fit shrink-0 items-center gap-2 text-[13px] text-black/45 hover:text-black"
@@ -94,7 +94,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
           <div className="w-full max-w-[400px]">
             {done ? (
               <>
-                <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black max-sm:text-[28px]">
+                <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black">
                   {already ? "You are already on the list" : "You are on the list"}
                 </h1>
                 <p className="mt-4 text-[14px] leading-6 text-black/55">
@@ -122,7 +122,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
               </>
             ) : (
               <form onSubmit={submit} noValidate>
-                <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black max-sm:text-[28px]">
+                <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black">
                   Join the waitlist
                 </h1>
                 <p className="mt-4 text-[14px] leading-6 text-black/55">

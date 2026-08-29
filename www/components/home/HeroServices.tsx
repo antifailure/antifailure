@@ -59,15 +59,15 @@ export function HeroServices() {
   }, [trailingIndex]);
 
   return (
-    <ul className="grid grid-cols-5 grid-rows-[auto_auto] gap-x-16 gap-y-8 max-xl:-mx-5 max-xl:flex max-xl:snap-x max-xl:snap-mandatory max-xl:scroll-px-5 max-xl:gap-x-8 max-xl:gap-y-0 max-xl:overflow-x-auto max-xl:px-5 max-xl:no-scrollbars max-md:gap-x-6">
+    <ul className="grid grid-cols-5 grid-rows-[auto_auto] gap-x-16 gap-y-8 max-xl:gap-x-6 max-xl:gap-y-6 max-lg:-mx-5 max-lg:flex max-lg:snap-x max-lg:snap-mandatory max-lg:scroll-px-5 max-lg:gap-x-8 max-lg:gap-y-0 max-lg:overflow-x-auto max-lg:px-5 max-lg:no-scrollbars max-md:gap-x-6">
       {items.map((item, index) => {
         const isActive = autoPlayIndex === index || trailingIndex === index;
         return (
           <li
             key={item.title}
-            className="group row-span-2 grid w-full max-w-64 cursor-default grid-rows-subgrid content-start text-black max-xl:w-[min(16rem,78vw)] max-xl:shrink-0 max-xl:snap-start max-xl:grid-rows-[auto_auto] max-xl:gap-y-8 max-xl:self-start max-md:gap-y-6"
+            className="group row-span-2 grid w-full max-w-64 cursor-default grid-rows-subgrid content-start text-black max-lg:shrink-0 max-lg:snap-start max-lg:grid-rows-[auto_auto] max-lg:gap-y-8 max-lg:self-start max-md:gap-y-6"
           >
-            <p className="block max-w-sm text-base tracking-extra-tight text-pretty text-gray-new-50">
+            <p className="block max-w-sm text-base tracking-extra-tight text-pretty text-gray-new-50 max-xl:text-sm/normal max-lg:text-base">
               <span className="font-semibold text-black">{item.title}.</span> {item.description}
             </p>
             <span className="relative block aspect-[5/4] w-full overflow-hidden rounded-[12px] border border-black/[0.08] bg-white font-sans shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-[border-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] [@media(hover:hover)]:group-hover:border-black/[0.16]">

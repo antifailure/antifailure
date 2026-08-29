@@ -543,8 +543,8 @@ export function ReportScene() {
 
   return (
     <div ref={ref} className="pointer-events-none mt-16 select-none max-xl:mt-12 max-lg:mt-10" aria-hidden>
-      <div className="max-xl:overflow-visible" style={{ opacity: reduced ? 1 : vis }}>
-        <Panel className="min-h-[680px] min-w-[720px] max-xl:min-h-0 max-xl:min-w-0">
+      <div className="overflow-x-auto" style={{ opacity: reduced ? 1 : vis }}>
+        <Panel className="min-h-[680px] min-w-[720px]">
           <div className="flex items-center justify-between gap-4 px-3 py-2.5">
             <div className="flex min-w-0 items-center gap-2.5">
               <QueueChip className="text-black/70">pr/184</QueueChip>
@@ -563,9 +563,9 @@ export function ReportScene() {
             </div>
           </div>
           <Hairline />
-          <div className="grid min-h-[632px] grid-cols-[minmax(300px,0.92fr)_1.2fr] max-xl:min-h-0 max-xl:grid-cols-1">
+          <div className="grid min-h-[632px] grid-cols-[minmax(300px,0.92fr)_1.2fr]">
             <ChecksColumn t={playhead} blocked={blocked} running={running} />
-            <div className="relative flex flex-col border-l border-black/10 max-xl:border-t max-xl:border-l-0">
+            <div className="relative flex flex-col border-l border-black/10">
               <EvidenceColumn t={playhead} />
             </div>
           </div>

@@ -51,7 +51,7 @@ function MigrationStudio() {
 
 export function MigrationsPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         eyebrow="Migration Safety Engine"
         title="Catch exclusive locks before they take checkout down."
@@ -137,6 +137,7 @@ rolling rollback is unsafe`}
 
       <PageSection>
         <Split
+          reverse
           visual={
             <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">
               <LockChart state={1} />

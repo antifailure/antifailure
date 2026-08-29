@@ -263,9 +263,9 @@ function Tag({ color, label }: { color: string; label: string }) {
 export function FailClosedScene() {
   return (
     <div data-scene="fail-closed" className="pointer-events-none relative w-full select-none" aria-hidden>
-      <div className="relative aspect-[1024/477] w-full overflow-hidden max-xl:aspect-auto">
-        <div className="absolute inset-0 bg-[#EFEFF1] max-xl:hidden">
-          <div className="absolute inset-y-0 left-[38%] right-0 flex gap-3 pt-[11%] pr-6 pb-[8%] opacity-[0.82]">
+      <div className="relative aspect-[1024/477] w-full overflow-hidden max-md:aspect-auto max-md:min-h-[540px]">
+        <div className="absolute inset-0 bg-[#EFEFF1]">
+          <div className="absolute inset-y-0 left-[38%] right-0 flex gap-3 pt-[11%] pr-6 pb-[8%] opacity-[0.82] max-md:left-3 max-md:pt-10 max-md:opacity-90">
             {COLUMNS.map((col) => (
               <div key={col.title} className="flex w-[248px] shrink-0 flex-col">
                 <div className="mb-2.5 flex h-7 items-center gap-1.5 px-0.5">
@@ -313,7 +313,7 @@ export function FailClosedScene() {
         </div>
 
         <div
-          className="pointer-events-none absolute inset-0 max-xl:hidden"
+          className="pointer-events-none absolute inset-0"
           style={{
             background: [
               "linear-gradient(to right, #f7f7f5 0%, #f7f7f5 4%, transparent 10%, transparent 62%, rgba(247,247,245,0.45) 78%, #f7f7f5 100%)",
@@ -322,7 +322,7 @@ export function FailClosedScene() {
           }}
         />
 
-        <div className="absolute top-[11.1%] bottom-[7.5%] left-[4.9%] z-10 flex w-[32.5%] min-w-[280px] max-w-[340px] flex-col overflow-hidden rounded-[12px] border border-black/[0.08] bg-white shadow-[0_16px_48px_rgba(0,0,0,0.10)] max-xl:relative max-xl:inset-auto max-xl:h-auto max-xl:w-full max-xl:min-w-0 max-xl:max-w-none max-xl:shadow-[0_1px_0_rgba(0,0,0,0.04),0_24px_48px_rgba(0,0,0,0.08)]">
+        <div className="absolute top-[11.1%] bottom-[7.5%] left-[4.9%] z-10 flex w-[32.5%] min-w-[280px] max-w-[340px] flex-col overflow-hidden rounded-[12px] border border-black/[0.08] bg-white shadow-[0_16px_48px_rgba(0,0,0,0.10)] max-sm:left-3 max-md:top-auto max-md:h-[78%] max-md:w-[calc(100%-24px)] max-md:min-w-0 max-md:max-w-none">
           <div className="flex h-11 shrink-0 items-center justify-between border-b border-black/[0.06] px-3.5">
             <div className="flex items-center gap-2">
               <SlackHash />
@@ -354,7 +354,7 @@ export function FailClosedScene() {
                 </div>
               ))}
             </div>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent max-xl:hidden" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent" />
           </div>
 
           <div className="px-3 pb-3">

@@ -148,29 +148,10 @@ export function WorkloadScene() {
   const stamped = viewT >= STAMP_AT;
 
   return (
-    <div ref={ref} className="relative w-full">
-      <div className="hidden max-xl:block">
-        <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">
-          <div className="flex items-center justify-between gap-3 border-b border-black/[0.08] px-4 py-2.5">
-            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-black/45">
-              workload studio
-            </span>
-            <span className="font-mono text-[12px] tracking-extra-tight text-[#C43D3D]">6.9s</span>
-          </div>
-          <ul>
-            {LANES.map((lane) => (
-              <li
-                key={lane.key}
-                className="flex items-center gap-3 border-b border-black/[0.06] px-4 py-3 last:border-0"
-              >
-                <span className="size-2 shrink-0 rounded-full" style={{ background: lane.color }} />
-                <span className="text-[14px] tracking-extra-tight text-black">{lane.label}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-      <div className="relative aspect-[16/9] w-full overflow-hidden bg-[#f7f7f5] outline outline-1 outline-black/20 max-xl:hidden">
+    <div
+      ref={ref}
+      className="relative aspect-[16/9] w-full overflow-hidden bg-[#f7f7f5] outline outline-1 outline-black/20"
+    >
       <div className="absolute inset-0 select-none" aria-hidden>
         <svg viewBox={`0 0 ${VW} ${VH}`} className="absolute inset-0 h-full w-full" aria-hidden>
           <rect width={VW} height={VH} fill="#f7f7f5" />
@@ -223,7 +204,6 @@ export function WorkloadScene() {
           6.9s
         </div>
         <div className="pointer-events-none absolute inset-0 bg-[#f7f7f5]" style={{ opacity: fade }} />
-      </div>
       </div>
     </div>
   );

@@ -14,11 +14,11 @@ export default function Page() {
     <SiteLayout>
       <Hero />
       <TocWrapper>
-        <Migrations />
         <Workload />
-        <Features />
+        <Migrations />
         <Twins />
         <Firewall />
+        <Features />
       </TocWrapper>
       <Trust />
       <Cta />

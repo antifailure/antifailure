@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { clamp, lerp } from "@/lib/easing";
 import { useInViewPlay } from "@/lib/useInViewPlay";
 import { usePausedRaf } from "@/lib/usePausedRaf";
-import { LockChartMobile } from "@/components/home/media/LockChart";
+import { Caret } from "@/components/motion/Caret";
 import { FILM_EASE, Pill } from "./hero/linear";
 import {
   EvidenceRow,
@@ -511,17 +511,14 @@ export function MigrationScene({ tab, playId, onTab, onBar }: SceneProps) {
 
   return (
     <div ref={ref} className="@container relative w-full select-none">
-      <LockChartMobile state={viewTab} />
-      <div className="max-md:hidden">
-        <Film
-          key={`${viewTab}-${onTab ? playId : viewTab}`}
-          tab={viewTab}
-          playing={idle}
-          reduced={reduced}
-          onBar={onBar}
-          onTab={selectTab}
-        />
-      </div>
+      <Film
+        key={`${viewTab}-${onTab ? playId : viewTab}`}
+        tab={viewTab}
+        playing={idle}
+        reduced={reduced}
+        onBar={onBar}
+        onTab={selectTab}
+      />
     </div>
   );
 }

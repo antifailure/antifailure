@@ -40,17 +40,17 @@ export function OracleScene() {
 
   return (
     <div ref={rootRef} className="w-full" aria-hidden>
-      <Panel className="relative aspect-[1184/340] w-full overflow-hidden rounded-[12px] max-xl:aspect-auto max-xl:min-h-[360px]">
+      <Panel className="relative aspect-[1184/340] w-full overflow-hidden rounded-[12px] max-md:aspect-auto max-md:min-h-[360px]">
         <div className="sage-grid pointer-events-none absolute inset-0 opacity-40" />
 
-        <div className="relative flex h-full flex-col px-5 py-4 max-xl:px-4">
+        <div className="relative flex h-full flex-col px-5 py-4 max-md:px-4">
           <div className="flex items-center justify-between gap-3" style={{ opacity: prodOn }}>
             <Node label="production" lit={prodOn > 0.6} />
             <MonoLabel className="uppercase tracking-[0.12em]">same state · same behavior</MonoLabel>
           </div>
 
           <div
-            className="mt-4 grid min-h-0 flex-1 grid-cols-2 gap-px overflow-hidden border border-black/10 bg-black/10 max-xl:grid-cols-1"
+            className="mt-4 grid min-h-0 flex-1 grid-cols-2 gap-px overflow-hidden border border-black/10 bg-black/10 max-md:grid-cols-1"
             style={{ opacity: lanesOn }}
           >
             <Lane
