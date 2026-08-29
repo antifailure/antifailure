@@ -38,8 +38,11 @@ environment URL, a row per workflow with its verdict and the detail behind it,
 steps for reproducing anything that did not pass, and a footer naming the
 branch, the commit, the duration and the golden it branched from.
 
-Invariant results and the insights summary are meant to join it and do not
-appear yet, because neither is executed in this release.
+It also carries what the data said. Every invariant the manifest declares is
+asked after the workflows, and a violated one puts the violating rows in the
+comment and the failure in the headline, so a run where every workflow passed
+and the data is broken does not read as a pass. The insights summary is meant
+to join it and does not appear yet.
 
 ## Forks
 

@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-34 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+32 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -79,6 +79,42 @@ The agent runner could not be found: {detail}
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/agents](/docs/concepts/agents/) |
+
+### AF-AGT-010
+
+Invariant {invariant} did not finish within {timeout}.
+
+**What to do.** Make the invariant cheaper; it runs after every workflow and must be a quick read.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/invariants](/docs/guides/invariants/) |
+
+### AF-AGT-011
+
+Invariant {invariant} is not read only.
+
+**What to do.** Rewrite it as a single SELECT; invariants run inside a read only transaction.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/invariants](/docs/guides/invariants/) |
+
+### AF-AGT-012
+
+Invariant {invariant} does not hold: {detail}
+
+**What to do.** The rows the statement returned are the violation. Run it against the branch to see them all.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/invariants](/docs/guides/invariants/) |
 
 ## Build
 

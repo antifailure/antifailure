@@ -22,6 +22,7 @@ type Run struct {
 	Commit       string
 	Golden       string
 	Workflows    []Workflow
+	Invariants   []Invariant
 	Load         *Load
 	Egress       *Egress
 	Verification *Verification
@@ -39,6 +40,24 @@ type Workflow struct {
 	Steps   []string
 	Trace   string
 }
+
+// Invariant is what the data said after the workflows ran.
+//
+// Held and Error are separate for the same reason a workflow's failed and
+// blocked are: an invariant that could not be asked has not found anything,
+// and printing it as a violation would blame the change for our own gap.
+type Invariant struct {
+	Name        string
+	Description string
+	Held        bool
+	Columns     []string
+	Rows        [][]string
+	More        bool
+	Error       string
+}
+
+// Violated reports whether this invariant was shown to be broken.
+func (i Invariant) Violated() bool { return i.Error == "" && !i.Held }
 
 // Load is a traffic result.
 type Load struct {
@@ -79,7 +98,7 @@ func (r Run) Verdict() string {
 		counts[w.Verdict]++
 	}
 	switch {
-	case counts["fail"] > 0:
+	case counts["fail"] > 0, r.InvariantsViolated() > 0:
 		return "fail"
 	case counts["flaky"] > 0:
 		return "flaky"
@@ -102,8 +121,24 @@ func (r Run) Headline() string {
 	}
 	switch r.Verdict() {
 	case "pass":
+		if len(r.Invariants) > 0 {
+			return fmt.Sprintf("All %d workflows passed, and %s held.",
+				len(r.Workflows), plural(len(r.Invariants), "invariant", "invariants"))
+		}
 		return fmt.Sprintf("All %d workflows passed.", len(r.Workflows))
 	case "fail":
+		// The invariant is named first when the workflows are all green,
+		// because "3 workflows passed" above a failing run is the comment
+		// people learn to stop believing.
+		if counts["fail"] == 0 {
+			return fmt.Sprintf("Every workflow passed and %s did not hold.",
+				plural(r.InvariantsViolated(), "invariant", "invariants"))
+		}
+		if v := r.InvariantsViolated(); v > 0 {
+			return fmt.Sprintf("%s failed, and %s did not hold.",
+				plural(counts["fail"], "workflow", "workflows"),
+				plural(v, "invariant", "invariants"))
+		}
 		return fmt.Sprintf("%s failed.", plural(counts["fail"], "workflow", "workflows"))
 	case "flaky":
 		return fmt.Sprintf("%s passed only sometimes.",
@@ -118,6 +153,79 @@ func (r Run) Headline() string {
 		return fmt.Sprintf("%s ran without proving anything either way.",
 			plural(counts["unverified"], "workflow", "workflows"))
 	}
+}
+
+// InvariantsViolated counts the invariants shown to be broken.
+func (r Run) InvariantsViolated() int {
+	n := 0
+	for _, i := range r.Invariants {
+		if i.Violated() {
+			n++
+		}
+	}
+	return n
+}
+
+// invariantSection is what the data said, for the comment.
+//
+// One line when everything held, because a run where nothing is wrong should
+// cost the reader one line. The violating rows are shown in full when
+// something is wrong, since they are the diagnosis and a reader who has to go
+// and run the query themselves has been told there is a problem and not what
+// it is.
+func (r Run) invariantSection() string {
+	var b strings.Builder
+	violated := r.InvariantsViolated()
+	blocked := 0
+	for _, i := range r.Invariants {
+		if i.Error != "" {
+			blocked++
+		}
+	}
+
+	if violated == 0 && blocked == 0 {
+		fmt.Fprintf(&b, "Invariants: %s held.\n\n",
+			plural(len(r.Invariants), "invariant", "invariants"))
+		return b.String()
+	}
+
+	for _, i := range r.Invariants {
+		switch {
+		case i.Error != "":
+			fmt.Fprintf(&b, "Invariant `%s` could not be checked: %s Nothing here counts against the change.\n\n",
+				i.Name, oneLine(i.Error))
+		case i.Violated():
+			fmt.Fprintf(&b, "**Invariant `%s` does not hold.**", i.Name)
+			if i.Description != "" {
+				fmt.Fprintf(&b, " %s", i.Description)
+			}
+			b.WriteString("\n\n")
+			b.WriteString(evidenceTable(i))
+		}
+	}
+	return b.String()
+}
+
+// evidenceTable renders the violating rows.
+func evidenceTable(i Invariant) string {
+	if len(i.Columns) == 0 || len(i.Rows) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "| %s |\n", strings.Join(i.Columns, " | "))
+	b.WriteString("| " + strings.Repeat("--- | ", len(i.Columns)) + "\n")
+	for _, row := range i.Rows {
+		cells := make([]string, len(row))
+		for j, c := range row {
+			cells[j] = oneLine(c)
+		}
+		fmt.Fprintf(&b, "| %s |\n", strings.Join(cells, " | "))
+	}
+	if i.More {
+		b.WriteString("\nMore rows than these. Run the statement against the branch to see them all.\n")
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 func plural(n int, one, many string) string {
@@ -193,6 +301,10 @@ func (r Run) Markdown() string {
 			fmt.Fprintf(&b, "\nTrace: `%s`\n", w.Trace)
 		}
 		b.WriteString("\n</details>\n\n")
+	}
+
+	if len(r.Invariants) > 0 {
+		b.WriteString(r.invariantSection())
 	}
 
 	if v := r.Verification; v != nil {

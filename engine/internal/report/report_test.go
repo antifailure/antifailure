@@ -151,3 +151,78 @@ func TestMarkdown_FooterCarriesWhatWasTested(t *testing.T) {
 	require.Contains(t, body, "2m14s")
 	require.Contains(t, body, "gv_20260826")
 }
+
+// The comment is the only part of this most people see, so what it says when
+// the workflows pass and the data is broken is the thing to get right.
+func TestACleanRunOfWorkflowsWithBrokenDataDoesNotReadAsAPass(t *testing.T) {
+	run := report.Run{
+		Environment: "pr-42",
+		Workflows: []report.Workflow{
+			{Name: "checkout", Verdict: "pass"},
+			{Name: "signup", Verdict: "pass"},
+		},
+		Invariants: []report.Invariant{
+			{
+				Name:        "no-orphan-orders",
+				Description: "Every order belongs to a user that exists.",
+				Columns:     []string{"order_id", "user_id"},
+				Rows:        [][]string{{"900", "4242"}, {"901", "4243"}},
+			},
+		},
+	}
+
+	require.Equal(t, "fail", run.Verdict(),
+		"a violated invariant fails the run even when every workflow passed")
+	require.Equal(t, "Every workflow passed and 1 invariant did not hold.", run.Headline())
+
+	md := run.Markdown()
+	require.Contains(t, md, "**Invariant `no-orphan-orders` does not hold.**")
+	require.Contains(t, md, "Every order belongs to a user that exists.")
+	// The rows are the diagnosis, so they are in the comment rather than
+	// behind an instruction to go and run the query.
+	require.Contains(t, md, "| order_id | user_id |")
+	require.Contains(t, md, "| 900 | 4242 |")
+	require.Contains(t, md, "| 901 | 4243 |")
+	require.NotContains(t, md, "All 2 workflows passed")
+}
+
+func TestAnInvariantThatHeldCostsTheReaderOneLine(t *testing.T) {
+	run := report.Run{
+		Workflows:  []report.Workflow{{Name: "checkout", Verdict: "pass"}},
+		Invariants: []report.Invariant{{Name: "no-orphan-orders", Held: true}},
+	}
+	require.Equal(t, "pass", run.Verdict())
+	require.Equal(t, "All 1 workflows passed, and 1 invariant held.", run.Headline())
+	require.Contains(t, run.Markdown(), "Invariants: 1 invariant held.")
+}
+
+// An invariant that could not be asked is ours, not the change's, and the
+// comment has to say so or an incomplete environment reads as broken data.
+func TestAnInvariantThatCouldNotBeCheckedIsNotHeldAgainstTheChange(t *testing.T) {
+	run := report.Run{
+		Workflows: []report.Workflow{{Name: "checkout", Verdict: "pass"}},
+		Invariants: []report.Invariant{
+			{Name: "no-orphan-orders", Error: "AF-AGT-010 Invariant no-orphan-orders did not finish within 30s."},
+		},
+	}
+	require.Equal(t, "pass", run.Verdict(), "a blocked invariant does not fail the run")
+	require.Zero(t, run.InvariantsViolated())
+
+	md := run.Markdown()
+	require.Contains(t, md, "could not be checked")
+	require.Contains(t, md, "Nothing here counts against the change.")
+	require.NotContains(t, md, "does not hold")
+}
+
+func TestMoreRowsThanKeptIsSaidRatherThanImplied(t *testing.T) {
+	run := report.Run{
+		Workflows: []report.Workflow{{Name: "checkout", Verdict: "pass"}},
+		Invariants: []report.Invariant{{
+			Name:    "no-orphan-orders",
+			Columns: []string{"order_id"},
+			Rows:    [][]string{{"1"}, {"2"}},
+			More:    true,
+		}},
+	}
+	require.Contains(t, run.Markdown(), "More rows than these.")
+}

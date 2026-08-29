@@ -280,7 +280,13 @@ func TestMain(m *testing.M) {
 			shared.fatal = fmt.Sprintf("Docker is here and no golden could be made: %v", err)
 			return m.Run()
 		}
-		branch, err := p.Branch(ctx, gv.ID, "subsettest")
+		// Unique per run. The Docker provider names the container after the
+		// branch, so a constant here means af-db-subsettest is reused rather
+		// than created whenever a previous run was interrupted before its
+		// cleanup, and this suite then loads its schema into a database that
+		// already has one. Same defect as internal/masking and
+		// internal/env/goldenstore_test.go had.
+		branch, err := p.Branch(ctx, gv.ID, fmt.Sprintf("subsettest%d", time.Now().UnixNano()%1e9))
 		if err != nil {
 			_ = p.DestroyGolden(ctx, gv.ID)
 			_ = p.Close()

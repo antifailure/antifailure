@@ -60,9 +60,10 @@ its verdict and the detail behind it, a collapsible set of steps for
 reproducing any workflow that did not pass, and a footer naming the branch, the
 commit, how long it took and which golden it branched from.
 
-Invariant results and the insights summary are meant to join it and do not
-appear yet, because neither is executed in this release. See
-[invariants](/docs/guides/invariants/).
+It also carries what the data said: every
+[invariant](/docs/guides/invariants/) the manifest declares is asked after the
+workflows, and a violated one puts the offending rows in the comment. The
+insights summary is meant to join it and does not appear yet.
 
 It edits that comment in place on the next push rather than adding another. A
 bot that comments on every push is a bot people mute, and a muted bot reports

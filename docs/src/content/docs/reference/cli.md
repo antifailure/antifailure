@@ -407,6 +407,33 @@ af insights [flags]
 | `--no-rehearsal` | `false` | Skip the migration rehearsal, which is the only check that makes a second branch. |
 | `--save` | - | Save this report to compare against later. |
 
+### `af invariants`
+
+Ask the data the questions the manifest declares.
+
+An invariant is a read only statement that must return no rows, asked of the
+branch, so that a flow which appears to succeed while corrupting data is caught
+by the data rather than by the screen.
+
+They are asked automatically after the workflows in 'af test' and 'af ci'. This
+runs them on their own, which is what you want while writing one, or after a
+migration, or when a run failed and you want to know whether the data is the
+reason.
+
+Every statement runs inside a transaction opened READ ONLY, so a write is
+refused by Postgres rather than trusted not to happen, and each one has its own
+timeout. Rows returned means the invariant is violated, and the rows are the
+evidence: they are printed, because a check that tells you something is wrong
+without telling you which rows has told you to go and do the work yourself.
+
+```
+af invariants [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to ask, defaulting to the checked out one. |
+
 ### `af license`
 
 Show the license status of this installation.

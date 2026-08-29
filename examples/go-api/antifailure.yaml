@@ -91,9 +91,11 @@ workflows:
       - "the new order is returned with a total of 2599"
     tags: [smoke]
 
-# Declared and validated, not yet run. The engine parses these, refuses one that
-# is not read only, and shows them in af explain. Nothing executes the SQL in
-# this release, so a green run says nothing about them either way.
+# Asked of the branch after the workflows run, inside a READ ONLY transaction.
+# An invariant holds when its statement returns NO ROWS, so these select the
+# violating rows rather than counting them: count(*) returns one row saying
+# zero, which is a row, which is a violation. Both of these said count(*) until
+# something actually ran them.
 invariants:
   - name: no-orphaned-orders
     description: >-
@@ -101,12 +103,13 @@ invariants:
       API cannot make from the outside, and the one a masking run that broke
       the join would fail.
     sql: |
-      SELECT count(*) AS violations
+      SELECT o.id AS order_id, o.customer_id
       FROM orders o
       LEFT JOIN customers c ON c.id = o.customer_id
       WHERE c.id IS NULL
+      ORDER BY o.id
 
   - name: no-negative-totals
     description: An order's total is always positive, whatever the masking did to it.
     sql: |
-      SELECT count(*) AS violations FROM orders WHERE total_cents <= 0
+      SELECT id AS order_id, total_cents FROM orders WHERE total_cents <= 0

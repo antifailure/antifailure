@@ -18,6 +18,8 @@ const (
 	AFAGT010 Code = "AF-AGT-010"
 	// Invariant {invariant} is not read only.
 	AFAGT011 Code = "AF-AGT-011"
+	// Invariant {invariant} does not hold: {detail}
+	AFAGT012 Code = "AF-AGT-012"
 
 	// Build
 	// The build for service {service} failed after {duration}.
@@ -310,6 +312,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/invariants",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFAGT012: {
+		Code:      AFAGT012,
+		Area:      "AGT",
+		Message:   "Invariant {invariant} does not hold: {detail}",
+		NextStep:  "The rows the statement returned are the violation. Run it against the branch to see them all.",
+		Docs:      "guides/invariants",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
 	},
 	AFBLD001: {
 		Code:      AFBLD001,

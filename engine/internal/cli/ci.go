@@ -102,6 +102,12 @@ change.`),
 						Steps: r.Outcome.Reproduction, Trace: r.Evidence.Trace,
 					})
 				}
+				for _, i := range test.Invariants {
+					run.Invariants = append(run.Invariants, report.Invariant{
+						Name: i.Name, Description: i.Description, Held: i.Held,
+						Columns: i.Columns, Rows: i.Rows, More: i.More, Error: i.Error,
+					})
+				}
 			}
 
 			if decisions, dErr := o.Decisions(ctx, 500); dErr == nil && len(decisions) > 0 {
@@ -127,6 +133,19 @@ change.`),
 			writeReport(e, run, output)
 
 			if run.Verdict() == "fail" {
+				// Named, because a run can now fail two ways and the exit
+				// message is the only part a script keeps.
+				if run.InvariantsViolated() > 0 {
+					var first string
+					for _, i := range run.Invariants {
+						if i.Violated() {
+							first = i.Name
+							break
+						}
+					}
+					return silent(aferrors.Coded(aferrors.AFAGT012,
+						"invariant", first, "detail", "the statement returned rows"))
+				}
 				return silent(aferrors.Coded(aferrors.AFAGT002,
 					"workflow", "a workflow", "budget", "its attempts"))
 			}
