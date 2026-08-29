@@ -73,7 +73,7 @@ func TestDockerBuilder_BuildsFromADockerfileInTheRepository(t *testing.T) {
 	require.NotEmpty(t, progress, "the build reports progress as it goes")
 	require.Positive(t, res.Duration)
 
-	insp, _, err := b.cli.ImageInspectWithRaw(context.Background(), res.ImageRef)
+	insp, err := b.cli.ImageInspect(context.Background(), res.ImageRef)
 	require.NoError(t, err)
 	require.True(t, dockerutil.IsOurs(insp.Config.Labels),
 		"the image carries the managed label, or the leak detector cannot find it")

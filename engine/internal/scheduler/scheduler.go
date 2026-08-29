@@ -347,11 +347,12 @@ func matches(requires, tags map[string]string) (string, bool) {
 // already in hand, so the result does not depend on the input's order.
 func order(queue []Run, cfg Config, now time.Time) []Run {
 	type keyed struct {
-		run       Run
-		lane      Lane
-		round     int
-		queuedAt  time.Time
-		effective int
+		run Run
+		// lane is already the effective lane, after aging. An extra field for
+		// the same number was never written to and never read.
+		lane     Lane
+		round    int
+		queuedAt time.Time
 	}
 
 	// Group by repository within organization to compute the round each run

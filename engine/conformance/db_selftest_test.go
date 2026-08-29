@@ -124,8 +124,15 @@ func TestTheSuitePassesAgainstAProviderThatKeepsItsGuarantees(t *testing.T) {
 // an exemption describing something that is no longer true reads as protection
 // that is not there.
 //
-// Both were found by running the negative controls below for the first time.
-// Neither is a fault in the fake.
+// Found by running the negative controls below for the first time. Neither was
+// a fault in the fake.
+//
+// One of the two is closed. Health_ReportsADestroyedBranch accepted an error
+// while its catalogue entry said "unreachable rather than erroring", and the
+// catalogue was right: teardown asks for health, so a provider that errors on
+// a branch it has just removed makes a successful teardown look like a
+// failure. Both shipped providers already answer that way, so enforcing the
+// description cost nothing and closed the disagreement.
 var knownGaps = map[fakes.Fault]string{
 	fakes.BranchAcceptsUnverified: "" +
 		"The VACUITY in Branch_RefusesAnUnverifiedGolden is fixed: it used to put " +
@@ -139,14 +146,6 @@ var knownGaps = map[fakes.Fault]string{
 		"through the interface. Closing it needs a way to obtain an unverified " +
 		"version, which is an interface change and a design decision rather " +
 		"than a fix.",
-
-	fakes.HealthErrorsOnDestroyed: "" +
-		"Health_ReportsADestroyedBranch is DECLARED as \"Health reports a destroyed " +
-		"branch as unreachable rather than erroring\" and its implementation returns " +
-		"early when Health errors, with a comment saying an error is acceptable. The " +
-		"suite and its own catalogue description disagree, and the description is the " +
-		"one a provider author reads. One of the two has to change; the suite is not " +
-		"mine to decide for.",
 }
 
 // The negative controls.

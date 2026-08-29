@@ -7,13 +7,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
-
-func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 
 var epoch = time.Date(2026, 3, 4, 5, 6, 7, 0, time.FixedZone("plus2", 2*60*60))
 

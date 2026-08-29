@@ -498,7 +498,7 @@ const cards: {
   },
   {
     title: "Workload Studio.",
-    body: "Observed patterns, deterministic journeys, and Crowdi users.",
+    body: "Observed patterns, deterministic journeys, and exploratory users.",
     Visual: WorkloadTree,
   },
   {

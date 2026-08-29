@@ -276,11 +276,12 @@ func uncalledByGate(just string) []string {
 	// it is out of `gate` for the reason recorded in exemptFromGate.
 	exemptRecipes := map[string]bool{
 		"vuln": true,
-		// The linter has findings that predate its config, in packages several
-		// people are editing at once. It goes into `gate` when that count
-		// reaches zero; until then a gate that fails every branch for
-		// something none of them did is one people learn to route around.
-		"lint": true,
+		// The getting started path end to end. It needs a daemon and takes
+		// minutes, so it runs on a schedule rather than on every branch, the
+		// same reasoning as the external link check: a check that costs
+		// everybody ten minutes for a property that changes weekly is a check
+		// people learn to skip.
+		"walkthrough": true,
 	}
 
 	// Recipes that are gates rather than conveniences. A recipe that mutates

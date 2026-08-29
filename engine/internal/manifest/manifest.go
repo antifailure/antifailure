@@ -19,7 +19,6 @@ package manifest
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -632,14 +631,4 @@ func confine(p string) (string, bool) {
 		return "", true
 	}
 	return clean, true
-}
-
-// exists reports whether a path exists inside the repository root. It takes an
-// fs.FS so that tests can validate against an in memory tree.
-func exists(root fs.FS, p string) bool {
-	if p == "" {
-		return true
-	}
-	_, err := fs.Stat(root, p)
-	return err == nil
 }

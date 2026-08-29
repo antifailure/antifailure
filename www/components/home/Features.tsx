@@ -28,7 +28,7 @@ const ITEMS = [
   {
     icon: "oracle" as const,
     title: "AI discovers, systems prove.",
-    description: "Crowdi explores. Deterministic scenarios and the oracle decide.",
+    description: "AI discovers. Deterministic scenarios and the oracle decide.",
   },
   {
     icon: "postgres" as const,

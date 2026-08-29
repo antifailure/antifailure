@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	dblabdb "github.com/antifailure/antifailure/engine/internal/db/dblab"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
 	supabasedb "github.com/antifailure/antifailure/engine/internal/db/supabase"
@@ -81,7 +82,10 @@ func TestNeonWithoutAKeySaysWhichVariableIsMissing(t *testing.T) {
 func TestAProviderThisBuildDoesNotHaveIsRefusedRatherThanSubstituted(t *testing.T) {
 	// The failure this prevents is the quiet one. Falling back to Docker gives
 	// somebody an empty preview and no reason for it.
-	for _, kind := range []schema.DBProvider{schema.DBDBLab, "invented"} {
+	// Both Supabase and DBLab are built after this merge, so each side's
+	// listing of the other as absent is now wrong. What is left is a provider
+	// that genuinely does not exist.
+	for _, kind := range []schema.DBProvider{"invented"} {
 		_, err := orchestrator(t, &schema.Database{Provider: kind}, nil).
 			newDatabaseProvider(context.Background())
 		require.Error(t, err, "%s was accepted", kind)
@@ -130,6 +134,50 @@ func TestSupabaseWithoutATokenSaysWhichVariableIsMissing(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFSEC001))
 	require.Contains(t, err.Error(), "MY_SUPABASE_TOKEN")
+}
+
+func TestAManifestAskingForDBLabGetsDBLab(t *testing.T) {
+	p, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBDBLab, Project: "http://dblab.internal:2345", APIKeyEnv: "MY_DBLAB_TOKEN",
+	}, map[string]string{"MY_DBLAB_TOKEN": "whatever"}).newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	require.Equal(t, "dblab", p.Name())
+	require.IsType(t, &dblabdb.Provider{}, p)
+}
+
+func TestTheDBLabTokenVariableDefaultsToTheOneTheEngineDocuments(t *testing.T) {
+	p, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBDBLab, Project: "http://dblab.internal:2345",
+	}, map[string]string{"DBLAB_VERIFICATION_TOKEN": "whatever"}).newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	require.Equal(t, "dblab", p.Name())
+}
+
+func TestDBLabWithoutAnEndpointIsRefusedBeforeAnythingIsCreated(t *testing.T) {
+	// A Database Lab Engine is self hosted, so unlike a hosted provider there
+	// is no account to enumerate and nothing to fall back to. A default would
+	// be a guess at somebody else's infrastructure.
+	_, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBDBLab,
+	}, map[string]string{"DBLAB_VERIFICATION_TOKEN": "whatever"}).newDatabaseProvider(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002))
+	require.Contains(t, err.Error(), "database.project")
+}
+
+func TestDBLabWithoutATokenIsRefusedRatherThanRunningWithoutOne(t *testing.T) {
+	// The engine itself will run with no verification token, and an engine
+	// with no verification token is one that anybody who can reach the port
+	// can create clones of production data on. Defaulting to empty here would
+	// make that the quiet path.
+	_, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBDBLab, Project: "http://dblab.internal:2345", APIKeyEnv: "MY_DBLAB_TOKEN",
+	}, nil).newDatabaseProvider(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFSEC001))
+	require.Contains(t, err.Error(), "MY_DBLAB_TOKEN")
 }
 
 func TestAnEmptyProviderIsDockerAndTheVersionFollowsTheManifest(t *testing.T) {

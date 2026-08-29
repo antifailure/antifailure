@@ -154,8 +154,8 @@ func Build(tables []masking.Table, cfg Config) (Plan, error) {
 
 	for _, table := range ordered {
 		step := Step{Table: table, Reason: needed[table]}
-		switch {
-		case table == cfg.SeedTable:
+		switch table {
+		case cfg.SeedTable:
 			step.Where = cfg.SeedWhere
 		default:
 			step.Where = condition(table, rels, needed)

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/antifailure/antifailure/engine/internal/events"
 )
 
 // Pane identifies a focusable region.
@@ -410,6 +412,23 @@ func (m *Model) agentLines(width int) []string {
 // beginning of the run for ever and never the thing that is happening now,
 // which is the opposite of what a tail is for. It rendered that way until
 // somebody looked at a frame.
+// logLine formats one event for the tail.
+//
+// The environment is left out when it is the one the dashboard is watching.
+// The header already names it, every line in the pane belongs to it, and
+// repeating it spends the width of an environment id on every single row,
+// which is width the message needed. An event from somewhere else keeps its
+// env, because there the name is the only thing that explains the line.
+//
+// The event is a value, so blanking the field edits a copy and the model's
+// tail is untouched.
+func logLine(e events.Event, env string) string {
+	if env != "" && e.Env == env {
+		e.Env = ""
+	}
+	return e.String()
+}
+
 func (m *Model) logLines(width, lines int) []string {
 	tail := m.Tail()
 	out := make([]string, 0, len(tail))
@@ -418,7 +437,7 @@ func (m *Model) logLines(width, lines int) []string {
 		if !e.TS.IsZero() {
 			prefix = e.TS.UTC().Format("15:04:05") + " "
 		}
-		out = append(out, Truncate(prefix+e.String(), width))
+		out = append(out, Truncate(prefix+logLine(e, m.Env), width))
 	}
 	if len(out) == 0 {
 		return []string{"waiting for events"}

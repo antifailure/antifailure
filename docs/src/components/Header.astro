@@ -1,0 +1,74 @@
+---
+/**
+ * Replaces Starlight's header with the site's own.
+ *
+ * Starlight's search and the mobile menu toggle are kept, because both are
+ * documentation-specific and there is nothing on the marketing site to
+ * inherit them from. Everything else (the bar itself, the wordmark, the
+ * navigation, the log in and sign up buttons) comes from the site.
+ */
+import Search from "virtual:starlight/components/Search";
+import SiteChrome from "./SiteChrome.astro";
+import config from "virtual:starlight/user-config";
+
+const shouldRenderSearch =
+  config.pagefind ||
+  config.components.Search !== "@astrojs/starlight/components/Search.astro";
+---
+
+<SiteChrome />
+
+<div class="af-docsbar">
+  <div class="af-docsbar-inner">
+    {shouldRenderSearch && <Search />}
+  </div>
+</div>
+
+<style>
+  /* Starlight's own header wrapper pads its contents by --sl-nav-pad-x and
+     sets its own height and bottom border. Our two bars carry all three
+     themselves and want the full width, so measured at 390px the site header
+     was rendering 310px wide and its hairline stopped 32px short of each
+     edge. Hand the wrapper's job over. */
+  :global(.page > .header) {
+    padding: 0;
+    gap: 0;
+    height: auto;
+    border-bottom: 0;
+    background: transparent;
+  }
+
+  /* A second, quieter bar under the site header holding the things that only
+     exist in the documentation. Keeping them out of the site header is what
+     lets that header stay byte-identical to the one on every other page. */
+  .af-docsbar {
+    border-bottom: 1px solid var(--sl-color-hairline);
+    background: var(--sl-color-bg-nav);
+  }
+  .af-docsbar-inner {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    max-width: 1856px;
+    margin-inline: auto;
+    padding: 0.6rem 2rem;
+  }
+  .af-docsbar-inner :global(site-search) {
+    flex: 1;
+    max-width: 34rem;
+  }
+  @media (max-width: 50rem) {
+    .af-docsbar-inner {
+      padding: 0.55rem 1.25rem;
+    }
+  }
+
+  /* Starlight fixes its menu button at `(--sl-nav-height - button) / 2` from
+     the top of the viewport, which assumes the nav is a single bar. Ours is
+     two, and --sl-nav-height covers both, so the button landed halfway down
+     straddling the hairline between them. Centre it in the site header
+     instead, where the marketing site's own menu button sits. */
+  :global(starlight-menu-button button) {
+    top: calc((3.5rem - var(--sl-menu-button-size, 2rem)) / 2) !important;
+  }
+</style>

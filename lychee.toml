@@ -1,0 +1,67 @@
+# Link checking for the documentation and the repository's front door.
+#
+# Run with: just links
+
+# A slow upstream is not a broken link. Two retries and twenty seconds is
+# enough for a site that is merely busy and short enough that a genuinely dead
+# host does not hold the build for minutes.
+max_retries = 2
+retry_wait_time = 2
+timeout = 20
+max_redirects = 5
+
+# Some sites answer a HEAD with 405 and a GET with 200. Asking for the document
+# is slower and is what a reader's browser does.
+method = "get"
+
+# A generic agent is refused by several documentation hosts, which then look
+# like dead links.
+user_agent = "Mozilla/5.0 (compatible; lychee; +https://antifailure.dev)"
+
+# 429 is rate limiting and 403 is a bot wall. Neither means the page is gone,
+# and treating them as broken teaches everyone to ignore this check.
+accept = ["200..=299", "403", "429"]
+
+# The marketing site is a Next.js static export, which writes solutions/saas.html
+# and is served at /solutions/saas. Without this every link in its navigation
+# reads as dead, which is 2,500 false failures and a check nobody trusts.
+fallback_extensions = ["html"]
+
+# A link to /docs/reference/cli/ points at a directory. Without this lychee
+# calls the directory itself the target, finds no headings in it, and reports
+# every fragment on the site as missing. With it the fragment is checked
+# against the page a browser would actually load.
+#
+# The "." entry is the directory itself, and it is last. The marketing export
+# writes product.html beside a product/ directory of sub-pages, so /product has
+# no index; without the fallback every one of those links reads as dead.
+index_files = ["index.html", "."]
+
+# Fragments are checked against the target document, which is what catches a
+# heading that was renamed out from under a link.
+include_fragments = "full"
+
+exclude_path = [
+  "node_modules",
+  "dist",
+  ".astro",
+  # The build log for this repository rather than product documentation. It
+  # cites branches and runs that come and go by design.
+  "docs/plan",
+  # Generated from upstream package metadata, which carries whatever URLs the
+  # packages declared. A dead link there is the upstream project's to fix.
+  "THIRD_PARTY_NOTICES.md",
+]
+
+exclude = [
+  # Examples, not addresses. These are the hosts the documentation uses to show
+  # what a rule or a connection string looks like, and none of them resolve.
+  "^https?://localhost",
+  "^https?://127\\.0\\.0\\.1",
+  "^https?://[^/]*\\.?example\\.(com|org|net)",
+  "^https?://[^/]*\\.?invalid",
+  "^https?://api\\.stripe\\.com",
+  "^https?://telemetry\\.",
+  # A repository address that only exists once a user has made one.
+  "^https?://github\\.com/your-",
+]
