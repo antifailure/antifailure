@@ -259,12 +259,12 @@ export function WorkersScene() {
     <div className="bg-[#f4f7f5] px-8 py-8 text-left max-md:px-5 max-md:py-6" aria-hidden>
       <MonoLabel className="uppercase">twin · marketplace workers</MonoLabel>
       <ul className="mt-6 divide-y divide-black/8 border-y border-black/8">
-        {[
+        {([
           ["matching.worker", "RUNNING", true as const],
           ["notify.worker", "RUNNING", true as const],
           ["settle.worker", "RUNNING", true as const],
           ["api.partners.test", "BLOCKED", false as const],
-        ].map(([name, status, ok]) => (
+        ] as const).map(([name, status, ok]) => (
           <li key={name} className="flex items-center gap-6 py-3">
             <CheckRow ok={ok}>{name}</CheckRow>
             <span

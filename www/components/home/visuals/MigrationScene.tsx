@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { clamp, lerp } from "@/lib/easing";
 import { useInViewPlay } from "@/lib/useInViewPlay";
 import { usePausedRaf } from "@/lib/usePausedRaf";
+import { Caret } from "@/components/motion/Caret";
 import { LockChartMobile } from "@/components/home/media/LockChart";
 import { FILM_EASE, Pill } from "./hero/linear";
 import {
