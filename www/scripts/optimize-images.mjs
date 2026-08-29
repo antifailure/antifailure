@@ -28,10 +28,41 @@
  *
  * Run: node scripts/optimize-images.mjs   (also runs as part of `npm run build`)
  */
-import sharp from "sharp";
+/*
+ * sharp is deliberately NOT in package.json, and that needs saying out loud
+ * because it looks like an oversight.
+ *
+ * next declares sharp as an optional dependency and it is what next/image uses
+ * to encode, so it is already in the tree and the lock file. Adding it as a
+ * direct devDependency looks tidier and breaks `npm ci`: sharp's optional
+ * platform packages resolve per architecture, so a lock file regenerated on a
+ * macOS laptop omits what a Linux runner needs, and `npm ci` refuses to
+ * install when package.json and the lock disagree. That failed CI twice, once
+ * for @emnapi/wasi-threads and once for @emnapi/core and @emnapi/runtime.
+ * Generating the lock with --os=linux --cpu=x64 fixes one of the three and not
+ * the others.
+ *
+ * So the dependency is taken from next, and the import is guarded below so
+ * that if that ever stops being true the build says which line to read rather
+ * than printing ERR_MODULE_NOT_FOUND.
+ */
 import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+let sharp;
+try {
+  ({ default: sharp } = await import("sharp"));
+} catch (cause) {
+  console.error(
+    "cannot load sharp, so the hero art cannot be encoded and the site would " +
+      "deploy with no images at all.\n" +
+      "sharp comes from next's optional dependencies. If next has dropped it, " +
+      "add it to package.json AND regenerate package-lock.json on Linux, not " +
+      "on a laptop: see the comment at the top of this file for why.",
+  );
+  throw cause;
+}
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, "assets", "hero");
