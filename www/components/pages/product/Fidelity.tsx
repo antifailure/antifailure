@@ -79,7 +79,7 @@ function FidelityMeter() {
         </div>
         <div className="relative mt-1.5 h-4">
           <MonoLabel className="absolute left-0 tabular-nums">0</MonoLabel>
-          <MonoLabel className="absolute left-[80%] -translate-x-1/2 tabular-nums text-black/55">
+          <MonoLabel className="absolute left-[80%] -translate-x-1/2 tabular-nums text-black/55 max-sm:hidden">
             policy 80%
           </MonoLabel>
           <MonoLabel className="absolute right-0 tabular-nums">100</MonoLabel>
@@ -183,7 +183,7 @@ function PolicyPanel() {
 
 export function FidelityPage() {
   return (
-    <PageShell>
+    <PageShell inset>
       <PageHero
         eyebrow="Fidelity Graph"
         title="Say what the twin actually reproduced."

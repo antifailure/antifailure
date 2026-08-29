@@ -69,7 +69,7 @@ const SOURCES = [
 
 export function WorkloadPage() {
   return (
-    <PageShell>
+    <PageShell inset>
       <PageHero
         eyebrow="Workload Studio"
         title="Exercise the twin the way production actually behaves."
@@ -91,15 +91,15 @@ export function WorkloadPage() {
           title="<strong>Observed. Deterministic. Exploratory.</strong> Compile what matters. Scale what repeats."
         />
         <div className="relative mt-14">
-          <ul className="grid grid-cols-3 gap-x-16 max-lg:grid-cols-1 max-lg:gap-y-10">
+          <ul className="grid grid-cols-3 gap-x-16 max-xl:grid-cols-1 max-xl:gap-y-10">
             {SOURCES.map((source) => (
               <li key={source.letter} className="min-w-0">
                 <SourceColumn source={source} />
               </li>
             ))}
           </ul>
-          <span className="pointer-events-none absolute inset-y-0 left-[calc(33.333%-32px)] w-px bg-black/12 max-lg:hidden" />
-          <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-lg:hidden" />
+          <span className="pointer-events-none absolute inset-y-0 left-[calc(33.333%-32px)] w-px bg-black/12 max-xl:hidden" />
+          <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-xl:hidden" />
         </div>
       </PageSection>
 
@@ -157,18 +157,18 @@ assertions:
 function TrafficMixer() {
   return (
     <Panel className="mt-14 rounded-[12px] bg-white tabular-nums">
-      <header className="flex h-10 items-center justify-between gap-3 px-4">
+      <header className="flex h-10 items-center justify-between gap-3 px-4 max-md:h-auto max-md:flex-wrap max-md:py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <span className="size-1.5 shrink-0 bg-[#33BF00]" />
           <MonoLabel className="text-black/70">Workload Studio</MonoLabel>
           <span className="text-black/20">·</span>
           <MonoLabel className="tabular-nums">run_08f2</MonoLabel>
         </div>
-        <MonoLabel className="shrink-0 tabular-nums text-black/55">06:12 remaining</MonoLabel>
+        <MonoLabel className="shrink-0 tabular-nums text-black/55 max-md:ml-auto">06:12 remaining</MonoLabel>
       </header>
       <Hairline />
 
-      <div className="grid grid-cols-4 max-lg:grid-cols-2 max-md:grid-cols-1">
+      <div className="grid grid-cols-4 max-xl:grid-cols-2 max-md:grid-cols-1">
         <MixerCell label="session rate">
           <div className="flex items-baseline gap-1.5">
             <span className="font-mono text-[28px] leading-none tracking-tighter text-black">24</span>
@@ -276,7 +276,7 @@ function MixerCell({
       className={cn(
         "px-4 py-5",
         rule &&
-          "border-black/10 max-md:border-t md:max-lg:even:border-l md:max-lg:[&:nth-child(n+3)]:border-t lg:border-l",
+          "border-black/10 max-md:border-t md:max-xl:even:border-l md:max-xl:[&:nth-child(n+3)]:border-t xl:border-l",
       )}
     >
       <MonoLabel className="block">{label}</MonoLabel>

@@ -88,7 +88,7 @@ function FidBar({ fill }: { fill: number }) {
 
 function RiskPlanMock() {
   return (
-    <Panel className="h-full min-h-[400px] rounded-[12px] bg-white ring-0" aria-hidden>
+    <Panel className="h-full min-h-[400px] rounded-[12px] bg-white ring-0 max-md:min-h-0" aria-hidden>
       <div className="flex items-start justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -133,7 +133,7 @@ function RiskPlanMock() {
       </div>
       <Hairline />
 
-      <div className="grid grid-cols-2 max-[420px]:grid-cols-1">
+      <div className="grid grid-cols-2 max-xl:grid-cols-1">
         <div className="px-4 py-3">
           <MonoLabel className="uppercase">Services affected</MonoLabel>
           <ul className="mt-2 flex flex-col gap-1.5">
@@ -144,7 +144,7 @@ function RiskPlanMock() {
             ))}
           </ul>
         </div>
-        <div className="border-l border-black/10 px-4 py-3 max-[420px]:border-l-0 max-[420px]:border-t">
+        <div className="border-l border-black/10 px-4 py-3 max-xl:border-l-0 max-xl:border-t">
           <div className="flex items-center justify-between gap-2">
             <MonoLabel className="uppercase">Fidelity recommended</MonoLabel>
             <span className="font-mono text-[13px] tabular-nums tracking-extra-tight text-black">87%</span>
@@ -203,7 +203,7 @@ function ScopePanel() {
         <StatusPill tone="WARN">HIGH</StatusPill>
       </div>
       <Hairline />
-      <div className="grid grid-cols-2 max-sm:grid-cols-1">
+      <div className="grid grid-cols-2 max-xl:grid-cols-1">
         <div className="px-5 py-4">
           <MonoLabel className="uppercase text-[#285D49]">Include</MonoLabel>
           <ul className="mt-3 flex flex-col gap-2">
@@ -229,7 +229,7 @@ function ScopePanel() {
             </li>
           </ul>
         </div>
-        <div className="border-l border-black/10 px-5 py-4 max-sm:border-t max-sm:border-l-0">
+        <div className="border-l border-black/10 px-5 py-4 max-xl:border-t max-xl:border-l-0">
           <MonoLabel className="uppercase">Skip</MonoLabel>
           <ul className="mt-3 flex flex-col gap-2">
             <li>
@@ -343,7 +343,7 @@ function FlowRail() {
 
 export function ChangeIntelligencePage() {
   return (
-    <PageShell>
+    <PageShell inset>
       <PageHero
         eyebrow="Change Intelligence"
         title="Test what matters for this change."

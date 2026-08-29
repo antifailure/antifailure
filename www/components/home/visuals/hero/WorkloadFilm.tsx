@@ -1,7 +1,7 @@
 "use client";
 
 import { span, useHeroFilmClock, type FilmProps } from "./clock";
-import { Avatar, Bar, Hairline, Label, Meta, easeInOut, moveStyle, smooth } from "./linear";
+import { Avatar, Bar, Hairline, Label, Meta, Pill, easeInOut, moveStyle, smooth } from "./linear";
 
 const LOOP = 8;
 
@@ -50,11 +50,15 @@ export function WorkloadFilm({ active, hovered }: FilmProps) {
               {i > 0 ? <Hairline /> : null}
               <div className="px-2.5 py-2">
                 <div className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-[11px] tracking-extra-tight text-[#1A1A1A]">
-                    {row.label}
-                  </span>
+                  {row.label === "exploratory" ? (
+                    <Pill className="bg-[#4CB782]/12 text-[#2F7A56] ring-[#4CB782]/25">{row.label}</Pill>
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate text-[11px] tracking-extra-tight text-[#1A1A1A]">
+                      {row.label}
+                    </span>
+                  )}
                   {row.avatars ? (
-                    <span className="flex -space-x-1.5">
+                    <span className="ml-auto flex -space-x-1.5">
                       {row.avatars.map((a, ai) => {
                         const show = smooth(span(t, 1.4 + ai * 0.18, 1.95 + ai * 0.18));
                         return (

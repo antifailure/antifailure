@@ -84,7 +84,7 @@ const BLOCK_METRICS: { k: string; v: string }[] = [
 
 export function OverviewPage() {
   return (
-    <PageShell>
+    <PageShell inset>
       <PageHero
         eyebrow="Product"
         title="A disposable production twin that proves whether a deployment is safe."
@@ -99,26 +99,26 @@ export function OverviewPage() {
           pass, warning, or block — then the environment is destroyed.
         </p>
 
-        <div className="relative mt-16 max-md:mt-10">
-          <ul className="grid grid-cols-4 gap-x-12 gap-y-14 max-lg:grid-cols-2 max-md:grid-cols-1 max-md:gap-y-8">
+        <div className="relative mt-14 max-md:mt-10">
+          <ul className="grid grid-cols-4 gap-x-16 gap-y-12 max-xl:grid-cols-2 max-xl:gap-x-10 max-md:grid-cols-1 max-md:gap-y-8">
             {MODULES.map((m) => (
               <li key={m.title} className="min-w-0">
                 <svg viewBox="0 0 16 16" className="mb-4 size-4 text-black" fill="none" aria-hidden>
                   <rect x="1.5" y="1.5" width="13" height="13" stroke="currentColor" strokeWidth="1.2" />
                 </svg>
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <h3 className="text-[18px] leading-snug tracking-extra-tight text-black">{m.title}</h3>
                   {m.verdict ? <StatusPill tone={m.verdict}>{m.verdict}</StatusPill> : null}
                 </div>
-                <p className="mt-2 max-w-[280px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+                <p className="mt-2 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
                   {m.body}
                 </p>
               </li>
             ))}
           </ul>
-          <span className="pointer-events-none absolute inset-y-0 left-[calc(25%-24px)] w-px bg-black/12 max-lg:hidden" />
+          <span className="pointer-events-none absolute inset-y-0 left-[calc(25%-16px)] w-px bg-black/12 max-xl:hidden" />
           <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-black/12 max-md:hidden" />
-          <span className="pointer-events-none absolute inset-y-0 right-[calc(25%-24px)] w-px bg-black/12 max-lg:hidden" />
+          <span className="pointer-events-none absolute inset-y-0 right-[calc(25%-16px)] w-px bg-black/12 max-xl:hidden" />
         </div>
       </PageSection>
 
@@ -142,8 +142,8 @@ export function OverviewPage() {
                 ))}
               </div>
               <Hairline />
-              <div className="grid grid-cols-2 max-sm:grid-cols-1">
-                <div className="border-r border-black/8 px-5 py-5 max-sm:border-r-0 max-sm:border-b max-sm:border-black/8">
+              <div className="grid grid-cols-2 max-xl:grid-cols-1">
+                <div className="border-r border-black/8 px-5 py-5 max-xl:border-r-0 max-xl:border-b max-xl:border-black/8">
                   <div className="flex items-center justify-between gap-2">
                     <MonoLabel>Shared staging</MonoLabel>
                     <span className="border border-black/[0.08] px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight text-black/35">
@@ -200,7 +200,7 @@ export function OverviewPage() {
           <MigrationScene tab={0} playId={0} />
         </div>
 
-        <div className="mt-8 grid grid-cols-2 gap-5 max-lg:grid-cols-1">
+        <div className="mt-8 grid grid-cols-2 gap-5 max-xl:grid-cols-1">
           <Panel className="rounded-[12px] bg-white">
             <div className="flex items-center justify-between gap-3 px-5 py-3">
               <MonoLabel className="text-black/55">pr · 184 · safety check</MonoLabel>
@@ -262,7 +262,7 @@ export function OverviewPage() {
 
       <PageSection tone="white">
         <PageHeading title="<strong>The output is a decision.</strong> Not a dataset. Not a preview URL alone." />
-        <ul className="relative mt-16 grid grid-cols-3 gap-x-16 max-md:grid-cols-1 max-md:gap-y-10">
+        <ul className="relative mt-16 grid grid-cols-3 gap-x-16 max-xl:grid-cols-1 max-xl:gap-y-10">
           {VERDICTS.map((item) => (
             <li key={item.tone} className="min-w-0">
               <StatusPill tone={item.tone}>{item.tone}</StatusPill>
@@ -274,8 +274,8 @@ export function OverviewPage() {
               </p>
             </li>
           ))}
-          <span className="pointer-events-none absolute inset-y-0 left-[calc(33.333%-32px)] w-px bg-black/12 max-md:hidden" />
-          <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-md:hidden" />
+          <span className="pointer-events-none absolute inset-y-0 left-[calc(33.333%-32px)] w-px bg-black/12 max-xl:hidden" />
+          <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-xl:hidden" />
         </ul>
         <div className="mt-16 max-w-[640px] border-t border-black/10 pt-8">
           <MonoLabel>What we will not claim</MonoLabel>

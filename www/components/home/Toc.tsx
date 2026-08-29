@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 
 const SECTIONS = [
+  { id: "migrations", title: "Migration Safety", theme: "light" as const },
   { id: "workload", title: "Workload Studio", theme: "light" as const },
-  { id: "migrations", title: "Migration Safety", theme: "sage" as const },
+  { id: "features", title: "Safety properties", theme: "light" as const },
   { id: "twins", title: "Isolated Twin", theme: "light" as const },
   { id: "firewall", title: "Side-Effect Firewall", theme: "light" as const },
-  { id: "features", title: "Safety properties", theme: "light" as const },
 ];
 
 export function TocWrapper({ children }: { children: React.ReactNode }) {

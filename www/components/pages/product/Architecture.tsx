@@ -116,7 +116,7 @@ function PlaneDiagram() {
   return (
     <Stage className="mt-14">
       <div className="relative">
-        <div className="grid grid-cols-2 max-lg:grid-cols-1">
+        <div className="grid grid-cols-2 max-xl:grid-cols-1">
           <PlaneColumn
             kicker="Hosted"
             title="Control plane"
@@ -133,7 +133,7 @@ function PlaneDiagram() {
             }
           />
 
-          <div className="flex items-center gap-3 border-y border-black/10 px-6 py-3 lg:hidden">
+          <div className="flex items-center gap-3 border-y border-black/10 px-6 py-3 xl:hidden">
             <span className="h-px min-w-0 flex-1 bg-black/12" aria-hidden />
             <MonoLabel className="uppercase tracking-[0.12em]">trust boundary</MonoLabel>
             <span className="h-px min-w-0 flex-1 bg-black/12" aria-hidden />
@@ -158,10 +158,10 @@ function PlaneDiagram() {
         </div>
 
         <div
-          className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-px bg-[#c41e1e]/70 lg:block"
+          className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-px bg-[#c41e1e]/70 xl:block"
           aria-hidden
         />
-        <div className="pointer-events-none absolute top-6 left-1/2 z-[1] hidden -translate-x-1/2 border border-black/[0.08] bg-white px-2.5 py-1 lg:block">
+        <div className="pointer-events-none absolute top-6 left-1/2 z-[1] hidden -translate-x-1/2 border border-black/[0.08] bg-white px-2.5 py-1 xl:block">
           <MonoLabel className="uppercase tracking-[0.12em]">trust boundary</MonoLabel>
         </div>
       </div>
@@ -177,7 +177,7 @@ function PlaneDiagram() {
 
 export function ArchitecturePage() {
   return (
-    <PageShell>
+    <PageShell inset>
       <PageHero
         eyebrow="Architecture"
         title="Hosted control plane. Customer-hosted data plane."
@@ -264,8 +264,8 @@ export function ArchitecturePage() {
 
       <RelatedGrid
         items={[
-          { href: "/security", title: "Security", description: "Fail closed. Data stays in your boundary." },
-          { href: "/open-source", title: "Open source", description: "The inspectable surface inside the boundary." },
+          { href: "/product/firewall", title: "Firewall", description: "How side effects are contained." },
+          { href: "/docs", title: "Docs", description: "How a twin run works." },
           { href: "/docs/concepts/journal", title: "Journal docs", description: "Lifecycle and isolation in full." },
         ]}
       />
