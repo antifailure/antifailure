@@ -42,6 +42,7 @@ func Merge(findings []Finding, root string) (*schema.Manifest, []Question) {
 	m.Database = mergeDatabase(findings, services, &questions)
 	m.Egress = mergeEgress(findings)
 	m.Personas = defaultPersonas()
+	m.Auth = mergeAuth(findings)
 	m.Workflows = suggestedWorkflows(findings)
 
 	// Sorted so that two runs over the same tree produce byte identical YAML.
@@ -434,6 +435,33 @@ func mergeEgress(findings []Finding) *schema.Egress {
 	}
 	sort.SliceStable(e.Rules, func(i, j int) bool { return e.Rules[i].Host < e.Rules[j].Host })
 	return e
+}
+
+// mergeAuth turns the authentication finding into the manifest's auth block.
+//
+// Absent when nothing was recognised, which is the right answer rather than a
+// gap: with no block the engine picks the adapter from the live schema at run
+// time, and that is better evidence than a dependency list. Writing
+// `adapter: auto` into every manifest would be noise that says nothing.
+func mergeAuth(findings []Finding) *schema.Auth {
+	found := OfKind(findings, KindAuth)
+	if len(found) == 0 {
+		return nil
+	}
+	f := found[0]
+
+	auth := &schema.Auth{Adapter: schema.AuthAdapter(f.Value)}
+	if f.Extra["hosted"] == "true" {
+		auth.TokenEnv = f.Extra["token_env"]
+		// Deliberately left false, and this is the important line in the
+		// function. A hosted adapter refuses to create anybody until somebody
+		// says the tenant is not production, and writing sandbox: true here
+		// would make that decision on their behalf, from a dependency list,
+		// for the one setting whose whole purpose is that a person confirmed
+		// it. AF-DB-020 asks for it by name when the run reaches that point.
+		auth.Sandbox = false
+	}
+	return auth
 }
 
 // defaultPersonas returns the two accounts nearly every application needs, so

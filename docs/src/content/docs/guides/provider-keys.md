@@ -148,6 +148,52 @@ Removing a key that is not there is not an error. This is a command people run
 in a hurry, and a retry after a timeout must not report failure for reaching the
 state you asked for.
 
+## How a stored key gets used
+
+Runs do not hold your key. They ask the control plane, which holds it, and the
+control plane makes the call to Anthropic or OpenAI.
+
+That is the only arrangement in which a cap is a cap. A key handed to a build
+machine is spent by that machine, and this would find out afterwards if it found
+out at all. Here the budget is checked before the key is decrypted, so a run with
+no allowance never causes the key to exist in memory, let alone reach a provider.
+
+Point the runner at the control plane and give it a token where the provider key
+used to go:
+
+```
+export ANTHROPIC_BASE_URL=https://app.dev.antifailure.dev/byok/anthropic
+export ANTHROPIC_API_KEY=<your Antifailure token>
+```
+
+or, for OpenAI:
+
+```
+export OPENAI_BASE_URL=https://app.dev.antifailure.dev/byok/openai
+export OPENAI_API_KEY=<your Antifailure token>
+```
+
+Nothing else changes. The request body, the response body and the error shapes
+are the provider's own, so a client library that knows how to read an Anthropic
+error keeps working.
+
+What comes back carries one extra header, `x-antifailure-cost-usd`, so a run can
+say what it spent without asking again.
+
+### What is refused, and why
+
+**No allowance left**: `402`, and the request never reaches the provider. A `402`
+rather than a `401` because retrying with a different token will not help, and a
+client that treats it as an authentication problem will loop.
+
+**A model with no configured price**: `400`, before the call. Discovering an
+unpriced model afterwards means the money is already spent and the only choice
+left is whether to lie about it. The message names the model and how to price it.
+
+**A streamed request**: `400`. Neither caller in this product streams today, and
+a pass-through that could not read usage out of the stream would cost money and
+record nothing, which is worse than refusing.
+
 ## Who may do what
 
 | | Console | `af provider` |

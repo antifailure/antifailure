@@ -44,7 +44,12 @@ ARG AF_BUILD_DATE=unknown
 LABEL org.opencontainers.image.title="Antifailure control plane" \
       org.opencontainers.image.description="Environments that outlive a CI job, quotas, and history." \
       org.opencontainers.image.source="https://github.com/antifailure/antifailure" \
-      org.opencontainers.image.documentation="https://antifailure.dev/self-hosting/control-plane/" \
+      # /docs/ IS PART OF THE PATH. The site is served under it, so the URL
+      # without it is a 404, and this label is the one thing in the image that
+      # tells an operator where to read about what they are running. It was
+      # wrong in every image published so far, and nothing could have caught it:
+      # claimcheck reads markdown, and a string in a Dockerfile is not markdown.
+      org.opencontainers.image.documentation="https://antifailure.dev/docs/self-hosting/control-plane/" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${AF_VERSION}" \
       org.opencontainers.image.revision="${AF_COMMIT}" \

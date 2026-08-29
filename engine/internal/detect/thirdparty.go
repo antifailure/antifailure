@@ -148,6 +148,12 @@ var thirdParties = []ThirdParty{
 		EnvHints: []string{"CLERK_SECRET_KEY", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"},
 	},
 	{
+		Name: "WorkOS", Hosts: []string{"api.workos.com"}, Mode: "sandbox",
+		Why:      "WorkOS has a staging environment, so personas sign in through the real flow.",
+		Packages: []string{"@workos-inc/node", "@workos-inc/authkit-nextjs", "workos"},
+		EnvHints: []string{"WORKOS_API_KEY", "WORKOS_CLIENT_ID"},
+	},
+	{
 		Name: "Auth0", Hosts: []string{"*.auth0.com"}, Mode: "sandbox",
 		Why:      "Auth0 tenants are free to create, so personas sign in through the real flow.",
 		Packages: []string{"auth0", "@auth0/nextjs-auth0", "express-openid-connect"},

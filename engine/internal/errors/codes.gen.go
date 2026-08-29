@@ -76,8 +76,10 @@ const (
 	// The subset could not be taken: {detail}
 	AFDB011 Code = "AF-DB-011"
 	// Personas cannot be provisioned because {provider} creates users only
-	// through its own API.
+	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
+	// {provider} rejected the admin token used to create personas.
+	AFDB021 Code = "AF-DB-021"
 	// Migrations failed on the branch: {detail}
 	AFDB030 Code = "AF-DB-030"
 
@@ -501,11 +503,20 @@ var catalog = map[Code]Entry{
 	AFDB020: {
 		Code:      AFDB020,
 		Area:      "DB",
-		Message:   "Personas cannot be provisioned because {provider} creates users only through its own API.",
-		NextStep:  "Configure SANDBOX mode for {provider} so that personas are created in its sandbox tenant.",
+		Message:   "Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured.",
+		NextStep:  "Point auth.url or auth.domain at a sandbox, development or staging tenant and set auth.sandbox: true, so that personas are never created in production.",
 		Docs:      "guides/personas",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFDB021: {
+		Code:      AFDB021,
+		Area:      "DB",
+		Message:   "{provider} rejected the admin token used to create personas.",
+		NextStep:  "Check that the variable named by auth.token_env holds a key for the sandbox tenant with permission to create users.",
+		Docs:      "guides/personas",
+		Retryable: false,
+		ExitCode:  ExitAuth,
 	},
 	AFDB030: {
 		Code:      AFDB030,

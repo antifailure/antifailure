@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"fmt"
 	"path"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,15 @@ const (
 	// DefaultPersonaDomain is reserved by RFC 6761 and can never receive mail,
 	// so a persona address cannot become a real one by accident.
 	DefaultPersonaDomain = "example.test"
+	// DefaultPersonaPhonePrefix is the North American block reserved for
+	// fictional use, 555-0100 through 555-0199. It is the phone number's
+	// version of example.test: a persona number cannot become a real handset
+	// by accident, which matters more here than for mail, because a text
+	// message reaches somebody immediately and at their expense.
+	//
+	// The block holds a hundred numbers and a manifest holds at most fifty
+	// personas, so numbering never wraps and two personas never collide.
+	DefaultPersonaPhonePrefix = "+155501"
 )
 
 // normalize fills in every default and cleans every path, exactly once.
@@ -60,6 +70,7 @@ func normalize(m *schema.Manifest, root string) {
 	normalizeDatabase(m)
 	normalizeEgress(m)
 	normalizePersonas(m)
+	normalizeAuth(m)
 	normalizeWorkflows(m)
 	normalizeInsights(m)
 	normalizeLoad(m)
@@ -195,10 +206,18 @@ func normalizeEgress(m *schema.Manifest) {
 }
 
 func normalizePersonas(m *schema.Manifest) {
+	texted := 0
 	for i := range m.Personas {
 		p := &m.Personas[i]
 		if p.Login == "" {
 			p.Login = schema.LoginPassword
+		}
+		if p.Login == schema.LoginSMSCode && p.Phone == "" {
+			// Only for the strategy that uses it. Giving every persona a
+			// number would put one in the manifest for accounts that will
+			// never receive a text, which reads as configuration and is not.
+			p.Phone = fmt.Sprintf("%s%02d", DefaultPersonaPhonePrefix, texted)
+			texted++
 		}
 		if p.Email == "" {
 			p.Email = p.Name + "@" + DefaultPersonaDomain
@@ -381,4 +400,33 @@ func sanitizeName(s string) string {
 		return "app"
 	}
 	return out
+}
+
+// normalizeAuth fills in the defaults an adapter can assume.
+//
+// Only where there is one right answer. auth.adapter defaults to auto because
+// detection is better than a guess written into every manifest, and the Auth0
+// connection defaults to the name Auth0 itself creates.
+func normalizeAuth(m *schema.Manifest) {
+	if m.Auth == nil {
+		return
+	}
+	a := m.Auth
+	if a.Adapter == "" {
+		a.Adapter = schema.AuthAuto
+	}
+	if a.Adapter == schema.AuthAuth0 && a.Connection == "" {
+		a.Connection = "Username-Password-Authentication"
+	}
+	if a.Table != nil {
+		if a.Table.Schema == "" {
+			a.Table.Schema = "public"
+		}
+		if a.Table.ID == "" {
+			a.Table.ID = "id"
+		}
+		if a.Table.Email == "" {
+			a.Table.Email = "email"
+		}
+	}
 }

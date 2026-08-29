@@ -13,6 +13,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
+| `auth` | [auth](#auth) | no | How personas come to exist. |
 | `database` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | `egress` | [Egress](#egress) | no | What the environment may reach on the network. |
 | `github` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
@@ -25,6 +26,39 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `services` | list of [Service](#service) | no | Every process the environment runs: web servers, API servers, background workers, and scheduled jobs. Min items 1, max items 50. |
 | `version` | `1` | **yes** | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
 | `workflows` | list of [Workflow](#workflow) | no | What the agents do, written as sentences. A workflow is a goal, not a script: the runner decides the actions and verifies the outcome. Max items 200. |
+
+## auth
+
+How personas come to exist. Absent from most manifests, because detection answers it; present when detection is wrong, when the users table has names nothing could guess, or when the application's users live somewhere only a script can reach.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `adapter` | `auto`, `direct`, `supabase`, `supabase_api`, `nextauth`, `clerk`, `auth0`, `workos`, `seed` | no | Which authentication scheme personas are created in. auto picks it from the dependency list and the live schema. Defaults to `auto`. |
+| `connection` | string | no | The Auth0 database connection users are created in. Defaults to Username-Password-Authentication. Max length 128. |
+| `domain` | string | no | The tenant, for Auth0, for example dev-abc123.us.auth0.com. Max length 253. |
+| `password` | [password rules](#password-rules) | no | The application's password policy, so the generated password satisfies it. |
+| `sandbox` | boolean | no | That the configured tenant is a sandbox, development or staging tenant rather than the production one. A hosted adapter refuses to create anybody without this, because the only tenant it could otherwise fall back to is the real one. Defaults to `false`. |
+| `seed` | string | no | The command the seed adapter runs, once per persona, with the persona in the environment as AF_PERSONA_NAME, AF_PERSONA_EMAIL, AF_PERSONA_PASSWORD, AF_PERSONA_TOTP_SECRET, AF_PERSONA_ROLE, AF_PERSONA_LOGIN and AF_PERSONA_ATTRIBUTES. It must be idempotent, because it runs again on every branch. Max length 2000. |
+| `sessions` | list of string | no | Extra tables holding sessions or tokens, emptied so that no real session survives into a branch. Masking does not touch them, because a session token is not personal data by any rule a scanner applies. Max items 50. |
+| `table` | [auth table](#auth-table) | no | The columns of an application's own users table, for the direct adapter. |
+| `token_env` | string | no | The variable holding the provider's admin credential. The variable name, never the credential. Max length 128. |
+| `url` | string | no | The project's API root, for Supabase. Max length 2048. |
+
+## auth table
+
+The columns of an application's own users table, for the direct adapter. Named rather than guessed, because guessing a column name is how provisioning writes a row the application cannot read.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `attributes` | object | no | Maps a persona attribute name to the column it is stored in. Max properties 50. |
+| `email` | string | no | Defaults to `email`. Max length 63. |
+| `id` | string | no | Defaults to `id`. Max length 63. |
+| `json` | string | no | A JSONB column that persona attributes with no column of their own are written into. Max length 63. |
+| `name` | string | **yes** | Max length 63. |
+| `password` | string | no | The column the bcrypt hash goes in. Absent for a table that keeps no password. Max length 63. |
+| `role` | string | no | Max length 63. |
+| `schema` | string | no | Defaults to `public`. Max length 63. |
+| `timestamps` | list of string | no | Columns set to now() on insert, and on update where the name contains 'updated'. Max items 10. |
 
 ## Build
 
@@ -158,6 +192,16 @@ Traffic shaped like production, compared between the base branch and this one. R
 | `thresholds` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
 | `unsafe_routes` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
 
+## password rules
+
+The application's password policy, so the generated password satisfies it. Without this, an application stricter than the generator refuses a correct password at sign in and the run reports a login failure that looks like the application's fault.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `forbid` | string | no | Characters the application will not accept. Max length 32. |
+| `min_length` | integer | no | Minimum 1, maximum 128. |
+| `symbols` | string | no | Replaces the default symbol set, for an application that rejects the ones it uses. Max length 32. |
+
 ## Persona
 
 One account an agent logs in as. Personas are created or reconciled in the golden by the authentication adapter, so an agent signs in the way a person does rather than through a bypass.
@@ -169,6 +213,7 @@ One account an agent logs in as. Personas are created or reconciled in the golde
 | `login` | `none`, `password`, `magic_link`, `email_code`, `sms_code`, `totp`, `session` | no | How this persona signs in. none is for an application with no sign in, or a page that is public: the agent goes straight to start_path. magic_link and email_code read the message from the captured inbox, so they work with no mail provider at all. The runner drives none, password, magic_link, email_code and sms_code today; a persona set to totp or session is reported as blocked with the reason, rather than failing the change. Defaults to `password`. |
 | `mfa` | boolean | no | Whether to enroll a time based one time password secret, which the runner holds so that it can complete a challenge. Defaults to `false`. |
 | `name` | string | **yes** | Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
+| `phone` | string | no | Number an SMS code is sent to. Defaults to a number in the +1 555 0100 block, which is reserved for fictional use and can never reach a real handset. Only sms_code uses it. Max length 32. |
 | `role` | string | no | Application role to provision, for example admin or member. Interpreted by the authentication adapter. Max length 64. |
 
 ## Resources
