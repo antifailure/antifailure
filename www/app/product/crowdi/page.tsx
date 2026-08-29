@@ -15,7 +15,7 @@ export default function LegacySlugRedirectPage() {
           __html: `location.replace("/product/exploratory-users");`,
         }}
       />
-      <main className="flex min-h-svh items-center justify-center px-6">
+      <main id="main" tabIndex={-1} className="flex min-h-svh items-center justify-center px-6">
         <p className="text-[15px] tracking-extra-tight text-gray-new-40">
           This page moved to{" "}
           <Link

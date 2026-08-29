@@ -154,6 +154,28 @@ for (const file of pages) {
   if (!existsSync(file.replace(/\.html$/, ".md"))) missing.markdownTwin.push(rel);
 }
 
+// The skip link is in the root layout, so it is on every page, but the element
+// it points at is not: three pages do not use SiteLayout and had no id="main",
+// and one of them had no <main> at all. That made the first thing a keyboard
+// user reaches a link that goes nowhere. The assembled-site link check caught
+// it, which is the right outcome and the late one, so it is asserted here too
+// against every page rather than only the ones that end up in the site bundle.
+console.log("\nSkip link");
+const deadSkipLink = [];
+for (const file of pages) {
+  const html = readFileSync(file, "utf8");
+  const target = html.match(/<a[^>]+class="skip-to-content"[^>]*href="#([^"]+)"/i)?.[1];
+  if (!target) continue;
+  if (!new RegExp(`id="${target}"`).test(html)) deadSkipLink.push(path.relative(OUT, file));
+}
+assert(
+  deadSkipLink.length === 0,
+  "the skip-to-content link resolves on every page",
+  deadSkipLink.length > 0
+    ? `no matching id on ${deadSkipLink.length}: ${deadSkipLink.join(", ")}`
+    : "",
+);
+
 const LABELS = {
   canonical: "every indexable page has a canonical",
   ogTitle: "every indexable page has og:title",

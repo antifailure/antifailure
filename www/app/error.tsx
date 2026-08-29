@@ -27,7 +27,7 @@ export default function Error({
   }, [error]);
 
   return (
-    <main className="flex min-h-screen flex-col justify-center bg-white px-8 py-24 max-sm:px-5">
+    <main id="main" tabIndex={-1} className="flex min-h-screen flex-col justify-center bg-white px-8 py-24 max-sm:px-5">
       <div className="mx-auto w-full max-w-[46rem]">
         <p className="font-mono text-[13px] uppercase tracking-[0.14em] text-gray-new-40">
           Something broke
