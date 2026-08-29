@@ -156,3 +156,13 @@ variable "provider_key_secret_enabled" {
   default     = true
   description = "Generate a sealing secret so customers' provider keys can be stored."
 }
+
+# Empty means no GitHub App, which is a supported state: sign-in works and the
+# webhook endpoint refuses deliveries rather than accepting unsigned ones. Set
+# it and the two secrets must already be in the vault, because GitHub mints the
+# private key and Terraform cannot.
+variable "github_app_id" {
+  type        = string
+  default     = ""
+  description = "The numeric GitHub App ID, or empty for no App."
+}

@@ -31,6 +31,7 @@ import (
 	dblabdb "github.com/antifailure/antifailure/engine/internal/db/dblab"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
+	supabasedb "github.com/antifailure/antifailure/engine/internal/db/supabase"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
@@ -717,6 +718,35 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 			return nil, err
 		}
 		return p, nil
+
+	case schema.DBSupabase:
+		db := m.Database
+		if db.Project == "" {
+			return nil, aferrors.Coded(aferrors.AFMAN002,
+				"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+				"detail", "database.provider is supabase and database.project is empty; "+
+					"the provider needs the Supabase project reference to create branches in")
+		}
+		name := db.APIKeyEnv
+		if name == "" {
+			name = "SUPABASE_ACCESS_TOKEN"
+		}
+		token, _, found, err := o.secretChain().Lookup(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || token.IsZero() {
+			return nil, aferrors.Coded(aferrors.AFSEC001,
+				"names", name,
+				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
+		}
+		return supabasedb.New(supabasedb.Options{
+			Token:       token,
+			ProjectRef:  db.Project,
+			Clock:       o.opts.Clock,
+			Version:     databaseVersion(m),
+			MaxBranches: db.MaxBranches,
+		})
 
 	case schema.DBDBLab:
 		db := m.Database

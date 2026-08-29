@@ -183,7 +183,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | 3.5 Subsetting | proven | A closure over the real foreign keys, executed against a real Postgres in CI and on a workstation, on a schema with a composite key, a nullable self reference, a required self reference, a two table cycle, an identity column, a generated column, a table with no primary key and a relationship the schema does not declare. Every key resolves afterwards, asserted by querying the loaded database rather than the planner. Masking is run over the result and the link groups still join. Before this the package had no callers at all. |
 | 3.6 Authentication adapters | planned | |
 | 3.7 Neon | proven | The full database conformance suite, all 23 behaviours, against the real Neon API. Found three bugs a fake would not have: `pooled` omitted means pooled, so `ConnDirect` was returning a pooled connection; a 200 with an empty body broke destroy-twice; and Neon's own branch ceiling arrived as an unexplained 422. |
-| 3.8 Supabase | planned | Blocked on Q5: no account provisioned. |
+| 3.8 Supabase | proven | All 23 behaviours of the database conformance suite against the real Supabase Management API, zero skips, nothing left behind. It took four runs: the suite found three bugs and every one was an ordering rather than a state. Branching a golden worked and resetting that same branch failed; a rename is acknowledged before the branch listing shows it, so a caller was told a verified golden had failed verification; and a branch answers 404 for seconds after being created. Also proven separately: a real application shape (a public table with a foreign key to auth.users, an identity, a live session, a non public schema, row level security with a policy), and the sweep, on a run killed on purpose. |
 | 3.9 DBLab | proven | The full database conformance suite against a REAL Database Lab Engine (v4.1.3, built for arm64, ZFS pool in a Colima VM, its own retrieval having pulled a 5000/20000 row source database in): 21 behaviours PASS, 0 FAIL, and 2 skipped by name because this provider does not declare pooled endpoints or a concurrent branch limit. The suite's leak check found nothing left behind. Found three bugs a fake would have agreed with. A clone leaves the engine's API BEFORE its ZFS dataset is released, so collecting a golden raced a teardown the API said had finished, and every golden the suite made was leaking. A three minute wait was too short for a second concurrent clone, which did not merely fail: the engine finished the clone afterwards, so giving up early CREATED an orphan the harness never asked back. And the declared branch latency described a best case. Re-run in full after 61ecc70 strengthened Branch_RefusesAnUnverifiedGolden, because the first run satisfied an assertion that commit retired for having checked nothing: 21 PASS, 0 FAIL, same 2 named skips, and that behaviour green on its real assertion in 32.95s. The engine was left holding 0 clones and only the base snapshot, which is exactly what it held before. |
 | 3.10 Golden lifecycle | proven | `schedule`, `max_age` and `retain` now decide something; before this they parsed, validated, defaulted, printed and did nothing. Cron with a zone, tested at both real daylight saving transitions. Publish and pull proven end to end: one machine refreshes and publishes, a second with no production credential pulls, verifies for itself, and branches it. |
 | 3.11 Postgres Insights | planned | |
@@ -215,7 +215,7 @@ Docker Desktop translates the traffic again at the virtual machine's gateway.
 | `internal/subset` | proven | closure, execution and an integrity check, against a real Postgres. This row said `proven` when the package had zero importers; it is true now. The suites ask for Postgres 16 rather than 17 deliberately: pg_dump refuses to read a server newer than itself and Debian, Ubuntu and the runners still ship a 16 client. The suite runs two ways: the container it builds itself, which is what CI does, and a server that is already running when `AF_TEST_DATABASE_URL` names one, which is the name `ci.yml` and the web suites already use, which is fatal rather than skipped if that server does not answer. Both are run rather than offered: the container path reports 17.092s in CI, and all twelve pass against a standing Postgres 17, which also shows the subsetter working on 17 and confirms the 16 pin is about pg_dump rather than about anything the subsetter does. |
 | `internal/golden` | proven | cron with a zone at both daylight saving transitions; retention, including a property test that a sweep always leaves something branchable; three storage backends round tripped against a real filesystem, a real MinIO and a real Azurite. The two remote backends need those servers, so in CI they skip and the rows rest on the local runs. |
 | Neon provider | proven | against the real service |
-| Supabase provider | planned | blocked on an account |
+| Supabase provider | proven | against the real service |
 | DBLab provider | proven | against a real self hosted engine, 21 behaviours, 2 named skips, nothing left behind |
 
 ## Phase 4. Build and runtime
@@ -486,11 +486,14 @@ code that has not been written:
 
 - **8.10** is no longer blocked on an AKS decision. The control plane runs on Container Apps, where the whole stack costs 32.49 USD a month against roughly 75 for an idle AKS control plane before a node runs. The Terraform is written and plans clean; what is left is the decision to spend, and an Entra app registration so CI can plan with a federated credential instead of skipping.
 - **14.1, 14.3** still want a cluster, which costs money for as long as it exists. 14.10 does not, and is not on this list: backup, restore and the drill are proven against a real Postgres and run on every CI build. What the deployed stack would add is a rehearsal against the database an outage would actually happen to, which is a different and better test than the one that exists, not a missing one.
-- **3.8** needs a Supabase account. 3.7 no longer does. **3.9 never needed one**:
-  a Database Lab Engine is self hosted, so the only cost is a machine with ZFS
-  and a copy of production. `docs/providers/dblab` says how to stand one up,
-  including on Apple Silicon, where neither ZFS nor an arm64 image exists
-  out of the box.
+- **3.7, 3.8 and 3.9 no longer need anything.** The Supabase suite runs against
+  a dedicated project (`af-conformance`, ref `fmidgkkluotxzopkdnnr`, org
+  `tilt`) which costs about $0.32 a day and should be deleted, with its access
+  token revoked, once nobody is running the suite. **3.9 never needed an
+  account**: a Database Lab Engine is self hosted, so the only cost is a
+  machine with ZFS and a copy of production. `docs/providers/dblab` says how to
+  stand one up, including on Apple Silicon, where neither ZFS nor an arm64
+  image exists out of the box.
 - **pg_dump refuses to read a server newer than itself**, so a golden refresh
   from a Postgres 17 source needs a 17 client. `pgcopy` now looks for one
   across PATH and the places distributions install the versions that are not on
