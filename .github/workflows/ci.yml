@@ -59,6 +59,21 @@ jobs:
           (cd engine && go test ./internal/hud -update-frames)
           git diff --exit-code
 
+      - name: The engine's parsers survive arbitrary input
+        # The manifest is a file from the repository under test, and the
+        # detection engine reads that repository's contents, so both parse
+        # bytes somebody else wrote. C.7 says the customer's repository is data
+        # and never code, and a parser that panics on a crafted file is the
+        # cheapest way to break that promise.
+        #
+        # Both targets existed before this step and neither was ever fuzzed.
+        # `go test ./...` runs a fuzz target against its committed seed corpus
+        # and nothing else, which passes while exploring no input at all.
+        run: |
+          cd engine
+          go test ./internal/manifest -run FuzzParse -fuzz FuzzParse -fuzztime 60s
+          go test ./internal/detect -run FuzzAnalyzers -fuzz FuzzAnalyzers -fuzztime 60s
+
       - name: The release stamps a version that exists
         # The linker accepts -X for a symbol it cannot find and says nothing.
         # v0.1.0 shipped with every version flag pointing at main, where the

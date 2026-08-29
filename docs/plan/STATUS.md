@@ -196,7 +196,7 @@ sub-phase above them read `proven`.
 | G3 | Race and goroutine leak | **partial**: `-race` everywhere; goleak in 8 of the 9 packages that start goroutines. `internal/insights` is open, see QUESTIONS Q8 |
 | G4 | Coverage thresholds per package | **measured, not yet blocking**. `just coverage`. 16 of 50 packages meet C.5 today |
 | G5 | Conformance suites | enforced |
-| G6 | Fuzz | partial: the licence parser fuzzes in CI; C.5 also names the manifest, masking rules, proxy HTTP, OpenAPI, APM and trace parsers |
+| G6 | Fuzz | partial: the licence, manifest and detection parsers each fuzz 60s in CI. The manifest target covers the masking rules, which are a section of it. Still unfuzzed: proxy HTTP, OpenAPI specs, APM responses, Playwright trace ingestion |
 | G7 | Security: gitleaks, trufflehog, gosec, semgrep, govulncheck, pnpm audit, pinned actions | partial: trivy on images and Terraform is not wired |
 | G8 | Docs | enforced |
 | G9 | Corpus: every corpus app completes up, test, down | not a gate yet |
