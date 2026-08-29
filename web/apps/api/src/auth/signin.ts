@@ -27,6 +27,56 @@ export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000
 export class SignInError extends Error {}
 
 /**
+ * Who may sign in at all.
+ *
+ * Null means anyone GitHub authenticates, which is the right default for a
+ * self-hosted installation: the operator already decided who reaches the
+ * instance, and a second list to maintain is a second thing to get wrong.
+ *
+ * A list means exactly those GitHub logins and nobody else. That is what the
+ * hosted staging deployment runs with while signups are closed, and it is
+ * enforced BEFORE any row is written, so a refused person leaves no user
+ * record, no session, and nothing to clean up.
+ *
+ * The distinction that matters: refusing here is not the same as the
+ * membership check further down. Somebody not on this list cannot sign in.
+ * Somebody on it signs in and still sees nothing until an installation exists
+ * for one of their organizations. Both are needed, because the first is a
+ * closed door and the second is what makes an open one safe.
+ */
+export type SignInAllowlist = ReadonlySet<string> | null
+
+/**
+ * Reads the allowlist from a comma or whitespace separated string.
+ *
+ * An unset variable is null, meaning open. A variable set to something that
+ * contains no logins at all is NOT open: it is a list of nobody, and it
+ * refuses everyone. That asymmetry is deliberate. `AF_SIGNIN_ALLOWLIST=""` is
+ * far more likely to be a broken deployment script than a considered decision
+ * to let the world in, and the safe reading of an ambiguous configuration is
+ * the closed one.
+ */
+export function parseAllowlist(value: string | undefined | null): SignInAllowlist {
+  if (value === undefined || value === null) return null
+  const logins = value
+    .split(/[,\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+  return new Set(logins)
+}
+
+/** What the process should say at startup, so the mode is never a guess. */
+export function describeAllowlist(list: SignInAllowlist): string {
+  if (list === null) {
+    return 'sign-in is OPEN: any GitHub account may sign in (AF_SIGNIN_ALLOWLIST is not set)'
+  }
+  if (list.size === 0) {
+    return 'sign-in is CLOSED TO EVERYONE: AF_SIGNIN_ALLOWLIST is set but names nobody'
+  }
+  return `sign-in is restricted to ${list.size} account(s) by AF_SIGNIN_ALLOWLIST`
+}
+
+/**
  * Starts the exchange: records a state value and returns where to send the
  * browser.
  *
@@ -87,6 +137,7 @@ export async function completeSignIn(
   clock: Clock,
   github: GitHubClient,
   input: { code: string; state: string },
+  allowlist: SignInAllowlist = null,
 ): Promise<CompletedSignIn> {
   const consumed = await pool.withoutTenant(async (db) => {
     // Deleted and returned in one statement, so two callbacks racing on the
@@ -109,6 +160,21 @@ export async function completeSignIn(
   }
 
   const { user, accessToken } = await github.exchangeCode(input.code)
+
+  // Before the user row, before the membership lookup, before anything is
+  // written. A refused sign-in must leave nothing behind: no account to find
+  // later, no row that makes it look as though somebody nearly got in.
+  //
+  // Checked on the GitHub numeric id's login rather than on the email address,
+  // for the same reason the rest of this file matches on the id: an address can
+  // be moved between accounts.
+  if (allowlist !== null && !allowlist.has(user.login.toLowerCase())) {
+    throw new SignInError(
+      'This installation is not open for sign-ups. Ask an owner to add your ' +
+        'GitHub account to the allowlist.',
+    )
+  }
+
   const orgs = await github.organizationsFor(accessToken)
 
   // The id being upserted is declared so that the row can be read back. See

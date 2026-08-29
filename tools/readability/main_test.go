@@ -71,6 +71,38 @@ func TestSentenceSplittingErrsTowardsSilence(t *testing.T) {
 	}
 }
 
+// A list is several sentences, and almost nobody ends a bullet with a full
+// stop. Counted naively, three bullets and the paragraph after them are one
+// sentence as long as all four, which inflates the mean on every page that
+// uses a list. This is the one place the splitter used to report a page as
+// harder than it is, which is the wrong direction for a report that is
+// supposed to be quiet when unsure.
+func TestEachListItemIsItsOwnSentence(t *testing.T) {
+	page := "- one two three four five\n" +
+		"- six seven eight nine ten\n" +
+		"- eleven twelve thirteen fourteen fifteen\n"
+
+	got := measure(page)
+	if got.Sentences != 3 {
+		t.Errorf("sentences = %d, want 3, one per item", got.Sentences)
+	}
+	if got.Longest != 5 {
+		t.Errorf("longest = %d, want 5: no item is longer than its own words", got.Longest)
+	}
+	if got.Mean != 5 {
+		t.Errorf("mean = %.1f, want 5", got.Mean)
+	}
+}
+
+// A numbered list is a list too, and so is one that is indented under a
+// paragraph, which is how most of them are actually written.
+func TestNumberedAndNestedListItemsCountTheSameWay(t *testing.T) {
+	got := measure("1. one two three\n2. four five six\n")
+	if got.Sentences != 2 {
+		t.Errorf("sentences = %d, want 2 for a numbered list", got.Sentences)
+	}
+}
+
 // Pointing the report at a tree with no pages is an error rather than a quiet
 // success, for the same reason as every other check here.
 func TestReportingOnNothingIsAnError(t *testing.T) {

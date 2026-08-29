@@ -11,3 +11,6 @@ import "github.com/antifailure/antifailure/engine/internal/events"
 func ServiceFieldForTest(line string, names map[string]bool) []events.Field {
 	return serviceField(line, names)
 }
+
+// NonEmptyForTest exposes nonEmpty to the package's external tests.
+func NonEmptyForTest(kv ...string) []events.Field { return nonEmpty(kv...) }

@@ -1,0 +1,7 @@
+# Pinned exactly, because an example that resolves differently next week is an
+# example that fails for somebody with no change to the repository. The long
+# term support line rather than the newest, which is what a team running this
+# in production would pick.
+Django==5.2.17
+psycopg[binary]==3.3.4
+gunicorn==26.2.0

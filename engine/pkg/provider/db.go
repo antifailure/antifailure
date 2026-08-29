@@ -90,6 +90,23 @@ type Caps struct {
 	ProviderMasking bool
 	// PooledEndpoints reports whether ConnPooled is available.
 	PooledEndpoints bool
+	// Subsetting reports whether the provider can start a refresh from an
+	// EMPTY candidate, which is what taking a production shaped slice needs.
+	//
+	// It is a real distinction rather than a preference. A provider whose
+	// candidate is a copy-on-write branch of the source, as Neon's and
+	// Supabase's are, has the whole database the moment the candidate exists
+	// and there is nothing to load into; subsetting there could only mean
+	// deleting down, which copies everything first and so saves nothing on the
+	// provider where branching was already free. A provider that starts an
+	// empty Postgres and fills it, as the Docker one does, can be given the
+	// slice instead of the whole thing.
+	//
+	// A manifest asking for a subset on a provider that does not declare this
+	// is refused, naming the provider. The alternative, accepting it and
+	// copying everything, is a manifest key that reads as configuration and
+	// behaves as decoration.
+	Subsetting bool
 	// MaxConcurrentBranches is the provider's limit. Zero means unlimited.
 	MaxConcurrentBranches int
 	// ExpectedBranchLatency is what the provider expects branching to take on
@@ -119,8 +136,24 @@ type GoldenSpec struct {
 	Version int
 	// RulesHash identifies the masking rules being applied.
 	RulesHash string
-	// Subset, when set, narrows what is copied.
-	Subset *SubsetSpec
+	// Load fills the candidate from the source, and REPLACES the provider's
+	// own copy when it is set.
+	//
+	// It is set when the manifest asks for a subset, because a subset is a
+	// different copy rather than a filter applied after one. The point of
+	// taking a slice of a two hundred gigabyte database is not moving the
+	// other hundred and ninety, so a provider that copied everything and then
+	// let something delete most of it would have done the expensive part
+	// anyway and would then need a VACUUM FULL to give the space back.
+	//
+	// Same inversion of control as Mask and Verify below, and for the same
+	// reason: the closure over foreign keys is the part that must not vary
+	// between providers, so it has exactly one implementation and the provider
+	// supplies only the empty database to put the result in.
+	//
+	// A provider that cannot produce an empty candidate declares
+	// Caps.Subsetting false and will never be given this.
+	Load func(ctx context.Context, sourceURL, candidateURL secrets.Value) error
 	// Mask applies the masking rules to a candidate, and is called by the
 	// provider once the candidate holds data.
 	//
@@ -132,14 +165,6 @@ type GoldenSpec struct {
 	// Verify scans a candidate and returns a signed attestation. A provider
 	// must call it and must not publish a version if it returns an error.
 	Verify func(ctx context.Context, candidateURL secrets.Value) (string, error)
-}
-
-// SubsetSpec narrows what a refresh copies.
-type SubsetSpec struct {
-	SeedTable        string
-	SeedWhere        string
-	MaxRows          int
-	FollowDependents int
 }
 
 // Resource is one thing a provider created, as the leak detector sees it.

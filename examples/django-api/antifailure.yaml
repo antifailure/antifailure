@@ -1,0 +1,53 @@
+version: 1
+name: django-orders
+
+# The third example, and the third shape. examples/go-api is a compiled binary,
+# examples/next-app is a framework with a build step and server rendered pages,
+# and this is a framework whose own migration system owns the schema. That is
+# the part worth watching here: `manage.py migrate` runs against the branch,
+# so a pull request that adds a field gets the column and nobody else's
+# environment does.
+
+services:
+  - name: web
+    kind: web
+    path: .
+    port: 8000
+    health_path: /health
+    # Django's own migrations, run by Django's own command. There is no psql in
+    # this image and no SQL file to point one at, which is the whole point: the
+    # engine runs whatever the framework already uses.
+    migrate: "python manage.py migrate --noinput"
+    build:
+      strategy: dockerfile
+      dockerfile: Dockerfile
+      # What this build reaches, written down. Declared rather than enforced in
+      # this release: the engine validates the list and shows it in af explain,
+      # and the local builder does not yet seal a build. It is the record of
+      # what the build needs, not a control you can rely on.
+      allow_hosts:
+        - pypi.org
+        - files.pythonhosted.org
+        - deb.debian.org
+    env:
+      # DATABASE_URL is not declared here on purpose. The database block below
+      # injects it, and declaring it as well makes the secret resolver demand a
+      # value nobody has to supply.
+      - name: PORT
+        value: "8000"
+
+database:
+  provider: docker
+  version: 17
+  masking_rules: masking.yaml
+  golden:
+    schedule: "0 3 * * *"
+    max_age: 168h
+    retain: 3
+
+egress:
+  # This application calls nothing, and the policy says so rather than leaving
+  # a door open in case it one day does. For a rule that is used, read
+  # ../go-api, which takes a payment through api.stripe.com answered by the
+  # pack that ships with the engine.
+  default: block

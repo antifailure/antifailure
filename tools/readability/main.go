@@ -110,23 +110,39 @@ func overallMean(rs []report) float64 {
 	return float64(words) / float64(sentences)
 }
 
-// collect finds the pages a reader sees. docs/plan is the build log for this
-// repository rather than product documentation.
+// collect finds the pages a reader sees: the documentation site and the
+// examples, whose READMEs are the first prose most people meet. docs/plan is
+// the build log for this repository rather than product documentation.
 func collect(root string) ([]string, error) {
 	var out []string
-	err := filepath.WalkDir(filepath.Join(root, "docs", "src", "content", "docs"),
-		func(path string, d fs.DirEntry, err error) error {
+	for _, dir := range []string{
+		filepath.Join(root, "docs", "src", "content", "docs"),
+		filepath.Join(root, "examples"),
+	} {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			if d.IsDir() || filepath.Ext(path) != ".md" {
+			// Installed dependencies and build output are not prose this
+			// project ships. An example with a package.json puts thousands of
+			// other people's READMEs under node_modules, and the report went
+			// from 45 pages to 94 with the hardest one belonging to semver.
+			if d.IsDir() {
+				switch d.Name() {
+				case "node_modules", ".next", "dist", "vendor":
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if filepath.Ext(path) != ".md" {
 				return nil
 			}
 			out = append(out, path)
 			return nil
 		})
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
 	}
 	sort.Strings(out)
 	return out, nil
@@ -135,12 +151,14 @@ func collect(root string) ([]string, error) {
 var (
 	frontmatter = regexp.MustCompile(`(?s)\A---\n.*?\n---\n`)
 	fenced      = regexp.MustCompile("(?s)```.*?```")
+	indented    = regexp.MustCompile(`(?m)^(?:    |\t).*$`)
 	inlineCode  = regexp.MustCompile("`[^`]*`")
 	link        = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
 	heading     = regexp.MustCompile(`(?m)^#{1,6} .*$`)
 	tableRow    = regexp.MustCompile(`(?m)^\|.*$`)
 	htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
 	directive   = regexp.MustCompile(`(?m)^:::.*$`)
+	listItem    = regexp.MustCompile(`(?m)^\s*(?:[-*+]|\d+\.)\s+`)
 	wordRe      = regexp.MustCompile(`[A-Za-z][A-Za-z'-]*`)
 )
 
@@ -153,12 +171,26 @@ var (
 func measure(page string) report {
 	text := frontmatter.ReplaceAllString(page, "")
 	text = fenced.ReplaceAllString(text, " ")
+	// An indented block is a code block too, and a README that lists three
+	// endpoints that way is not harder to read for it.
+	text = indented.ReplaceAllString(text, " ")
 	text = htmlComment.ReplaceAllString(text, " ")
 	text = tableRow.ReplaceAllString(text, " ")
 	text = heading.ReplaceAllString(text, " ")
 	text = directive.ReplaceAllString(text, " ")
 	text = link.ReplaceAllString(text, "$1")
 	text = inlineCode.ReplaceAllString(text, "code")
+	// A list item is a sentence, whether or not its author ended it with a
+	// full stop. Most do not, so three bullets and the paragraph after them
+	// were being read as one sentence and counted at the length of all four.
+	// That inflates the mean on every page that uses a list, which is the
+	// opposite of the bias this tool says it has: the splitter is deliberately
+	// crude in the direction of reporting a page as easier than it is, and
+	// this was the one place it reported pages as harder. A README with two
+	// short lists measured 24.2 words a sentence and was reported as the
+	// hardest page in the project; it measures 22.1 once each item is its own
+	// sentence, and the hardest page is the one that genuinely is.
+	text = listItem.ReplaceAllString(text, ". ")
 
 	var r report
 	syllables := 0

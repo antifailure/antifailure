@@ -184,6 +184,20 @@ errors:
     docs: providers/overview
     retryable: false
     exit_code: 5
+  - code: AF-DB-008
+    area: DB
+    message: "The database provider {provider} at {endpoint} rejected the configured credential."
+    next_step: "Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing."
+    docs: providers/overview
+    retryable: false
+    exit_code: 4
+  - code: AF-DB-009
+    area: DB
+    message: "The Database Lab Engine at {endpoint} has no snapshot to build a golden from: {detail}"
+    next_step: "Wait for the engine's own data retrieval to finish, then refresh again; its progress is at GET /instance/retrieval."
+    docs: providers/dblab
+    retryable: true
+    exit_code: 5
   - code: AF-DB-010
     planned: true
     area: DB
@@ -192,6 +206,13 @@ errors:
     docs: concepts/goldens
     retryable: false
     exit_code: 5
+  - code: AF-DB-011
+    area: DB
+    message: "The subset could not be taken: {detail}"
+    next_step: "Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has."
+    docs: concepts/subsetting
+    retryable: false
+    exit_code: 4
   - code: AF-DB-020
     planned: true
     area: DB
@@ -602,7 +623,7 @@ errors:
     planned: true
     area: CP
     message: "The control plane at {url} could not be reached."
-    next_step: "Antifailure works without it. Unset control_plane.url to run fully locally."
+    next_step: "Antifailure works without it. Run af logout, or unset AF_CONTROL_PLANE_URL, to work fully locally."
     docs: self-hosting/control-plane
     retryable: true
     exit_code: 5

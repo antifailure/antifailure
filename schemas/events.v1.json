@@ -112,6 +112,10 @@
           "description": "An operation failed. The data carries the error code."
         },
         {
+          "const": "engine.progress",
+          "description": "A step in a long running operation, for work with no more specific event of its own."
+        },
+        {
           "const": "engine.retry",
           "description": "A provider call is being retried after a transient failure."
         },

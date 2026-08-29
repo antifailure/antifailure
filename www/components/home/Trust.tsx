@@ -1,7 +1,6 @@
 import { Container } from "@/components/layout/Container";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { cn } from "@/lib/cn";
-import { TrustBoundaryScene } from "@/components/home/visuals/TrustBoundaryScene";
 
 const ITEMS = [
   {
@@ -36,7 +35,7 @@ export function Trust() {
               <strong>Fail closed. Customer-hosted.</strong> Production data stays in your
               boundary. Cleanup is a first-class safety property, not a best-effort script.
             </h2>
-            <ul className="mt-[216px] flex gap-[92px] max-xl:mt-[136px] max-xl:gap-16 max-lg:gap-8 max-md:gap-5 max-sm:mt-9 max-sm:flex-col max-sm:gap-7">
+            <ul className="mt-16 flex gap-[92px] max-xl:mt-12 max-xl:gap-16 max-lg:mt-10 max-lg:gap-8 max-md:gap-5 max-sm:mt-9 max-sm:flex-col max-sm:gap-7">
               {ITEMS.map((item) => (
                 <li className={cn(item.className, "max-lg:w-40 max-sm:w-[220px]")} key={item.title}>
                   <div className="mb-5 size-8 rounded-full bg-black max-xl:mb-4 max-lg:mb-3.5 max-lg:size-7 max-md:size-6" />
@@ -52,22 +51,17 @@ export function Trust() {
           </div>
           <div
             className={cn(
-              "flex w-[480px] flex-col justify-between border-l border-gray-new-50 px-8",
+              "flex w-[480px] flex-col border-l border-gray-new-50 px-8",
               "max-xl:w-[340px] max-xl:pr-0 max-xl:pl-5 max-lg:w-64 max-lg:pl-[18px] max-sm:w-full max-sm:border-none max-sm:pl-0",
             )}
           >
-            <SectionLabel className="max-md:mb-4">What we will not claim</SectionLabel>
-            <div>
-              <blockquote className="font-mono text-[15px] leading-7 text-black/70">
-                Zero rollback. No deployment can ever fail. Thousands of AI agents behave exactly like
-                humans. One click perfectly clones every cloud. Use measurable evidence instead.
-              </blockquote>
-              <div className="mt-8 text-[13px] tracking-extra-tight text-gray-new-40">
-                Product brief, section 18
-              </div>
-              <div className="mt-8 overflow-hidden rounded-[12px] bg-[#f4f7f5] ring-1 ring-black/10 max-xl:mt-6 max-md:mt-5">
-                <TrustBoundaryScene />
-              </div>
+            <SectionLabel className="mb-5 max-md:mb-4">What we will not claim</SectionLabel>
+            <blockquote className="font-mono text-[15px] leading-7 text-black/70">
+              Zero rollback. No deployment can ever fail. Thousands of AI agents behave exactly like
+              humans. One click perfectly clones every cloud. Use measurable evidence instead.
+            </blockquote>
+            <div className="mt-8 text-[13px] tracking-extra-tight text-gray-new-40">
+              Product brief, section 18
             </div>
           </div>
         </div>

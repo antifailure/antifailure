@@ -230,6 +230,42 @@ The provider's concurrent branch limit ({limit}) is reached.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/limits](/docs/providers/limits/) |
 
+### AF-DB-008
+
+The database provider {provider} at {endpoint} rejected the configured credential.
+
+**What to do.** Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/overview](/docs/providers/overview/) |
+
+### AF-DB-009
+
+The Database Lab Engine at {endpoint} has no snapshot to build a golden from: {detail}
+
+**What to do.** Wait for the engine's own data retrieval to finish, then refresh again; its progress is at GET /instance/retrieval.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [providers/dblab](/docs/providers/dblab/) |
+
+### AF-DB-011
+
+The subset could not be taken: {detail}
+
+**What to do.** Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/subsetting](/docs/concepts/subsetting/) |
+
 ## Detection
 
 ### AF-DET-001

@@ -222,7 +222,7 @@
             "type": "string",
             "maxLength": 253
           },
-          "description": "Hosts the build may reach. The build runs under the same default deny as the environment, so a package registry or an engine download must be named here."
+          "description": "Hosts the build is declared to reach, such as a package registry or an engine download. DECLARED RATHER THAN ENFORCED in this release: the list is validated and shown by af explain, and the local builder does not yet seal a build or apply it. Write it as the record of what your build needs, and do not rely on it as a control."
         }
       }
     },
@@ -599,6 +599,7 @@
         "login": {
           "type": "string",
           "enum": [
+            "none",
             "password",
             "magic_link",
             "email_code",
@@ -607,7 +608,7 @@
             "session"
           ],
           "default": "password",
-          "description": "How this persona signs in. magic_link and email_code read the message from the captured inbox, so they work with no mail provider at all."
+          "description": "How this persona signs in. none is for an application with no sign in, or a page that is public: the agent goes straight to start_path. magic_link and email_code read the message from the captured inbox, so they work with no mail provider at all. The runner drives none, password, magic_link, email_code and sms_code today; a persona set to totp or session is reported as blocked with the reason, rather than failing the change."
         },
         "mfa": {
           "type": "boolean",

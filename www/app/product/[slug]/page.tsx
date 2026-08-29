@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ArchitecturePage } from "@/components/pages/product/Architecture";
 import { ChangeIntelligencePage } from "@/components/pages/product/ChangeIntelligence";
-import { CrowdiPage } from "@/components/pages/product/Crowdi";
+import { ExploratoryUsersPage } from "@/components/pages/product/ExploratoryUsers";
 import { FidelityPage } from "@/components/pages/product/Fidelity";
 import { FirewallPage } from "@/components/pages/product/Firewall";
 import { MigrationsPage } from "@/components/pages/product/Migrations";
@@ -31,13 +31,13 @@ const PAGES: Record<string, { title: string; description: string; Page: Componen
   },
   workload: {
     title: "Workload Studio — Antifailure",
-    description: "Observed patterns, deterministic scenarios, and Crowdi exploratory users.",
+    description: "Observed patterns, deterministic scenarios, and exploratory users.",
     Page: WorkloadPage,
   },
-  crowdi: {
-    title: "Crowdi — Antifailure",
-    description: "Exploratory AI users inside Workload Studio, not a standalone AI QA product.",
-    Page: CrowdiPage,
+  "exploratory-users": {
+    title: "Exploratory users — Antifailure",
+    description: "Exploratory AI users inside Workload Studio.",
+    Page: ExploratoryUsersPage,
   },
   migrations: {
     title: "Migration Safety — Antifailure",

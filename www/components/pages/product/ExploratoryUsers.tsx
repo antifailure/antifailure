@@ -44,13 +44,13 @@ const SUPPORTING = [
   { title: "API client", body: "Retry storms and idempotency edges." },
 ] as const;
 
-export function CrowdiPage() {
+export function ExploratoryUsersPage() {
   return (
     <PageShell>
       <PageHero
-        eyebrow="Crowdi · Workload Studio"
+        eyebrow="Workload Studio"
         title="AI discovers. Deterministic systems prove."
-        lead="Crowdi is the exploratory-user feature inside Workload Studio — not the product, the buyer, or the category. Agents pursue goals, find unanticipated paths, and compile them into versioned scenarios the runner can scale."
+        lead="Exploratory users live in Workload Studio, beside observed and deterministic traffic. Agents pursue goals, find unanticipated paths, and compile them into versioned scenarios the runner can scale."
         visual={
           <Stage>
             <WorkloadScene />
@@ -61,9 +61,9 @@ export function CrowdiPage() {
       <PageSection>
         <PageHeading title="<strong>Goals, not selectors.</strong> Personality changes timing and decisions — not merely prompt wording." />
         <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Crowdi receives a goal, a synthetic identity, and behavioral traits. Personas are grounded in
-          product analytics, or labeled as synthetic hypotheses. They live here as one traffic source
-          among observed patterns and deterministic journeys.
+          Exploratory users receive a goal, a synthetic identity, and behavioral traits. Personas are
+          grounded in product analytics, or labeled as synthetic hypotheses. They live here as one traffic
+          source among observed patterns and deterministic journeys.
         </p>
 
         <div className="mt-16 grid grid-cols-2 gap-5 max-lg:grid-cols-1">
@@ -148,7 +148,7 @@ export function CrowdiPage() {
       <PageSection tone="sage">
         <PageHeading title="<strong>Not a synthetic-user company.</strong> Exploratory users are a traffic source, not the category." />
         <div className="mt-12 grid grid-cols-2 gap-10 max-lg:grid-cols-1">
-          <Callout label="Do not position Crowdi as more personalities">
+          <Callout label="Do not position exploration as more personalities">
             That feature can be copied. The defensible system links exploratory behavior to
             infrastructure and database evidence. We will not claim thousands of AI agents behave
             exactly like humans. Charge for deployments protected — not for the number of AI
@@ -156,13 +156,13 @@ export function CrowdiPage() {
           </Callout>
           <Panel className="bg-white/70">
             <div className="px-5 py-3">
-              <MonoLabel>What Crowdi is not</MonoLabel>
+              <MonoLabel>What exploratory users are not</MonoLabel>
             </div>
             <Hairline />
             <ul>
               {[
                 ["AI QA platform", "Verification is a layer. The product is deployment safety."],
-                ["Synthetic-user company", "Crowdi lives inside Workload Studio, beside observed traffic."],
+                ["Synthetic-user company", "They live inside Workload Studio, beside observed traffic."],
                 ["More personalities", "A copied prompt library is not a durable wedge."],
                 ["Human-identical agents", "Exploration is useful. Exact human mimicry is not a claim."],
               ].map(([label, body], i) => (
@@ -185,7 +185,7 @@ export function CrowdiPage() {
 
       <RelatedGrid
         items={[
-          { href: "/product/workload", title: "Workload Studio", description: "Where Crowdi lives — observed, deterministic, and exploratory traffic." },
+          { href: "/product/workload", title: "Workload Studio", description: "Observed, deterministic, and exploratory traffic." },
           { href: "/product/oracle", title: "Differential Oracle", description: "Where compiled journeys become baseline-versus-candidate evidence." },
           { href: "/product", title: "Product", description: "The company is not a synthetic-user company." },
         ]}

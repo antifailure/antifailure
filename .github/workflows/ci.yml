@@ -75,6 +75,57 @@ jobs:
         # supposed to prevent.
         run: go run ./tools/gatecheck .
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        # For the examples that are not Go. Pinned to the same major the
+        # runtime images use, so the version that builds an example here is the
+        # version that builds it in the Dockerfile a user copies.
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: examples/*/package-lock.json
+
+      - name: The examples still compile and their manifests are valid
+        # An example that does not compile is worse than no example: it is the
+        # first thing a user copies. They are separate modules, outside the
+        # workspace so their dependencies never enter the engine's module
+        # graph, which means nothing else in this job would build them.
+        #
+        # All three languages, because checking only the compiled ones would
+        # leave the other two examples unchecked by the gate whose whole point
+        # is this sentence. Go builds, JavaScript builds, and Python runs the
+        # framework's own check, which loads the settings, the URL conf and
+        # every model.
+        run: |
+          set -euo pipefail
+          for dir in examples/*/; do
+            [ -f "$dir/go.mod" ] || continue
+            (cd "$dir" && GOWORK=off go build -o /dev/null ./... && GOWORK=off go vet ./...)
+          done
+          for dir in examples/*/; do
+            [ -f "$dir/package.json" ] || continue
+            (cd "$dir" && npm ci --no-audit --no-fund --silent && npm run build)
+          done
+          for dir in examples/*/; do
+            [ -f "$dir/requirements.txt" ] || continue
+            (
+              cd "$dir"
+              python3 -m venv .venv-gate
+              ./.venv-gate/bin/pip install -q --disable-pip-version-check -r requirements.txt
+              ./.venv-gate/bin/python -m compileall -q . -x '\.venv-gate'
+              if [ -f manage.py ]; then
+                DATABASE_URL="postgres://gate:gate@127.0.0.1:5432/gate" \
+                  ./.venv-gate/bin/python manage.py check
+              fi
+              rm -rf .venv-gate
+            )
+          done
+          go build -o /tmp/af-examples ./engine/cmd/af
+          for dir in examples/*/; do
+            [ -f "$dir/antifailure.yaml" ] || continue
+            (cd "$dir" && /tmp/af-examples explain > /dev/null)
+          done
+          echo "every example builds and every manifest is valid"
+
       - name: The prose stays readable
         # A regression guard rather than a style rule. The hardest page today
         # averages 23 words a sentence and the limit is 28, so this fires on a
@@ -231,7 +282,7 @@ jobs:
         # cspell owns spelling, with the project dictionary in
         # tools/docs/dictionary.txt. Adding a word is a one line diff a
         # reviewer can read.
-        run: npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" README.md CONTRIBUTING.md SECURITY.md
+        run: npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" "examples/**/*.md" README.md CONTRIBUTING.md SECURITY.md
 
       - name: Prose style
         # The Google developer documentation style at error level, plus the
@@ -253,18 +304,14 @@ jobs:
           sudo tar -xzf vale.tar.gz -C /usr/local/bin vale
           rm vale.tar.gz
           vale sync
-          vale docs/src/content/docs README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
+          vale docs/src/content/docs examples README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
 
       - name: Assemble the site
-        # Exactly what deploy.yml publishes: the marketing site at the root and
-        # the documentation under /docs. The link check and the preview both
-        # need the real layout, because /docs/reference/cli/#af-init is only a
-        # real address once both halves are in the same tree.
-        run: |
-          rm -rf site && mkdir -p site
-          cp -R www/out/. site/
-          cp -R docs/dist site/docs
-          echo "assembled $(find site -type f | wc -l) files"
+        # Exactly what deploy.yml publishes, because it is now the same script
+        # rather than a second copy that claimed to be. The link check and the
+        # preview both need the real layout, because /docs/reference/cli/#af-init
+        # is only a real address once both halves are in the same tree.
+        run: tools/site/assemble.sh
 
       - name: Every link on the assembled site resolves
         # Offline: internal links and fragments only. A fragment is the case
@@ -465,6 +512,15 @@ jobs:
         # dead end somebody finds only after following our instructions, and
         # the security one was a promise to researchers.
         run: go run ./tools/claimcheck .
+
+      - name: The manifests in the documentation are ones the engine accepts
+        # The gates above read style, spelling, links and repository paths. None
+        # of them knows what a manifest is, and a getting started page shipped
+        # telling readers to set control_plane.url. The engine refuses that with
+        # AF-MAN-002, "Unknown key", because the schema closes itself so that a
+        # typo cannot silently change an environment. The page was live on the
+        # site and every documentation gate was green.
+        run: go run ./tools/manifestcheck .
 
       - name: The prose reads like a person wrote it
         # The build plan asks for vale with "a custom rule that flags em dashes

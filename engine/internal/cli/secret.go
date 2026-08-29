@@ -163,10 +163,20 @@ func checkPassphrase(e *Env) error {
 }
 
 // readSecret reads a value without putting it anywhere it can be read back.
+//
+// The piped path reads e.Stdin rather than os.Stdin. It read os.Stdin once, and
+// that made every command using it untestable and unusable from anything that
+// embeds the CLI with its own streams: --stdin would block on the process's
+// real standard input while the caller's data sat unread. In the binary the two
+// are the same value, so nothing about production behaviour changes.
+//
+// The interactive path still uses the process's own descriptor, because reading
+// a password without echo means turning echo off on a terminal, and only a real
+// file descriptor has one.
 func readSecret(e *Env, fromStdin bool) (string, error) {
 	fd := int(os.Stdin.Fd())
 	if fromStdin || !term.IsTerminal(fd) {
-		scanner := bufio.NewScanner(os.Stdin)
+		scanner := bufio.NewScanner(e.Stdin)
 		if !scanner.Scan() {
 			if err := scanner.Err(); err != nil {
 				return "", fmt.Errorf("reading the value from stdin: %w", err)

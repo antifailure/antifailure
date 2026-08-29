@@ -38,6 +38,7 @@ SIEM
 Sigstore
 starlight
 subsetted
+subsetter
 subsetting
 supabase
 testcontainers
