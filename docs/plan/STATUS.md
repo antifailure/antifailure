@@ -201,7 +201,7 @@ sub-phase above them read `proven`.
 | G8 | Docs | enforced |
 | G9 | Corpus: every corpus app completes up, test, down | not a gate yet |
 | G10 | Teardown: leak detector reports zero untracked | enforced. The engine job's "Nothing was left behind" step counts managed containers and networks after the suites, and `just leaks` runs the same check. It is deliberately out of `just gate`, because a developer with an environment up would fail it every time and learn to skip the whole gate |
-| G11 | Reproducibility: identical rebuilds, SBOM, cosign verify | not a gate yet |
+| G11 | Reproducibility: identical rebuilds, SBOM, cosign verify | **rebuilds are reproducible now, and were not**. Both `build-release` and release.yml stamped BuildDate with `$(date -u)`, so every build of one commit differed and the shipping path was non-reproducible. The date comes from the commit. `just reproducible` builds twice and compares; it is in `just gate` and not yet a CI job. SBOM and cosign verification are still unwired |
 | G12 | Design: axe-core, visual regression, keyboard nav, CLI snapshots in four modes | not a gate yet |
 
 G4 is measured rather than blocking on purpose. Thirty four of fifty packages
