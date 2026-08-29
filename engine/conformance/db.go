@@ -22,6 +22,8 @@ package conformance
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -264,6 +266,10 @@ type harness struct {
 	masked     int
 	verified   int
 	failVerify bool
+	// refreshes counts what this harness has asked for, so that the rules hash
+	// can differ between two refreshes inside one behaviour as well as between
+	// behaviours. See rulesHash.
+	refreshes int
 }
 
 // createdSet records the resources one run of the suite made.
@@ -365,12 +371,33 @@ func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory
 	}
 }
 
+// rulesHash is different for every refresh this suite makes.
+//
+// It was the constant "conformance", and that made this suite intermittently
+// red in a way that pointed nowhere near itself. A golden's identifier is
+// gv_<timestamp to the second>_<first eight characters of the rules hash>, so
+// two refreshes in the same second with the same hash get the SAME identifier.
+// For a provider whose goldens are images the second commit then retags the
+// first, and one behaviour's cleanup destroys the golden another behaviour is
+// about to branch. It arrives as "the golden version no longer exists" from
+// Branch, several behaviours away from the refresh that caused it, and only on
+// machines fast enough to do two refreshes inside one second.
+//
+// The one-second resolution is provider.NewGoldenVersionID's, and it is worth
+// fixing there as well: two refreshes in the same second is not a thing only a
+// test does. This stops the suite depending on it either way.
+func (h *harness) rulesHash() string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s#%d", h.t.Name(), h.refreshes))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
 // spec builds a refresh specification whose callbacks record what happened.
 func (h *harness) spec() provider.GoldenSpec {
+	h.refreshes++
 	return provider.GoldenSpec{
 		SourceURL: secrets.New("postgres://conformance@source/db"),
 		Version:   17,
-		RulesHash: "conformance",
+		RulesHash: h.rulesHash(),
 		Mask: func(_ context.Context, _ secrets.Value) error {
 			h.masked++
 			return nil
