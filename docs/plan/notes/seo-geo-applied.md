@@ -72,10 +72,15 @@ trusting the ratio.
 headers on hashed assets, correct content types for `.md` and the text
 endpoints, the `/product/crowdi` 301, a real 404 status, and security headers.
 
-**Build integrity.** `output: "export"` restored, without which `deploy.yml`
-fails on `test -d www/out` and nothing deploys at all. `scripts/check-seo.mjs`
+**Build integrity.** `scripts/check-seo.mjs`
 runs 28 assertions against the built output and is wired into `deploy.yml`.
 `fetch-depth: 0` added to the checkout so sitemap dates are real.
+
+`output: "export"` was missing when this work started, so `next build` wrote
+`.next` while `deploy.yml` asserts `test -d www/out`, and nothing could
+deploy. It was restored independently on `hosted-loop` while this branch was
+in progress, and that version is the one kept here; only a pointer to
+`public/staticwebapp.config.json` was added to it.
 
 **Repository.** Homepage URL set (it was empty), description aligned to the
 one canonical sentence, topics expanded from 13 to the full 20, Discussions
