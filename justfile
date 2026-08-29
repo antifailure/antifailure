@@ -81,6 +81,8 @@ gate: _reports
     run "lint"                           just lint
     run "the gates themselves"           just test-tools
     run "engine"                         just test-engine
+    run "this platform's keyring"        just keyring
+    run "the other platforms lint"       just lint-platforms
     run "control plane"                  just test-web
     run "runner"                         just test-runner
     run "edition boundary"               just edition
@@ -485,6 +487,34 @@ generate:
     cd engine && go test ./internal/events -update-schema
     cd engine && go test ./internal/masking -update-transforms
     cd engine && go test ./internal/hud -update-frames
+
+# This machine's own credential store, against the real thing.
+#
+# The same command the keyring workflow runs, which is what lets `just gate` and
+# CI agree about it. What it actually exercises differs per platform and that is
+# the point: macOS runs the keychain tests here, Linux runs the Secret Service
+# ones, and Windows runs the Credential Manager ones. No single machine can run
+# all three, which is why that workflow has a job per platform, and why running
+# the local one here is the most a developer's gate can honestly do.
+#
+# A machine with no keyring daemon skips rather than fails. That is correct: the
+# chain's whole design is that an unavailable source is named and stepped over.
+keyring:
+    cd engine && go test ./internal/secrets/
+
+# Lint the code the other platforms compile.
+#
+# The main lint runs on one machine, so it only ever sees the files that
+# machine's build tags select. keyring_windows.go and keyring_darwin.go are
+# invisible to it, and a file nothing lints drifts: GOOS=windows found an
+# unchecked return in the Windows keyring that had been merged and green for a
+# day, because no linter on any runner had ever compiled it.
+#
+# Cross compiling for the lint costs nothing. It needs no runner of that
+# platform, since it type checks rather than runs.
+lint-platforms:
+    cd engine && GOOS=windows golangci-lint run --timeout 15m
+    cd engine && GOOS=darwin golangci-lint run --timeout 15m
 
 # The community build does not contain or need the enterprise edition.
 edition:

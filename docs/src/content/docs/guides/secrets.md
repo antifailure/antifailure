@@ -33,7 +33,8 @@ In order, most specific first:
 3. **The encrypted local store.** A file under `.antifailure`, for this
    repository.
 4. **The system keyring.** The long lived default on a workstation, shared
-   across repositories.
+   across repositories: the macOS keychain, the freedesktop Secret Service on
+   Linux, and the Credential Manager on Windows.
 
 The first source that has the value wins. The order is the point: a temporary
 override beats a file, and a file beats a stored default, which is what makes
@@ -85,12 +86,21 @@ passphrase everybody knows only looks encrypted.
 ## A credential that stopped working
 
 ```
-AF-SEC-002 The credential for GitHub was rejected after one refresh.
-  Next: Rotate the credential and store the new value where GitHub reads it.
+AF-SEC-002 The credential for Azure Key Vault at https://af.vault.azure.net
+was rejected after one refresh: Key Vault answered 403 Forbidden.
+  Next: Rotate the credential and store the new value where it reads it. A
+  rejection that survives a refresh is a credential that was revoked or was
+  never right, so retrying will not help.
 ```
 
-Refreshed once, then reported. Retrying a rejected credential in a loop turns a
-wrong key into a lockout.
+One renewal, once per process, then reported. Every store that holds a token
+which expires gets that one renewal, which covers a long-running process holding
+a stale token. A second rejection is not an expiry, and retrying a revoked
+credential once per declared variable turns a configuration mistake into a rate
+limit on a store everybody else is also using.
+
+This comes from the enterprise secret stores, which are the sources that
+authenticate. See [enterprise secret stores](/docs/enterprise/secrets/).
 
 ## A live key where a sandbox key belongs
 
@@ -109,7 +119,23 @@ goes through it. Redaction happens at the writer rather than at each call site,
 because a call site somebody forgot is exactly how a secret ends up in a CI
 log.
 
+The engine has five writers that can put an event somewhere a person later
+reads it: the local NDJSON log, the spool on disk, a span attribute, the bytes
+an OTLP collector receives, and the body of the request the control plane
+receives. Each redacts at its own writer, and each has a test that a connection
+string cannot reach it. The last of those is the only one that leaves the
+machine, so a self-hosted control plane stores events that have already been
+through the redactor of the engine that sent them.
+
 You will see this in error messages: `postgres://user:[redacted]@host/db`. That
 is working.
+
+## More places to look
+
+An organisation that keeps its credentials in HashiCorp Vault, AWS Secrets
+Manager, Azure Key Vault or Google Secret Manager can add them to the end of
+this chain with the enterprise edition. They are asked after every local source,
+for the same reason the keyring is asked after `.env`. See
+[enterprise secret stores](/docs/enterprise/secrets/).
 
 Related: [sandbox credentials](/docs/guides/sandbox/), [egress](/docs/concepts/egress/).

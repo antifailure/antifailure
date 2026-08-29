@@ -91,6 +91,25 @@ func TestAPlainCopyStillSendsExactlyTheFlagsItAlwaysDid(t *testing.T) {
 	}, dumpArgs(CopyOptions{}))
 }
 
+func TestASchemaOnlyCopySendsTheFlagThatLeavesTheRowsBehind(t *testing.T) {
+	// CopySchema used to be its own dump with its own flag list. Merging the
+	// two copy paths into one made it an option instead, and the whole point
+	// of subsetting is that the rows do NOT come across: without this flag a
+	// schema copy silently becomes a full copy of production, which is the
+	// exact thing the feature exists to avoid.
+	got := dumpArgs(CopyOptions{SchemaOnly: true})
+	require.Contains(t, got, "--schema-only")
+	// And the flags a plain copy sends are still all there.
+	for _, flag := range []string{
+		"--format=custom", "--no-owner", "--no-privileges", "--no-acl",
+		"--quote-all-identifiers",
+	} {
+		require.Contains(t, got, flag)
+	}
+	// Not sent when it was not asked for.
+	require.NotContains(t, dumpArgs(CopyOptions{}), "--schema-only")
+}
+
 func TestExcludingSchemasAlsoExcludesTheClusterWideObjectsThatComeWithThem(t *testing.T) {
 	// A publication belongs to the cluster rather than to a schema, so
 	// excluding a platform's schemas does not exclude the publication it
