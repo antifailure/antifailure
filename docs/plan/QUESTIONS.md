@@ -190,9 +190,36 @@ daemon race where a freshly committed image is not immediately inspectable; and
 `ImageRemove` with `PruneChildren: true` reaching a sibling committed from the
 same base image.
 
-**Proceeding under:** recorded, not fixed. The reproduction is a CI run, the
-window is milliseconds, and guessing at a fix for a race whose mechanism is
-unproven is how a flake becomes a flake with a plausible comment above it.
+**Answered, partly.** The identifier was still colliding, along an axis the
+first repair did not consider.
+
+The rules hash was `sha256(t.Name() + "#" + refreshCount)`. That is unique
+within one process and identical across processes: every package running this
+suite calls its entry point `TestConformance`, so `internal/db/docker`,
+`internal/db/dblab`, `internal/db/neon` and `internal/db/supabase` all produce
+the behaviour name `TestConformance/Branch_IsIsolatedFromTheGolden` and
+therefore the same eight characters, on every run. Go runs test packages in
+parallel, so "unique within one process" was never the property needed.
+
+The evidence had been in the failures the whole time and I read past it twice:
+the failure on 2026-08-29 at 03:02 and the one at 10:11 quote the SAME hash,
+`7969f160`, differing only in the timestamp. A hash that repeats across hours
+and runs is derived, not unique.
+
+It is four random bytes now, which is what `internal/masking`'s
+`uniqueRulesHash` already did for the same reason. Randomness cannot collide by
+construction, where both derivations collided along an axis nobody thought of.
+
+Not claimed as proven. The suite is green against a real daemon after the
+change, but this flake is intermittent and one green run is not evidence. What
+IS established is that the collision was real and is now impossible; if the
+failure returns, the cause is something else and the ruled-out list above still
+stands.
+
+Still open underneath it: `provider.NewGoldenVersionID` resolves to the second,
+so two refreshes in one second still depend on their hashes differing. That is
+production code, not test code, and two refreshes in a second is not something
+only a test does.
 
 ## Answered
 
