@@ -3,8 +3,10 @@ package env
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -420,6 +422,114 @@ func (o *Orchestrator) Load(ctx context.Context, opts LoadOptions) (*load.Result
 	return res, refused, err
 }
 
+// ScenarioOptions configure a scenario run.
+type ScenarioOptions struct {
+	// Only runs just the named scenarios. Empty runs all of them.
+	Only []string
+	Seed int64
+	// Concurrency bounds requests in flight, as it does for the mix.
+	Concurrency int
+	Progress    func(load.Progress)
+}
+
+// Scenarios runs the declared journeys against the environment.
+//
+// Beside the mix rather than instead of it: a scenario says what order the
+// requests come in and what must hold afterwards, and the mix says what the
+// rest of production is doing at the same time. Both are sent by the same
+// generator and both obey the same safe list.
+func (o *Orchestrator) Scenarios(ctx context.Context, opts ScenarioOptions) ([]load.ScenarioResult, error) {
+	status, err := o.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if status.URL == "" {
+		return nil, aferrors.Coded(aferrors.AFLOD010,
+			"detail", "nothing is running for this branch; bring it up with 'af up' first")
+	}
+
+	runs, err := o.scenarioRuns(opts.Only)
+	if err != nil {
+		return nil, err
+	}
+	if len(runs) == 0 {
+		return nil, aferrors.Coded(aferrors.AFLOD010,
+			"detail", "no scenarios are declared; add load.scenarios to the manifest")
+	}
+
+	cfg := o.opts.Manifest.Load
+	var safe, unsafe []string
+	if cfg != nil {
+		safe, unsafe = cfg.SafeRoutes, cfg.UnsafeRoutes
+	}
+	if len(safe) == 0 {
+		// The same default the mix takes. Reads under the root are the only
+		// thing that can be assumed safe without being told.
+		safe = []string{"GET /**"}
+	}
+
+	return load.RunScenarios(ctx, load.ScenarioOptions{
+		BaseURL: status.URL, Runs: runs,
+		SafeRoutes: safe, UnsafeRoutes: unsafe,
+		Seed: opts.Seed, Concurrency: opts.Concurrency,
+		Clock: o.opts.Clock, Progress: opts.Progress,
+	})
+}
+
+// scenarioRuns reads and validates every scenario the manifest declares.
+//
+// All of them are read before any of them runs, so a typo in the third
+// document is a message rather than a run that sends two journeys and then
+// stops halfway.
+func (o *Orchestrator) scenarioRuns(only []string) ([]load.ScenarioRun, error) {
+	cfg := o.opts.Manifest.Load
+	if cfg == nil {
+		return nil, nil
+	}
+	wanted := map[string]bool{}
+	for _, name := range only {
+		wanted[name] = true
+	}
+
+	var runs []load.ScenarioRun
+	seen := map[string]string{}
+	for _, entry := range cfg.Scenarios {
+		full := filepath.Join(o.opts.Root, filepath.FromSlash(entry.Path))
+		body, err := os.ReadFile(full)
+		if err != nil {
+			return nil, aferrors.Wrap(err, aferrors.AFLOD013, "path", entry.Path, "detail", err.Error())
+		}
+		sc, err := load.ParseScenario(body)
+		if err != nil {
+			return nil, aferrors.Wrap(err, aferrors.AFLOD013, "path", entry.Path, "detail", err.Error())
+		}
+		if where, dup := seen[sc.Name]; dup {
+			return nil, aferrors.Coded(aferrors.AFLOD013, "path", entry.Path,
+				"detail", fmt.Sprintf("the scenario name %q is already used by %s", sc.Name, where))
+		}
+		seen[sc.Name] = entry.Path
+		if len(wanted) > 0 && !wanted[sc.Name] {
+			continue
+		}
+
+		run := load.ScenarioRun{Scenario: sc, Sessions: entry.Sessions, Iterations: entry.Iterations}
+		if entry.StartAfter != "" {
+			d, err := time.ParseDuration(entry.StartAfter)
+			if err != nil {
+				return nil, aferrors.Wrap(err, aferrors.AFLOD013, "path", entry.Path,
+					"detail", fmt.Sprintf("start_after %q is not a duration", entry.StartAfter))
+			}
+			run.StartAfter = d
+		}
+		runs = append(runs, run)
+	}
+	if len(wanted) > 0 && len(runs) == 0 {
+		return nil, aferrors.Coded(aferrors.AFLOD010,
+			"detail", "no scenario matched the names given")
+	}
+	return runs, nil
+}
+
 // Thresholds returns the limits a load run is judged against.
 func (o *Orchestrator) Thresholds() (p95Increase, errorRate float64) {
 	if o.opts.Manifest.Load == nil || o.opts.Manifest.Load.Thresholds == nil {
@@ -435,30 +545,79 @@ func (o *Orchestrator) trafficShape() (load.Shape, error) {
 	if cfg == nil || cfg.Source == "" || cfg.Source == schema.LoadNone {
 		return load.DefaultShape(), nil
 	}
+
 	switch cfg.Source {
-	case schema.LoadAccessLog:
-		path := cfg.SourceConfig["path"]
-		if path == "" {
-			return load.Shape{}, aferrors.Coded(aferrors.AFLOD010,
-				"detail", "the load source is access_log and no path is configured")
-		}
-		body, err := os.ReadFile(filepath.Join(o.opts.Root, filepath.FromSlash(path)))
-		if err != nil {
-			return load.Shape{}, aferrors.Wrap(err, aferrors.AFLOD010, "detail", err.Error())
-		}
-		shape := load.FromAccessLog(strings.Split(string(body), "\n"))
-		if len(shape.Routes) == 0 {
-			return load.Shape{}, aferrors.Coded(aferrors.AFLOD010,
-				"detail", "no requests could be read from "+path)
-		}
-		if shape.RequestsPerSecond == 0 {
-			shape.RequestsPerSecond = 10
-		}
-		return shape, nil
+	case schema.LoadAccessLog, schema.LoadOTel:
 	default:
-		// A source that needs an account nobody has connected. Saying so beats
-		// silently sending the default and calling it production's shape.
-		return load.Shape{}, aferrors.Coded(aferrors.AFLOD010,
-			"detail", string(cfg.Source)+" is not connected in this build; use access_log or none")
+		// Datadog and New Relic used to reach here. They were in the schema,
+		// so a person could set them, and they were refused at run time, so
+		// they could never work. They are gone from the schema now and this
+		// arm catches a manifest that reached the engine without being
+		// validated, naming what does work rather than what does not.
+		return load.Shape{}, aferrors.Coded(aferrors.AFLOD012, "source", string(cfg.Source))
 	}
+
+	path := cfg.SourceConfig["path"]
+	if path == "" {
+		return load.Shape{}, aferrors.Coded(aferrors.AFLOD010,
+			"detail", "the load source is "+string(cfg.Source)+" and no source_config.path is configured")
+	}
+	body, err := os.ReadFile(filepath.Join(o.opts.Root, filepath.FromSlash(path)))
+	if err != nil {
+		return load.Shape{}, aferrors.Wrap(err, aferrors.AFLOD010, "detail", err.Error())
+	}
+
+	if cfg.Source == schema.LoadOTel {
+		read, err := load.FromOTLP(body)
+		if err != nil {
+			// The skip counts go in the message. An export full of client
+			// spans and an export whose exporter wrote the old attribute
+			// names both produce nothing, and "no requests were found" is a
+			// much harder message to act on than the reason.
+			return load.Shape{}, aferrors.Coded(aferrors.AFLOD010,
+				"detail", err.Error()+" in "+path+describeSkipped(read.Skipped))
+		}
+		return read.Shape, nil
+	}
+
+	shape := load.FromAccessLog(strings.Split(string(body), "\n"))
+	if len(shape.Routes) == 0 {
+		return load.Shape{}, aferrors.Coded(aferrors.AFLOD010,
+			"detail", "no requests could be read from "+path)
+	}
+	if shape.RequestsPerSecond == 0 {
+		// No line in the log carried a readable timestamp, so the arrival
+		// rate is a guess. It says so in the source, because presenting a
+		// guessed rate as production's is how a load run reports a number
+		// nobody measured.
+		shape.RequestsPerSecond = 10
+		shape.Source = "access_log, arrival rate assumed"
+	}
+	return shape, nil
+}
+
+// describeSkipped renders what a trace read passed over, worst first.
+func describeSkipped(skipped map[string]int) string {
+	if len(skipped) == 0 {
+		return ""
+	}
+	type pair struct {
+		reason string
+		n      int
+	}
+	pairs := make([]pair, 0, len(skipped))
+	for reason, n := range skipped {
+		pairs = append(pairs, pair{reason, n})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].n != pairs[j].n {
+			return pairs[i].n > pairs[j].n
+		}
+		return pairs[i].reason < pairs[j].reason
+	})
+	parts := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		parts = append(parts, fmt.Sprintf("%d %s", p.n, p.reason))
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }

@@ -663,6 +663,34 @@ errors:
     docs: concepts/load
     retryable: false
     exit_code: 8
+  - code: AF-LOD-012
+    area: LOD
+    message: "There is no load source called {source}."
+    next_step: "Use otel for an OpenTelemetry trace export, access_log for a combined format log, or none. Both file sources read source_config.path."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
+  - code: AF-LOD-013
+    area: LOD
+    message: "The scenario at {path} could not be read: {detail}"
+    next_step: "Fix the document, then run 'af doctor' to revalidate the manifest."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
+  - code: AF-LOD-014
+    area: LOD
+    message: "{count} scenario assertions did not hold."
+    next_step: "Each one is listed above with what it measured. Fix the regression, or change what the scenario asks for."
+    docs: concepts/load
+    retryable: false
+    exit_code: 8
+  - code: AF-LOD-015
+    area: LOD
+    message: "The scenario {scenario} proved nothing: {detail}"
+    next_step: "A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
   - code: AF-LOD-001
     planned: true
     area: LOD

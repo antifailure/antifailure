@@ -884,6 +884,44 @@ func (v *validator) load(m *schema.Manifest) {
 				"Unsafe wins, and the ambiguity will confuse whoever reads this next. Remove one.")
 		}
 	}
+
+	// The source is checked here as well as at run time, because 'af doctor'
+	// is where somebody finds out their manifest is wrong and a load run is
+	// twenty minutes into a pull request check.
+	switch l.Source {
+	case "", schema.LoadNone, schema.LoadOTel, schema.LoadAccessLog:
+	default:
+		v.add("load.source",
+			fmt.Sprintf("There is no load source called %q.", l.Source),
+			"The sources that read traffic are otel, an OpenTelemetry trace export, and access_log, a combined format log. Both take source_config.path.")
+	}
+	if (l.Source == schema.LoadOTel || l.Source == schema.LoadAccessLog) && l.SourceConfig["path"] == "" {
+		v.add("load.source_config",
+			fmt.Sprintf("The load source is %s and no path is configured.", l.Source),
+			"Set source_config.path to the file the traffic is read from.")
+	}
+
+	for i := range l.Scenarios {
+		sc := l.Scenarios[i]
+		base := fmt.Sprintf("load.scenarios[%d]", i)
+		if strings.TrimSpace(sc.Path) == "" {
+			v.add(base+".path", "The scenario has no path.",
+				"Point it at a scenario document in the repository.")
+			continue
+		}
+		if !v.pathExists(sc.Path) {
+			v.add(base+".path", fmt.Sprintf("There is no file at %s.", sc.Path), "")
+		}
+		if sc.StartAfter != "" {
+			if _, err := ParseDuration(sc.StartAfter); err != nil {
+				v.add(base+".start_after",
+					fmt.Sprintf("The value %q is not a duration.", sc.StartAfter), "")
+			}
+		}
+		if sc.Sessions < 0 || sc.Iterations < 0 {
+			v.add(base, "A scenario cannot run a negative number of times.", "")
+		}
+	}
 }
 
 // policy checks the release gate.

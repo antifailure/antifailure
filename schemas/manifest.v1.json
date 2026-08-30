@@ -1101,13 +1101,11 @@
           "type": "string",
           "enum": [
             "none",
-            "datadog",
-            "newrelic",
             "otel",
             "access_log"
           ],
           "default": "none",
-          "description": "Where the endpoint mix comes from."
+          "description": "Where the endpoint mix comes from. An OpenTelemetry trace export or a combined format access log, both read from a file named in source_config.path."
         },
         "source_config": {
           "type": "object",
@@ -1116,7 +1114,7 @@
             "maxLength": 1024
           },
           "maxProperties": 20,
-          "description": "Adapter specific settings, such as a service name or a log path. Credentials come from the secrets subsystem."
+          "description": "Adapter specific settings. Both sources take a path: the OTLP/JSON trace export, or the access log. Credentials come from the secrets subsystem."
         },
         "scale": {
           "type": "number",
@@ -1149,6 +1147,14 @@
           },
           "description": "Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards."
         },
+        "scenarios": {
+          "type": "array",
+          "maxItems": 50,
+          "description": "Declared journeys run against the environment beside the mix. Each entry names a scenario document in the repository.",
+          "items": {
+            "$ref": "#/$defs/load_scenario"
+          }
+        },
         "thresholds": {
           "type": "object",
           "additionalProperties": false,
@@ -1171,6 +1177,41 @@
               "default": 0.2
             }
           }
+        }
+      }
+    },
+    "load_scenario": {
+      "title": "Load scenario",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "description": "One journey document and how hard to run it.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The scenario document, relative to the repository root."
+        },
+        "sessions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 1,
+          "description": "How many sessions walk the journey at once."
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 1,
+          "description": "How many times each session walks it."
+        },
+        "start_after": {
+          "type": "string",
+          "pattern": "^[0-9]+(ms|s|m)$",
+          "description": "Delay before this scenario starts, so one journey can burst while another is already running."
         }
       }
     },

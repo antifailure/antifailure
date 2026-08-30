@@ -211,6 +211,7 @@ func FromAccessLog(lines []string) Shape {
 	methods := map[string]string{}
 	paths := map[string]string{}
 	total := 0
+	var first, last time.Time
 
 	for _, line := range lines {
 		method, path, ok := parseAccessLine(line)
@@ -223,9 +224,18 @@ func FromAccessLog(lines []string) Shape {
 		methods[key] = method
 		paths[key] = normalised
 		total++
+
+		if at, ok := parseAccessTime(line); ok {
+			if first.IsZero() || at.Before(first) {
+				first = at
+			}
+			if at.After(last) {
+				last = at
+			}
+		}
 	}
 
-	shape := Shape{Source: "access_log"}
+	shape := Shape{Source: "access_log", RequestsPerSecond: accessRate(total, first, last)}
 	for key, n := range counts {
 		shape.Routes = append(shape.Routes, Route{
 			Method: methods[key], Path: paths[key], Weight: float64(n),
@@ -238,6 +248,47 @@ func FromAccessLog(lines []string) Shape {
 		return shape.Routes[i].String() < shape.Routes[j].String()
 	})
 	return shape
+}
+
+// accessRate is the arrival rate the log observed.
+//
+// Before this the rate was assumed, and the assumption reached the report as
+// production's rate. A combined format line carries a timestamp, so the rate
+// can be counted rather than guessed, and a log with no readable timestamps
+// returns zero so the caller can say the rate is unknown instead of inventing
+// one. The window is clamped at a second for the same reason the trace
+// reader's is: a log covering one second must not report its whole contents
+// as a per second rate multiplied by nothing.
+func accessRate(total int, first, last time.Time) float64 {
+	if total == 0 || first.IsZero() || !last.After(first) {
+		return 0
+	}
+	window := last.Sub(first)
+	if window < time.Second {
+		window = time.Second
+	}
+	return float64(total) / window.Seconds()
+}
+
+// accessTimeLayout is the combined format's timestamp, as every reverse proxy
+// writes it.
+const accessTimeLayout = "02/Jan/2006:15:04:05 -0700"
+
+// parseAccessTime pulls the timestamp out of a combined format line.
+func parseAccessTime(line string) (time.Time, bool) {
+	start := strings.IndexByte(line, '[')
+	if start < 0 {
+		return time.Time{}, false
+	}
+	end := strings.IndexByte(line[start:], ']')
+	if end < 0 {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(accessTimeLayout, line[start+1:start+end])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return at, true
 }
 
 // parseAccessLine pulls the method and path out of a combined format line.

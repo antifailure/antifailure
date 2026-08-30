@@ -480,10 +480,13 @@ type Goal struct {
 // LoadSource names where the endpoint mix comes from.
 type LoadSource string
 
+// Datadog and New Relic were here and are gone. Both were accepted by the
+// schema and refused by the runtime, which is worse than not offering them: a
+// key a person can set that cannot work reads as a broken product rather than
+// as an unfinished one. OpenTelemetry stayed because it is a published wire
+// format that can be read from a file, so it could be finished.
 const (
 	LoadNone      LoadSource = "none"
-	LoadDatadog   LoadSource = "datadog"
-	LoadNewRelic  LoadSource = "newrelic"
 	LoadOTel      LoadSource = "otel"
 	LoadAccessLog LoadSource = "access_log"
 )
@@ -497,7 +500,25 @@ type Load struct {
 	Duration     string            `json:"duration,omitempty" yaml:"duration,omitempty"`
 	SafeRoutes   []string          `json:"safe_routes,omitempty" yaml:"safe_routes,omitempty"`
 	UnsafeRoutes []string          `json:"unsafe_routes,omitempty" yaml:"unsafe_routes,omitempty"`
+	Scenarios    []LoadScenario    `json:"scenarios,omitempty" yaml:"scenarios,omitempty"`
 	Thresholds   *LoadThresholds   `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
+}
+
+// LoadScenario points at a journey document and says how hard to run it.
+//
+// The document lives in the repository rather than in the manifest because a
+// journey with parallel blocks and assertions in it is a page long, and a
+// manifest with three of them inline is a manifest nobody can read.
+type LoadScenario struct {
+	// Path is the scenario document, relative to the repository root.
+	Path string `json:"path,omitempty" yaml:"path,omitempty"`
+	// Sessions is how many run the journey at once.
+	Sessions int `json:"sessions,omitempty" yaml:"sessions,omitempty"`
+	// Iterations is how many times each session walks it.
+	Iterations int `json:"iterations,omitempty" yaml:"iterations,omitempty"`
+	// StartAfter delays this scenario, so one journey can burst while another
+	// is already running.
+	StartAfter string `json:"start_after,omitempty" yaml:"start_after,omitempty"`
 }
 
 // LoadThresholds are the deltas that fail a run.

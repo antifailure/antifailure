@@ -296,8 +296,11 @@ and if it changes in one it changes in both.
 | `internal/load` shape | proven | weighted mix, Poisson arrivals, deterministic per seed |
 | `internal/load` safety | proven | every route unsafe until named; a method pattern does not cover another method |
 | `internal/load` run | proven | measured against a real server; achieved rate reported, not the target |
-| `internal/load` access log | proven | paths normalised, or the mix collapses into a list |
-| `af load` and `af load smoke` | proven | run against a live environment; a route with no baseline is never a breach |
+| `internal/load` access log | proven | paths normalised, or the mix collapses into a list; the arrival rate is counted from the log's timestamps, and a log without them says the rate was assumed |
+| `internal/load` OpenTelemetry source | proven | OTLP/JSON, one document or one per line, server spans only, both attribute vocabularies; production's own p95 per route becomes the baseline `p95_increase` had nothing to compare against before |
+| `internal/load` scenarios | proven | declared journeys with think time, parallel blocks and assertions; deterministic per seed, proven by planning the same seed twice and by sending the same sequence twice |
+| `af load` and `af load smoke` | proven | run against a live environment; a route with no baseline is never a breach; the report says where the shape came from and the rate it asked for |
+| `af load scenario` | proven | assertions answer in the run vocabulary; a scenario whose step is not in `safe_routes` is blocked entirely and still exits non-zero |
 
 ## The differential oracle
 

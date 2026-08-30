@@ -786,6 +786,8 @@ invariants:
 load:
   enabled: true
   source: access_log
+  source_config:
+    path: traffic/access.log
 `)
 	out := manifest.Explain(m)
 	for _, want := range []string{

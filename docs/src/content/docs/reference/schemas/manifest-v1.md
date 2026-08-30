@@ -214,10 +214,22 @@ Traffic shaped like production, compared between the base branch and this one. R
 | `enabled` | boolean | no | Defaults to `false`. |
 | `safe_routes` | list of string | no | Routes that may be called freely because they do not mutate state. Max items 500. |
 | `scale` | number | no | Fraction of production arrival rate to reproduce. Defaults to `0.05`. Minimum 0.001, maximum 1. |
-| `source` | `none`, `datadog`, `newrelic`, `otel`, `access_log` | no | Where the endpoint mix comes from. Defaults to `none`. |
-| `source_config` | object | no | Adapter specific settings, such as a service name or a log path. Credentials come from the secrets subsystem. Max properties 20. |
+| `scenarios` | list of [Load scenario](#load-scenario) | no | Declared journeys run against the environment beside the mix. Each entry names a scenario document in the repository. Max items 50. |
+| `source` | `none`, `otel`, `access_log` | no | Where the endpoint mix comes from. An OpenTelemetry trace export or a combined format access log, both read from a file named in source_config.path. Defaults to `none`. |
+| `source_config` | object | no | Adapter specific settings. Both sources take a path: the OTLP/JSON trace export, or the access log. Credentials come from the secrets subsystem. Max properties 20. |
 | `thresholds` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
 | `unsafe_routes` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
+
+## Load scenario
+
+One journey document and how hard to run it.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `iterations` | integer | no | How many times each session walks it. Defaults to `1`. Minimum 1, maximum 1000. |
+| `path` | string | **yes** | The scenario document, relative to the repository root. Max length 512. |
+| `sessions` | integer | no | How many sessions walk the journey at once. Defaults to `1`. Minimum 1, maximum 1000. |
+| `start_after` | string | no | Delay before this scenario starts, so one journey can burst while another is already running. Matches `^[0-9]+(ms\|s\|m)$`. |
 
 ## Oracle
 

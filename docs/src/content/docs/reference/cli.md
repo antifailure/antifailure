@@ -548,6 +548,7 @@ af load
 Subcommands:
 
 - [`af load run`](#af-load-run) Run the full load profile.
+- [`af load scenario`](#af-load-scenario) Run the declared journeys against the environment.
 - [`af load smoke`](#af-load-smoke) Send a short burst, to check the environment answers under any load at all.
 
 ### `af load run`
@@ -564,6 +565,32 @@ af load run [flags]
 | `--duration` | `1m0s` | How long to send for. |
 | `--scale` | `1` | Multiplier on production's rate. |
 | `--seed` | `1` | Makes two runs send the same sequence. |
+
+### `af load scenario`
+
+Run the declared journeys against the environment.
+
+A scenario is an ordered journey rather than a mix: open the billing page, ask
+for the subscription, submit, and submit again three hundred milliseconds later
+because the first one felt slow. Sessions walk it at once, and one scenario can
+start after another so a burst arrives while something else is already running.
+
+The requests are HTTP. Clicking a button is 'af test' and the browser agents;
+this is what the load generator can send, at the concurrency load runs at.
+
+Every step is checked against load.safe_routes before anything is sent, so a
+scenario that names an undeclared route is blocked rather than run.
+
+```
+af load scenario [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to send at, defaulting to the checked out one. |
+| `--concurrency` | `20` | Ceiling on requests in flight. |
+| `--only` | - | Run just these scenarios, by name. |
+| `--seed` | `1` | Makes two runs send the same schedule. |
 
 ### `af load smoke`
 

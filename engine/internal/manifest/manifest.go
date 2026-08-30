@@ -518,6 +518,7 @@ var knownKeys = []string{
 	"migration_rehearsal", "query_regression", "plan_diff", "regression_factor",
 	"regression_min_ms", "large_table_rows", "rolling_compatibility", "when", "against",
 	"source", "source_config", "scale", "safe_routes", "unsafe_routes", "thresholds",
+	"scenarios", "iterations", "start_after",
 	"p95_increase", "error_rate", "query_count_increase",
 	"migration_lock", "warn_ms", "fail_ms", "migration_failed", "migration_rewrite",
 	"migration_lint", "plan_regression", "load_regression", "egress_surprise",

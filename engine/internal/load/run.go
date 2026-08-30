@@ -2,11 +2,13 @@ package load
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +50,16 @@ type Progress struct {
 
 // Result is what a run measured.
 type Result struct {
+	// Source says where the traffic mix came from, so a reader can tell
+	// production's shape from the default. Shape.Source has claimed since it
+	// was written that it exists "so a report can say whether it is real
+	// traffic or a guess", and until this field nothing carried it out of the
+	// run: the comment described an intention rather than a behaviour.
+	Source string `json:"source,omitempty"`
+	// TargetRate is the arrival rate the run aimed for, which is the shape's
+	// rate times the scale. Rate below is what was achieved, and the gap
+	// between the two is the first thing worth looking at.
+	TargetRate float64 `json:"target_rate,omitempty"`
 	// Sent is how many requests completed, successfully or not.
 	Sent int `json:"sent"`
 	// Duration is how long the run took.
@@ -178,11 +190,34 @@ func send(
 	ctx context.Context, client *http.Client, baseURL string,
 	route Route, m *meter, c clock.Clock,
 ) {
+	status, elapsed, err := sendOnce(ctx, client, baseURL, route, c)
+	reason := ""
+	switch {
+	case err != nil:
+		reason = classify(err)
+	case status >= 500:
+		// A mix read from production contains the routes production serves,
+		// and some of those answer 404 for most of their traffic. Counting a
+		// 404 here would report the shape's own contents as a failure. A
+		// scenario is judged differently, because a declared journey that
+		// gets a 404 is a broken journey.
+		reason = strconv.Itoa(status)
+	}
+	m.record(route.String(), elapsed, reason)
+}
+
+// sendOnce performs one request and reports what came back.
+//
+// Shared with the scenario executor, which needs the status code rather than
+// the mix's judgement of it.
+func sendOnce(
+	ctx context.Context, client *http.Client, baseURL string,
+	route Route, c clock.Clock,
+) (status int, elapsedMs float64, err error) {
 	url := strings.TrimSuffix(baseURL, "/") + route.Path
 	req, err := http.NewRequestWithContext(ctx, route.Method, url, nil)
 	if err != nil {
-		m.record(route.String(), 0, "malformed request")
-		return
+		return 0, 0, fmt.Errorf("%w: %w", errMalformedRequest, err)
 	}
 	// Marked, so an application that wants to behave differently under
 	// generated load can, and so an access log can tell the two apart.
@@ -190,26 +225,26 @@ func send(
 
 	at := c.Now()
 	resp, err := client.Do(req)
-	elapsed := float64(c.Since(at).Microseconds()) / 1000
-
+	elapsedMs = float64(c.Since(at).Microseconds()) / 1000
 	if err != nil {
-		m.record(route.String(), elapsed, classify(err))
-		return
+		return 0, elapsedMs, err
 	}
 	// Drained, or the connection cannot be reused and the run measures
 	// connection setup rather than the application.
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	_ = resp.Body.Close()
-
-	reason := ""
-	if resp.StatusCode >= 500 {
-		reason = fmt.Sprintf("%d", resp.StatusCode)
-	}
-	m.record(route.String(), elapsed, reason)
+	return resp.StatusCode, elapsedMs, nil
 }
+
+// errMalformedRequest marks a request that could not be built at all, which is
+// a fault in the shape rather than in the environment answering it.
+var errMalformedRequest = errors.New("malformed request")
 
 // classify turns a transport error into a short reason.
 func classify(err error) string {
+	if errors.Is(err, errMalformedRequest) {
+		return "malformed request"
+	}
 	text := err.Error()
 	switch {
 	case strings.Contains(text, "context deadline exceeded"), strings.Contains(text, "Timeout"):
@@ -269,7 +304,9 @@ func finish(m *meter, opts Options, started time.Time) *Result {
 
 	elapsed := opts.Clock.Since(started)
 	res := &Result{
-		Sent: m.sent, Duration: elapsed,
+		Source:     opts.Shape.Source,
+		TargetRate: opts.Shape.RequestsPerSecond * opts.Scale,
+		Sent:       m.sent, Duration: elapsed,
 		Overall: percentiles(m.all),
 		Errors:  map[string]int{},
 	}

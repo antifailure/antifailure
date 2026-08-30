@@ -526,6 +526,54 @@ Load exceeded {count} thresholds the manifest sets.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/load](/docs/concepts/load/) |
 
+### AF-LOD-012
+
+There is no load source called {source}.
+
+**What to do.** Use otel for an OpenTelemetry trace export, access_log for a combined format log, or none. Both file sources read source_config.path.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
+### AF-LOD-013
+
+The scenario at {path} could not be read: {detail}
+
+**What to do.** Fix the document, then run 'af doctor' to revalidate the manifest.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
+### AF-LOD-014
+
+{count} scenario assertions did not hold.
+
+**What to do.** Each one is listed above with what it measured. Fix the regression, or change what the scenario asks for.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
+### AF-LOD-015
+
+The scenario {scenario} proved nothing: {detail}
+
+**What to do.** A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
 ## Manifest
 
 ### AF-MAN-001
