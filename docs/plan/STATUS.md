@@ -301,7 +301,7 @@ and if it changes in one it changes in both.
 | `.github/workflows/ci.yml` | proven | engine with the race detector against a real daemon, runner with a real browser, edition boundary, credential scan |
 | `tools/scanrepo` | proven | uses the engine's own detector, so CI and the proxy cannot disagree |
 | `golangci-lint` | proven | zero findings across the engine, and a gate in CI and in `just gate` rather than advice |
-| `tools/gatecheck` | proven | 22 gates in CI, every one reachable from `just gate`; one exemption left, `vuln`, which security.yml owns |
+| `tools/gatecheck` | proven | 22 gates in CI, every one reachable from `just gate`; one exemption left, `vuln`, which security.yml owns. It also reads the workflows themselves, and now checks that every job declares `runs-on` or `uses`: a job with neither makes GitHub refuse the whole file before any job is created, so the workflow reports nothing rather than reporting red |
 
 It found two real bugs on its first two runs: stale packaged sidecar
 sources, and a database provider that inventoried every managed container
