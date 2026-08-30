@@ -116,6 +116,12 @@ af provider budget anthropic 50
 Dollars per month, for the current month. `af provider list` shows what has been
 spent against it.
 
+A call is charged to the month whose cap allowed it out, not to the month it
+finished in. A long completion that starts at 23:59 on the last day of a month
+is checked against that month's cap, so that is where the money lands. Set the
+next month's cap before it starts: a month with no cap cannot spend at all,
+which is the safe direction for somebody else's key.
+
 ### Rotating
 
 Store the new key. Rotating replaces the old one and revokes it in the same

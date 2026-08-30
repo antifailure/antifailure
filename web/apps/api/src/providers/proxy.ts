@@ -153,7 +153,17 @@ export async function forward(
       // before, because what is charged has to be what was used. A failure to
       // record here would let a customer spend past the cap one request at a
       // time, so it is not swallowed.
-      await recordSpend(options.pool, options.clock, { orgId, provider, usd: costUsd })
+      //
+      // The period comes from the budget this call was authorised against
+      // rather than from the clock now. A long completion that spans midnight
+      // on the last day of a month used to be charged to a month with no budget
+      // row, which meant charged to nothing at all.
+      await recordSpend(options.pool, options.clock, {
+        orgId,
+        provider,
+        usd: costUsd,
+        period: borrowed.budget.period,
+      })
     }
   }
 

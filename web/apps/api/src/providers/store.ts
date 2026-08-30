@@ -321,17 +321,49 @@ export async function borrowKey(
 export async function recordSpend(
   pool: Pool,
   clock: Clock,
-  input: { orgId: string; provider: Provider; usd: number },
+  input: {
+    orgId: string
+    provider: Provider
+    usd: number
+    /**
+     * The period this spend belongs to, which is the one borrowKey authorised
+     * it against rather than the one it is now.
+     *
+     * Passed in rather than recomputed here, and that is the fix for a real
+     * ordering bug. A budget row is keyed on (org, provider, period); borrowKey
+     * reads the period when the request goes out and this ran when it came
+     * back. A call that started at 23:59 on the last day of a month and
+     * finished a minute later read two different periods, and the row for the
+     * second one does not exist, because a cap is set per month by hand. The
+     * UPDATE matched nothing, the charge vanished, and the cap that permitted
+     * the spend never heard about it. Charging the month that allowed the money
+     * out is also the only answer that adds up: the cap it was checked against
+     * is the cap it has to count against.
+     */
+    period?: string
+  },
 ): Promise<Budget | null> {
   if (!(input.usd > 0)) return null
-  const period = periodOf(clock.now())
+  const period = input.period ?? periodOf(clock.now())
   return pool.withTenant({ orgId: input.orgId }, async (db) => {
     // Added in SQL rather than read-modify-written, so two runs finishing at
     // once cannot lose one another's spend.
-    await db.execute(sql`
+    //
+    // RETURNING, because an UPDATE that matched no row looks exactly like one
+    // that matched. This charge is money that has already left; a row that is
+    // not there has to be an error somebody sees, not a zero.
+    const updated = await db.execute<{ provider: Provider }>(sql`
       UPDATE provider_budgets
       SET spent_usd = spent_usd + ${input.usd}, updated_at = ${clock.now().toISOString()}
-      WHERE provider = ${input.provider} AND period = ${period}::date`)
+      WHERE provider = ${input.provider} AND period = ${period}::date
+      RETURNING provider`)
+    if (updated.length === 0) {
+      throw new ProviderKeyError(
+        `${input.usd.toFixed(6)} USD was spent on ${input.provider} and there is no budget row ` +
+          `for ${period.slice(0, 7)} to charge it to, so it has not been recorded. ` +
+          `Set a cap for that month; until then the spend is not counted against anything.`,
+      )
+    }
     return readBudget(db, input.orgId, input.provider, period)
   })
 }
