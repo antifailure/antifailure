@@ -362,6 +362,18 @@ Migrations failed on the branch: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/insights](/docs/concepts/insights/) |
 
+### AF-DB-031
+
+The migration finding {rule} fails this project's policy: {detail}
+
+**What to do.** The report above names the table and the statement. Fix the migration, or lower the rule to 'warn' in the manifest's policy block.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+
 ## Detection
 
 ### AF-DET-001
@@ -603,6 +615,18 @@ The webhook could not be delivered to {service}: {detail}
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/webhooks](/docs/guides/webhooks/) |
+
+### AF-NET-013
+
+The environment tried to reach {hosts}, which nothing in the manifest mentions.
+
+**What to do.** Add an egress rule for it with the mode you intend, or set policy.egress_surprise to 'warn' to let the attempt through the check.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verdicts](/docs/concepts/verdicts/) |
 
 ## Differential oracle
 

@@ -41,8 +41,15 @@ branch, the commit, the duration and the golden it branched from.
 It also carries what the data said. Every invariant the manifest declares is
 asked after the workflows, and a violated one puts the violating rows in the
 comment and the failure in the headline, so a run where every workflow passed
-and the data is broken does not read as a pass. The insights summary is meant
-to join it and does not appear yet.
+and the data is broken does not read as a pass.
+
+And it carries what this change does to the database and the network: the
+migrations rehearsed against a branch of the golden, the locks they held, what
+Postgres rewrote, the lint findings, the plans that changed, the hosts the
+environment reached for, whether the branch read back masked, and what teardown
+removed. Each of those is ranked by the manifest's
+[policy block](/docs/concepts/verdicts/), worst first, and the ones set to
+`fail` are what stop the merge.
 
 ## Forks
 

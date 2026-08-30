@@ -27,6 +27,21 @@ af insights --save baseline.json      on main
 af insights --baseline baseline.json  on the branch
 ```
 
+Every check here also runs inside `af ci`, so what it finds reaches the pull
+request comment rather than only a terminal somebody chose to open. `af ci`
+takes the same two flags, spelled `--save-baseline` and `--baseline`. What each
+finding does to the check is the manifest's
+[policy block](/docs/concepts/verdicts/): a lock held past two seconds fails by
+default, a rewrite and a lint finding warn.
+
+The rehearsal runs on every change, including one with no migrations in it.
+There is no cheaper way to know: `af up` applies the branch's migrations to the
+environment's own database, so asking that database what is pending returns
+nothing on exactly the pull requests that have migrations. Finding out costs a
+branch of the golden, which is the branch the rehearsal needs anyway, so the
+check runs and a change with nothing pending gets one line saying so. Set
+`insights.migration_rehearsal: false` to skip it.
+
 ## Migration rehearsal
 
 The pending migrations run against a branch made for the rehearsal and thrown
@@ -48,8 +63,9 @@ AF-DB-030 Migrations failed on the branch: relation "users_email_key" already
 exists
 ```
 
-`af insights` exits non-zero when that happens, so a pull request check fails
-rather than printing a note nobody reads.
+`af insights` exits non-zero when that happens, and inside `af ci` it is a
+`migration_failed` finding, which fails the check by default. Either way a
+pull request check fails rather than printing a note nobody reads.
 
 ### Every statement is timed on its own
 
@@ -280,5 +296,6 @@ Not measured: query statistics need the pg_stat_statements extension, which is
 not available here
 ```
 
-Related: [goldens](/docs/concepts/goldens/), [load](/docs/concepts/load/),
+Related: [verdicts](/docs/concepts/verdicts/),
+[goldens](/docs/concepts/goldens/), [load](/docs/concepts/load/),
 [invariants](/docs/guides/invariants/).
