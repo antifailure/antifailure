@@ -382,7 +382,7 @@ pushed. The first release is the test.
 | `web/packages/db` audit chain | proven | every field of every entry altered in turn, each detected |
 | `web/packages/policy` | proven | 43 vectors; a one-bit change to a specificity weight breaks six |
 | `web/apps/api` | proven | 127 tests: matrix, sign-in, sessions, ingestion, membership sync |
-| `engine/internal/controlplane` | proven | 79 percent; sends, buffers, drops the oldest, obeys a throttle |
+| `engine/internal/controlplane` | proven | 79 percent; sends, buffers, drops the oldest, obeys a throttle. `MaxBatch` and the server's `MAX_BATCH` are the same number written out on both sides, and its comment claimed they matched; `vocabulary_test.go` reads the server's and compares them now. `internal/auth/scopes_test.go` does the same for `GrantableScopes`, whose comment says it mirrors `GRANTABLE_SCOPES`, and for the sentence in the signing-in guide that is a third copy of the same five names |
 | `af env pull` | proven | against the real server: four events sent out of order with a repeat, three stored, the late one changing nothing |
 
 The whole loop is proven end to end rather than against a fake: the real
