@@ -10,13 +10,22 @@
 // else, and the happy path is not where sign-in breaks.
 
 import { randomBytes } from 'node:crypto'
-import type { GitHubClient, GitHubOrg, GitHubUser } from './github.ts'
+import { GitHubError, type GitHubClient, type GitHubOrg, type GitHubUser } from './github.ts'
 import type { Clock } from '../clock.ts'
 
 interface PendingCode {
   code: string
   login: string
   issuedAt: number
+}
+
+/** One dispatch, exactly as the control plane asked for it. */
+export interface Dispatched {
+  installationId: number
+  repository: string
+  workflow: string
+  ref: string
+  inputs: Record<string, string>
 }
 
 export class FakeGitHub implements GitHubClient {
@@ -26,6 +35,9 @@ export class FakeGitHub implements GitHubClient {
   private readonly codes = new Map<string, PendingCode>()
   private unreachable = false
   private readonly tokens = new Map<string, string>()
+  private readonly workflows = new Set<string>()
+  private readonly dispatched: Dispatched[] = []
+  private dispatchRefusal: string | null = null
 
   /** How long a code is good for. GitHub's is ten minutes. */
   readonly codeTtlMs = 10 * 60 * 1000
@@ -114,5 +126,51 @@ export class FakeGitHub implements GitHubClient {
   /** Makes roleIn throw, the way a network failure or a rate limit does. */
   breakRoleLookups(broken = true): void {
     this.unreachable = broken
+  }
+
+  /**
+   * Says that a repository has a workflow file that accepts a dispatch.
+   *
+   * Registering it is required rather than optional, for the same reason the
+   * code exchange is single use: the interesting case for a dispatch is the
+   * one where GitHub says no, and a fake that accepts every dispatch cannot
+   * reach it. A repository with no registered workflow refuses exactly the way
+   * the real client does when the file is missing, the App was not installed
+   * on the repository, or `actions: write` was never granted.
+   */
+  addWorkflow(repository: string, workflow: string): void {
+    this.workflows.add(`${repository}#${workflow}`)
+  }
+
+  /** Every dispatch the control plane asked for, in order. */
+  get dispatches(): readonly Dispatched[] {
+    return this.dispatched
+  }
+
+  /** Makes the next dispatch fail the way GitHub does when a workflow file
+   *  exists and will not accept a dispatch. */
+  refuseDispatches(reason: string | null = 'no workflow_dispatch trigger'): void {
+    this.dispatchRefusal = reason
+  }
+
+  async dispatchWorkflow(
+    installationId: number,
+    repository: string,
+    workflow: string,
+    ref: string,
+    inputs: Record<string, string>,
+  ): Promise<void> {
+    // GitHubError, not a plain Error, and this is the one place in the fake
+    // where the exact type matters. The routes turn a GitHubError into a
+    // refusal the caller can read and let anything else become a 500, so a
+    // fake that threw something untyped would make the refusal path
+    // unreachable from a test and leave the 500 path the only one exercised.
+    if (this.dispatchRefusal) {
+      throw new GitHubError(`GitHub refused to dispatch ${workflow}: ${this.dispatchRefusal}`)
+    }
+    if (!this.workflows.has(`${repository}#${workflow}`)) {
+      throw new GitHubError(`GitHub cannot see ${workflow} in ${repository}`)
+    }
+    this.dispatched.push({ installationId, repository, workflow, ref, inputs })
   }
 }

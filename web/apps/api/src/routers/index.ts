@@ -14,6 +14,9 @@ import { PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLES, ROLE_PERMISSIONS, rolesWit
 import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
 import { syncMembership, SignInError } from '../auth/signin.ts'
 import { GitHubError } from '../auth/github.ts'
+import { createEnvironment, agentsRouter, loadRouter } from './dispatch.ts'
+import { runtimesRouter } from './runtimes.ts'
+import { billingRouter } from './billing.ts'
 
 const uuid = z.string().uuid()
 
@@ -22,6 +25,10 @@ const uuid = z.string().uuid()
 // ---------------------------------------------------------------------------
 
 const environmentsRouter = router({
+  // Lives in dispatch.ts because it acts rather than reads, and everything
+  // that acts goes out through the customer's own CI. See that file's header.
+  create: createEnvironment,
+
   list: orgProcedure('environments.view')
     .input(
       z.object({
@@ -347,19 +354,98 @@ const networkRouter = router({
 
       return c.pool.withTenant(c.tenant, async (db) => {
         const repo = await repositoryId(db, input.repository)
-        await db.execute(sql`
-          INSERT INTO network_rules (org_id, repository_id, host, mode, paths, methods, note)
+        const rows = await db.execute<{ id: string }>(sql`
+          INSERT INTO network_rules (org_id, repository_id, host, mode, paths, methods, note, proposed_by)
           VALUES (${c.actor.orgId}, ${repo}, ${input.host}, ${input.mode},
                   ${sql.param(input.paths ?? null)}::text[],
                   ${sql.param(input.methods ?? null)}::text[],
-                  ${input.note ?? null})`)
+                  ${input.note ?? null}, ${c.actor.userId})
+          RETURNING id`)
         await audit(db, c, {
           action: 'network.rule_proposed',
           targetType: 'repository',
           targetId: input.repository,
           detail: { host: input.host, mode: input.mode },
         })
-        return { proposed: true }
+        // Inert until approved. Returning the id is the whole point of the
+        // shape: the caller has something to hand to `network.approve`, and a
+        // proposal that cannot be named is a proposal nobody can act on.
+        return { proposed: true, ruleId: rows[0]!.id, needsApproval: true }
+      })
+    }),
+
+  /**
+   * The approval queue.
+   *
+   * A read of policy state rather than a policy action, so it is guarded by
+   * `environments.view` like the other policy reads. Somebody who can see the
+   * effective policy should be able to see what is waiting to change it; a
+   * viewer who can read the audit log and not the queue learns about the
+   * change only after it happened.
+   */
+  pending: orgProcedure('environments.view')
+    .input(z.object({ repository: z.string().optional() }).default({}))
+    .query(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      return c.pool.withTenant(c.tenant, async (db) =>
+        db.execute(sql`
+          SELECT n.id, n.host, n.mode, n.paths, n.methods, n.note, n.created_at,
+                 r.full_name AS repository, u.github_login AS proposed_by
+          FROM network_rules n
+          LEFT JOIN repositories r ON r.id = n.repository_id
+          LEFT JOIN users u ON u.id = n.proposed_by
+          WHERE n.approved_at IS NULL
+            -- Filtered exactly the way effectiveEgress filters, which means an
+            -- organization-wide proposal shows up on every repository rather
+            -- than nowhere. It is going to apply to that repository once it is
+            -- approved, so hiding it from the queue there would mean somebody
+            -- approving a change to a repository they were never shown.
+            AND (${input.repository ?? null}::text IS NULL
+                 OR n.repository_id IS NULL
+                 OR r.full_name = ${input.repository ?? null})
+          ORDER BY n.created_at ASC
+          LIMIT 200`),
+      )
+    }),
+
+  /**
+   * Approve a proposed egress rule, which is what makes it enforce.
+   *
+   * The permission exists to be the gate on loosening egress, so this is the
+   * one route in the file where the interesting case is the one that widens
+   * access rather than the one that narrows it. The audit entry records the
+   * mode for that reason: "approved a rule" is not reviewable, "approved
+   * api.example.com allow" is.
+   */
+  approve: orgProcedure('network.approve')
+    .input(z.object({ ruleId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      return c.pool.withTenant(c.tenant, async (db) => {
+        // Re-approving an already approved rule must not move the approver, or
+        // a second click rewrites who is accountable for a decision somebody
+        // else made. The WHERE clause makes the second call a no-op that
+        // reports NOT_FOUND rather than a silent overwrite.
+        const rows = await db.execute<{ id: string; host: string; mode: string; repository: string | null }>(sql`
+          UPDATE network_rules
+          SET approved_at = ${c.clock.now().toISOString()},
+              approved_by = ${c.actor.userId},
+              updated_at = ${c.clock.now().toISOString()}
+          WHERE id = ${input.ruleId} AND approved_at IS NULL
+          RETURNING id, host, mode,
+                    (SELECT full_name FROM repositories r WHERE r.id = network_rules.repository_id) AS repository`)
+        if (rows.length === 0) throw notFound('pending egress rule', input.ruleId)
+        const rule = rows[0]!
+        await audit(db, c, {
+          action: 'network.rule_approved',
+          // An organization-wide rule belongs to no repository, and writing a
+          // sentence into the target id to say so would put prose in the
+          // column an export filters on. It is recorded as what it is.
+          targetType: rule.repository === null ? 'organization' : 'repository',
+          targetId: rule.repository ?? c.actor.orgId,
+          detail: { host: rule.host, mode: rule.mode, ruleId: rule.id },
+        })
+        return { approved: true, host: rule.host, mode: rule.mode }
       })
     }),
 })
@@ -382,8 +468,13 @@ async function effectiveEgress(c: OrgContext, repository?: string): Promise<Egre
              n.fixtures, n.webhook_path, n.note, n.repository_id
       FROM network_rules n
       LEFT JOIN repositories r ON r.id = n.repository_id
-      WHERE n.repository_id IS NULL
-         OR (${repository ?? null}::text IS NOT NULL AND r.full_name = ${repository ?? null})
+      -- Approved only. An unapproved rule is a request, and this function
+      -- answers "what is enforced". Before the approval columns existed the
+      -- two were the same query, so a proposal was policy the moment it was
+      -- written.
+      WHERE n.approved_at IS NOT NULL
+        AND (n.repository_id IS NULL
+             OR (${repository ?? null}::text IS NOT NULL AND r.full_name = ${repository ?? null}))
       ORDER BY n.position ASC, n.created_at ASC`)
 
     // Organization-wide rules first, so that a repository rule with the same
@@ -804,10 +895,14 @@ export const appRouter = router({
   repositories: repositoriesRouter,
   environments: environmentsRouter,
   runs: runsRouter,
+  agents: agentsRouter,
+  load: loadRouter,
   network: networkRouter,
   masking: maskingRouter,
   audit: auditRouter,
   members: membersRouter,
+  runtimes: runtimesRouter,
+  billing: billingRouter,
   tokens: tokensRouter,
   org: orgRouter,
 })
