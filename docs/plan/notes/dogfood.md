@@ -170,19 +170,22 @@ while the recording rotted.
 
 ## What it found
 
-Thirty-eight findings, thirty-seven fixed with a regression test. Two came from
+Forty findings, thirty-nine fixed with a regression test. Two came from
 writing the manifest, four from the golden refresh, three from the web
-application, six from wiring the pipeline itself, five from merging main and
-from the first run in CI, and the rest from running the pieces against each
+application, six from wiring the pipeline itself, seven from merging main and
+from the first two runs in CI, and the rest from running the pieces against each
 other. Every one of them was invisible in the files, and five of them are the
 same shape: a thing that was written, tested, documented, and never called.
 
-The last five are worth separating out, because they came from the two things
+The last seven are worth separating out, because they came from the two things
 this exercise had not yet done. Merging a branch that had been open for a while
 found a manifest whose invariants could never fail and two migrations sharing a
 number. Pushing found the rest: the first CI run failed on the first build, on
 a builder that works on every machine here and no runner, and then answered the
-pull request with silence. None of the five was reachable from a laptop.
+pull request with silence. The second run got past the seeder and
+found that the product's own masking command could not be run before `af up`,
+and blamed a golden that was never involved. None of the seven was reachable
+from a laptop.
 
 ### Product bugs
 
@@ -649,6 +652,36 @@ typecheck loop nor the runner's, and the only thing standing between a broken
 console and a release was the image build asserting `index.html` exists, in a
 different workflow. Both `ci.yml` and `just typecheck` now run its production
 build, which is the same command the Dockerfile runs.
+
+**40. `af mask plan` could not be run before `af up`, and said the wrong thing about why.**
+The first thing anybody does with masking is ask what the rules would do. In a
+fresh checkout that failed, because the command connects to the environment's
+own branch and no environment exists yet.
+
+What it printed was worse than the refusal. A branch asked for by environment
+carries no golden name, and the not-found path named that empty value in a
+message whose placeholder is the golden version, so the output read `The golden
+version  no longer exists` with nothing between the spaces, and the next step
+sent the reader to `af golden list` about a golden that was never involved.
+Three things wrong in one sentence: the wrong error, a blank where a name goes,
+and advice for a different problem.
+
+The schema a plan is about is the source's schema, which the golden is a copy
+of, so the plan now reads the source when there is no branch and says which
+database it read from. That is not a lesser answer; it is the same answer one
+step earlier, which is where somebody fixing a masking rule wants it. With
+neither a branch nor a source, the refusal says there is no branch and to run
+`af up`, which is what AF-DB-014 exists for.
+
+Proven against the seeded control plane: 93 columns across 26 tables, read from
+the source, exit 0.
+
+**39. The dogfood pipeline ran `af mask plan` where it could not work.**
+The step is right to be where it is. Its whole argument is that a column nobody
+classified should fail before a golden is published, when the fix is one line in
+masking.yaml rather than after. But it ran the command at the one point in the
+pipeline where the command refused, and the refusal was the one above. The step
+did not move; the command was fixed to work there.
 
 **38. The comment job answered a failed run with silence.**
 The job downloads the report the dogfood job uploads. A run that fails before

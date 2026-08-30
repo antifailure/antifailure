@@ -483,7 +483,7 @@ including every finding and what is not built, is in
 | The invariants in this repository's own manifest | proven | All four were written as `SELECT count(*)` and every one of them could never fail: an invariant holds when its statement returns no rows, and a bare count returns one row saying zero. `af explain` refused the manifest and named all four. Four checks that read as evidence and were not, found in this repository's own file by this repository's own validator. |
 | The ten-green streak | planned | **No streak exists and none is claimed.** |
 
-What it found: thirty-eight defects, thirty-seven fixed with regression tests,
+What it found: forty defects, thirty-nine fixed with regression tests,
 one issue open at
 [antifailure/antifailure#24](https://github.com/antifailure/antifailure/issues/24).
 Every one of them was invisible in the files, and five are the same shape: a

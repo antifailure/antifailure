@@ -542,6 +542,19 @@ func (p *Provider) ConnString(ctx context.Context, b provider.Branch, mode provi
 		return p.connString(port), nil
 	}
 	if lastErr != nil && cerrdefs.IsNotFound(lastErr) {
+		// Which of the two this is depends on what was asked for, and getting
+		// it wrong sends somebody to the wrong command.
+		//
+		// A branch asked for by environment carries no From, so reporting a
+		// missing GOLDEN here printed "The golden version  no longer exists"
+		// with a hole where the name goes, and told the reader to run
+		// `af golden list` about a golden that was never the problem. The
+		// problem is that nothing has been branched yet, and the answer is
+		// `af up`. Found by running `af mask plan` in a fresh checkout, which
+		// is the first thing anybody would try.
+		if b.From == "" {
+			return secrets.Value{}, aferrors.Coded(aferrors.AFDB014, "env", b.EnvID)
+		}
 		return secrets.Value{}, aferrors.Coded(aferrors.AFDB004, "version", b.From)
 	}
 	if lastErr == nil {

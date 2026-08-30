@@ -350,6 +350,18 @@ The database seed command failed: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens/) |
 
+### AF-DB-014
+
+No database branch exists for {env}.
+
+**What to do.** Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens/) |
+
 ### AF-DB-020
 
 Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured.

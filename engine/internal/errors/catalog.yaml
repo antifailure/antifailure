@@ -175,6 +175,13 @@ errors:
     docs: providers/limits
     retryable: false
     exit_code: 5
+  - code: AF-DB-014
+    area: DB
+    message: "No database branch exists for {env}."
+    next_step: "Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 5
   - code: AF-DB-013
     area: DB
     message: "The database seed command failed: {detail}"

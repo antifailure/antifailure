@@ -88,6 +88,8 @@ const (
 	AFDB012 Code = "AF-DB-012"
 	// The database seed command failed: {detail}
 	AFDB013 Code = "AF-DB-013"
+	// No database branch exists for {env}.
+	AFDB014 Code = "AF-DB-014"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
@@ -554,6 +556,15 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "The database seed command failed: {detail}",
 		NextStep:  "Run the command yourself against an empty database of the same version. It is: {command}",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB014: {
+		Code:      AFDB014,
+		Area:      "DB",
+		Message:   "No database branch exists for {env}.",
+		NextStep:  "Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
