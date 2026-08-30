@@ -35,12 +35,12 @@ import (
 // The second is the control run. A workflow that fails against the migrated
 // branch has not proved anything on its own, because it may be a workflow that
 // fails on the previous release for reasons that have nothing to do with the
-// schema. So a failure is re-run against a branch of the SAME golden with the
-// migrations NOT applied. Passing there and failing here is the migration; the
-// two runs differ in nothing else. Failing in both is `unverified` and is said
-// so in those words. The control costs a second environment and it is only
-// paid when something already failed, which is the case where being right
-// matters and being cheap does not.
+// schema. So a failure is re-run against a branch of the SAME golden carrying
+// the schema that release was deployed against. Passing there and failing here
+// is the migration; the two runs differ in nothing else. Failing in both is
+// `unverified` and is said so in those words. The control costs a second
+// environment and it is only paid when something already failed, which is the
+// case where being right matters and being cheap does not.
 
 // RollingWhen decides when the check runs.
 //
@@ -422,7 +422,8 @@ func identAfter(upperSQL, keyword string) string {
 // ones that do NOT count against the change. `blocked` is our failure: the
 // image would not build, the previous commit could not be resolved, the runner
 // did not start. `unverified` is a workflow that failed on the previous
-// release with and without the migrations, so it says nothing about them.
+// release with and without this branch's migrations, so it says nothing about
+// them.
 // Reporting either as `fail` would spend the whole credibility of the check on
 // its first false positive.
 type RollingVerdict string
@@ -450,7 +451,8 @@ type RollingWorkflow struct {
 	// our reading of it.
 	Migrated string `json:"migrated"`
 	// Control is what the runner said against the same golden with the
-	// migrations NOT applied, and is empty when no control was needed.
+	// schema that release was deployed against, and is empty when no control
+	// was needed.
 	Control string `json:"control,omitempty"`
 	// Detail is the runner's explanation of the failure.
 	Detail string `json:"detail,omitempty"`
@@ -558,8 +560,8 @@ type RunnerOutcome struct {
 	Detail  string
 }
 
-// NeedsControl reports the workflows whose failure has to be re-run against an
-// unmigrated branch before it can be believed.
+// NeedsControl reports the workflows whose failure has to be re-run against the
+// schema that release was deployed against before it can be believed.
 //
 // Only failures. A workflow that passed needs no alibi, and paying for a
 // second environment to confirm a pass is how a check that usually passes
@@ -604,8 +606,9 @@ func GradeRolling(
 			switch {
 			case !ran:
 				w.Verdict = RollingUnverified
-				w.Detail = "this workflow failed and was not re-run without the migrations, " +
-					"so nothing here shows the migration is what changed"
+				w.Detail = "this workflow failed and was not re-run against the schema " +
+					"that release was deployed against, so nothing here shows the " +
+					"migration is what changed"
 			case c.Verdict == "pass" || c.Verdict == "flaky":
 				w.Verdict = RollingFail
 				w.Control = c.Verdict
@@ -623,7 +626,8 @@ func GradeRolling(
 				w.Verdict = RollingUnverified
 				w.Control = c.Verdict
 				w.Detail = "this workflow does not pass on " + describeRelease(release) +
-					" even without the migrations applied, so it says nothing about them"
+					" against the schema it was deployed against either, so it says " +
+					"nothing about these migrations"
 			}
 		default:
 			// blocked, unverified, or a word the runner grew that this build
@@ -642,10 +646,11 @@ func GradeRolling(
 		r.Verdict = RollingFail
 	case counts[RollingPass] > 0:
 		// At least one workflow was exercised end to end against the migrated
-		// schema and came back clean. Amber because a second workflow could
-		// not be exercised would make this check amber on most runs, and a
-		// check that is amber on most runs is one nobody reads. The ones that
-		// proved nothing are named below instead.
+		// schema and came back clean. Pass rather than amber: turning amber
+		// because a second workflow could not be exercised would make this
+		// check amber on most runs, and a check that is amber on most runs is
+		// one nobody reads. The ones that proved nothing are named in the
+		// report instead.
 		r.Verdict = RollingPass
 	case counts[RollingUnverified] > 0:
 		r.Verdict = RollingUnverified
@@ -905,8 +910,9 @@ func (r *Rolling) Explain() string {
 			fmt.Fprintf(&b, "  pass        %s\n", w.Name)
 		case RollingFail:
 			fmt.Fprintf(&b, "  FAIL        %s\n", w.Name)
-			b.WriteString("              It passes against a branch of the same golden with the\n" +
-				"              migrations not applied, so the migrations are the difference.\n")
+			b.WriteString("              It passes against a branch of the same golden carrying\n" +
+				"              the schema that release was deployed against, so this\n" +
+				"              branch's migrations are the difference.\n")
 			switch {
 			case w.Cause != nil:
 				fmt.Fprintf(&b, "              %s\n", w.Cause.Sentence(release))

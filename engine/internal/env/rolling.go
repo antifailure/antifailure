@@ -221,8 +221,8 @@ func (o *Orchestrator) previousOrchestrator(envID, tree string, m *schema.Manife
 	return prev
 }
 
-// rollingControl re-runs the failing workflows against an unmigrated branch of
-// the same golden.
+// rollingControl re-runs the failing workflows against a branch of the same
+// golden carrying the schema the previous release was deployed against.
 //
 // A failure here leaves the map empty, which grades every failure as
 // unverified rather than as a finding. That is the right direction to fail in:
@@ -236,7 +236,8 @@ func (o *Orchestrator) rollingControl(
 
 	o.progress(fmt.Sprintf(
 		"%d workflow(s) failed, so the same release is being run against the same golden "+
-			"with the migrations not applied, to see whether the migrations are the difference",
+			"carrying the schema it was deployed against, to see whether this branch's "+
+			"migrations are the difference",
 		len(only)))
 
 	base, release, err := o.bringUpPreviousRelease(ctx, s, previousRelease{

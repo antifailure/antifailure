@@ -273,7 +273,7 @@ func TestGrade_FailureTheControlAlsoFailsIsUnverified(t *testing.T) {
 	require.Equal(t, insights.RollingUnverified, r.Verdict)
 	require.False(t, r.Failed())
 	require.Equal(t, insights.RollingUnverified, r.Workflows[0].Verdict)
-	require.Contains(t, r.Workflows[0].Detail, "even without the migrations")
+	require.Contains(t, r.Workflows[0].Detail, "the schema it was deployed against either")
 }
 
 func TestGrade_FailureWithNoControlIsUnverified(t *testing.T) {
@@ -281,7 +281,7 @@ func TestGrade_FailureWithNoControlIsUnverified(t *testing.T) {
 	r := insights.GradeRolling(
 		[]insights.RunnerOutcome{outcome("a", "fail")}, nil, nil, nil, "abc123")
 	require.Equal(t, insights.RollingUnverified, r.Verdict)
-	require.Contains(t, r.Workflows[0].Detail, "not re-run without the migrations")
+	require.Contains(t, r.Workflows[0].Detail, "was not re-run against the schema")
 }
 
 func TestGrade_BlockedWorkflowsNeverCountAgainstTheChange(t *testing.T) {

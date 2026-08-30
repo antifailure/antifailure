@@ -143,8 +143,9 @@ own workflows are driven through it:
 Rolling deploy compatibility:
   the previous release is ac5f6d8912ab, the merge base with origin/main
   FAIL        browse-customers
-              It passes against a branch of the same golden with the
-              migrations not applied, so the migrations are the difference.
+              It passes against a branch of the same golden carrying
+              the schema that release was deployed against, so this
+              branch's migrations are the difference.
               ac5f6d8912ab still reads customers.email, which this migration
               dropped.
               customer list: ERROR: column "email" does not exist (SQLSTATE 42703)
