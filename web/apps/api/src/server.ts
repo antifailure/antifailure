@@ -614,7 +614,23 @@ export function createServer(options: ServerOptions) {
       return c.json({ error: 'The body is not JSON.' }, 400)
     }
     try {
-      await denyDeviceCode(options.pool, clock, String(body.user_code ?? ''))
+      const outcome = await denyDeviceCode(options.pool, clock, String(body.user_code ?? ''))
+      if (!outcome.denied) {
+        // 409 rather than 200 or 404. Nothing here says whether the code ever
+        // existed, which is the same reason approve gives one message for
+        // three cases: this endpoint must not become the oracle that tells
+        // somebody which guessed codes are real. What it does say is that the
+        // login was not declined, because the caller may have just approved it
+        // in another tab and a terminal somewhere is holding the token.
+        return c.json(
+          {
+            error:
+              'That login was not declined: it was already approved, already answered, or is no longer live. ' +
+              'If a terminal has a token it should not have, revoke it under Keys.',
+          },
+          409,
+        )
+      }
       return c.json({ denied: true })
     } catch (err) {
       if (err instanceof DeviceError) return c.json({ error: err.message }, 400)

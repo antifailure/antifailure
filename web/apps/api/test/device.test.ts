@@ -90,7 +90,7 @@ describe('the device grant', { skip: (await available()) ? false : 'no Postgres 
   }
 
   async function approve(userCode: string, who: { cookie: string; csrfToken: string }) {
-    return api.fetch('/auth/device/approve', {
+    const res = await api.fetch('/auth/device/approve', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -99,6 +99,14 @@ describe('the device grant', { skip: (await available()) ? false : 'no Postgres 
       },
       body: JSON.stringify({ user_code: userCode }),
     })
+    // Asserted here rather than left to the caller. Approve is limited to a
+    // burst of ten per address and this suite makes most of them, so a test
+    // added to the end of the file used to take the eleventh token, get a 429
+    // that nothing looked at, and turn into a confusing authorization_pending
+    // in a completely different test. A helper that swallows a refusal reports
+    // the wrong test.
+    assert.equal(res.status, 200, `approve answered ${res.status}: ${await res.clone().text()}`)
+    return res
   }
 
   // -------------------------------------------------------------------------
@@ -179,6 +187,59 @@ describe('the device grant', { skip: (await available()) ? false : 'no Postgres 
     api.clock.advance(DEVICE_POLL_INTERVAL_SECONDS * 1000 + 1000)
     const after = await poll(started.device_code)
     assert.equal(after.body.error, 'access_denied')
+  })
+
+  test('a deny that came too late says so rather than reporting success', async () => {
+    // approve-then-deny. The approval screen hides the buttons once a code is
+    // approved, so this is reached from a second tab, a back button, or a
+    // person who approved by mistake and went looking for the way to undo it.
+    //
+    // The UPDATE deny runs carries "AND approved_at IS NULL", so it correctly
+    // refuses to overwrite the approval, and the endpoint answered 200
+    // { denied: true } anyway, because nothing looked at how many rows it
+    // changed. Somebody is told a login was declined while the terminal it
+    // belongs to is holding a ninety day token. Being told the truth is what
+    // sends them to revoke it.
+    // The approve and deny limits are a burst of ten per address at one a
+    // second, and this suite spends most of them. Moving the clock refills the
+    // buckets so this test measures the deny path rather than the limiter.
+    api.clock.advance(60_000)
+    const started = await begin()
+    const admin = await signInAs(api, org, 'admin', 'device-late-deny')
+    await approve(started.user_code, admin)
+
+    const late = await api.fetch('/auth/device/deny', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: admin.cookie,
+        [CSRF_HEADER]: admin.csrfToken,
+      },
+      body: JSON.stringify({ user_code: started.user_code }),
+    })
+    assert.equal(late.status, 409)
+    const body = (await late.json()) as { error: string }
+    assert.match(body.error, /already approved/i)
+
+    // And the approval still stands, which is the fact the message reports.
+    api.clock.advance(DEVICE_POLL_INTERVAL_SECONDS * 1000 + 1000)
+    const granted = await poll(started.device_code)
+    assert.equal(granted.status, 200, 'the late deny silently revoked an approval it never touched')
+  })
+
+  test('denying a code that never existed is not reported as a denial either', async () => {
+    api.clock.advance(60_000)
+    const admin = await signInAs(api, org, 'admin', 'device-unknown-deny')
+    const res = await api.fetch('/auth/device/deny', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: admin.cookie,
+        [CSRF_HEADER]: admin.csrfToken,
+      },
+      body: JSON.stringify({ user_code: 'BCDF-GHJK' }),
+    })
+    assert.equal(res.status, 409)
   })
 
   test('approving needs a session', async () => {

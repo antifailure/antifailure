@@ -222,23 +222,40 @@ export async function approveDeviceCode(
   return { approved: true }
 }
 
-/** A person can also say no, which is not the same as letting it expire. */
+/**
+ * A person can also say no, which is not the same as letting it expire.
+ *
+ * The WHERE clause carries "approved_at IS NULL", so a deny that arrives after
+ * an approval correctly refuses to overwrite it. What it did not do was say so:
+ * the function returned { denied: true } whatever the UPDATE touched, and an
+ * UPDATE that matched no row is indistinguishable from one that matched. The
+ * ordering is an ordinary one, because the two answers are in different browser
+ * tabs and the second one still has the code in its URL: somebody approves,
+ * changes their mind, presses Deny, is told the login was declined, and the
+ * terminal is holding a ninety day token. Being told what actually happened is
+ * what sends them to revoke it.
+ *
+ * A deny that changed nothing is reported to the caller rather than thrown as a
+ * DeviceError, because none of RFC 8628's four codes describes it and this is
+ * not the endpoint the terminal polls.
+ */
 export async function denyDeviceCode(
   pool: Pool,
   clock: Clock,
   userCode: string,
-): Promise<{ denied: true }> {
+): Promise<{ denied: boolean }> {
   const code = normaliseUserCode(userCode)
   if (!code) throw new DeviceError('invalid_request', 'That is not a valid code.')
-  await pool.withoutTenant(
+  return pool.withoutTenant(
     async (db) => {
-      await db.execute(sql`
+      const rows = await db.execute<{ id: string }>(sql`
         UPDATE device_authorizations SET denied_at = ${clock.now().toISOString()}
-        WHERE user_code = ${code} AND approved_at IS NULL AND denied_at IS NULL`)
+        WHERE user_code = ${code} AND approved_at IS NULL AND denied_at IS NULL
+        RETURNING id`)
+      return { denied: rows.length > 0 }
     },
     { deviceUserCode: code },
   )
-  return { denied: true }
 }
 
 export interface IssuedToken {
