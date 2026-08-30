@@ -1,7 +1,8 @@
 // GitHub, behind an interface, so that the sign-in flow can be tested.
 //
-// The interface is narrow on purpose: four calls, each returning exactly what
-// the application stores. A wider one would tempt callers into passing GitHub's
+// The interface is narrow on purpose: one call per question the application
+// asks, each returning exactly what the application stores. A wider one would
+// tempt callers into passing GitHub's
 // response shape around, and then the fake has to reproduce GitHub's response
 // shape rather than its behaviour, which is how a fake stops being worth
 // anything.
@@ -51,6 +52,28 @@ export interface GitHubClient {
     orgLogin: string,
     login: string,
   ): Promise<'admin' | 'member' | null>
+  /**
+   * Asks a workflow in the customer's repository to run.
+   *
+   * This is the whole of how the control plane acts. It does not bring an
+   * environment up, start an agent, or drive load: the engine does all of that
+   * inside the customer's own CI, where their database and their secrets
+   * already are. Running it here would mean a snapshot of their production
+   * shape crossing into this service, which is the one thing the architecture
+   * refuses.
+   *
+   * `repository` is the full name, `owner/name`, because that is what the
+   * repositories table stores and splitting it at the call site is one more
+   * place to get it wrong. `ref` is a branch or a tag, not a commit: GitHub
+   * refuses a SHA here.
+   */
+  dispatchWorkflow(
+    installationId: number,
+    repository: string,
+    workflow: string,
+    ref: string,
+    inputs: Record<string, string>,
+  ): Promise<void>
 }
 
 export interface GitHubConfig {
@@ -244,6 +267,85 @@ export class RealGitHubClient implements GitHubClient {
     } catch {
       return null
     }
+  }
+
+  /**
+   * Dispatches a workflow run, and reads GitHub's refusals as the answers they
+   * are rather than passing a status code up.
+   *
+   * Every failure here is a state the operator can fix and none of them is a
+   * fault in this control plane, so each carries the sentence that names the
+   * fix. The two that arrive most often are worth calling out because GitHub's
+   * own message for them is misleading:
+   *
+   * 404 is not "the repository is gone". It is what GitHub answers for a
+   * workflow file that does not exist, for a repository this installation was
+   * not given, and for an App that holds no `actions: write` permission, and
+   * they are indistinguishable from here on purpose: GitHub will not confirm
+   * the existence of something the caller may not see.
+   *
+   * 422 is the workflow file existing and not accepting a dispatch. Either it
+   * has no `workflow_dispatch` trigger, or the ref does not exist on the
+   * default branch, which is the rule people trip over: GitHub reads the
+   * trigger list from the DEFAULT branch, so a workflow that only gained
+   * `workflow_dispatch` on a feature branch cannot be dispatched at all.
+   */
+  async dispatchWorkflow(
+    installationId: number,
+    repository: string,
+    workflow: string,
+    ref: string,
+    inputs: Record<string, string>,
+  ): Promise<void> {
+    const tokens = this.config.installationTokens
+    if (!tokens) {
+      throw new GitHubError(
+        'Dispatching a workflow needs a GitHub App. Set AF_GITHUB_APP_ID, ' +
+          'AF_GITHUB_APP_PRIVATE_KEY and AF_GITHUB_APP_WEBHOOK_SECRET.',
+      )
+    }
+    const token = await tokens.for(installationId)
+    const base = this.config.apiBase ?? 'https://api.github.com'
+    const path =
+      `/repos/${repository.split('/').map(encodeURIComponent).join('/')}` +
+      `/actions/workflows/${encodeURIComponent(workflow)}/dispatches`
+
+    const res = await fetch(new URL(path, base), {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: 'application/vnd.github+json',
+        'content-type': 'application/json',
+        'x-github-api-version': '2022-11-28',
+        'user-agent': 'antifailure',
+      },
+      body: JSON.stringify({ ref, inputs }),
+    })
+    // 204 and nothing else. GitHub returns no body and no run id, so there is
+    // deliberately nothing here to return: the run appears in the customer's
+    // Actions tab, and it reaches this control plane the same way every other
+    // run does, as events the engine sends.
+    if (res.status === 204) return
+
+    const body = await res.text().catch(() => '')
+    if (res.status === 404) {
+      throw new GitHubError(
+        `GitHub cannot see ${workflow} in ${repository}. Either the file is not at ` +
+          `.github/workflows/${workflow} on the default branch, or the App was not ` +
+          `installed on this repository, or it has not been granted the Actions ` +
+          `write permission. All three answer 404.`,
+      )
+    }
+    if (res.status === 422) {
+      throw new GitHubError(
+        `GitHub refused to dispatch ${workflow} in ${repository}: ${body.slice(0, 200)}. ` +
+          `A workflow can only be dispatched if the copy on the DEFAULT branch declares ` +
+          `workflow_dispatch, and the ref ${ref} has to exist.`,
+      )
+    }
+    throw new GitHubError(
+      `GitHub refused to dispatch ${workflow} in ${repository}: ${res.status}. ${body.slice(0, 200)}`,
+    )
   }
 
   /**

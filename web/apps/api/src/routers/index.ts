@@ -14,6 +14,9 @@ import { PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLES, ROLE_PERMISSIONS, rolesWit
 import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
 import { syncMembership, SignInError } from '../auth/signin.ts'
 import { GitHubError } from '../auth/github.ts'
+import { createEnvironment, agentsRouter, loadRouter } from './dispatch.ts'
+import { runtimesRouter } from './runtimes.ts'
+import { billingRouter } from './billing.ts'
 
 const uuid = z.string().uuid()
 
@@ -22,6 +25,10 @@ const uuid = z.string().uuid()
 // ---------------------------------------------------------------------------
 
 const environmentsRouter = router({
+  // Lives in dispatch.ts because it acts rather than reads, and everything
+  // that acts goes out through the customer's own CI. See that file's header.
+  create: createEnvironment,
+
   list: orgProcedure('environments.view')
     .input(
       z.object({
@@ -347,7 +354,7 @@ const networkRouter = router({
 
       return c.pool.withTenant(c.tenant, async (db) => {
         const repo = await repositoryId(db, input.repository)
-        const [row] = await db.execute<{ id: string }>(sql`
+        const rows = await db.execute<{ id: string }>(sql`
           INSERT INTO network_rules (org_id, repository_id, host, mode, paths, methods, note, proposed_by)
           VALUES (${c.actor.orgId}, ${repo}, ${input.host}, ${input.mode},
                   ${sql.param(input.paths ?? null)}::text[],
@@ -363,7 +370,7 @@ const networkRouter = router({
         // Inert until approved. Returning the id is the whole point of the
         // shape: the caller has something to hand to `network.approve`, and a
         // proposal that cannot be named is a proposal nobody can act on.
-        return { proposed: true, ruleId: row.id, needsApproval: true }
+        return { proposed: true, ruleId: rows[0]!.id, needsApproval: true }
       })
     }),
 
@@ -388,7 +395,13 @@ const networkRouter = router({
           LEFT JOIN repositories r ON r.id = n.repository_id
           LEFT JOIN users u ON u.id = n.proposed_by
           WHERE n.approved_at IS NULL
+            -- Filtered exactly the way effectiveEgress filters, which means an
+            -- organization-wide proposal shows up on every repository rather
+            -- than nowhere. It is going to apply to that repository once it is
+            -- approved, so hiding it from the queue there would mean somebody
+            -- approving a change to a repository they were never shown.
             AND (${input.repository ?? null}::text IS NULL
+                 OR n.repository_id IS NULL
                  OR r.full_name = ${input.repository ?? null})
           ORDER BY n.created_at ASC
           LIMIT 200`),
@@ -422,11 +435,14 @@ const networkRouter = router({
           RETURNING id, host, mode,
                     (SELECT full_name FROM repositories r WHERE r.id = network_rules.repository_id) AS repository`)
         if (rows.length === 0) throw notFound('pending egress rule', input.ruleId)
-        const [rule] = rows
+        const rule = rows[0]!
         await audit(db, c, {
           action: 'network.rule_approved',
-          targetType: 'repository',
-          targetId: rule.repository ?? 'the whole organization',
+          // An organization-wide rule belongs to no repository, and writing a
+          // sentence into the target id to say so would put prose in the
+          // column an export filters on. It is recorded as what it is.
+          targetType: rule.repository === null ? 'organization' : 'repository',
+          targetId: rule.repository ?? c.actor.orgId,
           detail: { host: rule.host, mode: rule.mode, ruleId: rule.id },
         })
         return { approved: true, host: rule.host, mode: rule.mode }
@@ -879,10 +895,14 @@ export const appRouter = router({
   repositories: repositoriesRouter,
   environments: environmentsRouter,
   runs: runsRouter,
+  agents: agentsRouter,
+  load: loadRouter,
   network: networkRouter,
   masking: maskingRouter,
   audit: auditRouter,
   members: membersRouter,
+  runtimes: runtimesRouter,
+  billing: billingRouter,
   tokens: tokensRouter,
   org: orgRouter,
 })

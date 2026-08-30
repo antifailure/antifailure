@@ -252,6 +252,24 @@ export const networkRules = pgTable('network_rules', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index('network_rules_scope_idx').on(t.orgId, t.repositoryId, t.position)])
 
+// Where an organization's environments are allowed to run. A name and a
+// provider, never a credential: the control plane does not reach a runtime, it
+// hands the name to the customer's own CI. See migrations/0018.
+export const runtimes = pgTable('runtimes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  name: text('name').notNull(),
+  provider: text('provider').notNull(),
+  labels: textArray('labels').notNull(),
+  note: text('note'),
+  registeredBy: uuid('registered_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  // Removed rather than deleted, so an environment that named this runtime
+  // still resolves to something the console can explain.
+  removedAt: timestamp('removed_at', { withTimezone: true }),
+}, (t) => [index('runtimes_org_idx').on(t.orgId, t.createdAt)])
+
 export const engineTokens = pgTable('engine_tokens', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').notNull(),
@@ -521,8 +539,8 @@ export const scimGroupMembers = pgTable('scim_group_members', {
  *  isolated, so the suite asserts this list covers the database. */
 export const tenantScopedTables = [
   members, githubInstallations, repositories, environments, goldenVersions,
-  runs, verdicts, artifacts, maskingRules, networkRules, engineTokens, events,
-  auditEntries, providerKeys, providerBudgets,
+  runs, verdicts, artifacts, maskingRules, networkRules, runtimes, engineTokens,
+  events, auditEntries, providerKeys, providerBudgets,
   ssoConnections, ssoConnectionSecrets, ssoDomains, ssoLoginStates,
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,
