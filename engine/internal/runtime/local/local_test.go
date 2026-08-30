@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,21 +28,93 @@ import (
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
-func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
+// asked and skipped count how many tests wanted the daemon and how many did
+// not get it. TestMain reads them.
+var asked, skipped atomic.Int64
+
+// silentFullSkip reports whether a run proved nothing and said so quietly.
+//
+// A pure function so it can be tested, which a TestMain cannot be. The
+// condition is narrow on purpose: some tests skipping is a machine being slow
+// on one operation, and no tests asking is a package with nothing to skip.
+// Every test asking and every one skipping is the case where ok is a lie.
+func silentFullSkip(asked, skipped int64, optedOut bool) bool {
+	return !optedOut && asked > 0 && skipped == asked
+}
+
+// TestMain refuses a run in which every test that needed the daemon skipped.
+//
+// This package holds the containment suite, and containment is the property
+// the product is sold on. A green check that never ran is worse than a red
+// one, because the next person builds on it. Set AF_SKIP_DOCKER to say out
+// loud that this machine has no daemon.
+func TestMain(m *testing.M) {
+	code := m.Run()
+
+	// Leaks first, because a goroutine left behind only shows up once
+	// everything has finished. A package gets one TestMain, so both checks
+	// live here.
+	if code == 0 {
+		if err := goleak.Find(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			code = 1
+		}
+	}
+
+	a, s := asked.Load(), skipped.Load()
+	if a > 0 {
+		fmt.Fprintf(os.Stderr, "local: %d of %d daemon tests ran\n", a-s, a)
+	}
+	if code == 0 && silentFullSkip(a, s, os.Getenv("AF_SKIP_DOCKER") != "") {
+		fmt.Fprintf(os.Stderr,
+			"local: every one of the %d daemon tests skipped, so this package proved "+
+				"nothing about containment. Start Docker, or set AF_SKIP_DOCKER=1 to "+
+				"accept that.\n", a)
+		code = 1
+	}
+	os.Exit(code)
+}
+
+// The guard's own decision, checked directly. A TestMain cannot be tested, so
+// the condition it acts on is a function that can be.
+func TestSilentFullSkipOnlyFiresWhenNothingRan(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name           string
+		asked, skipped int64
+		optedOut       bool
+		want           bool
+	}{
+		{"everything skipped", 7, 7, false, true},
+		{"everything ran", 7, 0, false, false},
+		{"some skipped", 7, 2, false, false},
+		{"nothing asked", 0, 0, false, false},
+		{"everything skipped, said out loud", 7, 7, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			require.Equal(t, c.want, silentFullSkip(c.asked, c.skipped, c.optedOut))
+		})
+	}
+}
 
 func requireRuntime(t *testing.T) *local.Runtime {
 	t.Helper()
+	asked.Add(1)
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
+		skipped.Add(1)
 		t.Skip("skipped: AF_SKIP_DOCKER is set")
 	}
 	r, err := local.New(local.Options{Clock: clock.New(), ReadyTimeout: 90 * time.Second})
 	if err != nil {
+		skipped.Add(1)
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := r.Inventory(ctx); err != nil {
 		_ = r.Close()
+		skipped.Add(1)
 		t.Skipf("skipped: the Docker daemon did not respond: %v", err)
 	}
 	t.Cleanup(func() { _ = r.Close() })
@@ -398,9 +471,19 @@ func parseInt(t *testing.T, re *regexp.Regexp, s string) int {
 // that looks like a broken egress control.
 func requireInternet(t *testing.T) {
 	t.Helper()
-	c := &http.Client{Timeout: 10 * time.Second}
+	// Its own transport, closed on the way out. The default one keeps the
+	// connection idle for a minute and a half, and its reader and writer
+	// goroutines are what goleak finds at the end of a run where this was the
+	// only outbound call anything made.
+	tr := &http.Transport{}
+	defer tr.CloseIdleConnections()
+	c := &http.Client{Timeout: 10 * time.Second, Transport: tr}
 	resp, err := c.Get("http://" + allowedHost + "/")
 	if err != nil {
+		// Counted as a skip for the same reason the daemon ones are. A laptop
+		// with no network would otherwise run every containment test, reach
+		// nothing, skip everything and print ok.
+		skipped.Add(1)
 		t.Skipf("skipped: %s is not reachable from this machine: %v", allowedHost, err)
 	}
 	_ = resp.Body.Close()
