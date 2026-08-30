@@ -138,8 +138,10 @@ export const ENTITLING_STATUSES: readonly string[] = ['trialing', 'active', 'pas
 
 /** A subscription in one of these entitles nothing. `incomplete` is here
  *  because its first payment has not gone through at all, so there was never
- *  an upgrade to take away. */
-export const ENDED_STATUSES: readonly string[] = [
+ *  an upgrade to take away. Not exported: planForStatus is the only thing that
+ *  should be asking, and a second caller comparing statuses itself is how the
+ *  two lists start disagreeing. */
+const ENDED_STATUSES: readonly string[] = [
   'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused',
 ]
 
