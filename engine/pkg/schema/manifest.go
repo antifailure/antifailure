@@ -25,6 +25,7 @@ type Manifest struct {
 	Invariants []Invariant `json:"invariants,omitempty" yaml:"invariants,omitempty"`
 	Insights   *Insights   `json:"insights,omitempty" yaml:"insights,omitempty"`
 	Load       *Load       `json:"load,omitempty" yaml:"load,omitempty"`
+	Policy     *Policy     `json:"policy,omitempty" yaml:"policy,omitempty"`
 	Runtime    *Runtime    `json:"runtime,omitempty" yaml:"runtime,omitempty"`
 	GitHub     *GitHub     `json:"github,omitempty" yaml:"github,omitempty"`
 }
@@ -389,6 +390,84 @@ type LoadThresholds struct {
 	P95Increase        float64 `json:"p95_increase,omitempty" yaml:"p95_increase,omitempty"`
 	ErrorRate          float64 `json:"error_rate,omitempty" yaml:"error_rate,omitempty"`
 	QueryCountIncrease float64 `json:"query_count_increase,omitempty" yaml:"query_count_increase,omitempty"`
+}
+
+// PolicyLevel is what one class of finding does to the check.
+//
+// Three levels rather than two, because a real finding that does not stop a
+// merge had nowhere to go before this: everything the run noticed either
+// failed the build or was printed and forgotten. A rewrite on a table of four
+// hundred rows is worth a line in the comment and is not worth blocking on,
+// and a policy that can only say fail or nothing teaches people to say
+// nothing.
+type PolicyLevel string
+
+const (
+	// PolicyIgnore drops the finding entirely. It is not printed and it does
+	// not reach the verdict.
+	PolicyIgnore PolicyLevel = "ignore"
+	// PolicyWarn reports the finding and leaves the check passing.
+	PolicyWarn PolicyLevel = "warn"
+	// PolicyFail reports the finding and fails the check.
+	PolicyFail PolicyLevel = "fail"
+)
+
+// AllPolicyLevels returns every level, weakest first. Kept so the schema, the
+// validator and the documentation cannot drift.
+func AllPolicyLevels() []PolicyLevel {
+	return []PolicyLevel{PolicyIgnore, PolicyWarn, PolicyFail}
+}
+
+// Policy is what each class of finding does to the pull request check.
+//
+// It exists because "pass, warning, or block" was a sentence on a web page and
+// nothing in the engine could produce the middle one. Every key here is read
+// by af ci when it builds the report, and each maps one kind of evidence to
+// one level, so that the answer to "why did this fail" is always a key in this
+// block rather than a rule somebody has to read Go to find.
+type Policy struct {
+	// MigrationLock is how long a migration may hold a lock on a table.
+	MigrationLock *LockPolicy `json:"migration_lock,omitempty" yaml:"migration_lock,omitempty"`
+	// MigrationFailed is a migration that did not apply to a branch with
+	// production's shape in it.
+	MigrationFailed PolicyLevel `json:"migration_failed,omitempty" yaml:"migration_failed,omitempty"`
+	// MigrationRewrite is a statement Postgres reported as rewriting a table.
+	MigrationRewrite PolicyLevel `json:"migration_rewrite,omitempty" yaml:"migration_rewrite,omitempty"`
+	// MigrationLint governs all six lint rules together. They are one setting
+	// because a project that wants the lint wants all of it: the rules are
+	// already scoped by table size, so the noisy case is handled by
+	// insights.large_table_rows rather than by turning a rule off.
+	MigrationLint PolicyLevel `json:"migration_lint,omitempty" yaml:"migration_lint,omitempty"`
+	// PlanRegression is a query plan that got worse.
+	PlanRegression PolicyLevel `json:"plan_regression,omitempty" yaml:"plan_regression,omitempty"`
+	// QueryRegression is a statement that runs more often or slower than the
+	// baseline did.
+	QueryRegression PolicyLevel `json:"query_regression,omitempty" yaml:"query_regression,omitempty"`
+	// LoadRegression is a load threshold from the load block being exceeded.
+	LoadRegression PolicyLevel `json:"load_regression,omitempty" yaml:"load_regression,omitempty"`
+	// EgressSurprise is the environment trying to reach a host the manifest
+	// does not mention.
+	EgressSurprise PolicyLevel `json:"egress_surprise,omitempty" yaml:"egress_surprise,omitempty"`
+	// Masking is the environment's own branch reading back with something in
+	// it that still parses as real data.
+	Masking PolicyLevel `json:"masking,omitempty" yaml:"masking,omitempty"`
+	// Cleanup is teardown leaving a resource behind.
+	Cleanup PolicyLevel `json:"cleanup,omitempty" yaml:"cleanup,omitempty"`
+}
+
+// LockPolicy is the two thresholds on how long a migration held a lock.
+//
+// Two numbers rather than one because the interesting range is wide: a lock
+// held for a fifth of a second is a pause, one held for five seconds is an
+// outage on a busy table, and there is no single figure that is right for
+// both. Both are compared against a sampled lower bound, so a run that
+// breaches one really did hold the lock at least that long.
+type LockPolicy struct {
+	// WarnMS reports a lock held at least this long.
+	WarnMS float64 `json:"warn_ms,omitempty" yaml:"warn_ms,omitempty"`
+	// FailMS fails the check on a lock held at least this long. It must not be
+	// below WarnMS, which the validator enforces.
+	FailMS float64 `json:"fail_ms,omitempty" yaml:"fail_ms,omitempty"`
 }
 
 // RuntimeProvider names where environments run.

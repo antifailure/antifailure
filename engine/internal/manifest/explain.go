@@ -168,6 +168,15 @@ func Explain(m *schema.Manifest) string {
 	fmt.Fprintf(&b, "  plan diff    %s\n", enabledWord(deref(m.Insights.PlanDiff)))
 	b.WriteString("\n")
 
+	// Only the keys that stop a merge, and the lock thresholds. The full
+	// block is ten lines of "warn" and this section exists so that somebody
+	// can see what will block them without reading the schema.
+	b.WriteString("Policy\n")
+	fmt.Fprintf(&b, "  locks        warn at %.0f ms, fail at %.0f ms\n",
+		m.Policy.MigrationLock.WarnMS, m.Policy.MigrationLock.FailMS)
+	fmt.Fprintf(&b, "  fails on     %s\n", failingPolicies(m.Policy))
+	b.WriteString("\n")
+
 	b.WriteString("Runtime\n")
 	fmt.Fprintf(&b, "  provider     %s\n", m.Runtime.Provider)
 	fmt.Fprintf(&b, "  hostnames    *.%s\n", m.Runtime.Domain)
@@ -270,4 +279,36 @@ func Hosts(m *schema.Manifest) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// failingPolicies names every class of finding that stops a merge.
+//
+// Named rather than counted, because "3 policies" tells a reader nothing and
+// the whole point of the block is that the answer to "why did this fail" is a
+// key they can go and read.
+func failingPolicies(p *schema.Policy) string {
+	pairs := []struct {
+		name  string
+		level schema.PolicyLevel
+	}{
+		{"migration_failed", p.MigrationFailed},
+		{"migration_rewrite", p.MigrationRewrite},
+		{"migration_lint", p.MigrationLint},
+		{"plan_regression", p.PlanRegression},
+		{"query_regression", p.QueryRegression},
+		{"load_regression", p.LoadRegression},
+		{"egress_surprise", p.EgressSurprise},
+		{"masking", p.Masking},
+		{"cleanup", p.Cleanup},
+	}
+	var names []string
+	for _, pair := range pairs {
+		if pair.level == schema.PolicyFail {
+			names = append(names, pair.name)
+		}
+	}
+	if len(names) == 0 {
+		return "nothing; every finding is a warning"
+	}
+	return strings.Join(names, ", ")
 }

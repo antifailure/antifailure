@@ -70,6 +70,9 @@
     "load": {
       "$ref": "#/$defs/load"
     },
+    "policy": {
+      "$ref": "#/$defs/policy"
+    },
     "runtime": {
       "$ref": "#/$defs/runtime"
     },
@@ -870,6 +873,123 @@
               "default": 0.2
             }
           }
+        }
+      }
+    },
+    "policy": {
+      "title": "Policy",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What each class of finding does to the pull request check. A finding at 'fail' fails the check, one at 'warn' is reported and the check still passes, and one at 'ignore' is not reported at all. Every key here is read when the report is built, so the answer to why a check failed is always one of these keys.",
+      "properties": {
+        "migration_lock": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How long a migration may hold a lock on a table. Both figures are compared against a sampled lower bound, so a breach really did hold the lock at least that long.",
+          "properties": {
+            "warn_ms": {
+              "type": "number",
+              "minimum": 0,
+              "default": 500,
+              "description": "Report a lock held at least this many milliseconds."
+            },
+            "fail_ms": {
+              "type": "number",
+              "minimum": 0,
+              "default": 2000,
+              "description": "Fail the check on a lock held at least this many milliseconds. Must not be below warn_ms."
+            }
+          }
+        },
+        "migration_failed": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "A migration that did not apply to a branch with production's shape in it. A migration that fails here is one that would have failed in production."
+        },
+        "migration_rewrite": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through."
+        },
+        "migration_lint": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "Any of the six migration lint rules. They share one setting because the rules are already scoped by table size."
+        },
+        "plan_regression": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "A query plan that got worse: a table now read end to end, or an index no longer used."
+        },
+        "query_regression": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "A statement that runs more often, or slower, than the saved baseline did. Needs a baseline to compare against."
+        },
+        "load_regression": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "A load threshold from the load block being exceeded."
+        },
+        "egress_surprise": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "The environment tried to reach a host the manifest does not mention. The request was refused either way; this decides whether the attempt stops the merge."
+        },
+        "masking": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "The environment's own branch read back with something in it that still parses as real data."
+        },
+        "cleanup": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "Teardown left a resource behind. The journal remembers what is left, so 'af down' can finish the job."
         }
       }
     },

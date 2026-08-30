@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -31,6 +32,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.workflows(m)
 	v.invariants(m)
 	v.load(m)
+	v.policy(m)
 	v.runtime(m)
 
 	if v.suppressed > 0 {
@@ -694,6 +696,57 @@ func (v *validator) load(m *schema.Manifest) {
 				"Unsafe wins, and the ambiguity will confuse whoever reads this next. Remove one.")
 		}
 	}
+}
+
+// policy checks the release gate.
+//
+// A level nobody recognises is the failure worth catching here. Falling back
+// to a default would mean a manifest that says "block" quietly warns instead,
+// and the first time anybody noticed would be a merge that should not have
+// happened.
+func (v *validator) policy(m *schema.Manifest) {
+	p := m.Policy
+	if p == nil {
+		return
+	}
+	levels := map[string]schema.PolicyLevel{
+		"migration_failed":  p.MigrationFailed,
+		"migration_rewrite": p.MigrationRewrite,
+		"migration_lint":    p.MigrationLint,
+		"plan_regression":   p.PlanRegression,
+		"query_regression":  p.QueryRegression,
+		"load_regression":   p.LoadRegression,
+		"egress_surprise":   p.EgressSurprise,
+		"masking":           p.Masking,
+		"cleanup":           p.Cleanup,
+	}
+	keys := make([]string, 0, len(levels))
+	for k := range levels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !knownPolicyLevel(levels[k]) {
+			v.add("policy."+k,
+				fmt.Sprintf("%q is not a policy level.", string(levels[k])),
+				"The levels are ignore, warn and fail. Use fail to stop the merge, warn to report the finding and let it through, and ignore to drop it.")
+		}
+	}
+
+	if l := p.MigrationLock; l != nil && l.FailMS > 0 && l.WarnMS > l.FailMS {
+		v.add("policy.migration_lock.fail_ms",
+			fmt.Sprintf("The failing threshold %.0fms is below the warning threshold %.0fms.", l.FailMS, l.WarnMS),
+			"A lock long enough to fail the check is always long enough to be worth reporting. Raise fail_ms above warn_ms, or lower warn_ms.")
+	}
+}
+
+func knownPolicyLevel(l schema.PolicyLevel) bool {
+	for _, known := range schema.AllPolicyLevels() {
+		if l == known {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *validator) runtime(m *schema.Manifest) {

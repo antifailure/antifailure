@@ -36,6 +36,13 @@ const (
 	DefaultRegressionFac = 1.5
 	DefaultRegressionMS  = 5
 	DefaultLargeTable    = 100000
+	// DefaultLockWarnMS and DefaultLockFailMS bound how long a migration may
+	// hold a lock on a table. Two seconds is the figure the product has
+	// advertised since before it could enforce it: past that, a lock on a busy
+	// table is an outage rather than a pause. Half a second is the point at
+	// which it is worth a line in the comment.
+	DefaultLockWarnMS = 500
+	DefaultLockFailMS = 2000
 	// DefaultPersonaDomain is reserved by RFC 6761 and can never receive mail,
 	// so a persona address cannot become a real one by accident.
 	DefaultPersonaDomain = "example.test"
@@ -74,6 +81,7 @@ func normalize(m *schema.Manifest, root string) {
 	normalizeWorkflows(m)
 	normalizeInsights(m)
 	normalizeLoad(m)
+	normalizePolicy(m)
 	normalizeRuntime(m)
 	normalizeGitHub(m)
 }
@@ -309,6 +317,44 @@ func normalizeLoad(m *schema.Manifest) {
 	for i, r := range l.UnsafeRoutes {
 		l.UnsafeRoutes[i] = normalizeRoute(r)
 	}
+}
+
+// normalizePolicy fills in the release gate.
+//
+// The two defaults that are not "warn" are the two the product has always
+// claimed: an unknown destination and a failed teardown cannot ship. A
+// migration that does not apply is the third, and it is not really a policy
+// choice: a migration that fails against production's shape fails the deploy.
+// Everything else defaults to warn, because a gate that blocks on its first
+// day is a gate people turn off on their second.
+func normalizePolicy(m *schema.Manifest) {
+	if m.Policy == nil {
+		m.Policy = &schema.Policy{}
+	}
+	p := m.Policy
+	if p.MigrationLock == nil {
+		p.MigrationLock = &schema.LockPolicy{}
+	}
+	if p.MigrationLock.WarnMS == 0 {
+		p.MigrationLock.WarnMS = DefaultLockWarnMS
+	}
+	if p.MigrationLock.FailMS == 0 {
+		p.MigrationLock.FailMS = DefaultLockFailMS
+	}
+	level := func(v *schema.PolicyLevel, def schema.PolicyLevel) {
+		if *v == "" {
+			*v = def
+		}
+	}
+	level(&p.MigrationFailed, schema.PolicyFail)
+	level(&p.MigrationRewrite, schema.PolicyWarn)
+	level(&p.MigrationLint, schema.PolicyWarn)
+	level(&p.PlanRegression, schema.PolicyWarn)
+	level(&p.QueryRegression, schema.PolicyWarn)
+	level(&p.LoadRegression, schema.PolicyWarn)
+	level(&p.EgressSurprise, schema.PolicyFail)
+	level(&p.Masking, schema.PolicyFail)
+	level(&p.Cleanup, schema.PolicyFail)
 }
 
 func normalizeRoute(r string) string {
