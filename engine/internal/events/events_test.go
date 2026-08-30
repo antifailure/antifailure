@@ -450,3 +450,70 @@ func TestNewFileSink_ReportsAnUncreatableDirectory(t *testing.T) {
 	_, err := events.NewFileSink(filepath.Join(f, "sub"), "env_a", redact.New(), events.FileSinkOptions{})
 	require.Error(t, err)
 }
+
+// The counter continues where the last command left it.
+//
+// The regression: Seq is documented as "a monotonic counter per environment,
+// so a consumer can order events and notice a gap", and it restarted at 1 for
+// every command. One `af up` reached 127 and the `af down` after it started
+// again at 1, in the same log, for the same environment. Ordering by sequence
+// was wrong across commands and a gap could not be detected at all.
+func TestBus_ContinuesAnEnvironmentsSequenceAcrossCommands(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	const env = "shop-main-a1b2c3"
+
+	first := events.NewBus(clock.New())
+	sink, err := events.NewFileSink(dir, env, redact.New(), events.FileSinkOptions{})
+	require.NoError(t, err)
+	first.AddSink(sink)
+	for range 5 {
+		first.Emit(env, events.Progress, events.LevelInfo, "the first command")
+	}
+	require.NoError(t, first.Close())
+	require.Equal(t, uint64(5), first.Seq(env))
+
+	// A second command, as a second process would see it.
+	resume := events.LastSequence(dir, env, env)
+	require.Equal(t, uint64(5), resume, "the log has to carry the number forward")
+
+	second := events.NewBus(clock.New())
+	second.ResumeSequence(env, resume)
+	second.Emit(env, events.EnvDestroyed, events.LevelInfo, "the second command")
+	require.Equal(t, uint64(6), second.Seq(env),
+		"the second command restarted the counter, so a gap cannot be detected")
+}
+
+// A first run, a missing log, and a damaged one all start at one.
+func TestLastSequence_StartsAtZeroWhenThereIsNothingToResume(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.Zero(t, events.LastSequence(dir, "never-seen", "never-seen"))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "damaged.ndjson"),
+		[]byte("this is not json\n{\"env\":\"damaged\",\"seq\":\n"), 0o600))
+	require.Zero(t, events.LastSequence(dir, "damaged", "damaged"),
+		"an unreadable log must not stop a command, only fail to help it")
+}
+
+// A log is named for a sanitised identifier and carries the real one, so the
+// two arguments are two different things and reading it has to use both.
+func TestLastSequence_ReadsALogNamedForSomethingElse(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "shop-main-a1b2c3.ndjson"),
+		[]byte(`{"env":"shop/main@a1b2c3","seq":7}`+"\n"), 0o600))
+	require.Equal(t, uint64(7),
+		events.LastSequence(dir, "shop-main-a1b2c3", "shop/main@a1b2c3"))
+	require.Zero(t, events.LastSequence(dir, "shop-main-a1b2c3", "shop-main-a1b2c3"),
+		"matching the file's name against the events inside it finds nothing")
+}
+
+// Another environment's numbers are not this one's.
+func TestLastSequence_IgnoresOtherEnvironments(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mine.ndjson"),
+		[]byte(`{"env":"theirs","seq":900}`+"\n"+`{"env":"mine","seq":3}`+"\n"), 0o600))
+	require.Equal(t, uint64(3), events.LastSequence(dir, "mine", "mine"))
+}

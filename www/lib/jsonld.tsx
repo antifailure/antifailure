@@ -211,13 +211,22 @@ export function PostJsonLd({ post }: { post: Post }) {
         headline: post.title,
         description: post.dek,
         url,
-        mainEntityOfPage: { "@type": "WebPage", "@id": url },
+        // The WebPage node PageJsonLd emits for this same path, by reference.
+        // Spelling out an inline {"@type":"WebPage", "@id": url} here gave the
+        // page two identities that differed only by a fragment, which is the
+        // same duplicate-entity problem as the author field below.
+        mainEntityOfPage: { "@id": `${url}#webpage` },
         datePublished: post.published,
         dateModified: postModified(post),
         keywords: [...post.tags],
         inLanguage: "en",
         image: absoluteUrl(OG_IMAGE.url),
-        author: { "@type": "Organization", name: post.author.name, url: post.author.url },
+        // The Organization by reference, not a second one spelled out here.
+        // An inline {"@type":"Organization", name, url} is a NEW node as far as
+        // a consumer is concerned, so three posts would have declared three more
+        // Antifailures on a domain whose whole point is to resolve to one. The
+        // url on it also pointed at /company, which this site does not have.
+        author: { "@id": ORG_ID },
         publisher: { "@id": ORG_ID },
         isPartOf: { "@id": SITE_ID },
         about: { "@id": SOFTWARE_ID },

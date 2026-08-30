@@ -16,6 +16,7 @@
 
 import type { Action, Planner, Snapshot, Workflow } from './workflow.ts';
 import { anchored, judgeAll } from './workflow.ts';
+import { CassetteMiss } from './cassette.ts';
 
 /** Which provider a key belongs to. */
 export type Provider = 'anthropic' | 'openai';
@@ -92,6 +93,14 @@ export class ModelPlanner implements Planner {
     try {
       raw = await this.#complete(prompt(workflow, snapshot, history), this.#config);
     } catch (err) {
+      // A cassette with no recording for this page is not a model outage, and
+      // falling back would hide it: the run would quietly become a
+      // deterministic one, pass, and nobody would learn that the recording had
+      // gone stale. So it stops here and the run is blocked, which is a
+      // statement about the recording rather than about the application.
+      if (err instanceof CassetteMiss) {
+        return { kind: 'stuck', why: err.message };
+      }
       // A model that is unreachable is not evidence about the application. The
       // deterministic planner carries on if there is one, and if there is not
       // the run is stuck, which is blocked rather than failed.

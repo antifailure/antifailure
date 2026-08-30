@@ -42,13 +42,41 @@ named. Everything else is refused with a decision you can read.
 | `port` | int | What it listens on. `PORT` is set for you. |
 | `health_path` | string | Readiness check, default `/`. |
 | `health_timeout` | duration | Default `180s`. |
-| `migrate` | string | Runs before the service, with a direct connection. |
+| `migrate` | string | Runs to completion before the service starts, with an elevated connection. See below. |
 | `schedule` | cron | For `kind: cron`. |
 | `replicas` | int | Default 1. |
 | `depends_on` | list | Other services that must start first. |
 | `env` | list | Variables this service needs, by name. |
 | `resources` | block | `cpu` and `memory`. |
 | `build` | block | See below. |
+
+### What a service is given
+
+Every container the engine starts receives these, whether or not the manifest
+mentions them.
+
+| Variable | In the service | In its `migrate` command |
+| --- | --- | --- |
+| `DATABASE_URL` | The unprivileged connection the application uses. Pooled where the provider has a pool. |  The elevated connection, which may run DDL and is never pooled, because a transaction pooler does not support what a migration needs. |
+| `PORT`, `HOST` | The port from the manifest, bound to `0.0.0.0`. | Not set. |
+| `AF_ENV_ID` | The environment's identifier. | The same. |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` | The egress sidecar, and the addresses inside the environment that must not go through it. | The same. |
+
+The row that surprises people is the first one. `DATABASE_URL` is one name for
+two different connections, and which one a container gets depends on whether it
+is the service or the service's migration. That is deliberate: a migration
+needs privileges the application must not have, and giving the application a
+second variable it should never read is a worse answer than giving each
+container exactly the connection it is allowed to use.
+
+The consequence for an image author: a migration entry point should read
+`DATABASE_URL` and expect to be able to run DDL with it. An image built for a
+deployment that names two connections explicitly needs to accept
+`DATABASE_URL` as well, or it cannot run inside a preview at all.
+
+`AF_ENV_ID` is set only for a container the engine created. A script that seeds
+accounts, or does anything else that would be dangerous against production, can
+refuse to run when it is absent.
 
 ```
 AF-RUN-042 Service web depends on cache, which the manifest does not declare.
@@ -64,11 +92,11 @@ arbitrarily.
 | --- | --- |
 | `strategy` | `auto` (default), `dockerfile`, or `buildpack`. |
 | `dockerfile` | Path, when it is not `./Dockerfile`. |
-| `context` | Build context, default the service's directory. |
+| `context` | Build context directory, relative to the repository root. Defaults to the root, so a service can copy from a shared package. |
 | `target` | A stage in a multi stage Dockerfile. |
 | `image` | A prebuilt image, instead of building. |
 | `args` | Build arguments. |
-| `allow_hosts` | Hosts the build may reach. The build is sandboxed too. |
+| `allow_hosts` | What the build needs to reach, recorded and not enforced in this release. |
 
 ### `env`
 

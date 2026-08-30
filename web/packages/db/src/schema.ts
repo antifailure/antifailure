@@ -113,6 +113,24 @@ export const oauthStates = pgTable('oauth_states', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 })
 
+export const emailSignInTokens = pgTable('email_signin_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tokenHash: bytea('token_hash').notNull(),
+  // Lowercased. The user is resolved when the token comes back, not when it is
+  // issued: see migrations/0012 for why issuing must not be able to read a
+  // user row by address.
+  email: text('email').notNull(),
+  redirectTo: text('redirect_to'),
+  ip: inet('ip'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+}, (t) => [
+  uniqueIndex('email_signin_tokens_hash_key').on(t.tokenHash),
+  index('email_signin_tokens_expiry_idx').on(t.expiresAt),
+])
+
 export const githubInstallations = pgTable('github_installations', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').notNull(),

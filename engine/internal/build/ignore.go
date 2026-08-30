@@ -33,6 +33,11 @@ type ignoreRule struct {
 	pattern string
 	re      *regexp.Regexp
 	negated bool
+	// clean is the pattern with the leading !, the trailing slash, and any
+	// leading ./ removed. Kept because `pattern` is the raw line, which is
+	// what a message quotes, and comparing paths against a string that still
+	// carries a `!` silently matches nothing.
+	clean string
 	// dirOnly is set for a pattern ending in a slash, which matches only a
 	// directory.
 	dirOnly bool
@@ -94,6 +99,7 @@ func compileIgnore(raw string) (ignoreRule, error) {
 	if p == "." || p == "" {
 		return r, fmt.Errorf("%q selects the whole context, which would exclude everything", raw)
 	}
+	r.clean = p
 	re, err := regexp.Compile("^" + globToRegexp(p) + "$")
 	if err != nil {
 		return r, fmt.Errorf("%q is not a usable pattern: %w", raw, err)
@@ -162,6 +168,49 @@ func (ig *Ignore) Excluded(p string, isDir bool) (bool, string) {
 		excluded, by = !r.negated, r.pattern
 	}
 	return excluded, by
+}
+
+// MayHoldAnException reports whether some path inside a directory could be
+// re-included by a negated rule.
+//
+// The walk skips an excluded directory whole, which is what makes ignoring
+// node_modules fast rather than merely correct. It is also how an exception
+// inside an excluded directory stops working: `deploy` followed by
+// `!deploy/docker/app.Dockerfile` reads correctly, the last matching rule
+// wins, and it never runs, because the walk pruned `deploy` before it ever
+// looked at a file underneath it. The Dockerfile is then missing from the
+// context and the daemon reports that it cannot locate a file that is plainly
+// on disk.
+//
+// So a directory is only pruned when nothing below it could come back. This is
+// deliberately generous: it asks whether the negated pattern's text begins
+// inside this directory, rather than trying to decide which concrete paths it
+// would match. Being wrong here costs a walk of a subtree that turns out to
+// have nothing in it; being wrong the other way silently drops a file somebody
+// asked for.
+func (ig *Ignore) MayHoldAnException(dir string) bool {
+	prefix := strings.TrimSuffix(dir, "/") + "/"
+	for _, r := range ig.rules {
+		if !r.negated {
+			continue
+		}
+		p := r.clean
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+		// A pattern with a wildcard in it can reach anywhere below its first
+		// literal segment, and `**` can reach anywhere at all.
+		if strings.Contains(p, "*") {
+			literal := p
+			if i := strings.IndexAny(p, "*?["); i >= 0 {
+				literal = p[:i]
+			}
+			if literal == "" || strings.HasPrefix(prefix, literal) || strings.HasPrefix(literal, prefix) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // matches reports whether the rule covers the path itself or any directory

@@ -522,10 +522,13 @@ examples:
       )
     done
     go build -o /tmp/af-examples ./engine/cmd/af
-    for dir in examples/*/; do
-      [ -f "$dir/antifailure.yaml" ] || continue
-      (cd "$dir" && /tmp/af-examples explain > /dev/null)
-      echo "  $dir manifest is valid"
+    # The repository's own manifest is in this loop, and it was in no gate at
+    # all until it was. Every example was validated and the one file this
+    # product is dogfooded with was not.
+    for manifest in ./antifailure.yaml examples/*/antifailure.yaml; do
+      [ -f "$manifest" ] || continue
+      (cd "$(dirname "$manifest")" && /tmp/af-examples explain > /dev/null)
+      echo "  $manifest is valid"
     done
 
 # How hard each page is to read, worst first.
@@ -561,7 +564,8 @@ manifestcheck:
 gatecheck:
     go run ./tools/gatecheck .
 
-# The TypeScript that ships: the control plane packages and the agent runner.
+# The TypeScript that ships: the control plane packages, the agent runner, and
+# the console.
 typecheck:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -569,6 +573,20 @@ typecheck:
       npx --prefix web tsc --noEmit -p "web/$p/tsconfig.json"
     done
     npx --prefix runner tsc --noEmit -p runner/tsconfig.json
+    # The console, which this file was not checking and ci.yml was.
+    #
+    # That gap is the interesting part rather than the console itself. The
+    # comment at the top of this file says green here means green there, and a
+    # type error in console/ passed `just gate` and failed the www job twenty
+    # minutes later. It is a separate npm project with its own lockfile, so it
+    # is in neither loop above and had to be named.
+    #
+    # A build rather than a typecheck, because `next build` runs the typecheck
+    # too and then does the part a typecheck cannot: an import written as
+    # ../lib/guard from a page two directories deep resolves through baseUrl
+    # and fails in webpack with "Module not found".
+    [ -d console/node_modules ] || npm --prefix console ci --no-audit --no-fund
+    NEXT_TELEMETRY_DISABLED=1 npm --prefix console run build
 
 # G11. Two builds of one commit produce the same release artifact.
 #

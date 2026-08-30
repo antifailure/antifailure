@@ -57,6 +57,12 @@ func (p *Provider) imageFor(version int) string {
 
 // start creates and runs a container, pulling the image if it is absent.
 func (p *Provider) start(ctx context.Context, name, img string, labels map[string]string) (started, error) {
+	return p.startWithRetry(ctx, name, img, labels, 0)
+}
+
+func (p *Provider) startWithRetry(
+	ctx context.Context, name, img string, labels map[string]string, attempt int,
+) (started, error) {
 	// A container left by a previous run under the same deterministic name is
 	// removed rather than adopted. Adopting one would mean starting an
 	// environment on data whose provenance nothing recorded.
@@ -126,9 +132,44 @@ func (p *Provider) start(ctx context.Context, name, img string, labels map[strin
 
 	if err := p.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		_ = p.remove(context.WithoutCancel(ctx), resp.ID)
+		// A port that was free when it was probed and taken when it was bound.
+		//
+		// The allocator asks the kernel whether it can listen on a port before
+		// handing it out, which is the best a separate process can do and is
+		// not a lock: anything else on the machine can take it in the gap
+		// between the probe and the daemon's bind. On a laptop running two of
+		// these at once that gap is hit regularly, and the failure was fatal
+		// to the whole command with a message about a port number.
+		//
+		// Retried rather than surfaced, because the situation is transient by
+		// construction and the next port is very likely free. The attempts are
+		// bounded so that a machine with no free ports at all still reports
+		// that rather than looping.
+		if isPortTaken(err) && attempt < portRetries {
+			return p.startWithRetry(ctx, name, img, labels, attempt+1)
+		}
 		return started{}, fmt.Errorf("db.docker: start the container %s: %w", name, err)
 	}
 	return started{id: resp.ID, name: name, port: port}, nil
+}
+
+// portRetries bounds how many times a lost race is retried.
+//
+// Three, because each attempt takes a different port and the chance of losing
+// three races in a row is negligible unless something is wrong in a way more
+// attempts would not fix.
+const portRetries = 3
+
+// isPortTaken reports whether the daemon refused because the host port was
+// already bound.
+//
+// Matched on the message because the daemon does not give this a distinct
+// error type. The match is deliberately narrow: a broader one would swallow a
+// real networking failure and retry it three times before reporting it.
+func isPortTaken(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "port is already allocated") ||
+		strings.Contains(msg, "address already in use")
 }
 
 func isNoSpace(err error) bool {

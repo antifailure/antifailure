@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Button } from "@/components/layout/Button";
-import { PageJsonLd } from "@/lib/jsonld";
+import { FaqJsonLd, PageJsonLd } from "@/lib/jsonld";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { Container } from "@/components/layout/Container";
 import { SiteLayout } from "@/components/layout/SiteLayout";
@@ -55,7 +55,15 @@ export function PageHero({
   title: string;
   lead: string;
   visual?: ReactNode;
-  actions?: ReactNode;
+  /**
+   * `undefined` renders the default pair of buttons. `null` renders no action
+   * row at all, and no empty flex container leaving a gap where one was.
+   *
+   * The distinction is needed because `actions ?? default` treats both the
+   * same, so the only way to say "none" is an empty fragment, which still
+   * renders the wrapper and its margin.
+   */
+  actions?: ReactNode | null;
   framed?: boolean;
 }) {
   return (
@@ -70,18 +78,20 @@ export function PageHero({
         <p className="mt-8 max-w-[640px] text-[20px] leading-snug tracking-extra-tight text-gray-new-40 max-md:text-[17px]">
           {lead}
         </p>
-        <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
-          {actions ?? (
-            <>
-              <Button href="/signup" theme="filled">
-                Get started
-              </Button>
-              <Button href="/docs" theme="outlined">
-                Read the docs
-              </Button>
-            </>
-          )}
-        </div>
+        {actions === null ? null : (
+          <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
+            {actions ?? (
+              <>
+                <Button href="/signup" theme="filled">
+                  Get started
+                </Button>
+                <Button href="/docs" theme="outlined">
+                  Read the docs
+                </Button>
+              </>
+            )}
+          </div>
+        )}
         {visual ? (
           framed ? (
             <div className="relative mt-16 max-md:mt-12">
@@ -355,5 +365,46 @@ export function Prose({ children, className }: { children: ReactNode; className?
     >
       {children}
     </div>
+  );
+}
+
+export type FaqItem = { question: string; answer: string };
+
+/**
+ * A frequently-asked-questions block, and the FAQPage markup that describes it.
+ *
+ * Both come from the same array, which is the point. Question-and-answer
+ * structured data is the highest-value type for being quoted by an answer
+ * engine, because each pair is an individually addressable candidate rather
+ * than a paragraph somebody has to decide how to cut. It is also the type most
+ * often marked up with text the reader cannot see, which gets it discarded.
+ * Deriving the markup and the rendering from one source means they cannot
+ * disagree.
+ *
+ * `FaqJsonLd` existed before this did and had no callers at all, so the site
+ * carried a complete FAQPage emitter and published no FAQPage anywhere.
+ *
+ * Rendered as a <dl>. A question and its answer are a term and a definition,
+ * and that is the element that says so. It is not an accordion: an answer
+ * hidden behind a click is an answer some crawlers never see, and there are
+ * eight of these, not eighty.
+ */
+export function Faq({ path, items }: { path: string; items: FaqItem[] }) {
+  return (
+    <>
+      <FaqJsonLd path={path} entries={items} />
+      <dl className="mt-14 grid grid-cols-2 gap-x-12 gap-y-10 border-t border-black/12 pt-12 max-lg:grid-cols-1 max-lg:gap-y-8 max-md:mt-10 max-md:pt-8">
+        {items.map((item) => (
+          <div key={item.question}>
+            <dt className="text-[19px] leading-snug tracking-extra-tight text-black max-md:text-[17px]">
+              {item.question}
+            </dt>
+            <dd className="mt-3 text-[16px] leading-relaxed tracking-extra-tight text-gray-new-40 max-md:text-[15px]">
+              {item.answer}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </>
   );
 }

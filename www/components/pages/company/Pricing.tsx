@@ -139,6 +139,7 @@ export function PricingPage() {
   return (
     <PageShell>
       <PageHero
+        path="/pricing"
         eyebrow="Pricing"
         title="Operational value, not AI personalities."
         lead="Community is the local engine and it works today. Team is a platform fee plus run usage. Growth and Enterprise add volume, policy, and governance. These bands are illustrative, not a quote."

@@ -63,6 +63,7 @@ export function MigrationsPage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/migrations"
         eyebrow="Migration Safety Engine"
         title="Catch exclusive locks before they take checkout down."
         lead="The flagship module. A fresh branch carrying production's shape applies the pending migrations while a second connection samples what is locked, then reports the strongest mode held per table, how long it was held, what queued behind it, which tables were rewritten, and how the query plans moved."

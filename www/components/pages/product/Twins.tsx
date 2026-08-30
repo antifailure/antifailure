@@ -121,6 +121,7 @@ export function TwinsPage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/twins"
         eyebrow="Twin Orchestrator"
         title="A disposable production twin for every risky change."
         lead="Build the change, branch a sanitized database, isolate the network, replace production credentials, journal every resource as it comes up, and tear all of it down when the report is done."

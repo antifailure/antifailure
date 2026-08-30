@@ -292,6 +292,7 @@ export function ReportPage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/report"
         eyebrow="Safety Report and Release Gate"
         title="Pass or fail, with evidence."
         lead="The overall decision, every workflow's verdict, the rows behind an invariant that did not hold, the steps and the trace and the video to see a failure yourself, a summary of every outbound attempt including the denials, and latency against the p95 production serves each route in."

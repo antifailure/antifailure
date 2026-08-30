@@ -129,6 +129,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
     ],
   },
   { text: "Docs", href: "/docs" },
+  { text: "Writing", href: "/blog" },
   { text: "Pricing", href: "/pricing" },
 ];
 
@@ -190,6 +191,7 @@ export const FOOTER_MENUS = [
     items: [
       { text: "Documentation", href: "/docs" },
       { text: "Quickstart", href: "/docs/getting-started/quickstart" },
+      { text: "Writing", href: "/blog" },
       { text: "Manifest", href: "/docs/reference/manifest" },
       { text: "Error reference", href: "/docs/reference/errors" },
       { text: "Enterprise", href: "/docs/enterprise/licensing" },

@@ -263,7 +263,7 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
       const beforeAdmin = await signInAs(h, before, 'admin')
       const host = 'written-before-the-gate.example.test'
       const body = await readFile(
-        path.join(migrationsDir, '0017_an_egress_rule_nobody_approved.sql'),
+        path.join(migrationsDir, '0018_an_egress_rule_nobody_approved.sql'),
         'utf8',
       )
 

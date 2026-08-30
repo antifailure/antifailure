@@ -363,7 +363,7 @@
         "seed": {
           "type": "string",
           "maxLength": 1024,
-          "description": "Command that seeds a branch, for a project with no production database yet. Mutually exclusive with source_url_env."
+          "description": "Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env."
         }
       }
     },

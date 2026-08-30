@@ -5,6 +5,7 @@ export function MarketplacesPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/marketplaces"
         eyebrow="Solutions · Marketplaces"
         title="Queues, workers, dual-writes, matching logic staging never reproduces."
         lead="The twin runs your own workers and cron services beside the web tier, on the same branched database. Production webhooks are denied inside it, and every attempt is recorded."

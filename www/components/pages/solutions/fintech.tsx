@@ -6,6 +6,7 @@ export function FintechPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/fintech"
         eyebrow="Solutions · Fintech"
         title="Billing, ledgers, and side effects that must never hit live processors."
         lead="The firewall answers Stripe from a stateful pack with the network unplugged. Safe State masks account identifiers inside your boundary. An invariant you write catches the duplicate ledger row, and the comment carries the rows."

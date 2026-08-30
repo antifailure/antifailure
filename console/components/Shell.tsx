@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
@@ -17,7 +17,7 @@ import {
 } from "@/components/icons";
 import { rest, type Session } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
-import { Button } from "@/components/ui";
+import { Button, Field, inputClass } from "@/components/ui";
 
 const NAV = [
   { href: "/environments", label: "Environments", Icon: IconEnvironments },
@@ -33,7 +33,98 @@ const NAV = [
  * Signed out
  * ---------------------------------------------------------------------- */
 
-function SignIn() {
+/**
+ * Signing in with a link.
+ *
+ * Rendered only when the API says this deployment has mail configured, which
+ * it reports on the session endpoint. That is the whole reason the field
+ * exists: this console is one static export served by every installation, so
+ * it cannot know at build time, and a sign-in method offered where it cannot
+ * work is worse than one not offered at all.
+ *
+ * It is the way in that works where github.com is not reachable, which is
+ * every preview environment by design and every isolated network by
+ * circumstance.
+ *
+ * The answer is the same for an address with an account, an address without
+ * one, and something that is not an address. That is deliberate: three
+ * different answers would turn this field into a way to ask whether somebody
+ * works here.
+ */
+function EmailSignIn() {
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function send(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await rest("/auth/email", { method: "POST", body: { email } });
+      setSent(true);
+    } catch {
+      // Ours, not theirs. Telling somebody their link is on the way when it
+      // is not is the one answer worth distinguishing.
+      setError("Could not send a link just now. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (sent) {
+    return (
+      <p
+        role="status"
+        className="mt-6 rounded-[6px] border border-rule bg-card px-3.5 py-3 text-[13px] leading-6 text-muted"
+      >
+        Check your mail. If {email} has an account here, a sign-in link is on
+        its way and it is good for fifteen minutes.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <div className="mt-6 flex items-center gap-3" aria-hidden="true">
+        <span className="h-px flex-1 bg-rule" />
+        <span className="text-[11.5px] uppercase tracking-wide text-dim">or</span>
+        <span className="h-px flex-1 bg-rule" />
+      </div>
+      <form className="mt-5" onSubmit={send}>
+        <Field
+          label="Email address"
+          error={error}
+          hint="We send a link that signs you in. No password."
+        >
+          <input
+            className={inputClass}
+            type="email"
+            name="email"
+            required
+            autoComplete="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </Field>
+        <div className="mt-4">
+          <Button type="submit" variant="secondary" busy={busy} disabled={email.trim() === ""}>
+            {busy ? "Sending a link" : "Send a sign-in link"}
+          </Button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+function SignIn({ session }: { session: Session }) {
+  // A control plane that predates the methods field answers without one, and
+  // GitHub is the way in that has always existed. Read as "GitHub only"
+  // rather than as "none", so an older API is a page with one button on it
+  // instead of a page with none.
+  const methods = session.methods ?? ["github"];
   return (
     <main className="grid min-h-dvh place-items-center px-5 py-10">
       <div className="w-full max-w-[400px]">
@@ -52,6 +143,7 @@ function SignIn() {
           <GitHubMark />
           Continue with GitHub
         </a>
+        {methods.includes("email") ? <EmailSignIn /> : null}
         <p className="mt-6 text-[12.5px] leading-6 text-dim">
           The engine itself needs none of this. It is open source, it runs on
           your own machine, and the{" "}
@@ -221,7 +313,7 @@ export function Shell({ children }: { children: ReactNode }) {
   }
 
   const me = session.data as Session;
-  if (!me.signedIn) return <SignIn />;
+  if (!me.signedIn) return <SignIn session={me} />;
   if (!me.orgId) return <NoOrganization session={me} />;
 
   return (

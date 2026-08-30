@@ -200,7 +200,15 @@ change.`),
 			return ciExit(run)
 		},
 	}
-	cmd.Flags().StringVarP(&output, "output", "o", "", "Write the report here as well as to the terminal")
+	// --report, not --output.
+	//
+	// A local --output shadows the persistent one, so on this command alone
+	// -o meant "a file to write" while everywhere else it means "text or
+	// json". `af ci -o json` wrote the pull request comment to a file called
+	// `json`, silently, and af ci had no machine readable output at all,
+	// which is notable for the one command written for CI. Renaming it frees
+	// -o to mean here what it means everywhere.
+	cmd.Flags().StringVar(&output, "report", "", "Write the report here as well as to the terminal")
 	cmd.Flags().BoolVar(&skipTeardown, "keep", false, "Leave the environment up, for debugging a failure")
 	cmd.Flags().BoolVar(&withLoad, "load", false, "Generate load as well as running the workflows")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Give up after this long")
@@ -369,9 +377,46 @@ func readDatabase(
 				"'af ci --save-baseline baseline.json' and pass it here with --baseline")
 	}
 
+	// From the same run rather than a second one. The statistics and the
+	// migration findings come out of one report, and asking for insights twice
+	// would rehearse the migrations `af up` has already applied.
+	run.Insights = summariseInsights(full.Stats)
+
 	findings, migration := migrationFindings(full, gate)
 	run.Migration = migration
 	return findings
+}
+
+// summariseInsights reduces the full report to what fits in a comment.
+//
+// Three facts, because the audience has thirty seconds: which tables the run
+// read end to end, what the slowest statement cost, and how many indexes
+// nothing touched. Everything else is what `af insights` is for.
+func summariseInsights(r insights.Report) *report.Insights {
+	out := &report.Insights{Missing: r.Missing}
+	for _, s := range r.Scans {
+		out.Sequential = append(out.Sequential, report.Scan{
+			Table: s.Table, Scans: s.SeqScans, Rows: s.LiveRows,
+		})
+		if len(out.Sequential) == 3 {
+			break
+		}
+	}
+	for _, q := range r.Queries {
+		if q.TotalMs > out.SlowestMs {
+			out.Slowest, out.SlowestMs = q.Text, q.TotalMs
+		}
+	}
+	for _, i := range r.Unused {
+		out.Unused = append(out.Unused, i.Table+"."+i.Name)
+	}
+	if len(out.Sequential) == 0 && out.Slowest == "" && len(out.Unused) == 0 && len(out.Missing) == 0 {
+		// Nothing to say and nothing missing. A section reading "no table
+		// read end to end" is still worth printing, because it is the
+		// difference between checked and not checked.
+		return out
+	}
+	return out
 }
 
 // writeReport prints the comment and writes it where a workflow can post it.

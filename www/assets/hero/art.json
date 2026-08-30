@@ -1,0 +1,31 @@
+{
+  "$comment": [
+    "The hero art, its true pixel size, and whether anything references it.",
+    "",
+    "Two things read this file and they must not be allowed to disagree.",
+    "scripts/optimize-images.mjs encodes every entry marked encode, and fails",
+    "the build if a width or height here does not match the PNG on disk or if",
+    "a source in this directory has no entry at all. components/Picture.tsx",
+    "reads the same numbers to write width, height and the srcSet candidate",
+    "descriptors, which is why they have to be true: a candidate advertised as",
+    "1536w that is really 1024w makes the browser pick the wrong one, and a",
+    "wrong aspect ratio makes the layout jump when the bytes land.",
+    "",
+    "encode:false is not a mistake. cta-atmosphere and sage-noise are in the",
+    "repository and referenced by nothing in app/, components/, lib/ or the",
+    "stylesheet: 3.5MB that used to deploy to no purpose. They stay here in",
+    "case they are wanted, and are simply not encoded or served."
+  ],
+  "art": {
+    "firewall-log.png": { "width": 1536, "height": 1024, "encode": true },
+    "footer-aurora.png": { "width": 1024, "height": 768, "encode": true },
+    "hero-aurora.png": { "width": 1536, "height": 1024, "encode": true },
+    "ide-stage.png": { "width": 1536, "height": 1024, "encode": true },
+    "lock-chart.png": { "width": 1536, "height": 1024, "encode": true },
+    "safe-state.png": { "width": 1536, "height": 1024, "encode": true },
+    "twin-graph.png": { "width": 1536, "height": 1024, "encode": true },
+    "twin-stack.png": { "width": 1536, "height": 1024, "encode": true },
+    "cta-atmosphere.png": { "width": 1536, "height": 1024, "encode": false },
+    "sage-noise.png": { "width": 1536, "height": 1024, "encode": false }
+  }
+}

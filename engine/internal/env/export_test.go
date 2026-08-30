@@ -5,6 +5,8 @@ import (
 	"io"
 
 	"github.com/antifailure/antifailure/engine/internal/events"
+	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -43,3 +45,25 @@ func ResolveBaselineForTest(root string, source schema.BaselineSource, ref strin
 func (o *Orchestrator) BaselineTreeForTest(ctx context.Context, rev string) (string, func(), error) {
 	return o.baselineTree(ctx, rev)
 }
+
+// PickGoldenForTest exposes pickGolden to the package's external tests.
+//
+// Which golden a branch is made from is the decision this test suite most
+// needs to be able to reach directly. Reaching it through Up would need a
+// provider, a runtime, a journal and a lock, and the property being asserted
+// is a property of one loop.
+func PickGoldenForTest(goldens []provider.GoldenVersion, wantRules string) (string, int) {
+	return pickGolden(goldens, wantRules)
+}
+
+// RunSeedForTest exposes runSeed to the package's external tests.
+//
+// The seed runs inside a provider callback during a refresh, so reaching it
+// through Up would need a daemon, a golden, and five minutes to assert that a
+// shell command ran.
+func RunSeedForTest(ctx context.Context, o *Orchestrator, seed, candidateURL string) error {
+	return o.runSeed(ctx, nil, seed, secrets.New(candidateURL))
+}
+
+// SeedRulesHashForTest exposes seedRulesHash.
+func SeedRulesHashForTest(seed string) string { return seedRulesHash(seed) }

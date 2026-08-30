@@ -6,6 +6,7 @@ import { createPool, migrate, type Pool } from '@antifailure/db'
 import { createServer } from '../src/server.ts'
 import { FakeClock } from '../src/clock.ts'
 import { FakeGitHub } from '../src/auth/fakegithub.ts'
+import { RecordingMailer } from '../src/auth/mail.ts'
 import { issueSession } from '../src/auth/session.ts'
 import type { Role } from '../src/permissions.ts'
 import { findConsoleBuild } from '../src/console/static.ts'
@@ -63,6 +64,8 @@ export interface ApiHarness {
   pool: Pool
   clock: FakeClock
   github: FakeGitHub
+  /** Every message the sign-in path tried to send. Nothing leaves the process. */
+  mailer: RecordingMailer
   fetch: (path: string, init?: RequestInit) => Promise<Response>
   close(): Promise<void>
 }
@@ -102,10 +105,14 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
   })
   const clock = new FakeClock()
   const github = new FakeGitHub(clock)
+  const mailer = new RecordingMailer()
   const { app } = createServer({
     pool,
     github,
     clock,
+    // Configured, so the two routes exist and the catalog test covers them.
+    // Nothing is sent: the mailer keeps what it was given.
+    emailSignIn: { mailer, baseUrl: 'http://api.test', productName: 'Antifailure' },
     // The test client speaks plain HTTP, and a Secure cookie would not come
     // back. Production defaults the other way and there is a test for that.
     secureCookies: false,
@@ -124,6 +131,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     pool,
     clock,
     github,
+    mailer,
     fetch: async (path, init) => app.fetch(new Request(`http://api.test${path}`, init)),
     async close() {
       await pool.close()

@@ -78,6 +78,46 @@ AF-AGT-003 The agent runner produced no readable output: exited with status 1.
 `af runner check` verifies it can start before you need it, and `af doctor`
 includes that check.
 
+## Recording what the model answered
+
+A model reads the page and decides what a person would do next. That is what
+makes a workflow written as a sentence work, and it is also the only part of a
+run that is not deterministic: the same page can produce a different plan
+twice, so a check that asks a model on every pull request is a check that can
+change its answer with nothing in the repository changing.
+
+Recording fixes both that and the bill. Point the runner at a directory and
+every prompt and answer is written to it, one readable JSON file per exchange.
+Every run afterwards reads from that directory, reaches no network, and costs
+nothing.
+
+```sh
+# Once, with a key set, to make the recording.
+AF_MODEL_CASSETTE=.antifailure/cassette AF_MODEL_CASSETTE_MODE=record af test
+
+# Afterwards, and in CI, with no key at all.
+AF_MODEL_CASSETTE=.antifailure/cassette af test
+```
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `AF_MODEL_CASSETTE` | unset | The directory of recordings. Unset means the model is asked live. |
+| `AF_MODEL_CASSETTE_MODE` | `replay` | `record` asks the model and writes what it answers. `replay` reads only. The default is the one that does not spend money on a schedule. |
+| `AF_MODEL_PROVIDER` | `anthropic` | Which provider a replay is filed under, when there is no key to read it from. |
+| `AF_MODEL` | the provider's default | Which model, likewise. |
+
+A recording is filed under the whole prompt, which already contains the page's
+accessibility snapshot, the workflow, and the history. So a page that changed
+is a different key, and a replay that finds nothing **refuses**. It does not
+fall back to asking the model, and it does not fall back to the deterministic
+planner: the workflow is reported `blocked`, which is a statement about the
+recording rather than about your application, and the message says to
+re-record.
+
+That refusal is the point. A cassette that quietly reached the network would
+spend money nightly and nobody would notice; one that quietly degraded to the
+deterministic planner would keep passing while the recording rotted.
+
 ## Independent workflows
 
 ```yaml

@@ -30,7 +30,21 @@ const OUT = path.join(ROOT, "out");
 const ENDPOINT = "https://api.indexnow.org/indexnow";
 
 const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
+/**
+ * Submitting is opt in, and running this by hand prints instead.
+ *
+ * The default used to be the other way around, with `--dry-run` to hold it
+ * back, and that is a bad shape for a script whose whole job is to POST to
+ * somebody else's service. Reading it to see what it would do submitted 25
+ * URLs to Bing. Nothing broke, because IndexNow verifies ownership by fetching
+ * the key file back from the site root and that file was not live yet, so the
+ * batch was discarded. It could as easily have been a live host and a list of
+ * pages that had not shipped.
+ *
+ * So: the workflow passes --submit after a successful publish, and a person
+ * running it gets the list and nothing else.
+ */
+const submit = args.includes("--submit");
 const days = Number(args[args.indexOf("--days") + 1]) || 7;
 
 /** The key is whichever <32 hex>.txt sits in the published root. */
@@ -86,8 +100,11 @@ const payload = {
 console.log(`IndexNow: ${urlList.length} URL(s) changed in the last ${days} days`);
 for (const u of urlList) console.log(`  ${u}`);
 
-if (dryRun) {
-  console.log("\n--dry-run, not submitting.");
+if (!submit) {
+  console.log(
+    "\nNot submitting. This prints by default; pass --submit to actually send " +
+      "the batch to IndexNow, which is what deploy.yml does after a publish.",
+  );
   process.exit(0);
 }
 

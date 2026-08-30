@@ -14,7 +14,6 @@ export const MASKING_ATTESTATION: Post = {
   summary:
     "Why anonymisation needs verification and enforcement rather than a script: determinism, read-back scanning, and a gate that cannot be waived.",
   published: "2026-08-28",
-  author: { name: "Antifailure", url: "https://antifailure.dev/company" },
   tags: ["Postgres", "Data masking", "Privacy"],
   body: (
     <>

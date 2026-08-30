@@ -38,6 +38,12 @@ import {
   type SignInAllowlist,
 } from './auth/signin.ts'
 import {
+  beginEmailSignIn,
+  redeemEmailSignIn,
+  EmailSignInError,
+  type EmailSignInConfig,
+} from './auth/email.ts'
+import {
   CSRF_HEADER,
   SESSION_COOKIE,
   clearedCookie,
@@ -87,6 +93,12 @@ export interface ServerOptions {
   secureCookies?: boolean
   /** Where the browser lands after signing in. */
   appBaseUrl?: string
+  /** Signing in with a link, for the deployments GitHub cannot reach. Absent
+   *  turns the two routes off entirely rather than leaving them answering with
+   *  an error, so an installation that has not configured mail does not expose
+   *  a sign-in path that cannot work. */
+  emailSignIn?: EmailSignInConfig
+
   /** Who may sign in at all. Null is open, which is the self-hosted default.
    *  See parseAllowlist: an empty list is closed to everyone, not open. */
   signInAllowlist?: SignInAllowlist
@@ -409,7 +421,7 @@ export function createServer(options: ServerOptions) {
       const issued = await issueSession(options.pool, clock, {
         userId: result.userId,
         orgId: decision.orgId,
-        ip: c.req.header('x-forwarded-for') ?? undefined,
+        ip: clientAddress(c.req.header('x-forwarded-for')),
         userAgent: c.req.header('user-agent') ?? undefined,
         replacing: existing ?? undefined,
       })
@@ -436,15 +448,23 @@ export function createServer(options: ServerOptions) {
     return c.json({ signedOut: true })
   })
 
+  // Which ways in this deployment actually offers. The console is a static
+  // export built once and served by every installation, so it cannot know at
+  // build time whether mail is configured here. Asking means a sign-in method
+  // that cannot work is not on the page at all, rather than being a button
+  // that fails on press.
+  const signInMethods = ['github', ...(options.emailSignIn ? ['email'] : [])]
+
   app.get('/auth/session', async (c) => {
     const token = readCookie(c.req.header('cookie'), SESSION_COOKIE)
-    if (!token) return c.json({ signedIn: false }, 200)
+    if (!token) return c.json({ signedIn: false, methods: signInMethods }, 200)
     const session = await resolveSession(options.pool, clock, token)
-    if (!session) return c.json({ signedIn: false }, 200)
+    if (!session) return c.json({ signedIn: false, methods: signInMethods }, 200)
     return c.json({
       signedIn: true,
       label: session.label,
       orgId: session.orgId,
+      orgSlug: session.orgSlug,
       role: session.role,
       // Handed to the page so it can send it back on mutations. Safe to expose:
       // it is derived from the session secret and reveals nothing about it.
@@ -453,6 +473,92 @@ export function createServer(options: ServerOptions) {
   })
 
   // -------------------------------------------------------------------------
+  // Signing in with a link
+  //
+  // Registered only when mail is configured. A route that exists and always
+  // answers "not available" is a sign-in method users try and support has to
+  // explain; a route that is not there is a form the page does not render.
+  // -------------------------------------------------------------------------
+
+  if (options.emailSignIn) {
+    const emailSignIn = options.emailSignIn
+
+    app.post('/auth/email', async (c) => {
+      const limited = authLimiter.take(
+        clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+      )
+      if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+      const body = await readEmailForm(c.req.raw)
+      // One answer for every input: an address with an account, an address
+      // without one, and something that is not an address. Anything else turns
+      // this form into a way to ask whether somebody works here.
+      const answer = { sent: true } as const
+      if (!body.email) return c.json(answer, 200)
+
+      let send: (() => Promise<void>) | null = null
+      try {
+        ;({ send } = await beginEmailSignIn(options.pool, clock, emailSignIn, {
+          email: body.email,
+          redirectTo: body.redirectTo,
+          ip: clientAddress(c.req.header('x-forwarded-for')) ?? null,
+          userAgent: c.req.header('user-agent') ?? null,
+        }))
+      } catch (err) {
+        // A database failure here is ours, and it is the one case worth
+        // answering differently, because telling somebody their link is on the
+        // way when it is not is worse than telling them to try again.
+        console.error('email sign-in', err)
+        return c.json({ error: 'Could not send a link just now. Try again.' }, 503)
+      }
+
+      // Started, not awaited. The response must not take longer for an address
+      // that has an account than for one that does not, and awaiting a mail
+      // provider is exactly that difference. A failure is logged; the caller
+      // was already told what to do next and retrying is the same action.
+      if (send) {
+        void send().catch((err: unknown) => {
+          console.error('email sign-in: the link could not be sent', err)
+        })
+      }
+      return c.json(answer, 200)
+    })
+
+    app.get('/auth/email/callback', async (c) => {
+      const limited = authLimiter.take(
+        clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+      )
+      if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+      const token = c.req.query('token')
+      if (!token) {
+        return c.json({ error: 'This sign-in link is no longer valid. Ask for another one.' }, 400)
+      }
+
+      try {
+        const result = await redeemEmailSignIn(options.pool, clock, token)
+        // Rotation, for the same reason the OAuth callback rotates: a cookie
+        // planted before sign-in must not ride the login that follows it.
+        const existing = readCookie(c.req.header('cookie'), SESSION_COOKIE)
+        const issued = await issueSession(options.pool, clock, {
+          userId: result.userId,
+          orgId: result.orgId,
+          ip: clientAddress(c.req.header('x-forwarded-for')),
+          userAgent: c.req.header('user-agent') ?? undefined,
+          replacing: existing ?? undefined,
+        })
+        c.header('set-cookie', sessionCookie(issued.token, issued.expiresAt, secure))
+        const base = options.appBaseUrl ?? '/'
+        const target = result.redirectTo ?? '/'
+        return c.redirect(new URL(target, base.endsWith('/') ? base : `${base}/`).toString(), 302)
+      } catch (err) {
+        if (err instanceof EmailSignInError) return c.json({ error: err.message }, 400)
+        throw err
+      }
+    })
+  }
+
+
   // Signing in a terminal
   //
   // Four endpoints, and which of them needs a session is the whole design. The
@@ -1250,6 +1356,40 @@ export function createServer(options: ServerOptions) {
   return { app, ingestLimiter, authLimiter, metrics }
 }
 
+/**
+ * The address and return path out of a sign-in request.
+ *
+ * Both shapes are accepted because both are real. The application posts JSON;
+ * a page with no JavaScript posts a form, and a sign-in that stops working
+ * when a script fails to load is a sign-in that locks people out on exactly
+ * the days they most need to get in.
+ */
+async function readEmailForm(
+  req: Request,
+): Promise<{ email: string | null; redirectTo: string | null }> {
+  const type = req.headers.get('content-type') ?? ''
+  try {
+    if (type.includes('application/json')) {
+      const body = (await req.json()) as { email?: unknown; redirect_to?: unknown }
+      return {
+        email: typeof body.email === 'string' ? body.email : null,
+        redirectTo: typeof body.redirect_to === 'string' ? body.redirect_to : null,
+      }
+    }
+    const form = await req.formData()
+    const email = form.get('email')
+    const redirect = form.get('redirect_to')
+    return {
+      email: typeof email === 'string' ? email : null,
+      redirectTo: typeof redirect === 'string' ? redirect : null,
+    }
+  } catch {
+    // A body that does not parse is the same as no address: answered the same
+    // way as everything else, because a parse error is also a probe.
+    return { email: null, redirectTo: null }
+  }
+}
+
 function clientKey(forwardedFor: string | undefined, userAgent: string | undefined): string {
   return `${clientIP(forwardedFor)}|${(userAgent ?? '').slice(0, 64)}`
 }
@@ -1260,6 +1400,44 @@ function clientKey(forwardedFor: string | undefined, userAgent: string | undefin
 // buckets.
 function clientIP(forwardedFor: string | undefined): string {
   return (forwardedFor ?? '').split(',')[0]?.trim() || 'unknown'
+}
+
+/**
+ * The caller's address, in a form the database will accept, or null.
+ *
+ * Not the same function as clientIP, and the difference is the whole point.
+ * clientIP produces a rate-limit bucket key, where "unknown" is a perfectly
+ * good key and every request without a header sharing one bucket is the
+ * intended behaviour. This produces a value for an `inet` column, where
+ * "unknown" is a type error that fails the whole statement.
+ *
+ * Two ways that bites, both found by putting a real Postgres behind this:
+ * a direct request has no `x-forwarded-for` at all, and a request through two
+ * proxies has "1.2.3.4, 5.6.7.8", which is a list rather than an address. The
+ * first entry is the client; the rest are the proxies that forwarded it. A
+ * value that is neither is recorded as nothing, because a sign-in that fails
+ * because the audit field would not parse is the wrong trade in every
+ * direction.
+ */
+function clientAddress(forwardedFor: string | undefined): string | undefined {
+  const first = (forwardedFor ?? '').split(',')[0]?.trim()
+  if (!first) return undefined
+  // A bracketed IPv6 literal with a port, which is what some proxies send.
+  const unbracketed = /^\[(.+)\](?::\d+)?$/.exec(first)?.[1] ?? first
+  // An IPv4 address with a port, likewise. IPv6 is left alone here: it is
+  // full of colons, so stripping at the last one would truncate an address.
+  const withoutPort = /^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/.exec(unbracketed)?.[1] ?? unbracketed
+  return looksLikeAddress(withoutPort) ? withoutPort : undefined
+}
+
+function looksLikeAddress(value: string): boolean {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
+    return value.split('.').every((octet) => Number(octet) <= 255)
+  }
+  // Deliberately shape rather than grammar: Postgres does the real parsing,
+  // and this only has to keep a header value that is plainly not an address
+  // out of the statement.
+  return /^[0-9a-fA-F:]+$/.test(value) && value.includes(':')
 }
 
 /**

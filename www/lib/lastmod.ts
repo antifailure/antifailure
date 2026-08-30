@@ -8,16 +8,24 @@ import { getPost, postModified } from "./blog";
  *
  * This runs at build time only, from app/sitemap.ts. It exists because
  * `lastModified: new Date()` is the default nearly every sitemap ships with,
- * and it is a lie that costs something: it tells an engine that all thirty-one
- * pages changed on every deploy. Freshness is one of the few signals an answer
+ * and it is a lie that costs something: it tells an engine that every page
+ * changed on every deploy. Freshness is one of the few signals an answer
  * engine weighs directly, and it stops being a signal the moment it is always
  * true. Perplexity draws roughly half its citations from content under thirteen
  * weeks old, so being able to say truthfully that a page is recent is worth
  * more than saying it about everything.
  *
- * If git is unavailable or the checkout is shallow, this falls back to the
- * build time rather than failing the build. A slightly wrong date is better
- * than no sitemap.
+ * If git cannot answer, this fails the build in CI and warns locally. The
+ * earlier version fell back to the build clock on the reasoning that a
+ * slightly wrong date beats no sitemap, and that was the wrong trade: the
+ * fallback is silent, it is indistinguishable downstream from a real date, and
+ * it produces exactly the everything-changed-today lie this module exists to
+ * remove. A shallow checkout is a one line fix in the workflow, so the build
+ * should say so rather than quietly ship the thing it was written to prevent.
+ *
+ * Locally it stays a warning, because a file that has never been committed
+ * legitimately has no history and stopping `next build` on that would make the
+ * site impossible to preview while writing a new page.
  */
 
 const ROOT = process.cwd();
@@ -26,7 +34,7 @@ const ROOT = process.cwd();
  * Source files that, if changed, mean the route's content changed.
  *
  * Deliberately NOT including lib/routes.ts, even though it holds every title
- * and description. It is one file shared by all thirty routes, so listing it
+ * and description. It is one file shared by every route, so listing it
  * here would collapse every lastmod to the date that file was last touched and
  * reproduce exactly the "everything changed at once" lie this module exists to
  * avoid. A title edit not moving the date is the lesser error.
@@ -57,10 +65,23 @@ function sourcesFor(routePath: string): string[] {
     );
   } else if (routePath === "/solutions") {
     candidates.push("app/solutions/page.tsx", "components/pages/solutions/Hub.tsx");
+  } else if (routePath.startsWith("/blog/")) {
+    const slug = routePath.slice("/blog/".length);
+    candidates.push(`content/blog/${slug}.tsx`, "app/blog/[slug]/page.tsx");
+  } else if (routePath === "/blog") {
+    candidates.push("app/blog/page.tsx", "lib/blog.ts");
   } else if (routePath === "/pricing") {
     candidates.push("app/pricing/page.tsx", "components/pages/company/Pricing.tsx");
+  } else if (routePath === "/signin" || routePath === "/signup") {
+    candidates.push(`app${routePath}/page.tsx`, "components/AuthScreen.tsx");
   } else {
-    candidates.push(`app${routePath}/page.tsx`);
+    // The legal pages, all six of which are components/pages/company/Legal.tsx.
+    //
+    // lib/company-content.tsx used to be listed here and is not any more: it
+    // has no importers at all since the four company pages were deleted, so
+    // every page falling through to this branch was taking its date from a
+    // file nothing renders.
+    candidates.push(`app${routePath}/page.tsx`, "components/pages/company/Legal.tsx");
   }
 
   return candidates.filter((c) => existsSync(path.join(ROOT, c)));
@@ -83,27 +104,84 @@ export function contentLastModified(routePath: string): Date {
   const sources = sourcesFor(routePath);
   if (sources.length === 0) return new Date();
 
+/**
+ * A shallow checkout, asked directly rather than inferred.
+ *
+ * This is the case worth naming, and every guard before it missed. With
+ * `actions/checkout`'s default depth of 1 git is present and answers happily:
+ * there is exactly one commit, every file looks like it was added in it, and
+ * `git log -1` hands back that commit's date for all of them. Nothing throws
+ * and nothing is empty. What ships is one date on every route, which is the
+ * everything-changed-today lie wearing a real timestamp, and no check
+ * downstream can tell it from the truth. check-seo.mjs compares each stamp
+ * against the newest commit, and under depth 1 they are equal to it.
+ *
+ * `--is-shallow-repository` is the question that actually distinguishes them.
+ */
+function isShallow(): boolean {
   try {
-    const iso = execFileSync(
+    return (
+      execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
+        cwd: ROOT,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim() === "true"
+    );
+  } catch {
+    // Git could not answer at all, which contentLastModified reports itself
+    // with a message naming the route.
+    return false;
+  }
+}
+
+let shallowChecked = false;
+let shallow = false;
+
+function unavailable(routePath: string, why: string): Date {
+  const guidance =
+    `no usable commit history for ${routePath} (${why}).\n` +
+    "The sitemap's lastmod would fall back to the build clock, which tells " +
+    "every engine that every page changed today. Set fetch-depth: 0 on " +
+    "actions/checkout so the build can read real dates.";
+
+  if (STRICT) throw new Error(guidance);
+
+  if (!warned) {
+    warned = true;
+    console.warn(`[sitemap] ${guidance}`);
+  }
+  return new Date();
+}
+
+export function contentLastModified(routePath: string): Date {
+  if (!shallowChecked) {
+    shallowChecked = true;
+    shallow = isShallow();
+  }
+  if (shallow) {
+    return unavailable(
+      routePath,
+      "this is a shallow checkout, so every file looks like it was added in the one commit that exists",
+    );
+  }
+
+  const sources = sourcesFor(routePath);
+  if (sources.length === 0) return unavailable(routePath, "no source file matched this route");
+
+  let iso: string;
+  try {
+    iso = execFileSync(
       "git",
       ["log", "-1", "--format=%cI", "--", ...sources],
       { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     ).trim();
-
-    if (!iso) return new Date();
-    const when = new Date(iso);
-    return Number.isNaN(when.getTime()) ? new Date() : when;
   } catch {
-    if (!warned) {
-      warned = true;
-      // One line, not one per route. A shallow checkout is the usual cause:
-      // actions/checkout fetches depth 1 by default, which leaves every file
-      // looking like it changed in the same commit.
-      console.warn(
-        "[sitemap] git history unavailable; falling back to build time for lastModified. " +
-          "Set fetch-depth: 0 on actions/checkout to get real dates.",
-      );
-    }
-    return new Date();
+    return unavailable(routePath, "git is not available here");
   }
+
+  if (!iso) return unavailable(routePath, `${sources.join(", ")} have no commits`);
+
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return unavailable(routePath, `git returned an unparseable date: ${iso}`);
+  return when;
 }

@@ -135,11 +135,19 @@ jobs:
             )
           done
           go build -o /tmp/af-examples ./engine/cmd/af
-          for dir in examples/*/; do
-            [ -f "$dir/antifailure.yaml" ] || continue
-            (cd "$dir" && /tmp/af-examples explain > /dev/null)
+          # The repository's own manifest first, and it was in no gate at all
+          # until this line. Every example was validated and the one file this
+          # product is dogfooded with was not, so its four invariants were
+          # written as SELECT count(*) and every one of them could never fail:
+          # an invariant holds when its statement returns no rows, and a bare
+          # count returns one row saying zero. Four checks that read as
+          # evidence and were not. `af explain` refuses them by name, and
+          # nothing was running it here.
+          for manifest in ./antifailure.yaml examples/*/antifailure.yaml; do
+            [ -f "$manifest" ] || continue
+            (cd "$(dirname "$manifest")" && /tmp/af-examples explain > /dev/null)
           done
-          echo "every example builds and every manifest is valid"
+          echo "every example builds, and every manifest here is valid"
 
       - name: The prose stays readable
         # A regression guard rather than a style rule. The hardest page today
@@ -304,9 +312,16 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: runner/package.json
+          # The lockfile, not the manifest. Keyed on package.json the cache key
+          # was a file full of ranges, so two runs of the same commit could
+          # resolve different trees and the cache made that quieter rather than
+          # louder. That is the failure a lockfile exists to prevent.
+          cache-dependency-path: runner/package-lock.json
 
-      - run: npm install --no-audit --no-fund
+      # ci rather than install, now that there is a lockfile to obey. It also
+      # fails when the lockfile has drifted from package.json, which is the
+      # only thing checking that they agree.
+      - run: npm ci --no-audit --no-fund
         working-directory: runner
 
       - name: Install the browser

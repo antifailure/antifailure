@@ -70,37 +70,94 @@ mkdir -p site/schemas && cp schemas/*.json site/schemas/
 # alone on purpose: Astro serves it from directory indexes with its own
 # trailing-slash convention, and rewriting that from here would be guessing at
 # another build's contract.
-{
-  echo '{'
-  echo '  "routes": ['
-  first=1
-  while IFS= read -r page; do
-    clean="${page%.html}"
-    [ "$clean" = "/index" ] && clean="/"
-    [ $first -eq 1 ] || echo ','
-    first=0
-    printf '    { "route": "%s", "redirect": "%s", "statusCode": 301 }' "$page" "$clean"
-  done < <(cd site && find . -maxdepth 3 -name '*.html' -not -path './docs/*' -not -name '404.html' | sed 's|^\.||' | sort)
-  echo ''
-  echo '  ],'
-  echo '  "responseOverrides": {'
-  echo '    "404": { "rewrite": "/404.html", "statusCode": 404 }'
-  echo '  },'
-  echo '  "globalHeaders": {'
-  echo '    "x-content-type-options": "nosniff",'
-  echo '    "referrer-policy": "strict-origin-when-cross-origin"'
-  echo '  },'
-  echo '  "mimeTypes": {'
-  echo '    ".json": "application/json",'
-  echo '    ".sh": "text/plain"'
-  echo '  }'
-  echo '}'
-} > site/staticwebapp.config.json
+#
+# Generated ON TOP OF www/public/staticwebapp.config.json rather than instead of
+# it. That file is the site's host policy: the mime types for the markdown twins
+# and the AVIF art, immutable caching on hashed assets, the legacy /product/crowdi
+# redirect, and the security headers. It is copied into site/ with the rest of
+# www/out and this block used to overwrite it, so every one of those directives
+# had been dead in production since the day it was written. The file existed, the
+# deploy shipped it, Azure read it, and none of it was the file anybody wrote.
+#
+# So the redirects below are appended to whatever that file declares, and the
+# assertions afterwards fail the build if the merge loses something.
+python3 - "$(pwd)/site" <<'MERGE'
+import json, os, sys
+
+root = sys.argv[1]
+config = os.path.join(root, "staticwebapp.config.json")
+
+with open(config, encoding="utf-8") as f:
+    base = json.load(f)
+
+pages = []
+for dirpath, dirnames, filenames in os.walk(root):
+    rel = os.path.relpath(dirpath, root)
+    depth = 0 if rel == "." else len(rel.split(os.sep))
+    if rel == "docs" or rel.startswith("docs" + os.sep):
+        dirnames[:] = []
+        continue
+    if depth >= 3:
+        dirnames[:] = []
+    for name in filenames:
+        if not name.endswith(".html") or name == "404.html":
+            continue
+        page = "/" + os.path.normpath(os.path.join(rel, name)).replace(os.sep, "/")
+        page = page.replace("/./", "/")
+        pages.append(page)
+
+generated = []
+for page in sorted(set(pages)):
+    clean = page[: -len(".html")]
+    if clean == "/index":
+        clean = "/"
+    generated.append({"route": page, "redirect": clean, "statusCode": 301})
+
+# The file-form redirects go first: they are exact matches on a specific page and
+# nothing in the base file wants to answer for a .html address.
+base["routes"] = generated + base.get("routes", [])
+
+with open(config, "w", encoding="utf-8") as f:
+    json.dump(base, f, indent=2)
+    f.write("\n")
+MERGE
 
 python3 -c 'import json,sys; json.load(open("site/staticwebapp.config.json"))' || {
   echo "the generated staticwebapp.config.json is not valid JSON"
   exit 1
 }
+
+# The merge has to have kept the source file's own declarations. Asserted rather
+# than assumed, because the failure mode is silent: a config that is present,
+# valid, and missing half of what somebody wrote in it looks exactly like a
+# working one until you read a response header.
+python3 - <<'ASSERT' || exit 1
+import json, sys
+
+with open("www/public/staticwebapp.config.json", encoding="utf-8") as f:
+    source = json.load(f)
+with open("site/staticwebapp.config.json", encoding="utf-8") as f:
+    shipped = json.load(f)
+
+lost = []
+for key in ("mimeTypes", "globalHeaders"):
+    for name, value in source.get(key, {}).items():
+        if shipped.get(key, {}).get(name) != value:
+            lost.append(f"{key}.{name}")
+
+source_routes = {(r.get("route"), json.dumps(r, sort_keys=True)) for r in source.get("routes", [])}
+shipped_routes = {(r.get("route"), json.dumps(r, sort_keys=True)) for r in shipped.get("routes", [])}
+lost += [route for route, _ in source_routes - shipped_routes]
+
+if lost:
+    print("the assembled host config lost declarations from")
+    print("www/public/staticwebapp.config.json: " + ", ".join(sorted(lost)))
+    sys.exit(1)
+
+print(f"host config: {len(shipped['routes'])} routes, "
+      f"{len(shipped.get('mimeTypes', {}))} mime types, "
+      f"{len(shipped.get('globalHeaders', {}))} global headers")
+ASSERT
 
 # Assert the promises, rather than trusting the copies above. Each of these is
 # an address something already shipped points at.

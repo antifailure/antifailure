@@ -175,6 +175,27 @@ errors:
     docs: providers/limits
     retryable: false
     exit_code: 5
+  - code: AF-DB-014
+    area: DB
+    message: "No database branch exists for {env}."
+    next_step: "Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 5
+  - code: AF-DB-013
+    area: DB
+    message: "The database seed command failed: {detail}"
+    next_step: "Run the command yourself against an empty database of the same version. It is: {command}"
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 5
+  - code: AF-DB-012
+    area: DB
+    message: "No golden matches this manifest's masking rules, and {count} were made under different ones."
+    next_step: "Run 'af golden refresh' to make one from the source this manifest names."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 5
   - code: AF-DB-007
     planned: true
     area: DB
@@ -341,7 +362,22 @@ errors:
     retryable: false
     exit_code: 3
 
+  - code: AF-BLD-011
+    area: BLD
+    message: "The Dockerfile {dockerfile} for {service} is excluded from the build context by .dockerignore."
+    next_step: "Add '!{dockerfile}' to .dockerignore. The file exists, and the build sends a filtered copy of the tree to the daemon, so a path the ignore file excludes is not there to build from."
+    docs: guides/build
+    retryable: false
+    exit_code: 3
+
   # Runtime
+  - code: AF-BLD-012
+    area: BLD
+    message: "The Dockerfile {dockerfile} for {service} is outside the build context {context}."
+    next_step: "Widen build.context, or move the Dockerfile inside it. A build cannot read a file the context does not carry."
+    docs: guides/build
+    retryable: false
+    exit_code: 4
   - code: AF-RUN-001
     area: RUN
     message: "The command '{command}' is not available in this version."

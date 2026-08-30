@@ -65,7 +65,12 @@ export function MigrationBento() {
         <div className="relative z-10 flex h-full">
           <Sidebar live={live} />
 
-          <main className="relative min-w-0 flex-1" style={{ padding: `${u(14)} ${u(28)} 0 ${u(24)}` }}>
+          {/* A div, not a <main>. This whole component is a drawing of an
+              application, and the elements inside it are shapes rather than
+              structure. As a real <main> it was a second content landmark on
+              the home page, so somebody navigating by landmark met two, one of
+              them a picture. check-seo.mjs asserts there is exactly one. */}
+          <div className="relative min-w-0 flex-1" style={{ padding: `${u(14)} ${u(28)} 0 ${u(24)}` }}>
             <IssueTop />
             <h2
               className="truncate"
@@ -118,7 +123,7 @@ export function MigrationBento() {
               }}
               aria-hidden
             />
-          </main>
+          </div>
         </div>
 
         <AgentWindow seconds={worked} live={live} plan={plan} onPlan={setPlan} />
