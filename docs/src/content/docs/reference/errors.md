@@ -338,6 +338,18 @@ Migrations failed on the branch: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/insights](/docs/concepts/insights/) |
 
+### AF-DB-031
+
+The previous release does not survive this migration: {detail}
+
+**What to do.** A rolling deploy runs both releases at once, so make the change backward compatible: add the new column and write to both, migrate the readers, and drop the old one in a later deploy.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/insights](/docs/concepts/insights/) |
+
 ## Detection
 
 ### AF-DET-001

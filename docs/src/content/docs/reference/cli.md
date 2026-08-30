@@ -391,6 +391,12 @@ this environment ran are compared against a report saved on the base branch.
   af insights --save baseline.json     on main
   af insights --baseline baseline.json on the branch
 
+Where the migrations take something away, the previous release is built and run
+against the migrated branch as well, because a rolling deploy leaves both
+releases talking to the same database for the length of the window and nothing
+else here checks that. It exits non zero only when a workflow passes without
+the migrations and fails with them.
+
 It says what it could not measure, and it names any check the manifest turned
 off. A report that silently omits a check reads exactly like a check that found
 nothing.
@@ -401,10 +407,12 @@ af insights [flags]
 
 | Flag | Default | What it does |
 | --- | --- | --- |
+| `--against` | - | Which commit the previous release is, overriding the manifest. |
 | `--baseline` | - | Compare against a report saved earlier. |
 | `--branch` | - | Branch to read, defaulting to the checked out one. |
 | `--limit` | `20` | How many queries to show. |
 | `--no-rehearsal` | `false` | Skip the migration rehearsal, which is the only check that makes a second branch. |
+| `--runner` | - | Path to the runner's entry point. |
 | `--save` | - | Save this report to compare against later. |
 
 ### `af invariants`

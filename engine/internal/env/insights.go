@@ -23,6 +23,14 @@ type InsightsOptions struct {
 	// for the case where a second branch cannot be made, not as a way to
 	// disable the check: that is what the manifest is for.
 	SkipRehearsal bool
+	// Against overrides which commit the rolling deploy check treats as the
+	// previous release, for the run where somebody is checking a specific one.
+	// Empty uses the manifest.
+	Against string
+	// RunnerPath overrides where the agent runner lives. The rolling deploy
+	// check drives workflows, so it needs the runner the same way af test
+	// does.
+	RunnerPath string
 }
 
 // RunInsights performs every check the manifest leaves on.
@@ -79,7 +87,80 @@ func (o *Orchestrator) RunInsights(
 		runOpts.NoRehearsalReason = "the migrations were not rehearsed, because --no-rehearsal was given"
 	}
 
-	return insights.Run(ctx, runOpts)
+	full, err := insights.Run(ctx, runOpts)
+	if err != nil {
+		return full, err
+	}
+	full.Rolling, full.Off = o.rolling(ctx, s, runOpts.Config, full, opts)
+	return full, nil
+}
+
+// rolling decides whether the rolling deploy check runs, and runs it.
+//
+// It is here rather than inside insights.Run because proving the previous
+// release still works needs a second image, a second environment and a
+// browser, and the insights package deliberately holds only the questions a
+// database can answer on its own.
+//
+// A check that does not run is named in Off rather than left out, which is the
+// rule every other check in this report follows: a report that silently omits
+// a check reads exactly like a check that found nothing.
+func (o *Orchestrator) rolling(
+	ctx context.Context, s *session, cfg insights.Config, full insights.Full,
+	opts InsightsOptions,
+) (*insights.Rolling, []string) {
+	off := func(reason string) (*insights.Rolling, []string) {
+		return &insights.Rolling{Verdict: insights.RollingOff, Reason: reason},
+			append(full.Off, "the rolling deploy check, because "+reason)
+	}
+	blocked := func(reason string) (*insights.Rolling, []string) {
+		return &insights.Rolling{Verdict: insights.RollingBlocked, Reason: reason}, full.Off
+	}
+
+	rc := cfg.Rolling
+	if opts.Against != "" {
+		rc.Against = opts.Against
+	}
+	if rc.When == insights.RollingNever {
+		return off("insights.rolling_compatibility.when is never")
+	}
+
+	if full.Rehearsal == nil {
+		return blocked("the migrations were not rehearsed, so there is no migrated schema to " +
+			"run the previous release against")
+	}
+	if full.Rehearsal.Failed {
+		return blocked("the migrations did not apply, so there is no migrated schema to run " +
+			"the previous release against")
+	}
+
+	stmts := rollingStatements(full.Rehearsal)
+	if len(stmts) == 0 {
+		return off("this branch has no migration pending against the golden the environment " +
+			"came from, so there is nothing for the previous release to meet")
+	}
+	if !rc.On(insights.Narrowing(stmts)) {
+		// The expensive branch not taken, and said out loud. Every statement
+		// in these migrations only adds something, and code that never heard
+		// of it cannot notice it, so running a second build and a second
+		// environment would cost a doubled pipeline for a result that is
+		// already known.
+		return off("these migrations only add things the previous release cannot notice. " +
+			"Set insights.rolling_compatibility.when to always to run it regardless")
+	}
+
+	golden, why, err := o.environmentGolden(ctx, s)
+	if err != nil {
+		return blocked(o.opts.Redactor.String(err.Error()))
+	}
+	if golden == "" {
+		return blocked(why)
+	}
+
+	return o.rollingCheck(ctx, s, rollingInputs{
+		Config: rc, Golden: golden, Statements: stmts,
+		Set: insights.Discover(os.DirFS(o.opts.Root)), RunnerPath: opts.RunnerPath,
+	}), full.Off
 }
 
 // rehearsalBranch makes a throwaway branch of the golden and everything the

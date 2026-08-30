@@ -84,6 +84,8 @@ const (
 	AFDB021 Code = "AF-DB-021"
 	// Migrations failed on the branch: {detail}
 	AFDB030 Code = "AF-DB-030"
+	// The previous release does not survive this migration: {detail}
+	AFDB031 Code = "AF-DB-031"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -537,6 +539,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/insights",
 		Retryable: false,
 		ExitCode:  ExitProvider,
+	},
+	AFDB031: {
+		Code:      AFDB031,
+		Area:      "DB",
+		Message:   "The previous release does not survive this migration: {detail}",
+		NextStep:  "A rolling deploy runs both releases at once, so make the change backward compatible: add the new column and write to both, migrate the readers, and drop the old one in a later deploy.",
+		Docs:      "concepts/insights",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
 	},
 	AFDET001: {
 		Code:      AFDET001,

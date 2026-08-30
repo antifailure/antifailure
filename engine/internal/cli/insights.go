@@ -13,7 +13,7 @@ import (
 )
 
 func newInsightsCommand(e *Env) *cobra.Command {
-	var branch, baseline, save string
+	var branch, baseline, save, against, runner string
 	var limit int
 	var skipRehearsal bool
 	cmd := &cobra.Command{
@@ -33,6 +33,12 @@ this environment ran are compared against a report saved on the base branch.
   af insights --save baseline.json     on main
   af insights --baseline baseline.json on the branch
 
+Where the migrations take something away, the previous release is built and run
+against the migrated branch as well, because a rolling deploy leaves both
+releases talking to the same database for the length of the window and nothing
+else here checks that. It exits non zero only when a workflow passes without
+the migrations and fails with them.
+
 It says what it could not measure, and it names any check the manifest turned
 off. A report that silently omits a check reads exactly like a check that found
 nothing.`),
@@ -43,7 +49,10 @@ nothing.`),
 				return err
 			}
 
-			opts := env.InsightsOptions{Limit: limit, SkipRehearsal: skipRehearsal}
+			opts := env.InsightsOptions{
+				Limit: limit, SkipRehearsal: skipRehearsal,
+				Against: against, RunnerPath: runner,
+			}
 			if baseline != "" {
 				body, rErr := os.ReadFile(baseline)
 				switch {
@@ -96,6 +105,13 @@ nothing.`),
 				// would turn the whole check into a note nobody reads.
 				return aferrors.Coded(aferrors.AFDB030, "detail", full.Rehearsal.Error)
 			}
+			if full.Rolling.Failed() {
+				// Non zero for the same reason, and only for a proven break.
+				// A rolling check that could not run exits zero and says so,
+				// because a blocked check and a broken change must never be
+				// the same exit code.
+				return aferrors.Coded(aferrors.AFDB031, "detail", rollingDetail(full.Rolling))
+			}
 			if full.Clean() {
 				e.Out.Status(e.Out.S(StyleGood, SymbolOK), "nothing to report",
 					"from the checks that ran")
@@ -109,5 +125,35 @@ nothing.`),
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to read, defaulting to the checked out one")
 	cmd.Flags().BoolVar(&skipRehearsal, "no-rehearsal", false,
 		"Skip the migration rehearsal, which is the only check that makes a second branch")
+	cmd.Flags().StringVar(&against, "against", "",
+		"Which commit the previous release is, overriding the manifest")
+	cmd.Flags().StringVar(&runner, "runner", "", "Path to the runner's entry point")
 	return cmd
+}
+
+// rollingDetail is the one sentence the failure carries out to the exit code.
+//
+// The named workflow and the named object, because a code with "a workflow
+// failed" in it is a code somebody has to open the log to understand, and the
+// log is the part that scrolls away in CI.
+func rollingDetail(r *insights.Rolling) string {
+	for _, w := range r.Workflows {
+		if w.Verdict != insights.RollingFail {
+			continue
+		}
+		if w.Cause != nil {
+			return w.Name + " fails against the migrated schema, and " +
+				w.Cause.Sentence(shortAgainst(r))
+		}
+		return w.Name + " fails against the migrated schema and passes without the " +
+			"migrations, on " + shortAgainst(r)
+	}
+	return "the previous release fails against the migrated schema"
+}
+
+func shortAgainst(r *insights.Rolling) string {
+	if len(r.Against) > 12 {
+		return r.Against[:12]
+	}
+	return r.Against
 }
