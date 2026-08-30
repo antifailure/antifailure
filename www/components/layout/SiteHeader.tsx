@@ -163,6 +163,11 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                           )}
                           aria-expanded={isActive}
                           aria-haspopup="menu"
+                          // The panel these open lives after </header>, so a
+                          // reader who follows the trigger has no way back to
+                          // it without this. The ids were already on the
+                          // panels and nothing pointed at them.
+                          aria-controls={`submenu-${index}`}
                           onClick={() => enterMenu(isActive ? null : index)}
                         >
                           {menu.text}
@@ -215,6 +220,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
             className="hidden size-11 items-center justify-center max-xl:flex"
             aria-label={mobile ? "Close menu" : "Open menu"}
             aria-expanded={mobile}
+            aria-controls="mobile-menu"
             onClick={() => setMobile((v) => !v)}
           >
             <span className="flex flex-col gap-1.5">
@@ -225,7 +231,16 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
         </Container>
       </header>
 
-      <div
+      {/* A nav rather than a div, and the change is only the tag name. This
+          panel holds every link under Product and Solutions and it sits after
+          </header> and before <main>, so it belonged to no landmark at all:
+          somebody navigating by landmark went from the header straight past
+          the site's whole product menu. nav is block level like div, so every
+          class, the measured height and the hover handlers carry over
+          unchanged. Labelled because a second unnamed nav beside the one in
+          the header is two identical entries in a landmark list. */}
+      <nav
+        aria-label="Main submenus"
         className={cn(
           "main-navigation-submenu absolute top-full left-0 z-40 w-full overflow-hidden border-b border-gray-new-90 bg-white transition-[height] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] max-xl:hidden",
           open === null ? "pointer-events-none border-transparent" : "pointer-events-auto",
@@ -309,10 +324,20 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
             );
           })}
         </div>
-      </div>
+      </nav>
 
       {mobile ? (
-        <div className="fixed inset-0 top-14 z-40 hidden overflow-y-auto bg-white px-5 pt-6 pb-[max(4rem,env(safe-area-inset-bottom))] max-xl:block">
+        // The same landmark gap as the panel above, and on the surface where
+        // it costs more: below xl the header's own nav is display:none, so
+        // this IS the main navigation and there was no navigation landmark on
+        // a phone at all. Named "Main" for that reason rather than "Mobile":
+        // the two are never in the tree together, so the landmark keeps one
+        // name across the breakpoint.
+        <nav
+          id="mobile-menu"
+          aria-label="Main"
+          className="fixed inset-0 top-14 z-40 hidden overflow-y-auto bg-white px-5 pt-6 pb-[max(4rem,env(safe-area-inset-bottom))] max-xl:block"
+        >
           <div className="flex flex-col">
             {HEADER_MENUS.map((menu, index) => {
               const hasSubmenu = Boolean(menu.sections?.length);
@@ -405,7 +430,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
               </Button>
             </div>
           </div>
-        </div>
+        </nav>
       ) : null}
     </div>
   );
