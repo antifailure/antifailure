@@ -36,6 +36,7 @@ var sources = []string{
 	"pkg/schema/manifest.go",
 	"internal/policy/policy.go",
 	"cmd/af-proxy/main.go",
+	"cmd/af-proxy/destination.go",
 	"cmd/af-proxy/dns.go",
 	"cmd/af-proxy/transparent.go",
 	"cmd/af-proxy/mitm.go",

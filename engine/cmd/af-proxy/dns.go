@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -82,6 +83,18 @@ func (d *dnsServer) answer(query []byte) []byte {
 	}
 	bare := strings.TrimSuffix(strings.ToLower(name), ".")
 
+	if bare == "localhost" || strings.HasSuffix(bare, ".localhost") {
+		// Answered here rather than forwarded. RFC 6761 reserves the name for
+		// the loopback interface and says a resolver must not send it to the
+		// network, and forwarding it was a way out with a payload in it: a
+		// query for a-secret-value.attacker.example.localhost went to the
+		// upstream resolver like any other name.
+		if qtype == typeA {
+			return replyA(query, name, net.IPv4(127, 0, 0, 1))
+		}
+		return emptyAnswer(query)
+	}
+
 	if d.isInternal(bare) {
 		// Forwarded unchanged. A service calling another service, or the
 		// database, is not egress, and routing it through the sidecar would
@@ -104,9 +117,19 @@ func (d *dnsServer) answer(query []byte) []byte {
 		// produce a connection that hangs instead of one that is decided.
 		return emptyAnswer(query)
 	default:
-		if resp, ferr := d.forward(query); ferr == nil {
-			return resp
-		}
+		// Answered here rather than forwarded, and this is the hole that
+		// closed. Forwarding meant a TXT, NULL, CNAME or SRV query for an
+		// external name went to whatever resolves names for this host, which
+		// is a channel out of the environment carrying whatever the client
+		// put in the name, on a port and a protocol the policy never sees. It
+		// is the oldest exfiltration route there is, and the Kubernetes
+		// containment probe already counts a query to another resolver as an
+		// escape.
+		//
+		// An empty answer rather than a refusal, for the same reason the AAAA
+		// case gives one: a client that asks for several types and gets a
+		// refusal for one often gives up on the name entirely.
+		d.noteTunnel(bare, qtype)
 		return emptyAnswer(query)
 	}
 }
@@ -134,6 +157,50 @@ func (d *dnsServer) note(name string) {
 	if !seen && d.emit != nil {
 		d.emit(record{Event: "resolve", Host: name})
 	}
+}
+
+// noteTunnel records an external lookup for a record type this resolver does
+// not answer, once per name.
+//
+// Recorded rather than dropped silently, because the interesting thing about
+// a burst of TXT queries for subdomains of one name is that it happened at
+// all, and af net log is where somebody would look for it.
+func (d *dnsServer) noteTunnel(name string, qtype uint16) {
+	d.mu.Lock()
+	key := name + "/" + strconv.Itoa(int(qtype))
+	seen := d.logged[key]
+	d.logged[key] = true
+	d.mu.Unlock()
+	if seen || d.emit == nil {
+		return
+	}
+	d.emit(record{
+		Event: "resolve", Host: name, Allowed: false,
+		Reason: "This environment answers only address lookups for external names. A " +
+			recordTypeName(qtype) + " query is a way to carry data out of the environment " +
+			"without opening a connection, so it is answered here rather than forwarded.",
+	})
+}
+
+// recordTypeName names the types worth naming, for the log line above.
+func recordTypeName(qtype uint16) string {
+	switch qtype {
+	case 5:
+		return "CNAME"
+	case 10:
+		return "NULL"
+	case 12:
+		return "PTR"
+	case 15:
+		return "MX"
+	case 16:
+		return "TXT"
+	case 33:
+		return "SRV"
+	case 255:
+		return "ANY"
+	}
+	return "type " + strconv.Itoa(int(qtype))
 }
 
 func (d *dnsServer) forward(query []byte) ([]byte, error) {
