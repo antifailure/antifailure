@@ -297,10 +297,67 @@ system is designed for. A drill that comes in well under it is not a reason to
 stop running the drill: what the drill really tests is whether the backup is
 one, and the timing is the part you get for free.
 
+## Nobody can sign in
+
+Everything about access derives from GitHub. Who may sign in is a list of GitHub
+logins, membership comes from a GitHub App installation, and the role comes from
+GitHub. So a GitHub-side accident can lock every person out of a control plane
+that is otherwise running perfectly: the App deleted, its private key lost, the
+OAuth client secret rotated into the wrong variable, or an organization whose
+first sign-in happened while the App was broken and therefore has no owner.
+
+Fix GitHub first. The three that account for almost all of it: `AF_GITHUB_APP_ID`
+and its private key, `AF_GITHUB_CLIENT_SECRET` matching the OAuth App, and
+`AF_GITHUB_REDIRECT_URI` matching what the OAuth App has registered. The start-up
+log says which of these the process found. Getting sign-in working again is the
+real repair, and the command below is not a substitute for it.
+
+Reach for break-glass only when sign-in works and there is nobody inside the
+organization who can act, which means nobody holds `members.manage`.
+
+```
+af-control-plane-backup break-glass \
+  --url postgres://owner@host/antifailure \
+  --org acme \
+  --github-login somebody \
+  --role owner \
+  --reason "the App was deleted on 2026-08-30 and acme has no owner" \
+  --dry-run
+```
+
+`--dry-run` reads the current role and reports what would change, and writes
+nothing. Run it that way first; run it again without the flag to apply it.
+
+What it does and does not do, because both matter at three in the morning:
+
+- It sets one person's role in one organization, and nothing else. It issues no
+  session and grants no login. It is not a way to be somebody.
+- **It cannot create an account.** It can only give a role to somebody who has
+  signed in here at least once. If nobody ever has, what is broken is the OAuth
+  configuration and no database write will fix it.
+- It refuses a change that would leave the organization with no owner, which is
+  the state it exists to get out of.
+- It writes an audit entry, `member.break_glass`, with the reason you gave, the
+  role before and after, and the login of whoever ran the command. That entry is
+  inside the hash chain and cannot be quietly removed. Recording it is the whole
+  reason to use this rather than `psql`, which would leave nothing behind.
+- The role is marked `manual`, so **Sync from GitHub** on the Members page does
+  not undo the repair when GitHub comes back. Take it back by hand once it has.
+
+The `--url` must be a connection row-level security does not apply to: the
+cluster superuser, or a role with `BYPASSRLS`. Every tenant table is `FORCE ROW
+LEVEL SECURITY`, so the role that owns the schema is subject to the policies like
+anybody else. The command checks this before it does anything and says so, rather
+than updating nothing and reporting success.
+
 ## What not to do
 
 **Do not restore over the live database.** The tool refuses; do not work around
 the refusal. Restore beside it and switch.
+
+**Do not use break-glass to add yourself to a customer's organization.** It
+records who ran it and why, in a log the customer can export. It is for restoring
+access somebody already had, not for acquiring access nobody granted.
 
 **Do not run `af down --all` to clean up during an incident.** It removes every
 environment on the machine, including ones somebody is using to debug the

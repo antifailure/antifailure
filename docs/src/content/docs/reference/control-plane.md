@@ -71,12 +71,27 @@ holds `billing.manage`, and who pays is this application's decision rather than
 GitHub's. Promote somebody with the role control on the Members page; a role set
 that way is marked `manual` and is never overwritten by a later sign-in.
 
+With one exception, and it is the first sign-in. An organization is created by
+the installation webhook, before anybody has signed in, so every organization
+passes once through a state where it has no members at all. The first person to
+sign in becomes its `owner` rather than its `admin`, provided GitHub confirms
+they administer the organization. Without that, no organization created this way
+would ever have an owner, and nothing would hold `billing.manage`. The
+promotion is marked `manual`, so a later sync does not take it back, and it is
+recorded in the audit log as `member.bootstrapped`.
+
 Two cases where nothing changes rather than something being guessed. Sometimes
 GitHub will not say what somebody's role is: no App configured, a rate limit, an
 outage. An existing membership then keeps the role it already had, because a
 transient failure must not demote the only administrator out of their own
 organization. A first sign-in during the same failure gets `member`, because
-guessing upward would hand out administrative rights on a timeout.
+guessing upward would hand out administrative rights on a timeout, and that
+applies to the first member of an empty organization as well: GitHub has to say
+`admin` for anybody to become an owner. If the App is permanently broken and
+that leaves an organization with nobody who can act, the way back is
+[break-glass](/docs/self-hosting/operations/#nobody-can-sign-in), which is an
+operator holding the database credential rather than a guess made by a web
+request.
 
 Sign-in can only ever speak for the person signing in. **Sync from GitHub** on
 the Members page reconciles everybody at once, and it is the only thing that
