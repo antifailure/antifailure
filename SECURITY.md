@@ -103,6 +103,43 @@ cannot hurt us and when that judgement expires. An expired entry fails the
 build, and so does an entry that no longer matches a real finding. The file is
 short and it is meant to be read.
 
+**What govulncheck does not answer, and where that shows.** It asks whether a
+vulnerable symbol is reachable from our code. GitHub's Dependabot asks whether a
+vulnerable version is in the module graph at all. Those are different questions
+and today they give different answers: the daily scan is green and there are
+eight open Dependabot alerts.
+
+All eight are one dependency, `github.com/docker/docker`, counted twice because
+both `engine/go.mod` and `ee/engine/go.mod` require it. They are four Moby
+advisories and **none of them has a fix to take**: checked against
+proxy.golang.org rather than remembered, no version of `github.com/docker/docker`
+or `github.com/moby/moby` above v28.5.2 exists, three of the four cover
+everything up to and including 28.5.2, and the fourth names a version that
+exists only as a Docker Engine release. `github.com/moby/moby/v2`, where the
+fixes landed, is a beta.
+
+All four are daemon-side bugs and we are an API client, and for three of them
+that is checkable rather than a claim to take on trust. Their Go advisory
+entries carry symbols, and every symbol is a method on the daemon's own `Daemon`
+type: `openContainerFS`, `createIfNotExists`, `containerExtractToDir`. Those
+live in Moby's daemon package, which this engine does not import. It takes the
+Docker client and five API type packages from that module and nothing else, so
+the vulnerable code is not linked into the binary at all. That is why the scan
+is green, and green is the right answer.
+
+The fourth, the plugin privilege off-by-one, carries no symbol information, so
+every symbol in the module matches it. That is why it is the one govulncheck
+flags, and why it has an entry in `.govulncheck.yaml` arguing from how we use
+Docker rather than from a call graph.
+
+The call sites, and the one residual exposure worth naming, are written out in
+`docs/security/pentest-readiness.md`.
+
+The honest gap is not the reasoning, it is that nothing in this repository
+watches the module-version surface. `just vuln` can be green while that page has
+eight entries on it, and the only reason anybody looked was that a push printed
+the count.
+
 **Known vulnerabilities, npm.** `tools/npmaudit` runs `npm audit` over every
 lockfile in the repository, in the same workflow and on the same schedule, and
 holds the result to `.npmaudit.yaml` under the same three rules. It exists
