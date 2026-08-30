@@ -30,6 +30,31 @@ is a process that fails in production rather than at deploy time.
 | `AF_MIGRATE` | unset | Set to `1` to apply migrations at startup. Requires `AF_MIGRATION_DATABASE_URL`. |
 | `AF_MIGRATION_DATABASE_URL` | unset | A connection string for a role that may run DDL. |
 
+## Signing in with a link
+
+GitHub is the front door and it needs a route to github.com. A preview
+environment has none by design, and an isolated network has none at all, so
+there is a second way in: a link sent to an address that already belongs to a
+member of an organization.
+
+It is off unless all three variables below are set. Setting one or two of them
+stops the process at startup and says which are missing, because two of three
+is a link that goes nowhere or mail that cannot be sent, and both of those fail
+at the moment somebody is locked out rather than at deploy time.
+
+There is no sign-up on this path. An address receives a link only once somebody
+has invited it into an organization, the link works once, and it expires in
+fifteen minutes.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `AF_RESEND_API_KEY` | unset | The Resend key the link is sent with. An HTTP mail API rather than SMTP on purpose: it is a request the egress sidecar can capture, which is what lets a preview environment read its own sign-in mail instead of delivering it to somebody. |
+| `AF_MAIL_FROM` | unset | The From address. Resend refuses a domain it has not verified, which is a configuration error worth failing loudly on. |
+| `AF_PUBLIC_URL` | unset | Where the link points: the origin a browser reaches this deployment on. Wrong here means a link that lands somewhere nobody is serving. |
+| `AF_ENV_URL` | injected | Set by Antifailure inside a preview environment: the address of the environment's first web service, which is the application a person opens. `AF_PUBLIC_URL` is preferred where a deployment sets one, and this is the fallback, because the address a preview answers on is allocated at run time and no value written in a manifest can be right. Ignored outside a preview, where nothing sets it. |
+| `AF_RESEND_BASE_URL` | `https://api.resend.com` | Where the mail API is. Set it to point at a local capture during development. |
+| `AF_PRODUCT_NAME` | `Antifailure` | The name in the subject line, for a white-labelled deployment. |
+
 ## Schema maintenance
 
 The `events` table is partitioned by month. Partitions are created ahead of the

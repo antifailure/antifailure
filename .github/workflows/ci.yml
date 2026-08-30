@@ -179,9 +179,16 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: runner/package.json
+          # The lockfile, not the manifest. Keyed on package.json the cache key
+          # was a file full of ranges, so two runs of the same commit could
+          # resolve different trees and the cache made that quieter rather than
+          # louder. That is the failure a lockfile exists to prevent.
+          cache-dependency-path: runner/package-lock.json
 
-      - run: npm install --no-audit --no-fund
+      # ci rather than install, now that there is a lockfile to obey. It also
+      # fails when the lockfile has drifted from package.json, which is the
+      # only thing checking that they agree.
+      - run: npm ci --no-audit --no-fund
         working-directory: runner
 
       - name: Install the browser
@@ -343,13 +350,28 @@ jobs:
         working-directory: web
 
       - name: Typecheck
-        # There is no build step, so this is the only thing between a type
-        # error and a running server.
+        # There is no build step for the API, so this is the only thing between
+        # a type error and a running server. apps/app is included here and is
+        # also built below, because for that one a typecheck is not enough.
         run: |
-          for p in packages/db packages/policy apps/api; do
+          for p in packages/db packages/policy apps/api apps/app; do
             npx tsc --noEmit -p "$p/tsconfig.json"
           done
         working-directory: web
+
+      - name: The web application builds
+        # A typecheck is not a build, and the difference is not academic. An
+        # import written as ../lib/guard from a page two directories deep
+        # typechecks clean, because tsconfig resolves it through baseUrl, and
+        # fails in webpack with "Module not found". That shipped a broken image
+        # and was caught by a container that would not start.
+        #
+        # The production build, not a dev server, because that is the artifact:
+        # this is the same command the Dockerfile runs.
+        run: npm run build --workspace @antifailure/app
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1' 
 
       - name: The suites did not skip
         # Every suite here skips itself when there is no database, which is

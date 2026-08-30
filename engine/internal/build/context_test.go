@@ -316,3 +316,106 @@ func TestContext_TarCanBeReadTwice(t *testing.T) {
 	require.True(t, bytes.Equal(first, second))
 	require.Equal(t, c.Size(), len(first))
 }
+
+// An exception inside an excluded directory has to survive the walk.
+//
+// The bug: the walk pruned an excluded directory whole, so a later `!` rule
+// naming a file inside it never ran. `Excluded` was correct and never asked.
+// A Dockerfile re-included that way was missing from the context and the daemon
+// reported that it could not locate a file that was plainly on disk.
+func TestContext_KeepsAFileReIncludedInsideAnExcludedDirectory(t *testing.T) {
+	root := tree(t, map[string]string{
+		"deploy/docker/app.Dockerfile": "FROM alpine\n",
+		"deploy/docker/notes.md":       "not needed in an image",
+		"deploy/terraform/main.tf":     "also not needed",
+		"main.go":                      "package main",
+	})
+
+	c := build(t, root, "deploy\n!deploy/docker/app.Dockerfile\n")
+
+	require.True(t, c.Has("deploy/docker/app.Dockerfile"),
+		"the re-included Dockerfile is missing: the walk pruned deploy before the exception ran")
+	require.False(t, c.Has("deploy/docker/notes.md"), "the exclusion still applies to everything else")
+	require.False(t, c.Has("deploy/terraform/main.tf"))
+	require.True(t, c.Has("main.go"))
+}
+
+// The pruning it replaced still has to happen, or ignoring node_modules stops
+// being fast and starts being a walk of every dependency in the tree.
+func TestContext_StillPrunesAnExcludedDirectoryWithNoExceptionInIt(t *testing.T) {
+	files := map[string]string{"main.go": "package main"}
+	for i := 0; i < 200; i += 1 {
+		files["node_modules/pkg"+string(rune('a'+i%26))+"/index.js"] = "x"
+	}
+	root := tree(t, files)
+
+	// An exception elsewhere, so the rule set has one and the question is
+	// whether this directory is judged on its own.
+	c := build(t, root, "node_modules\ndeploy\n!deploy/docker/app.Dockerfile\n")
+
+	require.False(t, c.Has("node_modules/pkga/index.js"))
+	require.True(t, c.Has("main.go"))
+	require.Less(t, len(c.Files), 10,
+		"the whole of node_modules was walked, so a rule set with any exception in it "+
+			"makes every excluded directory expensive")
+}
+
+// A context under the refusal limit and far over anything a compiler reads.
+//
+// The regression: the control plane's build sent 598 MiB on every run, all but
+// two of it a marketing site the image never opens, and nothing in the output
+// said so. The two gigabyte refusal did not fire, because the mistake was not
+// large enough to be refused, only large enough to turn a forty second build
+// into half an hour. What was missing was the sentence naming the directory.
+func TestContext_NamesTheDirectoryThatDominatesAnOversizedContext(t *testing.T) {
+	big := strings.Repeat("x", 300<<20/3)
+	root := tree(t, map[string]string{
+		"src/main.go":    "package main",
+		"www/a":          big,
+		"www/b":          big,
+		"www/c":          big,
+		"docs/README.md": "hello",
+	})
+	c := build(t, root, "")
+
+	require.True(t, c.Oversized(), "300 MiB is over the threshold worth mentioning")
+	require.Equal(t, "www/", c.Largest)
+	require.Contains(t, c.Explain(), "www/")
+	require.Contains(t, c.Explain(), "% of it")
+
+	// And the same tree with the directory excluded is unremarkable, which is
+	// the state the warning is asking somebody to reach.
+	quiet := build(t, root, "www\n")
+	require.False(t, quiet.Oversized())
+}
+
+// A top level file, rather than a directory, can be the largest entry.
+func TestContext_LargestEntryCanBeAFileAtTheRoot(t *testing.T) {
+	root := tree(t, map[string]string{
+		"fixture.bin": strings.Repeat("x", 4096),
+		"src/main.go": "package main",
+	})
+	c := build(t, root, "")
+	require.Equal(t, "fixture.bin", c.Largest)
+	require.False(t, c.Oversized(), "4 KiB is not worth a warning")
+}
+
+// Tar hands out a reader over the archive rather than a copy of it.
+//
+// The regression is a cost rather than a wrong answer: the reader was built as
+// strings.NewReader(string(c.tarball)), which allocates and copies the whole
+// archive every time the daemon is handed one. At 600 MiB that is 600 MiB of
+// garbage per build, invisible in the output and invisible in a small test.
+// Reading twice already had a test; this one asserts the copy is gone.
+func TestContext_TarDoesNotCopyTheArchive(t *testing.T) {
+	c := build(t, tree(t, map[string]string{"a.txt": strings.Repeat("a", 8192)}), "")
+
+	r, ok := c.Tar().(*bytes.Reader)
+	require.True(t, ok, "Tar must return a reader over the bytes, not over a copy of them")
+	require.Equal(t, int64(c.Size()), r.Size())
+
+	// And it still reads the same archive.
+	body, err := io.ReadAll(c.Tar())
+	require.NoError(t, err)
+	require.Equal(t, c.Size(), len(body))
+}

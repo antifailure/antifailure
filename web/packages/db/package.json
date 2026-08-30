@@ -10,7 +10,8 @@
   },
   "scripts": {
     "test": "node --test --test-concurrency=1 test/*.test.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "seed": "node bin/seed-staging.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
@@ -19,5 +20,8 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0"
+  },
+  "bin": {
+    "af-seed-staging": "./bin/seed-staging.ts"
   }
 }

@@ -333,15 +333,6 @@ links:
     cp -R docs/dist site/docs
     lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
 
-# The getting started path, run in order and timed.
-#
-# Not in `just gate`. It needs a Docker daemon and it takes minutes, because it
-# really does build an image, branch a database, and wait for a service to
-# answer. The daily schedule in .github/workflows/walkthrough.yml is where it
-# runs unattended; run it here before changing anything a new user touches.
-walkthrough:
-    go run ./tools/walkthrough .
-
 # The examples build and their manifests are valid.
 #
 # An example that does not compile is worse than no example: it is the first
@@ -394,10 +385,15 @@ gatecheck:
 typecheck:
     #!/usr/bin/env bash
     set -euo pipefail
-    for p in packages/db packages/policy apps/api; do
+    for p in packages/db packages/policy apps/api apps/app; do
       npx --prefix web tsc --noEmit -p "web/$p/tsconfig.json"
     done
     npx --prefix runner tsc --noEmit -p runner/tsconfig.json
+    # A typecheck is not a build. An import written as ../lib/guard from a page
+    # two directories deep typechecks clean, because tsconfig resolves it
+    # through baseUrl, and fails in webpack with "Module not found". That
+    # shipped a broken image once already.
+    NEXT_TELEMETRY_DISABLED=1 npm --prefix web run build --workspace @antifailure/app
 
 # The license parser has to survive arbitrary input, because a licence token
 # arrives from outside and a parser that panics on one is a denial of service

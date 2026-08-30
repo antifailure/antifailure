@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -92,6 +93,8 @@ type DockerBuilder struct {
 	redactor *redact.Redactor
 	// noCache forces a rebuild even when the tag exists, for af up --rebuild.
 	noCache bool
+	// buildKit is whether the daemon was asked for the modern builder.
+	buildKit bool
 }
 
 // DockerOptions configure the builder.
@@ -99,6 +102,9 @@ type DockerOptions struct {
 	Clock    clock.Clock
 	Redactor *redact.Redactor
 	NoCache  bool
+	// Getenv reads the process environment, for DOCKER_BUILDKIT. Nil uses the
+	// real one.
+	Getenv func(string) string
 }
 
 // NewDockerBuilder returns a builder talking to the local daemon.
@@ -113,8 +119,52 @@ func NewDockerBuilder(opts DockerOptions) (*DockerBuilder, error) {
 	if opts.Redactor == nil {
 		opts.Redactor = redact.New()
 	}
-	return &DockerBuilder{cli: cli, clock: opts.Clock, redactor: opts.Redactor, noCache: opts.NoCache}, nil
+	if opts.Getenv == nil {
+		opts.Getenv = os.Getenv
+	}
+	b := &DockerBuilder{cli: cli, clock: opts.Clock, redactor: opts.Redactor, noCache: opts.NoCache}
+	b.buildKit = wantsBuildKit(context.Background(), cli, opts.Getenv)
+	return b, nil
 }
+
+// buildKitPingTimeout bounds the one question asked at construction.
+//
+// A daemon that cannot answer which builder it has in two seconds is a daemon
+// that is about to fail the build for its own reasons, and waiting longer here
+// only moves where that shows up.
+const buildKitPingTimeout = 2 * time.Second
+
+// wantsBuildKit decides which builder to ask the daemon for.
+//
+// Asked once, at construction, rather than per build, because the answer is a
+// property of the daemon and a build should not pay for a round trip to learn
+// something it already knew.
+//
+// DOCKER_BUILDKIT=0 is honoured because it is the escape hatch every Docker
+// user already knows, and because a new builder needs one. Anything else,
+// including the variable being unset, means "whatever the daemon says it has",
+// which is what the docker CLI does.
+func wantsBuildKit(ctx context.Context, cli *client.Client, getenv func(string) string) bool {
+	if v := getenv("DOCKER_BUILDKIT"); v == "0" || strings.EqualFold(v, "false") {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, buildKitPingTimeout)
+	defer cancel()
+	ping, err := cli.Ping(ctx)
+	if err != nil {
+		// The legacy builder is the safe answer when the daemon will not say.
+		// It is slower and it is present on every daemon that has ever
+		// existed, and a build that runs slowly is better than one that does
+		// not run.
+		return false
+	}
+	return ping.BuilderVersion == dockerbuild.BuilderBuildKit
+}
+
+// UsesBuildKit reports which builder this one talks to. The lifecycle prints
+// it, because a silent fall back to the slow builder is a regression nobody
+// would notice.
+func (b *DockerBuilder) UsesBuildKit() bool { return b.buildKit }
 
 // Close releases the daemon connection.
 func (b *DockerBuilder) Close() error { return b.cli.Close() }
@@ -204,6 +254,10 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 	}
 
 	started := b.clock.Now()
+	version := dockerbuild.BuilderV1
+	if b.buildKit {
+		version = dockerbuild.BuilderBuildKit
+	}
 	resp, err := b.cli.ImageBuild(ctx, req.Context.tarWith(extra), dockerbuild.ImageBuildOptions{
 		Tags:        []string{ref},
 		Dockerfile:  dockerfilePath,
@@ -213,6 +267,7 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 		ForceRemove: true,
 		NoCache:     b.noCache,
 		PullParent:  false,
+		Version:     version,
 		Labels:      dockerutil.Managed(dockerutil.KindService, req.EnvID, started),
 	})
 	if err != nil {
@@ -221,7 +276,14 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	log, buildErr := b.stream(resp.Body, req.Progress)
+	// Two languages, one endpoint. Which one the daemon answers in is decided
+	// by the version asked for above, so the reader is chosen by the same
+	// flag rather than by sniffing the first document.
+	read := b.stream
+	if b.buildKit {
+		read = b.streamBuildKit
+	}
+	log, buildErr := read(resp.Body, req.Progress)
 	res.Log = log
 	res.Duration = b.clock.Since(started)
 	if buildErr != nil {

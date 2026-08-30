@@ -27,6 +27,9 @@ export interface Job {
   /** model, when set, lets a model read the page and decide. The key is the
    *  user's: nothing here ships one and the engine never stores one. */
   readonly model?: import('./model.ts').ModelConfig;
+  /** complete overrides how a model is asked. Set by a cassette, so a run can
+   *  replay recorded answers and reach no network at all. */
+  readonly complete?: import('./model.ts').Complete;
   /** attempts is how many times a workflow is retried before being called
    *  flaky or failed. Two is the useful number: one retry distinguishes a
    *  genuine failure from a fluke, and more just makes a slow suite slower. */
@@ -160,7 +163,9 @@ async function attemptOnce(
   // unreachable mid run should not end the workflow, and the shapes every
   // application shares do not need one.
   const planner = job.planner
-    ?? (job.model ? new ModelPlanner(job.model, undefined, deterministic) : deterministic);
+    ?? (job.model
+      ? new ModelPlanner(job.model, job.complete, deterministic)
+      : deterministic);
 
   const history: Action[] = [];
   const limit = workflow.maxSteps ?? MAX_STEPS;

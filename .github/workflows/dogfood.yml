@@ -1,0 +1,306 @@
+name: Dogfood
+
+# Antifailure checking Antifailure's own pull requests, with Antifailure.
+#
+# Everything this finds is something a customer would have found first. That is
+# the entire argument for the file: the control plane is a web application with
+# a Postgres schema, row level security, migrations and an audit chain, which is
+# exactly the shape of application this product is sold to check. Running it
+# against ourselves is the only test of the product that nobody can grade
+# generously.
+#
+# It is separate from ci.yml on purpose. ci.yml is the gate: it decides whether
+# a change may merge, it runs on every push, and it must never be slow or
+# flaky. This one needs a container runtime, a database to copy, and twenty
+# minutes, and its failures are a report about the product rather than a
+# verdict on the diff.
+on:
+  pull_request:
+  schedule:
+    # Nightly, after the existing security scan, so two jobs are not competing
+    # for the same runners.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read, and only read, for everything that runs untrusted code. The one job
+# that needs to write a comment declares it for itself and does nothing else,
+# which is narrower than granting it here and hoping.
+permissions:
+  contents: read
+
+jobs:
+  dogfood:
+    # One job, not a matrix. On a pull request the question is whether this
+    # change broke the product, and the control plane answers it against the
+    # largest real schema we have: nineteen tables, row level security,
+    # partitions, an audit chain, and migrations. The examples answer a
+    # different question, which is whether the product still works on somebody
+    # else's shape, and that answer does not change between two commits an hour
+    # apart. They run on the schedule below.
+    name: control plane
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # The database the golden is copied from. A real Postgres, because
+    # everything under test is what Postgres enforces: row level security, the
+    # policies the masking plan has to preserve, the partitions the rules have
+    # to follow, and the roles pg_dump does not carry.
+    services:
+      staging:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: staging
+          POSTGRES_DB: antifailure
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The source the masking rules are written against. Synthesised rather
+      # than restored from production: a control plane that copies a real
+      # customer's database into a public CI runner would be the single worst
+      # thing this repository could do, and the shape is what the rules are
+      # about, not the rows.
+      AF_STAGING_DATABASE_URL: postgres://postgres:staging@127.0.0.1:5433/antifailure
+      # Recorded, so the spend is zero. A cassette miss refuses rather than
+      # falling back to a live call or to the deterministic planner, which is
+      # what makes "zero" a fact rather than an intention.
+      AF_MODEL_MODE: replay
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the binary under test
+        # The binary from this commit, not a release. The whole point is to
+        # find out what this change did to the product.
+        run: go build -o bin/af ./engine/cmd/af
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+
+      - name: Install the runner and its browser
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+        working-directory: runner
+
+      - name: Shape the staging database
+        # Migrations and then a deterministic seed, both from one script: the
+        # seeder applies the migrations itself, because a seed against a schema
+        # it did not create is a seed that fails on the first column somebody
+        # added.
+        #
+        # Deterministic so that a masking plan, a verification scan and an
+        # insights report are the same two days running, which is what makes a
+        # difference between two runs mean something.
+        #
+        # Synthetic rather than restored from production. A control plane that
+        # copied a real customer's database into a public runner would be the
+        # single worst thing this repository could do, and what the masking
+        # rules are about is the shape rather than the rows.
+        run: npm run seed --workspace @antifailure/db
+        working-directory: web
+        env:
+          AF_MIGRATION_DATABASE_URL: ${{ env.AF_STAGING_DATABASE_URL }}
+
+      - name: The rules classify every column
+        # Before anything is copied. `af mask plan` refuses a column no rule
+        # names and no default can decide, so this fails on a migration that
+        # added a column nobody classified, at the point where the fix is one
+        # line in masking.yaml rather than after a golden has been published.
+        run: ./bin/af -C . mask plan
+
+      - name: Refresh the golden, with the attestation required
+        # Copy, mask, verify, publish. Verification is not a flag here: an
+        # unverified version cannot be branched, so a golden that reaches the
+        # next step is a golden whose attestation was signed.
+        run: ./bin/af -C . golden refresh
+
+      - name: The whole check, the way a customer runs it
+        # tools/dogfood runs `af ci` and nothing else of substance. What it
+        # adds is a budget per step, taken from the environment's own event
+        # stream, and a JSON record of the run, which is what a ten green
+        # streak is a claim about.
+        run: |
+          go run ./tools/dogfood \
+            -C . \
+            --af "$GITHUB_WORKSPACE/bin/af" \
+            --mode pr \
+            --report "$GITHUB_WORKSPACE/dogfood-report.md" \
+            --record "$GITHUB_WORKSPACE/dogfood-record.json"
+
+      - name: What the database noticed about this change
+        # Separate from the run above because it reads the branch after the
+        # workflows have driven it, and because a migration that changes a plan
+        # is worth reporting even when every workflow passed.
+        if: always()
+        run: ./bin/af -C . insights || true
+
+      - name: Nothing was left behind
+        # The claim this product makes about itself. Asserted here as well as
+        # inside the tool, because the tool could be the thing that is broken.
+        if: always()
+        run: |
+          left=$(docker ps -aq --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
+          nets=$(docker network ls -q --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
+          echo "containers: $left, networks: $nets"
+          if [ "$left" != "0" ] || [ "$nets" != "0" ]; then
+            docker ps -a --filter label=dev.antifailure.managed
+            echo "::error::the dogfood run leaked resources"
+            exit 1
+          fi
+
+      - name: Keep the record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dogfood-report
+          path: |
+            dogfood-report.md
+            dogfood-record.json
+            .antifailure/events
+          retention-days: 30
+          if-no-files-found: warn
+
+  comment:
+    name: post the comment
+    needs: dogfood
+    if: >-
+      always() && github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # The one write in this file, and the only job that has it. A fork's pull
+    # request does not reach here at all: the condition above requires the head
+    # to be this repository, because a token that can write a comment is a
+    # token that must never be handed to code somebody else pushed.
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dogfood-report
+          path: report
+
+      - name: Post it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          [ -f report/dogfood-report.md ] || { echo "no report to post"; exit 0; }
+
+          # Edited rather than appended. A pull request that is pushed to six
+          # times should carry one comment that is current, not six that
+          # disagree, and the marker is how the right one is found again.
+          marker='<!-- antifailure-dogfood -->'
+          { echo "$marker"; cat report/dogfood-report.md; } > body.md
+
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq "[.[] | select(.body | startswith(\"$marker\")) | .id] | first // empty")
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" \
+              -F body=@body.md > /dev/null
+            echo "updated comment $existing"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+              -F body=@body.md > /dev/null
+            echo "posted a new comment"
+          fi
+
+  nightly:
+    name: nightly, the whole corpus
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        manifest: [examples/orders-api, examples/go-api, examples/rails-shop]
+
+    env:
+      # Same cassette rule as above. The one job in this repository that spends
+      # money on a model is the existing nightly smoke, and this file does not
+      # add a second.
+      AF_MODEL_MODE: replay
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - run: go build -o bin/af ./engine/cmd/af
+
+      - name: Install the runner and its browser
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+        working-directory: runner
+
+      - name: Skip a manifest that is not there yet
+        id: present
+        run: |
+          if [ -f "./antifailure.yaml" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::. has no manifest, nothing to run"
+          fi
+
+      - name: The pipeline, with load
+        if: steps.present.outputs.present == 'true'
+        run: |
+          go run ./tools/dogfood \
+            -C . \
+            --af "$GITHUB_WORKSPACE/bin/af" \
+            --mode nightly \
+            --record "$GITHUB_WORKSPACE/dogfood-record.json"
+
+      - name: Nothing was left behind
+        if: always()
+        run: |
+          left=$(docker ps -aq --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
+          if [ "$left" != "0" ]; then
+            docker ps -a --filter label=dev.antifailure.managed
+            echo "::error::the nightly run leaked resources"
+            exit 1
+          fi
+
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # By index rather than by manifest: an artifact name cannot hold a
+          # slash, and examples/orders-api has one.
+          name: nightly-${{ strategy.job-index }}
+          path: dogfood-record.json
+          retention-days: 30
+          if-no-files-found: warn

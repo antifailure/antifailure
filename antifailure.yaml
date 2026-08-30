@@ -1,0 +1,308 @@
+version: 1
+name: antifailure-control-plane
+
+# This repository's own manifest.
+#
+# Every pull request against antifailure/antifailure gets a preview of the
+# control plane built from this file: the web application, the API, and a
+# Postgres branched from a masked copy of the staging control plane. The agents
+# then use it the way a customer does, and whatever that surfaces is a bug we
+# fix rather than a report we file about somebody else.
+#
+# It is deliberately an ordinary manifest. There is no private syntax here, no
+# flag that only works for us, and nothing configured outside this file. If a
+# thing is awkward to express here, that is the product being awkward, and the
+# fix is in the product.
+
+services:
+  # The application a person looks at. It proxies /auth and /trpc to the API
+  # under its own origin, because a session cookie set by one host is not sent
+  # to another, so a browser talking to the API directly would sign in and come
+  # back holding nothing.
+  - name: app
+    kind: web
+    path: web/apps/app
+    port: 3100
+    health_path: /login
+    # Generous. This is a Next.js production build starting from a cold image
+    # on a CI runner, and the failure this guards against is a service that
+    # never comes up, not one that takes eleven seconds instead of nine.
+    health_timeout: 180s
+    build:
+      strategy: dockerfile
+      dockerfile: deploy/docker/app.Dockerfile
+      # What this build needs to reach, recorded rather than enforced. The
+      # list is parsed, validated and shown by `af explain`, and nothing
+      # applies it: the build is not sealed in this release. It is written
+      # anyway, because the record is what makes the day it becomes a control
+      # a configuration change rather than an investigation.
+      #
+      # npm is the only entry, and that is a property of the Dockerfile worth
+      # keeping: both faces the application uses come from a package rather
+      # than from a font service, so there is no fonts.googleapis.com here and
+      # a sealed build would still work.
+      allow_hosts:
+        - registry.npmjs.org
+    env:
+      - name: AF_API_URL
+        value: http://api:8080
+    depends_on:
+      - api
+
+  - name: api
+    kind: web
+    path: web/apps/api
+    port: 8080
+    health_path: /health
+    health_timeout: 180s
+    # Migrations run against the branch rather than the golden, so a pull
+    # request that adds a column gets it and nobody else's environment does.
+    #
+    # Then the two identities a preview can be signed into as. Masking replaces
+    # every address with a synthetic one at example.test, which is correct and
+    # leaves nobody to sign in as, so a known pair is added here.
+    # `personas.mjs` refuses to run outside an environment the engine created.
+    migrate: node bootstrap.mjs && node personas.mjs
+    build:
+      strategy: dockerfile
+      dockerfile: deploy/docker/control-plane.Dockerfile
+      allow_hosts:
+        - registry.npmjs.org
+    env:
+      # AF_DATABASE_URL is not declared here on purpose. The database block
+      # below injects it, and declaring it as well makes the secret resolver
+      # demand a value nobody has to supply.
+      - name: AF_PORT
+        value: "8080"
+      # Plain HTTP inside the environment, so a Secure cookie would never come
+      # back. There is nothing to protect here that is not already inside a
+      # network with no route out.
+      - name: AF_INSECURE_COOKIES
+        value: "1"
+      # AF_APP_BASE_URL is not set here, and that is the point.
+      #
+      # The address this environment answers on is allocated at run time, so no
+      # value written in a manifest can be right. The engine injects AF_ENV_URL
+      # with the address of the first web service it declares, and the API
+      # falls back to it. Hardcoding localhost:3100 here is what made an agent
+      # read a sign in link out of the inbox and navigate to a port nothing
+      # was listening on.
+      # Signing in with a link, which is the only way in that works here:
+      # github.com is not reachable from inside this environment, by design.
+      # The mail is not delivered either. api.resend.com is captured below, so
+      # the message lands in the inbox and the agent reads the link out of it.
+      # AF_PUBLIC_URL is likewise left to the engine, for the same reason.
+      - name: AF_MAIL_FROM
+        value: Antifailure <sign-in@antifailure.test>
+      - name: AF_RESEND_API_KEY
+        # A placeholder, and it is enough. The request never leaves: the
+        # sidecar answers api.resend.com with the provider's own success shape
+        # and records the message. A real key here would buy nothing and would
+        # be a real key inside a preview environment.
+        value: capture-mode-needs-no-key
+      # GitHub sign-in is configured so the process starts and the button
+      # renders. Pressing it inside a preview reaches a host the policy blocks,
+      # which is the correct behaviour and is what the workflow below asserts
+      # by not using it.
+      - name: AF_GITHUB_CLIENT_ID
+        value: preview-has-no-github
+      - name: AF_GITHUB_CLIENT_SECRET
+        value: preview-has-no-github
+      - name: AF_GITHUB_REDIRECT_URI
+        value: http://localhost:3100/auth/github/callback
+
+database:
+  provider: docker
+  version: 17
+  url_env: AF_DATABASE_URL
+  masking_rules: masking.yaml
+  # Where the golden is copied from. Unset on a laptop, where `af golden
+  # refresh` is run against a database somebody stood up locally; set in CI to
+  # the staging control plane.
+  source_url_env: AF_STAGING_DATABASE_URL
+  golden:
+    # Refreshed nightly and never used past a week. A golden older than that is
+    # a copy of a schema that has moved on, and branching from it produces
+    # migration failures that look like application bugs.
+    schedule: "0 3 * * *"
+    max_age: 168h
+    retain: 3
+
+egress:
+  # Nothing reaches the internet unless it is named here. That includes
+  # github.com, which is the point: the control plane's own sign-in path has to
+  # work without it, and this is what proves it does rather than asserting it.
+  default: block
+  rules:
+    - host: api.resend.com
+      mode: capture
+      note: "the sign-in link, recorded into the inbox instead of being sent to anybody"
+
+personas:
+  - name: owner
+    # An address that belongs to a member of the seeded organization. The link
+    # is sent to it, captured, and read back; nothing is delivered.
+    email: owner@antifailure.test
+    role: owner
+    login: magic_link
+
+  - name: viewer
+    email: viewer@antifailure.test
+    role: viewer
+    login: magic_link
+
+workflows:
+  # The expectations below name words that actually appear on the page.
+  #
+  # That is not a stylistic choice. Without a model key the runner reads the
+  # accessibility tree and checks it against these strings, and an expectation
+  # written as a sentence about the product ("the audit log shows entries") can
+  # be neither confirmed nor contradicted by anything on screen. The runner
+  # says so and returns `unverified`, which is the honest answer and not a
+  # useful one. Naming the page's own labels makes the same check verifiable at
+  # zero cost, and a model key still improves on it rather than being required.
+  - name: sign-in-with-a-link
+    description: >-
+      As the owner, ask for a sign-in link with the email address, read the
+      link out of the captured message, follow it, and confirm you land on a
+      signed in page.
+    persona: owner
+    start_path: /login
+    expect:
+      - "Sign out"
+      - "Environments"
+    tags: [smoke, auth]
+
+  - name: view-the-environment-matrix
+    description: >-
+      As the owner, look at the list of environments and check that it shows
+      environments with their repository, branch, and state.
+    persona: owner
+    start_path: /
+    expect:
+      - "Repository"
+      - "Branch"
+      - "State"
+    tags: [smoke]
+
+  - name: open-a-run
+    description: >-
+      As the owner, open an environment from the list, then open one of its
+      runs, and check that the run shows what the agents concluded.
+    persona: owner
+    start_path: /
+    expect:
+      - "Environments"
+      - "Repository"
+    tags: [smoke]
+
+  - name: edit-a-network-policy
+    description: >-
+      As the owner, go to the network policy page and check that it lists the
+      hosts the policy names and offers a way to explain a decision.
+    persona: owner
+    start_path: /network
+    expect:
+      - "Host"
+      - "Mode"
+      - "Explain"
+    tags: [policy]
+
+  - name: read-the-audit-log
+    description: >-
+      As the owner, open the audit log and check that it shows entries, can be
+      filtered by action, and offers the page before this one.
+    persona: owner
+    start_path: /audit
+    expect:
+      - "Action"
+      - "Filter"
+      - "Older entries"
+    tags: [smoke, audit]
+
+  - name: a-viewer-cannot-edit-policy
+    description: >-
+      As the viewer, open the network policy page and check that the form for
+      proposing a rule is not usable.
+    persona: viewer
+    start_path: /network
+    expect:
+      - "Host"
+      - "Mode"
+    tags: [policy, rbac]
+
+invariants:
+  - name: every-environment-belongs-to-a-repository
+    description: >-
+      The join the matrix is built on. A masking run that remapped one side of
+      it and not the other would empty the page while every table still had
+      rows in it, which is the failure that looks like an application bug.
+    sql: |
+      SELECT count(*) AS violations
+      FROM environments e
+      LEFT JOIN repositories r ON r.id = e.repository_id
+      WHERE r.id IS NULL
+
+  - name: every-member-belongs-to-a-user
+    description: Masking remaps user identifiers, and membership has to follow them.
+    sql: |
+      SELECT count(*) AS violations
+      FROM members m
+      LEFT JOIN users u ON u.id = m.user_id
+      WHERE u.id IS NULL
+
+  - name: the-audit-chain-is-linked
+    description: >-
+      Every entry after the first points at the entry before it. Masking must
+      not touch the hash columns, and this is what says so: a rule that
+      nullified them would leave a log that fails its own verification.
+    sql: |
+      SELECT count(*) AS violations
+      FROM audit_entries a
+      WHERE a.prev_hash IS NULL
+        AND a.seq > (SELECT min(seq) FROM audit_entries b WHERE b.org_id = a.org_id)
+
+  - name: no-session-outlives-its-user
+    description: A session pointing at a user that masking removed is a session nothing can resolve.
+    sql: |
+      SELECT count(*) AS violations
+      FROM sessions s
+      LEFT JOIN users u ON u.id = s.user_id
+      WHERE u.id IS NULL
+
+insights:
+  enabled: true
+  migration_rehearsal: true
+  query_regression: true
+  plan_diff: true
+
+load:
+  enabled: true
+  source: none
+  # A smoke, not a benchmark. The question is whether the control plane answers
+  # under any load at all, on a shared CI runner where a number would mean
+  # nothing anyway.
+  scale: 0.05
+  duration: 60s
+  safe_routes:
+    - GET /login
+    - GET /
+    - GET /audit
+    - GET /network
+  unsafe_routes:
+    - POST /auth/email
+    - POST /trpc/*
+  thresholds:
+    p95_increase: 0.5
+    error_rate: 0.02
+
+runtime:
+  provider: local
+  ttl: 24h
+  idle_sleep: 30m
+
+github:
+  mode: actions
+  comment: true
+  fork_policy: label
+  teardown_on: [close, merge, ttl]

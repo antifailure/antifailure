@@ -158,11 +158,23 @@ const runsRouter = router({
     .input(z.object({ runId: uuid }))
     .query(async ({ ctx, input }) => {
       const c = ctx as OrgContext
-      return c.pool.withTenant(c.tenant, async (db) =>
-        db.execute(sql`
+      return c.pool.withTenant(c.tenant, async (db) => {
+        const rows = await db.execute<ArtifactRow>(sql`
           SELECT id, kind, step, content_type, size_bytes, sha256, retained
-          FROM artifacts WHERE run_id = ${input.runId} ORDER BY step NULLS LAST, kind`),
-      )
+          FROM artifacts WHERE run_id = ${input.runId} ORDER BY step NULLS LAST, kind`)
+        // size_bytes is a bigint, and the driver hands a bigint over as a
+        // string so that a value beyond 2^53 is not quietly rounded. That is
+        // the right default and it is the wrong shape to publish: a client
+        // that formats it does `size / 1024` and gets a number from a string
+        // by coercion, then does the same to something that is genuinely text
+        // and gets NaN, and nothing throws in either case.
+        //
+        // So it is converted here, at the boundary that declares the shape,
+        // rather than left for every caller to guess at. The range is not a
+        // risk: 2^53 bytes is nine petabytes, and an artifact is a video of a
+        // browser session.
+        return rows.map((row) => ({ ...row, size_bytes: asNumber(row.size_bytes) }))
+      })
     }),
 })
 
@@ -422,14 +434,20 @@ const auditRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const c = ctx as OrgContext
-      return c.pool.withTenant(c.tenant, async (db) =>
-        db.execute(sql`
+      return c.pool.withTenant(c.tenant, async (db) => {
+        const rows = await db.execute<AuditRow>(sql`
           SELECT seq, actor_label, action, target_type, target_id, origin, detail, occurred_at
           FROM audit_entries
           WHERE (${input.action ?? null}::text IS NULL OR action = ${input.action ?? null})
             AND (${input.before ?? null}::bigint IS NULL OR seq < ${input.before ?? null})
-          ORDER BY seq DESC LIMIT ${input.limit}`),
-      )
+          ORDER BY seq DESC LIMIT ${input.limit}`)
+        // seq is a bigserial and arrives as a string, for the same reason
+        // size_bytes does. It is the cursor this endpoint pages by, so a caller
+        // that sends back what it was given sends a string where the input
+        // schema wants a number. Converted here so the value that comes out is
+        // the value that can go back in.
+        return rows.map((row) => ({ ...row, seq: asNumber(row.seq) }))
+      })
     }),
 
   verify: orgProcedure('audit.export')
@@ -681,6 +699,31 @@ function notFound(kind: string, id: string): TRPCError {
     // ask whether another organization has a repository by that name.
     message: `No ${kind} named ${id} in this organization.`,
   })
+}
+
+interface ArtifactRow extends Record<string, unknown> {
+  size_bytes: string | number | null
+}
+
+interface AuditRow extends Record<string, unknown> {
+  seq: string | number
+}
+
+/**
+ * A bigint, as a number.
+ *
+ * Null stays null; anything beyond what a double represents exactly is left as
+ * the string it arrived as, because rounding it silently is worse than
+ * publishing a type union nobody expected. Neither of the two columns this is
+ * used on can reach that: nine petabytes in one artifact, and nine quadrillion
+ * audit entries.
+ */
+function asNumber(value: string | number | null | undefined): number | string | null {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'number') return value
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed)) return value
+  return parsed
 }
 
 function asIso(v: Date | string): string {

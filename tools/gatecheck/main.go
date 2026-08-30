@@ -276,12 +276,6 @@ func uncalledByGate(just string) []string {
 	// it is out of `gate` for the reason recorded in exemptFromGate.
 	exemptRecipes := map[string]bool{
 		"vuln": true,
-		// The getting started path end to end. It needs a daemon and takes
-		// minutes, so it runs on a schedule rather than on every branch, the
-		// same reasoning as the external link check: a check that costs
-		// everybody ten minutes for a property that changes weekly is a check
-		// people learn to skip.
-		"walkthrough": true,
 	}
 
 	// Recipes that are gates rather than conveniences. A recipe that mutates
@@ -346,6 +340,20 @@ var exemptFromGate = map[string]string{
 		"It runs on every pull request and on a daily schedule in security.yml, " +
 		"which is where a scan whose input is a moving database belongs. Run it by " +
 		"hand with `just vuln`.",
+
+	"tool dogfood": "" +
+		"Its input is not in the tree either, and it is not one thing. tools/dogfood " +
+		"runs the product against itself: it needs a container runtime, a staging " +
+		"database to copy, a browser, and about twenty minutes, and what it " +
+		"produces is a report about the product rather than a verdict on the diff. " +
+		"`just gate` has to work on a plane and has to finish while somebody is " +
+		"still looking at it, and this does neither. " +
+		"What IS a function of the tree is the harness's own behaviour, and " +
+		"`go test ./tools/dogfood` covers it inside `just test-tools`, which " +
+		"`gate` runs: that the budgets are well formed, that a phase is timed " +
+		"from the events that bound it, and that a run with a leak is not green. " +
+		"It runs on every pull request and nightly in dogfood.yml, which is where " +
+		"a check whose input is a live environment belongs.",
 
 	"tool cost": "" +
 		"Its input is not in the tree. tools/cost reads a Terraform plan, and a " +

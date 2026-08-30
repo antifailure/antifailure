@@ -11,14 +11,49 @@ examples
 schemas
 bin
 infra
+# The marketing site. Six hundred megabytes of it, and the reason this line
+# exists: it was missing, so every control plane build tarred up www and its
+# node_modules and streamed them to the daemon. The build worked. It took
+# thirty minutes instead of forty seconds and nothing said why.
+#
+# The lesson is the shape of this file rather than the one directory. A list
+# of what to leave out is only correct until somebody adds a directory, and
+# nothing tells you the day that happens. `af up` now prints the size of a
+# context this large, which is the check that would have caught it.
+www
 deploy
+# The Dockerfiles themselves have to survive this, and it is easy to miss why.
+# `docker build -f` reads a Dockerfile from the host and never consults the
+# ignore file, so excluding it here still builds by hand. `af up` sends the
+# context to the daemon and names the Dockerfile *inside* it, so an excluded
+# one is simply not there, and the daemon answers "cannot locate specified
+# Dockerfile" about a file that is plainly on disk.
+!deploy/docker/app.Dockerfile
+!deploy/docker/control-plane.Dockerfile
 !deploy/docker/bootstrap.mjs
 !deploy/docker/maintenance.mjs
+!deploy/docker/personas.mjs
 ee
 web/node_modules
 web/**/node_modules
+# A local build's output. Sending it wastes a hundred megabytes on every build
+# and the image would ignore it anyway: the build stage produces its own.
+web/**/.next
 web/**/test
 **/*.test.ts
+# Working directories, none of which exist on a clean clone and all of which
+# are large on a machine somebody has been building on.
+.antifailure
+.gate-reports
+.playwright-mcp
+**/*.broken.*
 **/.env
 **/.env.*
 *.md
+# The manifest. Neither image reads it, and leaving it in the context makes
+# every image's tag depend on it: the tag is derived from the context digest,
+# so editing a workflow expectation or an egress rule changes the digest and
+# asks the daemon for an image that has never been built. The layers still
+# cache, and the rebuild is still work nobody asked for.
+antifailure.yaml
+masking.yaml

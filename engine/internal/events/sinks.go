@@ -200,6 +200,22 @@ func (s *FileSink) Deliver(_ context.Context, e Event) error {
 	if s.disabled {
 		return errSinkDisabled
 	}
+	// Reopened rather than refused, because a sink outlives the bus that
+	// closed it.
+	//
+	// A sink is attached to each session as that session opens and closed with
+	// it, which is right for a dashboard: one command, one session. `af ci`
+	// has two, because its teardown runs after the lifecycle that failed, and
+	// the second session's events were being written into a bufio.Writer over
+	// a closed file and lost with no error. The symptom was a log that
+	// recorded a run failing and never recorded it being torn down, which is
+	// the one line somebody reading that log most needs.
+	if s.f == nil {
+		if err := s.open(); err != nil {
+			s.disableLocked()
+			return err
+		}
+	}
 	if s.written+int64(len(b)) > s.maxBytes {
 		if err := s.rotateLocked(); err != nil {
 			s.disableLocked()
@@ -451,3 +467,57 @@ func (r *Reader) All() ([]Event, error) {
 
 // Compile time proof that the concrete redactor satisfies the sink interface.
 var _ redactor = (*redact.Redactor)(nil)
+
+// LastSequence reads the highest sequence number an environment's log holds.
+//
+// It is how a new command continues the counter the last one left, so that
+// `Event.Seq` means what its own documentation says: monotonic per
+// environment, and a gap in it is a gap rather than a restart.
+//
+// A missing, empty, or unreadable log returns zero, which starts the counter
+// at one. That is the right answer for a first run and the safe answer for a
+// damaged file: numbering from the beginning is confusing, and refusing to run
+// a command because its log could not be read would be worse.
+func LastSequence(dir, env string) uint64 {
+	f, err := os.Open(filepath.Join(dir, env+".ndjson"))
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = f.Close() }()
+
+	// Read from the end. A log is append only and rotates at 64 MiB, so the
+	// answer is in the last line and scanning the whole file to find it would
+	// cost a command a megabyte of reading before it did anything.
+	info, err := f.Stat()
+	if err != nil {
+		return 0
+	}
+	const window = 64 << 10
+	start := info.Size() - window
+	if start < 0 {
+		start = 0
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return 0
+	}
+	body, err := io.ReadAll(io.LimitReader(f, window+1))
+	if err != nil {
+		return 0
+	}
+
+	var highest uint64
+	for _, line := range strings.Split(string(body), "\n") {
+		var e struct {
+			Env string `json:"env"`
+			Seq uint64 `json:"seq"`
+		}
+		if json.Unmarshal([]byte(line), &e) != nil {
+			// A partial first line, from seeking into the middle of one.
+			continue
+		}
+		if e.Env == env && e.Seq > highest {
+			highest = e.Seq
+		}
+	}
+	return highest
+}

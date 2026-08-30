@@ -197,6 +197,53 @@ func TestCredential_NeedsEntropyAfterThePrefix(t *testing.T) {
 	require.True(t, d.Match("sk"+"_live_"+"aBcDeFgHiJkLmNoPqRsTuVwXyZ01"))
 }
 
+// A digest is not a payment card, however the digits fall.
+//
+// The case that found this: `af golden refresh` on a schema with a sha256
+// column refused to publish, because one digest in eleven hundred contained a
+// thirteen digit run that started with a Visa prefix and passed the Luhn check.
+// The finding read `artifacts.sha256 holds payment-card`, which is both wrong
+// and unactionable, and a scanner that produces those is a scanner somebody
+// turns off.
+func TestPaymentCard_DoesNotFireOnDigitsInsideALongerToken(t *testing.T) {
+	card := detector(t, "payment-card")
+
+	// A real number, and the same digits with a letter against them. Every one
+	// of the second group is part of a token rather than a number anybody
+	// wrote, which is the distinction being drawn.
+	require.True(t, card.Match("4111111111111111"), "a card on its own must still be found")
+
+	for _, glued := range []string{
+		"b4111111111111111",
+		"4111111111111111b",
+		"a1b4111111111111111cd",
+		// A whole digest, which is the shape that actually caused this.
+		"9f4111111111111111e3a7c2",
+	} {
+		require.False(t, card.Match(glued),
+			"%q is a token with digits in it, not a payment card", glued)
+	}
+}
+
+// The other half: narrowing the match must not lose the ways a card is really
+// written.
+func TestPaymentCard_StillFindsOneWrittenTheWaysPeopleWriteThem(t *testing.T) {
+	card := detector(t, "payment-card")
+
+	for _, real := range []string{
+		"4111111111111111",
+		"4111 1111 1111 1111",
+		"4111-1111-1111-1111",
+		`{"card":"4111111111111111"}`,
+		"card: 4111111111111111",
+		"4111 1111 1111 1111 visa",
+		"paid with 4111111111111111.",
+		"(4111111111111111)",
+	} {
+		require.True(t, card.Match(real), "%q is a payment card and was not found", real)
+	}
+}
+
 func TestDetectors_HandlePathologicalInputWithoutHanging(t *testing.T) {
 	t.Parallel()
 	// A masked database contains long text columns, and a detector that is

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 
+	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/insights"
 	"github.com/antifailure/antifailure/engine/internal/masking"
@@ -257,6 +258,17 @@ func (o *Orchestrator) maskDatabase(
 	res, err := exec.Apply(ctx, conn, plan)
 	if err != nil {
 		return res.Rows, res.Tables, aferrors.Wrap(err, aferrors.AFMSK010, "detail", err.Error())
+	}
+
+	// Analysed again, because masking just rewrote most of the columns the copy
+	// had statistics for. A golden published without this is one every branch
+	// inherits a blind planner from, and `af insights` then compares two
+	// sequential scans and reports no regression however bad the change was.
+	if err := pgcopy.Analyze(ctx, url); err != nil {
+		// Not fatal. A golden with stale statistics is worse than one with
+		// fresh ones and far better than no golden, and the failure is worth
+		// saying out loud rather than stopping a refresh for.
+		o.progress("could not refresh planner statistics: " + err.Error())
 	}
 	return res.Rows, res.Tables, nil
 }

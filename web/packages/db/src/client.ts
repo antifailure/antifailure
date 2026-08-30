@@ -49,6 +49,9 @@ export interface UnscopedOptions {
   sessionHash?: Buffer
   /** The hash of an engine token, for resolving a bearer token. */
   engineTokenHash?: Buffer
+  /** The hash of an email sign-in token, for issuing one and for redeeming
+   *  the link it was sent in. */
+  emailTokenHash?: Buffer
   /** GitHub numeric ids being upserted, so their rows can be read back. */
   githubIds?: number[]
   /** The user sign-in has just established, so their memberships can be read
@@ -130,6 +133,7 @@ export function createPool(options: PoolOptions): Pool {
           // checkable by reading this function instead of trusting callers.
           'antifailure.session_hash': '',
           'antifailure.engine_token_hash': '',
+          'antifailure.email_token_hash': '',
           'antifailure.github_ids': (opts?.githubIds ?? []).join(','),
           'antifailure.signin_user_id': opts?.signinUserId ?? '',
           'antifailure.github_logins': (opts?.githubLogins ?? []).join(','),
@@ -145,6 +149,9 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.session_hash': opts?.sessionHash ? opts.sessionHash.toString('hex') : '',
           'antifailure.engine_token_hash': opts?.engineTokenHash
             ? opts.engineTokenHash.toString('hex')
+            : '',
+          'antifailure.email_token_hash': opts?.emailTokenHash
+            ? opts.emailTokenHash.toString('hex')
             : '',
           'antifailure.github_ids': (opts?.githubIds ?? []).join(','),
           'antifailure.signin_user_id': opts?.signinUserId ?? '',

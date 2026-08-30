@@ -7,7 +7,7 @@
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import {
   ABSOLUTE_LIFETIME_MS, IDLE_TIMEOUT_MS, hashToken, issueSession, resolveSession,
   sessionCookie, readCookie, csrfTokenFor, csrfMatches,
@@ -121,6 +121,42 @@ describe('the OAuth exchange', { skip: hasDatabase ? false : 'no Postgres' }, ()
     assert.equal(body.signedIn, true)
     assert.equal(body.orgId, org.orgId)
     assert.equal(body.role, 'member')
+  })
+
+  it('signs in behind a chain of proxies, where the forwarded header is a list', async () => {
+    // The header a request arrives with in production is not one address. Two
+    // proxies in front of this make it "client, proxy", and the sessions table
+    // records the address in an `inet` column, which refuses a list outright.
+    // The failure was total: the INSERT threw, the callback answered 500, and
+    // nobody could sign in at all through that path. Nothing behind a single
+    // proxy or a direct request reproduces it, which is why it is written down
+    // here rather than left to be found by whoever deploys behind a second one.
+    //
+    // A direct request with no header at all is the same bug from the other
+    // side: the bucket key for a request with no address is the literal string
+    // "unknown", and that is a fine bucket key and not an address.
+    const cases: Record<string, string | null> = {
+      '203.0.113.7, 198.51.100.4': '203.0.113.7',
+      '203.0.113.9:44321': '203.0.113.9',
+      '[2001:db8::1]:443': '2001:db8::1',
+      'unknown': null,
+      '': null,
+    }
+
+    for (const [header, expected] of Object.entries(cases)) {
+      const { state, code } = await startAndApprove(`proxy-${randomUUID().slice(0, 6)}`)
+      const res = await h.fetch(`/auth/github/callback?code=${code}&state=${state}`, {
+        ...(header ? { headers: { 'x-forwarded-for': header } } : {}),
+      })
+      assert.equal(res.status, 302, `a request forwarded as "${header}" could not sign in`)
+
+      const cookie = res.headers.get('set-cookie')!.split(';')[0]!
+      const token = cookie.slice(cookie.indexOf('=') + 1)
+      const [row] = await h.admin<{ ip: string | null }[]>`
+        SELECT host(ip) AS ip FROM sessions
+        WHERE token_hash = ${createHash('sha256').update(token, 'utf8').digest()}`
+      assert.equal(row?.ip ?? null, expected, `"${header}" was recorded as ${row?.ip ?? 'nothing'}`)
+    }
   })
 
   it('refuses a state value it never issued', async () => {

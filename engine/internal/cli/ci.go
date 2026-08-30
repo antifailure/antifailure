@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"sort"
@@ -12,8 +14,10 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/insights"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
+	"github.com/antifailure/antifailure/engine/internal/verify"
 )
 
 // af ci is the whole check in one command, because that is how it is used.
@@ -108,6 +112,18 @@ change.`),
 				run.Egress = summariseEgress(decisions)
 			}
 
+			// The masking result and what the database noticed. Both were
+			// fields on the report that nothing ever filled in, so the two
+			// sections a reviewer most needs could not appear: the one that
+			// says the data was proved masked, and the one that says how the
+			// change behaves against real volume. A section that cannot be
+			// rendered is the same as a section that does not exist, and this
+			// one was the product's central promise.
+			run.Verification = attestedMasking(ctx, o, run.Golden)
+			if rep, iErr := o.Insights(ctx, 25); iErr == nil {
+				run.Insights = summariseInsights(rep)
+			}
+
 			if withLoad {
 				e.Out.Section("Generating load")
 				if res, _, lErr := o.Load(ctx, env.LoadOptions{Duration: 30 * time.Second}); lErr == nil {
@@ -133,7 +149,15 @@ change.`),
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&output, "output", "o", "", "Write the report here as well as to the terminal")
+	// --report, not --output.
+	//
+	// A local --output shadows the persistent one, so on this command alone
+	// -o meant "a file to write" while everywhere else it means "text or
+	// json". `af ci -o json` wrote the pull request comment to a file called
+	// `json`, silently, and af ci had no machine readable output at all,
+	// which is notable for the one command written for CI. Renaming it frees
+	// -o to mean here what it means everywhere.
+	cmd.Flags().StringVar(&output, "report", "", "Write the report here as well as to the terminal")
 	cmd.Flags().BoolVar(&skipTeardown, "keep", false, "Leave the environment up, for debugging a failure")
 	cmd.Flags().BoolVar(&withLoad, "load", false, "Generate load as well as running the workflows")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Give up after this long")
@@ -141,6 +165,82 @@ change.`),
 	cmd.Flags().StringVar(&runner, "runner", "", "Path to the runner's entry point")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to check, defaulting to the checked out one")
 	return cmd
+}
+
+// attestedMasking reads the golden's own attestation rather than rescanning.
+//
+// The scan already ran, at refresh, and its result is signed and stored on the
+// version. Reading it back is what makes the pull request comment report the
+// same fact the branch rule enforced, rather than a second opinion that could
+// disagree with it. The signature is checked here for the same reason it
+// exists: this is a different process from the one that produced it.
+func attestedMasking(ctx context.Context, o *env.Orchestrator, golden string) *report.Verification {
+	if golden == "" {
+		return nil
+	}
+	versions, err := o.Goldens(ctx)
+	if err != nil {
+		return nil
+	}
+	for _, v := range versions {
+		if v.ID != golden || v.Attestation == "" {
+			continue
+		}
+		var a verify.Attestation
+		if json.Unmarshal([]byte(v.Attestation), &a) != nil {
+			return nil
+		}
+		if !a.Verify() {
+			// Present and unreadable is worse than absent, so it is said
+			// rather than dropped.
+			return &report.Verification{
+				Findings: []string{"The golden's attestation does not verify against its own key."},
+			}
+		}
+		out := &report.Verification{
+			Clean: a.Report.Clean(), Columns: a.Report.Columns,
+			RowsSampled: a.Report.RowsSampled,
+		}
+		for _, f := range a.Report.Findings {
+			// The finding, never the value that produced it.
+			out.Findings = append(out.Findings,
+				fmt.Sprintf("%s.%s holds %s.", f.Table, f.Column, f.Detector))
+		}
+		return out
+	}
+	return nil
+}
+
+// summariseInsights reduces the full report to what fits in a comment.
+//
+// Three facts, because the audience has thirty seconds: which tables the run
+// read end to end, what the slowest statement cost, and how many indexes
+// nothing touched. Everything else is what `af insights` is for.
+func summariseInsights(r insights.Report) *report.Insights {
+	out := &report.Insights{Missing: r.Missing}
+	for _, s := range r.Scans {
+		out.Sequential = append(out.Sequential, report.Scan{
+			Table: s.Table, Scans: s.SeqScans, Rows: s.LiveRows,
+		})
+		if len(out.Sequential) == 3 {
+			break
+		}
+	}
+	for _, q := range r.Queries {
+		if q.TotalMs > out.SlowestMs {
+			out.Slowest, out.SlowestMs = q.Text, q.TotalMs
+		}
+	}
+	for _, i := range r.Unused {
+		out.Unused = append(out.Unused, i.Table+"."+i.Name)
+	}
+	if len(out.Sequential) == 0 && out.Slowest == "" && len(out.Unused) == 0 && len(out.Missing) == 0 {
+		// Nothing to say and nothing missing. A section reading "no table
+		// read end to end" is still worth printing, because it is the
+		// difference between checked and not checked.
+		return out
+	}
+	return out
 }
 
 // writeReport prints the comment and writes it where a workflow can post it.

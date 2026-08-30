@@ -73,6 +73,18 @@ type EnvSpec struct {
 	// than one that refuses. Zero means use DatabaseURL for both, which is
 	// correct for a provider with no pool.
 	MigrationDatabaseURL secrets.Value
+	// PublicPorts maps a service name to the host port it will be reachable
+	// on, reserved before anything starts.
+	//
+	// Reserved up front, and not merely reported afterwards, because a service
+	// has to be told its own address before it runs. An application that emails
+	// a sign in link, redirects through OAuth, or hands a webhook a callback
+	// builds an absolute URL, and inside a preview the only address that works
+	// is one the runtime allocates. Without this, every such application sends
+	// a link to its own container port: the agent that received one navigated
+	// to http://localhost:3100 and got a connection refused, four minutes into
+	// a workflow.
+	PublicPorts map[string]int
 	// Egress is the policy the sidecar enforces.
 	//
 	// Nil means block everything. The runtime never decides what a rule means;

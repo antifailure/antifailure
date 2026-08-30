@@ -31,6 +31,12 @@ const (
 	AFBLD004 Code = "AF-BLD-004"
 	// No build strategy could be detected for {service}.
 	AFBLD010 Code = "AF-BLD-010"
+	// The Dockerfile {dockerfile} for {service} is excluded from the build
+	// context by .dockerignore.
+	AFBLD011 Code = "AF-BLD-011"
+	// The Dockerfile {dockerfile} for {service} is outside the build
+	// context {context}.
+	AFBLD012 Code = "AF-BLD-012"
 
 	// Control plane
 	// The control plane at {url} could not be reached.
@@ -64,6 +70,11 @@ const (
 	// Extension {extension} is required by the golden and is not available
 	// on the target.
 	AFDB007 Code = "AF-DB-007"
+	// No golden matches this manifest's masking rules, and {count} were
+	// made under different ones.
+	AFDB008 Code = "AF-DB-008"
+	// The database seed command failed: {detail}
+	AFDB009 Code = "AF-DB-009"
 	// The storage pool has {available} free and the operation needs
 	// {needed}.
 	AFDB010 Code = "AF-DB-010"
@@ -339,6 +350,24 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
+	AFBLD011: {
+		Code:      AFBLD011,
+		Area:      "BLD",
+		Message:   "The Dockerfile {dockerfile} for {service} is excluded from the build context by .dockerignore.",
+		NextStep:  "Add '!{dockerfile}' to .dockerignore. The file exists, and the build sends a filtered copy of the tree to the daemon, so a path the ignore file excludes is not there to build from.",
+		Docs:      "guides/build",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFBLD012: {
+		Code:      AFBLD012,
+		Area:      "BLD",
+		Message:   "The Dockerfile {dockerfile} for {service} is outside the build context {context}.",
+		NextStep:  "Widen build.context, or move the Dockerfile inside it. A build cannot read a file the context does not carry.",
+		Docs:      "guides/build",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
 	AFCP001: {
 		Code:      AFCP001,
 		Area:      "CP",
@@ -444,6 +473,24 @@ var catalog = map[Code]Entry{
 		Message:   "Extension {extension} is required by the golden and is not available on the target.",
 		NextStep:  "Install {extension} on the target, or remove its use from the schema before refreshing.",
 		Docs:      "providers/overview",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB008: {
+		Code:      AFDB008,
+		Area:      "DB",
+		Message:   "No golden matches this manifest's masking rules, and {count} were made under different ones.",
+		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB009: {
+		Code:      AFDB009,
+		Area:      "DB",
+		Message:   "The database seed command failed: {detail}",
+		NextStep:  "Run the command yourself against an empty database of the same version. It is: {command}",
+		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
 	},

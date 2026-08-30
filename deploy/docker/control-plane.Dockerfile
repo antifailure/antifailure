@@ -21,13 +21,29 @@ WORKDIR /app
 # cached until a dependency actually changes.
 COPY web/package.json web/package-lock.json ./
 COPY web/apps/api/package.json ./apps/api/
+COPY web/apps/app/package.json ./apps/app/
 COPY web/packages/db/package.json ./packages/db/
 COPY web/packages/policy/package.json ./packages/policy/
 
+# Scoped to this workspace, not the whole tree. The web application is a
+# workspace member and its dependencies are a framework and a compiler; a plain
+# `npm ci` here would install every one of them into an image that runs a
+# server and never renders a page. The manifest above is still copied, because
+# npm needs the whole workspace graph present to resolve the lockfile against
+# it, and a manifest is not an install.
+#
 # --ignore-scripts: nothing in this dependency tree needs a build step, and a
 # postinstall script running at image build time is a supply chain hole that
 # buys nothing here.
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts \
+      --workspace @antifailure/api --include-workspace-root
+
+# Asserted rather than assumed. The scoping above is one flag away from
+# silently installing a web framework into this image, and an image that is
+# three hundred megabytes larger than it should be is not something anybody
+# notices from a build log.
+RUN test ! -d node_modules/next \
+  || (echo 'the web framework is in the API image: the workspace scoping above stopped working' && exit 1)
 
 # ---------------------------------------------------------------------------
 # Runtime.
@@ -70,6 +86,9 @@ COPY web/packages/policy ./packages/policy
 # how a schema arrives that the running code does not understand.
 COPY deploy/docker/bootstrap.mjs ./bootstrap.mjs
 COPY deploy/docker/maintenance.mjs ./maintenance.mjs
+# The preview identities. Refuses to run outside an environment the engine
+# created; see the file for why that check is not a formality.
+COPY deploy/docker/personas.mjs ./personas.mjs
 
 # The migrations are read from disk at runtime by AF_MIGRATE=1, so they have to
 # be in the image. Asserted rather than assumed: an image whose migration
@@ -88,7 +107,13 @@ EXPOSE 8080
 # so this answers "is the process up", never "can it serve". Readiness is left
 # to the orchestrator, and the reason is written down in the self-hosting page
 # rather than implied by a probe that claims more than it checks.
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+# Ten seconds, and five retries. /health is a cheap route and this is still
+# generous on purpose: a check that fails on a loaded machine takes down a
+# container that was answering correctly, which is a worse outcome than a check
+# that waits. Measured against the sibling image, where a three second timeout
+# failed seventeen times in a row against a page that was returning 200 in 4.4
+# seconds.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=5 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.AF_PORT||8080)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "apps/api/src/main.ts"]

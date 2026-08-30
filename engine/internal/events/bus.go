@@ -66,6 +66,28 @@ type Option func(*Bus)
 
 // WithIDFunc replaces the event identifier generator. Tests use it to get
 // stable identifiers.
+// ResumeSequence starts an environment's counter after a value it already
+// reached.
+//
+// Seq is documented as "a monotonic counter per environment, so a consumer can
+// order events and notice a gap", and until this existed it was per process:
+// one `af up` reached 127 and the `af down` after it started again at 1 in the
+// same log, for the same environment. Ordering by sequence was wrong across
+// commands and a gap could not be detected at all, because 1 after 127 is
+// indistinguishable from a restart and from 126 lost events.
+//
+// The caller supplies where to resume from, because the bus deliberately knows
+// nothing about storage. The engine reads it back from the environment's own
+// event log, which is the only place the number has ever been durable.
+func ResumeSequence(env string, seq uint64) Option {
+	return func(b *Bus) {
+		if env == "" || seq == 0 {
+			return
+		}
+		b.seqByEnv[env] = seq
+	}
+}
+
 func WithIDFunc(f func() string) Option {
 	return func(b *Bus) { b.idFn = f }
 }

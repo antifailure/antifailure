@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/hud"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/redact"
@@ -126,7 +128,34 @@ func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestra
 			env2.Out.Printf("  %s\n", r.String(line))
 		},
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+	attachEventLog(o, root, r)
 	return o, m, err
+}
+
+// attachEventLog writes the environment's event stream to disk.
+//
+// Every command that touches an environment produces a typed, sequenced,
+// redacted event for everything it does, and until this existed the only
+// consumer was the terminal. The two sinks that write those events to a file
+// were both fully implemented, both tested, and both had zero call sites, so
+// there was no machine readable record of a run anywhere: a CI job could only
+// scrape the prose, and a support bundle could only carry what a person had
+// scrolled past.
+//
+// Failing to open the log is not a reason to refuse the command. The log is a
+// record of the work, not the work, and a read only checkout or a full disk
+// must not stop somebody bringing an environment up. The sink disables itself
+// and says so in that case, which is the same answer one level down.
+func attachEventLog(o *env.Orchestrator, root string, r *redact.Redactor) {
+	dir := filepath.Join(root, env.StateDir, "events")
+	sink, err := events.NewFileSink(dir, o.EnvID(), r, events.FileSinkOptions{})
+	if err != nil {
+		return
+	}
+	o.AddSink(sink)
 }
 
 // repoRoot is the directory holding the manifest.

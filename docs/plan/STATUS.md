@@ -366,6 +366,41 @@ community engine, and `af up` calls them. That matters: they shipped once with
 no call site anywhere, which is a socket nothing is plugged into and is
 indistinguishable from one that works until somebody relies on it.
 
+## Dogfooding
+
+Antifailure run against Antifailure's own control plane. The full write-up,
+including every finding and what is not built, is in
+[docs/plan/notes/dogfood.md](notes/dogfood.md).
+
+| Piece | State | Notes |
+| --- | --- | --- |
+| `antifailure.yaml` and `masking.yaml` for the control plane | proven | An ordinary manifest with no special case in it. `af explain` resolves it and `af golden refresh` runs it end to end. |
+| The web application, `web/apps/app` | written | Six routes against the real API, a contract test that asserts every field it renders comes back with the type it expects, and no page-level horizontal overflow at 390px. Never yet driven by an agent. |
+| Signing in with a link | proven | `web/apps/api`, migration 0012, 14 tests covering the race, expiry, open redirect, and fixation. It exists because a preview environment has no route to github.com, which is the product working rather than a problem to solve. |
+| `af golden refresh` on the control plane | proven | Copy, mask, verify, publish: 19 tables, 2620 rows, 84 columns verified, 28s. It took six engine fixes to get there, listed in the note. |
+| Recorded model answers | proven | `AF_MODEL_CASSETTE`, 11 tests. A replay that misses refuses rather than calling the model or silently degrading. |
+| `af up` on the control plane | written | Branches the golden, builds both images, issues an environment certificate, starts the egress proxy, and runs migrations. Reached the migration step and stopped there on a variable name the published image expects and the engine does not inject, which is fixed. Not yet observed green end to end on one machine. |
+| `af test`, `af insights`, `af load smoke` on the control plane | planned | Configured in the manifest, and none of the three has run against the control plane. |
+| The builder | proven | Every image used the deprecated legacy builder, at roughly 25 seconds a step against a 34 step Dockerfile. BuildKit is negotiated from the daemon's ping, with a legacy fall back that says so, and its status stream is decoded into the same redacted log. |
+| `tools/dogfood` | proven | Runs `af ci` the way a customer does and adds three things: a budget per step taken from the environment's own event stream, a JSON record per run, and a leak check afterwards. Ten tests. Run against a real `af` binary: it times each step, applies the budget, writes the record, and exits non-zero on a failure. |
+| `.github/workflows/dogfood.yml` | written | A pull request job against the control plane, a nightly against the corpus with a load smoke, both in recorded model mode. Never run: it has not been pushed. |
+| The ten-green streak | planned | **No streak exists and none is claimed.** |
+
+What it found: thirty-three defects, thirty-two fixed with regression tests,
+one issue open at
+[antifailure/antifailure#24](https://github.com/antifailure/antifailure/issues/24).
+Every one of them was invisible in the files, and five are the same shape: a
+thing that was written, tested, documented, and never called.
+
+The two that matter most: a golden could not be made of any database using
+row-level security, which is the pattern this product's own documentation
+recommends; and masking rules did not follow a table to its partitions, so a
+column explicitly marked `preserve` was emptied through a partition with
+nothing saying so. Two more were about scoping rather than correctness: `af up`
+branched whichever verified golden was newest regardless of which manifest made
+it, so a preview of one project could come up holding a masked copy of another
+project's database.
+
 ## Phase 14. Scaling
 
 | Sub-phase | State | Notes |
@@ -382,7 +417,7 @@ indistinguishable from one that works until somebody relies on it.
 | 11.2 Generated references | proven | Five references are generated and every one fails the build when it drifts: the command reference from the cobra tree, the error reference from the catalog, the transform reference from the masking registry, and a page per JSON Schema from `tools/schemadoc`. The event envelope schema itself is generated from the Go type, with a test that walks the struct so a field added without a schema entry fails rather than ships. |
 | 11.4 Error catalog completeness | proven | Every entry is either returned somewhere or marked reserved, and a reserved entry that something returns fails too. It found 38 entries documenting errors this version cannot produce. |
 | 11.5 Contributing and provider authoring | proven | `CONTRIBUTING.md`, `docs/contributing/provider-authoring.md` including a walkthrough of the worked example the plan asks for, and both document types with templates: RFCs in `docs/rfc/` for a change somebody outside the repository will notice, argued before the code exists, and ADRs in `docs/adr/` for what was decided and why. The worked example is `engine/internal/testutil/fakes/inmemory.go`, a complete provider in 180 lines with no database behind it, and the guide names the four things in it worth copying rather than inventing. |
-| 11.6 Documentation quality assurance | written | Five of the plan's six deliverables. The four gates it names are at zero findings and run in CI: vale with the Google style at error level, cspell with a project dictionary, lychee over the assembled site including fragments, and the G8 forbidden token scan. `tools/readability` is the per page report, in the gate with a limit of 28 words a sentence, which is five words above the hardest page today, so it fires on drift rather than on style: 41 pages, mean 16.3, hardest 23.0. Screenshot freshness is enforced for the one screenshot this product has, the dashboard frame in `guides/dashboard`, which is rendered by `internal/hud` and regenerated by `just generate` rather than typed. All four gates plus the readability report now cover `examples/` as well as the site, because an example's README is the first prose most people meet. `tools/walkthrough` is the scripted new user walkthrough: `af doctor`, `af explain`, `af up`, open the URL it printed, `af status`, `af down`, each timed, with `--budget` to judge the total and a teardown that runs whether or not a step failed. It runs on a daily schedule in `walkthrough.yml` rather than on every push, for the same reason as the external link check. **It found three defects in `examples/go-api` on its first run and none of them were visible in the files:** a reachable `golang.org/x/text` advisory, a manifest declaring `DATABASE_URL` as required while the database block already injects it, and a sandbox rule whose credential cannot resolve on a machine that has never been given a test key. A fourth is fixed and unproven here: the image had no `psql` while the manifest's migrate command used it, and the full path has not yet completed on this machine, where `af up` on this example exceeded fifteen minutes against a plain `docker build` of the same image taking one minute forty eight. The daily run on a clean machine is what will settle that. |
+| 11.6 Documentation quality assurance | written | Five of the plan's six deliverables. The four gates it names are at zero findings and run in CI: vale with the Google style at error level, cspell with a project dictionary, lychee over the assembled site including fragments, and the G8 forbidden token scan. `tools/readability` is the per page report, in the gate with a limit of 28 words a sentence, which is five words above the hardest page today, so it fires on drift rather than on style: 41 pages, mean 16.3, hardest 23.0. Screenshot freshness is enforced for the one screenshot this product has, the dashboard frame in `guides/dashboard`, which is rendered by `internal/hud` and regenerated by `just generate` rather than typed. All four gates plus the readability report now cover `examples/` as well as the site, because an example's README is the first prose most people meet. Not built: the scripted new user walkthrough that times the getting started path. |
 | 11.1 Information architecture and content | written | 43 pages across the fixed architecture, and the site is live. Getting started has one page rather than the three the plan asks for, and that is a placement gap rather than a coverage one, which is a correction to what this row said first: the GitHub Actions path is documented in `guides/github` and the hosted path in `self-hosting/control-plane`, and neither is reachable from Getting started where somebody arriving would look. Genuinely missing: the framework guides the plan names by name, Next.js with Supabase, Next.js with Neon, Django, Rails, and monorepos. |
 | 11.3 Examples and tutorials | written | One of the three the plan names. `examples/go-api` is a complete application against the whole configuration surface: two tables with a foreign key, three endpoints, masking rules that link the join, a sandboxed egress rule, a persona, a workflow and two invariants. It is gated rather than committed and forgotten: `just examples` and CI build every example outside the workspace and run `af explain` over every manifest, because an example that does not compile is worse than none, being the first thing a user copies. Its manifest has not been run through a full `af up`; the throwaway repository used to prove `af up --hud` was. Missing: the Next.js and Django examples, and the recorded tutorials. |
 

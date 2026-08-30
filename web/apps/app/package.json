@@ -1,0 +1,31 @@
+{
+  "name": "@antifailure/app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The control plane a person looks at: environments, runs, network policy, and the audit log.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev --port 3100",
+    "build": "next build",
+    "start": "next start --port ${AF_APP_PORT:-3100}",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "geist": "^1.7.2",
+    "next": "^15.4.6",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.12",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.11",
+    "@types/react-dom": "^19.1.7",
+    "tailwindcss": "^4.1.12",
+    "typescript": "^5.9.2",
+    "@antifailure/api": "*",
+    "@antifailure/db": "*",
+    "postgres": "^3.4.9"
+  }
+}

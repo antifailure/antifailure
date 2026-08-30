@@ -23,6 +23,7 @@ before anything runs.
 | `credit_card` | no | Replaces a card number with a Luhn valid test number, so a payment form still validates it and no real card is ever present. |
 | `date_shift` | no | Moves a date or timestamp by a deterministic offset of up to a year, keeping its format and its time of day. |
 | `email` | yes | Replaces an address with a unique synthetic one at example.test, which is reserved and can never receive mail. |
+| `empty_json` | no | Replaces a JSON value with an empty one of the same kind, an object or an array. This is what empties a JSON column that cannot hold null, which nullify cannot do. |
 | `first_name` | no | Replaces a given name with a synthetic one. |
 | `free_text` | no | Replaces prose with synthetic prose of a similar length, so a layout built for three paragraphs still gets three paragraphs. |
 | `hash_hex` | yes | Replaces a value with a keyed hash of the same length. Equality is preserved and nothing else is. |
@@ -71,6 +72,13 @@ does not.
 
 A column that nothing reads can have `nullify`, and that is the default for
 unclassified free text on purpose: it makes the absence visible.
+
+`nullify` cannot empty a column that is `NOT NULL`, and the commonest shape of
+free-form column in any schema is `jsonb NOT NULL DEFAULT '{}'`. That is what
+`empty_json` is for: it writes an empty object or an empty array rather than
+removing the value, so the constraint still holds and a reader that indexes
+into an array still finds one. It is the default for an unclassified JSON
+column for the same reason `nullify` is the default for unclassified text.
 
 ## Uniqueness
 

@@ -32,7 +32,7 @@ jobs:
         run: curl -fsSL https://antifailure.dev/install.sh | sh
 
       - name: Run the check
-        run: af ci --output report.md
+        run: af ci --report report.md
         env:
           # Bring your own key. Without one the agents still run; workflows
           # that need a page read come back unverified rather than guessed at.

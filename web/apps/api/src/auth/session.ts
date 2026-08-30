@@ -103,6 +103,11 @@ export interface ResolvedSession {
   sessionId: string
   userId: string
   orgId: string | null
+  /** The organization's human name, for a page to say which tenant it is
+   *  showing. Being in the wrong one is the most confusing state this product
+   *  has, because every page is simply empty, and an identifier in the corner
+   *  answers a question a UUID does not. */
+  orgSlug: string | null
   label: string
   role: Role | null
   /** What a mutating request must present, derived from the token the caller
@@ -192,19 +197,25 @@ export async function resolveSession(
   )
 
   if (!base) return null
-  if (!base.orgId) return { ...base, role: null }
+  if (!base.orgId) return { ...base, orgSlug: null, role: null }
 
   // Read on every request rather than carried in the session. Removing
   // somebody from an organization has to take effect on their next request,
   // not on their next sign in, and a role in a cookie takes effect whenever
   // they happen to sign in again, which may be never.
-  const role = await pool.withTenant({ orgId: base.orgId, userId: base.userId }, async (db) => {
-    const rows = await db.execute<{ role: Role }>(sql`
-      SELECT role FROM members WHERE user_id = ${base.userId} AND org_id = ${base.orgId}`)
-    return rows[0]?.role ?? null
+  // The role and the organization's name in one round trip, because they are
+  // read on every single request and a second query for a label is a second
+  // query on every page of the application.
+  const scoped = await pool.withTenant({ orgId: base.orgId, userId: base.userId }, async (db) => {
+    const rows = await db.execute<{ role: Role | null; slug: string | null }>(sql`
+      SELECT m.role, o.slug
+      FROM organizations o
+      LEFT JOIN members m ON m.org_id = o.id AND m.user_id = ${base.userId}
+      WHERE o.id = ${base.orgId}`)
+    return { role: rows[0]?.role ?? null, slug: rows[0]?.slug ?? null }
   })
 
-  return { ...base, role }
+  return { ...base, role: scoped.role, orgSlug: scoped.slug }
 }
 
 export async function revokeSession(pool: Pool, token: string): Promise<void> {

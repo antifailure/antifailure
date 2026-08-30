@@ -16,6 +16,7 @@ package docker
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"sort"
 	"strconv"
@@ -237,10 +238,31 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 
 	version := provider.NewGoldenVersionID(p.clock.Now(), spec.RulesHash)
 	tag := ImageRepo + ":" + version
+	// The metadata goes on the image, because the image is the only part of a
+	// golden that outlives the process that made it. Without this, a version
+	// read back by ListGoldens carries only what its tag encodes, so the rules
+	// digest is empty and the attestation is gone, and everything downstream
+	// that reads either one is silently inert.
+	//
+	// The attestation is a signed JSON document, and a label holds a string,
+	// so it is encoded rather than embedded: a raw one carries quotes and
+	// newlines through a Dockerfile LABEL instruction, which is a parser this
+	// has no reason to argue with.
+	changes := []string{
+		`LABEL ` + LabelManaged + `=` + dockerutil.ManagedValue,
+		`LABEL ` + LabelKind + `=golden`,
+	}
+	if spec.RulesHash != "" {
+		changes = append(changes, `LABEL `+dockerutil.LabelRules+`=`+spec.RulesHash)
+	}
+	if attestation != "" {
+		changes = append(changes, `LABEL `+dockerutil.LabelAttestation+`=`+
+			base64.StdEncoding.EncodeToString([]byte(attestation)))
+	}
 	if _, err := p.cli.ContainerCommit(ctx, c.id, container.CommitOptions{
 		Reference: tag,
 		Comment:   "Antifailure golden " + version,
-		Changes:   []string{`LABEL ` + LabelManaged + `=` + dockerutil.ManagedValue, `LABEL ` + LabelKind + `=golden`},
+		Changes:   changes,
 	}); err != nil {
 		return provider.GoldenVersion{}, fmt.Errorf("db.docker: commit the golden image: %w", err)
 	}
@@ -303,13 +325,20 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 			if !ok {
 				continue
 			}
-			out = append(out, provider.GoldenVersion{
+			gv := provider.GoldenVersion{
 				ID: id, CreatedAt: time.Unix(img.Created, 0).UTC(),
 				SizeBytes: img.Size, ProviderRef: tag,
 				// A committed image only exists because verification passed;
 				// the commit is the last step of a refresh.
-				Verified: true,
-			})
+				Verified:  true,
+				RulesHash: img.Labels[dockerutil.LabelRules],
+			}
+			if raw := img.Labels[dockerutil.LabelAttestation]; raw != "" {
+				if decoded, decErr := base64.StdEncoding.DecodeString(raw); decErr == nil {
+					gv.Attestation = string(decoded)
+				}
+			}
+			out = append(out, gv)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
