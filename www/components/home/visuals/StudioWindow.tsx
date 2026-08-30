@@ -75,26 +75,44 @@ export function InnerHeader({
   );
 }
 
+/**
+ * The tab row inside a run window.
+ *
+ * `short` carries the same tabs written for a phone. Two twenty-character
+ * labels and a verdict chip do not fit in 290 points, and the alternative was
+ * a tab whose name ended mid-word.
+ */
 export function InnerPills({
   items,
+  short,
   active,
   onSelect,
   action,
 }: {
   items: readonly string[];
+  short?: readonly string[];
   active: number;
   onSelect?: (index: number) => void;
   action?: ReactNode;
 }) {
   return (
-    <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-y border-black/[0.08] px-3 max-md:px-2">
-      <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto no-scrollbars">
+    <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-y border-black/[0.08] px-3 max-md:gap-2 max-md:px-2">
+      <div className="fade-scroll-x flex min-w-0 items-center gap-0.5 overflow-x-auto no-scrollbars">
         {items.map((item, index) => {
           const selected = index === active;
           const className = cn(
-            "shrink-0 rounded-[8px] px-2.5 py-1 text-[12px] tracking-extra-tight",
+            "shrink-0 rounded-[8px] px-2.5 py-1 text-[12px] tracking-extra-tight max-md:px-2 max-md:text-[11px]",
             selected ? "bg-[#F4F4F6] text-[#1A1A1A]" : "text-[#6B6F76]",
           );
+          const label =
+            short && short[index] && short[index] !== item ? (
+              <>
+                <span className="max-md:hidden">{item}</span>
+                <span className="hidden max-md:inline">{short[index]}</span>
+              </>
+            ) : (
+              item
+            );
           if (onSelect) {
             return (
               <button
@@ -103,19 +121,19 @@ export function InnerPills({
                 className={cn(className, "pointer-events-auto hover:text-[#1A1A1A]")}
                 onClick={() => onSelect(index)}
               >
-                {item}
+                {label}
               </button>
             );
           }
           return (
             <span key={item} className={className}>
-              {item}
+              {label}
             </span>
           );
         })}
       </div>
       {action ? (
-        <span className="shrink-0 rounded-[8px] px-2.5 py-1 text-[12px] tracking-extra-tight text-[#6B6F76] ring-1 ring-black/[0.08]">
+        <span className="shrink-0 rounded-[8px] px-2.5 py-1 text-[12px] tracking-extra-tight text-[#6B6F76] ring-1 ring-black/[0.08] max-md:px-2 max-md:text-[11px]">
           {action}
         </span>
       ) : null}

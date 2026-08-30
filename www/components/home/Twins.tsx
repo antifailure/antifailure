@@ -56,6 +56,7 @@ export function Twins() {
         <div className="min-w-0">
           <Heading
             icon="twins"
+            label="Isolated Twin"
             title="<strong>A disposable production twin.</strong> Build the candidate, restore safe state, contain side effects, and destroy everything when the report is done."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
