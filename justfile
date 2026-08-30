@@ -524,7 +524,7 @@ examples:
 # it fires on a page that drifted, not on a page whose subject needs long
 # sentences. Run it with no argument to read the whole report.
 readability:
-    go run ./tools/readability . --max 28
+    go run ./tools/readability --max 28 .
 
 # The G8 forbidden token scan: notes to the author, unfilled slots, names that
 # belong to a person rather than the product, addresses that resolve only on

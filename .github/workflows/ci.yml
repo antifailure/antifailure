@@ -146,7 +146,7 @@ jobs:
         # averages 23 words a sentence and the limit is 28, so this fires on a
         # page that drifted rather than on a page whose subject needs long
         # sentences.
-        run: go run ./tools/readability . --max 28
+        run: go run ./tools/readability --max 28 .
 
       - name: No forbidden tokens in the documentation
         # The G8 scan. Documentation is a product surface, and these are the
