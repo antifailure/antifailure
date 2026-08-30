@@ -70,9 +70,8 @@ change.`),
 				defer func() {
 					c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 					defer cancel()
-					if td, downErr := o.Down(c); downErr == nil {
-						e.Out.Printf("  torn down, %d resources removed\n", td.Removed)
-					}
+					td, downErr := o.Down(c)
+					reportTeardown(e, td, downErr)
 				}()
 			}
 
@@ -236,4 +235,45 @@ func commitSHA(e *Env) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// reportTeardown says what the deferred teardown did, including when it did
+// nothing.
+//
+// This used to be one line inside the defer, guarded by `if downErr == nil`, so
+// the two outcomes that matter were both silent. A teardown that could not
+// reach the daemon printed nothing whatsoever, which on a green run is
+// indistinguishable from --keep. A teardown that ran and left containers behind
+// printed only how many it removed, and never that anything stayed. Either way
+// a pull request went green with an environment still on the runner, which is
+// the leak this command exists to prevent, reported as a success.
+//
+// It does not change the exit code, and that is a decision rather than an
+// oversight. af ci's exit code is the verdict on the change under test; a
+// container the daemon refused to remove is a fact about the runner, and
+// failing somebody's correct pull request for it sends them to read their own
+// diff. The leak check that does gate is G10, which counts what is left after
+// the suites rather than trusting any one command's report. What this owes the
+// reader is the sentence, and the sentence was missing.
+func reportTeardown(e *Env, td *env.Teardown, err error) {
+	if err != nil {
+		// Named with the same next step the error catalog gives for AF-RUN-030,
+		// because the situation is the same one and somebody reading a CI log
+		// needs the command, not the diagnosis.
+		e.Out.Printf("  %s teardown did not run: %v\n", e.Out.S(StyleBad, SymbolFail), err)
+		e.Out.Printf("    The environment is still up. Run 'af down' where this ran.\n")
+		return
+	}
+	if td == nil {
+		return
+	}
+	e.Out.Printf("  torn down, %d resources removed\n", td.Removed)
+	if len(td.Pending) == 0 {
+		return
+	}
+	e.Out.Printf("  %s %d resources are still there. Run 'af down' where this ran; the journal remembers what is left.\n",
+		e.Out.S(StyleBad, SymbolFail), len(td.Pending))
+	for _, p := range td.Pending {
+		e.Out.Printf("    %s/%s: %s\n", p.Kind, p.ID, p.Reason)
+	}
 }
