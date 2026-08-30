@@ -191,3 +191,74 @@ func TestUntarAcceptsWhatItShould(t *testing.T) {
 	_, statErr := os.Stat(filepath.Join(dir, "fine.go"))
 	require.NoError(t, statErr)
 }
+
+// A manifest in a subdirectory has to get that subdirectory's tree, not the
+// whole repository's. Asking git for the whole tree puts every file one
+// directory deeper than the build context expects, and the baseline build then
+// fails with no Dockerfile in a tree that plainly has one.
+func TestTheBaselineCheckoutIsTheManifestsOwnSubtree(t *testing.T) {
+	root, base, _ := gitRepoWithSubdirectory(t)
+
+	o, err := env.New(env.Options{
+		Root:     filepath.Join(root, "services", "api"),
+		Manifest: &schema.Manifest{Name: "api"},
+		Branch:   "feature",
+		Progress: func(string) {},
+	})
+	require.NoError(t, err)
+
+	dir, clean, err := o.BaselineTreeForTest(t.Context(), base)
+	require.NoError(t, err)
+	t.Cleanup(clean)
+
+	// The service's own files are at the root of the checkout.
+	body, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	require.NoError(t, err)
+	require.Equal(t, "FROM scratch\n", string(body))
+
+	// And the rest of the repository is not in it.
+	_, err = os.Stat(filepath.Join(dir, "services"))
+	require.True(t, os.IsNotExist(err), "the whole repository was archived")
+	_, err = os.Stat(filepath.Join(dir, "README.md"))
+	require.True(t, os.IsNotExist(err), "a file outside the manifest's directory was archived")
+
+	// The checkout lives under the manifest's own state directory and the
+	// cleanup removes it, because a tree left behind is a copy of the source
+	// nobody is watching.
+	require.Contains(t, dir, filepath.Join(env.StateDir, "oracle"))
+	clean()
+	_, err = os.Stat(dir)
+	require.True(t, os.IsNotExist(err), "the checkout outlived the comparison")
+}
+
+func gitRepoWithSubdirectory(t *testing.T) (root, base, head string) {
+	t.Helper()
+	root = t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test",
+			"GIT_AUTHOR_DATE=2026-08-30T09:00:00Z",
+			"GIT_COMMITTER_DATE=2026-08-30T09:00:00Z")
+		out, err := cmd.Output()
+		require.NoErrorf(t, err, "git %v", args)
+		return string(bytes.TrimSpace(out))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "services", "api"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "README.md"), []byte("the repository\n"), 0o644))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, "services", "api", "Dockerfile"), []byte("FROM scratch\n"), 0o644))
+
+	run("init", "--initial-branch=main", "-q")
+	run("add", ".")
+	run("commit", "-q", "-m", "first")
+	base = run("rev-parse", "HEAD")
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, "services", "api", "later.txt"), []byte("later\n"), 0o644))
+	run("add", ".")
+	run("commit", "-q", "-m", "second")
+	return root, base, run("rev-parse", "HEAD")
+}

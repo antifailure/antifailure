@@ -1,6 +1,7 @@
 package env
 
 import (
+	"context"
 	"io"
 
 	"github.com/antifailure/antifailure/engine/internal/events"
@@ -34,4 +35,11 @@ func UntarForTest(dir string, r io.Reader) error { return untar(dir, r) }
 // tests, so the git resolution can be exercised against a real repository.
 func ResolveBaselineForTest(root string, source schema.BaselineSource, ref string) (string, string, error) {
 	return resolveBaseline(root, source, ref)
+}
+
+// BaselineTreeForTest exposes baselineTree to the package's external tests, so
+// that the archive of a manifest in a subdirectory can be checked against a
+// real repository rather than reasoned about.
+func (o *Orchestrator) BaselineTreeForTest(ctx context.Context, rev string) (string, func(), error) {
+	return o.baselineTree(ctx, rev)
 }

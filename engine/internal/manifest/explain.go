@@ -189,7 +189,7 @@ func Explain(m *schema.Manifest) string {
 		fmt.Fprintf(&b, "  comparison   %s\n", enabledWord(deref(o.Enabled)))
 		fmt.Fprintf(&b, "  baseline     %s\n", baselineWord(o))
 		fmt.Fprintf(&b, "  fails on     %s\n", o.FailOn)
-		fmt.Fprintf(&b, "  requests     %s\n", plural("probe", len(o.Probes)))
+		fmt.Fprintf(&b, "  requests     %d %s\n", len(o.Probes), plural("probe", len(o.Probes)))
 		for _, p := range o.Probes {
 			fmt.Fprintf(&b, "    %-20s %s %s\n", p.Name, p.Method, p.Path)
 		}

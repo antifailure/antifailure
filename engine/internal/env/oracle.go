@@ -332,6 +332,17 @@ func resolveBaseline(root string, source schema.BaselineSource, ref string) (rev
 	return rev, "the merge base with " + ref, nil
 }
 
+// repoLayout reports the repository's top level and where the manifest's
+// directory sits inside it, in git's own path syntax.
+//
+// Asked of git rather than computed from the two paths. The top level and the
+// root can differ in symlinks, in case, and in trailing separators on the three
+// platforms this runs on, and rev-parse already knows the answer.
+func repoLayout(root string) (top, prefix string) {
+	return gitOutput(root, "rev-parse", "--show-toplevel"),
+		strings.TrimSuffix(gitOutput(root, "rev-parse", "--show-prefix"), "/")
+}
+
 // gitOutput runs a git command and returns its trimmed output, or empty.
 //
 // Empty rather than an error for every failure, because every caller here is
@@ -367,7 +378,24 @@ func (o *Orchestrator) baselineTree(ctx context.Context, rev string) (string, fu
 	}
 	clean := func() { _ = os.RemoveAll(dir) }
 
-	cmd := exec.CommandContext(ctx, "git", "-C", o.opts.Root, "archive", "--format=tar", rev)
+	// The tree at that revision, and only the part of it this manifest is
+	// about. A manifest in a subdirectory of a monorepo asks git for
+	// "<rev>:<prefix>", which archives that subtree with paths relative to it;
+	// plain "<rev>" would archive the whole repository and put every file one
+	// directory deeper than the build context expects.
+	//
+	// Run from the repository's top level, not from the manifest's directory.
+	// git archive restricts its output to the working directory's path INSIDE
+	// the tree it was given, so asking for the subtree from inside the
+	// subdirectory looks for services/api within services/api and produces an
+	// empty archive. That is what the first version of this did, and the
+	// symptom was a baseline build failing with no Dockerfile in a tree that
+	// plainly had one.
+	from, spec := o.opts.Root, rev
+	if top, prefix := repoLayout(o.opts.Root); prefix != "" {
+		from, spec = top, rev+":"+prefix
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", from, "archive", "--format=tar", spec)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

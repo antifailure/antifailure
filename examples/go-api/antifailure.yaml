@@ -91,6 +91,39 @@ workflows:
       - "the new order is returned with a total of 2599"
     tags: [smoke]
 
+# Run this change beside the version it replaces, on the same data, and report
+# what the two did differently.
+#
+# The probes are written down rather than discovered because both versions have
+# to receive the same bytes in the same order: the agents above decide their
+# next step from what is on the screen, so two runs of one workflow send two
+# different request sequences and a comparison of those compares the agent with
+# itself.
+oracle:
+  # The merge base, so the comparison does not change when somebody else lands a
+  # commit on main halfway through a review.
+  baseline: merge_base
+  probes:
+    - name: health
+      path: /health
+    - name: list-customers
+      path: /customers
+    - name: place-an-order
+      method: POST
+      path: /orders
+      headers:
+        content-type: application/json
+      body: '{"customer_id": 1, "total_cents": 2599}'
+    # The refusal is compared too. A change that starts accepting an order with
+    # no total is a change worth seeing, and it is invisible to a probe plan
+    # that only sends requests it expects to succeed.
+    - name: refuse-an-order-with-no-total
+      method: POST
+      path: /orders
+      headers:
+        content-type: application/json
+      body: '{"customer_id": 1, "total_cents": 0}'
+
 # Asked of the branch after the workflows run, inside a READ ONLY transaction.
 # An invariant holds when its statement returns NO ROWS, so these select the
 # violating rows rather than counting them: count(*) returns one row saying
