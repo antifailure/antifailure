@@ -9,6 +9,12 @@ This page is written for the person who has just been woken up. It assumes you
 know nothing about the state of the system and have about ninety seconds of
 patience. Everything here has been run; nothing is aspirational.
 
+Setting the rotation up rather than firefighting inside it belongs on the
+[on-call page](/docs/self-hosting/on-call/): who holds it, what an
+acknowledgement means, and what to do first for each class of page. The
+[status page](/docs/self-hosting/status-page/) is what a customer reads while
+you read this one; it is not the pager and does not substitute for it.
+
 ## The first thirty seconds
 
 Three questions, in this order, because the answer to each changes which of the
@@ -104,6 +110,19 @@ What is actually happening while it is down:
 
 So the recovery order is: bring the control plane back, and do nothing to the
 engines. They will catch up on their own.
+
+## A deploy went bad and the automatic rollback did not fire
+
+`deploy/cd/deploy.sh` already rolls back on a failed post-promotion health
+gate, in the same run, before the gate exits. This section is for the failure
+that shows up after that: the gate passed, the run finished green, and the
+problem only became visible later, from a graph or a customer.
+
+Full procedure, including the case where a migration already applied and the
+revision you are about to restore may or may not still be compatible with it:
+[Upgrade and rollback, the manual path](/docs/self-hosting/azure/#upgrade-and-rollback-the-manual-path).
+Do not skip that page's step on the migration; assuming compatibility instead
+of checking it is how a rollback becomes a second incident.
 
 ## Restoring the control plane database
 
@@ -308,6 +327,47 @@ af doctor
 `af doctor` runs ten checks and each one carries a remediation. It is the fastest
 way to find out that the thing you are debugging is a Docker daemon that is not
 running.
+
+## Load testing the control plane itself
+
+`af load` shapes traffic against an environment `af up` built; nothing before
+this pointed it at the control plane's own API, which is the one service in
+this product that has never had its own load generator run against it.
+
+`engine/cmd/loadcp` does, using the same `engine/internal/load` package `af
+load` does, against a URL instead of an af-managed environment:
+
+```sh
+go run ./cmd/loadcp -url https://app.dev.antifailure.dev -duration 1m -scale 1
+```
+
+The bundled profile is not measured production traffic; none has been
+captured yet, and there is nowhere in this product's own load package to point
+at the control plane's access log until there is one. Each route's weight is
+instead its own declared ceiling from `web/apps/api/src/limits.ts`, the number
+the rate limiter already enforces per caller. The profile says so: its
+`source` field reads `declared_limits`, not `production`, the same honesty
+`internal/load` itself applies to a shape nobody supplied.
+
+**What a real run found.** Built and run once against a real local instance,
+schema migrated, serving from an actual Postgres, not a fake: at half the
+combined declared rate (92 requests a second, one caller, `-scale 0.5`), p95
+latency climbed from 0.5 seconds to 3.2 seconds over a 31 second run, achieving
+37 requests a second against a target of 92, with `/readyz` carrying the worst
+tail at up to 4.9 seconds. No request was rejected by the rate limiter at any point in
+this run; the connection pool queued first. That run was on a laptop reporting
+a load average over 75 from other work sharing the same machine at the time,
+which is exactly the caveat this project's own [disaster recovery
+timings](#rehearse-it-on-a-schedule-before-you-need-it) already carry: a
+latency number is a property of the hardware and what else is running on it,
+not a portable fact about the code. What is portable is the finding underneath
+it, which is worth checking again on quiet, dedicated hardware before it
+informs a real capacity decision: on this run, the database connection pool
+(`AF_POOL_MAX`, ten by default) became the limiting factor before the
+per-caller rate limits did, for a single caller sending across every route at
+once. An operator sizing a real deployment should raise `AF_POOL_MAX` to match
+expected concurrent callers rather than assuming the rate limiter is the only
+ceiling in the system.
 
 ## Where the numbers come from
 
