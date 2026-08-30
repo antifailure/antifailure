@@ -10,7 +10,7 @@ github:
   mode: actions        # or app, or off
   comment: true
   fork_policy: label
-  teardown_on: [closed, merged]
+  teardown_on: [close, merge, ttl]
 ```
 
 ## Two modes
@@ -47,7 +47,7 @@ to join it and does not appear yet.
 ## Forks
 
 ```yaml
-  fork_policy: label     # none, label, or all
+  fork_policy: label     # never, label, or always
 ```
 
 A pull request from a fork runs code somebody outside your organisation wrote,
@@ -55,19 +55,20 @@ against an environment holding a masked copy of your data with real sandbox
 credentials in the proxy.
 
 `label` is the default and the right one: nothing runs until a maintainer adds
-the label, which is a person deciding. `none` refuses forks. `all` runs
+the label, which is a person deciding. `never` refuses forks. `always` runs
 everything, and is only reasonable for a repository where every contributor
 already has write access.
 
 ## Teardown
 
 ```yaml
-  teardown_on: [closed, merged]
+  teardown_on: [close, merge, ttl]
 ```
 
 An environment that outlives its pull request is the leak this product exists
-to prevent. Both events are listed because a merged pull request is closed and
-a closed one may never be merged.
+to prevent. Close and merge are both listed because a merged pull request is
+closed and a closed one may never be merged, and `ttl` bounds the case where
+neither happens.
 
 ## Signature verification
 
