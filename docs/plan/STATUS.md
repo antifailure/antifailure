@@ -244,7 +244,7 @@ and they move under a gate that can see them.
 | `pkg/provider` database interface | proven | |
 | `engine/conformance` | proven | 23 behaviors; now asserts it left nothing behind |
 | `internal/db/docker` | proven | full suite green against a real daemon |
-| `internal/masking` transforms | proven | 22 transforms |
+| `internal/masking` transforms | proven | 23 transforms, counted from the registry rather than from this row, which said 22. The reference page's uniqueness sentence is generated from `PreservesUniqueness` now: it had been hand written next to the generated table and disagreed with it about `int_fpe`, `string_fpe` and `preserve`, directly under the AF-MSK-007 example that tells a reader to pick a uniqueness preserving transform |
 | `internal/masking` catalog | proven | reads the live schema, keys, unique constraints, generated columns |
 | `internal/masking` rules | proven | specificity decides, not order; defaults link by transform |
 | `internal/masking` executor | proven | chunked, resumable, ctid for unkeyed tables |
