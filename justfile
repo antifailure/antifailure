@@ -412,14 +412,24 @@ walkthrough:
 # green run that examined nothing, which is the failure this repository keeps
 # finding. Two, because one tenant cannot be isolated from anybody.
 #
-# 120 seconds is a tripwire, not the recovery time objective. Measured: this
-# same drill restores in under two seconds on a continuous integration runner
-# with nothing else on it, and between five and fifteen on a laptop running a
-# dozen other containers. A budget near either number would fire on machine
-# load and teach everybody to re-run until it passes, which is how a gate stops
-# meaning anything. A restore of this database that takes two minutes has had
-# something change shape, and that is worth a person looking. The objective the
-# recovery time is actually held against is two hours, and it lives in
+# 300 seconds is a backstop, not a performance target, and the number was
+# chosen from measurements rather than picked. This same drill restores in
+# under two seconds on a continuous integration runner with nothing else on it.
+# On a laptop running a dozen other containers, two runs of this recipe an hour
+# apart reported 14.9 seconds and 46.3, and this repository has recorded a
+# restore of the same database taking 160 on a busy machine. A budget set near
+# the CI number, or near the first laptop number, would spend most of its life
+# failing on machine load, and a gate that fails for a reason the author cannot
+# fix is one people learn to re-run until it passes.
+#
+# So this fires on a change in kind: a restore that has stopped working rather
+# than one on a slow morning. What actually detects a regression is the series,
+# not the threshold, which is why the workflow publishes the measured time to
+# the run summary and keeps it as an artifact for ninety days. Compare against
+# last week's number; the budget is only there so a restore that has fallen off
+# a cliff cannot pass quietly.
+#
+# The objective the recovery time is held against is two hours, and it lives in
 # docs/src/content/docs/self-hosting/operations.md where an operator reads it.
 #
 # One command, and the one the weekly workflow runs.
@@ -449,7 +459,7 @@ drill: _reports
       --out {{reports}}/drill \
       --database af_drill \
       --app-password drill-password \
-      --max-restore-seconds 120 \
+      --max-restore-seconds 300 \
       --report {{reports}}/drill.json
 
 # The examples build and their manifests are valid.

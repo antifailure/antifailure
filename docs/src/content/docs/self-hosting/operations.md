@@ -241,8 +241,10 @@ UTC, in `.github/workflows/drill.yml`, which invokes the `drill` recipe in the
 same command. Run `just drill` to run exactly that yourself: it starts a
 Postgres of its own, applies every migration, seeds two organizations so the
 cross-tenant read has another tenant to be refused, and holds the recovery time
-against a budget of 120 seconds. That budget is a tripwire for a restore that
-has changed shape, not the objective below.
+against a budget of 300 seconds. That budget is a backstop against a restore
+that has stopped working, not the objective below and not a performance target.
+What detects a regression is the series: the workflow publishes each
+measurement to the run summary and keeps it for ninety days.
 
 The number it prints is the **restore** time, not the whole run, because
 recovery starts from a backup that already exists. Counting the time to take one
