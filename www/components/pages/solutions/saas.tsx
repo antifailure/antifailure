@@ -16,7 +16,7 @@ export function SaasPage() {
       <PageHero
         eyebrow="Solutions · B2B SaaS"
         title="Daily deploys. Expanding schemas. Staging that drifted years ago."
-        lead="The first twin should catch the migration that locks subscriptions during peak traffic — against sanitized tenant-shaped state, not a fixture dump."
+        lead="The first twin should catch the migration that locks subscriptions during peak traffic, against sanitized tenant-shaped state rather than a fixture dump."
         visual={<TenantSubsetScene />}
       />
       <PageSection tone="sage">

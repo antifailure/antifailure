@@ -88,7 +88,7 @@ export function PrivacyPage() {
           <p>
             Sign-in today is for the waitlist. There is no public production control plane yet. If
             that changes, this page will be replaced with a dated policy that names a legal entity,
-            subprocessors, and retention periods — not a restatement of intent.
+            subprocessors, and retention periods, not a restatement of intent.
           </p>
         </Prose>
       </PageSection>

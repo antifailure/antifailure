@@ -86,15 +86,18 @@ function TrafficResult() {
       </div>
       <Hairline />
 
-      <div className="flex items-center gap-4 px-5 py-2">
+      {/* Hidden on a phone, where the row below stacks and a header lines up
+          with nothing. Truncated rather than wrapped in between, because a
+          two-line column head pushes the panel wider than the measure. */}
+      <div className="flex items-center gap-4 px-5 py-2 max-md:hidden">
         <MonoLabel className="w-[44%] shrink-0 uppercase tracking-[0.14em]">route</MonoLabel>
         <MonoLabel className="w-[14%] shrink-0 text-right uppercase tracking-[0.14em]">share</MonoLabel>
         <MonoLabel className="w-[20%] shrink-0 text-right uppercase tracking-[0.14em]">p95</MonoLabel>
-        <MonoLabel className="min-w-0 flex-1 text-right uppercase tracking-[0.14em]">
-          vs production
+        <MonoLabel className="min-w-0 flex-1 truncate text-right uppercase tracking-[0.14em]">
+          vs prod p95
         </MonoLabel>
       </div>
-      <Hairline />
+      <Hairline className="max-md:hidden" />
 
       <ul>
         {ROUTES.map((row) => {

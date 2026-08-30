@@ -173,7 +173,10 @@ function PlaneDiagram() {
           className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-px bg-[#c41e1e]/70 xl:block"
           aria-hidden
         />
-        <div className="pointer-events-none absolute top-6 left-1/2 z-[1] hidden -translate-x-1/2 border border-black/[0.08] bg-white px-2.5 py-1 xl:block">
+        {/* Centred on the divider rather than pinned to the top, where it sat
+            on top of the data plane's own kicker and rendered it as
+            "TOMER-HOSTED". */}
+        <div className="pointer-events-none absolute top-1/2 left-1/2 z-[1] hidden -translate-x-1/2 -translate-y-1/2 border border-black/[0.08] bg-white px-2.5 py-1 xl:block">
           <MonoLabel className="uppercase tracking-[0.12em]">trust boundary</MonoLabel>
         </div>
       </div>

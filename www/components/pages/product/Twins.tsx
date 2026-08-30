@@ -347,13 +347,16 @@ function IsolationSpec() {
         <StatusPill tone="FAIL">fail closed</StatusPill>
       </div>
       <Hairline />
-      <div className="grid grid-cols-5 max-xl:grid-cols-1">
+      {/* Four across, not five. The list lost three claims that were not built
+          and seven do not divide by five without leaving a row three cells
+          short. */}
+      <div className="grid grid-cols-4 max-xl:grid-cols-2 max-md:grid-cols-1">
         {ISOLATION.map((item, i) => {
-          const lastInRowXl = (i + 1) % 5 === 0 || i === ISOLATION.length - 1;
+          const lastInRowXl = (i + 1) % 4 === 0 || i === ISOLATION.length - 1;
           return (
             <div
               key={item.title}
-              className="relative px-5 py-6 max-xl:border-t max-xl:border-black/10 max-xl:first:border-t-0 xl:border-black/10 xl:[&:nth-child(n+6)]:border-t"
+              className="relative px-5 py-6 max-md:border-t max-md:border-black/10 max-md:first:border-t-0 md:max-xl:border-black/10 md:max-xl:[&:nth-child(n+3)]:border-t xl:border-black/10 xl:[&:nth-child(n+5)]:border-t"
             >
               {!lastInRowXl ? (
                 <Hairline vertical className="absolute top-5 right-0 bottom-5 hidden h-auto xl:block" />

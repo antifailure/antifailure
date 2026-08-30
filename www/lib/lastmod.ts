@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { getPost, postModified } from "./blog";
 
 /**
  * When the content behind a route last actually changed.
@@ -68,6 +69,17 @@ function sourcesFor(routePath: string): string[] {
 let warned = false;
 
 export function contentLastModified(routePath: string): Date {
+  // A post carries its own date. Asking git when content/blog/<file>.tsx last
+  // changed would answer a different question, and the file name is not the
+  // slug anyway: what-staging-misses.tsx publishes at
+  // /blog/what-staging-misses-about-migrations. Before this branch existed
+  // these three routes fell through to the build clock, which is the exact
+  // thing this module was written to stop, and check:seo caught it.
+  if (routePath.startsWith("/blog/")) {
+    const post = getPost(routePath.slice("/blog/".length));
+    if (post) return new Date(postModified(post));
+  }
+
   const sources = sourcesFor(routePath);
   if (sources.length === 0) return new Date();
 

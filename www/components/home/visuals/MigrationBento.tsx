@@ -330,7 +330,7 @@ function activityFor(plan: Plan): Activity[] {
     who: "maya",
     avatar: "/home/avatar-maya.jpg",
     time: "4min ago",
-    body: "ACCESS EXCLUSIVE held 27.4s — POST /v1/checkout is stalled behind the rewrite.",
+    body: "ACCESS EXCLUSIVE held 27.4s. 84 statements queued behind it, including POST /v1/checkout.",
   },
   {
     kind: "comment",
