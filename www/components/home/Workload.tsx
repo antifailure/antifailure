@@ -15,6 +15,7 @@ export function Workload() {
         <div className="min-w-0">
           <Heading
             icon="workload"
+            label="Workload Studio"
             title="<strong>Workload Studio for the change that matters.</strong> Observed patterns, deterministic journeys, and exploratory users. Not production traffic diverted."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">

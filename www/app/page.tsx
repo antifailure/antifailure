@@ -13,11 +13,14 @@ export default function Page() {
   return (
     <SiteLayout>
       <Hero />
+      {/* Isolated Twin and Workload Studio trade places: the twin is what the
+          workload runs against, so it has to be on the page before the studio
+          that drives it. */}
       <TocWrapper>
         <Migrations />
-        <Workload />
-        <Features />
         <Twins />
+        <Features />
+        <Workload />
         <Firewall />
       </TocWrapper>
       <Trust />

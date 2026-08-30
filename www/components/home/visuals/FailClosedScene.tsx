@@ -1,3 +1,5 @@
+import { cn } from "@/lib/cn";
+
 const COLUMNS = [
   {
     title: "Simulated",
@@ -260,11 +262,82 @@ function Tag({ color, label }: { color: string; label: string }) {
   );
 }
 
+/**
+ * The phone reading of the same truth.
+ *
+ * A three-column board with a chat window floating over it is a shape that only
+ * works at desk width. Squeezed onto a phone the columns disappeared behind the
+ * card and the section lost its evidence. The board's rows are the evidence, so
+ * on a phone they become what they are: a ledger of attempted effects, each one
+ * with what the firewall did about it.
+ */
+const LEDGER = COLUMNS.flatMap((col) =>
+  col.cards.slice(0, col.title === "Blocked" ? 3 : 2).map((card) => ({
+    id: card.id,
+    title: card.title,
+    tag: card.tags[0],
+    disposition: col.title.toLowerCase(),
+    icon: col.icon,
+  })),
+);
+
+function EgressLedger() {
+  return (
+    <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">
+      <div className="flex items-center justify-between border-b border-black/[0.06] px-3.5 py-2.5">
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#8A8F98]">
+          Egress ledger
+        </span>
+        <span className="text-[12px] tabular-nums tracking-tight text-[#8A8F98]">
+          {COLUMNS.reduce((n, col) => n + col.count, 0)} attempts
+        </span>
+      </div>
+      <div className="flex items-center gap-4 border-b border-black/[0.06] bg-[#FAFAFB] px-3.5 py-2">
+        {COLUMNS.map((col) => (
+          <span key={col.title} className="flex items-center gap-1.5 text-[12px] tracking-tight text-[#6B6F76]">
+            <ColIcon kind={col.icon} />
+            {col.title}
+            <span className="tabular-nums text-[#9B9EA5]">{col.count}</span>
+          </span>
+        ))}
+      </div>
+      <ul>
+        {LEDGER.map((row) => (
+          <li
+            key={row.id}
+            className="flex items-start justify-between gap-3 border-b border-black/[0.05] px-3.5 py-2.5 last:border-b-0"
+          >
+            <span className="min-w-0">
+              <span className="block text-[13px] leading-snug tracking-tight text-[#1A1A1A]">{row.title}</span>
+              <span className="mt-1 flex items-center gap-1.5">
+                <span className="font-mono text-[10px] tabular-nums tracking-tight text-[#9B9EA5]">{row.id}</span>
+                <Tag color={row.tag.color} label={row.tag.label} />
+              </span>
+            </span>
+            <span
+              className={cn(
+                "mt-0.5 shrink-0 font-mono text-[10px] uppercase tracking-[0.1em]",
+                row.disposition === "blocked" ? "text-[#2F8A5F]" : "text-[#9B9EA5]",
+              )}
+            >
+              {row.disposition}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function FailClosedScene() {
   return (
     <div data-scene="fail-closed" className="pointer-events-none relative w-full select-none" aria-hidden>
-      <div className="relative aspect-[1024/477] w-full overflow-hidden max-xl:aspect-auto">
-        <div className="absolute inset-0 bg-[#EFEFF1] max-xl:hidden">
+      <div className="hidden max-xl:mt-1 max-xl:flex max-xl:flex-col max-xl:gap-4">
+        <EgressLedger />
+        <SlackThread mobile />
+      </div>
+      <div className="relative aspect-[1024/477] w-full overflow-hidden max-xl:hidden">
+        <div className="absolute inset-0 bg-[#EFEFF1]">
           <div className="absolute inset-y-0 left-[38%] right-0 flex gap-3 pt-[11%] pr-6 pb-[8%] opacity-[0.82]">
             {COLUMNS.map((col) => (
               <div key={col.title} className="flex w-[248px] shrink-0 flex-col">
@@ -322,7 +395,29 @@ export function FailClosedScene() {
           }}
         />
 
-        <div className="absolute top-[11.1%] bottom-[7.5%] left-[4.9%] z-10 flex w-[32.5%] min-w-[280px] max-w-[340px] flex-col overflow-hidden rounded-[12px] border border-black/[0.08] bg-white shadow-[0_16px_48px_rgba(0,0,0,0.10)] max-xl:relative max-xl:inset-auto max-xl:h-auto max-xl:w-full max-xl:min-w-0 max-xl:max-w-none max-xl:shadow-[0_1px_0_rgba(0,0,0,0.04),0_24px_48px_rgba(0,0,0,0.08)]">
+        <SlackThread />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The thread that reads the ledger back in human words.
+ *
+ * On a wide screen it floats over the board. On a phone it sits under the
+ * ledger as its own block, at content height, because a card pinned to 78% of
+ * a fixed-height stage cut its own last message in half.
+ */
+function SlackThread({ mobile }: { mobile?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col overflow-hidden rounded-[12px] border border-black/[0.08] bg-white",
+        mobile
+          ? "w-full"
+          : "absolute top-[11.1%] bottom-[7.5%] left-[4.9%] z-10 w-[32.5%] min-w-[280px] max-w-[340px] shadow-[0_16px_48px_rgba(0,0,0,0.10)]",
+      )}
+    >
           <div className="flex h-11 shrink-0 items-center justify-between border-b border-black/[0.06] px-3.5">
             <div className="flex items-center gap-2">
               <SlackHash />
@@ -400,8 +495,6 @@ export function FailClosedScene() {
               </div>
             </div>
           </div>
-        </div>
-      </div>
     </div>
   );
 }

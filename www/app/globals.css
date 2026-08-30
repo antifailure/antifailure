@@ -460,3 +460,16 @@ body {
     animation: none !important;
   }
 }
+/*
+ * A horizontally scrolling strip whose right edge dissolves instead of
+ * chopping a word in half.
+ *
+ * Only below `md`: at desk width these strips are wide enough that nothing
+ * overflows, and a mask there would just fade content for no reason.
+ */
+@media (max-width: 767px) {
+  .fade-scroll-x {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+  }
+}

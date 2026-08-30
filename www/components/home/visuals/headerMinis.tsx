@@ -18,6 +18,10 @@ const MINI_CSS = `
   letter-spacing: -0.02em;
   color: ${GREEN};
   white-space: nowrap;
+  /* The masked address is longer than the cell. Dissolve it rather than
+     letting it run into the frame edge. */
+  -webkit-mask-image: linear-gradient(to right, #000 60%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 60%, transparent 100%);
 }
 .mini-scramble::after { content: "m***@twin"; }
 .mini-packet { transform: translate(28px, 0); }

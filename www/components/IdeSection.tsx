@@ -276,13 +276,16 @@ function TokenView({
   const text = tokens.map((tok) => tok.t).join("") + (echo ?? "");
   const lines = Math.max(8, text.split("\n").length);
   return (
-    <div className="flex min-h-[228px] font-mono text-[13px] leading-[22px]">
-      <div className="select-none py-3.5 pl-3 pr-3 text-right text-[#565656]">
+    <div className="flex min-h-[228px] font-mono text-[13px] leading-[22px] max-sm:min-h-[200px] max-sm:text-[11px] max-sm:leading-[19px]">
+      {/* The gutter is dropped on a phone rather than shrunk. The code has to
+          wrap at that width, and a wrapped line makes every number below it
+          point at the wrong row — a broken gutter is worse than none. */}
+      <div className="select-none py-3.5 pl-3 pr-3 text-right text-[#565656] max-sm:hidden">
         {Array.from({ length: lines }, (_, i) => (
           <div key={i}>{i + 1}</div>
         ))}
       </div>
-      <pre className="min-w-0 flex-1 overflow-auto py-3.5 pr-4 outline-none">
+      <pre className="min-w-0 flex-1 overflow-auto py-3.5 pr-4 outline-none max-sm:overflow-visible max-sm:px-3.5 max-sm:whitespace-pre-wrap max-sm:break-words">
         {tokens.map((tok, i) => (
           <span key={i} className={tok.cls || VAR}>
             {tok.t}
@@ -659,7 +662,7 @@ export function IdePlay() {
           ) : null}
         </div>
         <div className="min-w-0 bg-white">
-          <div className="flex overflow-x-auto border-b border-black/[0.07] px-1 text-[12.5px]">
+          <div className="fade-scroll-x no-scrollbars flex overflow-x-auto border-b border-black/[0.07] px-1 text-[12.5px]">
             {openTabs.map((id) => {
               const on = id === activeFile;
               return (
@@ -720,12 +723,12 @@ export function IdePlay() {
                 style={{ animation: "wt-sheen 0.9s cubic-bezier(0.16,1,0.3,1) 1" }}
               />
             ) : null}
-            <div className="flex gap-5 overflow-x-auto px-3 text-[11.5px] text-black/35">
+            <div className="fade-scroll-x no-scrollbars flex gap-5 overflow-x-auto px-3 text-[11.5px] text-black/35 max-sm:gap-4">
               {BOTTOM_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
-                  className={`shrink-0 border-b py-1.5 ${
+                  className={`shrink-0 whitespace-nowrap border-b py-1.5 ${
                     bottomTab === tab.id
                       ? "border-black text-black"
                       : "border-transparent hover:text-black/70"
@@ -736,9 +739,7 @@ export function IdePlay() {
                 </button>
               ))}
             </div>
-            <pre className="min-h-[128px] overflow-x-auto px-4 pb-4 font-mono text-[12px] leading-[20px] text-black/72">
-              {bottomBody}
-            </pre>
+            <pre className="min-h-[128px] overflow-x-auto px-4 pb-4 font-mono text-[12px] leading-[20px] text-black/72 max-sm:min-h-[96px] max-sm:px-3.5 max-sm:text-[11px] max-sm:leading-[18px]">{bottomBody}</pre>
           </div>
         </div>
         <div className="hidden min-w-0 bg-[#f4f4f2] p-2 xl:block">
