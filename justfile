@@ -432,10 +432,13 @@ examples:
       )
     done
     go build -o /tmp/af-examples ./engine/cmd/af
-    for dir in examples/*/; do
-      [ -f "$dir/antifailure.yaml" ] || continue
-      (cd "$dir" && /tmp/af-examples explain > /dev/null)
-      echo "  $dir manifest is valid"
+    # The repository's own manifest is in this loop, and it was in no gate at
+    # all until it was. Every example was validated and the one file this
+    # product is dogfooded with was not.
+    for manifest in ./antifailure.yaml examples/*/antifailure.yaml; do
+      [ -f "$manifest" ] || continue
+      (cd "$(dirname "$manifest")" && /tmp/af-examples explain > /dev/null)
+      echo "  $manifest is valid"
     done
 
 # How hard each page is to read, worst first.

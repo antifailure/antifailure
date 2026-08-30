@@ -852,6 +852,54 @@ happened twice while dogfooding. Fixed: the container name is derived from
 back what was assigned, because any number this code picks can be taken between
 the picking and the binding.
 
+## Where the gate suite is structurally blind
+
+Worth stating on its own, because it is the argument for finishing this rather
+than a footnote to it. Almost every finding above was invisible to twenty-nine
+gates that were all passing.
+
+- Two consoles doing the same job. No gate notices architectural duplication.
+  Both compiled, both were tested, both were correct.
+- `masking.yaml` drifting from a schema main had changed. Catching it needed
+  the product, `af mask plan`, and that check had never once run successfully.
+- Four invariants written as `SELECT count(*)` that could never fail. Every one
+  of them parsed, and the file they were in was in no gate at all.
+- The transforms page contradicting itself, generated table against
+  hand-written prose, with a comment in the generator explaining that the prose
+  was deliberately left alone.
+
+The pattern is one thing. The suite is strong on mechanical invariants, where
+one artifact is checked against a rule, and blind to **two things that are each
+individually valid and jointly wrong**. Nobody wrote a bug in any of those four.
+Somebody wrote a console and somebody else wrote a console; somebody added SSO
+tables and somebody else wrote masking rules; somebody generated a table and
+somebody else wrote a paragraph under it. Each half passed review because each
+half was right.
+
+That is exactly the gap this pipeline exists to close, and it closes it in the
+only way that works: by running the whole product against a real database and
+seeing what the combination does, rather than by adding a thirtieth rule about
+a file.
+
+Three of the four are now also caught mechanically, which is worth doing where
+it is cheap and is not a substitute for the above:
+
+| Was blind to | Now caught by | Would it have fired |
+| --- | --- | --- |
+| A manifest whose invariants can never fail | `just examples` and ci.yml validate this repository's own `antifailure.yaml`, not only the examples' | Yes, verified by reintroducing the `count(*)` and watching AF-MAN-002 name the line |
+| Prose contradicting the table generated above it | `TestTheProseAgreesWithTheRegistryAboutUniqueness` reads the hand-written half and checks every transform it classifies against the registry | Yes, and it found a second one on its first run: the prose was wrong about `int_fpe` as well as `string_fpe`, and I had corrected only the one I noticed by hand |
+| Masking rules drifting from the schema | `af mask plan` in the pipeline, which now runs | Yes, this is finding 42 |
+
+The fourth, architectural duplication, has no cheap mechanical form and is left
+to the thing that actually found it: a person asking which of the two the
+preview should run.
+
+The second row is the one to keep in mind. That gate was written to close a gap
+I had already fixed by hand, and it immediately failed on a case I had missed
+in the same paragraph, in the same session, having looked directly at it. A
+check positioned to compare two artifacts finds things a person comparing them
+does not.
+
 ## About every number in this note
 
 They were all taken on one laptop running two agents against one Docker daemon,

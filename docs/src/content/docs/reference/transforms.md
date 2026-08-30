@@ -89,18 +89,22 @@ unique constraint users_email_key.
   for users.email.
 ```
 
-`email`, `uuid_remap`, `username`, `hash_hex` and `int_fpe` preserve
-uniqueness. `name`, `city`, `company`, `string_fpe` and the rest do not,
-because two people can share a name and pretending otherwise would mean
+`email`, `uuid_remap`, `username`, `hash_hex` and `preserve` preserve
+uniqueness. `name`, `city`, `company`, `string_fpe`, `int_fpe` and the rest do
+not, because two people can share a name and pretending otherwise would mean
 generating increasingly unlikely ones to satisfy a constraint the data never
 had.
 
-`string_fpe` is the one worth saying twice, because it reads like it should.
-It keeps a value's length and character classes so a format check still
-matches, and two different inputs of the same shape can land on the same
-output. The Unique column in the table above is generated from the registry
-and is the answer; this sentence was written by hand and said the opposite for
-long enough to be quoted at somebody.
+The format preserving pair are the ones worth saying twice, because they read
+like they should be safe here and are not. `string_fpe` keeps a value's length
+and character classes, and `int_fpe` keeps a number's digit count and sign, so
+in both cases two different inputs of the same shape can land on the same
+output. Keeping a value's shape says nothing about keeping values apart.
+
+This paragraph said otherwise about both of them, one at a time. It is checked
+against the registry now, by the same test that generates the table above it,
+because the table was right the whole time and sitting directly above the
+sentence contradicting it.
 
 ## Determinism
 
