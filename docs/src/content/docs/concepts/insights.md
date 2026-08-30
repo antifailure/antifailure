@@ -228,9 +228,11 @@ second environment for those would double a pipeline and learn nothing.
 ```yaml
 insights:
   rolling_compatibility:
-    when: always     # every migration, including a purely additive one
-    when: never      # off
+    when: always
 ```
+
+`always` runs it for every migration, including a purely additive one.
+`never` turns it off, and the report says so rather than leaving it out.
 
 A check that did not run is named in the report rather than left out:
 
