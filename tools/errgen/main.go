@@ -56,6 +56,7 @@ var areaNames = map[string]string{
 	"NET": "Egress",
 	"AGT": "Agents",
 	"LOD": "Load",
+	"ORC": "Differential oracle",
 	"GH":  "GitHub",
 	"CP":  "Control plane",
 	"INF": "Infrastructure",

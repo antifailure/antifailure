@@ -194,6 +194,32 @@ const (
 	// The synthesis model returned no usable response for {method} {path}.
 	AFNET030 Code = "AF-NET-030"
 
+	// Differential oracle
+	// The manifest declares no oracle block, so there is nothing to
+	// compare.
+	AFORC001 Code = "AF-ORC-001"
+	// The oracle is on and declares no requests to send.
+	AFORC002 Code = "AF-ORC-002"
+	// The baseline revision could not be resolved: {detail}
+	AFORC003 Code = "AF-ORC-003"
+	// The baseline and the candidate are both {commit}, so there is
+	// nothing to compare.
+	AFORC004 Code = "AF-ORC-004"
+	// The baseline revision {commit} could not be checked out: {detail}
+	AFORC005 Code = "AF-ORC-005"
+	// There is no web service to send requests to in the {side}
+	// environment.
+	AFORC006 Code = "AF-ORC-006"
+	// The baseline environment did not come up: {detail}
+	AFORC007 Code = "AF-ORC-007"
+	// The {side} branch could not be read for comparison: {detail}
+	AFORC008 Code = "AF-ORC-008"
+	// The golden version {version} the comparison pinned is no longer
+	// present or no longer verified.
+	AFORC009 Code = "AF-ORC-009"
+	// The candidate behaves differently from the baseline: {detail}
+	AFORC010 Code = "AF-ORC-010"
+
 	// Runtime
 	// The command '{command}' is not available in this version.
 	AFRUN001 Code = "AF-RUN-001"
@@ -897,6 +923,96 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/synth",
 		Retryable: true,
 		ExitCode:  ExitProvider,
+	},
+	AFORC001: {
+		Code:      AFORC001,
+		Area:      "ORC",
+		Message:   "The manifest declares no oracle block, so there is nothing to compare.",
+		NextStep:  "Add an oracle block with at least one probe; the manifest reference has the shape.",
+		Docs:      "concepts/oracle",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFORC002: {
+		Code:      AFORC002,
+		Area:      "ORC",
+		Message:   "The oracle is on and declares no requests to send.",
+		NextStep:  "Add at least one entry under oracle.probes. Both versions have to receive the same requests in the same order, so the plan is written down rather than discovered.",
+		Docs:      "concepts/oracle",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFORC003: {
+		Code:      AFORC003,
+		Area:      "ORC",
+		Message:   "The baseline revision could not be resolved: {detail}",
+		NextStep:  "Set oracle.base_ref to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref.",
+		Docs:      "concepts/oracle",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFORC004: {
+		Code:      AFORC004,
+		Area:      "ORC",
+		Message:   "The baseline and the candidate are both {commit}, so there is nothing to compare.",
+		NextStep:  "Commit the change, or point oracle.base_ref at the revision you meant to compare against.",
+		Docs:      "concepts/oracle",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFORC005: {
+		Code:      AFORC005,
+		Area:      "ORC",
+		Message:   "The baseline revision {commit} could not be checked out: {detail}",
+		NextStep:  "Check that the commit is present in this clone; a shallow clone often is not deep enough to reach it.",
+		Docs:      "concepts/oracle",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
+	AFORC006: {
+		Code:      AFORC006,
+		Area:      "ORC",
+		Message:   "There is no web service to send requests to in the {side} environment.",
+		NextStep:  "Declare a service of kind web in the manifest; the oracle compares HTTP responses and needs somewhere to send them.",
+		Docs:      "concepts/oracle",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFORC007: {
+		Code:      AFORC007,
+		Area:      "ORC",
+		Message:   "The baseline environment did not come up: {detail}",
+		NextStep:  "Bring the baseline revision up on its own with 'af up' from a checkout of it to see the build or migration failure in full.",
+		Docs:      "concepts/oracle",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
+	AFORC008: {
+		Code:      AFORC008,
+		Area:      "ORC",
+		Message:   "The {side} branch could not be read for comparison: {detail}",
+		NextStep:  "Check the branch is reachable, or turn the contents comparison off with oracle.database.enabled: false to compare responses alone.",
+		Docs:      "concepts/oracle",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
+	AFORC009: {
+		Code:      AFORC009,
+		Area:      "ORC",
+		Message:   "The golden version {version} the comparison pinned is no longer present or no longer verified.",
+		NextStep:  "Run the comparison again; both sides branch one golden and the one the candidate used has gone.",
+		Docs:      "concepts/oracle",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
+	AFORC010: {
+		Code:      AFORC010,
+		Area:      "ORC",
+		Message:   "The candidate behaves differently from the baseline: {detail}",
+		NextStep:  "Read the differences above. Each one is either the change you meant to make or a regression; raise oracle.fail_on if this class of difference is expected.",
+		Docs:      "concepts/oracle",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
 	},
 	AFRUN001: {
 		Code:      AFRUN001,

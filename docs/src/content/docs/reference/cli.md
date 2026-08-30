@@ -767,6 +767,41 @@ in the decision, no matter where it sits in the file.
 af net policy
 ```
 
+### `af oracle`
+
+Run this change beside the version it is replacing and diff what they did.
+
+Brings a second environment up from a baseline revision, branches the same
+golden for both so they start from identical rows, sends both the same requests
+in the same order, and reports every difference in what came back and in what
+ended up in the database.
+
+Responses and database contents are compared. Events, outbound effects, traces
+and query plans are not: two comparisons done completely are worth more than six
+done shallowly, because the first one that cries wolf is the last one anybody
+looks at.
+
+Values that no two runs can agree on are normalised before they are compared:
+two timestamps within an hour, two UUIDs, two numbers within a relative
+tolerance. Everything the comparison declined to look at is printed, defaults
+included, because an oracle that silently ignores a field is worse than one that
+reports it.
+
+The candidate environment is left running whether or not this command brought it
+up. The baseline is torn down unless --keep says otherwise.
+
+```
+af oracle [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--baseline` | - | Revision to compare against, overriding oracle.base_ref. |
+| `--branch` | - | Branch to compare, defaulting to the checked out one. |
+| `--fail-on` | - | Lowest severity that fails the command: none, minor, major, or critical. |
+| `--keep` | `false` | Leave the baseline environment up, for looking at a difference. |
+| `-o`, `--output` | - | Write the report here as well as to the terminal. |
+
 ### `af provider`
 
 Your own model provider keys and their monthly caps.
