@@ -5,6 +5,11 @@
 // configuration cannot talk to anybody. Null everywhere means this installation
 // takes no money, which is the self-hosted default and a state every route has
 // to serve rather than crash in.
+//
+// What is re-exported here is exactly what the process and the HTTP surface
+// reach for, and nothing else. Everything inside this directory imports from
+// the module that defines it, so there is one path to each symbol rather than
+// two, and a re-export nobody uses cannot sit here looking like an interface.
 
 import type { StripeConfig } from './plans.ts'
 import type { StripeClient } from './stripe.ts'
@@ -14,16 +19,9 @@ export interface Billing {
   config: StripeConfig
 }
 
-export { stripeConfigFrom, planForPrice, planForStatus, PAID_PLANS, LIVE_STATUSES } from './plans.ts'
-export type { PaidPlan, StripeConfig } from './plans.ts'
-export { RealStripeClient, StripeError } from './stripe.ts'
-export type { StripeClient, StripeSubscription, StripeInvoice } from './stripe.ts'
-export {
-  handleStripeDelivery,
-  parseStripeEvent,
-  verifyStripeSignature,
-  SIGNATURE_TOLERANCE_SECONDS,
-  type StripeEvent,
-  type StripeOutcome,
-} from './webhook.ts'
-export { attachCustomer, readBillingState, reconcile } from './store.ts'
+// main.ts, which reads the configuration and builds the client once.
+export { stripeConfigFrom } from './plans.ts'
+export { RealStripeClient } from './stripe.ts'
+
+// server.ts, which owns the one unauthenticated endpoint this feature has.
+export { handleStripeDelivery, parseStripeEvent, verifyStripeSignature } from './webhook.ts'
