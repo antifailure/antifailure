@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -794,4 +796,90 @@ func answerCount(msg []byte) int {
 		return 0
 	}
 	return int(binary.BigEndian.Uint16(msg[6:8]))
+}
+
+// A TLS connection that names no host.
+//
+// Interception is by DNS, so a connection arrives at the sidecar believing it
+// reached the origin, and the only thing saying where it was going is the
+// server name in the handshake. A connection without one cannot be attributed
+// to a host, so it cannot be decided, so it has to be refused: allowing it
+// would be a hole exactly the shape of connecting by address and skipping the
+// policy. The code says so and nothing checked it.
+func TestAttack_ATLSConnectionWithNoServerNameIsRefused(t *testing.T) {
+	s := newSidecar(t, &schema.Egress{Default: schema.ModeAllow})
+
+	client, server := net.Pipe()
+	go s.proxy.serveTransparentTLS(server)
+	go func() {
+		// A handshake for an address rather than a name carries no
+		// server_name extension, which is what a client connecting straight
+		// to an IP sends.
+		_ = tls.Client(client, &tls.Config{
+			ServerName:         "",
+			InsecureSkipVerify: true, //nolint:gosec // the attack is that nothing answers
+		}).Handshake()
+	}()
+	_ = client.SetDeadline(time.Now().Add(10 * time.Second))
+	_, _ = io.Copy(io.Discard, client)
+	_ = client.Close()
+
+	rec := s.waitFor(t, func(r record) bool { return r.Via == "transparent" && r.TLS })
+	require.False(t, rec.Allowed, "a connection naming no host was allowed under default allow")
+	require.Contains(t, rec.Reason, "no server name")
+	require.Empty(t, rec.Host, "there was no host to attribute it to, and none was invented")
+}
+
+// A handshake for an allowed host carrying a request for a blocked one.
+//
+// Once the sidecar terminates TLS it reads a Host header from inside, and the
+// two can disagree. The decision has to follow the header, because that is
+// where the request is actually going, and following the handshake instead
+// would let one allowed name carry requests to every other host on the
+// internet.
+func TestAttack_AnInspectedTunnelDecidesOnTheInnerHost(t *testing.T) {
+	certPEM, keyPEM, err := GenerateAuthority("adversarial", time.Now())
+	require.NoError(t, err)
+
+	s := newSidecar(t, &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules: []schema.EgressRule{
+			// Paths make the host one the sidecar reads inside, which is what
+			// puts this connection on the inspected path at all.
+			{Host: "allowed.example.test", Mode: schema.ModeAllow, Paths: []string{"/"}},
+		},
+	})
+	s.proxy.ca, err = newCertAuthority(certPEM, keyPEM)
+	require.NoError(t, err)
+
+	roots := x509.NewCertPool()
+	require.True(t, roots.AppendCertsFromPEM([]byte(certPEM)))
+
+	client, server := net.Pipe()
+	go s.proxy.serveTransparentTLS(server)
+
+	done := make(chan string, 1)
+	go func() {
+		conn := tls.Client(client, &tls.Config{ServerName: "allowed.example.test", RootCAs: roots})
+		if hsErr := conn.Handshake(); hsErr != nil {
+			done <- "handshake: " + hsErr.Error()
+			return
+		}
+		if _, wErr := io.WriteString(conn,
+			"GET /secrets HTTP/1.1\r\nHost: blocked.example.test\r\nConnection: close\r\n\r\n"); wErr != nil {
+			done <- "write: " + wErr.Error()
+			return
+		}
+		body, _ := io.ReadAll(io.LimitReader(conn, 1<<16))
+		done <- string(body)
+	}()
+
+	_ = client.SetDeadline(time.Now().Add(20 * time.Second))
+	answer := <-done
+	_ = client.Close()
+
+	require.Contains(t, answer, "403", "a request for a blocked host was carried by an allowed handshake")
+	rec := s.waitFor(t, func(r record) bool { return r.Host == "blocked.example.test" })
+	require.False(t, rec.Allowed)
+	require.Equal(t, "inspect", rec.Via)
 }
