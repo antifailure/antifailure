@@ -8,7 +8,7 @@ export function FintechPage() {
       <PageHero
         eyebrow="Solutions · Fintech"
         title="Billing, ledgers, and side effects that must never hit live processors."
-        lead="The firewall simulates Stripe. Safe State masks account identifiers. The oracle compares ledger writes. Duplicate events are incidents — they belong in a report, not in production."
+        lead="The firewall answers Stripe from a stateful pack with the network unplugged. Safe State masks account identifiers inside your boundary. An invariant you write catches the duplicate ledger row, and the comment carries the rows."
         visual={<FirewallScene />}
       />
       <PageSection>
@@ -19,8 +19,8 @@ export function FintechPage() {
               { title: "Clone-local Stripe", body: "Payment creation is stored in a clone-local ledger. Nothing charges." },
               { title: "Email captured", body: "SendGrid and similar sinks render and store. Nothing is delivered." },
               { title: "Fail closed", body: "Unknown processors and production API hostnames are blocked and ledgered." },
-              { title: "Ledger comparison", body: "The oracle compares writes, events, and third-party effects against baseline." },
-              { title: "Irreversible writes", body: "Candidate billing events that old code cannot reconcile show up before ship." },
+              { title: "Invariants on the ledger", body: "A statement you write, asked of the branch after the workflows run. If it returns rows, the check fails and the rows are in the comment." },
+              { title: "A whole billing flow, offline", body: "Checkout, subscription and webhook against the built-in Stripe pack, with the network unplugged." },
               { title: "Mid-market first", body: "Technically sophisticated billing teams. Not a regulated-enterprise procurement motion." },
             ]}
           />
@@ -32,9 +32,9 @@ export function FintechPage() {
           visual={
             <SpecRows
               rows={[
-                ["Stripe payment", "Simulate and store in a clone-local ledger"],
+                ["Stripe payment", "Answered from a stateful pack, in a clone-local ledger"],
                 ["SendGrid email", "Render and capture, never deliver"],
-                ["Slack webhook", "Store a message preview"],
+                ["Slack webhook", "Captured, never posted"],
                 ["Production hostname", "Block and flag as critical"],
                 ["Unknown TCP", "Deny by default"],
                 ["Attempted-effect ledger", "Every outbound attempt is recorded, including denies"],

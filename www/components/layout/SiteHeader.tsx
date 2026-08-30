@@ -9,7 +9,7 @@ import { Logo } from "./Logo";
 import { cn } from "@/lib/cn";
 import { FOOTER_MENUS, GITHUB_URL, HEADER_MENUS } from "@/lib/nav";
 import { HeaderMini, MenuCardArt, ProductMiniStyles } from "@/components/home/visuals/headerMinis";
-import { Chevron, DiscordIcon, GitHubIcon } from "../icons";
+import { BookIcon, Chevron, GitHubIcon } from "../icons";
 
 function HeaderLink({
   href,
@@ -192,12 +192,15 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                 <GitHubIcon className="h-[18px] w-[18px] text-gray-new-20" />
                 <span className="text-sm leading-none tracking-extra-tight">GitHub</span>
               </a>
+              {/* There is no Discord. The link that used to sit here was
+                  labelled Discord and went to the waitlist form, which is a
+                  broken promise in the header of every page. */}
               <Link
-                href="/signup"
+                href="/docs"
                 className="flex items-center gap-1.5 text-black transition-colors hover:text-gray-new-40"
               >
-                <DiscordIcon className="h-[18px] w-[18px] text-gray-new-20" />
-                <span className="text-sm leading-none tracking-extra-tight">Discord</span>
+                <BookIcon className="h-[18px] w-[18px] text-gray-new-20" />
+                <span className="text-sm leading-none tracking-extra-tight">Docs</span>
               </Link>
             </div>
             <div className="flex gap-x-3.5">

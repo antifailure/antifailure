@@ -4,7 +4,32 @@
   "routes": [
     {
       "route": "/product/crowdi",
-      "redirect": "/product/exploratory-users",
+      "redirect": "/product/load",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/workload",
+      "redirect": "/product/load",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/exploratory-users",
+      "redirect": "/product/load",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/oracle",
+      "redirect": "/product/report",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/fidelity",
+      "redirect": "/product/report",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/change-intelligence",
+      "redirect": "/product",
       "statusCode": 301
     },
     {

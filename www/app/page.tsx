@@ -13,9 +13,8 @@ export default function Page() {
   return (
     <SiteLayout>
       <Hero />
-      {/* Isolated Twin and Workload Studio trade places: the twin is what the
-          workload runs against, so it has to be on the page before the studio
-          that drives it. */}
+      {/* Isolated Twin comes before Load: the twin is what the traffic is sent
+          at, so it has to be on the page before the section that sends it. */}
       <TocWrapper>
         <Migrations />
         <Twins />

@@ -22,12 +22,20 @@ const OUTER_R = 33;
 const INNER_R = 20.5;
 const MARK_SIZE = 24;
 
-type Level = "PASS" | "WARN" | "BLOCK" | "STEP";
+/**
+ * The verdicts a workflow can return, and the plain steps between them.
+ *
+ * WARN and BLOCK used to be two of the four. The engine has no warning state,
+ * and its `blocked` means the run could not be carried through rather than
+ * "do not merge", so this stream was showing a vocabulary no reader would ever
+ * see in a real check.
+ */
+type Level = "PASS" | "FLAKY" | "FAIL" | "STEP";
 
 const TONE: Record<Level, { background: string }> = {
   PASS: { background: "rgba(51,191,0,0.12)" },
-  WARN: { background: "rgba(217,119,6,0.12)" },
-  BLOCK: { background: "rgba(220,38,38,0.10)" },
+  FLAKY: { background: "rgba(16,16,16,0.06)" },
+  FAIL: { background: "rgba(220,38,38,0.10)" },
   STEP: { background: "transparent" },
 };
 
@@ -36,14 +44,14 @@ const ROWS: { level: Level; time: string }[] = [
   { level: "PASS", time: "4:25:30 PM" },
   { level: "STEP", time: "4:25:31 PM" },
   { level: "STEP", time: "4:25:33 PM" },
-  { level: "WARN", time: "4:25:34 PM" },
+  { level: "FLAKY", time: "4:25:34 PM" },
   { level: "STEP", time: "4:25:35 PM" },
   { level: "PASS", time: "4:25:37 PM" },
   { level: "STEP", time: "4:25:38 PM" },
   { level: "STEP", time: "4:25:39 PM" },
-  { level: "BLOCK", time: "4:25:41 PM" },
+  { level: "FAIL", time: "4:25:41 PM" },
   { level: "STEP", time: "4:25:42 PM" },
-  { level: "WARN", time: "4:25:43 PM" },
+  { level: "FLAKY", time: "4:25:43 PM" },
   { level: "PASS", time: "4:25:45 PM" },
   { level: "STEP", time: "4:25:46 PM" },
 ];

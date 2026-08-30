@@ -1075,7 +1075,7 @@ export function FirewallScene() {
                     style={{ opacity: caretOn ? 1 : 0 }}
                   />
                 </span>
-                <StatusPill tone={crit > 0 ? "BLOCK" : "PASS"}>{crit > 0 ? "BLOCK" : "PASS"}</StatusPill>
+                <StatusPill tone={crit > 0 ? "FAIL" : "PASS"}>{crit > 0 ? "DENY" : "PASS"}</StatusPill>
               </div>
               <Hairline />
               <div className="flex items-center gap-4 px-3 py-1.5 tabular-nums">
@@ -1153,7 +1153,7 @@ export function FirewallScene() {
               </div>
               {reduced ? (
                 <div className="px-3 pb-2">
-                  <StatusPill tone="BLOCK">api.prod.internal</StatusPill>
+                  <StatusPill tone="FAIL">api.prod.internal</StatusPill>
                 </div>
               ) : null}
             </div>
@@ -1206,7 +1206,7 @@ export function FirewallScene() {
             >
               <div className="bg-white px-5 py-3 ring-1 ring-red-600/50">
                 <div className="font-mono text-[12px] tracking-extra-tight text-red-700">
-                  unknown egress · run blocked by policy.
+                  unknown destination · denied inside the twin.
                 </div>
                 <div className="mt-1 font-mono text-[10px] tracking-extra-tight text-black/40">
                   telemetry.unknown.example · unresolved
@@ -1219,7 +1219,7 @@ export function FirewallScene() {
       <Panel className="hidden overflow-hidden max-xl:block">
         <div className="flex items-center justify-between gap-3 border-b border-black/10 px-4 py-2.5">
           <MonoLabel className="uppercase tracking-[0.12em]">side-effect firewall</MonoLabel>
-          <StatusPill tone="BLOCK">BLOCK</StatusPill>
+          <StatusPill tone="FAIL">DENY</StatusPill>
         </div>
         <ul>
           {LEDGER.map((row) => (
@@ -1242,7 +1242,7 @@ export function FirewallScene() {
           ))}
         </ul>
         <div className="border-t border-red-600/40 bg-white px-4 py-3 font-mono text-[12px] tracking-extra-tight text-red-700">
-          unknown egress · run blocked by policy.
+          unknown destination · denied inside the twin.
         </div>
       </Panel>
     </div>

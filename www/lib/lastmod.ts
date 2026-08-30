@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { getPost, postModified } from "./blog";
 
 /**
  * When the content behind a route last actually changed.
@@ -34,7 +35,7 @@ function sourcesFor(routePath: string): string[] {
   const candidates: string[] = [];
 
   if (routePath === "/") {
-    candidates.push("app/page.tsx", "components/home", "lib/marketing-content.tsx");
+    candidates.push("app/page.tsx", "components/home");
   } else if (routePath.startsWith("/product/")) {
     const slug = routePath.slice("/product/".length);
     // Twins -> Twins.tsx, safe-state -> SafeState.tsx, and so on.
@@ -50,14 +51,16 @@ function sourcesFor(routePath: string): string[] {
     candidates.push("app/product/page.tsx", "components/pages/product/Overview.tsx");
   } else if (routePath.startsWith("/solutions/")) {
     candidates.push(
-      "lib/solutions-content.tsx",
+      `components/pages/solutions/${routePath.slice("/solutions/".length)}.tsx`,
       "components/pages/solutions/Vertical.tsx",
       "app/solutions/[slug]/page.tsx",
     );
   } else if (routePath === "/solutions") {
     candidates.push("app/solutions/page.tsx", "components/pages/solutions/Hub.tsx");
+  } else if (routePath === "/pricing") {
+    candidates.push("app/pricing/page.tsx", "components/pages/company/Pricing.tsx");
   } else {
-    candidates.push(`app${routePath}/page.tsx`, "lib/company-content.tsx");
+    candidates.push(`app${routePath}/page.tsx`);
   }
 
   return candidates.filter((c) => existsSync(path.join(ROOT, c)));
@@ -66,6 +69,17 @@ function sourcesFor(routePath: string): string[] {
 let warned = false;
 
 export function contentLastModified(routePath: string): Date {
+  // A post carries its own date. Asking git when content/blog/<file>.tsx last
+  // changed would answer a different question, and the file name is not the
+  // slug anyway: what-staging-misses.tsx publishes at
+  // /blog/what-staging-misses-about-migrations. Before this branch existed
+  // these three routes fell through to the build clock, which is the exact
+  // thing this module was written to stop, and check:seo caught it.
+  if (routePath.startsWith("/blog/")) {
+    const post = getPost(routePath.slice("/blog/".length));
+    if (post) return new Date(postModified(post));
+  }
+
   const sources = sourcesFor(routePath);
   if (sources.length === 0) return new Date();
 

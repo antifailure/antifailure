@@ -135,9 +135,8 @@ export const MIGRATION_LOCKS: Post = {
         statement specific enough to argue with:{" "}
         <em>
           this statement holds ACCESS EXCLUSIVE on <code>orders</code> for
-          twenty-seven seconds at your row count, checkout p99 goes from 820ms
-          to 6.9s while it does, and rollback stops being safe once the backfill
-          starts.
+          twenty-seven seconds at your row count, eighty-four statements queue
+          behind it, and the table is rewritten in full.
         </em>
       </p>
       <p>

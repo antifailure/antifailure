@@ -61,7 +61,7 @@ const PII_FRAMES = [
 const COPY = {
   build: {
     title: "Isolated twin, production not in path",
-    body: "Clone-local DNS, no default public egress, TTL and budget on every resource.",
+    body: "Clone-local DNS, no default public egress, no route out of the network.",
   },
   restore: {
     title: "Isolated twin, production not in path",
@@ -73,7 +73,7 @@ const COPY = {
   },
   destroy: {
     title: "Isolated twin, production not in path",
-    body: "Every resource is journaled, destroyed, and attested. Nothing outlives the run.",
+    body: "Every resource is journaled, destroyed, and counted. Nothing outlives the run.",
   },
 } as const;
 

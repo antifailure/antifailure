@@ -1,5 +1,6 @@
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
+import { Illustrative } from "@/components/layout/Illustrative";
 import { MigrationBento } from "@/components/home/visuals/MigrationBento";
 
 export function Migrations() {
@@ -16,10 +17,15 @@ export function Migrations() {
           <Heading
             icon="migrations"
             label="Migration Safety"
-            title="<strong>Migration Safety.</strong> Catch exclusive locks before they take checkout down. Locks, plans, and rollback feasibility before it ships."
+            title="<strong>Migration Safety.</strong> Catch exclusive locks before they take checkout down. The strongest lock held per table, what queued behind it, and how the plans moved."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <MigrationBento />
+            <Illustrative label="Example finding" className="mt-6">
+              One migration rehearsed, with the numbers chosen. What is measured is the strongest
+              lock mode and its hold time, what queued behind it, whether the table was rewritten,
+              and the query plans before and after.
+            </Illustrative>
           </div>
         </div>
       </Container>

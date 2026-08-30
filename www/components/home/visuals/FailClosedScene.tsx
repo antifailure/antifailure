@@ -104,14 +104,14 @@ const MESSAGES = [
     initial: "D",
     bg: "#6b8cae",
     time: "8:55 PM",
-    body: "Yea — SendGrid /v3/mail/send is captured. MIME stored. Never delivered.",
+    body: "Yes, SendGrid /v3/mail/send is captured. MIME stored. Never delivered.",
   },
   {
     name: "andreas",
     initial: "A",
     bg: "#5a8f6e",
     time: "8:56 PM",
-    body: "hooks.prod.internal is unresolved. Unknown destination — denied. Fail closed.",
+    body: "hooks.prod.internal is unresolved. Unknown destination, denied. Fail closed.",
   },
 ] as const;
 

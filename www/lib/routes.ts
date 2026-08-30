@@ -74,9 +74,9 @@ export const ROUTES: readonly Route[] = [
     path: "/product/safe-state",
     title: "Safe State — Antifailure",
     description:
-      "Sanitized, referentially consistent, production-shaped Postgres. Masking is compiled to SQL, verified by a scanner, and attested before it can be branched.",
+      "Sanitized, referentially consistent, production-shaped Postgres. Masking is compiled to SQL, read back by a scanner, and signed before it can be branched.",
     summary:
-      "How production data is masked deterministically, verified column by column, and attested before use.",
+      "How production data is masked deterministically, read back column by column, and signed before use.",
     section: "product",
     indexable: true,
     priority: 0.8,
@@ -95,23 +95,12 @@ export const ROUTES: readonly Route[] = [
     parent: "/product",
   },
   {
-    path: "/product/workload",
-    title: "Workload Studio — Antifailure",
+    path: "/product/load",
+    title: "Load — Antifailure",
     description:
-      "Observed traffic patterns, deterministic scenarios, and exploratory agents, run against the twin at production shape.",
-    summary: "How load is shaped from real traffic rather than invented, and how it is replayed.",
-    section: "product",
-    indexable: true,
-    priority: 0.8,
-    parent: "/product",
-  },
-  {
-    path: "/product/exploratory-users",
-    title: "Exploratory users — Antifailure",
-    description:
-      "Agents that drive a real browser through the accessibility tree, log in the way a person does, and return a verdict with evidence.",
+      "Traffic shaped like production's own access log, sent at the twin, and compared against the p95 production serves each route in.",
     summary:
-      "How agent-driven exploration works, how it signs in, and the five verdicts it can return.",
+      "Where the traffic shape comes from, which routes are sent, and what a regression is measured against.",
     section: "product",
     indexable: true,
     priority: 0.8,
@@ -121,9 +110,9 @@ export const ROUTES: readonly Route[] = [
     path: "/product/migrations",
     title: "Migration Safety — Antifailure",
     description:
-      "Pending migrations rehearsed on a fresh branch: per-statement timing, the strongest lock held per table, plan regressions, and whether rollback is still safe.",
+      "Pending migrations rehearsed on a branch with production's shape: per-statement timing, the strongest lock held per table, table rewrites, and query plans before and after.",
     summary:
-      "What migration rehearsal measures: locks, per-statement timing, plan diffs, rollback feasibility.",
+      "What migration rehearsal measures: locks, per-statement timing, table rewrites, plan diffs.",
     section: "product",
     indexable: true,
     priority: 0.9,
@@ -133,44 +122,11 @@ export const ROUTES: readonly Route[] = [
     path: "/product/report",
     title: "Safety Report — Antifailure",
     description:
-      "Pass, warning, or block on the pull request, with the video, trace and reproduction steps behind the decision.",
-    summary: "What lands on the pull request, and what evidence backs each verdict.",
+      "Pass or fail on the pull request, with the video, trace and reproduction steps behind the decision.",
+    summary: "What lands on the pull request, the five verdicts a workflow can return, and the evidence behind each.",
     section: "product",
     indexable: true,
     priority: 0.8,
-    parent: "/product",
-  },
-  {
-    path: "/product/change-intelligence",
-    title: "Change Intelligence — Antifailure",
-    description:
-      "What to validate for this pull request, and at what fidelity, decided from the change rather than from a fixed suite.",
-    summary: "How the system decides which checks a given diff actually warrants.",
-    section: "product",
-    indexable: true,
-    priority: 0.7,
-    parent: "/product",
-  },
-  {
-    path: "/product/oracle",
-    title: "Differential Oracle — Antifailure",
-    description:
-      "Baseline against candidate on equivalent state and behavior, so a difference is attributable to the change and not to the environment.",
-    summary: "How baseline and candidate are compared, and what counts as a real difference.",
-    section: "product",
-    indexable: true,
-    priority: 0.7,
-    parent: "/product",
-  },
-  {
-    path: "/product/fidelity",
-    title: "Fidelity Graph — Antifailure",
-    description:
-      "An explicit model of what the twin reproduced and what it did not, so a passing run states its own limits.",
-    summary: "How the twin records what it did and did not reproduce, and why that is published.",
-    section: "product",
-    indexable: true,
-    priority: 0.7,
     parent: "/product",
   },
   {

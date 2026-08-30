@@ -42,14 +42,14 @@ export const HEADER_MENUS: HeaderMenu[] = [
             description: "Simulators instead of real-world side effects",
           },
           {
-            title: "Workload Studio",
-            href: "/product/workload",
-            description: "Observed, deterministic, and exploratory traffic",
+            title: "Load",
+            href: "/product/load",
+            description: "Traffic shaped like production's access log",
           },
           {
             title: "Migration Safety",
             href: "/product/migrations",
-            description: "Locks, plans, rollback feasibility",
+            description: "Locks, rewrites, and query plans",
           },
         ],
       },
@@ -59,22 +59,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
           {
             title: "Safety Report",
             href: "/product/report",
-            description: "Pass, warning, or block on the PR",
-          },
-          {
-            title: "Change Intelligence",
-            href: "/product/change-intelligence",
-            description: "What to validate for this change",
-          },
-          {
-            title: "Differential Oracle",
-            href: "/product/oracle",
-            description: "Baseline vs candidate comparison",
-          },
-          {
-            title: "Fidelity Graph",
-            href: "/product/fidelity",
-            description: "What the twin actually reproduced",
+            description: "Pass or fail on the PR, with evidence",
           },
           {
             title: "Architecture",
@@ -87,13 +72,13 @@ export const HEADER_MENUS: HeaderMenu[] = [
     featured: [
       {
         title: "The migration wedge",
-        description: "Exclusive locks, plan regressions, and rollback that is no longer safe.",
+        description: "Exclusive locks, table rewrites, and query plans on production's own shape.",
         href: "/product/migrations",
         visual: "fleet",
       },
       {
-        title: "Pass, warning, or block",
-        description: "An evidence-backed gate on the pull request, not a preview URL alone.",
+        title: "Pass or fail, with evidence",
+        description: "A gate on the pull request carrying the video and trace behind the verdict.",
         href: "/product/report",
         visual: "twin",
       },
@@ -137,7 +122,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
       },
       {
         title: "The migration wedge",
-        description: "Exclusive locks, plan regressions, and rollback that is no longer safe.",
+        description: "Exclusive locks, table rewrites, and query plans on production's own shape.",
         href: "/product/migrations",
         visual: "fleet",
       },
@@ -172,7 +157,7 @@ export const FOOTER_MENUS = [
       { text: "Overview", href: "/product" },
       { text: "Isolated Twin", href: "/product/twins" },
       { text: "Safe State", href: "/product/safe-state" },
-      { text: "Workload Studio", href: "/product/workload" },
+      { text: "Load", href: "/product/load" },
       { text: "Pricing", href: "/pricing" },
       { text: "Architecture", href: "/product/architecture" },
     ],
@@ -183,11 +168,10 @@ export const FOOTER_MENUS = [
       { text: "Side-Effect Firewall", href: "/product/firewall" },
       { text: "Migration Safety", href: "/product/migrations" },
       { text: "Safety Report", href: "/product/report" },
-      { text: "Change Intelligence", href: "/product/change-intelligence" },
-      { text: "Differential Oracle", href: "/product/oracle" },
-      { text: "Fidelity Graph", href: "/product/fidelity" },
-      { text: "Exploratory users", href: "/product/exploratory-users" },
       { text: "Insights", href: "/docs/concepts/insights" },
+      { text: "Agents", href: "/docs/concepts/agents" },
+      { text: "Egress", href: "/docs/concepts/egress" },
+      { text: "Masking", href: "/docs/concepts/masking" },
     ],
   },
   {
@@ -215,9 +199,8 @@ export const FOOTER_MENUS = [
     heading: "Connect",
     items: [
       { text: "GitHub", href: GITHUB_URL },
-      { text: "Discord", href: "/signup" },
       { text: "Log in", href: "/signin" },
-      { text: "Sign up", href: "/signup" },
+      { text: "Join the waitlist", href: "/signup" },
     ],
   },
 ];
