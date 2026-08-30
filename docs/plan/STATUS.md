@@ -283,7 +283,7 @@ and they move under a gate that can see them.
 | Capture and the inbox | proven | Resend, SendGrid, Postmark, Mailgun, Twilio |
 | `internal/mockpack` | proven | stateful packs; built in Stripe pack runs a billing flow offline |
 | `internal/webhook` | proven | Stripe, GitHub, Svix signing, verified independently |
-| Synth mode | proven | invents a response, marks it synthesized, refuses readably with no key |
+| Synth mode | proven | invents a response, marks it synthesized, refuses readably with no key. Its model selection is the runner's, written out twice: same two variables, same precedence, same two default models, in Go and in TypeScript, with nothing comparing them and the control plane refusing any model it has no price for. `cmd/af-proxy/synth_models_test.go` calls the real selector, reads the runner's defaults and the control plane's `DEFAULT_PRICES`, and fails if the two sides disagree or if either default is unpriced |
 | Rate limiting | proven | per rule, shapes rather than refuses, burst lets startup through |
 
 ## Phase 6. Agents
