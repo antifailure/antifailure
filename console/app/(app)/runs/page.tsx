@@ -289,52 +289,52 @@ function Start({ onStarted }: { onStarted: () => void }) {
               }}
             >
               <div className="grid gap-3 sm:grid-cols-[2fr_1fr_2fr_auto] sm:items-end">
-              <Field label="Environment">
-                <select
-                  className={inputClass}
-                  value={chosen}
-                  onChange={(e) => setEnvId(e.target.value)}
-                >
-                  {live.map((e) => (
-                    <option key={e.env_id} value={e.env_id}>
-                      {e.env_id} ({e.branch})
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Run">
-                <select
-                  className={inputClass}
-                  value={kind}
-                  onChange={(e) => setKind(e.target.value === "load" ? "load" : "agents")}
-                >
-                  <option value="agents">agents</option>
-                  <option value="load">load</option>
-                </select>
-              </Field>
-              {kind === "agents" ? (
-                <Field label="Workflows">
-                  <input
+                <Field label="Environment">
+                  <select
                     className={inputClass}
-                    value={workflows}
-                    onChange={(e) => setWorkflows(e.target.value)}
-                    placeholder="sign-up, checkout"
-                  />
+                    value={chosen}
+                    onChange={(e) => setEnvId(e.target.value)}
+                  >
+                    {live.map((e) => (
+                      <option key={e.env_id} value={e.env_id}>
+                        {e.env_id} ({e.branch})
+                      </option>
+                    ))}
+                  </select>
                 </Field>
-              ) : (
-                <Field label="Seconds">
-                  <input
+                <Field label="Run">
+                  <select
                     className={inputClass}
-                    inputMode="numeric"
-                    value={seconds}
-                    onChange={(e) => setSeconds(e.target.value)}
-                    placeholder="60"
-                  />
+                    value={kind}
+                    onChange={(e) => setKind(e.target.value === "load" ? "load" : "agents")}
+                  >
+                    <option value="agents">agents</option>
+                    <option value="load">load</option>
+                  </select>
                 </Field>
-              )}
-              <Button type="submit" variant="primary" busy={busy}>
-                {busy ? "Asking" : "Start"}
-              </Button>
+                {kind === "agents" ? (
+                  <Field label="Workflows">
+                    <input
+                      className={inputClass}
+                      value={workflows}
+                      onChange={(e) => setWorkflows(e.target.value)}
+                      placeholder="sign-up, checkout"
+                    />
+                  </Field>
+                ) : (
+                  <Field label="Seconds">
+                    <input
+                      className={inputClass}
+                      inputMode="numeric"
+                      value={seconds}
+                      onChange={(e) => setSeconds(e.target.value)}
+                      placeholder="60"
+                    />
+                  </Field>
+                )}
+                <Button type="submit" variant="primary" busy={busy}>
+                  {busy ? "Asking" : "Start"}
+                </Button>
               </div>
               {/* Under the row rather than in a Field: a hint inside one grid
                   cell makes it taller, and items-end then lifts that input
