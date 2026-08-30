@@ -95,46 +95,59 @@ func (o *Orchestrator) RunInsights(
 	return full, nil
 }
 
-// rolling decides whether the rolling deploy check runs, and runs it.
+// rollingDecision is what the check settles before it spends anything.
 //
-// It is here rather than inside insights.Run because proving the previous
-// release still works needs a second image, a second environment and a
-// browser, and the insights package deliberately holds only the questions a
-// database can answer on its own.
-//
-// A check that does not run is named in Off rather than left out, which is the
-// rule every other check in this report follows: a report that silently omits
-// a check reads exactly like a check that found nothing.
-func (o *Orchestrator) rolling(
-	ctx context.Context, s *session, cfg insights.Config, full insights.Full,
-	opts InsightsOptions,
-) (*insights.Rolling, []string) {
-	off := func(reason string) (*insights.Rolling, []string) {
-		return &insights.Rolling{Verdict: insights.RollingOff, Reason: reason},
-			append(full.Off, "the rolling deploy check, because "+reason)
+// It is separated from the run because the two failures it can have are
+// invisible in the output and expensive in opposite directions. Deciding to
+// run when nothing narrowed doubles every pipeline that ships an additive
+// migration; deciding not to run when something did silently skips the check
+// on the migration it exists for. Both produce a report that looks fine, so
+// both need a test that does not need a daemon.
+type rollingDecision struct {
+	// run says the check is worth paying for.
+	run bool
+	// verdict and reason are what to report when it is not.
+	verdict insights.RollingVerdict
+	reason  string
+	// manifestOff says the reason belongs in the report's "turned off in the
+	// manifest" list. Only a manifest that turned the check off does: a
+	// migration that takes nothing away is not the manifest's doing, and
+	// putting it under that heading printed a sentence that was both
+	// duplicated and untrue.
+	manifestOff bool
+	// statements are the pending migrations, for the run that follows.
+	statements []insights.Statement
+}
+
+// decideRolling answers whether to run the check, from the manifest and from
+// what the rehearsal found.
+func decideRolling(rc insights.RollingConfig, r *insights.Rehearsal) rollingDecision {
+	off := func(reason string) rollingDecision {
+		return rollingDecision{verdict: insights.RollingOff, reason: reason}
 	}
-	blocked := func(reason string) (*insights.Rolling, []string) {
-		return &insights.Rolling{Verdict: insights.RollingBlocked, Reason: reason}, full.Off
+	blocked := func(reason string) rollingDecision {
+		return rollingDecision{verdict: insights.RollingBlocked, reason: reason}
 	}
 
-	rc := cfg.Rolling
-	if opts.Against != "" {
-		rc.Against = opts.Against
-	}
 	if rc.When == insights.RollingNever {
-		return off("insights.rolling_compatibility.when is never")
+		d := off("insights.rolling_compatibility.when is never")
+		d.manifestOff = true
+		return d
 	}
-
-	if full.Rehearsal == nil {
+	// Blocked rather than off, and the difference matters: off says there was
+	// nothing to check, blocked says the check could not be made. Reporting
+	// the second as the first would hide a migration that did not apply behind
+	// a line that reads like a clean bill of health.
+	if r == nil {
 		return blocked("the migrations were not rehearsed, so there is no migrated schema to " +
 			"run the previous release against")
 	}
-	if full.Rehearsal.Failed {
+	if r.Failed {
 		return blocked("the migrations did not apply, so there is no migrated schema to run " +
 			"the previous release against")
 	}
 
-	stmts := rollingStatements(full.Rehearsal)
+	stmts := rollingStatements(r)
 	if len(stmts) == 0 {
 		return off("this branch has no migration pending against the golden the environment " +
 			"came from, so there is nothing for the previous release to meet")
@@ -148,17 +161,49 @@ func (o *Orchestrator) rolling(
 		return off("these migrations only add things the previous release cannot notice. " +
 			"Set insights.rolling_compatibility.when to always to run it regardless")
 	}
+	return rollingDecision{run: true, statements: stmts}
+}
+
+// rolling decides whether the rolling deploy check runs, and runs it.
+//
+// It is here rather than inside insights.Run because proving the previous
+// release still works needs a second image, a second environment and a
+// browser, and the insights package deliberately holds only the questions a
+// database can answer on its own.
+//
+// A check that does not run is named rather than left out, which is the rule
+// every other check in this report follows: a report that silently omits a
+// check reads exactly like a check that found nothing.
+func (o *Orchestrator) rolling(
+	ctx context.Context, s *session, cfg insights.Config, full insights.Full,
+	opts InsightsOptions,
+) (*insights.Rolling, []string) {
+	rc := cfg.Rolling
+	if opts.Against != "" {
+		rc.Against = opts.Against
+	}
+
+	d := decideRolling(rc, full.Rehearsal)
+	if !d.run {
+		off := full.Off
+		if d.manifestOff {
+			off = append(off, "the rolling deploy check, because "+d.reason)
+		}
+		return &insights.Rolling{Verdict: d.verdict, Reason: d.reason}, off
+	}
 
 	golden, why, err := o.environmentGolden(ctx, s)
 	if err != nil {
-		return blocked(o.opts.Redactor.String(err.Error()))
+		return &insights.Rolling{
+			Verdict: insights.RollingBlocked,
+			Reason:  o.opts.Redactor.String(err.Error()),
+		}, full.Off
 	}
 	if golden == "" {
-		return blocked(why)
+		return &insights.Rolling{Verdict: insights.RollingBlocked, Reason: why}, full.Off
 	}
-
 	return o.rollingCheck(ctx, s, rollingInputs{
-		Config: rc, Golden: golden, Statements: stmts,
+		Config: rc, Golden: golden, Statements: d.statements,
 		Set: insights.Discover(os.DirFS(o.opts.Root)), RunnerPath: opts.RunnerPath,
 	}), full.Off
 }
