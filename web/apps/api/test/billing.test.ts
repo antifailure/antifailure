@@ -727,6 +727,62 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     await dropOrg(h.admin, o.orgId)
   })
 
+  it('creating a customer carries an idempotency key scoped to the organization', async () => {
+    // The customer is created at Stripe and the local row is written after it,
+    // in a transaction that can fail. Without the key the retry creates a
+    // SECOND Stripe customer for the same organization and orphans the first,
+    // and an organization billed twice then has two customers that both look
+    // real in the dashboard.
+    //
+    // What is asserted is that the header is SENT. That Stripe returns the
+    // first customer for a repeated key is Stripe's behaviour, the mock pack
+    // does not implement it, and it cannot be proven here without an account.
+    const { org: o } = await freshOrg('idem')
+    const session = await signInAs(h, o, 'owner')
+
+    const seen: { path: string; key: string | null }[] = []
+    const watched = await stripeAgainstMockPack()
+    const underneath = watched.config.fetch!
+    const spy = await startApi({
+      stripe: {
+        config: watched.config,
+        client: new (await import('../src/billing/stripe.ts')).RealStripeClient({
+          ...watched.config,
+          fetch: async (input, init) => {
+            const url = new URL(input instanceof Request ? input.url : String(input))
+            const headers = new Headers(init?.headers)
+            seen.push({ path: url.pathname, key: headers.get('idempotency-key') })
+            return underneath(input, init)
+          },
+        }),
+      },
+    })
+    const spyOrg = await seedOrg(spy.admin, 'idemspy')
+    const spySession = await signInAs(spy, spyOrg, 'owner')
+
+    const { status } = await callProcedure(spy, spySession, 'subscriptions.checkout', 'mutation', {
+      plan: 'team', seats: 1,
+      successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
+    })
+    assert.equal(status, 200)
+
+    const customerCall = seen.find((c) => c.path === '/v1/customers')
+    assert.ok(customerCall, 'no customer was created')
+    assert.equal(customerCall.key, `af-customer-${spyOrg.orgId}`)
+
+    // And deliberately not on the checkout session: Stripe returns the same
+    // session for a repeated key, so an organization that cancelled and came
+    // back would be sent to a stale expired page forever.
+    const sessionCall = seen.find((c) => c.path === '/v1/checkout/sessions')
+    assert.ok(sessionCall, 'no checkout session was opened')
+    assert.equal(sessionCall.key, null)
+
+    await dropOrg(spy.admin, spyOrg.orgId)
+    await spy.close()
+    await dropOrg(h.admin, o.orgId)
+    void session
+  })
+
   it('a payment method is recorded as metadata and never as a card', async () => {
     const { org: o, customerId } = await freshOrg('card')
     await attach(o.orgId, customerId)

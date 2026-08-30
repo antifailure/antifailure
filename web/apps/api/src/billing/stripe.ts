@@ -131,7 +131,20 @@ export class RealStripeClient implements StripeClient {
     // the Stripe dashboard chasing a failed payment needs to know which
     // organization to contact and the session is gone by then.
     body.set('metadata[org_id]', input.orgId)
-    return customerOf(await this.post('/v1/customers', body))
+    // Keyed on the organization, which is the one place a duplicate is
+    // permanent rather than untidy.
+    //
+    // The customer is created at Stripe and the local row is written after it,
+    // in a transaction that can fail. Without this, the retry creates a SECOND
+    // Stripe customer for the same organization, the first is orphaned with
+    // nothing pointing at it, and an organization that ends up billed twice has
+    // two customers that both look real in the dashboard. Stripe returns the
+    // first customer for a repeated key, so the retry converges instead.
+    //
+    // Not used on the checkout session: Stripe returns the SAME session for a
+    // repeated key, so an organization that cancelled and came back would be
+    // sent to a stale expired page forever.
+    return customerOf(await this.post('/v1/customers', body, `af-customer-${input.orgId}`))
   }
 
   async createCheckoutSession(input: {
@@ -221,7 +234,11 @@ export class RealStripeClient implements StripeClient {
     return this.config.fetch ?? globalThis.fetch
   }
 
-  private async post(path: string, body: URLSearchParams): Promise<Record<string, unknown>> {
+  private async post(
+    path: string,
+    body: URLSearchParams,
+    idempotencyKey?: string,
+  ): Promise<Record<string, unknown>> {
     const res = await this.call()(new URL(path, this.base()), {
       method: 'POST',
       headers: {
@@ -230,6 +247,7 @@ export class RealStripeClient implements StripeClient {
         // Pinned. An account whose default version moves is an account whose
         // responses change shape under a running deployment.
         'stripe-version': STRIPE_API_VERSION,
+        ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
       },
       body: body.toString(),
     })
