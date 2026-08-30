@@ -241,6 +241,13 @@ export const networkRules = pgTable('network_rules', {
   webhookPath: text('webhook_path'),
   note: text('note'),
   position: integer('position').notNull().default(0),
+  // Proposed by one person, approved by another, or by the same person in a
+  // team small enough that the distinction is bookkeeping. A rule is inert
+  // until approvedAt is set: effectiveEgress will not read it and no
+  // environment applies it.
+  proposedBy: uuid('proposed_by'),
+  approvedBy: uuid('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index('network_rules_scope_idx').on(t.orgId, t.repositoryId, t.position)])
