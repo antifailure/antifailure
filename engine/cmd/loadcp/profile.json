@@ -1,0 +1,17 @@
+{
+  "source": "declared_limits",
+  "requests_per_second": 184,
+  "routes": [
+    {"method": "GET", "path": "/health", "weight": 50},
+    {"method": "GET", "path": "/readyz", "weight": 50},
+    {"method": "GET", "path": "/metrics", "weight": 2},
+    {"method": "GET", "path": "/openapi.json", "weight": 2},
+    {"method": "GET", "path": "/auth/session", "weight": 10},
+    {"method": "GET", "path": "/v1/whoami", "weight": 5},
+    {"method": "GET", "path": "/v1/providers", "weight": 5},
+    {"method": "GET", "path": "/v1/environments/loadcp-nonexistent", "weight": 10},
+    {"method": "GET", "path": "/trpc/health", "weight": 20},
+    {"method": "GET", "path": "/console/api/providers", "weight": 10},
+    {"method": "GET", "path": "/", "weight": 20}
+  ]
+}
