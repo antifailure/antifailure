@@ -473,3 +473,128 @@ body {
     mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
   }
 }
+
+/*
+ * The skip-to-content link.
+ *
+ * It is the first thing in the body, and it has to stay reachable by keyboard
+ * while staying out of the way of everyone else. `display: none` and
+ * `visibility: hidden` both remove it from the tab order, which defeats the
+ * point, so it is positioned off-screen and returns on focus.
+ *
+ * It shipped once with no rule at all and rendered as the words "Skip to
+ * content" sitting above the header on every page.
+ */
+.skip-to-content {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.75rem 1.25rem;
+  background: #ffffff;
+  color: #000000;
+  font-size: 14px;
+  letter-spacing: -0.02em;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+}
+
+.skip-to-content:focus-visible,
+.skip-to-content:focus {
+  left: 1rem;
+  top: 1rem;
+  outline: 2px solid #33bf00;
+  outline-offset: 2px;
+}
+
+/* The main landmark takes focus when the skip link is used. That focus must
+   not paint a ring around the entire page. */
+main:focus {
+  outline: none;
+}
+
+/*
+ * Long-form post bodies.
+ *
+ * Scoped to .prose-post rather than styling bare elements, because the rest of
+ * the site composes its own layout and does not want opinionated h2 margins
+ * arriving from a stylesheet.
+ *
+ * The measure is capped at 680px in the page component, which lands around 70
+ * characters at this size. Longer lines are measurably harder to track back
+ * to the start of, and this is the one part of the site somebody reads top to
+ * bottom rather than scans.
+ */
+.prose-post {
+  font-size: 17px;
+  line-height: 1.75;
+  letter-spacing: -0.011em;
+  color: var(--color-gray-new-20);
+}
+
+.prose-post > * + * {
+  margin-top: 1.35em;
+}
+
+.prose-post h2 {
+  margin-top: 2.6em;
+  font-size: 27px;
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+  color: #000;
+  /* text-wrap: balance keeps a two-line heading from leaving one orphan word
+     on the second line, which is the most common ugly moment in a post. */
+  text-wrap: balance;
+}
+
+.prose-post h3 {
+  margin-top: 2em;
+  font-size: 20px;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  color: #000;
+}
+
+.prose-post ul,
+.prose-post ol {
+  padding-left: 1.15em;
+}
+
+.prose-post ul { list-style: disc; }
+.prose-post ol { list-style: decimal; }
+
+.prose-post li + li { margin-top: 0.6em; }
+.prose-post li::marker { color: var(--color-gray-new-60); }
+
+.prose-post strong {
+  font-weight: 500;
+  color: #000;
+}
+
+.prose-post code {
+  padding: 0.12em 0.36em;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.055);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  /* 0.88em rather than a fixed px size, so inline code inside a heading scales
+     with the heading instead of shrinking to body size. */
+  font-size: 0.88em;
+  letter-spacing: 0;
+}
+
+.prose-post a {
+  color: #000;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 0, 0, 0.25);
+  text-underline-offset: 4px;
+}
+
+.prose-post a:hover {
+  text-decoration-color: rgba(0, 0, 0, 0.7);
+}
+
+@media (max-width: 767px) {
+  .prose-post { font-size: 16px; }
+  .prose-post h2 { margin-top: 2.2em; font-size: 23px; }
+  .prose-post h3 { font-size: 18px; }
+}

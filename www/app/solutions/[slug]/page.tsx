@@ -1,5 +1,6 @@
 import { SOLUTION_PAGE_SLUGS, SolutionVerticalPage } from "@/components/pages/solutions/Vertical";
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { notFound } from "next/navigation";
 
 const META: Record<string, { title: string; description: string }> = {
@@ -19,7 +20,8 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  return META[slug] ?? { title: "Solutions — Antifailure" };
+  if (!META[slug]) return { title: "Solutions — Antifailure" };
+  return pageMetadata(`/solutions/${slug}`);
 }
 
 export default async function Page({ params }: { params: Promise<{ slug: string }> }) {

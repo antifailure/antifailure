@@ -329,6 +329,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The sitemap's lastmod for each route comes from when the files
+          # behind it last changed, which means asking git. The default shallow
+          # fetch makes every file look like it arrived in one commit, so every
+          # lastmod collapses to the same value and the freshness signal
+          # becomes noise. check:seo asserts that they differ, which is how
+          # this was caught rather than shipped.
+          fetch-depth: 0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -346,6 +354,16 @@ jobs:
         # broken import is a blank page rather than a failed unit test, so the
         # proof is the production export itself.
         run: npm run build
+        working-directory: www
+
+      - name: The crawl surfaces the site claims to have
+        # Sitemap, robots, canonicals, OpenGraph, structured data, the markdown
+        # twins and the skip link. None of these break a build when they go
+        # missing, which is how the site shipped for weeks with no sitemap and
+        # an og:image that 404'd. It runs here rather than only at deploy so
+        # that a route added without an entry in lib/routes.ts fails the pull
+        # request that added it.
+        run: npm run check:seo
         working-directory: www
 
       - run: npm ci --no-audit --no-fund
