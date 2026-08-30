@@ -19,6 +19,10 @@ service-account*.json
 # Build output
 bin/
 dist/
+# Where tools/release/build.sh assembles an archive before packing it. It holds
+# a copy of the binary, so leaving it untracked and unignored is how a 58MB
+# artifact ends up in somebody's `git add -A`.
+stage/
 .tools/
 .gate-reports/
 # Anchored to the root. Unanchored, `coverage/` matches a directory of that

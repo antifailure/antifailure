@@ -665,6 +665,40 @@ jobs:
           cd ee/engine
           GOWORK=off go test ./license -run FuzzParse -fuzz FuzzParse -fuzztime 60s
 
+  reproducible:
+    name: the release rebuilds to the same bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # Full history, because the build stamps the commit date and a shallow
+      # checkout of a merge commit does not have the one the release would use.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Two builds of this commit produce the same release artifact
+        # G11, which was a local recipe and is now a job, because a gate that
+        # only ever runs on somebody's workstation is a gate that stops
+        # running. `just gate` still calls the same script, so the two cannot
+        # drift; this is the copy that runs on every pull request.
+        #
+        # It compares the archive as well as the binary. The previous version
+        # compared bin/af, which was already identical every time, and passed
+        # for months while all four .tar.gz files it stood in for differed
+        # between builds. The archive is what a person downloads and what
+        # checksums.txt names, so it is the one whose reproducibility is worth
+        # anything.
+        #
+        # This does not run through `just`. ci.yml never has: `just gate` is a
+        # workstation command whose recipes assume vale, lychee and cspell are
+        # installed, and cd.yml records what happened when a job copied it
+        # without its prerequisites. The script is the shared part.
+        run: ./tools/release/reproducible.sh
+
   secrets:
     name: no credentials in the tree
     runs-on: ubuntu-latest

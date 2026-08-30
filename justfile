@@ -260,14 +260,25 @@ build:
     @./bin/af version
 
 # Build it the way a release does, so the version is stamped.
+#
+# Through the same script the release workflow calls, rather than a copy of the
+# build command. The copy is what broke it: this recipe and release.yml both
+# stamped BuildDate with $(date -u), the two drifted apart in every other
+# respect over time, and `just reproducible` could not see the shipping build
+# because it was comparing this one.
+#
+# It produces the real artifact, archive and all, so that what a developer
+# builds is what a user downloads.
 build-release version="dev":
-    @mkdir -p bin
-    cd engine && go build -trimpath -ldflags "-s -w \
-      -X github.com/antifailure/antifailure/engine/internal/cli.Version={{version}} \
-      -X github.com/antifailure/antifailure/engine/internal/cli.Commit=$(git rev-parse HEAD) \
-      -X github.com/antifailure/antifailure/engine/internal/cli.BuildDate=$(git show -s --format=%cI HEAD)" \
-      -o ../bin/af ./cmd/af
-    @./bin/af version
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p bin
+    bare="{{version}}"; bare="${bare#v}"
+    ./tools/release/build.sh "$(go env GOOS)" "$(go env GOARCH)" \
+      "$bare" "$(git rev-parse HEAD)" "$(git show -s --format=%cI HEAD)" \
+      dist stage
+    cp "stage/antifailure_${bare}_$(go env GOOS)_$(go env GOARCH)/af" bin/af
+    ./bin/af version
 
 # ---------------------------------------------------------------------------
 # Test
@@ -489,33 +500,23 @@ typecheck:
     done
     npx --prefix runner tsc --noEmit -p runner/tsconfig.json
 
-# G11. Two builds of one commit produce the same binary.
+# G11. Two builds of one commit produce the same release artifact.
 #
-# It did not. The release recipe stamped BuildDate with $(date -u), so every
-# build of the same commit differed, and release.yml carried the identical
-# line: the shipping path was non-reproducible, not just the local one. The
-# date comes from the commit now, which is deterministic and still means
-# something to whoever reads `af version`.
+# The artifact, not the binary. This compared bin/af, which was already
+# identical every time, and passed while all four .tar.gz files it stood in for
+# differed between builds. The binaries were reproducible; the thing a person
+# downloads never was.
 #
-# A gate rather than a note, because this is the kind of property that is true
-# until somebody adds one more -X flag.
+# The two causes were both in the packaging. tar takes each entry's mtime from
+# the filesystem and cp had just set those to now, and gzip writes its own
+# timestamp into the header, so the archive carried the wall clock twice.
+# tools/reltar writes the archive instead, which is why this can now assert the
+# property that matters.
+#
+# It also runs in a CI job of its own. A gate that only ever runs on a
+# workstation is a gate that stops running.
 reproducible version="v0.0.0-gate":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just build-release {{version}} > /dev/null
-    a=$(shasum -a 256 bin/af | cut -d' ' -f1)
-    just build-release {{version}} > /dev/null
-    b=$(shasum -a 256 bin/af | cut -d' ' -f1)
-    if [ "$a" != "$b" ]; then
-      echo "two builds of this commit differ:"
-      echo "  $a"
-      echo "  $b"
-      echo
-      echo "Something in the build embeds the moment it ran. The usual cause is a"
-      echo "timestamp in an -X flag; derive it from the commit instead."
-      exit 1
-    fi
-    echo "two builds of this commit are identical: $a"
+    ./tools/release/reproducible.sh {{version}}
 
 # The license parser has to survive arbitrary input, because a licence token
 # arrives from outside and a parser that panics on one is a denial of service
