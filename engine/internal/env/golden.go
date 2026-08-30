@@ -19,6 +19,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/golden"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/masking"
@@ -312,12 +313,12 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 		RulesHash: hash,
 		SourceURL: source,
 		Mask: func(ctx context.Context, url secrets.Value) error {
-			rows, tables, maskErr := o.maskDatabase(ctx, url, key, rules, hash)
+			rows, tables, maskErr := o.maskDatabase(ctx, s, url, key, rules, hash)
 			result.Rows, result.Tables = rows, tables
 			return maskErr
 		},
 		Verify: func(ctx context.Context, url secrets.Value) (string, error) {
-			report, att, verifyErr := o.verifyDatabase(ctx, url, hash)
+			report, att, verifyErr := o.verifyDatabase(ctx, s, url, hash)
 			result.Report = report
 			result.Attestation = att
 			if verifyErr != nil {
@@ -516,8 +517,17 @@ func (o *Orchestrator) sourceURL() secrets.Value {
 }
 
 // maskDatabase applies the rules to a database.
+//
+// It takes the session because masking is the longest and least visible part of
+// a refresh, and because the dashboard's database pane is drawn entirely from
+// the mask events below. The pane existed before any of them were emitted: the
+// catalog documented mask.planned, mask.progress, mask.applied, mask.verifying,
+// mask.verified and mask.finding, the reference page generated from that
+// catalog told a customer they could filter on all six, and this function
+// reported its work with o.progress alone, which reaches a terminal and no sink.
 func (o *Orchestrator) maskDatabase(
-	ctx context.Context, url secrets.Value, key *masking.Key, rules *masking.RuleSet, hash string,
+	ctx context.Context, s *session, url secrets.Value,
+	key *masking.Key, rules *masking.RuleSet, hash string,
 ) (int64, int, error) {
 	conn, err := pgx.Connect(ctx, url.Reveal())
 	if err != nil {
@@ -534,6 +544,15 @@ func (o *Orchestrator) maskDatabase(
 		return 0, 0, aferrors.Coded(aferrors.AFMSK010,
 			"detail", masking.DescribeProblems(plan.Problems))
 	}
+	columns := 0
+	for _, t := range plan.Tables {
+		columns += len(t.Columns)
+	}
+	o.event(s, events.MaskPlanned,
+		fmt.Sprintf("masking %d columns across %d tables", columns, len(plan.Tables)),
+		events.F("tables", len(plan.Tables)), events.F("columns", columns),
+		events.F("unclassified", len(plan.Unclassified)), events.F("percent", 0))
+
 	if len(plan.Unclassified) > 0 {
 		// Reported, not refused. Refusing would make the first run of a real
 		// schema impossible; saying nothing would let the columns ship.
@@ -542,12 +561,27 @@ func (o *Orchestrator) maskDatabase(
 			len(plan.Unclassified), masking.DescribeColumns(plan.Unclassified, 6)))
 	}
 
+	// Counted here rather than read off the executor because the callback is
+	// what the percentage has to be derived from, and it reports one table at a
+	// time. Apply runs the tables in order on one goroutine, so a plain counter
+	// is enough and a mutex would only hide that if it ever stopped being true.
+	finished := 0
 	exec, err := masking.NewExecutor(masking.ExecutorOptions{
 		Key: key, Clock: o.opts.Clock,
 		Progress: func(p masking.Progress) {
-			if p.Finished {
-				o.progress(fmt.Sprintf("masked %s (%d rows)", p.Table, p.Rows))
+			if !p.Finished {
+				return
 			}
+			finished++
+			percent := 100
+			if len(plan.Tables) > 0 {
+				percent = finished * 100 / len(plan.Tables)
+			}
+			o.event(s, events.MaskProgress,
+				fmt.Sprintf("masked %s (%d rows)", p.Table, p.Rows),
+				events.F("table", p.Table), events.F("rows", p.Rows),
+				events.F("percent", percent))
+			o.progress(fmt.Sprintf("masked %s (%d rows)", p.Table, p.Rows))
 		},
 	})
 	if err != nil {
@@ -557,18 +591,25 @@ func (o *Orchestrator) maskDatabase(
 	if err != nil {
 		return res.Rows, res.Tables, aferrors.Wrap(err, aferrors.AFMSK010, "detail", err.Error())
 	}
+	o.event(s, events.MaskApplied,
+		fmt.Sprintf("masked %d rows across %d tables", res.Rows, res.Tables),
+		events.F("rows", res.Rows), events.F("tables", res.Tables),
+		events.F("percent", 100))
 	return res.Rows, res.Tables, nil
 }
 
 // verifyDatabase reads a database back and signs what it found.
 func (o *Orchestrator) verifyDatabase(
-	ctx context.Context, url secrets.Value, hash string,
+	ctx context.Context, s *session, url secrets.Value, hash string,
 ) (verify.Report, string, error) {
 	conn, err := pgx.Connect(ctx, url.Reveal())
 	if err != nil {
 		return verify.Report{}, "", aferrors.Wrap(err, aferrors.AFDB004, "env", "the golden candidate")
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
+
+	o.event(s, events.MaskVerifying, "reading the masked copy back",
+		events.F("phase", "verifying"))
 
 	report, err := verify.Scan(ctx, conn, verify.Options{
 		Now:      func() time.Time { return o.opts.Clock.Now() },
@@ -596,11 +637,26 @@ func (o *Orchestrator) verifyDatabase(
 		// The refusal that the whole product rests on. A golden that fails
 		// here is never published, so it can never be branched, so no
 		// environment can hold it.
+		//
+		// One event per finding, at error level, because the refusal below
+		// names only the first and the pane counts them. Somebody looking at a
+		// failed refresh wants to know whether one column leaked or forty.
+		for _, f := range report.Findings {
+			o.eventErr(s, events.MaskFinding,
+				fmt.Sprintf("%s found %s in %s.%s.%s",
+					f.Detector, f.Column, f.Schema, f.Table, f.Column),
+				events.F("detector", f.Detector),
+				events.F("table", f.Schema+"."+f.Table), events.F("column", f.Column))
+		}
 		first := report.Findings[0]
 		return report, string(body), aferrors.Coded(aferrors.AFMSK002,
 			"detector", first.Detector, "table", first.Schema+"."+first.Table,
 			"column", first.Column)
 	}
+	o.event(s, events.MaskVerified,
+		fmt.Sprintf("verified %d columns across %d tables", report.Columns, report.Tables),
+		events.F("tables", report.Tables), events.F("columns", report.Columns),
+		events.F("rows_sampled", report.RowsSampled), events.F("verified", true))
 	return report, string(body), nil
 }
 
