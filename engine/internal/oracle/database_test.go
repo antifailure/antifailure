@@ -25,9 +25,16 @@ import (
 // two branches and a test that reads one database twice cannot tell a working
 // comparison from one that returns nothing.
 
-// testDatabaseURL is this lane's own Postgres, kept separate from the shared
-// one on 55432 so that two suites creating databases at once cannot collide.
-const testDatabaseURL = "postgres://postgres:test@127.0.0.1:55509/antifailure"
+// testDatabaseURL is the Postgres the whole project's tests share, the one
+// `just db` starts, and AF_TEST_DATABASE_URL overrides it. The same constant
+// internal/insights uses, deliberately: a second convention for the same server
+// is one too many, and a suite pointed at a port nothing in CI starts skips
+// silently on every run while the job goes green. That has happened here
+// before, which is what AF_REQUIRE_DATABASE exists to make loud.
+//
+// The databases this file creates are all prefixed af_oracle_, so two suites
+// on one server cannot collide.
+const testDatabaseURL = "postgres://postgres:test@127.0.0.1:55432/antifailure"
 
 func maintenanceURL() string {
 	if u := os.Getenv("AF_TEST_DATABASE_URL"); u != "" {
