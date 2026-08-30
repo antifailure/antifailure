@@ -275,6 +275,24 @@ export function Callout({
   );
 }
 
+/**
+ * A fact nobody has supplied yet, rendered as an obvious blank.
+ *
+ * The legal pages need a handful of values that no part of this repository
+ * knows: a registered entity, an address, a governing law. The wrong answer is
+ * a template token, which builds and publishes looking like finished prose to
+ * everybody except the one person who knows what it was meant to say. This
+ * reads as a blank on the rendered page, in the same amber the warn callout
+ * already uses, so a page shipped with one in it is visibly unfinished.
+ */
+export function Blank({ children }: { children: string }) {
+  return (
+    <span className="rounded-[4px] border-b border-dashed border-[#8A6A12]/70 bg-[#8A6A12]/[0.08] px-1.5 font-mono text-[0.82em] tracking-snug text-[#8A6A12]">
+      {children} to be supplied
+    </span>
+  );
+}
+
 export function Steps({ items }: { items: { title: string; body: string }[] }) {
   return (
     <ol className="relative mt-12 grid grid-cols-4 gap-x-16 gap-y-10 max-xl:grid-cols-2 max-md:grid-cols-1">

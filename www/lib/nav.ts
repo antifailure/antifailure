@@ -149,6 +149,22 @@ export const HEADER_MENUS: HeaderMenu[] = [
 
 export const GITHUB_URL = "https://github.com/antifailure/antifailure";
 
+/**
+ * The legal row along the bottom of the footer.
+ *
+ * Separate from FOOTER_MENUS because these are not a category of the product,
+ * and because a security review looks for them here before it looks anywhere
+ * else. A document that exists and is not linked is a document nobody finds.
+ */
+export const LEGAL_LINKS = [
+  { text: "Privacy", href: "/privacy" },
+  { text: "Terms", href: "/terms" },
+  { text: "DPA", href: "/dpa" },
+  { text: "Subprocessors", href: "/subprocessors" },
+  { text: "Retention", href: "/data-retention" },
+  { text: "Service levels", href: "/sla" },
+];
+
 export const FOOTER_MENUS = [
   {
     heading: "Product",
