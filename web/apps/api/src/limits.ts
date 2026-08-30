@@ -193,6 +193,10 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 20, burst: 200, key: 'ip',
     reason: 'GitHub sends bursts when an installation changes, and a delivery lost to a rate limit is an installation this control plane never learns about. The signature check runs before any work, so an unsigned flood is cheap to refuse.',
   },
+  'POST /webhooks/stripe': {
+    rate: 20, burst: 200, key: 'ip',
+    reason: 'Stripe sends a burst when a billing period rolls over and every subscription renews at once, and a delivery lost to a rate limit is a payment this control plane never learns about. The signature check runs before any work, so an unsigned flood is cheap to refuse.',
+  },
   'POST /v1/events': {
     rate: 200, burst: 2000, key: 'token',
     reason: 'An engine that was offline sends its backlog at once. The burst absorbs a re-connect; the rate is what one busy CI account sustains.',

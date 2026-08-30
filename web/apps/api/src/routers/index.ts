@@ -14,6 +14,7 @@ import { PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLES, ROLE_PERMISSIONS, rolesWit
 import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
 import { syncMembership, SignInError } from '../auth/signin.ts'
 import { GitHubError } from '../auth/github.ts'
+import { subscriptionsRouter } from './subscriptions.ts'
 
 const uuid = z.string().uuid()
 
@@ -810,6 +811,7 @@ export const appRouter = router({
   members: membersRouter,
   tokens: tokensRouter,
   org: orgRouter,
+  subscriptions: subscriptionsRouter,
 })
 
 export type AppRouter = typeof appRouter
