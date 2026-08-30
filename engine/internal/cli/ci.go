@@ -27,9 +27,13 @@ import (
 // comment, and tears down whatever happens is a workflow file nobody has to
 // understand.
 //
-// Teardown is in a deferred path rather than a later step, because a step that
-// runs after a failing step does not run, and an environment that outlives its
-// pull request is the leak this product exists to prevent.
+// Teardown is not a later step, because a step that runs after a failing step
+// does not run, and an environment that outlives its pull request is the leak
+// this product exists to prevent. It is called explicitly before the report is
+// written, with a deferred call behind it as the safety net for a panic or an
+// interrupt. Deferred alone was the old shape, and it put the teardown after
+// the report, which is why a run that could not remove its database reported
+// pass.
 
 func newCICommand(e *Env) *cobra.Command {
 	var branch, output, docsBase, runner, baseline, saveBaseline string
