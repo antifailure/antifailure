@@ -346,9 +346,17 @@ func (r Result) Verdict() string {
 
 // Headline is the first line, which is the only line most people read.
 func (r Result) Headline() string {
+	// The baseline is named when there is one and left out when there is not,
+	// rather than printed as an empty string. "identical to  across 3
+	// requests" is the shape of a sentence with a hole in it, and a headline
+	// is the one line everybody reads.
+	against := ""
+	if r.BaselineRef != "" {
+		against = " " + short(r.BaselineRef)
+	}
 	if len(r.Findings) == 0 {
-		return fmt.Sprintf("The candidate behaved identically to %s across %s.",
-			short(r.BaselineRef), plural(len(r.Probes), "request", "requests"))
+		return fmt.Sprintf("The candidate behaved identically to%s across %s.",
+			orTheBaseline(against), plural(len(r.Probes), "request", "requests"))
 	}
 	counts := Count(r.Findings)
 	var parts []string
@@ -357,14 +365,27 @@ func (r Result) Headline() string {
 			parts = append(parts, fmt.Sprintf("%d %s", n, sev))
 		}
 	}
-	return fmt.Sprintf("%s against %s: %s.",
+	if against != "" {
+		against = " against" + against
+	}
+	return fmt.Sprintf("%s%s: %s.",
 		plural(len(r.Findings), "difference", "differences"),
-		short(r.BaselineRef), strings.Join(parts, ", "))
+		against, strings.Join(parts, ", "))
 }
 
 // Sort puts the findings in reading order. Called by the comparison entry
 // points; exported so a caller that appends its own can restore the order.
 func (r *Result) Sort() { sortFindings(r.Findings) }
+
+// orTheBaseline names the baseline, or says "the baseline" when the caller has
+// not resolved a revision, which is what a comparison run outside a repository
+// looks like.
+func orTheBaseline(named string) string {
+	if named == "" {
+		return " the baseline"
+	}
+	return named
+}
 
 func plural(n int, one, many string) string {
 	if n == 1 {

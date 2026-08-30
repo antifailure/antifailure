@@ -34,7 +34,7 @@ func Compare(in Input) *Result {
 	truncatedProbes := 0
 	for i := range in.Probes {
 		p := &in.Probes[i]
-		findings, truncated := CompareResponses(
+		findings, truncated := compareResponses(
 			in.Config, collect, i, p.Name, p.Baseline, p.Candidate)
 		p.Findings = len(findings)
 		result.Findings = append(result.Findings, findings...)
@@ -50,14 +50,14 @@ func Compare(in Input) *Result {
 	}
 
 	if in.BaselineAfter != nil && in.CandidateAfter != nil {
-		after, summary := CompareSnapshots(
+		after, summary := compareSnapshots(
 			in.Config, in.Database, collect, in.BaselineAfter, in.CandidateAfter)
 		var before []Finding
 		if in.BaselineBefore != nil && in.CandidateBefore != nil {
-			before, _ = CompareSnapshots(
+			before, _ = compareSnapshots(
 				in.Config, in.Database, nil, in.BaselineBefore, in.CandidateBefore)
 		}
-		result.Findings = append(result.Findings, AttributePhases(before, after)...)
+		result.Findings = append(result.Findings, attributePhases(before, after)...)
 		result.Database = summary
 	}
 

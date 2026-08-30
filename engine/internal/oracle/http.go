@@ -194,8 +194,8 @@ func Drive(
 	return out
 }
 
-// CompareResponses is the whole HTTP comparison for one probe.
-func CompareResponses(
+// compareResponses is the whole HTTP comparison for one probe.
+func compareResponses(
 	cfg Config, collect *collector, order int, name string, base, cand Response,
 ) ([]Finding, bool) {
 	d := &differ{

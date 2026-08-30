@@ -51,6 +51,24 @@ var DefaultIgnoredHeaders = []string{
 	"x-trace-id",
 }
 
+// DefaultTimestampSkew is how far apart two timestamps may be and still be
+// equal.
+//
+// Bounded, not unbounded, and the bound is the interesting decision. The
+// obvious normaliser says "two well formed timestamps are equal", and that
+// hides the bug class it most needs to catch: a change that shifts an expiry by
+// a day, or a migration that rewrites every date an hour earlier, writes two
+// perfectly well formed timestamps.
+//
+// An hour, because of what the harness itself contributes. The two probes of a
+// pair are milliseconds apart, so anything the request generates agrees closely.
+// The two ENVIRONMENTS are built one after the other, so a row written by the
+// migrations can be minutes apart on the two sides, and on a slow build many
+// minutes. An hour is comfortably above that and comfortably below any shift a
+// person means. It is configurable, and the report says how large a gap it
+// actually absorbed, so nobody has to take the number on trust.
+const DefaultTimestampSkew = time.Hour
+
 // DefaultFloatTolerance is the relative difference two numbers may have and
 // still be equal.
 //
@@ -85,8 +103,11 @@ type Config struct {
 	// FloatTolerance is the relative difference two numbers may have. Zero
 	// means DefaultFloatTolerance.
 	FloatTolerance float64
+	// TimestampSkew is how far apart two timestamps may be and still be
+	// equal. Zero means DefaultTimestampSkew.
+	TimestampSkew time.Duration
 	// KeepTimestamps compares timestamp strings exactly instead of treating
-	// two well formed timestamps as equal. It exists because an application
+	// two nearby timestamps as equal. It exists because an application
 	// whose timestamps come from the data rather than from the clock has no
 	// non-determinism to absorb, and absorbing it anyway would hide a
 	// migration that shifted every date by an hour.
@@ -101,6 +122,13 @@ func (c Config) tolerance() float64 {
 		return DefaultFloatTolerance
 	}
 	return c.FloatTolerance
+}
+
+func (c Config) skew() time.Duration {
+	if c.TimestampSkew <= 0 {
+		return DefaultTimestampSkew
+	}
+	return c.TimestampSkew
 }
 
 // ignoredHeader reports whether a header is skipped.
@@ -147,6 +175,11 @@ type NormaliserUse struct {
 	// Examples are up to three paths where it fired, so a reader can go and
 	// look at one.
 	Examples []string `json:"examples,omitempty"`
+	// Widest is the largest gap this normaliser absorbed, for the ones that
+	// have a bound. It is what turns "timestamps are normalised" from a claim
+	// into a number somebody can disagree with: an absorbed gap of four
+	// milliseconds is the harness, and one of fifty minutes is worth a look.
+	Widest string `json:"widest,omitempty"`
 }
 
 // maxExamples is how many paths each normaliser records.
@@ -180,6 +213,9 @@ func (i Ignored) Describe() string {
 	for _, n := range i.Normalisers {
 		fmt.Fprintf(&b, "The %s normaliser made %s equal",
 			n.Name, plural(n.Count, "value", "values"))
+		if n.Widest != "" {
+			fmt.Fprintf(&b, ", the widest gap %s", n.Widest)
+		}
 		if len(n.Examples) > 0 {
 			fmt.Fprintf(&b, ", at %s", strings.Join(n.Examples, ", "))
 			if n.Count > len(n.Examples) {
@@ -193,10 +229,13 @@ func (i Ignored) Describe() string {
 
 // collector accumulates what the normalisers absorbed while a comparison runs.
 type collector struct {
-	uses map[string]*NormaliserUse
+	uses   map[string]*NormaliserUse
+	widest map[string]time.Duration
 }
 
-func newCollector() *collector { return &collector{uses: map[string]*NormaliserUse{}} }
+func newCollector() *collector {
+	return &collector{uses: map[string]*NormaliserUse{}, widest: map[string]time.Duration{}}
+}
 
 func (c *collector) record(name, path string) {
 	if c == nil {
@@ -213,13 +252,29 @@ func (c *collector) record(name, path string) {
 	}
 }
 
+// recordGap is record for a normaliser with a bound, keeping the widest gap it
+// absorbed.
+func (c *collector) recordGap(name, path string, gap time.Duration) {
+	if c == nil {
+		return
+	}
+	c.record(name, path)
+	if gap > c.widest[name] {
+		c.widest[name] = gap
+	}
+}
+
 func (c *collector) result() []NormaliserUse {
 	if c == nil || len(c.uses) == 0 {
 		return nil
 	}
 	out := make([]NormaliserUse, 0, len(c.uses))
-	for _, u := range c.uses {
-		out = append(out, *u)
+	for name, u := range c.uses {
+		use := *u
+		if gap, ok := c.widest[name]; ok {
+			use.Widest = gap.Round(time.Millisecond).String()
+		}
+		out = append(out, use)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -282,22 +337,29 @@ var timestampLayouts = []string{
 	"2006-01-02 15:04:05",
 }
 
-// looksLikeTimestamp reports whether a string parses as one of the layouts.
+// parseTimestamp reads a string as an instant under one of the layouts.
 //
 // The length guard is not an optimisation. "2006" parses under no layout here,
 // but a bare four digit year would under a shorter one somebody adds later,
-// and a version string is not a clock. Nineteen characters is the shortest
-// real form, "2006-01-02 15:04:05".
-func looksLikeTimestamp(s string) bool {
+// and a version string is not a clock. Nineteen characters is the shortest real
+// form, "2006-01-02 15:04:05".
+func parseTimestamp(s string) (time.Time, bool) {
 	if len(s) < 19 || len(s) > 40 {
-		return false
+		return time.Time{}, false
 	}
 	for _, layout := range timestampLayouts {
-		if _, err := time.Parse(layout, s); err == nil {
-			return true
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
 		}
 	}
-	return false
+	return time.Time{}, false
+}
+
+// looksLikeTimestamp reports whether a string is an instant at all, without
+// saying which.
+func looksLikeTimestamp(s string) bool {
+	_, ok := parseTimestamp(s)
+	return ok
 }
 
 // normaliseScalar decides whether two scalar values are equal, and records why
@@ -318,9 +380,26 @@ func normaliseScalar(cfg Config, c *collector, path string, base, cand any) (equ
 	bs, bok := base.(string)
 	cs, cok := cand.(string)
 	if bok && cok {
-		if !cfg.KeepTimestamps && looksLikeTimestamp(bs) && looksLikeTimestamp(cs) {
-			c.record("timestamp", path)
-			return true
+		if !cfg.KeepTimestamps {
+			bt, bts := parseTimestamp(bs)
+			ct, cts := parseTimestamp(cs)
+			// Both sides have to be instants. A timestamp against "pending" is
+			// a difference, and this is the line that keeps the normaliser from
+			// being a hole rather than a tolerance.
+			if bts && cts {
+				gap := ct.Sub(bt)
+				if gap < 0 {
+					gap = -gap
+				}
+				if gap <= cfg.skew() {
+					c.recordGap("timestamp", path, gap)
+					return true
+				}
+				// Past the skew it is reported, and the caller shows the two
+				// values. Nothing is recorded here: a normaliser that did not
+				// absorb anything has not ignored anything.
+				return false
+			}
 		}
 		if !cfg.KeepUUIDs && uuidPattern.MatchString(bs) && uuidPattern.MatchString(cs) {
 			c.record("uuid", path)

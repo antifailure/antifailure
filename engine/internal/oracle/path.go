@@ -143,6 +143,15 @@ func parsePattern(pattern string) ([]token, bool) {
 	if len(out) == 0 {
 		return nil, false
 	}
+	// A trailing descend matches every path there is, so "$.." would ignore
+	// the whole body and "$.orders.." would ignore everything under orders.
+	// Both read as though they were about to name something, and both are far
+	// broader than whoever typed them meant. Refusing beats matching
+	// everything: an ignore rule that silently swallows the document is the
+	// one mistake this package must not let somebody make quietly.
+	if out[len(out)-1].descend {
+		return nil, false
+	}
 	return out, true
 }
 

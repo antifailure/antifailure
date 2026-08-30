@@ -213,14 +213,30 @@ func (d *differ) diffArray(path []segment, base, cand []any) {
 	}
 }
 
+// maxReorderCheck is the longest array the reordering check will confirm.
+//
+// Confirming is quadratic, and the prefilter below is what keeps the quadratic
+// step from running on an array that is simply different. Past this length the
+// check is skipped and the elements are compared by index, which is the correct
+// answer rather than a degraded one: a two thousand element list that came back
+// shuffled is a difference at every index, and saying so is not wrong.
+const maxReorderCheck = 200
+
 // reordered reports whether two arrays hold the same members in a different
 // order.
 //
-// Membership is decided on the canonical form of each element, with the same
-// normalisers applied, so a list of objects whose timestamps differ is still
-// recognised as reordered rather than as entirely changed.
+// Two stages, and the second one is not optional. The canonical form collapses
+// every normalised class to a token, which makes the set comparison cheap and
+// makes it WRONG on its own: two timestamps a year apart both canonicalise to
+// the same token, so a list whose dates all shifted would be reported as a
+// reordering and the shift would never be printed. The canonical sort is a
+// prefilter; the answer comes from matching each element to a distinct partner
+// under the real comparison.
 func (d *differ) reordered(base, cand []any) bool {
-	if len(base) != len(cand) {
+	if len(base) != len(cand) || len(base) < 2 || len(base) > maxReorderCheck {
+		// An array of one cannot be reordered, and saying it was would be a
+		// way to report "the same element in a different order" about an
+		// element that changed.
 		return false
 	}
 	same := true
@@ -233,6 +249,7 @@ func (d *differ) reordered(base, cand []any) bool {
 	if same {
 		return false
 	}
+
 	bk := make([]string, len(base))
 	ck := make([]string, len(cand))
 	for i := range base {
@@ -243,6 +260,25 @@ func (d *differ) reordered(base, cand []any) bool {
 	sort.Strings(ck)
 	for i := range bk {
 		if bk[i] != ck[i] {
+			return false
+		}
+	}
+
+	// Confirmed against the real comparison, one partner each. Greedy is exact
+	// here because equalValues is an equivalence: an element that matches two
+	// candidates matches them interchangeably, so which one it takes cannot
+	// change whether a perfect matching exists.
+	taken := make([]bool, len(cand))
+	for i := range base {
+		matched := false
+		for j := range cand {
+			if taken[j] || !equalValues(d.cfg, base[i], cand[j]) {
+				continue
+			}
+			taken[j], matched = true, true
+			break
+		}
+		if !matched {
 			return false
 		}
 	}

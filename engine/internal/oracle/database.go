@@ -430,8 +430,8 @@ func matchTable(pattern, schema, name, qualified string) bool {
 	return (s == "*" || s == schema) && (t == "*" || t == name)
 }
 
-// CompareSnapshots diffs two branches' contents.
-func CompareSnapshots(
+// compareSnapshots diffs two branches' contents.
+func compareSnapshots(
 	cfg Config, opts DatabaseOptions, collect *collector, base, cand *Snapshot,
 ) ([]Finding, *DatabaseSummary) {
 	summary := &DatabaseSummary{MaxRows: opts.MaxRowsOrDefault()}
@@ -714,12 +714,12 @@ func identity(f Finding) string {
 	return string(f.Kind) + "\x00" + f.Where + "\x00" + f.Path
 }
 
-// AttributePhases marks each database finding as the migrations' or the
+// attributePhases marks each database finding as the migrations' or the
 // traffic's.
 //
 // Anything the pre-traffic comparison already found belongs to the migrations.
 // Everything else appeared while the probes ran.
-func AttributePhases(before, after []Finding) []Finding {
+func attributePhases(before, after []Finding) []Finding {
 	prior := map[string]bool{}
 	for _, f := range before {
 		prior[identity(f)] = true
