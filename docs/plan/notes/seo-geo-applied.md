@@ -93,6 +93,61 @@ of which restate claims this repository already makes elsewhere.
 and a TechArticle node tied to the same Organization `@id` as the marketing
 site.
 
+## The blog, and blog.antifailure.dev
+
+The writing lives at `antifailure.dev/blog`. `blog.antifailure.dev` resolves and
+sends one 301 there.
+
+That split is deliberate. A subdomain is commonly treated as a separate site,
+so a blog on one starts from nothing and earns authority that never reaches the
+product pages. A subfolder shares the domain outright, which for a domain
+registered this year is most of the available upside. Keeping the subdomain
+working costs nothing and means a link somebody has already shared does not
+break.
+
+What was built:
+
+- `/blog` and `/blog/<slug>`, static, with three posts whose every factual
+  claim about the product restates something this repository already says.
+- Posts are registered in `lib/blog.ts` and appended to the route registry, so
+  the sitemap, `llms.txt`, `llms-full.txt`, the breadcrumb trail, the markdown
+  twins and `check:seo` all cover them without any of those being taught what
+  a blog is. Adding a post to one file reaches all of them.
+- `BlogPosting` JSON-LD per post, linked to the same Organization and WebSite
+  `@id` as the rest of the site, with `datePublished` and `dateModified`.
+- `og:type: article` with `publishedTime`, which is what puts a date into a
+  link preview.
+- An RSS feed at `/blog/rss.xml`. Unfashionable and cheap, and the things that
+  still read one, aggregators and crawlers learning a site has published, are
+  worth reaching.
+
+Infrastructure, in Azure rather than GoDaddy: the `antifailure.dev` zone is
+Azure DNS in the `af-web` resource group, and GoDaddy is at most the registrar.
+
+- `af-blog`, a second Free Static Web App, serving only a 301. `af-site` is on
+  the Free tier, which allows two custom domains, and the apex and `www` use
+  both.
+- A `blog` CNAME to that app, and `blog.antifailure.dev` bound to it with a
+  managed certificate.
+- `deploy/blog-redirect/` holds the two files that app serves, so the redirect
+  is version controlled rather than living only in a portal.
+
+## IndexNow
+
+Shipped. `www/public/<key>.txt` is the ownership proof, `scripts/indexnow.mjs`
+submits, and `deploy.yml` runs it after a successful publish and never before.
+
+Only URLs whose sitemap `lastmod` falls inside the last seven days are
+submitted. Re-sending the whole sitemap on every deploy is what the protocol
+asks people not to do, and `lastmod` here comes from real git history, so it is
+a truthful basis for deciding what is new.
+
+The key is deliberately committed. IndexNow proves ownership by fetching it
+back from the site root, so publishing it is the mechanism rather than a leak.
+
+Google does not participate. Bing, Yandex, Seznam and Naver do, and
+participants share submissions.
+
 ## Needs an account. Cannot be done from here.
 
 These are the items in the catalog that require logging in as somebody. Each
@@ -105,9 +160,9 @@ one is a real technique from the list, not a gap in the work.
 2. **Google Search Console.** Verify the property, submit the sitemap. (SEO 19, 22)
 3. **Bing Webmaster Tools.** Verify and submit. This one matters more than it
    looks: Bing's index is the retrieval layer behind ChatGPT search and
-   Copilot, so a page Bing has not indexed cannot be cited there. (SEO 20, GEO 96)
-4. **IndexNow key.** Generate a key, serve it at the root, ping on deploy.
-   (SEO 21, GEO 95)
+   Copilot, so a page Bing has not indexed cannot be cited there. IndexNow now
+   pushes changes automatically, but the console is still where you confirm
+   they were accepted and see what was indexed. (SEO 20, GEO 96)
 5. **Wikidata item.** Create it, then add the QID to `SAME_AS` in
    `lib/site.ts`. (GEO 53)
 6. **Owned profiles.** LinkedIn, X, Crunchbase. Create them with the identical
@@ -139,6 +194,32 @@ one is a real technique from the list, not a gap in the work.
   which reaches the same consumers.
 - **`Last-Modified` response headers** (GEO 91). Set by the host, not by the
   build.
+
+## The one thing to carry across when #42 lands
+
+PR #42 (www/ui-pass) and this work touch seven of the same files:
+
+    www/app/solutions/[slug]/page.tsx
+    www/components/pages/company/Pricing.tsx
+    www/components/pages/product/Migrations.tsx
+    www/components/pages/product/Report.tsx
+    www/components/pages/solutions/Hub.tsx
+    www/components/pages/solutions/Vertical.tsx
+    www/next.config.ts
+
+Six are ordinary conflicts. The one that needs attention is `Vertical.tsx`:
+#42 splits it into per-slug files, and this work added a `path=` prop to each
+of its nine `<PageHero>` calls. That single prop is what produces the visible
+breadcrumb trail, the WebPage node and the BreadcrumbList node, so a refactor
+that drops it silently removes structured data from nine solution pages.
+
+Carry `path="/solutions/<slug>"` into each new per-slug file.
+
+If it is missed, `npm run check:seo` fails on "every indexable page has
+JSON-LD" and names the files. That is the point of the check, and it runs in
+`deploy.yml` before publishing, so the failure is loud and lands before
+anything ships. It is still cheaper to carry the prop across than to debug it
+afterwards.
 
 ## Known issues found along the way, outside this scope
 

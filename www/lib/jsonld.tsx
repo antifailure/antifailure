@@ -11,6 +11,7 @@ import {
   absoluteUrl,
 } from "./site";
 import { breadcrumbTrail } from "./routes";
+import { postModified, type Post } from "./blog";
 
 /**
  * Structured data, emitted as one linked graph rather than several loose
@@ -185,6 +186,41 @@ export function FaqJsonLd({ path, entries }: { path: string; entries: FaqEntry[]
           name: e.question,
           acceptedAnswer: { "@type": "Answer", text: e.answer },
         })),
+      }}
+    />
+  );
+}
+
+/**
+ * BlogPosting for a single post, linked back to the site graph.
+ *
+ * `BlogPosting` rather than the broader `Article` because it is more specific
+ * and specificity is free here. `dateModified` is present on every post even
+ * when it equals `datePublished`: freshness is one of the few signals an
+ * answer engine weighs directly, and omitting the field is not neutral, it
+ * just leaves the engine to guess from whatever it can find.
+ */
+export function PostJsonLd({ post }: { post: Post }) {
+  const url = absoluteUrl(`/blog/${post.slug}`);
+  return (
+    <JsonLd
+      data={{
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "@id": `${url}#post`,
+        headline: post.title,
+        description: post.dek,
+        url,
+        mainEntityOfPage: { "@type": "WebPage", "@id": url },
+        datePublished: post.published,
+        dateModified: postModified(post),
+        keywords: [...post.tags],
+        inLanguage: "en",
+        image: absoluteUrl(OG_IMAGE.url),
+        author: { "@type": "Organization", name: post.author.name, url: post.author.url },
+        publisher: { "@id": ORG_ID },
+        isPartOf: { "@id": SITE_ID },
+        about: { "@id": SOFTWARE_ID },
       }}
     />
   );

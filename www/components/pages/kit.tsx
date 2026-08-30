@@ -31,7 +31,16 @@ export function PageHero({
   title: string;
   lead: string;
   visual?: ReactNode;
-  actions?: ReactNode;
+  /**
+   * `undefined` renders the default pair of buttons. `null` renders no action
+   * row at all, and no empty flex container leaving a gap where one was.
+   *
+   * The distinction is needed because `actions ?? default` treats both the
+   * same, so the only way to say "none" used to be an empty fragment, which
+   * still rendered the wrapper and its margin. The blog index did exactly that
+   * and shipped 200px of dead space under its lead.
+   */
+  actions?: ReactNode | null;
   framed?: boolean;
   /**
    * The route this page is served at, e.g. "/product/twins".
@@ -55,18 +64,20 @@ export function PageHero({
         <p className="mt-8 max-w-[640px] text-[20px] leading-snug tracking-extra-tight text-gray-new-40 max-md:text-[17px]">
           {lead}
         </p>
-        <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-sm:flex-col max-sm:gap-y-3">
-          {actions ?? (
-            <>
-              <Button href="/signup" theme="filled">
-                Get started
-              </Button>
-              <Button href="/docs" theme="outlined">
-                Read the docs
-              </Button>
-            </>
-          )}
-        </div>
+        {actions === null ? null : (
+          <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-sm:flex-col max-sm:gap-y-3">
+            {actions ?? (
+              <>
+                <Button href="/signup" theme="filled">
+                  Get started
+                </Button>
+                <Button href="/docs" theme="outlined">
+                  Read the docs
+                </Button>
+              </>
+            )}
+          </div>
+        )}
         {visual ? (
           framed ? (
             <div className="relative mt-16 max-md:mt-12">

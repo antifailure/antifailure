@@ -128,12 +128,19 @@ tools/docs/styles/Google/
 # is deterministic, so a clean checkout produces the same bytes and the
 # repository does not carry a second copy of every image in two more formats.
 #
+# The two generated extensions rather than the whole directory. Ignoring
+# www/public/home/ outright also swallows any real asset somebody adds there,
+# silently: `git add` says nothing and the file simply never ships. A branch
+# adding a PNG to that directory is a normal thing to do and must not depend on
+# whoever writes it noticing this rule.
+#
 # www/public/og.png is deliberately NOT here. It is generated too, but by
 # scripts/make-og.mjs, which renders text with whatever fonts the machine has.
 # On a CI runner with no Helvetica Neue that silently substitutes and ships a
 # card nobody has looked at, so the reviewed PNG is committed and the script is
 # run by hand when the card should change.
-/www/public/home/
+/www/public/home/*.avif
+/www/public/home/*.webp
 
 # Salvage directories from an interrupted dependency install. Safe to delete.
 *.broken.[0-9]*
