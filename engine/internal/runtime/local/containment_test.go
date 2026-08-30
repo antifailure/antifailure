@@ -39,8 +39,26 @@ import (
 // The design being attacked was already wrong once in a way a test caught:
 // disabling IP masquerading looks like it removes a container's route out and
 // does not, because Docker Desktop translates the traffic again at the virtual
-// machine's gateway. That is why the inner network is created internal, and
-// why this file exists.
+// machine's gateway. That is why the inner network is created internal.
+//
+// This is not the first containment test in the repository, and the two that
+// came before are worth knowing about because of what they miss.
+// engine/conformance/runtime.go carries eight Egress_ behaviours that every
+// runtime has to answer, with a self-test that proves each one can fail, and
+// engine/internal/runtime/k8s/containment.go refuses to start an environment
+// on a cluster whose CNI accepts a NetworkPolicy and enforces nothing. Both
+// ask whether the NETWORK has a route out. Neither asks what the sidecar will
+// do if it is asked nicely, and the sidecar is the one thing in the
+// environment that does have a route out.
+//
+// The gap is visible in the conformance behaviours themselves.
+// Egress_CannotReachTheMetadataEndpoint strips the proxy variables before it
+// tries, so it proves the container cannot reach 169.254.169.254 and says
+// nothing about the sidecar fetching it on the container's behalf, which it
+// did. Egress_CannotBeBypassedByUDP sends a query to another resolver, and
+// says nothing about a query to the right resolver for a record type it was
+// forwarding straight back out. Both holes were real and both are closed; the
+// tests here are the ones that would have found them.
 
 // The marker lines the probe prints.
 //
@@ -223,9 +241,12 @@ func TestContainment_NothingEscapesAContainedEnvironment(t *testing.T) {
 // out, and it has to report escapes. If it does not, the script is not
 // attacking anything and the suite is decoration.
 func TestContainment_TheSameProbeEscapesWithoutIt(t *testing.T) {
-	r := requireRuntime(t)
+	// The runtime is not used here, and asking for it anyway is deliberate:
+	// it is what counts this test as one that wanted the daemon, so a machine
+	// without one skips it out loud rather than leaving the contained run
+	// above with no control.
+	requireRuntime(t)
 	requireInternet(t)
-	_ = r
 
 	cli, err := dockerutil.Client()
 	require.NoError(t, err)
