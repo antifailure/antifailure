@@ -75,7 +75,6 @@ gate: _reports
     run "prose stays readable"           just readability
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
-    run "the workflows are valid"        just workflows
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
@@ -384,6 +383,85 @@ links:
     cp -R docs/dist site/docs
     lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
 
+# The getting started path, run in order and timed.
+#
+# Not in `just gate`. It needs a Docker daemon and it takes minutes, because it
+# really does build an image, branch a database, and wait for a service to
+# answer. The daily schedule in .github/workflows/walkthrough.yml is where it
+# runs unattended; run it here before changing anything a new user touches.
+walkthrough:
+    go run ./tools/walkthrough .
+
+# Prove the backup restores, and record how long it took.
+#
+# Not in `just gate`, for the same reason as `walkthrough`: it needs a Docker
+# daemon and it takes minutes, because it really does take a dump, create a
+# database, restore into it and then interrogate the result through the
+# unprivileged role. The weekly schedule in .github/workflows/drill.yml is
+# where it runs unattended, and that workflow runs this recipe rather than its
+# own copy of these commands, so the thing CI proves and the thing you can run
+# here cannot drift apart.
+#
+# A Postgres of its own, on a port nothing else uses. This creates databases,
+# restores into them and drops them, which is antisocial on the shared
+# development container and fragile against anyone recreating it mid-run.
+#
+# The scratch database is seeded with two organizations before the drill runs,
+# and that is not decoration. Against an empty database every comparison passes
+# over nothing and the cross-tenant read has no other tenant to be refused: a
+# green run that examined nothing, which is the failure this repository keeps
+# finding. Two, because one tenant cannot be isolated from anybody.
+#
+# 300 seconds is a backstop, not a performance target, and the number was
+# chosen from measurements rather than picked. This same drill restores in
+# under two seconds on a continuous integration runner with nothing else on it.
+# On a laptop running a dozen other containers, two runs of this recipe an hour
+# apart reported 14.9 seconds and 46.3, and this repository has recorded a
+# restore of the same database taking 160 on a busy machine. A budget set near
+# the CI number, or near the first laptop number, would spend most of its life
+# failing on machine load, and a gate that fails for a reason the author cannot
+# fix is one people learn to re-run until it passes.
+#
+# So this fires on a change in kind: a restore that has stopped working rather
+# than one on a slow morning. What actually detects a regression is the series,
+# not the threshold, which is why the workflow publishes the measured time to
+# the run summary and keeps it as an artifact for ninety days. Compare against
+# last week's number; the budget is only there so a restore that has fallen off
+# a cliff cannot pass quietly.
+#
+# The objective the recovery time is held against is two hours, and it lives in
+# docs/src/content/docs/self-hosting/operations.md where an operator reads it.
+#
+# One command, and the one the weekly workflow runs.
+drill: _reports
+    #!/usr/bin/env bash
+    set -euo pipefail
+    url="postgres://postgres:test@127.0.0.1:55434/antifailure"
+    cleanup() { docker rm -f af-drill-test > /dev/null 2>&1 || true; }
+    trap cleanup EXIT
+    cleanup
+    docker run -d --name af-drill-test -p 55434:5432 \
+      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine > /dev/null
+    # A real query against the target database rather than pg_isready. The
+    # image runs initdb against a temporary server and pg_isready answers on
+    # that one, before POSTGRES_DB exists.
+    for _ in $(seq 1 90); do
+      docker exec af-drill-test psql -U postgres -d antifailure -tAc 'select 1' \
+        > /dev/null 2>&1 && break
+      sleep 1
+    done
+    docker exec af-drill-test psql -U postgres -d antifailure -tAc 'select 1' > /dev/null 2>&1 \
+      || { docker logs af-drill-test; echo "postgres never accepted a query"; exit 1; }
+    rm -rf {{reports}}/drill && mkdir -p {{reports}}/drill
+    node web/apps/api/src/backup-scratch.ts --url "$url" --app-password drill-password
+    node web/apps/api/src/backup-cli.ts drill \
+      --url "$url" \
+      --out {{reports}}/drill \
+      --database af_drill \
+      --app-password drill-password \
+      --max-restore-seconds 300 \
+      --report {{reports}}/drill.json
+
 # The examples build and their manifests are valid.
 #
 # An example that does not compile is worse than no example: it is the first
@@ -474,27 +552,6 @@ manifestcheck:
 # This justfile runs what CI runs.
 gatecheck:
     go run ./tools/gatecheck .
-
-# The workflows themselves parse and start.
-#
-# Nothing here checked that, and a workflow that does not start is invisible to
-# every other gate in this file: it produces no job, no log and no failing
-# step, and GitHub reports the run under the file's path because it never got
-# far enough to read its name. A `timeout-minutes` edit deleted the `runs-on`
-# line from a job, and the only symptom was a red check with nothing inside it.
-#
-# actionlint rather than a YAML parse, because the file was valid YAML the
-# whole time. What was wrong was the workflow schema, and the same tool also
-# reads the shell in every `run:` block, which is where the next one of these
-# will be.
-workflows:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! command -v actionlint > /dev/null; then
-      go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-    fi
-    "$(command -v actionlint || echo "$(go env GOPATH)/bin/actionlint")" .github/workflows/*.yml
-    echo "workflows: $(ls .github/workflows/*.yml | wc -l | tr -d ' ') files, every job can start"
 
 # The TypeScript that ships: the control plane packages, the agent runner, and
 # the console.
@@ -589,6 +646,7 @@ _generated:
     (cd engine && go test ./internal/hud -update-frames)
     git diff --exit-code -- \
       engine/internal/errors/codes.gen.go \
+      docs/src/content/docs/reference/errors.md \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
       schemas/events.v1.json \

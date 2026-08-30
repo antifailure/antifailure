@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Button } from "@/components/layout/Button";
+import { PageJsonLd } from "@/lib/jsonld";
+import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { Container } from "@/components/layout/Container";
 import { SiteLayout } from "@/components/layout/SiteLayout";
 import { SectionLabel } from "@/components/layout/SectionLabel";
@@ -31,6 +33,7 @@ export function PageShell({
 }
 
 export function PageHero({
+  path,
   eyebrow,
   title,
   lead,
@@ -38,6 +41,16 @@ export function PageHero({
   actions,
   framed = true,
 }: {
+  /**
+   * The route this hero heads, when the page is one the route table knows.
+   *
+   * Passing it is what gives the page its breadcrumb trail and its WebPage
+   * structured data, both of which are read by crawlers rather than people and
+   * so are easy to leave off without anybody noticing. It is optional because
+   * a hero on a route that is deliberately not indexed should not claim a
+   * place in a trail.
+   */
+  path?: string;
   eyebrow: string;
   title: string;
   lead: string;
@@ -48,6 +61,8 @@ export function PageHero({
   return (
     <section className="pt-28 pb-16 safe-paddings max-lg:pt-16 max-md:pt-12 max-md:pb-10">
       <Container size="1600" className="page-measure">
+        {path ? <PageJsonLd path={path} /> : null}
+        {path ? <Breadcrumbs path={path} /> : null}
         <SectionLabel>{eyebrow}</SectionLabel>
         <h1 className="mt-5 max-w-[1100px] text-[64px] leading-dense tracking-tighter max-xl:max-w-[920px] max-xl:text-[52px] max-lg:text-[44px] max-md:text-[34px] max-sm:text-[32px]">
           {title}
@@ -257,6 +272,24 @@ export function Callout({
       </div>
       <div className="text-black/80">{children}</div>
     </div>
+  );
+}
+
+/**
+ * A fact nobody has supplied yet, rendered as an obvious blank.
+ *
+ * The legal pages need a handful of values that no part of this repository
+ * knows: a registered entity, an address, a governing law. The wrong answer is
+ * a template token, which builds and publishes looking like finished prose to
+ * everybody except the one person who knows what it was meant to say. This
+ * reads as a blank on the rendered page, in the same amber the warn callout
+ * already uses, so a page shipped with one in it is visibly unfinished.
+ */
+export function Blank({ children }: { children: string }) {
+  return (
+    <span className="rounded-[4px] border-b border-dashed border-[#8A6A12]/70 bg-[#8A6A12]/[0.08] px-1.5 font-mono text-[0.82em] tracking-snug text-[#8A6A12]">
+      {children} to be supplied
+    </span>
   );
 }
 

@@ -160,6 +160,11 @@ func Rehearse(
 	r.TotalMS = float64(time.Since(start).Microseconds()) / 1000
 
 	r.Locks = collect()
+	// The lint said which lock this migration would ask for. The sampler now
+	// says how long it actually held it against production's row counts, and
+	// that number is the length of the queue the missing lock_timeout would
+	// have let build up.
+	annotateLockTimeout(r.Lint, r.Locks)
 	r.Statements = timings
 	if watcher != nil {
 		// The applier may have finished before the server did, which is
@@ -180,6 +185,43 @@ func Rehearse(
 		r.Error = short(applyErr)
 	}
 	return r, nil
+}
+
+// annotateLockTimeout folds what the sampler saw into the lock_timeout
+// finding.
+//
+// The rule fires from the SQL, because it has to fire before the migrations
+// run and on a migration that turns out to be quick. What the rehearsal adds
+// is the measurement: how long that lock was really held on a table with
+// production's row counts, which is how long every query arriving behind it
+// would have waited in production. A claim about queueing is an argument; a
+// second and a half of ACCESS EXCLUSIVE on a table holding forty million rows
+// is the thing that makes somebody add the line.
+//
+// It mutates in place because LintFinding is carried by value in a slice the
+// caller already owns, and a copy returned here would be a second list nothing
+// reads.
+func annotateLockTimeout(findings []LintFinding, locks []LockHold) {
+	for i := range findings {
+		if findings[i].Rule != RuleNoLockTimeout || findings[i].Table == "" {
+			continue
+		}
+		for _, l := range locks {
+			if l.Table != findings[i].Table || l.HeldMS <= 0 {
+				continue
+			}
+			findings[i].Detail += fmt.Sprintf(
+				" This rehearsal held %s on %s for at least %s, which is how long production's "+
+					"queries would have been queued behind it.",
+				l.Mode, l.Table, duration(l.HeldMS))
+			if l.Blocking {
+				findings[i].Detail +=
+					" Another session was seen waiting on it even here, on a branch nothing " +
+						"else is using."
+			}
+			break
+		}
+	}
 }
 
 // attachRewrites puts each rewritten table against the statement that caused

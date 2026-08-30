@@ -399,12 +399,78 @@ func TestRehearse_LintsAgainstTheBranchesRealRowCounts(t *testing.T) {
 		set, &insights.SQLApplier{}, 1000)
 	require.NoError(t, err)
 
-	require.Len(t, r.Lint, 1)
-	require.Equal(t, insights.RuleDropColumnInView, r.Lint[0].Rule)
-	require.Contains(t, r.Lint[0].Detail, "order_notes",
+	// A stock Postgres sets no lock_timeout, so that rule fires here too. It
+	// is looked up by rule rather than by position for that reason: an
+	// assertion on r.Lint[0] is an assertion about which rules happen to
+	// exist.
+	dropped := findingFor(t, r.Lint, insights.RuleDropColumnInView)
+	require.Contains(t, dropped.Detail, "order_notes",
 		"the view that reads the column has to be named, or the finding is not actionable")
-	require.Greater(t, r.Lint[0].Rows, int64(10000),
+	require.Greater(t, dropped.Rows, int64(10000),
 		"the row count comes from the branch, not from a guess")
+}
+
+// findingFor picks one rule's finding out of a report.
+func findingFor(
+	t *testing.T, findings []insights.LintFinding, rule insights.Rule,
+) insights.LintFinding {
+	t.Helper()
+	for _, f := range findings {
+		if f.Rule == rule {
+			return f
+		}
+	}
+	require.FailNowf(t, "rule did not fire", "%s is not among %v", rule, rulesIn(findings))
+	return insights.LintFinding{}
+}
+
+func TestRehearse_ReadsLockTimeoutFromTheServerRatherThanGuessing(t *testing.T) {
+	db, done := requireDatabase(t, "insightslocktimeout")
+	defer done()
+
+	// The lock is held long enough for the sampler to see it, because the
+	// point of this rule on a rehearsal is that the finding carries the real
+	// length of the window rather than an argument about one.
+	r := rehearse(t, db, map[string]string{
+		"001_slow.sql": "ALTER TABLE orders ADD COLUMN region text;\nSELECT pg_sleep(1);\n",
+	})
+	require.False(t, r.Failed, r.Error)
+
+	f := findingFor(t, r.Lint, insights.RuleNoLockTimeout)
+	require.Equal(t, "orders", f.Table)
+	require.Greater(t, f.Rows, int64(10000),
+		"the row count comes from the branch, and it is what makes a queued lock an outage")
+	require.Contains(t, f.Detail, "ACCESS EXCLUSIVE")
+	require.Contains(t, f.Detail, "AccessExclusiveLock",
+		"the sampler's own observation has to reach the finding, or the rule is only an "+
+			"argument about what a migration might do")
+
+	// And the rule goes quiet when the server already sets it, which is how
+	// most projects that set it do it. ALTER DATABASE reaches a session at the
+	// moment it connects, so this is proved on fresh connections rather than
+	// on the ones the first rehearsal used.
+	ctx := context.Background()
+	var name string
+	require.NoError(t, db.conn.QueryRow(ctx, "SELECT current_database()").Scan(&name))
+	_, err := db.conn.Exec(ctx, "ALTER DATABASE "+name+" SET lock_timeout = '3s'")
+	require.NoError(t, err)
+
+	conn, err := pgx.Connect(ctx, db.url.Reveal())
+	require.NoError(t, err)
+	defer func() { _ = conn.Close(ctx) }()
+	watch, err := pgx.Connect(ctx, db.url.Reveal())
+	require.NoError(t, err)
+	defer func() { _ = watch.Close(ctx) }()
+
+	set := insights.Discover(migrationsFS(map[string]string{
+		"002_more.sql": "ALTER TABLE orders ADD COLUMN currency text;",
+	}))
+	quiet, err := insights.Rehearse(ctx, conn, watch, db.url, set,
+		&insights.SQLApplier{}, insights.LargeTableRows)
+	require.NoError(t, err)
+	require.False(t, quiet.Failed, quiet.Error)
+	require.NotContains(t, rulesIn(quiet.Lint), insights.RuleNoLockTimeout,
+		"the setting is on the database, so warning that nothing sets it would be false")
 }
 
 func TestRehearse_OnlyAppliesWhatThePendingSetSays(t *testing.T) {

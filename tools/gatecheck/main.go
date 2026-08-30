@@ -276,6 +276,21 @@ func uncalledByGate(just string) []string {
 	// it is out of `gate` for the reason recorded in exemptFromGate.
 	exemptRecipes := map[string]bool{
 		"vuln": true,
+		// The getting started path end to end. It needs a daemon and takes
+		// minutes, so it runs on a schedule rather than on every branch, the
+		// same reasoning as the external link check: a check that costs
+		// everybody ten minutes for a property that changes weekly is a check
+		// people learn to skip.
+		"walkthrough": true,
+		// The disaster recovery drill. Same reasoning as walkthrough: it needs
+		// a daemon, and it takes minutes because it really does take a dump,
+		// create a database, restore into it, and interrogate the result
+		// through the unprivileged role. It runs weekly in drill.yml. What IS
+		// a function of the tree is the drill's own behaviour, and
+		// `just test-web` covers that inside `gate`: the suite breaks a
+		// restored database in each of the ways that matter and asserts the
+		// drill notices.
+		"drill": true,
 	}
 
 	// Recipes that are gates rather than conveniences. A recipe that mutates

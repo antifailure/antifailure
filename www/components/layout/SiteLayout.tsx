@@ -15,7 +15,9 @@ export function SiteLayout({
   return (
     <div className="relative flex min-h-screen flex-col">
       <SiteHeader overlay={overlay} />
-      <main className={cn("flex min-w-0 flex-1 flex-col", className)}>{children}</main>
+      <main id="main" tabIndex={-1} className={cn("flex min-w-0 flex-1 flex-col", className)}>
+        {children}
+      </main>
       <SiteFooter />
     </div>
   );

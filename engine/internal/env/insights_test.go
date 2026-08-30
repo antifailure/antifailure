@@ -167,10 +167,15 @@ func TestRunInsightsRehearsesOnItsOwnBranchAndTakesItAway(t *testing.T) {
 	// The lint ran against the branch's real catalogue rather than against the
 	// SQL alone. Nothing in the statement says the column is an int today, and
 	// that is the fact that decides whether Postgres rewrites the table.
-	require.Len(t, full.Rehearsal.Lint, 1)
-	require.Equal(t, insights.RuleAlterColumnType, full.Rehearsal.Lint[0].Rule)
-	require.Equal(t, "orders", full.Rehearsal.Lint[0].Table)
-	require.Greater(t, full.Rehearsal.Lint[0].Rows, int64(rows),
+	var rewrite *insights.LintFinding
+	for i := range full.Rehearsal.Lint {
+		if full.Rehearsal.Lint[i].Rule == insights.RuleAlterColumnType {
+			rewrite = &full.Rehearsal.Lint[i]
+		}
+	}
+	require.NotNil(t, rewrite, "the rewrite rule did not fire on a migration that rewrites")
+	require.Equal(t, "orders", rewrite.Table)
+	require.Greater(t, rewrite.Rows, int64(rows),
 		"the row count came from the branch, and it is what makes a rewrite an outage")
 
 	// And Postgres itself said it rewrote the table, through the event trigger

@@ -682,14 +682,22 @@ got far enough to read one. A red check with nothing inside it.
 
 Twenty-nine gates had nothing to say. The file was valid YAML the whole time,
 which is why a parse check would not have caught it either: what was wrong was
-the workflow schema. `actionlint` is in `just gate` and in ci.yml now, and it
-also reads the shell inside every `run:` block, which is where the next one of
-these will be.
+the workflow schema.
 
-The edit was mine, and it is the second time in this session that a string
-replacement took a line I did not mean it to take. The first moved a job's
-steps into another job. Neither was a thinking error; both were an editing
-technique that does not check what it removed.
+I reached for `actionlint` and that was the wrong answer, for a reason this
+repository had already written down. `just gate` has to work on a plane, and a
+gate that begins with `go install` does not. main got there first and better:
+`TestEveryJobSaysWhereItRuns` checks the one piece of the Actions schema that
+produced this, in the tree, with no dependency and a positive control. That is
+the version that survives the merge. Mine is gone.
+
+The edit was mine, and it is one of three times in this session that a string
+replacement took a line I did not mean it to take. One moved a job's steps into
+another job. One deleted the whole `typecheck` recipe from the justfile while
+removing the gate above it, which `gatecheck` caught within the minute by
+noticing CI ran a typecheck the justfile no longer did. None was a thinking
+error; all three were an editing technique that does not check what it removed,
+and the gates caught two of the three.
 
 **45. A compiled binary, committed for the third time.**
 `go build ./tools/dogfood` writes `./dogfood` into whatever directory it ran

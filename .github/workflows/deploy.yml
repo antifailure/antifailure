@@ -47,6 +47,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # www/lib/lastmod.ts asks git when the files behind each route last
+          # changed, and writes that into the sitemap. The default shallow
+          # fetch leaves every file looking like it was created in one commit,
+          # which collapses every lastmod to the same value and turns a
+          # freshness signal into noise.
+          fetch-depth: 0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -61,6 +68,15 @@ jobs:
         # needs no server. The waitlist is a managed function under /api and is
         # deployed by the platform rather than built here.
         run: npm ci --no-audit --no-fund && npm run build
+        working-directory: www
+
+      - name: Check the SEO and GEO surfaces
+        # Every one of these was missing from production when the check was
+        # written: no sitemap, no robots.txt, no canonical, no OpenGraph, no
+        # structured data, and an og:image that had 404'd since the day the
+        # documentation site first referenced it. None of it broke a build.
+        # That is exactly why it needs a check rather than a habit.
+        run: npm run check:seo
         working-directory: www
 
       - name: Build the documentation
@@ -106,6 +122,25 @@ jobs:
           app_location: site
           skip_app_build: true
           skip_api_build: true
+
+      - name: Tell Bing what changed
+        # Only after a real publish, because IndexNow is a claim that a URL is
+        # live and fetchable. Submitting before the deploy asks a crawler to
+        # look at something that is not there yet, which is how a key gets
+        # distrusted.
+        #
+        # This matters beyond Bing's own results: Bing's index is the retrieval
+        # layer behind ChatGPT search and Copilot, so a page it has not indexed
+        # cannot be cited there regardless of how it ranks on Google.
+        #
+        # The script exits 0 on a rejected submission. The site is already
+        # published at this point and a crawler will find it anyway; failing
+        # the deploy over a notification would be the wrong trade.
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: node scripts/indexnow.mjs
+        working-directory: www
 
       - name: Say so when it was not published
         if: ${{ env.TOKEN == '' }}

@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { notFound } from "next/navigation";
 import { ArchitecturePage } from "@/components/pages/product/Architecture";
 import { ChangeIntelligencePage } from "@/components/pages/product/ChangeIntelligence";
@@ -81,9 +82,11 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const page = PAGES[slug];
-  if (!page) return { title: "Product — Antifailure" };
-  return { title: page.title, description: page.description };
+  if (!PAGES[slug]) return { title: "Product — Antifailure" };
+  // From the route registry rather than from PAGES, so that a product page
+  // gets the same canonical, OpenGraph card and robots directives as every
+  // other page. Reading the title from two places is how they drift.
+  return pageMetadata(`/product/${slug}`);
 }
 
 export default async function Page({ params }: { params: Promise<{ slug: string }> }) {

@@ -90,23 +90,6 @@ jobs:
         # supposed to prevent.
         run: go run ./tools/gatecheck .
 
-      - name: The workflows themselves parse and start
-        # A workflow that does not start is invisible to every other gate here.
-        # It produces no job, no log and no failing step, and the run is
-        # reported under the file's path rather than its name because GitHub
-        # never got far enough to read one. A `timeout-minutes` edit deleted a
-        # job's `runs-on` line, and the only symptom was a red check with
-        # nothing inside it to read.
-        #
-        # actionlint rather than a YAML parse: the file was valid YAML the
-        # whole time, and what was wrong was the workflow schema. It also reads
-        # the shell in every `run:` block, which is where the next one of these
-        # will be.
-        run: |
-          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          "$(go env GOPATH)/bin/actionlint" .github/workflows/*.yml
-          echo "every workflow parses and every job can start"
-
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         # For the examples that are not Go. Pinned to the same major the
         # runtime images use, so the version that builds an example here is the
@@ -361,6 +344,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The sitemap's lastmod for each route comes from when the files
+          # behind it last changed, which means asking git. The default shallow
+          # fetch makes every file look like it arrived in one commit, so every
+          # lastmod collapses to the same value and the freshness signal
+          # becomes noise. check:seo asserts that they differ, which is how
+          # this was caught rather than shipped.
+          fetch-depth: 0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -378,6 +369,16 @@ jobs:
         # broken import is a blank page rather than a failed unit test, so the
         # proof is the production export itself.
         run: npm run build
+        working-directory: www
+
+      - name: The crawl surfaces the site claims to have
+        # Sitemap, robots, canonicals, OpenGraph, structured data, the markdown
+        # twins and the skip link. None of these break a build when they go
+        # missing, which is how the site shipped for weeks with no sitemap and
+        # an og:image that 404'd. It runs here rather than only at deploy so
+        # that a route added without an entry in lib/routes.ts fails the pull
+        # request that added it.
+        run: npm run check:seo
         working-directory: www
 
       - run: npm ci --no-audit --no-fund

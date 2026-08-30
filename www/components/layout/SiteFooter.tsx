@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Container } from "./Container";
-import { FOOTER_MENUS } from "@/lib/nav";
+import { FOOTER_MENUS, LEGAL_LINKS } from "@/lib/nav";
 
 function FooterLink({ href, children }: { href: string; children: string }) {
   const className =
@@ -61,16 +61,21 @@ export function SiteFooter() {
           ))}
         </div>
 
+        {/* gap-y as well as gap-x: this row wraps to two lines on a phone, and
+            with only a column gap the wrapped line sat against the one above it. */}
         <nav
           aria-label="Legal"
-          className="flex flex-wrap items-center gap-x-6 pb-10 text-[13px] tracking-tight text-[#8a8a8a] max-md:gap-x-5 max-md:pb-[max(2rem,env(safe-area-inset-bottom))]"
+          className="flex flex-wrap items-center gap-x-6 gap-y-2 pb-10 text-[13px] tracking-tight text-[#8a8a8a] max-md:gap-x-5 max-md:pb-[max(2rem,env(safe-area-inset-bottom))]"
         >
-          <Link className="transition-colors duration-200 hover:text-white" href="/privacy">
-            Privacy
-          </Link>
-          <Link className="transition-colors duration-200 hover:text-white" href="/terms">
-            Terms
-          </Link>
+          {LEGAL_LINKS.map((item) => (
+            <Link
+              key={item.href}
+              className="transition-colors duration-200 hover:text-white"
+              href={item.href}
+            >
+              {item.text}
+            </Link>
+          ))}
         </nav>
       </Container>
     </footer>

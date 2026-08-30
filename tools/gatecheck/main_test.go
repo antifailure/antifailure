@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -545,4 +546,97 @@ func TestEveryToolsBinaryNameIsIgnored(t *testing.T) {
 	if checked < 5 {
 		t.Fatalf("only %d tools were checked, so this has stopped looking", checked)
 	}
+}
+
+// Every job says where it runs.
+//
+// A job with no `runs-on` is not a job GitHub reports as failing. The whole
+// workflow file is refused before a single job is created, and what the API
+// returns is a run with zero jobs, `created_at` equal to `updated_at`, and the
+// file's path where its name should be. Nothing appears in the pull request's
+// checks, because the check never existed. A red check argues with you; this
+// one leaves.
+//
+// It happened to dogfood.yml. A commit rewrote
+//
+//	runs-on: ubuntu-latest
+//	timeout-minutes: 45
+//
+// into a longer comment and `timeout-minutes: 75`, and dropped the `runs-on`
+// line with the one it meant to replace. The two pushes after it produced runs
+// that started nothing, while the pull request still showed the older run's
+// comment, so the branch looked like it had a pipeline and did not.
+//
+// TestEveryWorkflowIsValidYAML above cannot catch it: the file is valid YAML
+// and declares its jobs. It is the Actions schema that is violated, and this is
+// the cheapest useful piece of that schema to check.
+func TestEveryJobSaysWhereItRuns(t *testing.T) {
+	files, _ := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
+	if len(files) == 0 {
+		t.Fatal("found no workflows, which means this check is looking in the wrong place")
+	}
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, job := range jobsWithNoRunner(t, body) {
+			t.Errorf("%s: job %q declares neither runs-on nor uses, "+
+				"so GitHub refuses the whole file and the workflow reports nothing at all",
+				filepath.Base(file), job)
+		}
+	}
+}
+
+func TestAJobMissingRunsOnIsReported(t *testing.T) {
+	// The positive control is the second job: a file where every job is wrong
+	// would also pass a check that had stopped looking.
+	got := jobsWithNoRunner(t, []byte(`
+name: example
+on: push
+jobs:
+  forgot:
+    timeout-minutes: 75
+    steps:
+      - run: echo hello
+  remembered:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+  delegated:
+    uses: ./.github/workflows/reusable.yml
+`))
+	want := []string{"forgot"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// jobsWithNoRunner names the jobs in a workflow that say nowhere to run.
+//
+// A job that calls a reusable workflow carries `uses` and must NOT carry
+// `runs-on`: the called workflow decides. Treating that as a fault would make
+// this gate refuse a correct file, which is the way a gate gets deleted.
+func jobsWithNoRunner(t *testing.T, body []byte) []string {
+	t.Helper()
+	var parsed struct {
+		Jobs map[string]struct {
+			RunsOn any    `yaml:"runs-on"`
+			Uses   string `yaml:"uses"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("not valid YAML: %v", err)
+	}
+	var missing []string
+	for name, job := range parsed.Jobs {
+		if job.Uses != "" || job.RunsOn != nil {
+			continue
+		}
+		missing = append(missing, name)
+	}
+	// Sorted, because a map is walked in a different order every run and an
+	// error message that reorders itself reads as a different failure.
+	sort.Strings(missing)
+	return missing
 }

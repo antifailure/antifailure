@@ -22,8 +22,8 @@
 //     and which migrations the database has not recorded yet.
 //   - sql.go: cutting a migration file into statements without breaking a
 //     dollar quoted function body in half.
-//   - lint.go: the six rules, and the catalogue read they need, because most
-//     of them are only true about a particular database.
+//   - lint.go: the rules, and the catalogue read they need, because most of
+//     them are only true about a particular database.
 //   - rehearsal.go: applying the pending migrations and timing each statement.
 //   - rewrite.go: asking Postgres whether it rewrote a table, rather than
 //     guessing from the statement.

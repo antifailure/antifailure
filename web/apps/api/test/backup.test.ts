@@ -18,6 +18,7 @@ import {
   rehearse,
   restore,
 } from '../src/backup.ts'
+import { prepareScratch } from '../src/backup-scratch.ts'
 
 // The disaster recovery drill.
 //
@@ -207,7 +208,14 @@ test('the restored database still refuses a cross-tenant read', { timeout: 600_0
 // a number nobody measured is a runbook that will be wrong on the day.
 test('the drill measures a recovery time and finds nothing wrong', { timeout: 600_000 }, async (t) => {
   if (skipWithoutDatabase(t)) return
-  await seedOrg(h!, 'dr-drill')
+  // Two, not one. The drill's last check asks one tenant to read another's
+  // rows, and with a single organization in the database there is no other
+  // tenant to be refused: the check would report that it could not run, which
+  // this test would then fail on. Depending on the organizations earlier tests
+  // in this file happen to have left behind would make that a property of the
+  // order the runner picked.
+  await seedOrg(h!, 'dr-drill-one')
+  await seedOrg(h!, 'dr-drill-two')
 
   const lines: string[] = []
   const drill = await rehearse({
@@ -221,6 +229,22 @@ test('the drill measures a recovery time and finds nothing wrong', { timeout: 60
 
   assert.deepEqual(drill.problems, [], lines.join('\n'))
   assert.ok(drill.recoveryTimeSeconds > 0, 'the drill measured nothing')
+  assert.equal(drill.overBudget, null, 'no budget was given, so nothing can be over one')
+
+  // The drill has to have ASKED. Everything else it does compares catalogue
+  // text against catalogue text, and all of that passes over a database which
+  // answers every query and isolates nothing.
+  assert.equal(
+    drill.isolation.attempted,
+    true,
+    `the drill never attempted the cross-tenant read: ${
+      drill.isolation.attempted ? '' : drill.isolation.reason
+    }`,
+  )
+  assert.ok(
+    drill.isolation.attempted && drill.isolation.tables.includes('environments'),
+    'the cross-tenant read did not reach environments',
+  )
   assert.equal(
     drill.recoveryTimeSeconds,
     drill.restoreSeconds,
@@ -438,6 +462,207 @@ test('a drill refuses a database it did not create, and leaves it standing', asy
   } finally {
     await survivor.end({ timeout: 5 })
   }
+})
+
+// The drill has to be able to go red, or it is a list of assertions that might
+// all be vacuous. These are the two breaks that matter, and both are made in
+// the SOURCE database rather than in the restored one, which is the whole
+// point: the manifest is taken from the source, so a source whose isolation is
+// already broken produces a manifest recording the breakage and a restore that
+// matches it perfectly. Every structural check in this module passes. Only the
+// behavioural one notices, and until it ran inside the drill nothing would
+// have.
+//
+// Both restore the policy afterwards, through t.after so that a failure part
+// way does not leave the rest of this file running against a database with no
+// tenant isolation in it.
+
+async function restoreEnvironmentPolicy(): Promise<void> {
+  await h!.unsafe('DROP POLICY IF EXISTS tenant_isolation ON environments')
+  await h!.unsafe(`
+    CREATE POLICY tenant_isolation ON environments
+      FOR ALL TO ${APP_ROLE}
+      USING (org_id = current_org())
+      WITH CHECK (org_id = current_org())`)
+}
+
+test('a drill goes red when the policy is there and lets every tenant through', { timeout: 600_000 }, async (t) => {
+  if (skipWithoutDatabase(t)) return
+  await seedOrg(h!, 'dr-permissive-one')
+  await seedOrg(h!, 'dr-permissive-two')
+  t.after(restoreEnvironmentPolicy)
+
+  // The nastiest shape of this failure: the policy is present, named the same
+  // thing, on a table whose row level security is enabled and forced. Every
+  // catalogue comparison in this file matches. It isolates nothing.
+  await h!.unsafe('DROP POLICY tenant_isolation ON environments')
+  await h!.unsafe(`
+    CREATE POLICY tenant_isolation ON environments
+      FOR ALL TO ${APP_ROLE} USING (true) WITH CHECK (true)`)
+
+  const drill = await rehearse({
+    adminUrl: adminUrlOf(),
+    outDir: workDir,
+    label: 'permissive',
+    targetDatabase: targetName(),
+    appPassword: 'app-test-password',
+  })
+
+  assert.ok(
+    drill.problems.some((p) => p.includes('environments') && p.includes('isolates nothing')),
+    `the drill did not notice a policy that lets every tenant through: ${drill.problems.join('; ')}`,
+  )
+  assert.ok(
+    drill.problems.some((p) => p.includes('no organization set')),
+    `an unscoped connection read every tenant and the drill did not say so: ${drill.problems.join('; ')}`,
+  )
+  // The half that proves this test is worth having. Nothing structural fired:
+  // the policy name is in the manifest, it is in the restored database, the
+  // row counts match, the grants match. A drill without the behavioural check
+  // would have reported this backup sound.
+  assert.deepEqual(
+    drill.problems.filter((p) => !p.includes(APP_ROLE)),
+    [],
+    'a structural check fired, which would make this test pass for the wrong reason',
+  )
+})
+
+test('a drill goes red when the policy did not come back at all', { timeout: 600_000 }, async (t) => {
+  if (skipWithoutDatabase(t)) return
+  await seedOrg(h!, 'dr-dropped-one')
+  await seedOrg(h!, 'dr-dropped-two')
+  t.after(restoreEnvironmentPolicy)
+
+  // Row level security stays enabled and forced, and there is now nothing
+  // behind it, so the table refuses everything. The first version of the
+  // behavioural check only looked for leakage and walked straight past this:
+  // nothing came back, so nothing leaked, so the drill was green over a table
+  // the application can no longer read.
+  await h!.unsafe('DROP POLICY tenant_isolation ON environments')
+
+  const drill = await rehearse({
+    adminUrl: adminUrlOf(),
+    outDir: workDir,
+    label: 'dropped',
+    targetDatabase: targetName(),
+    appPassword: 'app-test-password',
+  })
+
+  assert.ok(
+    drill.problems.some(
+      (p) => p.includes('environments') && p.includes('cannot read'),
+    ),
+    `the drill did not notice a dropped policy: ${drill.problems.join('; ')}`,
+  )
+})
+
+// A drill that could not attempt the cross-tenant read is a drill that proved
+// nothing about isolation, and the one thing it must not do is look like a
+// clean run.
+test('a drill that cannot connect as the application says so rather than passing', { timeout: 600_000 }, async (t) => {
+  if (skipWithoutDatabase(t)) return
+  await seedOrg(h!, 'dr-nopassword')
+
+  const drill = await rehearse({
+    adminUrl: adminUrlOf(),
+    outDir: workDir,
+    label: 'nopassword',
+    targetDatabase: targetName(),
+    // Deliberately absent.
+    appPassword: undefined,
+  })
+
+  assert.equal(drill.isolation.attempted, false)
+  assert.ok(
+    drill.problems.some((p) => p.includes('never attempted')),
+    `a drill that skipped the behavioural check reported: ${drill.problems.join('; ') || 'nothing'}`,
+  )
+})
+
+// The recovery time is the number the runbook quotes, so a regression in it has
+// to be able to fail a run. It is reported apart from the problems on purpose:
+// a slow restore and a restore that isolates nothing are not the same finding,
+// and a caller that prints them the same way teaches whoever reads the failure
+// that "this backup is not one" sometimes means the machine was busy.
+test('a drill over its recovery time budget reports it, and not as a broken backup', { timeout: 600_000 }, async (t) => {
+  if (skipWithoutDatabase(t)) return
+  await seedOrg(h!, 'dr-budget-one')
+  await seedOrg(h!, 'dr-budget-two')
+
+  const drill = await rehearse({
+    adminUrl: adminUrlOf(),
+    outDir: workDir,
+    label: 'budget',
+    targetDatabase: targetName(),
+    appPassword: 'app-test-password',
+    // Below any real restore. A budget expressed as a fraction of the measured
+    // time would be a test that cannot fail.
+    maxRestoreSeconds: 0.000001,
+  })
+
+  assert.deepEqual(drill.problems, [], 'the backup was sound; only the clock was over')
+  assert.ok(drill.overBudget, 'a restore slower than its budget was not reported')
+  assert.equal(drill.overBudget?.budgetSeconds, 0.000001)
+  assert.equal(drill.overBudget?.seconds, drill.restoreSeconds)
+
+  const generous = await rehearse({
+    adminUrl: adminUrlOf(),
+    outDir: workDir,
+    label: 'budget-ok',
+    targetDatabase: targetName(),
+    appPassword: 'app-test-password',
+    maxRestoreSeconds: 86_400,
+  })
+  assert.equal(generous.overBudget, null, 'a restore inside its budget was reported as over it')
+})
+
+// The scratch database the scheduled drill runs against. Against an empty
+// Postgres every comparison in this module passes over nothing and the
+// cross-tenant read has no other tenant to be refused, which is a green run
+// that examined nothing.
+test('a scratch database comes out with two tenants that own rows', { timeout: 600_000 }, async (t) => {
+  if (skipWithoutDatabase(t)) return
+  const name = `af_dr_scratch_${randomUUID().replace(/-/g, '').slice(0, 8)}`
+  const admin = postgres(DR_URL, { max: 1, onnotice: () => {} })
+  t.after(async () => {
+    await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`).catch(() => {})
+    await admin.end({ timeout: 5 })
+  })
+  await admin.unsafe(`CREATE DATABASE "${name}"`)
+
+  const { orgIds } = await prepareScratch(urlInto(name), { appPassword: 'app-test-password' })
+  assert.equal(orgIds.length, 2)
+
+  const seeded = postgres(urlInto(name), { max: 1, onnotice: () => {} })
+  try {
+    const rows = await seeded<{ org_id: string }[]>`
+      SELECT DISTINCT org_id::text AS org_id FROM environments ORDER BY 1`
+    assert.deepEqual(rows.map((r) => r.org_id).sort(), [...orgIds].sort())
+    // Without an audit entry per organization the manifest records an empty
+    // chain and the restore's audit comparison is a loop over nothing.
+    const heads = await seeded<{ n: string }[]>`
+      SELECT count(DISTINCT org_id)::text AS n FROM audit_entries`
+    assert.equal(heads[0]?.n, '2')
+  } finally {
+    await seeded.end({ timeout: 5 })
+  }
+
+  // Running it again must refuse. The only way this tool can hurt anybody is
+  // by being pointed at a database that already holds real organizations, and
+  // the refusal asks the database what it contains rather than whether its
+  // name looks like a scratch one.
+  await assert.rejects(
+    prepareScratch(urlInto(name), { appPassword: 'app-test-password' }),
+    /already holds/,
+  )
+})
+
+test('a scratch database with one organization is refused', async (t) => {
+  await assert.rejects(
+    prepareScratch(DR_URL, { orgs: 1 }),
+    /at least two organizations/,
+    'one tenant cannot be isolated from anybody, and a drill against it refuses nothing',
+  )
 })
 
 /** The admin URL pointed at one particular database. */
