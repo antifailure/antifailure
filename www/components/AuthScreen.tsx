@@ -77,7 +77,12 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
     // previous version pinned the page to the viewport height and hid the
     // overflow, which put the submit button below the fold and out of reach on
     // a phone. This scrolls.
-    <div className="grid min-h-dvh w-full bg-[#f7f7f5] lg:grid-cols-[2fr_3fr]">
+    //
+    // <main> rather than <div>: these pages do not use SiteLayout, so this is
+    // the only content landmark they have, and `id` is what the skip link in
+    // app/layout.tsx targets. Without it that link was dead on exactly these
+    // pages, which the assembled-site link check caught.
+    <main id="main" tabIndex={-1} className="grid min-h-dvh w-full bg-[#f7f7f5] lg:grid-cols-[2fr_3fr]">
       <AuthCover />
       <div className="relative flex flex-col bg-[#f7f7f5] px-6 py-8 sm:px-8 lg:px-16">
         <a
@@ -192,6 +197,6 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

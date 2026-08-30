@@ -222,6 +222,7 @@ export function OraclePage() {
   return (
     <PageShell>
       <PageHero
+        path="/product/oracle"
         eyebrow="Differential Oracle"
         title="Same state. Same behavior. Two versions."
         lead="Compare normalized HTTP, status classes, database writes, events, traces, query plans, latency, journeys, and logs. Declared expected differences do not count as regressions."

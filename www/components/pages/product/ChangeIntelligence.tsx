@@ -345,6 +345,7 @@ export function ChangeIntelligencePage() {
   return (
     <PageShell>
       <PageHero
+        path="/product/change-intelligence"
         eyebrow="Change Intelligence"
         title="Test what matters for this change."
         lead="Analyze the pull request for affected services, migrations, infrastructure, APIs, events, and critical workflows. Recommend twin fidelity and a validation plan."

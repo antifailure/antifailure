@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+import { Picture } from "@/components/Picture";
 import { Grain } from "./icons";
 
 const NODES = [
@@ -14,7 +14,7 @@ const NODES = [
 export function TwinGraph() {
   return (
     <div className="relative mt-14 aspect-[1184/500] w-full overflow-hidden max-xl:mt-12">
-      <Image src="/home/twin-graph.png" alt="" fill sizes="1184px" className="object-cover opacity-80" />
+      <Picture src="/home/twin-graph.png" alt="" fill sizes="1184px" className="object-cover opacity-80" />
       <svg viewBox="0 0 1184 500" className="absolute inset-0 h-full w-full" aria-hidden>
         <path
           d="M180 250 C280 250, 320 140, 400 140 C500 140, 540 250, 620 250 C720 250, 760 140, 840 140 C940 140, 980 250, 1040 250"

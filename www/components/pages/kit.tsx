@@ -5,6 +5,8 @@ import { Container } from "@/components/layout/Container";
 import { SiteLayout } from "@/components/layout/SiteLayout";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { Cta } from "@/components/home/Cta";
+import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
+import { FaqJsonLd, PageJsonLd } from "@/lib/jsonld";
 import { cn } from "@/lib/cn";
 
 export function PageShell({ children }: { children: ReactNode }) {
@@ -23,6 +25,7 @@ export function PageHero({
   visual,
   actions,
   framed = true,
+  path,
 }: {
   eyebrow: string;
   title: string;
@@ -30,10 +33,21 @@ export function PageHero({
   visual?: ReactNode;
   actions?: ReactNode;
   framed?: boolean;
+  /**
+   * The route this page is served at, e.g. "/product/twins".
+   *
+   * One prop, in the one component every page renders exactly once, that
+   * produces three things: the visible breadcrumb trail, the WebPage node and
+   * the BreadcrumbList node. Optional so an unfinished page still renders, but
+   * `npm run check:seo` fails on any published route that omits it.
+   */
+  path?: string;
 }) {
   return (
     <section className="pt-28 pb-16 safe-paddings max-lg:pt-16 max-md:pt-12 max-md:pb-10">
       <Container size="1600">
+        {path ? <PageJsonLd path={path} /> : null}
+        {path ? <Breadcrumbs path={path} /> : null}
         <SectionLabel>{eyebrow}</SectionLabel>
         <h1 className="mt-5 max-w-[1100px] text-[64px] leading-dense tracking-tighter max-xl:max-w-[920px] max-xl:text-[52px] max-lg:text-[44px] max-md:text-[34px] max-sm:text-[32px]">
           {title}
@@ -295,5 +309,43 @@ export function Prose({ children, className }: { children: ReactNode; className?
     >
       {children}
     </div>
+  );
+}
+
+export type FaqItem = { question: string; answer: string };
+
+/**
+ * A frequently-asked-questions block, and the FAQPage markup that describes it.
+ *
+ * Both come from the same array, which is the point. Question-and-answer
+ * structured data is the highest-value type for being quoted by an answer
+ * engine, because each pair is an individually addressable candidate rather
+ * than a paragraph somebody has to decide how to cut. It is also the type most
+ * often marked up with text the reader cannot see, which gets it discarded.
+ * Deriving the markup and the rendering from one source means they cannot
+ * disagree.
+ *
+ * Rendered as a <dl>. A question and its answer are a term and a definition,
+ * and that is the element that says so. It is not an accordion: an answer
+ * hidden behind a click is an answer some crawlers never see, and there are
+ * eight of these, not eighty.
+ */
+export function Faq({ path, items }: { path: string; items: FaqItem[] }) {
+  return (
+    <>
+      <FaqJsonLd path={path} entries={items} />
+      <dl className="mt-14 grid grid-cols-2 gap-x-12 gap-y-10 border-t border-black/12 pt-12 max-lg:grid-cols-1 max-lg:gap-y-8 max-md:mt-10 max-md:pt-8">
+        {items.map((item) => (
+          <div key={item.question}>
+            <dt className="text-[19px] leading-snug tracking-extra-tight text-black max-md:text-[17px]">
+              {item.question}
+            </dt>
+            <dd className="mt-3 text-[16px] leading-relaxed tracking-extra-tight text-gray-new-40 max-md:text-[15px]">
+              {item.answer}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </>
   );
 }

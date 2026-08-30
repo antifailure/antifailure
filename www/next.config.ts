@@ -30,6 +30,11 @@ const nextConfig: NextConfig = {
   // one redirect the site needs, /product/crowdi to /product/exploratory-users,
   // is app/product/crowdi/page.tsx: a real page, with the canonical link and
   // noindex, that the CDN can hand out like any other.
+
+  // Host level rules that a static export cannot express live next to the
+  // build output in public/staticwebapp.config.json: the 301 for the legacy
+  // slug, immutable cache headers on hashed assets, the text/markdown content
+  // type for the per page .md twins, and a real 404 status.
 };
 
 export default nextConfig;

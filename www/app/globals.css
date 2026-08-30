@@ -454,3 +454,42 @@ body {
     animation: none !important;
   }
 }
+
+/*
+ * The skip-to-content link.
+ *
+ * It is the first thing in the body, and it has to stay reachable by keyboard
+ * while staying out of the way of everyone else. `display: none` and
+ * `visibility: hidden` both remove it from the tab order, which defeats the
+ * point, so it is positioned off-screen and returns on focus.
+ *
+ * It shipped once with no rule at all and rendered as the words "Skip to
+ * content" sitting above the header on every page.
+ */
+.skip-to-content {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.75rem 1.25rem;
+  background: #ffffff;
+  color: #000000;
+  font-size: 14px;
+  letter-spacing: -0.02em;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+}
+
+.skip-to-content:focus-visible,
+.skip-to-content:focus {
+  left: 1rem;
+  top: 1rem;
+  outline: 2px solid #33bf00;
+  outline-offset: 2px;
+}
+
+/* The main landmark takes focus when the skip link is used. That focus must
+   not paint a ring around the entire page. */
+main:focus {
+  outline: none;
+}

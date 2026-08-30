@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+import { Picture } from "@/components/Picture";
 import { cn } from "@/lib/cn";
 import { Grain } from "./icons";
 
@@ -38,14 +38,13 @@ export function IdeOverlay({ className }: { className?: string }) {
 export function IdeStage() {
   return (
     <div className="pointer-events-none relative w-full bg-[#111315] outline outline-1 outline-black/20 max-sm:hidden">
-      <Image
+      <Picture
         className="relative w-full"
         src="/home/ide-stage.png"
         alt=""
         width={1056}
         height={628}
         sizes="(min-width: 1024px) 1056px, 100vw"
-        quality={90}
       />
       <IdeOverlay className="absolute inset-0" />
     </div>

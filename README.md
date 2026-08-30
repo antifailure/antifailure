@@ -6,10 +6,19 @@
 </p>
 
 <p align="center">
+  <a href="https://antifailure.dev">Website</a> &middot;
   <a href="https://antifailure.dev/docs">Documentation</a> &middot;
   <a href="https://antifailure.dev/docs/getting-started/quickstart">Quickstart</a> &middot;
+  <a href="docs/plan/STATUS.md">Status</a> &middot;
   <a href="CONTRIBUTING.md">Contributing</a> &middot;
   <a href="SECURITY.md">Security</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/antifailure/antifailure/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/antifailure/antifailure/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-black"></a>
+  <a href="https://antifailure.dev/docs"><img alt="Documentation" src="https://img.shields.io/badge/docs-antifailure.dev-33bf00"></a>
+  <img alt="Status: pre-1.0" src="https://img.shields.io/badge/status-pre--1.0-orange">
 </p>
 
 ---
@@ -72,6 +81,85 @@ comes from Docker, Neon, Supabase, or DBLab thin clones in front of any
 Postgres, including RDS, Cloud SQL, and Azure Database. Providers are an
 interface with a published conformance suite, so adding one is a package, not
 a fork.
+
+## How this differs from the things it sits next to
+
+Most of these are not competitors. Several are dependencies. The distinction
+worth drawing is what each one leaves undone.
+
+| Instead of | What it gives you | What is still missing |
+| --- | --- | --- |
+| A shared staging environment | One long-lived place to try things | It drifts from production, its data is invented, and everyone queues for it. The bug you ship is the one no fixture predicted. |
+| Preview environments from a PaaS | Your app, built and running, per branch | The database is a seed file. Nothing about the data has production's shape, size, or distribution, so a migration that is instant there can hold a lock for minutes in production. |
+| Postgres branching on its own | A real copy of real data, quickly | The data is still production data. Something has to mask it, prove the masking, and stop an unverified copy from being used. And the branch alone does not build your services or contain their egress. |
+| A masking or synthetic-data tool | Safe data | Safe data sitting in a file. It is not attached to a running stack, a sealed network, or anything that exercises a workflow end to end. |
+| A migration linter | A fast opinion on your SQL, statically | Static analysis cannot tell you how long `ALTER TABLE` holds a lock on a table with your row count, or that a query plan regressed. That needs execution against production-shaped data. |
+| Testcontainers and friends | Real dependencies in your test process | Fixtures, scoped to one test, in one process. Not the whole stack under production-shaped load with third-party calls contained. |
+
+Antifailure uses several of these rather than replacing them: the database can
+come from Neon, Supabase, or DBLab thin clones, and the runner drives a real
+browser. The part it adds is the assembly, and the proof that the assembly held.
+
+### When not to use this
+
+Being honest about this is cheaper than a disappointed evaluation.
+
+- **You do not use Postgres.** The safe-state work is Postgres-specific. Other
+  engines are not on the near roadmap.
+- **You need a guarantee.** This produces evidence, not certainty. The
+  [terms](https://antifailure.dev/terms) say so in the same words.
+- **You want a hosted product today.** There is no generally available control
+  plane yet. The signup page is a waitlist and says so.
+- **Your changes are not risky.** If nothing you ship touches schema, data
+  volume, or third-party side effects, a normal test suite is the right tool
+  and this is overhead.
+- **You cannot run containers in CI.** It needs Docker, GitHub Actions, or
+  Kubernetes somewhere it can build and run your services.
+
+## Questions people actually ask
+
+**Does my production data leave my infrastructure?**
+No. The hosted control plane holds organizations, policy, aggregated reports,
+and billing. Raw snapshots, secrets, and captured request bodies stay in your
+cloud by default. That boundary is described on the
+[architecture page](https://antifailure.dev/product/architecture).
+
+**How do I know the masking actually worked?**
+A scanner reads back every column of every table looking for anything that
+still parses as an email, a card number, a phone number, or a key, then signs
+an attestation. An unverified golden cannot be branched, and that is enforced
+in code rather than in a checklist.
+
+**What stops a test run from emailing real customers or charging a real card?**
+Every environment gets a sidecar that owns its network namespace, and nothing
+leaves except through it. Each host gets a mode: `BLOCK`, `ALLOW`, `SANDBOX`
+(test credentials, with a tripwire if a live key ever appears), `CAPTURE`
+(mail and SMS into a searchable inbox), or `MOCK` (a stateful offline pack).
+The default for an unlisted host is to fail closed.
+
+**Can it run with no network access at all?**
+Yes for the covered surface. The Stripe pack is complete enough to run
+checkout, subscribe, renew, and cancel with signed webhooks and no network.
+
+**What happens when a test fails because the tooling broke, not my code?**
+It is classified as such. The runner returns one of `pass`, `fail`, `flaky`,
+`blocked`, or `unverified`, and a failure caused by the runner is never counted
+against your application.
+
+**Which databases and platforms are supported?**
+Postgres, sourced from Docker, Neon, Supabase, or DBLab thin clones in front of
+any Postgres including RDS, Cloud SQL, and Azure Database. It runs locally on
+Docker, in GitHub Actions, or on your own Kubernetes.
+
+**Is it open source?**
+This repository is MIT licensed except for `ee/`, which is under the
+Antifailure Enterprise License. `ee/` is never compiled into the community
+binary, images, or Helm chart.
+
+**Is it production ready?**
+No, and [docs/plan/STATUS.md](docs/plan/STATUS.md) is the honest answer per
+component rather than a single claim. It marks each one proven, written, or
+planned, and is updated in the same pull request as the code.
 
 ## Status
 

@@ -136,6 +136,7 @@ export function FirewallPage() {
   return (
     <PageShell>
       <PageHero
+        path="/product/firewall"
         eyebrow="Side-Effect Firewall"
         title="The twin cannot act on the real world."
         lead="No default public egress. Clone-local DNS. Stateful provider simulators. Unknown destinations are blocked and written to the attempted-effect ledger."

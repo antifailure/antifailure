@@ -6,7 +6,10 @@
   "license": "MIT",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "images": "node scripts/optimize-images.mjs",
+    "og": "node scripts/make-og.mjs",
+    "build": "node scripts/optimize-images.mjs && next build && node scripts/markdown-twins.mjs",
+    "check:seo": "node scripts/check-seo.mjs",
     "start": "next start"
   },
   "dependencies": {

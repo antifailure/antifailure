@@ -20,6 +20,7 @@ export function PrivacyPage() {
   return (
     <PageShell>
       <PageHero
+        path="/privacy"
         eyebrow="Privacy Notice"
         title="Production data stays in the customer boundary."
         lead="The hosted control plane holds organizations, policy, aggregated reports, and billing. Raw snapshots, secrets, and captured request bodies stay in your cloud by default."
@@ -88,6 +89,7 @@ export function TermsPage() {
   return (
     <PageShell>
       <PageHero
+        path="/terms"
         eyebrow="Terms of Use"
         title="A proving ground, not a guarantee."
         lead="The product reports whether a deployment is safe to ship under the conditions it could observe and reproduce. It does not mathematically guarantee that a deployment cannot fail."

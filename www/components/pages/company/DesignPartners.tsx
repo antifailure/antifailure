@@ -40,6 +40,7 @@ export function DesignPartnersPage() {
   return (
     <PageShell>
       <PageHero
+        path="/design-partners"
         eyebrow="Design partners"
         title="One nervous deployment. Not a generic demo."
         lead="The recommended next action is not building the universal platform. It is securing one real risky migration and making a correct, useful decision about it."

@@ -15,7 +15,14 @@ export function SiteLayout({
   return (
     <div className="relative flex min-h-screen flex-col">
       <SiteHeader overlay={overlay} />
-      <main className={cn("flex flex-1 flex-col", className)}>{children}</main>
+      {/* `id` is the target of the skip-to-content link in app/layout.tsx.
+          Without it that link points at nothing, which is worse than not
+          having one: a keyboard user activates it and stays where they were.
+          `tabIndex={-1}` lets the element take focus when jumped to without
+          adding it to the tab order. */}
+      <main id="main" tabIndex={-1} className={cn("flex flex-1 flex-col", className)}>
+        {children}
+      </main>
       <SiteFooter />
     </div>
   );

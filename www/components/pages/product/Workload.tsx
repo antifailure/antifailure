@@ -71,6 +71,7 @@ export function WorkloadPage() {
   return (
     <PageShell>
       <PageHero
+        path="/product/workload"
         eyebrow="Workload Studio"
         title="Exercise the twin the way production actually behaves."
         lead="Three traffic sources on an isolated twin: observed patterns, deterministic journeys, and exploratory users. Capture is asynchronous. Live requests stay on their own path."
