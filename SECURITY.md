@@ -33,6 +33,34 @@ no details and we will reply with one.
 We will keep you updated at least weekly while a report is open, credit you in
 the advisory unless you prefer otherwise, and tell you before we publish.
 
+These are the numbers a small team can hold, and it is worth being exact about
+what that means. Nobody here is on call for this mailbox. The 72 hours is a
+working commitment and not a pager, so a report sent on a Friday evening is
+most likely read on Monday. Business days are Monday to Friday, London time.
+
+**Findings below high.** They get the same acknowledgement and the same
+assessment, and no fix deadline. We will tell you which release we expect to
+carry the fix, and tell you again if that changes.
+
+**If we miss a target.** Reply on the same thread and say so. If a week passes
+with no answer at all, open a public issue saying only that you sent a security
+report on a date and have had no reply. Do not put the finding in it. A silent
+mailbox is a failure of ours and you should not have to sit on a finding because
+of it.
+
+**If you want to publish.** Our default is 90 days from your first message,
+whether or not a fix has shipped, and we would rather agree a date with you than
+have one imposed. Tell us if you need it sooner. If a finding is already being
+exploited, publish whenever you judge is right and tell us you are doing it;
+none of the above outranks people being attacked.
+
+**Safe harbour.** We will not pursue or support legal action against anybody
+reporting in good faith under this policy, as long as you stay inside the scope
+below, stop at the point you have shown impact, and do not access, change or
+keep another person's data. There is no bug bounty. We can offer credit and a
+real answer, and it is worth saying that plainly rather than letting a reporter
+find out after the work.
+
 ## Supported versions
 
 The latest minor release of the current major line receives security fixes.
@@ -56,21 +84,72 @@ Each of these names something you can go and look at. A security policy that
 lists controls it does not have is worse than one that lists fewer, because it
 tells a researcher not to bother checking.
 
-**Credential scanning.** Every push runs `tools/scanrepo` over the working tree.
-It uses the engine's own live-credential detector, so the thing that refuses a
-secret at runtime and the thing that refuses one at review time cannot drift
-apart. It scans the tree, not the full history.
+**Credential scanning.** Every pull request, and every push to `main`, runs
+`tools/scanrepo` over the working tree. It uses the engine's own live-credential
+detector, so the thing that refuses a secret at runtime and the thing that
+refuses one at review time cannot drift apart. Two limits, said rather than
+implied: it scans the tree and not the full history, and a push to a topic
+branch with no pull request open runs nothing, because there is no pre-push
+hook.
 
 **Dependency pinning.** Go dependencies are pinned by `go.sum`. Every GitHub
 Action is pinned to a commit rather than a tag, because a tag is mutable and
 `@v4` is a promise the publisher can change after it was reviewed.
 
-**Known vulnerabilities.** `tools/vulncheck` runs govulncheck on every pull
+**Known vulnerabilities, Go.** `tools/vulncheck` runs govulncheck on every pull
 request and again every morning, and holds the result to `.govulncheck.yaml`:
 anything reachable from our code must be matched by an entry saying why it
 cannot hurt us and when that judgement expires. An expired entry fails the
 build, and so does an entry that no longer matches a real finding. The file is
 short and it is meant to be read.
+
+**What govulncheck does not answer, and where that shows.** It asks whether a
+vulnerable symbol is reachable from our code. GitHub's Dependabot asks whether a
+vulnerable version is in the module graph at all. Those are different questions
+and today they give different answers: the daily scan is green and there are
+eight open Dependabot alerts.
+
+All eight are one dependency, `github.com/docker/docker`, counted twice because
+both `engine/go.mod` and `ee/engine/go.mod` require it. They are four Moby
+advisories and **none of them has a fix to take**: checked against
+proxy.golang.org rather than remembered, no version of `github.com/docker/docker`
+or `github.com/moby/moby` above v28.5.2 exists, three of the four cover
+everything up to and including 28.5.2, and the fourth names a version that
+exists only as a Docker Engine release. `github.com/moby/moby/v2`, where the
+fixes landed, is a beta.
+
+All four are daemon-side bugs and we are an API client, and for three of them
+that is checkable rather than a claim to take on trust. Their Go advisory
+entries carry symbols, and every symbol is a method on the daemon's own `Daemon`
+type: `openContainerFS`, `createIfNotExists`, `containerExtractToDir`. Those
+live in Moby's daemon package, which this engine does not import. It takes the
+Docker client and five API type packages from that module and nothing else, so
+the vulnerable code is not linked into the binary at all. That is why the scan
+is green, and green is the right answer.
+
+The fourth, the plugin privilege off-by-one, carries no symbol information, so
+every symbol in the module matches it. That is why it is the one govulncheck
+flags, and why it has an entry in `.govulncheck.yaml` arguing from how we use
+Docker rather than from a call graph.
+
+The call sites, and the one residual exposure worth naming, are written out in
+`docs/security/pentest-readiness.md`.
+
+The honest gap is not the reasoning, it is that nothing in this repository
+watches the module-version surface. `just vuln` can be green while that page has
+eight entries on it, and the only reason anybody looked was that a push printed
+the count.
+
+**Known vulnerabilities, npm.** `tools/npmaudit` runs `npm audit` over every
+lockfile in the repository, in the same workflow and on the same schedule, and
+holds the result to `.npmaudit.yaml` under the same three rules. It exists
+because govulncheck reads Go modules and stops there, and every `npm ci` in CI
+passes `--no-audit`, so the half of this repository that faces the internet had
+no advisory check at all. One caveat that is not true of the Go scanner: npm
+audit has no reachability analysis, so an entry in `.npmaudit.yaml` argues from
+how a package is used rather than from a call graph. One gap: `runner/` has
+dependencies and no lockfile, so nothing resolves its tree, and the tool reports
+that on every run rather than skipping it quietly.
 
 **Release artifacts.** Built with `-trimpath` and CGO disabled from the tagged
 commit, by `tools/release/build.sh`, which is the one copy of the build that
@@ -105,9 +184,18 @@ page.
 **Attribution.** `THIRD_PARTY_NOTICES.md` is generated at release time from
 what is actually linked, not maintained by hand.
 
-One thing people reasonably expect that we do not yet have, said plainly rather
-than left to be discovered: there is no adversarial test suite attempting
-sandbox escape and proxy bypass. It is tracked and it is not done.
+Two things people reasonably expect, said plainly rather than left to be
+discovered.
+
+The SPDX bill of materials and the cosign signing above have never run against a
+real release. The only two tags in this repository, v0.1.0 and v0.1.1, were both
+built before those steps existed. The pipeline is held up by its own tests and
+by the release workflow refusing a tampered `checksums.txt`, and not yet by a
+published artifact you can download and check for yourself.
+
+There is no adversarial test suite attempting sandbox escape and proxy bypass.
+For a product whose central promise is containment, this is the most important
+missing test here. It is tracked and it is not done.
 
 ## Incident history
 

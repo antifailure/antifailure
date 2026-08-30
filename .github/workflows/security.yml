@@ -56,3 +56,37 @@ jobs:
         # the scanner is version controlled like everything else rather than
         # resolved to whatever @latest means on the day.
         run: go run ./tools/vulncheck .
+
+  # The same question for the JavaScript, which nothing was asking.
+  #
+  # govulncheck reads Go modules and stops there. Every `npm ci` in ci.yml passes
+  # --no-audit, so the seven lockfiles here had no advisory check at all, and one
+  # of them builds the control plane that holds organizations, policy and
+  # billing. This is the half of the repository exposed to the internet and it
+  # was the half with no scanner.
+  #
+  # A separate job rather than a step, because the two need different toolchains
+  # and a Go setup failure should not decide whether the npm answer was heard.
+  npm:
+    name: npm advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: tools/go.sum
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      # No `npm ci` anywhere above, deliberately. tools/npmaudit runs npm audit
+      # with --package-lock-only, so the lockfile is the thing under review and
+      # nothing has to be installed to review it. Installing first would make
+      # this job cost seven installs and would let a postinstall script run
+      # before the scan that is meant to judge it.
+      - name: Known advisories against the lockfiles
+        run: go run ./tools/npmaudit .

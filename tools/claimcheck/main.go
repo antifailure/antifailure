@@ -59,6 +59,10 @@ var notAPath = map[string]string{
 	"docs/neon-provider":     "the second example branch name in that same sentence",
 	"pgregory.net/rapid":     "a Go module path, resolved from the module cache and not a directory here",
 
+	"github.com/docker/docker": "a Go module path, named in SECURITY.md's account of the open Moby advisories, and resolved from the module cache rather than being a directory here",
+	"github.com/moby/moby":     "the same module under its other name, named in the same paragraph because the version check has to cover both spellings",
+	"github.com/moby/moby/v2":  "where Moby published the fixes, named so the reason they cannot be taken is checkable",
+
 	".gate-reports/": "created by `just gate` when it runs and gitignored, so it is a place output goes rather than something the repository contains",
 
 	"antifailure/antifailure-foss": "a GitHub repository name, not a path in this checkout",

@@ -754,6 +754,22 @@ clean:
 vuln:
     go run ./tools/vulncheck .
 
+# The same question for the JavaScript, which nothing was asking.
+#
+# govulncheck covers the Go modules. Every `npm ci` in ci.yml passes --no-audit,
+# so the seven lockfiles here, one of them the control plane that faces the
+# internet, had no advisory check at all. tools/npmaudit runs `npm audit`
+# against each and holds the result to .npmaudit.yaml the way vulncheck holds
+# govulncheck's to .govulncheck.yaml: an advisory with no written decision fails,
+# and so does a decision past its expiry or one that matches nothing.
+#
+# Out of `just gate` for exactly vuln's reason: the answer comes from the
+# registry's advisory database rather than from this tree, and `just gate` has
+# to work on a plane. security.yml runs it beside vuln, on every pull request
+# and again every morning.
+npmaudit:
+    go run ./tools/npmaudit .
+
 # The linter set CONTRIBUTING describes.
 #
 # Part of `just gate` since the count reached zero. It was kept out while there
