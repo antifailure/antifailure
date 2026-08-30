@@ -394,7 +394,32 @@ export interface RestoreResult {
    *  that drops this field rather than the name it asked for cannot do that,
    *  because on the path where nothing was created there is no field. */
   created: string
+  /** What the behavioural check did, or why it did not. Present on every
+   *  restore, including the ones that could not attempt it, because a check
+   *  that quietly did not run is indistinguishable from one that passed. */
+  isolation: IsolationResult
 }
+
+/**
+ * The outcome of asking the restored database to refuse a cross-tenant read.
+ *
+ * Two shapes rather than a `problems` array with a boolean beside it. A check
+ * that was never attempted has no findings, and an empty findings list is
+ * exactly what a clean check produces, so a single shape would let "we did not
+ * look" and "we looked and it was fine" render identically. The reason is
+ * carried instead, so the caller has to decide what to do about not knowing.
+ */
+export type IsolationResult =
+  | { attempted: false; reason: string }
+  | {
+      attempted: true
+      /** The tables the read was actually performed against. Reported so a
+       *  passing check names what it proved rather than asserting that it
+       *  proved something, and so that a check which quietly narrowed to one
+       *  table is visible in the output. */
+      tables: string[]
+      problems: string[]
+    }
 
 function urlFor(base: string, database: string, user?: string, password?: string): string {
   const u = new URL(base)
@@ -402,6 +427,215 @@ function urlFor(base: string, database: string, user?: string, password?: string
   if (user) u.username = user
   if (password) u.password = password
   return u.toString()
+}
+
+/**
+ * Asks the restored database to refuse a cross-tenant read, as the application.
+ *
+ * Every other check in this module compares catalogue text against catalogue
+ * text, and there is a whole class of failure none of them can see. A policy is
+ * present but the table's row level security is off; it is on but not FORCEd
+ * and the application role turns out to own the table; the role exists and
+ * cannot log in, so no policy is ever exercised at all. Worse, the comparison
+ * is relative: it asks whether the restore reproduced the backup, so a source
+ * database whose isolation was already broken produces a manifest recording the
+ * breakage and a restore that matches it perfectly. This check is the only
+ * absolute one in the file.
+ *
+ * So it connects as the unprivileged role the application actually uses, scopes
+ * itself to one organization, and reads with no WHERE clause. A WHERE clause
+ * would prove the query is careful; the policy is what has to be careful.
+ *
+ * Every tenant table, not a chosen one. A single witness passes while the table
+ * next to it leaks, and picking the witness by name would keep passing on the
+ * day somebody renames it. Only `antifailure.org_id` is set: the other settings
+ * the schema's policies consult are left unset, exactly as `withTenant` leaves
+ * them, so the auxiliary policies that resolve a session by its token or an
+ * installation by its account deny rather than answering.
+ *
+ * Three questions per table, because there are three ways to fail and two of
+ * them are not leaks:
+ *
+ *   scoped to an organization, no other organization's rows may come back;
+ *   scoped to an organization, its own rows must come back, or the restored
+ *     database is one the application cannot read and every customer sees an
+ *     empty account;
+ *   scoped to nothing, nothing may come back, because a connection that forgot
+ *     to scope itself must see none of them rather than all of them.
+ *
+ * The second question is not optional and it earned its place. Dropping a
+ * policy leaves the table with row level security still enabled and nothing
+ * behind it, which denies every read: the leak check passes because nothing
+ * came back, and the drill goes green over a table the application can no
+ * longer read at all. That was the first version of this function, and a
+ * deliberate `DROP POLICY tenant_isolation ON environments` walked straight
+ * through it. So a tenant that cannot read its own rows is a finding, on every
+ * tenant table, with no exemption for a table that might be narrow on purpose:
+ * this cannot tell a deliberately narrow policy from a missing one, and
+ * guessing in the quiet direction is how a check stops checking.
+ */
+export async function verifyIsolation(
+  targetUrl: string,
+  appPassword: string | undefined,
+): Promise<IsolationResult> {
+  if (!appPassword) {
+    return {
+      attempted: false,
+      reason:
+        `no password for ${APP_ROLE} was given, so nothing could connect as the role whose ` +
+        `access the policies constrain`,
+    }
+  }
+
+  let subjects: TenantTable[]
+  const admin = postgres(targetUrl, { max: 1, onnotice: () => {} })
+  try {
+    subjects = await tenantTables(admin)
+  } finally {
+    await admin.end({ timeout: 5 })
+  }
+  if (subjects.length === 0) {
+    return {
+      attempted: false,
+      reason:
+        `no tenant table in the restored database holds rows for two different organizations, ` +
+        `so there was no other tenant's rows for it to refuse. This proves the restore ran; it ` +
+        `proves nothing about isolation`,
+    }
+  }
+
+  const url = new URL(targetUrl)
+  url.username = APP_ROLE
+  url.password = appPassword
+  const app = postgres(url.toString(), { max: 1, connect_timeout: 30, onnotice: () => {} })
+  const problems: string[] = []
+  const tables: string[] = []
+  try {
+    for (const subject of subjects) {
+      let failed = false
+      for (const org of subject.orgs) {
+        let seen: string[]
+        try {
+          seen = await readTenantsAs(app, subject.name, org)
+        } catch (err) {
+          // A refusal to connect or to read is itself an answer: the restored
+          // database cannot be used by the application. Reported rather than
+          // thrown, so the drill returns a finding instead of a stack trace.
+          problems.push(
+            `${APP_ROLE} could not read ${subject.name} scoped to ${org}: ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+          )
+          failed = true
+          continue
+        }
+        const foreign = seen.filter((o) => o !== org)
+        if (foreign.length > 0) {
+          problems.push(
+            `${APP_ROLE} scoped to ${org} read ${subject.name} rows belonging to ` +
+              `${foreign.join(', ')}, so the restored database answers every query and ` +
+              `isolates nothing`,
+          )
+          failed = true
+        }
+        if (!seen.includes(org)) {
+          problems.push(
+            `${APP_ROLE} scoped to ${org} read none of that organization's own rows from ` +
+              `${subject.name}, so the restored database is one the application cannot read: ` +
+              `either the policy that lets a tenant read its own rows did not come back, or ` +
+              `it came back and no longer matches`,
+          )
+          failed = true
+        }
+      }
+
+      try {
+        const unscoped = await readTenantsAs(app, subject.name, '')
+        if (unscoped.length > 0) {
+          problems.push(
+            `${APP_ROLE} with no organization set read ${subject.name} rows belonging to ` +
+              `${unscoped.length} organizations, so a connection that forgot to scope itself ` +
+              `sees all of them`,
+          )
+          failed = true
+        }
+      } catch (err) {
+        problems.push(
+          `${APP_ROLE} could not read ${subject.name} with no organization set: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        )
+        failed = true
+      }
+
+      if (!failed) tables.push(subject.name)
+    }
+  } finally {
+    await app.end({ timeout: 5 })
+  }
+
+  return { attempted: true, tables, problems }
+}
+
+interface TenantTable {
+  name: string
+  /** Two organizations that both own rows in it. Two rather than all of them
+   *  because the question is whether one tenant can reach another, and a third
+   *  answers it no better than the second while costing another query. */
+  orgs: [string, string]
+}
+
+/**
+ * Every tenant table that holds rows for two different organizations.
+ *
+ * Empty when there is none, which the caller reports as a check it could not
+ * attempt rather than as a pass. A cross-tenant read against a database with
+ * one tenant in it refuses nothing and proves nothing, and that is the failure
+ * this module exists to avoid: an assertion scoped to a collection that
+ * excludes the casualty passes forever.
+ */
+async function tenantTables(admin: postgres.Sql): Promise<TenantTable[]> {
+  const candidates = await admin<{ name: string }[]>`
+    SELECT c.relname AS name
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'org_id'
+                         AND a.attnum > 0 AND NOT a.attisdropped
+     WHERE n.nspname = 'public'
+       AND c.relkind IN ('r', 'p')
+       AND NOT c.relispartition
+       -- Both, because both are load bearing. Without ENABLE there is no
+       -- policy evaluation at all, and without FORCE the table's owner is
+       -- exempt from every policy on it.
+       AND c.relrowsecurity
+       AND c.relforcerowsecurity
+     ORDER BY c.relname`
+
+  const out: TenantTable[] = []
+  for (const { name } of candidates) {
+    const orgs = await admin<{ org_id: string }[]>`
+      SELECT DISTINCT org_id::text AS org_id FROM ${admin(name)}
+       WHERE org_id IS NOT NULL ORDER BY 1 LIMIT 2`
+    if (orgs.length === 2) out.push({ name, orgs: [orgs[0]!.org_id, orgs[1]!.org_id] })
+  }
+  return out
+}
+
+/**
+ * The organizations one tenant sees in a table, read the way the application
+ * reads it.
+ *
+ * Transaction-local, through set_config's third argument, for the same reason
+ * the application's own pool does it that way: a setting left on a pooled
+ * connection is read by whoever borrows it next, which is a cross-tenant read
+ * that depends on pool scheduling and that no test would ever catch.
+ */
+async function readTenantsAs(app: postgres.Sql, table: string, org: string): Promise<string[]> {
+  const rows = (await app.begin(async (tx) => {
+    await tx`SELECT set_config('antifailure.org_id', ${org}, true)`
+    return tx.unsafe<{ org_id: string }[]>(
+      `SELECT DISTINCT org_id::text AS org_id FROM "${table.replace(/"/g, '""')}"`,
+    )
+  })) as unknown as { org_id: string }[]
+  return rows.map((r) => r.org_id)
 }
 
 /**
@@ -485,10 +719,18 @@ export async function restore(options: RestoreOptions): Promise<RestoreResult> {
     }
   }
 
+  // Last, because it is the only check that is about behaviour rather than
+  // about text, and because it needs the restore to have finished. A caller
+  // that gave no application password gets a result saying so rather than a
+  // silently shorter list of checks.
+  const isolation = await verifyIsolation(targetUrl, options.appPassword)
+  if (isolation.attempted) problems.push(...isolation.problems)
+
   return {
     seconds: Number(process.hrtime.bigint() - started) / 1e9,
     problems,
     targetUrl,
+    isolation,
     // Only reachable past the CREATE DATABASE above, which is only reachable
     // past the refusal of a database that already exists.
     created: options.targetDatabase,
@@ -613,6 +855,15 @@ export interface RehearsalOptions extends BackupOptions {
   /** Set false to leave the restored database standing, for a person to look
    *  at after a drill that found something. */
   drop?: boolean
+  /** The recovery time this drill is allowed to take before the result counts
+   *  as a regression, in seconds.
+   *
+   *  Undefined means the drill measures and reports and gates nothing, which
+   *  is the right answer against a production database: its size is not a
+   *  constant, so a budget set once would fire on growth rather than on a
+   *  regression. A budget belongs where the database being restored is a fixed
+   *  scratch one, which is continuous integration. */
+  maxRestoreSeconds?: number
   log?: (line: string) => void
 }
 
@@ -625,6 +876,15 @@ export interface Rehearsal {
   /** The recovery time this drill actually measured, which is the number the
    *  runbook is allowed to quote. */
   recoveryTimeSeconds: number
+  /** Set when a budget was given and the measured recovery time went past it.
+   *
+   *  Kept out of `problems` on purpose. A restore that is slower than a budget
+   *  is a different fact from a restore that produced a database which does
+   *  not isolate tenants, and putting both in one list would make the caller
+   *  print "this backup is not one" over a runner having a slow morning. */
+  overBudget: { seconds: number; budgetSeconds: number } | null
+  /** What the cross-tenant read did, or why it did not happen. */
+  isolation: IsolationResult
 }
 
 /**
@@ -655,10 +915,28 @@ export async function rehearse(options: RehearsalOptions): Promise<Rehearsal> {
   })
   log(`restored in ${restored.seconds.toFixed(1)}s`)
 
-  if (restored.problems.length === 0) {
+  // A drill that could not attempt the cross-tenant read is a drill that
+  // checked catalogue text against catalogue text and stopped. That is a
+  // finding, not a shorter run: every structural check can pass on a database
+  // which answers every query and isolates nothing, and this is the only check
+  // in the module that would notice. `restore` reports the reason and leaves
+  // the decision to its caller because a person doing a real recovery may have
+  // no password to hand; the drill has no such excuse, because the drill's
+  // whole job is to find this out before the day it matters.
+  const problems = [...restored.problems]
+  if (restored.isolation.attempted) {
+    log(
+      `${APP_ROLE} was refused another tenant's rows in ` +
+        `${restored.isolation.tables.length} tables: ${restored.isolation.tables.join(', ')}`,
+    )
+  } else {
+    problems.push(`the cross-tenant read was never attempted: ${restored.isolation.reason}`)
+  }
+
+  if (problems.length === 0) {
     log('the restored database matches the backup')
   } else {
-    for (const p of restored.problems) log(`PROBLEM: ${p}`)
+    for (const p of problems) log(`PROBLEM: ${p}`)
   }
 
   if (options.drop !== false) {
@@ -676,12 +954,25 @@ export async function rehearse(options: RehearsalOptions): Promise<Rehearsal> {
     }
   }
 
+  const overBudget =
+    options.maxRestoreSeconds !== undefined && restored.seconds > options.maxRestoreSeconds
+      ? { seconds: restored.seconds, budgetSeconds: options.maxRestoreSeconds }
+      : null
+  if (overBudget) {
+    log(
+      `SLOW: recovery took ${overBudget.seconds.toFixed(1)}s against a budget of ` +
+        `${overBudget.budgetSeconds}s`,
+    )
+  }
+
   return {
     backupSeconds: taken.seconds,
     restoreSeconds: restored.seconds,
     totalSeconds: taken.seconds + restored.seconds,
     bytes: taken.manifest.bytes,
-    problems: restored.problems,
+    problems,
     recoveryTimeSeconds: restored.seconds,
+    overBudget,
+    isolation: restored.isolation,
   }
 }
