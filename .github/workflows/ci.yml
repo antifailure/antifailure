@@ -345,6 +345,7 @@ jobs:
           cache-dependency-path: |
             www/package-lock.json
             console/package-lock.json
+            api/package-lock.json
 
       - run: npm ci --no-audit --no-fund
         working-directory: www
@@ -365,6 +366,16 @@ jobs:
         # request that added it.
         run: npm run check:seo
         working-directory: www
+
+      - name: The site API
+        # api/ is the marketing site's own backend and had no tests at all,
+        # while the file it holds ended with a comment saying its exports were
+        # "for the unit tests". It is a public unauthenticated write endpoint,
+        # which makes the untested branches the interesting ones: what counts
+        # as an address, when the rate limiter trips, and what a storage
+        # failure answers.
+        run: npm ci --no-audit --no-fund && npm test
+        working-directory: api
 
       - run: npm ci --no-audit --no-fund
         working-directory: docs
