@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -172,7 +173,7 @@ func TestUntarRefusesAPathOutsideTheCheckout(t *testing.T) {
 			entries, readErr := os.ReadDir(victim)
 			require.NoError(t, readErr)
 			for _, e := range entries {
-				require.Truef(t, filepath.HasPrefix(e.Name(), "checkout-"),
+				require.Truef(t, strings.HasPrefix(e.Name(), "checkout-"),
 					"%s appeared beside the checkout", e.Name())
 			}
 		})

@@ -125,10 +125,9 @@ func parsePattern(pattern string) ([]token, bool) {
 				return nil, false
 			}
 			inner := s[1:end]
-			switch {
-			case inner == "*":
+			if inner == "*" {
 				out = append(out, token{wildcard: true})
-			default:
+			} else {
 				n, err := strconv.Atoi(inner)
 				if err != nil || n < 0 {
 					return nil, false
