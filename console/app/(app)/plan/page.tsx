@@ -34,7 +34,7 @@ interface Plan {
   goldens: Verdict;
 }
 
-interface Billing {
+interface PlanState {
   plan: string;
   plans: Plan[];
   holding: { environments: number; goldens: number };
@@ -58,7 +58,7 @@ interface Billing {
  */
 function Billing() {
   const session = useSessionContext();
-  const state = useApi<Billing>(() => query("billing.get"), []);
+  const state = useApi<PlanState>(() => query("billing.get"), []);
   const csrf = session.data?.csrfToken ?? "";
   const mayManage = may(session.data?.role, "billing.manage");
   const [busy, setBusy] = useState<string | null>(null);
