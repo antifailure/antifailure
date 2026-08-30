@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/staticwebapp.config.json",
+  "routes": [
+    {
+      "route": "/*",
+      "redirect": "https://antifailure.dev/blog",
+      "statusCode": 301
+    }
+  ],
+  "responseOverrides": {
+    "404": {
+      "redirect": "https://antifailure.dev/blog",
+      "statusCode": 301
+    }
+  },
+  "globalHeaders": {
+    "strict-transport-security": "max-age=63072000; includeSubDomains; preload",
+    "x-content-type-options": "nosniff",
+    "x-robots-tag": "noindex, follow"
+  }
+}
