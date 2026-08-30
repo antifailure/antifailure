@@ -290,7 +290,7 @@ and they move under a gate that can see them.
 
 | Component | State | Notes |
 | --- | --- | --- |
-| `runner` verdict model | proven | five verdicts; a runner failure never counts against the application |
+| `runner` verdict model | proven | five verdicts; a runner failure never counts against the application. Those five words were written out by hand in five places across three languages and nothing compared them: a word the engine could not read fell through `report.Verdict` to `pass` and through the terminal to `unverified`, so the same run exited zero, said every workflow passed, and printed unverified beside the workflow in the same comment. An unreadable verdict is blocked now, and `internal/report/vocabulary_test.go` reads the runner's union and the control plane's `verdict_value` enum out of their own source and fails when either drifts |
 | `runner` inbox client | proven | checks what already arrived before waiting |
 | `runner` login strategies | proven | password, magic link, email code, SMS code |
 | `runner` planner | proven | deterministic, no model key needed; three way expectation check |

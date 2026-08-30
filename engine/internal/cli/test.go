@@ -9,6 +9,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/report"
 )
 
 // TestJSON is the machine readable result of a run.
@@ -117,6 +118,13 @@ people learn to ignore the results. Only a real failure exits non zero.`),
 }
 
 func verdictStyle(e *Env, verdict string) (string, string) {
+	// A word the engine cannot read is blocked, which is what report.Verdict
+	// rolls it up as. This arm used to render it as unverified, so a runner
+	// ahead of this engine produced a terminal line and a pull request comment
+	// that disagreed about the same workflow.
+	if !report.Known(verdict) {
+		verdict = "blocked"
+	}
 	switch verdict {
 	case "pass":
 		return e.Out.S(StyleGood, SymbolOK), "passed"
