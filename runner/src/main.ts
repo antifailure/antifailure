@@ -13,6 +13,7 @@ import { mkdirSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { run, type Job, type WorkflowResult } from './execute.ts';
+import { explore, type Exploration, type Goal } from './explore.ts';
 import { CommandInbox } from './inbox.ts';
 import { exitCodeFor } from './verdict.ts';
 import { fromEnvironment } from './model.ts';
@@ -27,6 +28,11 @@ interface JobDocument {
   readonly artifacts: string;
   readonly workflows: readonly Workflow[];
   readonly personas: readonly Persona[];
+  /** goals are exploratory runs. Present for 'af explore', absent for
+   *  'af test'. One entry point rather than two binaries, because the browser,
+   *  the sign in and the evidence capture are the same in both and a second
+   *  main is a second place for them to drift. */
+  readonly goals?: readonly Goal[];
   /** af is the path to the engine binary, used to read the inbox. Absent
    *  means no inbox, and a workflow needing one is blocked rather than
    *  failed. */
@@ -39,6 +45,7 @@ interface JobDocument {
 /** The document the engine reads back. */
 interface ResultDocument {
   readonly results: readonly WorkflowResult[];
+  readonly explorations: readonly Exploration[];
   readonly passed: number;
   readonly failed: number;
   readonly flaky: number;
@@ -86,10 +93,24 @@ async function main(): Promise<number> {
       : {}),
   };
 
-  const results = await run(job);
+  const results = doc.workflows.length > 0 ? await run(job) : [];
+  const explorations = doc.goals?.length
+    ? await explore({
+        baseURL: doc.base_url,
+        artifacts: doc.artifacts,
+        goals: doc.goals,
+        personas: doc.personas,
+        ...(job.inbox ? { inbox: job.inbox } : {}),
+        ...(doc.headless === undefined ? {} : { headless: doc.headless }),
+      })
+    : [];
+
   const counted = { passed: 0, failed: 0, flaky: 0, blocked: 0, unverified: 0 };
-  for (const r of results) {
-    switch (r.outcome.verdict) {
+  for (const verdict of [
+    ...results.map((r) => r.outcome.verdict),
+    ...explorations.map((e) => e.outcome.verdict),
+  ]) {
+    switch (verdict) {
       case 'pass': counted.passed++; break;
       case 'fail': counted.failed++; break;
       case 'flaky': counted.flaky++; break;
@@ -97,9 +118,12 @@ async function main(): Promise<number> {
       case 'unverified': counted.unverified++; break;
     }
   }
-  const out: ResultDocument = { results, ...counted };
+  const out: ResultDocument = { results, explorations, ...counted };
   process.stdout.write(JSON.stringify(out, replaceRegExp, 2) + '\n');
-  return exitCodeFor(results.map((r) => r.outcome));
+  return exitCodeFor([
+    ...results.map((r) => r.outcome),
+    ...explorations.map((e) => e.outcome),
+  ]);
 }
 
 /** replaceRegExp makes the patterns readable in the output document.
