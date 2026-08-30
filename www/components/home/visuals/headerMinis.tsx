@@ -391,9 +391,9 @@ export function MenuCardArt({ kind }: { kind: "twin" | "fleet" }) {
           <path d="M58 18H78" stroke="rgba(0,0,0,0.2)" strokeWidth="1.2" />
           <path d="M58 41H78" stroke="rgba(0,0,0,0.2)" strokeWidth="1.2" />
           <path d="M58 64H78" stroke="rgba(0,0,0,0.2)" strokeWidth="1.2" />
-          <Cylinder x="78" y="8" />
-          <Cylinder x="78" y="32" on />
-          <Cylinder x="78" y="56" />
+          <Cylinder x={78} y={8} />
+          <Cylinder x={78} y={32} on />
+          <Cylinder x={78} y={56} />
         </>
       ) : (
         <>
