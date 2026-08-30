@@ -1,0 +1,138 @@
+name: Drill
+
+# Proof that today's backup restores, taken before anybody needs it.
+#
+# web/apps/api/src/backup.ts has been able to do this since it was written, and
+# for months nothing ran it. That is the shape of the failure it exists to
+# prevent: a capability that is present, correct, documented, and never
+# executed, so the first time anybody finds out whether the backup is one is the
+# morning a region is gone. `af-control-plane-backup` had zero callers anywhere
+# in this repository until this file. The suite exercised the library; nothing
+# exercised the command an operator is told to type.
+#
+# Weekly rather than on every push, for the same reason as the walkthrough and
+# the external link check: it needs a daemon and it takes minutes, and a check
+# that costs everybody that on every branch is one people learn to skip. A
+# regression here is worth finding within a week; it is not worth blocking a
+# documentation typo.
+#
+# It runs `just drill` rather than its own copy of the commands. The parameters
+# that decide whether this proves anything (two organizations rather than one,
+# an application password so the cross-tenant read can be attempted at all, the
+# recovery time budget) live in one place, and a workflow carrying a second copy
+# of them is a workflow that will quietly stop matching what a person can run.
+
+on:
+  schedule:
+    # 04:00 UTC Monday, before the walkthrough at 05:00 and the link check at
+    # 06:00, so the week opens with the question of whether the backup restores
+    # answered first.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drill:
+    name: today's backup restores
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: A pg_dump new enough to read that Postgres
+        # The drill starts a Postgres 17 and the runner ships a 16 client.
+        # pg_dump refuses outright to read a server newer than itself, and
+        # resolveBinDir looks in /usr/lib/postgresql/*/bin, which is where this
+        # puts the right one. The same block ci.yml carries twice, for the same
+        # reason; if you change one, change the others.
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          test -x /usr/lib/postgresql/17/bin/pg_dump
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+
+      - name: Drill it
+        # Exit 3 is a restore that came back and does not isolate tenants, which
+        # is the one that matters. Exit 4 is a restore that is sound and slower
+        # than its budget. Both fail this job and they are not the same finding,
+        # which is why they are not the same exit code.
+        run: just drill
+
+      - name: The recovery time
+        # Written to the run's summary whether or not the drill passed. A drill
+        # that went red is exactly the run whose timing somebody will want to
+        # compare against last week's, and a number that only ever existed in a
+        # log people scroll past is a number nobody has.
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f .gate-reports/drill.json ]; then
+            echo "the drill wrote no report, so it did not get as far as measuring anything" \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node -e '
+            const r = require("./.gate-reports/drill.json");
+            const rows = [
+              ["recovery time", r.recoveryTimeSeconds.toFixed(1) + "s"],
+              ["backup time", r.backupSeconds.toFixed(1) + "s"],
+              ["dump size", r.bytes + " bytes"],
+              ["tables that refused another tenant",
+                r.isolation.attempted ? r.isolation.tables.join(", ")
+                                      : "NONE: " + r.isolation.reason],
+              ["problems", r.problems.length === 0 ? "none" : r.problems.join("; ")],
+            ];
+            const out = ["## Recovery time", "", "| | |", "|---|---|"]
+              .concat(rows.map(([k, v]) => `| ${k} | ${v} |`))
+              .concat(["", "This is the restore alone. Recovery starts from a backup that already",
+                       "exists, so the time to take one is work that has already happened when it",
+                       "matters. It is measured on a runner with nothing else on it and against a",
+                       "scratch database, which makes it a floor rather than the recovery time of",
+                       "the production control plane."]);
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, out.join("\n") + "\n");
+          '
+
+      - name: Keep the measurement
+        # Ninety days, so the number can be compared against a quarter ago
+        # rather than against memory. A recovery time objective nobody has a
+        # series for is a sentence in a document.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: drill
+          path: .gate-reports/drill.json
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Nothing was left behind
+        # The recipe removes its Postgres on the way out. This checks that it
+        # did, because a container that survived is a port collision for the
+        # next run, which fails for a reason that has nothing to do with the
+        # backup.
+        if: always()
+        run: |
+          left=$(docker ps -aq --filter=name=af-drill-test | wc -l | tr -d ' ')
+          if [ "$left" != "0" ]; then
+            echo "::error::the drill left its Postgres behind"
+            docker ps -a --filter=name=af-drill-test
+            exit 1
+          fi
+          echo "the drill removed its Postgres"

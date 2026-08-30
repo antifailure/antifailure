@@ -392,6 +392,66 @@ links:
 walkthrough:
     go run ./tools/walkthrough .
 
+# Prove the backup restores, and record how long it took.
+#
+# Not in `just gate`, for the same reason as `walkthrough`: it needs a Docker
+# daemon and it takes minutes, because it really does take a dump, create a
+# database, restore into it and then interrogate the result through the
+# unprivileged role. The weekly schedule in .github/workflows/drill.yml is
+# where it runs unattended, and that workflow runs this recipe rather than its
+# own copy of these commands, so the thing CI proves and the thing you can run
+# here cannot drift apart.
+#
+# A Postgres of its own, on a port nothing else uses. This creates databases,
+# restores into them and drops them, which is antisocial on the shared
+# development container and fragile against anyone recreating it mid-run.
+#
+# The scratch database is seeded with two organizations before the drill runs,
+# and that is not decoration. Against an empty database every comparison passes
+# over nothing and the cross-tenant read has no other tenant to be refused: a
+# green run that examined nothing, which is the failure this repository keeps
+# finding. Two, because one tenant cannot be isolated from anybody.
+#
+# 120 seconds is a tripwire, not the recovery time objective. Measured: this
+# same drill restores in under two seconds on a continuous integration runner
+# with nothing else on it, and between five and fifteen on a laptop running a
+# dozen other containers. A budget near either number would fire on machine
+# load and teach everybody to re-run until it passes, which is how a gate stops
+# meaning anything. A restore of this database that takes two minutes has had
+# something change shape, and that is worth a person looking. The objective the
+# recovery time is actually held against is two hours, and it lives in
+# docs/src/content/docs/self-hosting/operations.md where an operator reads it.
+#
+# One command, and the one the weekly workflow runs.
+drill: _reports
+    #!/usr/bin/env bash
+    set -euo pipefail
+    url="postgres://postgres:test@127.0.0.1:55434/antifailure"
+    cleanup() { docker rm -f af-drill-test > /dev/null 2>&1 || true; }
+    trap cleanup EXIT
+    cleanup
+    docker run -d --name af-drill-test -p 55434:5432 \
+      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine > /dev/null
+    # A real query against the target database rather than pg_isready. The
+    # image runs initdb against a temporary server and pg_isready answers on
+    # that one, before POSTGRES_DB exists.
+    for _ in $(seq 1 90); do
+      docker exec af-drill-test psql -U postgres -d antifailure -tAc 'select 1' \
+        > /dev/null 2>&1 && break
+      sleep 1
+    done
+    docker exec af-drill-test psql -U postgres -d antifailure -tAc 'select 1' > /dev/null 2>&1 \
+      || { docker logs af-drill-test; echo "postgres never accepted a query"; exit 1; }
+    rm -rf {{reports}}/drill && mkdir -p {{reports}}/drill
+    node web/apps/api/src/backup-scratch.ts --url "$url" --app-password drill-password
+    node web/apps/api/src/backup-cli.ts drill \
+      --url "$url" \
+      --out {{reports}}/drill \
+      --database af_drill \
+      --app-password drill-password \
+      --max-restore-seconds 120 \
+      --report {{reports}}/drill.json
+
 # The examples build and their manifests are valid.
 #
 # An example that does not compile is worse than no example: it is the first

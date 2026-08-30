@@ -110,6 +110,48 @@ engines. They will catch up on their own.
 The commands below have been run. The recovery time this installation should
 expect is the one your own drill measured, not the one in any document.
 
+### How much data an incident costs: the recovery point objective
+
+**Five minutes.** That is the recovery point objective for the control plane
+database, and it is Azure's number rather than one this project chose. Azure
+Database for PostgreSQL flexible server archives the write-ahead log
+continuously and documents the delay as up to five minutes, so a point in time
+recovery inside the primary region lands within five minutes of the failure.
+Five minutes of control plane writes is at most a handful of runs, verdicts and
+audit entries. Nothing in that window is a customer's data: raw snapshots,
+secrets and captured request bodies never leave the customer's cloud, and an
+engine that cannot reach the control plane buffers rather than dropping.
+
+**The recovery window is fourteen days**, which is `backup_retention_days` in
+`infra/terraform/modules/control-plane/variables.tf`. Azure allows 7 to 35 and
+its own default is 7. Fourteen is deliberate in both directions. Seven is not
+enough for the failure that actually needs a long window, which is not a lost
+server but a logical corruption nobody noticed: a bad migration on a Friday,
+found on the Monday after a week away, is already outside seven days and there
+is nothing to recover to. Thirty five is billed as backup storage every day for
+a window nobody has ever reached back into. Fourteen covers a fortnight, which
+is longer than anyone here has taken to notice a broken write.
+
+**A region loss costs up to an hour, and today it costs everything.**
+`geo_redundant_backup` defaults to `false`, so backups live only in the primary
+region and a region that is gone takes them with it. Turning it on gives a
+geo-restore with an RPO of up to an hour, because the copy to the paired region
+is asynchronous, and a geo-restore reaches the last backup that arrived rather
+than a second you choose: Azure does not offer point in time recovery from
+geo-redundant backups. Both of those are worse than the five minutes above, and
+both are enormously better than nothing.
+
+That default is correct for staging and wrong for production, and it is the
+expensive kind of wrong: backup redundancy can only be set when the server is
+created, so switching it on later means creating a new server and moving to it.
+Decide before the apply, not after.
+
+**None of this is the dump.** `af-control-plane-backup` is a second line with a
+different failure mode: it produces a file you hold, readable by any Postgres,
+which is what covers the case where the Azure subscription itself is the
+problem. Its recovery point is however long ago somebody last ran it, so it is
+worth a schedule of its own if you rely on it.
+
 ### Take a backup
 
 ```
@@ -156,7 +198,8 @@ over a live database is not a recovery, it is an outage with a different cause.
 Restore into a new name and switch the application over.
 
 It exits 3, and says which check failed, if the restored database does not match
-the manifest. **Do not point the control plane at a database that exited 3.**
+the manifest or does not isolate tenants. **Do not point the control plane at a
+database that exited 3.**
 `pg_restore` exits zero over a `GRANT` that failed because the role was missing,
 and over policies restored onto a table whose row level security it could not
 enable. Both produce a control plane that starts, answers every request, and
@@ -169,12 +212,37 @@ af-control-plane-backup drill \
   --url postgres://owner@host/antifailure \
   --out /var/backups/antifailure \
   --database af_drill \
-  --app-password "$APP_PASSWORD"
+  --app-password "$APP_PASSWORD" \
+  --report /var/backups/antifailure/drill.json
 ```
 
 The drill backs up, restores into a throwaway database, checks it against the
-manifest, drops it, and prints the recovery time it measured. Run it quarterly
-at least. A backup nobody has restored is a file.
+manifest, asks it through the unprivileged role to read another tenant's rows,
+drops it, and prints the recovery time it measured. Run it quarterly at least.
+A backup nobody has restored is a file.
+
+`--app-password` is not optional in practice. Without it nothing can connect as
+`antifailure_app`, so every check becomes a comparison of catalogue text against
+catalogue text, and all of that passes over a database that answers every query
+and isolates nothing. The drill treats a cross-tenant read it could not attempt
+as a failure and says so. The `restore` command says so and leaves the decision
+to you, because somebody recovering at three in the morning may not have the
+password to hand.
+
+It exits 3 when the restored database does not match or does not isolate, and 4
+when the restore was sound and slower than a `--max-restore-seconds` budget you
+gave it. Two codes rather than one, because a backup that is not one and a
+runner having a slow morning are not the same finding and must not read as the
+same finding.
+
+This repository runs the drill against a scratch database every Monday at 04:00
+UTC, in `.github/workflows/drill.yml`, which invokes the `drill` recipe in the
+`justfile` so that what runs unattended and what you can run by hand are the
+same command. Run `just drill` to run exactly that yourself: it starts a
+Postgres of its own, applies every migration, seeds two organizations so the
+cross-tenant read has another tenant to be refused, and holds the recovery time
+against a budget of 120 seconds. That budget is a tripwire for a restore that
+has changed shape, not the objective below.
 
 The number it prints is the **restore** time, not the whole run, because
 recovery starts from a backup that already exists. Counting the time to take one
