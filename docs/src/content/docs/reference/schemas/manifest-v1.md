@@ -161,7 +161,7 @@ One thing an exploratory agent tries to achieve. Unlike a workflow this declares
 | `goal` | string | **yes** | What somebody is trying to do, in one sentence. The agent has no script, so this is the only thing telling it where to go, and its words are what decide whether the goal was reached. Min length 10, max length 1000. |
 | `name` | string | **yes** | Max length 64, matches `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. |
 | `persona` | string | no | Which persona explores. Defaults to the first persona. Max length 40. |
-| `seed` | string | no | Decides every choice the agent makes. The same seed against the same application takes the same path, step for step, which is what makes a finding replayable. Defaults to the goal's name. Max length 64. |
+| `seed` | string | no | Decides every choice the agent makes. The same seed against the same application takes the same path, step for step, which is what lets a finding be replayed. Defaults to the goal's name. Max length 64. |
 | `slow_ms` | integer | no | How long one step may take before it is reported as friction. Defaults to `3000`. Minimum 1, maximum 600000. |
 | `start_path` | string | no | Where to begin. Defaults to the application root. Defaults to `/`. Max length 512. |
 

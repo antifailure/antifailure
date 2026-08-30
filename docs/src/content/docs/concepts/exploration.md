@@ -68,9 +68,9 @@ and cover less than their step counts suggest.
 
 One consequence is worth stating. The values an exploration types into a form
 come from the seed too, so replaying a sign up types the same address as the
-first run, and an application is right to refuse it. Freshness and
-replayability cannot both come from one seed, and replayability is what an
-exploration is for.
+first run, and an application is right to refuse it. Fresh data and a path
+that repeats cannot both come from one seed, and the path that repeats is what
+an exploration is for.
 
 ## What it will not press
 

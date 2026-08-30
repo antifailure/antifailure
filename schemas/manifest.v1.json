@@ -837,7 +837,7 @@
         "seed": {
           "type": "string",
           "maxLength": 64,
-          "description": "Decides every choice the agent makes. The same seed against the same application takes the same path, step for step, which is what makes a finding replayable. Defaults to the goal's name."
+          "description": "Decides every choice the agent makes. The same seed against the same application takes the same path, step for step, which is what lets a finding be replayed. Defaults to the goal's name."
         },
         "start_path": {
           "type": "string",

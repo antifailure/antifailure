@@ -220,8 +220,8 @@ export class Explorer {
     // trade this design makes on purpose: the same seed types the same email
     // address, so replaying a sign up against a stateful application is the
     // second sign up of the same person and the application is right to refuse
-    // it. Freshness and replayability cannot both be had from one seed, and
-    // replayability is the one an exploration exists for.
+    // it. Fresh data and a path that repeats cannot both be had from one seed,
+    // and the path that repeats is the one an exploration exists for.
     this.#identity = freshIdentity(goal.seed);
     this.#slowMs = goal.slowMs ?? DEFAULT_SLOW_MS;
     this.#goalWords = keywords(goal.goal);
