@@ -77,7 +77,14 @@ func description(e Exploration) string {
 		b.WriteString(", which did not get anywhere.")
 		return b.String()
 	}
-	b.WriteString(", which got there by: ")
+	// "got there" only when it did. An exploration that never reached the goal
+	// still compiles into a workflow worth having, and a description claiming
+	// it arrived would be the workflow lying about its own provenance.
+	if e.Reached {
+		b.WriteString(", which got there by: ")
+	} else {
+		b.WriteString(", which walked: ")
+	}
 	shown := e.Journey
 	extra := 0
 	if len(shown) > maxJourneyLines {
@@ -86,7 +93,7 @@ func description(e Exploration) string {
 	}
 	parts := make([]string, 0, len(shown))
 	for _, m := range shown {
-		parts = append(parts, lowerFirst(m.Sentence()))
+		parts = append(parts, lowerFirst(local(m).Sentence()))
 	}
 	b.WriteString(strings.Join(parts, ", "))
 	if extra > 0 {
@@ -110,6 +117,21 @@ func startPath(e Exploration) string {
 		return pathOf(m.URL)
 	}
 	return "/"
+}
+
+// local rewrites a move's absolute URL to a path.
+//
+// Every URL in a journey carries the preview environment's host, which is
+// different on every run and belongs to nobody's repository. A description
+// pasted into a manifest with 127.0.0.1:8731 in it is a description that reads
+// as a mistake within a day. Found by running this against a real application
+// and reading what it emitted.
+func local(m Move) Move {
+	if m.Kind != "goto" {
+		return m
+	}
+	m.URL = pathOf(m.URL)
+	return m
 }
 
 func pathOf(raw string) string {

@@ -97,11 +97,11 @@ person's patience.
 | Kind | What it means |
 | --- | --- |
 | `no_effect` | A control was activated and nothing changed: same address, same controls, same fields, same text. |
-| `dead_end` | A page offered nothing that had not already been tried, so the only way on was back. |
+| `dead_end` | A page offers no way onward at all: no control and no field, or nothing but controls an exploration must not press. Not a page whose controls this run happens to have tried already, which is just the run finishing. |
 | `revisit` | The path left a page and came back to it unchanged. The route loops. |
 | `unnamed_control` | The page carries interactive elements with no accessible name, so neither a screen reader nor an agent can say what they do. |
 | `slow_response` | One step took longer than `slow_ms` allows. The reading and the threshold are both on the finding. |
-| `goal_unreached` | The whole run ended without the goal ever being visible on any page. |
+| `goal_unreached` | The whole run ended without the goal ever being visible on any page. It names the goal's words that appeared nowhere, which is usually how you find out the goal described where somebody started rather than where they end up. |
 
 Each finding carries the page, the control where one element is responsible,
 the step, a confidence, what happened and what to do about it. Confidence is
@@ -131,6 +131,18 @@ the page the run ended on, or rewrite it. And a friction finding is not an
 expectation. "Pressing Upgrade plan changes nothing" is something to fix, not
 an outcome to assert, so the emitted workflow will not carry it. The notes
 printed alongside name every finding it leaves behind.
+
+## What it types, and what it prints
+
+An exploration fills a form with the same values a declared workflow uses: a
+reserved `example.test` address, the `+1 555 0100` block, and Stripe's test
+card. Nothing it types can reach a real inbox, handset or processor.
+
+A form submitted with GET puts every field in the address bar, and that address
+travels into a finding and into a pull request comment. So anything the agent
+typed is replaced with `[typed]` in every URL it reports. It knows exactly what
+it typed, which is what makes that precise rather than a guess at what looks
+sensitive.
 
 ## Evidence
 

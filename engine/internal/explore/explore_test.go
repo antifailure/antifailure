@@ -258,6 +258,12 @@ func TestADiscoveryCompilesIntoAWorkflowTheManifestAccepts(t *testing.T) {
 	assert.Equal(t, []string{"Upgrade the workspace to the paid plan."}, w.Expect)
 	assert.Contains(t, w.Description, "seed s1")
 	assert.Contains(t, w.Description, `press "Upgrade plan"`)
+	// The journey carries the preview environment's host, which differs on
+	// every run and belongs in nobody's repository. A description pasted into a
+	// manifest with a 127.0.0.1 in it reads as a mistake within a day.
+	assert.NotContains(t, w.Description, "http://app.test",
+		"the compiled description leaked the preview host")
+	assert.Contains(t, w.Description, "open /settings/billing?tab=plan")
 	require.NotNil(t, w.Budget)
 	assert.Greater(t, w.Budget.Steps, len(discovery().Journey))
 
@@ -281,8 +287,12 @@ func TestADiscoveryCompilesIntoAWorkflowTheManifestAccepts(t *testing.T) {
 func TestAnExplorationThatMissedTheGoalSaysSoInTheNotes(t *testing.T) {
 	e := discovery()
 	e.Reached = false
-	_, notes := explore.Compile(e, "owner")
+	w, notes := explore.Compile(e, "owner")
 	assert.Contains(t, strings.Join(notes, "\n"), "never reached the goal")
+	// The description must not claim it arrived. A compiled workflow that lies
+	// about its own provenance is worse than none.
+	assert.NotContains(t, w.Description, "got there by")
+	assert.Contains(t, w.Description, "which walked")
 }
 
 // yamlManifest wraps a compiled workflow in the smallest manifest that parses.

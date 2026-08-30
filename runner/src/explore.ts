@@ -192,8 +192,8 @@ export class Explorer {
   readonly #slowMs: number;
   readonly #goalWords: readonly string[];
 
-  /** offered is every control seen at a URL, unioned across visits. */
-  readonly #offered = new Map<string, string[]>();
+  /** controlsAt is every control seen at a URL, unioned across visits. */
+  readonly #controlsAt = new Map<string, string[]>();
   readonly #pressed = new Set<string>();
   readonly #filled = new Set<string>();
   readonly #exhausted = new Set<string>();
@@ -201,6 +201,9 @@ export class Explorer {
   readonly #signatures = new Map<string, number>();
   readonly #reportedRevisit = new Set<string>();
   readonly #reportedUnnamed = new Set<string>();
+  /** everSeen is the goal's words that appeared on some page, so a run that
+   *  did not arrive can say which of them were nowhere at all. */
+  readonly #everSeen = new Set<string>();
   readonly #visited: string[] = [];
 
   readonly #findings: Finding[] = [];
@@ -224,9 +227,30 @@ export class Explorer {
     this.#goalWords = keywords(goal.goal);
   }
 
+  /** redact removes anything this exploration typed from a URL it reports.
+   *
+   * A form submitted with GET puts every field in the address bar, and that
+   * address then travels into a finding, a compiled workflow description and a
+   * pull request comment. Here the values are a reserved test address and
+   * Stripe's test card, but the mechanism does not care what was typed, and
+   * the engine's redactor cannot help because it never sees a runner URL. The
+   * agent knows exactly what it typed, which makes this the one place the
+   * removal is precise rather than a guess at what looks sensitive.
+   */
+  redact(url: string): string {
+    let out = url;
+    for (const value of Object.values(this.#identity)) {
+      if (!value) continue;
+      for (const form of [value, encodeURIComponent(value)]) {
+        out = out.split(form).join('[typed]');
+      }
+    }
+    return out;
+  }
+
   get findings(): readonly Finding[] { return this.#findings; }
   get missing(): readonly string[] { return this.#missing; }
-  get visited(): readonly string[] { return this.#visited; }
+  get visited(): readonly string[] { return this.#visited.map((u) => this.redact(u)); }
   get reached(): boolean { return this.#reached; }
   get identity(): Identity { return this.#identity; }
 
@@ -237,11 +261,11 @@ export class Explorer {
     const url = snapshot.url;
     if (!this.#visited.includes(url)) this.#visited.push(url);
 
-    const seen = this.#offered.get(url) ?? [];
+    const seen = this.#controlsAt.get(url) ?? [];
     for (const control of snapshot.controls) {
       if (!seen.includes(control)) seen.push(control);
     }
-    this.#offered.set(url, seen);
+    this.#controlsAt.set(url, seen);
 
     // Every page the exploration stands on is registered here rather than in
     // settle, and the first step it was seen at wins. Registering only what an
@@ -255,7 +279,7 @@ export class Explorer {
       this.#reportedUnnamed.add(url);
       this.#findings.push({
         kind: 'unnamed_control',
-        url,
+        url: this.redact(url),
         step,
         confidence: 'high',
         detail:
@@ -267,6 +291,11 @@ export class Explorer {
           'only for somebody who can see it.',
         measuredMs: 0,
       });
+    }
+
+    const text = snapshot.text.toLowerCase();
+    for (const word of this.#goalWords) {
+      if (text.includes(word)) this.#everSeen.add(word);
     }
 
     if (judge(this.#goal.goal, snapshot.text) === 'met') {
@@ -302,25 +331,36 @@ export class Explorer {
       return { kind: 'click', control };
     }
 
-    // Nothing here that has not been tried. That is a dead end from where the
-    // exploration is standing, and it is worth saying so even though the run
-    // carries on: a page a person reaches with a goal in mind and cannot
-    // advance from is the shape of "nothing broke and I left".
+    // A dead end is a page that offers no way onward at all, not a page whose
+    // controls this run happens to have tried already.
+    //
+    // Reporting the second was the first thing running this against a real
+    // application got wrong. Every exploration ends by exhausting the page it
+    // started on, so every run produced a dead end on its own front page, and
+    // a finding that fires on every run regardless of the application is a
+    // finding people learn to skip. What is worth reporting is a page somebody
+    // arrives at with a goal in mind and cannot advance from, which is the
+    // shape of "nothing broke and I left".
+    if (this.#offered(url).length === 0) {
+      this.#findings.push({
+        kind: 'dead_end',
+        url: this.redact(url),
+        step,
+        confidence: 'high',
+        detail: snapshot.controls.length === 0 && snapshot.fields.length === 0
+          ? 'This page offers no control and no field, so there is no way onward from it and no ' +
+            'way back that says where you are.'
+          : `The only things this page offers are ${describe(snapshot)}, and none of them leads ` +
+            `anywhere: they are controls an exploration must not press, such as signing out or ` +
+            `deleting something.`,
+        fix:
+          'If somebody can reach this page while trying to ' +
+          `${lowerFirst(this.#goal.goal)} then it needs a way onward from here, or a way back ` +
+          'that says where they are.',
+        measuredMs: 0,
+      });
+    }
     this.#exhausted.add(url);
-    this.#findings.push({
-      kind: 'dead_end',
-      url,
-      step,
-      confidence: 'high',
-      detail:
-        `Nothing on this page moves the goal forward. It offers ` +
-        `${describe(snapshot)}, and every one of those was already tried.`,
-      fix:
-        'If somebody can reach this page while trying to ' +
-        `${lowerFirst(this.#goal.goal)} then it needs a way onward from here, or a way back that ` +
-        'says where they are.',
-      measuredMs: 0,
-    });
 
     // Back to the earliest page that still has something unexplored, chosen by
     // visit order rather than at random so that the path stays readable and
@@ -346,7 +386,7 @@ export class Explorer {
     if (elapsedMs > this.#slowMs) {
       this.#findings.push({
         kind: 'slow_response',
-        url: before.url,
+        url: this.redact(before.url),
         ...(move.kind === 'click' ? { control: move.control } : {}),
         step,
         confidence: 'high',
@@ -366,7 +406,7 @@ export class Explorer {
     if (move.kind === 'click' && beforeSig === afterSig) {
       this.#findings.push({
         kind: 'no_effect',
-        url: before.url,
+        url: this.redact(before.url),
         control: move.control,
         step,
         confidence: 'high',
@@ -389,7 +429,7 @@ export class Explorer {
       this.#reportedRevisit.add(afterSig);
       this.#findings.push({
         kind: 'revisit',
-        url: after.url,
+        url: this.redact(after.url),
         ...(move.kind === 'click' ? { control: move.control } : {}),
         step,
         confidence: 'medium',
@@ -414,22 +454,39 @@ export class Explorer {
     );
   }
 
-  /** finish records what the run as a whole did not manage. */
+  /** finish records what the run as a whole did not manage.
+   *
+   * The words that never appeared are named, and that detail is the whole
+   * value of this finding. Whether the goal was reached is decided by matching
+   * its words against the page, so a goal that describes where somebody
+   * started, "upgrade from the free plan to the paid one", can be satisfied by
+   * a page saying "your workspace is on the paid plan" and still read as
+   * unreached, because free and upgrade are nowhere on it. Running this
+   * against a real application produced exactly that, and a finding that only
+   * said "never reached" sent the reader looking for a missing feature when
+   * the answer was four words in the goal. Naming them makes the two cases
+   * tell themselves apart in a second.
+   */
   finish(step: number, lastURL: string): void {
     if (this.#reached) return;
+    const never = this.#goalWords.filter((w) => !this.#everSeen.has(w));
     this.#findings.push({
       kind: 'goal_unreached',
-      url: lastURL,
+      url: this.redact(lastURL),
       step,
       confidence: 'medium',
       detail:
         `${step} ${step === 1 ? 'step' : 'steps'} across ` +
-        `${this.#visited.length} ${this.#visited.length === 1 ? 'page' : 'pages'} and nothing ` +
-        `visible ever said ${lowerFirst(this.#goal.goal)} had happened.`,
+        `${this.#visited.length} ${this.#visited.length === 1 ? 'page' : 'pages'} and no page ` +
+        `carried enough of the goal's words to say it had happened. ` +
+        (never.length > 0
+          ? `These never appeared anywhere: ${never.join(', ')}.`
+          : `Every word appeared somewhere, but never enough of them on one page.`),
       fix:
-        'Either the path is longer than the budget, or it is not discoverable from where this ' +
-        'started. Raise the budget or set start_path closer, and if neither helps, that is the ' +
-        'finding.',
+        'If those words describe where somebody started rather than where they end up, rewrite ' +
+        'the goal to describe the finished state and run it again. Otherwise the path is longer ' +
+        'than the budget or not discoverable from here: raise the budget or set start_path ' +
+        'closer, and if neither helps, that is the finding.',
       measuredMs: 0,
     });
   }
@@ -437,9 +494,14 @@ export class Explorer {
   /** now is the injected clock, so the caller measures with the same one. */
   get clock(): Clock { return this.#clock; }
 
+  /** offered is every control at a URL an exploration is willing to press,
+   *  whether or not it has pressed it yet. */
+  #offered(url: string): string[] {
+    return (this.#controlsAt.get(url) ?? []).filter((c) => !destructive(c));
+  }
+
   #candidates(url: string): string[] {
-    const offered = this.#offered.get(url) ?? [];
-    return offered.filter((c) => !this.#pressed.has(`${url}|${c}`) && !destructive(c));
+    return this.#offered(url).filter((c) => !this.#pressed.has(`${url}|${c}`));
   }
 
   /** choose picks among the candidates, preferring the ones the goal names.

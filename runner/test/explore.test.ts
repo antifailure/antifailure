@@ -168,7 +168,7 @@ test('a page with nothing left to try is a dead end, and the run goes back', asy
 
   const finding = explorer.findings.find((f) => f.kind === 'dead_end');
   assert.ok(finding, `expected a dead_end, got ${kinds(explorer.findings).join(', ')}`);
-  assert.match(finding.detail, /nothing at all|controls/);
+  assert.match(finding.detail, /no control and no field/);
   // Having found the dead end it navigated back rather than stopping, and
   // pressed the control it had not tried.
   assert.ok(
@@ -375,4 +375,102 @@ test('a page signature changes when anything a person would notice changes', () 
     signature({ ...base, fields: [{ name: 'Email', type: 'email', filled: false }] }), same);
   // Control order is the DOM's business, not the page's meaning.
   assert.equal(signature({ ...base, controls: ['One'] }), same);
+});
+
+// The four things running this against a real application found, each with a
+// test so it stays found.
+
+test('a dead end is a page with no way onward, not one whose controls were tried', async () => {
+  // The first version reported a dead end whenever nothing was left to press,
+  // so every run ended by reporting one on its own front page. A finding that
+  // fires on every run regardless of the application is one people skip.
+  const clock = new FakeClock();
+  const site = new Site({
+    '/': { title: 'Home', text: 'Home.', controls: ['Docs'], links: { Docs: '/docs' } },
+    '/docs': { title: 'Docs', text: 'Docs.', controls: ['Home'], links: { Home: '/' } },
+  }, clock);
+
+  const { explorer } = await pursue(goal(), site, clock);
+  assert.equal(
+    explorer.findings.filter((f) => f.kind === 'dead_end').length, 0,
+    `every page here leads somewhere: ${JSON.stringify(explorer.findings, null, 2)}`,
+  );
+});
+
+test('a page whose only way onward is destructive is a dead end', async () => {
+  const clock = new FakeClock();
+  const site = new Site({
+    '/': { title: 'Home', text: 'Home.', controls: ['Danger'], links: { Danger: '/gone' } },
+    '/gone': { title: 'Gone', text: 'Gone.', controls: ['Delete everything'] },
+  }, clock);
+
+  const { explorer } = await pursue(goal(), site, clock);
+  const found = explorer.findings.filter((f) => f.kind === 'dead_end');
+  assert.equal(found.length, 1, JSON.stringify(explorer.findings.map((f) => f.kind)));
+  assert.equal(found[0]!.url, '/gone');
+  assert.match(found[0]!.detail, /must not press/);
+});
+
+test('a page with no control and no field says exactly that', async () => {
+  const clock = new FakeClock();
+  const site = new Site({
+    '/': { title: 'Home', text: 'Home.', controls: ['Help'], links: { Help: '/help' } },
+    '/help': { title: 'Help', text: 'Read the manual.' },
+  }, clock);
+
+  const { explorer } = await pursue(goal(), site, clock);
+  const found = explorer.findings.find((f) => f.kind === 'dead_end');
+  assert.ok(found);
+  assert.equal(found.url, '/help');
+  assert.match(found.detail, /no control and no field/);
+  // The first version's sentence read "It offers nothing at all, and every one
+  // of those was already tried", which refers to nothing.
+  assert.doesNotMatch(found.detail, /every one of those/);
+});
+
+test('what the agent typed is removed from every url it reports', async () => {
+  // A form submitted with GET puts every field in the address bar, and that
+  // address travels into a finding, a compiled description and a pull request
+  // comment. The agent knows exactly what it typed, which is what makes the
+  // removal precise rather than a guess at what looks sensitive.
+  const clock = new FakeClock();
+  const site = new Site({
+    '/': {
+      title: 'Sign up', text: 'Sign up.',
+      fields: [{ name: 'Email address', type: 'email' }],
+      controls: ['Continue'],
+      links: { Continue: '/done?e=af.leaky%40example.test' },
+    },
+    '/done?e=af.leaky%40example.test': { title: 'Done', text: 'Thanks.' },
+  }, clock);
+
+  const { explorer } = await pursue(goal({ seed: 'leaky' }), site, clock);
+  const everything = JSON.stringify({
+    findings: explorer.findings, visited: explorer.visited,
+  });
+  assert.ok(!everything.includes('af.leaky'), everything);
+  assert.ok(everything.includes('[typed]'), everything);
+});
+
+test('a goal that was never reached names the words that never appeared', async () => {
+  // Whether a goal was reached is decided by matching its words against the
+  // page, so a goal describing where somebody started can be satisfied and
+  // still read as unreached. Naming the missing words is what tells that case
+  // apart from a genuinely missing feature in a second.
+  const clock = new FakeClock();
+  const site = new Site({
+    '/': { title: 'Home', text: 'Your workspace is on the paid plan.' },
+  }, clock);
+
+  const { explorer } = await pursue(
+    goal({ goal: 'Upgrade the workspace from the free plan to the paid one.' }), site, clock);
+
+  const found = explorer.findings.find((f) => f.kind === 'goal_unreached');
+  assert.ok(found);
+  assert.match(found.detail, /never appeared anywhere/);
+  for (const word of ['upgrade', 'free']) {
+    assert.match(found.detail, new RegExp(word), `${word} was nowhere and is not named`);
+  }
+  // And the words that were on the page are not listed as missing.
+  assert.doesNotMatch(found.detail.split('never appeared anywhere:')[1] ?? '', /workspace|paid/);
 });
