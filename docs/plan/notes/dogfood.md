@@ -645,13 +645,21 @@ That finding outlived the application it was found in. While this branch was
 open, main landed its own console at `console/`, a static export the control
 plane serves from its own process on its own origin, and that is the one the
 published image ships. Two consoles is one too many, so the one written here is
-deleted and the preview runs the shipped image alone. The gap the finding names
-is still there and is worse in the survivor: `console/` is a separate npm
-project with its own lockfile, so it is in neither the web workspace's
-typecheck loop nor the runner's, and the only thing standing between a broken
-console and a release was the image build asserting `index.html` exists, in a
-different workflow. Both `ci.yml` and `just typecheck` now run its production
-build, which is the same command the Dockerfile runs.
+deleted and the preview runs the shipped image alone.
+
+I then claimed the survivor had the same gap, and it does not. I should record
+that plainly, because asserting a missing check without looking is the failure
+this whole document is about. main's `www` job already builds `console/` and
+then asserts that every route the control plane routes to was actually
+exported, which is a stricter check than the one I was about to add and catches
+a case I had not thought of: a stray server-only import stops a page exporting,
+and the route starts answering with the 404 page while nothing else notices.
+
+What is genuinely missing is smaller and still worth closing. `just gate` says
+at the top of the file that green here means green there, and the console was
+in neither the web workspace's typecheck loop nor the runner's, so a type error
+in it passed the local gate and failed the www job twenty minutes later.
+`just typecheck` builds it now. CI needed nothing.
 
 **43. The transform reference contradicted itself about uniqueness, on one page.**
 The table of transforms is generated from the registry and its Unique column is

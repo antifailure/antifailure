@@ -471,8 +471,8 @@ manifestcheck:
 gatecheck:
     go run ./tools/gatecheck .
 
-# The TypeScript that ships: the control plane packages, the console, and the
-# agent runner.
+# The TypeScript that ships: the control plane packages, the agent runner, and
+# the console.
 typecheck:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -480,19 +480,18 @@ typecheck:
       npx --prefix web tsc --noEmit -p "web/$p/tsconfig.json"
     done
     npx --prefix runner tsc --noEmit -p runner/tsconfig.json
-    # The console, which nothing here was checking. It is a separate npm
-    # project with its own lockfile, so it is neither in the web workspace's
-    # typecheck loop above nor in the runner's, and it was reaching the
-    # published image unchecked by any gate: the only thing standing between a
-    # broken console and a release was the image build asserting index.html
-    # exists, which happens in a different workflow.
+    # The console, which this file was not checking and ci.yml was.
     #
-    # A build rather than a typecheck, and the difference is not academic. An
-    # import written as ../lib/guard from a page two directories deep
-    # typechecks clean, because tsconfig resolves it through baseUrl, and
-    # fails in webpack with "Module not found". That shipped a broken image
-    # once already. `next build` runs the typecheck too, so this is the
-    # stricter of the two and not an extra one.
+    # That gap is the interesting part rather than the console itself. The
+    # comment at the top of this file says green here means green there, and a
+    # type error in console/ passed `just gate` and failed the www job twenty
+    # minutes later. It is a separate npm project with its own lockfile, so it
+    # is in neither loop above and had to be named.
+    #
+    # A build rather than a typecheck, because `next build` runs the typecheck
+    # too and then does the part a typecheck cannot: an import written as
+    # ../lib/guard from a page two directories deep resolves through baseUrl
+    # and fails in webpack with "Module not found".
     [ -d console/node_modules ] || npm --prefix console ci --no-audit --no-fund
     NEXT_TELEMETRY_DISABLED=1 npm --prefix console run build
 
