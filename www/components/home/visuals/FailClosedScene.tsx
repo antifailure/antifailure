@@ -326,7 +326,7 @@ export function FailClosedScene() {
           <div className="flex h-11 shrink-0 items-center justify-between border-b border-black/[0.06] px-3.5">
             <div className="flex items-center gap-2">
               <SlackHash />
-              <span className="text-[13px] font-semibold tracking-tight text-[#1A1A1A]">Thread</span>
+              <span className="text-[13px] font-semibold tracking-tight text-[#1A1A1A]">Checkout</span>
               <span className="text-[13px] tracking-tight text-[#8A8F98]">#egress</span>
             </div>
             <span className="text-[#B0B3B8]">

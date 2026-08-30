@@ -198,6 +198,19 @@ body {
   border: 1px solid var(--af-rule);
 }
 
+/* Expressive Code paints macOS traffic lights on framed blocks. They are
+ * decoration, not a control, and they read as a leftover mock. Hide the dots
+ * and collapse an empty title bar so a code block is just the code. */
+.expressive-code .frame .header::before {
+  display: none !important;
+  content: none !important;
+  box-shadow: none !important;
+}
+
+.expressive-code .frame:not(.has-title) .header {
+  display: none;
+}
+
 .sl-markdown-content table {
   font-variant-numeric: tabular-nums;
   border-collapse: collapse;

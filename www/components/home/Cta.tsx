@@ -20,9 +20,10 @@ export function Cta() {
   return (
     <section className="cta relative isolate overflow-hidden bg-black safe-paddings">
       <CtaBackdrop className="pointer-events-none absolute inset-0 -z-10 h-full w-full" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[58%] bg-[linear-gradient(0deg,#000_0%,#000_28%,rgba(0,0,0,0.55)_62%,rgba(0,0,0,0)_100%)] max-lg:h-[52%]" />
 
       <Container
-        className="flex min-h-[520px] flex-col justify-between gap-y-16 py-20 max-lg:min-h-0 max-lg:gap-y-12 max-lg:py-16 max-md:gap-y-10 max-md:py-14"
+        className="relative z-10 flex min-h-[520px] flex-col justify-between gap-y-16 py-20 max-lg:min-h-0 max-lg:gap-y-12 max-lg:py-16 max-md:gap-y-10 max-md:py-14"
         size="1920"
       >
         <h2 className="font-title text-[80px] leading-none tracking-tighter text-balance text-white max-xl:text-[64px] max-lg:text-[44px] max-md:text-[34px] max-sm:text-[30px]">

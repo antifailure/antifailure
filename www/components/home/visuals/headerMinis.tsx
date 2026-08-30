@@ -357,14 +357,72 @@ export function ProductMiniStyles() {
   return <style dangerouslySetInnerHTML={{ __html: MINI_CSS }} />;
 }
 
-export function HeaderMini({ title }: { title: string }) {
+function Cylinder({
+  x,
+  y,
+  on,
+}: {
+  x: number;
+  y: number;
+  on?: boolean;
+}) {
+  const fill = on ? GREEN : "white";
+  const stroke = on ? GREEN : "rgba(0,0,0,0.22)";
+  return (
+    <g>
+      <path d={`M${x} ${y + 5}v10c0 2.6 4 4.8 9 4.8s9-2.2 9-4.8V${y + 5}`} fill={fill} stroke={stroke} strokeWidth="1.2" />
+      <ellipse cx={x + 9} cy={y + 5} rx="9" ry="4.8" fill={fill} stroke={stroke} strokeWidth="1.2" />
+    </g>
+  );
+}
+
+export function MenuCardArt({ kind }: { kind: "twin" | "fleet" }) {
+  return (
+    <svg viewBox="0 0 168 88" className="h-[88px] w-[168px] shrink-0" fill="none" aria-hidden>
+      {kind === "twin" ? (
+        <>
+          <rect x="8" y="32" width="28" height="18" rx="3" fill="white" stroke="rgba(0,0,0,0.22)" strokeWidth="1.2" />
+          <text x="22" y="44" textAnchor="middle" fill={INK} fontFamily={SANS} fontSize="8" fontWeight="600">
+            twin
+          </text>
+          <path d="M36 41H58" stroke="rgba(0,0,0,0.2)" strokeWidth="1.2" />
+          <path d="M58 41V18" stroke="rgba(0,0,0,0.2)" strokeWidth="1.2" />
+          <path d="M58 41V64" stroke="rgba(0,0,0,0.2)" strokeWidth="1.2" />
+          <path d="M58 18H78" stroke="rgba(0,0,0,0.2)" strokeWidth="1.2" />
+          <path d="M58 41H78" stroke="rgba(0,0,0,0.2)" strokeWidth="1.2" />
+          <path d="M58 64H78" stroke="rgba(0,0,0,0.2)" strokeWidth="1.2" />
+          <Cylinder x={78} y={8} />
+          <Cylinder x={78} y={32} on />
+          <Cylinder x={78} y={56} />
+        </>
+      ) : (
+        <>
+          {[0, 1, 2].map((row) =>
+            [0, 1, 2].map((col) => (
+              <Cylinder
+                key={`${row}-${col}`}
+                x={18 + col * 48}
+                y={8 + row * 26}
+                on={(row === 1 && col === 1) || (row === 0 && col === 2) || (row === 2 && col === 0)}
+              />
+            )),
+          )}
+        </>
+      )}
+    </svg>
+  );
+}
+
+export function HeaderMini({ title, size = "nav" }: { title: string; size?: "nav" | "card" }) {
   const Mini = MINIS[title];
   if (!Mini) return null;
   return (
     <span
       className={cn(
-        "mini-frame pointer-events-none relative isolate block h-14 w-[84px] shrink-0 overflow-hidden rounded-[3px]",
-        "bg-[#f4f7f5] ring-1 ring-black/10",
+        "mini-frame pointer-events-none relative isolate block shrink-0 overflow-hidden",
+        size === "card"
+          ? "h-[92px] w-[148px] rounded-[8px] bg-white ring-1 ring-black/[0.08]"
+          : "h-14 w-[84px] rounded-[3px] bg-[#f4f7f5] ring-1 ring-black/10",
       )}
       aria-hidden
     >

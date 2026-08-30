@@ -13,7 +13,10 @@ export function Workload() {
         size="1600"
       >
         <div className="min-w-0">
-          <Heading title="<strong>Workload Studio for the change that matters.</strong> Observed patterns, deterministic journeys, and exploratory users. Not production traffic diverted." />
+          <Heading
+            icon="workload"
+            title="<strong>Workload Studio for the change that matters.</strong> Observed patterns, deterministic journeys, and exploratory users. Not production traffic diverted."
+          />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <WorkloadIdeStage />
           </div>
