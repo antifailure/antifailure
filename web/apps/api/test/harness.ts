@@ -148,7 +148,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
  * fetch that hands the request to `engine/internal/mockpack` running the
  * product's own Stripe pack. That is deliberately not a FakeStripeClient: a
  * fake agrees with whatever its author believed the response shape was, and
- * this arrangement is what found four defects in the shipped pack.
+ * this arrangement is what found five defects in the shipped pack.
  *
  * A request no route matches answers 501 rather than 404, because 404 is a real
  * answer here: getSubscription reads it as "Stripe has never heard of this",

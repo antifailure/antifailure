@@ -8,7 +8,7 @@
 // worth nothing: a fake is written by the same person, on the same day, with
 // the same wrong idea about the response shape. Testing it against the pack
 // proves the client survives what the product actually serves, and it is how
-// four defects in the pack were found.
+// five defects in the pack were found.
 //
 // WHY IT IS A SECOND IMPLEMENTATION. The alternative was running the Go
 // sidecar from a Node test, which puts a Go toolchain and a compile in the way

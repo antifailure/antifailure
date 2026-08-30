@@ -13,9 +13,11 @@
 // FakeStripeClient here. The tests construct THIS class, the one that ships,
 // and give it a fetch that reaches the mock pack. That is stronger than a fake,
 // because a fake agrees with whatever the author believed about the response
-// shape, and it is what found four defects in the pack: a checkout session
+// shape, and it is what found five defects in the pack: a checkout session
 // whose url named a different session, numeric fields returned as strings, a
-// cancel that discarded the customer, and no route for a plan change at all.
+// cancel that discarded the customer, subscriptions whose items were always
+// empty so the plan could not be read off one, and no route for a plan change
+// at all.
 //
 // Every method returns a decoded, typed value or throws. Nothing here returns
 // `any`, and nothing lets one surprising field discard a whole response: the
