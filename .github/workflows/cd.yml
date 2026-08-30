@@ -61,6 +61,14 @@ env:
   APP: afcp-app
   BOOTSTRAP_JOB: afcp-bootstrap
   STAGING_URL: https://app.dev.antifailure.dev
+  # Production, in its own resource group with its own everything. The names
+  # come from `name = "afcpprod"` in production.tfvars, and the group is
+  # separate on purpose: a blast radius that includes customers' control plane
+  # is not worth what sharing one would save.
+  PRODUCTION_RESOURCE_GROUP: af-cp-prod-centralus
+  PRODUCTION_APP: afcpprod-app
+  PRODUCTION_BOOTSTRAP_JOB: afcpprod-bootstrap
+  PRODUCTION_URL: https://app.antifailure.dev
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -271,15 +279,57 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # PRODUCTION DOES NOT EXIST YET, AND THIS SAYS SO RATHER THAN INVENTING IT.
+      # REFUSES UNTIL PRODUCTION EXISTS, BY ASKING RATHER THAN BY ASSERTING.
       #
-      # The approval gate, the federated credential, the digest promotion and
-      # this job are all real and wired. What is missing is the resource group
-      # and the container app to deploy into, which is a decision to spend money
-      # that has not been made. Refusing loudly here is the honest shape: the
-      # alternative is a job that deploys production to staging's app and calls
-      # it a promotion.
-      - name: Refuse until production infrastructure exists
+      # This step used to be an unconditional `exit 1` saying production
+      # infrastructure did not exist. That was true and it was also a thing
+      # somebody would have to remember to delete, under pressure, on the day of
+      # the first release. Asking Azure instead means the refusal stops the
+      # moment the apply has happened and no workflow edit is needed to make it
+      # stop.
+      #
+      # infra/terraform/stacks/control-plane/production.tfvars is the apply.
+      # docs/src/content/docs/self-hosting/production.md is the order it and the
+      # things Terraform cannot do have to happen in.
+      - name: Production infrastructure exists
         run: |
-          echo "::error title=No production environment::The production deploy path is wired end to end -- approval, OIDC, and the digest staging tested -- but there is no production Container App to deploy into yet. See docs/plan/notes/hosted-loop.md."
-          exit 1
+          if ! az containerapp show \
+                -n "${PRODUCTION_APP}" -g "${PRODUCTION_RESOURCE_GROUP}" \
+                --query id -o tsv >/dev/null 2>&1; then
+            echo "::error title=No production environment::${PRODUCTION_APP} does not exist in ${PRODUCTION_RESOURCE_GROUP}. The deploy path is wired end to end, approval, OIDC and the digest staging tested, and the infrastructure has not been applied. See docs/src/content/docs/self-hosting/production.md."
+            exit 1
+          fi
+
+      # The boundary, enforced rather than trusted, exactly as staging does it.
+      # azguard refuses any command whose resource group is not one this project
+      # owns, offline, and it fails closed.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
+      - name: The target group is ours
+        run: GOTOOLCHAIN=local go run ./tools/azguard check --tags "${PRODUCTION_RESOURCE_GROUP}"
+
+      # The same digest staging tested, which is the entire reason build outputs
+      # one. A tag can be moved between the two deploys and a digest cannot.
+      - name: Deploy
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          deploy/cd/deploy.sh \
+            "${PRODUCTION_RESOURCE_GROUP}" "${PRODUCTION_APP}" "${PRODUCTION_BOOTSTRAP_JOB}" \
+            "${IMAGE_DIGEST}" "${GITHUB_SHA}" "${PRODUCTION_URL}"
+
+      - name: What is serving
+        if: always()
+        run: |
+          {
+            echo "### production"
+            echo
+            echo '```'
+            curl -sS -m 10 "${PRODUCTION_URL}/readyz" || echo "no answer from ${PRODUCTION_URL}/readyz"
+            echo
+            echo '```'
+            az containerapp ingress traffic show -n "${PRODUCTION_APP}" -g "${PRODUCTION_RESOURCE_GROUP}" -o table || true
+          } >> "$GITHUB_STEP_SUMMARY"

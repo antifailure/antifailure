@@ -23,6 +23,8 @@ can run is worse than a short one.
 | CI identity, federated, no secret | **applied**, `af-infra-ci` |
 | Control plane on Kubernetes instead | **works**, the Helm chart, installed on a real cluster in CI |
 | Goldens storage | **off by default**, see below |
+| Alerting, an action group and eleven rules | **written**, `infra/terraform/modules/alerting`, off unless `alerting_enabled` |
+| Production, `app.antifailure.dev` | **written**, `production.tfvars`, not applied. [Standing up production](/docs/self-hosting/production/) |
 | Environment pool on AKS | **does not exist** |
 
 The goldens storage account is `goldens_enabled = false` on purpose. Nothing in
@@ -618,4 +620,6 @@ window, because that is precisely the sequence purge protection exists to
 prevent. Set `key_vault_name` yourself if you need to sidestep it knowingly.
 
 Related: [the control plane](/docs/self-hosting/control-plane/),
+[standing up production](/docs/self-hosting/production/),
+[the runbooks](/docs/self-hosting/runbooks/),
 [configuration](/docs/reference/control-plane/).

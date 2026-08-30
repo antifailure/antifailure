@@ -103,6 +103,7 @@ module "control_plane" {
   database_sku          = var.database_sku
   database_storage_mb   = var.database_storage_mb
   backup_retention_days = var.backup_retention_days
+  geo_redundant_backup  = var.geo_redundant_backup
   high_availability     = var.high_availability
 
   min_replicas = var.min_replicas
@@ -121,4 +122,46 @@ module "control_plane" {
 
   assign_deployer_secret_officer = var.assign_deployer_secret_officer
   deployer_principal_id          = var.deployer_principal_id
+
+  custom_domain           = var.custom_domain
+  dns_zone_name           = var.dns_zone_name
+  dns_zone_resource_group = var.dns_zone_resource_group
+}
+
+# Alerting, which staging does not run and production does.
+#
+# OFF BY DEFAULT, and that is a decision rather than an oversight. Staging goes
+# down on purpose several times a week: it is where a bad deploy is supposed to
+# be caught. Paging a person for that trains them to ignore the page, and the
+# page they learn to ignore is the same one production sends. Staging keeps the
+# post-deploy health gate in cd.yml, which fails the deploy and stops there.
+#
+# It also costs money. The availability test is billed per execution per
+# location and is the largest line this module adds.
+module "alerting" {
+  count  = var.alerting_enabled ? 1 : 0
+  source = "../../modules/alerting"
+
+  name                = var.name
+  resource_group_name = module.foundation.resource_group_name
+  location            = module.foundation.location
+  tags                = module.foundation.tags
+  log_analytics_id    = module.foundation.log_analytics_id
+
+  alert_emails           = var.alert_emails
+  alert_sms_country_code = var.alert_sms_country_code
+  alert_sms_number       = var.alert_sms_number
+
+  container_app_id   = module.control_plane.container_app_id
+  postgres_server_id = module.control_plane.postgres_server_id
+  job_ids            = module.control_plane.job_ids
+
+  # The name a customer uses, not the generated one. A probe against the
+  # generated address is green while DNS, the binding or the certificate is
+  # broken, which is most of the ways this becomes unreachable without the
+  # application doing anything wrong.
+  probe_url = "${var.app_base_url}/readyz"
+
+  database_sku = var.database_sku
+  min_replicas = var.min_replicas
 }

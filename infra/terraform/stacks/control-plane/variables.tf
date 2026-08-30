@@ -205,3 +205,79 @@ variable "ci_principal_id" {
   default     = ""
   description = "Object id of the service principal GitHub Actions federates into. Gets Reader on this resource group and nothing else. Empty disables the grant."
 }
+
+variable "geo_redundant_backup" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    Copy backups to the paired region. False is right for staging and wrong for
+    production: without it, a region losing its storage loses the backups with
+    the database, and the only remaining copy of the control plane is whatever
+    somebody has on a laptop.
+
+    It CANNOT BE CHANGED IN PLACE. Azure sets geo-redundancy when the server is
+    created and refuses to turn it on afterwards, so this is decided once per
+    server or paid for with a dump and a restore into a new one.
+  EOT
+}
+
+# --- the public name ------------------------------------------------------
+variable "custom_domain" {
+  type        = string
+  default     = ""
+  description = "The name to bind on the container app, for example app.antifailure.dev. Empty serves only the generated address. Must agree with app_base_url and with the OAuth App's callback."
+}
+
+variable "dns_zone_name" {
+  type    = string
+  default = ""
+}
+
+variable "dns_zone_resource_group" {
+  type        = string
+  default     = ""
+  description = "The group holding the zone. antifailure.dev is in af-web, not in this stack's group, so the identity applying this needs DNS Zone Contributor there."
+}
+
+# --- alerting ---------------------------------------------------------------
+variable "alerting_enabled" {
+  type        = bool
+  default     = false
+  description = "Create the action group, the availability tests and the metric alerts. Off for staging on purpose: a page for an environment that is supposed to break is a page people learn to ignore."
+
+  # Cross-variable validation, which Terraform allows from 1.9 and which this
+  # stack already requires. The alternative is a precondition inside the
+  # alerting module, and this one has to fail at plan time on the STACK, before
+  # anybody reads a diff that would create nine rules pointed at nothing.
+  validation {
+    condition     = !var.alerting_enabled || var.app_base_url != ""
+    error_message = "alerting_enabled needs app_base_url set, because the availability test has to ask for the name a customer uses. A probe against the generated azurecontainerapps.io address stays green while DNS, the domain binding or the certificate is broken, which is most of the ways this service becomes unreachable without the application doing anything wrong."
+  }
+
+  validation {
+    condition     = !var.alerting_enabled || length(var.alert_emails) > 0 || (var.alert_sms_number != "" && var.alert_sms_country_code != "")
+    error_message = "alerting_enabled with no receiver produces an action group that creates cleanly, attaches to every rule, reports healthy and delivers nothing to anybody. Set alert_emails, or both alert_sms_country_code and alert_sms_number."
+  }
+}
+
+# Sensitive for the same reason budget_contact_emails is: this repository plans
+# on every pull request into a step summary that is world readable, and an
+# address supplied as a variable would leave through a diff. See the foundation
+# module's copy for why the mark is necessary and not sufficient.
+variable "alert_emails" {
+  type      = list(string)
+  default   = []
+  sensitive = true
+}
+
+variable "alert_sms_country_code" {
+  type        = string
+  default     = ""
+  description = "Country calling code without the plus. Empty means no SMS receiver."
+}
+
+variable "alert_sms_number" {
+  type      = string
+  default   = ""
+  sensitive = true
+}

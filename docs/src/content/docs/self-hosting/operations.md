@@ -39,8 +39,17 @@ repository, and is not your problem tonight.
 ## What the alerts mean
 
 Every rule in `observability/alerts/antifailure.rules.yml` links back here. They
-are the only alerts that exist, on purpose: an alert nobody acts on trains
-everybody to ignore the ones that matter.
+read the counters the control plane keeps itself, so they need a Prometheus
+scraping `/metrics`.
+
+The hosted control plane on Azure has a second, smaller set that needs no
+Prometheus and watches the platform rather than the process: the database, the
+replicas, the jobs, the certificate, and the service as a customer reaches it.
+Those have their own pages under [runbooks](/docs/self-hosting/runbooks/), and
+each rule names its page in the notification it sends.
+
+Both sets are deliberately short. An alert nobody acts on trains everybody to
+ignore the ones that matter.
 
 ### ControlPlaneAvailabilityBudgetBurningFast
 

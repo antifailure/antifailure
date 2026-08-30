@@ -1,0 +1,177 @@
+# The daily vulnerability scan is a control only if somebody finds out when it
+# stops being one.
+#
+# TWO WAYS FOR THE SCAN TO STOP PROTECTING ANYBODY, and they need different
+# answers:
+#
+#   it RAN AND FAILED, which means govulncheck found something reachable, or an
+#   exemption in .govulncheck.yaml expired. GitHub emails whoever last touched
+#   the cron for a scheduled failure, which is a filterable notification sent to
+#   one person who may not be the person who can act.
+#
+#   it DID NOT RUN. GitHub disables scheduled workflows in a repository with no
+#   activity for sixty days, and it does so quietly. A repository whose scan
+#   silently stopped looks exactly like a repository with no vulnerabilities.
+#
+# WHY THIS IS NOT AN AZURE ALERT, which is where every other alert in this
+# project lives. Two Azure-side mechanisms were considered and both fail on
+# something specific:
+#
+#   A Log Analytics scheduled query over a heartbeat the workflow writes. The
+#   legacy HTTP Data Collector API that would let a workflow write one is
+#   deprecated with a retirement date, and the current Logs Ingestion API needs
+#   a data collection endpoint, a data collection rule, and a custom table that
+#   the azurerm provider cannot create at all. That is a new Terraform provider
+#   and an ARM template for one signal.
+#
+#   A custom metric pushed with the OIDC identity this repository already has,
+#   watched by an ordinary metric alert. The failure half would work. The
+#   silence half would not: a metric alert on a series that STOPS being emitted
+#   does not fire, and azurerm_monitor_metric_alert exposes no setting for how
+#   missing data is treated. A dead man's switch that does not notice death is
+#   the exact failure this file exists to prevent.
+#
+# So this runs where the thing it watches runs, and it fails loudly and leaves
+# an issue behind, because an issue is assignable and cannot be filtered into a
+# folder nobody opens.
+#
+# WHAT IT STILL CANNOT SEE, stated rather than implied away: this workflow is
+# scheduled too, so sixty days of inactivity disables it alongside the scan it
+# watches. That is why it also runs on every push to main. A repository nobody
+# has pushed to in two months and whose scans have stopped is dormant, and the
+# runbook says to check it by hand when picking work back up.
+name: security-watch
+
+on:
+  # The immediate half. A completed run of the Security workflow triggers this
+  # with its conclusion attached, so a failure is reported within a minute
+  # rather than waiting for tomorrow's check.
+  workflow_run:
+    workflows: [Security]
+    types: [completed]
+  # The dead man's switch. 09:00 UTC, two hours after the scan's 07:00, which
+  # is long enough for a thirty minute job plus a slow queue.
+  schedule:
+    - cron: "0 9 * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    name: the scan is running and passing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # Reading workflow runs other than this one, and leaving the issue.
+      actions: read
+      issues: write
+    steps:
+      # THE FRESHNESS CHECK IS THE WHOLE POINT AND IT RUNS ON EVERY TRIGGER,
+      # including the workflow_run one. A run that failed is also a run that
+      # happened, so checking the newest run's conclusion covers both halves
+      # with one query and there is no second code path to keep correct.
+      - name: The newest scan ran recently and passed
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # Twenty six hours. The scan is daily, so anything inside a day plus
+          # an hour of slack is on schedule and anything outside it is not.
+          MAX_AGE_HOURS: "26"
+        run: |
+          set -euo pipefail
+
+          # SCHEDULED RUNS ONLY, and this is the part that is easy to get
+          # wrong. security.yml also runs on every pull request, so asking for
+          # the newest completed run of any kind means a busy afternoon of pull
+          # requests makes a dead schedule look fresh. The daily run is the
+          # control; a pull request run is a check on that pull request and is
+          # visible there.
+          run_json=$(gh api \
+            "repos/${GH_REPO}/actions/workflows/security.yml/runs?event=schedule&status=completed&per_page=1" \
+            --jq '.workflow_runs[0] // empty')
+
+          if [ -z "${run_json}" ]; then
+            echo "problem=The Security workflow has no completed SCHEDULED run at all. Either it has never run on its cron, or the schedule was disabled before the first one." >> "$GITHUB_OUTPUT"
+            echo "url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          conclusion=$(printf '%s' "${run_json}" | jq -r '.conclusion')
+          updated=$(printf '%s' "${run_json}" | jq -r '.updated_at')
+          url=$(printf '%s' "${run_json}" | jq -r '.html_url')
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+          age_hours=$(( ( $(date -u +%s) - $(date -u -d "${updated}" +%s) ) / 3600 ))
+          echo "The newest completed scan concluded ${conclusion} ${age_hours}h ago: ${url}"
+
+          if [ "${conclusion}" != "success" ]; then
+            echo "problem=The newest vulnerability scan concluded ${conclusion}." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${age_hours}" -gt "${MAX_AGE_HOURS}" ]; then
+            echo "problem=The newest vulnerability scan is ${age_hours} hours old, and it is supposed to run daily. A scheduled workflow in a repository with no activity for sixty days is disabled by GitHub without saying so." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "problem=" >> "$GITHUB_OUTPUT"
+
+      # ONE ISSUE, REOPENED AND COMMENTED, NEVER A NEW ONE PER RUN. A watchdog
+      # that files an issue a day is a watchdog somebody mutes on the third day.
+      - name: Leave one issue open until it is fixed
+        if: steps.check.outputs.problem != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PROBLEM: ${{ steps.check.outputs.problem }}
+          SCAN_URL: ${{ steps.check.outputs.url }}
+          RUNBOOK: https://antifailure.dev/docs/self-hosting/runbooks/security-workflow/
+        run: |
+          set -euo pipefail
+          title="The vulnerability scan is not protecting this repository"
+          existing=$(gh issue list --state open --search "\"${title}\" in:title" \
+            --json number --jq '.[0].number // empty')
+
+          body=$(printf '%s\n\n%s\n\n%s\n' \
+            "${PROBLEM}" \
+            "Newest scan: ${SCAN_URL:-none}" \
+            "Runbook: ${RUNBOOK}")
+
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+          else
+            gh issue create --title "${title}" --body "${body}"
+          fi
+
+      # The job goes red as well as leaving the issue. A red check on main is
+      # visible to everybody without opening a notification.
+      - name: Fail loudly
+        if: steps.check.outputs.problem != ''
+        run: |
+          echo "::error title=Vulnerability scanning has stopped working::${{ steps.check.outputs.problem }}"
+          exit 1
+
+      # THE CLOSING HALF, WITHOUT WHICH THE ISSUE IS A PERMANENT SCAR. An alert
+      # that never clears is one people stop believing.
+      - name: Close the issue once the scan is healthy again
+        if: steps.check.outputs.problem == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="The vulnerability scan is not protecting this repository"
+          existing=$(gh issue list --state open --search "\"${title}\" in:title" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            gh issue close "${existing}" \
+              --comment "The newest scheduled scan passed. Closed by security-watch."
+          fi

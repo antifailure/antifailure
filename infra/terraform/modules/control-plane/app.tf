@@ -423,6 +423,12 @@ resource "azurerm_container_app" "this" {
     ignore_changes = [
       template[0].container[0].image,
       ingress[0].traffic_weight,
+      # ingress[0].custom_domain is NOT here, and it was, until `terraform
+      # validate` pointed out that the attribute is computed by the provider
+      # and cannot be set in configuration, so ignoring it does nothing.
+      # azurerm_container_app_custom_domain in domain.tf owns the binding and
+      # this resource reads it back. Older provider versions made it
+      # configurable, which is why every example on the internet ignores it.
     ]
   }
 
