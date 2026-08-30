@@ -186,18 +186,47 @@ func TestGatePostgres_ARealExclusiveLockReachesThePullRequestComment(t *testing.
 	require.Equal(t, aferrors.ExitTestFailure, exitCodeOfSilent(t, err))
 }
 
-func TestGatePostgres_ARealFastMigrationIsNotAFinding(t *testing.T) {
+func TestGatePostgres_AFindingFollowsTheMeasurementNotTheStatement(t *testing.T) {
 	// The other half, and the one that decides whether anybody keeps the check
-	// on. Adding a nullable column to a small table is instant and holds its
-	// lock for less than one sample, so it must produce nothing.
+	// on: the gate must not invent a finding.
+	//
+	// The first version of this asserted that adding a nullable column to a
+	// 200 row table produces no lock finding, and it was right about the
+	// intent and wrong as a test. Run on a machine with five other agents
+	// driving Docker, the ALTER took longer than the 500 millisecond warning
+	// threshold and the sampler was correct to say so. The property that does
+	// not depend on what else the machine is doing is that every finding
+	// matches the level the policy gives the hold time that was actually
+	// sampled.
 	r := rehearseForGate(t, map[string]string{
 		"001_fast.sql": "ALTER TABLE orders ADD COLUMN note text;\n",
 	}, 200, "fastmigration")
 	require.False(t, r.Failed, r.Error)
 
-	findings, migration := migrationFindings(insights.Full{Rehearsal: &r}, defaultGate())
+	gate := defaultGate()
+	findings, _ := migrationFindings(insights.Full{Rehearsal: &r}, gate)
 	for _, f := range findings {
-		require.NotEqual(t, ruleMigrationLock, f.Rule, "a fast migration produced a lock finding")
+		if f.Rule != ruleMigrationLock {
+			continue
+		}
+		var held float64
+		for _, l := range r.Locks {
+			if l.Table == f.Where {
+				held = l.HeldMS
+			}
+		}
+		require.Equal(t, gate.LockLevel(held), f.Level,
+			"the finding on %s does not match the %0.fms the sampler measured", f.Where, held)
+	}
+
+	// And with thresholds no machine could trip, the same rehearsal produces
+	// no lock finding at all and the check passes. That is the negative this
+	// test is for, stated in a way a busy machine cannot make wrong.
+	relaxed := gate
+	relaxed.LockWarnMS, relaxed.LockFailMS = 600000, 900000
+	findings, migration := migrationFindings(insights.Full{Rehearsal: &r}, relaxed)
+	for _, f := range findings {
+		require.NotEqual(t, ruleMigrationLock, f.Rule, "a lock finding survived a ten minute threshold")
 	}
 
 	run := report.Run{
@@ -261,7 +290,14 @@ func TestGatePostgres_ARealLintFindingCarriesTheBranchesRowCount(t *testing.T) {
 	}, 2000, "reallint")
 	require.False(t, r.Failed, r.Error)
 
-	findings, _ := migrationFindings(insights.Full{Rehearsal: &r}, defaultGate())
+	// Lock thresholds no machine could trip, so that this test is about the
+	// lint rule and not about how busy the build agent was: an index build on
+	// a loaded machine can hold its lock past two seconds, and that finding
+	// would be correct and would be answering a different question.
+	gate := defaultGate()
+	gate.LockWarnMS, gate.LockFailMS = 600000, 900000
+
+	findings, _ := migrationFindings(insights.Full{Rehearsal: &r}, gate)
 	var lint *report.Finding
 	for i := range findings {
 		if findings[i].Rule == string(insights.RuleIndexNotConcurrent) {
