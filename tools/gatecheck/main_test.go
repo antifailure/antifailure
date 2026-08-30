@@ -640,3 +640,104 @@ func jobsWithNoRunner(t *testing.T, body []byte) []string {
 	sort.Strings(missing)
 	return missing
 }
+
+// Nothing under www/lib is imported by nothing.
+//
+// The marketing site kept a whole generation of content modules after the
+// pages moved to components/pages: lib/company-content.tsx (19,879 bytes),
+// lib/solutions-content.tsx (10,347) and lib/marketing-content.tsx (40,244).
+// Seventy kilobytes with no importer between them, shipped in every deploy.
+//
+// Dead is the smaller half of the problem. lib/lastmod.ts named two of them as
+// the source of a route's date, so the home page and every /solutions page in
+// the sitemap took their lastmod from files nothing renders, and a commit
+// touching only dead content would have moved dates a reader is told mean the
+// page changed. company-content.tsx also carried `related` links to /company,
+// /security, /open-source and /design-partners, all four of which now answer
+// 404, waiting for somebody to import it again.
+//
+// Neither the compiler nor Biome reports this: every file type checks, and an
+// export with no consumer is legal. So it needs a gate, and it goes here with
+// the other checks on the shape of the tree rather than in check-seo.mjs,
+// which asserts against a build that has to happen first.
+func TestEveryWwwLibModuleIsImported(t *testing.T) {
+	dir := filepath.Join("..", "..", "www", "lib")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Skipf("no www/lib: %v", err)
+	}
+
+	// Every source file on the site, read once. The site is small enough that
+	// this is cheaper than being clever about which directories can import.
+	var corpus []string
+	root := filepath.Join("..", "..", "www")
+	err = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "node_modules" || d.Name() == ".next" || d.Name() == "out" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		switch filepath.Ext(p) {
+		case ".ts", ".tsx", ".mjs", ".js":
+		default:
+			return nil
+		}
+		body, readErr := os.ReadFile(p)
+		if readErr != nil {
+			return readErr
+		}
+		corpus = append(corpus, p+"\x00"+string(body))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(corpus) == 0 {
+		t.Fatal("read no www source files, which means this check is looking in the wrong place")
+	}
+
+	checked := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || (!strings.HasSuffix(name, ".ts") && !strings.HasSuffix(name, ".tsx")) {
+			continue
+		}
+		checked++
+		stem := strings.TrimSuffix(strings.TrimSuffix(name, ".tsx"), ".ts")
+		self := filepath.Join(dir, name)
+		// Both spellings the site uses: the "@/lib/x" alias and a relative
+		// "../lib/x". Matching on "lib/<stem>" covers each, and the quote or
+		// slash after it stops "lib/nav" from being answered by "lib/navbar".
+		if importedBy(corpus, self, stem) {
+			continue
+		}
+		t.Errorf("www/lib/%s has no importer anywhere under www/. "+
+			"An export nothing consumes type checks, lints clean and ships in every deploy; "+
+			"delete it, or wire it to the thing that was meant to use it.", name)
+	}
+	if checked == 0 {
+		t.Error("inspected no modules in www/lib, which means this check is looking in the wrong place")
+	}
+}
+
+// importedBy reports whether any file other than the module itself names it in
+// an import specifier.
+func importedBy(corpus []string, self, stem string) bool {
+	needle := "lib/" + stem
+	for _, entry := range corpus {
+		path, body, _ := strings.Cut(entry, "\x00")
+		if path == self {
+			continue
+		}
+		for _, closer := range []string{`"`, `'`, "`"} {
+			if strings.Contains(body, needle+closer) {
+				return true
+			}
+		}
+	}
+	return false
+}

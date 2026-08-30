@@ -42,7 +42,7 @@ function sourcesFor(routePath: string): string[] {
   const candidates: string[] = [];
 
   if (routePath === "/") {
-    candidates.push("app/page.tsx", "components/home", "lib/marketing-content.tsx");
+    candidates.push("app/page.tsx", "components/home");
   } else if (routePath.startsWith("/product/")) {
     const slug = routePath.slice("/product/".length);
     // Twins -> Twins.tsx, safe-state -> SafeState.tsx, and so on.
@@ -58,7 +58,6 @@ function sourcesFor(routePath: string): string[] {
     candidates.push("app/product/page.tsx", "components/pages/product/Overview.tsx");
   } else if (routePath.startsWith("/solutions/")) {
     candidates.push(
-      "lib/solutions-content.tsx",
       "components/pages/solutions/Vertical.tsx",
       "app/solutions/[slug]/page.tsx",
     );
@@ -76,10 +75,14 @@ function sourcesFor(routePath: string): string[] {
   } else {
     // The legal pages, all six of which are components/pages/company/Legal.tsx.
     //
-    // lib/company-content.tsx used to be listed here and is not any more: it
-    // has no importers at all since the four company pages were deleted, so
-    // every page falling through to this branch was taking its date from a
-    // file nothing renders.
+    // Three lib/*-content files used to be listed across this function, for
+    // the home page, the solutions pages and everything falling through to
+    // here. None of them had a single importer once the pages moved to
+    // components/pages, so the dates came from files nothing renders and a
+    // commit touching only dead content would have moved them. They are
+    // deleted rather than merely unlisted; sourcesFor filters by existsSync,
+    // so an entry naming a deleted file drops out in silence, which is how
+    // this survived being noticed.
     candidates.push(`app${routePath}/page.tsx`, "components/pages/company/Legal.tsx");
   }
 
