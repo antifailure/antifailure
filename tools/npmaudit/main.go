@@ -89,10 +89,13 @@ type npmError struct {
 	Detail  string `json:"detail"`
 }
 
+// packageVuln carries npm's own rolled-up severity for the package, which this
+// tool deliberately does not decode: it is the maximum across the package's
+// advisories, and a decision is made per advisory. The severity below comes off
+// the advisory itself.
 type packageVuln struct {
-	Name     string            `json:"name"`
-	Severity string            `json:"severity"`
-	Via      []json.RawMessage `json:"via"`
+	Name string            `json:"name"`
+	Via  []json.RawMessage `json:"via"`
 }
 
 // advisory is one entry of `via` when that entry is an object.
@@ -116,7 +119,6 @@ type advisory struct {
 	Title    string `json:"title"`
 	URL      string `json:"url"`
 	Severity string `json:"severity"`
-	Range    string `json:"range"`
 }
 
 // finding is one advisory against one package, in one project.
