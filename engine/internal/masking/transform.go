@@ -355,26 +355,20 @@ func (postcodeTransform) Describe() string {
 
 func (postcodeTransform) PreservesUniqueness() bool { return false }
 
+// A postal code is a string with a format, so this is stringFPE's rewrite and
+// not a copy of it.
+//
+// It was a copy: twenty identical lines, differing only in the order of two
+// mutually exclusive switch cases and in which of them carried the comment
+// explaining the rule. dupl found it, and running both proved they return the
+// same bytes for every input. That is the dangerous shape, because somebody
+// teaching postcode about outward codes would improve one of two identical
+// functions and leave the other behind with nothing to say so.
+//
+// The two names stay. They are what a manifest writes, they describe different
+// intents, and collapsing them would break every rules file that says postcode.
 func (postcodeTransform) Apply(k *Key, c Column, in *string) (*string, error) {
-	if nullOK(in) {
-		return nil, nil
-	}
-	if *in == "" {
-		return in, nil
-	}
-	s := newPRFStream(k.Sub(c), *in)
-	runes := []rune(*in)
-	for i, r := range runes {
-		switch {
-		case unicode.IsDigit(r):
-			runes[i] = rune('0' + s.intn(10))
-		case r >= 'A' && r <= 'Z':
-			runes[i] = rune('A' + s.intn(26))
-		case r >= 'a' && r <= 'z':
-			runes[i] = rune('a' + s.intn(26))
-		}
-	}
-	return str(string(runes)), nil
+	return stringFPETransform{}.Apply(k, c, in)
 }
 
 type companyTransform struct{}

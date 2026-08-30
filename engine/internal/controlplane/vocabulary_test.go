@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -148,5 +149,40 @@ func TestTheControlPlaneListParsesToSomethingRecognisable(t *testing.T) {
 	}
 	if !slices.Contains(accepted, "environment.ready") {
 		t.Fatal("the parsed list does not contain environment.ready, so it is not the list")
+	}
+}
+
+// The batch ceiling is the same number written out twice, and its comment on
+// this side claims it matches the control plane's.
+//
+// It does today. Nothing made it so. Raising it on the server alone leaves
+// every engine splitting batches it did not need to split; raising it here
+// alone turns each oversized batch into a refusal from the far end, after the
+// events have been serialised and sent. Both are silent, and both are the sort
+// of thing somebody changes on one side while reading the other side's comment
+// saying they agree.
+var maxBatchDecl = regexp.MustCompile(`export const MAX_BATCH = (\d+)`)
+
+func TestTheBatchCeilingIsTheSameOnBothSides(t *testing.T) {
+	b, err := os.ReadFile(filepath.Clean(ingestPath))
+	if err != nil {
+		t.Fatalf("read the control plane's ingestion module: %v", err)
+	}
+	m := maxBatchDecl.FindSubmatch(b)
+	if m == nil {
+		t.Fatalf("%s no longer declares MAX_BATCH in a form this test can read; "+
+			"fix the test rather than deleting it, because the engine's MaxBatch "+
+			"comment claims to match it and nothing else checks that", ingestPath)
+	}
+	theirs, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatalf("MAX_BATCH parsed as %q, which is not a number", m[1])
+	}
+	if theirs != controlplane.MaxBatch {
+		t.Errorf("the engine sends up to %d events in one request and %s accepts %d. "+
+			"The lower of the two is the real limit, and whichever side is wrong is wrong "+
+			"quietly: too high and every full batch is refused after being sent, too low "+
+			"and every run splits requests it did not need to.",
+			controlplane.MaxBatch, ingestPath, theirs)
 	}
 }

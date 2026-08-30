@@ -10,6 +10,7 @@ package report
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -87,6 +88,40 @@ type Verification struct {
 	Findings    []string
 }
 
+// Verdicts is every word a workflow result may carry, worst first.
+//
+// The runner decides these and declares them in runner/src/verdict.ts. They are
+// two programs in two languages that have to agree on one vocabulary and
+// nothing in either compiler can make them, so vocabulary_test.go reads that
+// file and this list and fails when they differ, the way the control plane's
+// event types are kept in step.
+var Verdicts = []string{"fail", "flaky", "blocked", "unverified", "pass"}
+
+// Known reports whether a word is one this engine can read.
+//
+// Exported because the terminal renders the same words and had its own list.
+// One authority, so that a runner ahead of this engine cannot be understood two
+// ways in one program.
+func Known(verdict string) bool { return slices.Contains(Verdicts, verdict) }
+
+// read is what this engine will treat a runner's word as.
+//
+// Anything outside Verdicts becomes blocked, because an outcome we cannot read
+// is a fact about us rather than about the change. That is the same rule that
+// puts a runner failure in blocked and not in fail.
+//
+// It has to be somewhere, because the alternative was in force and was wrong:
+// four separate switches over these words each fell through to a different
+// default, and the one in Verdict fell through to pass. A runner one version
+// ahead naming a new outcome would have reported the whole run green, exited
+// zero, and printed "unverified" beside that workflow in the same comment.
+func read(verdict string) string {
+	if Known(verdict) {
+		return verdict
+	}
+	return "blocked"
+}
+
 // Verdict is the one word answer for the whole run.
 //
 // A failure outranks everything, then flaky, then blocked. Blocked below flaky
@@ -95,7 +130,7 @@ type Verification struct {
 func (r Run) Verdict() string {
 	counts := map[string]int{}
 	for _, w := range r.Workflows {
-		counts[w.Verdict]++
+		counts[read(w.Verdict)]++
 	}
 	switch {
 	case counts["fail"] > 0, r.InvariantsViolated() > 0:
@@ -117,7 +152,7 @@ func (r Run) Verdict() string {
 func (r Run) Headline() string {
 	counts := map[string]int{}
 	for _, w := range r.Workflows {
-		counts[w.Verdict]++
+		counts[read(w.Verdict)]++
 	}
 	switch r.Verdict() {
 	case "pass":
@@ -241,7 +276,7 @@ func plural(n int, one, many string) string {
 // in an email digest, and by a screen reader, and only one of those renders an
 // emoji usefully.
 func symbol(verdict string) string {
-	switch verdict {
+	switch read(verdict) {
 	case "pass":
 		return "passed"
 	case "fail":
@@ -359,7 +394,7 @@ func (r Run) Markdown() string {
 }
 
 func rank(verdict string) int {
-	switch verdict {
+	switch read(verdict) {
 	case "fail":
 		return 0
 	case "flaky":

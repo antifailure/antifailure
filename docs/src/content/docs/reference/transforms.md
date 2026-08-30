@@ -81,10 +81,13 @@ unique constraint users_email_key.
   for users.email.
 ```
 
-`email`, `uuid_remap`, `username`, `hash_hex`, `int_fpe` and `string_fpe`
-preserve uniqueness. `name`, `city`, `company` and the rest do not, because two
-people can share a name and pretending otherwise would mean generating
-increasingly unlikely ones to satisfy a constraint the data never had.
+<!-- unique:start -->
+`email`, `hash_hex`, `preserve`, `username` and `uuid_remap` preserve uniqueness.
+<!-- unique:end -->
+
+`name`, `city`, `company` and the rest do not, because two people can share a
+name and pretending otherwise would mean generating increasingly unlikely ones
+to satisfy a constraint the data never had.
 
 ## Determinism
 

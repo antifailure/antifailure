@@ -186,9 +186,18 @@ const (
 
 // Event is one thing that happened.
 //
-// The envelope is fixed by schemas/events.v1.json and is identical across the
-// engine, the runner, and the control plane. Data is type specific and is
-// always a JSON object.
+// The envelope is fixed by schemas/events.v1.json, which is generated from this
+// struct and diffed by the gate, and Data is type specific and always a JSON
+// object.
+//
+// It is NOT the envelope the control plane receives, and this comment used to
+// say it was identical across the engine, the runner and the control plane.
+// Four of the eight names differ: ts against occurredAt, seq against sequence,
+// env against envId, data against payload, and level and msg have no
+// counterpart at all. internal/controlplane/client.go declares that shape and
+// sink.go translates into it. The runner emits no such envelope in either form.
+// Nothing outside Go reads this schema, so a false claim of a shared envelope
+// invites somebody to build against one that does not exist.
 type Event struct {
 	// ID is unique for this event.
 	ID string `json:"id"`
