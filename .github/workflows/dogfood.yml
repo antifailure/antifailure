@@ -101,6 +101,32 @@ jobs:
       - run: npm ci --no-audit --no-fund
         working-directory: web
 
+      - name: A pg_dump new enough to read that Postgres
+        # The service above is a Postgres 17 and the runner ships a 16 client.
+        # pg_dump refuses outright to read a server newer than itself, so a
+        # golden refresh cannot copy the source at all.
+        #
+        # This is the same step ci.yml carries in two jobs, for the same
+        # reason, and it is here rather than shared because a composite action
+        # for six lines is a worse trade than six lines. What made it worth
+        # writing down is that the engine already handled this correctly: it
+        # detected the mismatch and refused by name, printing the apt command
+        # that fixes it. The pipeline still failed, because a good error
+        # message is not a working environment, and the run that found it was
+        # the first one to get far enough to copy anything.
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          # Proof, not hope: the version that will actually be chosen.
+          pg_dump --version
+          test -x /usr/lib/postgresql/17/bin/pg_dump
+
       - name: Install the runner and its browser
         run: |
           npm ci --no-audit --no-fund
@@ -288,6 +314,32 @@ jobs:
           node-version: '24'
 
       - run: go build -o bin/af ./engine/cmd/af
+
+      - name: A pg_dump new enough to read that Postgres
+        # The service above is a Postgres 17 and the runner ships a 16 client.
+        # pg_dump refuses outright to read a server newer than itself, so a
+        # golden refresh cannot copy the source at all.
+        #
+        # This is the same step ci.yml carries in two jobs, for the same
+        # reason, and it is here rather than shared because a composite action
+        # for six lines is a worse trade than six lines. What made it worth
+        # writing down is that the engine already handled this correctly: it
+        # detected the mismatch and refused by name, printing the apt command
+        # that fixes it. The pipeline still failed, because a good error
+        # message is not a working environment, and the run that found it was
+        # the first one to get far enough to copy anything.
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          # Proof, not hope: the version that will actually be chosen.
+          pg_dump --version
+          test -x /usr/lib/postgresql/17/bin/pg_dump
 
       - name: Install the runner and its browser
         run: |

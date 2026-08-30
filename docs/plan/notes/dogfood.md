@@ -183,14 +183,14 @@ while the recording rotted.
 
 ## What it found
 
-Forty-three findings, forty-two fixed with a regression test. Two came from
+Forty-four findings, forty-three fixed with a regression test. Two came from
 writing the manifest, four from the golden refresh, three from the web
-application, six from wiring the pipeline itself, ten from merging main and
-from the first three runs in CI, and the rest from running the pieces against each
+application, six from wiring the pipeline itself, eleven from merging main and
+from the first four runs in CI, and the rest from running the pieces against each
 other. Every one of them was invisible in the files, and five of them are the
 same shape: a thing that was written, tested, documented, and never called.
 
-The last ten are worth separating out, because they came from the two things
+The last eleven are worth separating out, because they came from the two things
 this exercise had not yet done. Merging a branch that had been open for a while
 found a manifest whose invariants could never fail and two migrations sharing a
 number. Pushing found the rest: the first CI run failed on the first build, on
@@ -673,6 +673,23 @@ at the top of the file that green here means green there, and the console was
 in neither the web workspace's typecheck loop nor the runner's, so a type error
 in it passed the local gate and failed the www job twenty minutes later.
 `just typecheck` builds it now. CI needed nothing.
+
+**44. A good error message is not a working environment.**
+With the masking rules fixed, the run reached `af golden refresh` and stopped:
+the Postgres service is 17 and the runner ships a pg_dump 16, which refuses
+outright to read a server newer than itself.
+
+The engine handled this exactly right. It detected the mismatch, refused by
+name, and printed the apt command that fixes it, per platform. That is the
+behaviour this repository asks for everywhere, and the pipeline failed anyway,
+because a message telling somebody what to install does not install it. The
+workflow now does what the message says, in both jobs, and asserts the binary
+is where the engine looks for it rather than trusting the package.
+
+The same step already existed twice in ci.yml. It is here a third time rather
+than shared, because a composite action for six lines is the worse trade, and
+because the run that found this was the first one to get far enough to copy
+anything at all.
 
 **43. The transform reference contradicted itself about uniqueness, on one page.**
 The table of transforms is generated from the registry and its Unique column is
