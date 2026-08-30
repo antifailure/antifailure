@@ -170,14 +170,14 @@ while the recording rotted.
 
 ## What it found
 
-Forty findings, thirty-nine fixed with a regression test. Two came from
+Forty-three findings, forty-two fixed with a regression test. Two came from
 writing the manifest, four from the golden refresh, three from the web
-application, six from wiring the pipeline itself, seven from merging main and
-from the first two runs in CI, and the rest from running the pieces against each
+application, six from wiring the pipeline itself, ten from merging main and
+from the first three runs in CI, and the rest from running the pieces against each
 other. Every one of them was invisible in the files, and five of them are the
 same shape: a thing that was written, tested, documented, and never called.
 
-The last seven are worth separating out, because they came from the two things
+The last ten are worth separating out, because they came from the two things
 this exercise had not yet done. Merging a branch that had been open for a while
 found a manifest whose invariants could never fail and two migrations sharing a
 number. Pushing found the rest: the first CI run failed on the first build, on
@@ -652,6 +652,46 @@ typecheck loop nor the runner's, and the only thing standing between a broken
 console and a release was the image build asserting `index.html` exists, in a
 different workflow. Both `ci.yml` and `just typecheck` now run its production
 build, which is the same command the Dockerfile runs.
+
+**43. The transform reference contradicted itself about uniqueness, on one page.**
+The table of transforms is generated from the registry and its Unique column is
+correct. The paragraph two screens below it is written by hand, and it listed
+`string_fpe` among the transforms that preserve uniqueness. The registry says
+`PreservesUniqueness() bool { return false }`.
+
+It reads like it should be true, which is why it survived: `string_fpe` keeps a
+value's length and character classes, and two different inputs of the same shape
+can land on the same output. The generated half of the page was right the whole
+time, sitting directly above the wrong half, because one is regenerated and the
+other is not. Found by going to the page to choose a transform for a unique
+column and getting a candidate the engine would have refused.
+
+**42. Two changes were each correct and the pair was not.**
+main added single sign-on and SCIM. This branch wrote the masking rules. Neither
+touched the other, and forty-two columns across eleven new tables arrived with
+nobody having decided what happens to them.
+
+Most of that is fine by design: an unclassified text column is emptied, which is
+safe. One was not. `sso_connections.idp_entity_id` is unique, so emptying it
+would set every row to the same value and fail on the second, leaving the table
+half masked, and the engine refused the plan rather than finding that out
+halfway through a run. Fixing it surfaced a second: `sso_domains.domain` is
+unique too, and the `company` transform does not preserve uniqueness either.
+
+Both are now keyed hashes, which keep uniqueness and equality and carry nothing
+back to a customer, and that is the right answer for a value matched exactly
+rather than read. The SCIM person columns are classified as the people they are,
+because emptying them is safe and useless: a members page rendering a column of
+blanks proves nothing about whether it renders a directory. Every column left to
+the default is now listed by name in masking.yaml with its reason.
+
+Nobody forgot anything here. That is the finding.
+
+**41. The masking rules had never been checked against the schema.**
+There was no point in the pipeline where the rules met the current schema until
+this ran. `af mask plan` was in the workflow to do exactly that, and it had
+never once succeeded, so the check that would have caught 42 was itself
+untested.
 
 **40. `af mask plan` could not be run before `af up`, and said the wrong thing about why.**
 The first thing anybody does with masking is ask what the rules would do. In a

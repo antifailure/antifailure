@@ -423,6 +423,77 @@ rules:
     transform: preserve
     why: "what proves a migration file has not changed since it was applied"
 
+  # ---------------------------------------------------------------------------
+  # Single sign-on and SCIM.
+  #
+  # These tables arrived while this file was being written, on a branch that
+  # did not touch it, and the first dogfood run that got far enough to read the
+  # schema refused the plan because of one of them. That is the failure mode
+  # this whole exercise is about: nobody forgot anything, two changes were
+  # correct apart, and the pair was wrong.
+  # ---------------------------------------------------------------------------
+
+  # The one that made the plan refuse.
+  #
+  # It is unique, and an unclassified text column is emptied, so the update
+  # would have set every row to the same value and failed on the second one,
+  # leaving the table half masked. `hash_hex` keeps uniqueness and keeps
+  # equality and nothing else, which is exactly what an identifier that is
+  # matched but never read wants.
+  - table: sso_connections
+    column: idp_entity_id
+    transform: hash_hex
+    why: >-
+      the identity provider's own identifier, which is unique and is compared
+      rather than displayed. Emptying it is refused, because the constraint
+      would fail the run partway through
+
+  # A customer's real domain. It decides which connection a sign-in is routed
+  # to, so it is identifying in the way a company name is.
+  # Unique, and matched exactly rather than parsed, which is what makes a hash
+  # the right answer here where it would be wrong on a column somebody reads.
+  # `company` was tried first and refused for the same reason as the one above.
+  - table: sso_domains
+    column: domain
+    transform: hash_hex
+    why: >-
+      the customer's own domain, which names them as surely as their name does.
+      It is unique and it is compared rather than displayed, so a keyed hash
+      keeps the routing working and carries nothing back to the customer
+
+  - table: sso_connections
+    column: display_name
+    transform: company
+    link: customer
+    why: "what the customer calls their own connection, which is usually their name"
+
+  # SCIM carries people, directly. Emptying these is safe and useless: the
+  # members page in a preview would render a column of blanks, which proves
+  # nothing about whether it renders a directory.
+  - table: scim_resources
+    column: user_name
+    transform: username
+    link: person
+    why: "the handle the directory knows somebody by, and it is unique"
+  - table: scim_resources
+    column: given_name
+    transform: first_name
+    why: "a person's first name"
+  - table: scim_resources
+    column: family_name
+    transform: last_name
+    why: "a person's family name"
+  - table: scim_resources
+    column: display_name
+    transform: name
+    why: "how the directory shows a person, which is their name"
+  - table: scim_groups
+    column: display_name
+    transform: company
+    why: >-
+      a group name, which is a customer's own vocabulary rather than a person's.
+      Not linked to the customer, because a group is not the organization
+
   # Left to the default on purpose, and listed here so that the omission is
   # visible rather than accidental:
   #
@@ -430,6 +501,13 @@ rules:
   #   email_signin_tokens.*        redirect_to and user_agent, emptied
   #   oauth_states.*               a handshake in flight, emptied
   #   engine_tokens.name           a label somebody typed, emptied
+  #   device_authorizations.*      a code in flight and the label beside it
+  #   sso_login_states.*           a handshake in flight, every column of it
+  #   sso_assertions_seen.*        replay protection for assertions now gone
+  #   sso_connection_secrets.*     a certificate, which must not be copied
+  #   sso_connections.oidc_*       endpoint addresses and a client id
+  #   scim_tokens.prefix           the visible half of a token
+  #   provider_keys.*              fingerprint, last4 and version of a key
   #
   # `af mask plan` lists every one of them with the reason, which is the
   # check that this comment is still true.
