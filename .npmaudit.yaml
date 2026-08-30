@@ -1,0 +1,32 @@
+# npm advisories against a lockfile in this repository that we have decided not
+# to act on, with the reason and the date the decision expires.
+#
+# This file is enforced by tools/npmaudit, not merely consulted by a human. Any
+# advisory absent from this file fails the build; so does an entry past its
+# expiry, and so does an entry that no lockfile carries any more. That last rule
+# is what keeps the file honest: an exception left behind after the dependency
+# moves reads like protection that is not there.
+#
+# It is empty, and that is the current state rather than a placeholder. Every
+# lockfile here audits clean today, dev dependencies included, so this gate
+# fires on drift rather than on a backlog.
+#
+# npm audit has no reachability analysis, unlike govulncheck. It cannot tell you
+# the vulnerable function is never called, so an entry here will more often read
+# "this package is a build-time dependency and the vulnerable path is not
+# reachable from anything we ship" than the Go file's equivalents do. That is a
+# real argument and it still has to be written down, because the alternative is
+# an --audit-level flag that turns the gate down where nobody reads it.
+#
+# Adding an entry is a security decision. The bar is "this advisory cannot hurt
+# the thing we ship, and here is why", not "upgrading is inconvenient". If the
+# fix exists, take the fix.
+#
+#   allow:
+#     - id: GHSA-xxxx-xxxx-xxxx
+#       package: some-package
+#       expires: 2027-01-01
+#       reason: >
+#         Why this cannot reach anything we ship, and what would change it.
+
+allow:
