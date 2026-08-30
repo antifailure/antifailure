@@ -8,7 +8,7 @@ import { Container } from "./Container";
 import { Logo } from "./Logo";
 import { cn } from "@/lib/cn";
 import { FOOTER_MENUS, GITHUB_URL, HEADER_MENUS } from "@/lib/nav";
-import { MenuCardArt, ProductMiniStyles } from "@/components/home/visuals/headerMinis";
+import { HeaderMini, MenuCardArt, ProductMiniStyles } from "@/components/home/visuals/headerMinis";
 import { Chevron, DiscordIcon, GitHubIcon } from "../icons";
 
 function HeaderLink({
@@ -126,8 +126,9 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
           "after:absolute after:right-0 after:bottom-0 after:left-0 after:h-px after:bg-gray-new-90",
         )}
       >
-        <Container className="static z-10 flex w-full items-center justify-between max-md:px-8 max-sm:px-5" size="1920">
-          <div className="flex items-center gap-x-[92px] xl:gap-x-10">
+        <Container className="static z-10 flex w-full items-center justify-between gap-x-6 max-md:px-8 max-sm:px-5" size="1920">
+          {/* The gap used to be 92px below `xl` and 40px above it, which is backwards: the narrow end is where the row runs out of room, and at 1024 it pushed the sign-up button past the right edge of the page. */}
+            <div className="flex items-center gap-x-6 xl:gap-x-10">
             <Logo />
             <nav className="group/main-nav max-xl:hidden" aria-label="Main">
               <ul className="flex items-center">
@@ -145,8 +146,8 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                         <HeaderLink
                           href={menu.href}
                           className={cn(
-                            "relative flex h-16 items-center gap-x-1 rounded-sm px-3.5 text-[15px] font-normal leading-normal tracking-snug whitespace-pre text-black/70 transition-colors duration-200 hover:text-black xl:px-2.5",
-                            index === 0 && "-ml-3.5 xl:-ml-2.5",
+                            "relative flex h-16 items-center gap-x-1 rounded-sm px-2.5 text-[15px] font-normal leading-normal tracking-snug whitespace-pre text-black/70 transition-colors duration-200 hover:text-black",
+                            index === 0 && "-ml-2.5",
                             pathname === menu.href && "text-black",
                           )}
                         >
@@ -156,7 +157,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                         <button
                           type="button"
                           className={cn(
-                            "group/main-nav-trigger relative flex h-16 items-center gap-x-1 rounded-sm px-3.5 text-[15px] font-normal leading-normal tracking-snug whitespace-pre text-black/70 transition-colors duration-200 hover:text-black xl:px-2.5",
+                            "group/main-nav-trigger relative flex h-16 items-center gap-x-1 rounded-sm px-2.5 text-[15px] font-normal leading-normal tracking-snug whitespace-pre text-black/70 transition-colors duration-200 hover:text-black",
                             isActive && "text-black",
                             open !== null && !isActive && "text-gray-new-50",
                           )}
@@ -346,16 +347,25 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                           <div className="mb-3 text-[10px] font-medium uppercase tracking-snug text-gray-new-50">
                             {section.title}
                           </div>
-                          <div className="flex flex-col gap-3">
+                          {/* The same thumbnails the desktop dropdown gets. The
+                              phone menu is the first thing most visitors open,
+                              and eleven identical text rows told them nothing
+                              about what any of these pages contain. */}
+                          <div className="flex flex-col gap-3.5">
                             {section.items.map((item) => (
                               <HeaderLink
                                 key={item.href}
                                 href={item.href}
-                                className="text-[16px] tracking-extra-tight"
+                                className="group flex items-center gap-3 text-[16px] tracking-extra-tight"
                                 onClick={closeNow}
                               >
-                                {item.title}
-                                <span className="mt-0.5 block text-[13px] text-gray-new-50">{item.description}</span>
+                                <HeaderMini title={item.title} />
+                                <span className="min-w-0">
+                                  {item.title}
+                                  <span className="mt-0.5 block text-[13px] leading-snug text-gray-new-50">
+                                    {item.description}
+                                  </span>
+                                </span>
                               </HeaderLink>
                             ))}
                           </div>

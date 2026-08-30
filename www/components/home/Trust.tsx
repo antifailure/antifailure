@@ -1,14 +1,17 @@
 import { Container } from "@/components/layout/Container";
 import { SectionLabel } from "@/components/layout/SectionLabel";
+import { TrustIcon } from "@/components/home/media/icons";
 import { cn } from "@/lib/cn";
 
 const ITEMS = [
   {
+    icon: "failclosed" as const,
     title: "Fail closed",
     description: "Unknown destinations, missing sanitization evidence, or failed cleanup cannot ship.",
     className: "w-[216px] max-xl:w-48",
   },
   {
+    icon: "hosted" as const,
     title: "Customer-hosted",
     description: "Production data stays inside the customer boundary. The control plane never needs a copy.",
     className: "w-72 max-xl:w-64",
@@ -38,7 +41,7 @@ export function Trust() {
             <ul className="mt-16 flex gap-[92px] max-xl:mt-12 max-xl:gap-10 max-md:flex-col max-md:gap-7">
               {ITEMS.map((item) => (
                 <li className={cn(item.className, "max-lg:w-auto max-lg:max-w-[280px] max-md:max-w-none max-md:w-full")} key={item.title}>
-                  <div className="mb-5 size-8 rounded-full bg-black max-xl:mb-4 max-lg:mb-3.5 max-lg:size-7 max-md:size-6" />
+                  <TrustIcon name={item.icon} className="mb-5 text-black max-xl:mb-4 max-lg:mb-3.5" />
                   <h3 className="text-4xl leading-dense tracking-tighter max-xl:text-[36px] max-lg:text-[28px] max-md:text-[24px]">
                     {item.title}
                   </h3>

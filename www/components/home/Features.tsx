@@ -15,6 +15,7 @@ export function Features() {
         <div className="min-w-0 border-t border-black/12 pt-9 max-lg:pt-7">
           <Heading
             icon="features"
+            label="Safety properties"
             title="<strong>Safety properties, not slogans.</strong> The platform answers whether this deployment is safe to ship under the conditions that actually matter."
           />
           <SafetyCards className="mt-16 max-xl:mt-12 max-lg:mt-10 max-md:mt-8" />

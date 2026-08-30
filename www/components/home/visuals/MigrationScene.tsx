@@ -47,6 +47,7 @@ const HOLD = 14.4;
 const LOCK_LIMIT = 2;
 
 const TABS = ["Catch exclusive locks", "Safer expand-and-contract"] as const;
+const TABS_SHORT = ["Exclusive lock", "Expand-and-contract"] as const;
 
 const SQL_RISKY =
   "ALTER TABLE subscriptions ADD COLUMN access_tier text NOT NULL DEFAULT 'free';";
@@ -410,6 +411,7 @@ function Film({
       />
       <InnerPills
         items={TABS}
+        short={TABS_SHORT}
         active={tab}
         onSelect={onTab ? (index) => onTab(index === 0 ? 0 : 1) : undefined}
         action={
