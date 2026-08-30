@@ -100,6 +100,35 @@ func TestMarkdown_AFindingCarriesItsRuleNameRatherThanACode(t *testing.T) {
 	require.Contains(t, out, "Instead: add the column nullable first")
 }
 
+func TestMarkdown_AFindingsFixIsNotTruncatedLikeATableCell(t *testing.T) {
+	t.Parallel()
+	// It was. A finding's detail and fix are a paragraph in a list, not a
+	// cell, and the 120 character cap lost the half of "take the lock in a
+	// transaction that does nothing else, so the window is the statement
+	// rather than the migration" that says what to do.
+	fix := "Split the statement, or take the lock in a transaction that does nothing else, " +
+		"so the window is the statement rather than the migration."
+	r := run(report.Workflow{Name: "checkout", Verdict: "pass"})
+	r.Findings = []report.Finding{{
+		Rule: "migration_lock", Level: report.LevelWarn, Title: "a lock", Fix: fix,
+	}}
+	require.Contains(t, r.Markdown(), "Instead: "+fix)
+}
+
+func TestMarkdown_AFindingCannotFillTheWholeComment(t *testing.T) {
+	t.Parallel()
+	// The other end of the same decision. One of these can carry a database
+	// error, and an error that fills the comment is an error nobody reads
+	// past.
+	r := run(report.Workflow{Name: "checkout", Verdict: "pass"})
+	r.Findings = []report.Finding{{
+		Rule: "migration_failed", Level: report.LevelFail, Title: "it did not apply",
+		Detail: strings.Repeat("x", 4000),
+	}}
+	require.NotContains(t, r.Markdown(), strings.Repeat("x", 600))
+	require.Contains(t, r.Markdown(), "…")
+}
+
 func TestMarkdown_AWarningExplainsWhereTheThresholdLives(t *testing.T) {
 	t.Parallel()
 	r := run(report.Workflow{Name: "checkout", Verdict: "pass"})

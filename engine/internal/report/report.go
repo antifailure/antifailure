@@ -530,6 +530,22 @@ func rank(verdict string) int {
 	}
 }
 
+// flatten is oneLine's sibling for prose that is not in a table.
+//
+// The cap is much higher because a finding's detail is a paragraph rather than
+// a cell, and truncating "so the window is the statement rather than the whole
+// migration" at 120 characters loses the half that says what to do. There is
+// still a cap, because one of these can carry a database error and an error
+// that fills the comment is an error nobody reads past.
+func flatten(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	const max = 500
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-1] + "…"
+}
+
 // oneLine keeps a table cell a table cell.
 func oneLine(s string) string {
 	s = strings.ReplaceAll(strings.TrimSpace(s), "\n", " ")
@@ -594,10 +610,10 @@ func (r Run) findingSection() string {
 		}
 		b.WriteString("\n")
 		if f.Detail != "" {
-			fmt.Fprintf(&b, "%s\n", oneLine(f.Detail))
+			fmt.Fprintf(&b, "%s\n", flatten(f.Detail))
 		}
 		if f.Fix != "" {
-			fmt.Fprintf(&b, "Instead: %s\n", oneLine(f.Fix))
+			fmt.Fprintf(&b, "Instead: %s\n", flatten(f.Fix))
 		}
 		b.WriteString("\n")
 	}

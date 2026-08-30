@@ -120,7 +120,7 @@ func migrationFindings(full insights.Full, p report.Policy) ([]report.Finding, *
 				// was, because "migration_lint" in a comment tells nobody what
 				// to change.
 				Rule: string(l.Rule), Level: p.MigrationLint, Where: l.Table,
-				Title:  l.Rule.Title(),
+				Title:  sentence(l.Rule.Title()),
 				Detail: lintDetail(l),
 				Fix:    l.Fix,
 			})
@@ -306,6 +306,16 @@ func gateError(f report.Finding) error {
 		// rule names of their own.
 		return aferrors.Coded(aferrors.AFDB031, "rule", f.Rule, "detail", f.Title)
 	}
+}
+
+// sentence capitalises a rule title so it reads beside the findings written as
+// sentences. The lint rules name themselves in lower case, because they are
+// headings elsewhere.
+func sentence(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:] + "."
 }
 
 // msWord prints milliseconds the way somebody reads them.
