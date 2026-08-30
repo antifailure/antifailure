@@ -21,16 +21,18 @@ WORKDIR /app
 # cached until a dependency actually changes.
 COPY web/package.json web/package-lock.json ./
 COPY web/apps/api/package.json ./apps/api/
-COPY web/apps/app/package.json ./apps/app/
 COPY web/packages/db/package.json ./packages/db/
 COPY web/packages/policy/package.json ./packages/policy/
 
-# Scoped to this workspace, not the whole tree. The web application is a
-# workspace member and its dependencies are a framework and a compiler; a plain
-# `npm ci` here would install every one of them into an image that runs a
-# server and never renders a page. The manifest above is still copied, because
-# npm needs the whole workspace graph present to resolve the lockfile against
-# it, and a manifest is not an install.
+# Scoped to this workspace, not the whole tree. A plain `npm ci` here would
+# install every workspace member's dependencies into an image that runs one
+# server, and the assertion below exists because that scoping is one flag away
+# from bringing a web framework along for the ride.
+#
+# The console is deliberately not among the manifests above. It is its own npm
+# project with its own lockfile rather than a workspace member, and it is built
+# in its own stage further down, which is what keeps a compiler and a framework
+# out of this stage entirely rather than merely unselected.
 #
 # --ignore-scripts: nothing in this dependency tree needs a build step, and a
 # postinstall script running at image build time is a supply chain hole that

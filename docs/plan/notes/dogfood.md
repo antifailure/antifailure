@@ -170,12 +170,19 @@ while the recording rotted.
 
 ## What it found
 
-Thirty-three findings, thirty-two fixed with a regression test. Two came from
+Thirty-eight findings, thirty-seven fixed with a regression test. Two came from
 writing the manifest, four from the golden refresh, three from the web
-application, six from wiring the pipeline itself, and the rest from running the
-pieces against each other. Every one of them was invisible in the files, and
-five of them are the same shape: a thing that was written, tested, documented,
-and never called.
+application, six from wiring the pipeline itself, five from merging main and
+from the first run in CI, and the rest from running the pieces against each
+other. Every one of them was invisible in the files, and five of them are the
+same shape: a thing that was written, tested, documented, and never called.
+
+The last five are worth separating out, because they came from the two things
+this exercise had not yet done. Merging a branch that had been open for a while
+found a manifest whose invariants could never fail and two migrations sharing a
+number. Pushing found the rest: the first CI run failed on the first build, on
+a builder that works on every machine here and no runner, and then answered the
+pull request with silence. None of the five was reachable from a laptop.
 
 ### Product bugs
 
@@ -642,6 +649,65 @@ typecheck loop nor the runner's, and the only thing standing between a broken
 console and a release was the image build asserting `index.html` exists, in a
 different workflow. Both `ci.yml` and `just typecheck` now run its production
 build, which is the same command the Dockerfile runs.
+
+**38. The comment job answered a failed run with silence.**
+The job downloads the report the dogfood job uploads. A run that fails before
+`af ci` writes anything uploads no artifact at all, and `download-artifact` is
+a hard error on a missing one, so the job died on its first step. The guard for
+exactly this case, `[ -f report/dogfood-report.md ] || exit 0`, was the step
+below and was never reached.
+
+Silence is the one answer this must never give, because a reviewer who sees no
+comment cannot tell whether the check passed, failed, or never ran. The
+download tolerates a miss now, and a run with no report posts the fact that it
+has no report, with a link to what happened.
+
+**37. The Dockerfile copied a manifest that no longer existed.**
+Deleting the second web application left one `COPY web/apps/app/package.json`
+behind, and the image build failed on it in thirteen seconds. The workspace
+lockfile still carried the application's whole dependency tree too, seventeen
+hundred lines of a framework and a compiler that nothing installs any more.
+Both are gone, and the comment beside the COPY block, which explained the
+scoping in terms of that application, now explains it in terms of what is
+actually there.
+
+**36. Two migrations both numbered 0012.**
+main added device authorization as 0012 and this branch added email sign-in as
+0012, an hour apart. Whichever merged second would have applied SECOND on a
+database that took both and FIRST on a database that only ever saw it, so two
+installations would have run the same two migrations in different orders and
+nothing would have said so.
+
+main also wrote the test that catches it, on its own branch, naming this exact
+collision. So the merge produced the defect and imported its own detector in
+the same commit, and the detector won. Renumbered to 0017.
+
+**35. BuildKit works on every developer machine here and no CI runner.**
+The first CI run failed on the first build with `no active sessions`, from
+`docker.io/library/alpine:3.20`, before a single instruction ran.
+
+The daemon's `/build` endpoint runs BuildKit against a session, which the
+client is expected to open first: it is how registry credentials, secrets and
+SSH sockets reach the builder. The Docker CLI opens one. This engine does not,
+because opening one means the buildkit session packages, which pull a
+dependency graph an order of magnitude larger than everything the engine uses
+to talk to Docker, including a Kubernetes client that would then have to be
+kept in step with the one the cluster runtime already pins. Adding it upgraded
+thirty transitive Kubernetes packages, which is not a thing to do inside a
+merge.
+
+The negotiation was not wrong so much as asking slightly the wrong question.
+The ping advertises BuildKit as the default builder, which is true, and carries
+no field that says "and you will need a session". Docker Desktop does not
+require one and a plain Linux dockerd does, which is the worst possible split:
+every machine this was written on is fine and every machine it has to run on is
+not, so the suite was green locally and red on the first push.
+
+A build that fails this way is now repeated on the legacy builder and says so.
+The first attempt costs resolving one FROM line, which is the zero seconds it
+failed in, and what somebody gets is a slower build rather than no build. The
+session is the better answer and it is a change of its own, on a branch where a
+Kubernetes upgrade can be reviewed as the thing it is.
 
 **34. Four invariants in this repository's own manifest could never fail.**
 Every one of them was written as `SELECT count(*) ... WHERE ...`. An invariant

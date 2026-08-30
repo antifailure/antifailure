@@ -17,15 +17,22 @@ credentials.json
 service-account*.json
 
 # Build output
-bin/
-dist/
-.tools/
-.gate-reports/
-# Anchored to the root. Unanchored, `coverage/` matches a directory of that
-# name at ANY depth, which silently swallowed tools/coverage, the source of
-# gate G4: the files existed on disk, `go build` and `go test` were happy, and
-# git could not see them. A tool that cannot be committed is a gate that does
-# not exist.
+#
+# Anchored, every one of them. Unanchored, a rule like `coverage/` matches a
+# directory of that name at ANY depth, and this has now cost the repository
+# twice. It swallowed tools/coverage, the source of gate G4: the files existed
+# on disk, `go build` and `go test` were happy, and git could not see them. A
+# tool that cannot be committed is a gate that does not exist. Then `bin/`
+# swallowed web/packages/db/bin, the seeder's entry point, and the failure
+# arrived in CI as "Cannot find module" on a path that plainly exists locally,
+# with package.json cheerfully declaring the script the whole time.
+#
+# The rule is the lesson rather than the two directories: if a name is only
+# meant to mean the one at the root, write the slash.
+/bin/
+/dist/
+/.tools/
+/.gate-reports/
 /coverage/
 *.out
 *.test
@@ -79,8 +86,7 @@ engine/**/testdata/tmp/
 runner/artifacts/
 
 # Local gate output. Generated per run, never committed.
-.gate-reports/
-bin/
+/.gate-reports/
 
 # Compiled binaries built in place.
 #

@@ -3,6 +3,7 @@ package build
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -228,4 +229,32 @@ func TestStreamBuildKit_TheFinalImageDocumentIsNotAString(t *testing.T) {
 	lines, err := b.streamBuildKit(body, nil)
 	require.NoError(t, err, "the final document must not be read as a failure")
 	require.Contains(t, strings.Join(lines, "\n"), "FROM alpine")
+}
+
+// The daemon says it prefers BuildKit and then refuses to run it.
+//
+// This is not a hypothetical. `wantsBuildKit` reads the daemon's ping, which
+// advertises BuildKit as the default builder, and that is a true answer: it is
+// what the Docker CLI uses. But the CLI opens a session first, and this client
+// does not, so a plain Linux dockerd answers the build with "no active
+// sessions" before it has resolved the first FROM line.
+//
+// Every developer machine here runs Docker Desktop, which does not, so the
+// whole suite was green locally and the first CI run failed on the first
+// build. The split is the worst possible one, and it is why the fallback is
+// tested by its trigger rather than by its code being present.
+func TestNeedsSession_RecognisesTheOneFailureWorthRetrying(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, needsSession(errors.New(
+		"alpine:3.20: failed to resolve source metadata for docker.io/library/alpine:3.20: "+
+			"no active sessions")),
+		"this is the message a Linux daemon sends and the whole reason the fallback exists")
+
+	// Anything else is the Dockerfile's problem or the daemon's, and repeating
+	// it on the legacy builder would take twice as long to say the same thing.
+	require.False(t, needsSession(nil))
+	require.False(t, needsSession(errors.New("pull access denied for private/thing")))
+	require.False(t, needsSession(errors.New("no such file or directory")))
+	require.False(t, needsSession(errors.New("dockerfile parse error on line 3")))
 }

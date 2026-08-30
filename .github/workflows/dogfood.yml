@@ -198,7 +198,13 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      # Allowed to find nothing. A run that fails before `af ci` writes
+      # anything uploads no artifact at all, and this step is a hard error on a
+      # missing one, so the job died here and the pull request got silence. The
+      # guard for exactly that case was one step below, never reached.
+      - id: fetch
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
         with:
           name: dogfood-report
           path: report
@@ -207,9 +213,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          [ -f report/dogfood-report.md ] || { echo "no report to post"; exit 0; }
+
+          # Silence is the one answer this must never give. A reviewer who sees
+          # no comment cannot tell whether the check passed, failed, or never
+          # ran, and the first dogfood run in CI gave exactly that: it fell over
+          # on the seeder and said nothing here at all. So a run with no report
+          # posts the fact that it has no report.
+          if [ ! -f report/dogfood-report.md ]; then
+            mkdir -p report
+            {
+              echo "## Dogfood"
+              echo
+              echo "This pull request's preview environment did not get far enough to"
+              echo "produce a report, so there is nothing here about the change itself."
+              echo "That is a failure of the pipeline rather than a verdict on the diff."
+              echo
+              echo "[What happened]($RUN_URL)"
+            } > report/dogfood-report.md
+          fi
 
           # Edited rather than appended. A pull request that is pushed to six
           # times should carry one comment that is current, not six that

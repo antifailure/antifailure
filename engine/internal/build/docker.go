@@ -254,11 +254,7 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 	}
 
 	started := b.clock.Now()
-	version := dockerbuild.BuilderV1
-	if b.buildKit {
-		version = dockerbuild.BuilderBuildKit
-	}
-	resp, err := b.cli.ImageBuild(ctx, req.Context.tarWith(extra), dockerbuild.ImageBuildOptions{
+	opts := dockerbuild.ImageBuildOptions{
 		Tags:        []string{ref},
 		Dockerfile:  dockerfilePath,
 		Target:      req.Target,
@@ -267,23 +263,27 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 		ForceRemove: true,
 		NoCache:     b.noCache,
 		PullParent:  false,
-		Version:     version,
 		Labels:      dockerutil.Managed(dockerutil.KindService, req.EnvID, started),
-	})
+	}
+
+	log, buildErr, err := b.attempt(ctx, req, opts, extra, b.buildKit)
+	if err == nil && b.buildKit && needsSession(buildErr) {
+		// BuildKit over this endpoint wants a session, and this client has
+		// none. See needsSession for what that means and why the answer is to
+		// build rather than to explain.
+		// Guarded like every other call to it in this file: a caller that
+		// wants no progress passes nil, and a fallback that panicked while
+		// reporting itself would be worse than the problem it reports.
+		if req.Progress != nil {
+			req.Progress(sessionFallbackNotice)
+		}
+		log, buildErr, err = b.attempt(ctx, req, opts, extra, false)
+	}
 	if err != nil {
 		return res, aferrors.Wrap(err, aferrors.AFBLD001,
 			"service", req.Service, "duration", b.clock.Since(started).Round(time.Second).String())
 	}
-	defer func() { _ = resp.Body.Close() }()
 
-	// Two languages, one endpoint. Which one the daemon answers in is decided
-	// by the version asked for above, so the reader is chosen by the same
-	// flag rather than by sniffing the first document.
-	read := b.stream
-	if b.buildKit {
-		read = b.streamBuildKit
-	}
-	log, buildErr := read(resp.Body, req.Progress)
 	res.Log = log
 	res.Duration = b.clock.Since(started)
 	if buildErr != nil {
@@ -291,6 +291,75 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 			"service", req.Service, "duration", res.Duration.Round(time.Second).String())
 	}
 	return res, nil
+}
+
+// attempt runs one build and reads its stream.
+//
+// Two errors come back and they are different things. The first is whether the
+// build could be STARTED, which is a fault of this process or the daemon. The
+// second is whether the build SUCCEEDED, which is a fault of the Dockerfile
+// and arrives inside the stream rather than from the call. Only the second is
+// worth showing somebody a log for, and only the first is worth retrying.
+func (b *DockerBuilder) attempt(
+	ctx context.Context,
+	req Request,
+	opts dockerbuild.ImageBuildOptions,
+	extra map[string]string,
+	buildKit bool,
+) (log []string, buildErr error, err error) {
+	opts.Version = dockerbuild.BuilderV1
+	if buildKit {
+		opts.Version = dockerbuild.BuilderBuildKit
+	}
+
+	resp, err := b.cli.ImageBuild(ctx, req.Context.tarWith(extra), opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Two languages, one endpoint. Which one the daemon answers in is decided
+	// by the version asked for above, so the reader is chosen by the same
+	// flag rather than by sniffing the first document.
+	read := b.stream
+	if buildKit {
+		read = b.streamBuildKit
+	}
+	log, buildErr = read(resp.Body, req.Progress)
+	return log, buildErr, nil
+}
+
+const sessionFallbackNotice = "this daemon will not run BuildKit for a client with no session, " +
+	"so the build is being repeated on the legacy builder"
+
+// needsSession reports whether a build failed because BuildKit wanted a
+// session that this client never opened.
+//
+// The daemon's /build endpoint runs BuildKit against a session, and the
+// session is a separate gRPC stream the client is expected to open first: it
+// is how registry credentials, secrets and SSH sockets reach the builder.
+// Opening one means the buildkit session packages, which pull a dependency
+// graph an order of magnitude larger than everything this binary uses to talk
+// to Docker, including a Kubernetes client that would then have to be kept in
+// step with the one the cluster runtime already pins.
+//
+// This is why the negotiation in wantsBuildKit is not enough on its own. The
+// daemon's ping advertises BuildKit as the default builder, which is true and
+// is what the CLI uses, and the CLI opens a session. So the ping is an honest
+// answer to a question this client is asking slightly wrong, and there is no
+// field on it that says "and you will need a session". It works on Docker
+// Desktop and fails on a plain Linux dockerd, which is the worst possible
+// split: every developer machine is fine and every CI runner is not.
+//
+// So the answer is to notice and build anyway. A first attempt costs the time
+// to resolve one FROM line, which is the zero seconds this failed in on the
+// runner, and what the user gets is a slower build rather than no build. The
+// alternative is refusing to build on the one machine that matters most.
+//
+// Matched on the daemon's text because that is all there is: the message
+// arrives as a plain string over HTTP with no code beside it.
+func needsSession(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "no active sessions")
 }
 
 // buildMessage is the daemon's streaming output.
