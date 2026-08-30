@@ -22,6 +22,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `load` | [Load](#load) | no | Traffic shaped like production, compared between the base branch and this one. |
 | `name` | string | no | A short name for this application, used in environment hostnames and in the control plane. Defaults to the repository directory name. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `personas` | list of [Persona](#persona) | no | The accounts agents log in as. Each is created or reconciled in the golden by the authentication adapter, so a persona is a real user of the application rather than a bypass. Max items 50. |
+| `policy` | [Policy](#policy) | no | What each class of finding does to the pull request check. |
 | `runtime` | [Runtime](#runtime) | no | Where and how long the environment runs. |
 | `services` | list of [Service](#service) | no | Every process the environment runs: web servers, API servers, background workers, and scheduled jobs. Min items 1, max items 50. |
 | `version` | `1` | **yes** | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
@@ -215,6 +216,23 @@ One account an agent logs in as. Personas are created or reconciled in the golde
 | `name` | string | **yes** | Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `phone` | string | no | Number an SMS code is sent to. Defaults to a number in the +1 555 0100 block, which is reserved for fictional use and can never reach a real handset. Only sms_code uses it. Max length 32. |
 | `role` | string | no | Application role to provision, for example admin or member. Interpreted by the authentication adapter. Max length 64. |
+
+## Policy
+
+What each class of finding does to the pull request check. A finding at 'fail' fails the check, one at 'warn' is reported and the check still passes, and one at 'ignore' is not reported at all. Every key here is read when the report is built, so the answer to why a check failed is always one of these keys.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `cleanup` | `ignore`, `warn`, `fail` | no | Teardown left a resource behind. The journal remembers what is left, so 'af down' can finish the job. Defaults to `fail`. |
+| `egress_surprise` | `ignore`, `warn`, `fail` | no | The environment tried to reach a host the manifest does not mention. The request was refused either way; this decides whether the attempt stops the merge. Defaults to `fail`. |
+| `load_regression` | `ignore`, `warn`, `fail` | no | A load threshold from the load block being exceeded. Defaults to `warn`. |
+| `masking` | `ignore`, `warn`, `fail` | no | The environment's own branch read back with something in it that still parses as real data. Defaults to `fail`. |
+| `migration_failed` | `ignore`, `warn`, `fail` | no | A migration that did not apply to a branch with production's shape in it. A migration that fails here is one that would have failed in production. Defaults to `fail`. |
+| `migration_lint` | `ignore`, `warn`, `fail` | no | Any of the six migration lint rules. They share one setting because the rules are already scoped by table size. Defaults to `warn`. |
+| `migration_lock` | object | no | How long a migration may hold a lock on a table. Both figures are compared against a sampled lower bound, so a breach really did hold the lock at least that long. |
+| `migration_rewrite` | `ignore`, `warn`, `fail` | no | A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through. Defaults to `warn`. |
+| `plan_regression` | `ignore`, `warn`, `fail` | no | A query plan that got worse: a table now read end to end, or an index no longer used. Defaults to `warn`. |
+| `query_regression` | `ignore`, `warn`, `fail` | no | A statement that runs more often, or slower, than the saved baseline did. Needs a baseline to compare against. Defaults to `warn`. |
 
 ## Resources
 

@@ -226,6 +226,13 @@ errors:
     docs: guides/personas
     retryable: false
     exit_code: 4
+  - code: AF-DB-031
+    area: DB
+    message: "The migration finding {rule} fails this project's policy: {detail}"
+    next_step: "The report above names the table and the statement. Fix the migration, or lower the rule to 'warn' in the manifest's policy block."
+    docs: concepts/verdicts
+    retryable: false
+    exit_code: 8
   - code: AF-DB-030
     area: DB
     message: "Migrations failed on the branch: {detail}"
@@ -548,6 +555,13 @@ errors:
     docs: guides/inbox
     retryable: true
     exit_code: 8
+  - code: AF-NET-013
+    area: NET
+    message: "The environment tried to reach {hosts}, which nothing in the manifest mentions."
+    next_step: "Add an egress rule for it with the mode you intend, or set policy.egress_surprise to 'warn' to let the attempt through the check."
+    docs: concepts/verdicts
+    retryable: false
+    exit_code: 6
   - code: AF-NET-012
     area: NET
     message: "The webhook could not be delivered to {service}: {detail}"

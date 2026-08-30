@@ -84,6 +84,8 @@ const (
 	AFDB021 Code = "AF-DB-021"
 	// Migrations failed on the branch: {detail}
 	AFDB030 Code = "AF-DB-030"
+	// The migration finding {rule} fails this project's policy: {detail}
+	AFDB031 Code = "AF-DB-031"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -186,6 +188,9 @@ const (
 	AFNET011 Code = "AF-NET-011"
 	// The webhook could not be delivered to {service}: {detail}
 	AFNET012 Code = "AF-NET-012"
+	// The environment tried to reach {hosts}, which nothing in the
+	// manifest mentions.
+	AFNET013 Code = "AF-NET-013"
 	// {host} rejected the environment certificate, which usually means the
 	// client pins its own.
 	AFNET020 Code = "AF-NET-020"
@@ -538,6 +543,15 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitProvider,
 	},
+	AFDB031: {
+		Code:      AFDB031,
+		Area:      "DB",
+		Message:   "The migration finding {rule} fails this project's policy: {detail}",
+		NextStep:  "The report above names the table and the statement. Fix the migration, or lower the rule to 'warn' in the manifest's policy block.",
+		Docs:      "concepts/verdicts",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
+	},
 	AFDET001: {
 		Code:      AFDET001,
 		Area:      "DET",
@@ -870,6 +884,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/webhooks",
 		Retryable: true,
 		ExitCode:  ExitFailure,
+	},
+	AFNET013: {
+		Code:      AFNET013,
+		Area:      "NET",
+		Message:   "The environment tried to reach {hosts}, which nothing in the manifest mentions.",
+		NextStep:  "Add an egress rule for it with the mode you intend, or set policy.egress_surprise to 'warn' to let the attempt through the check.",
+		Docs:      "concepts/verdicts",
+		Retryable: false,
+		ExitCode:  ExitPolicyDenied,
 	},
 	AFNET020: {
 		Code:      AFNET020,

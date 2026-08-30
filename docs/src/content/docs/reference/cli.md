@@ -29,11 +29,17 @@ Bring an environment up, run everything, write a report, tear it down.
 
 The whole check in one command, for a pull request.
 
+The agents drive the workflows, the invariants are asked of the data, the
+migrations are rehearsed against a throwaway branch of the golden, and what the
+environment reached for is summarised. Every finding is ranked by the manifest's
+policy block, which decides what fails the check and what is only reported.
+
 Teardown happens whatever the outcome, including a failure and including an
 interrupt, because an environment that outlives its pull request is the leak
-this product exists to prevent.
+this product exists to prevent. It happens before the report is written, so a
+teardown that left something behind is in the report rather than after it.
 
-Only a real failure exits non zero. A blocked run says what was missing and
+Only a real finding exits non zero. A blocked run says what was missing and
 exits zero, so an incomplete environment is not indistinguishable from a broken
 change.
 
@@ -43,12 +49,14 @@ af ci [flags]
 
 | Flag | Default | What it does |
 | --- | --- | --- |
+| `--baseline` | - | Compare queries and plans against a report saved on the base branch. |
 | `--branch` | - | Branch to check, defaulting to the checked out one. |
 | `--docs` | - | Where documentation links point. |
 | `--keep` | `false` | Leave the environment up, for debugging a failure. |
 | `--load` | `false` | Generate load as well as running the workflows. |
 | `-o`, `--output` | - | Write the report here as well as to the terminal. |
 | `--runner` | - | Path to the runner's entry point. |
+| `--save-baseline` | - | Save this run's queries and plans, to compare a later branch against. |
 | `--timeout` | `30m0s` | Give up after this long. |
 
 ### `af doctor`

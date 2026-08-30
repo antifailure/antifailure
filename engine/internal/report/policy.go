@@ -146,6 +146,11 @@ type Finding struct {
 	Detail string
 	// Fix is what to write instead, when there is something to write.
 	Fix string
+	// Count is how many things this finding covers: hosts, resources,
+	// thresholds. It is on the finding rather than recomputed from Where,
+	// because the error code that names the exit needs it and splitting a
+	// display string to get a number back is how a count goes wrong.
+	Count int
 	// Where locates it: a table, a host, a migration file.
 	Where string
 }
