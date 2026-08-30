@@ -1,0 +1,99 @@
+# A status page whose signal comes from outside the thing it reports on.
+#
+# Every other check in this repository runs where the thing it is checking
+# runs: CI builds the commit, the deploy gate curls the revision it just
+# created. A status page cannot work that way. If the probe lived in the
+# control plane's own process, a total outage of the control plane would also
+# silence the page that is supposed to say so, which is the one failure a
+# status page exists to rule out.
+#
+# So this runs on a schedule, on GitHub's infrastructure rather than Azure's,
+# and it writes to its own orphan branch rather than to main: a probe every
+# five minutes on `main` would fire cd.yml's staging deploy every five
+# minutes, which is the opposite of what a status page should cause.
+# status-data is read by nothing else in this repository and triggers nothing
+# else in it.
+#
+# See docs/src/content/docs/self-hosting/status-page.md for why this shape and
+# not a third party product, and for the one manual step (enabling Pages on
+# status-data) that turns this branch into a URL.
+name: status
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: status-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: probe and publish
+    runs-on: ubuntu-latest
+    if: github.repository == 'antifailure/antifailure'
+    timeout-minutes: 5
+    permissions:
+      # Only to push status-data, and nothing else this token could touch: no
+      # pull requests, no issues, no other branch.
+      contents: write
+    steps:
+      - name: Check out the scripts, from the commit this workflow runs at
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: main
+
+      - name: Check out the data branch, into the same working copy origin remembers
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: data
+          fetch-depth: 0
+
+      - name: Move to status-data, creating it the first time this runs
+        working-directory: data
+        run: |
+          git config user.name "antifailure-status"
+          git config user.email "status@antifailure.dev"
+          if git ls-remote --exit-code --heads origin status-data > /dev/null; then
+            git fetch origin status-data
+            git checkout -B status-data origin/status-data
+          else
+            echo "status-data does not exist yet on the remote; starting it"
+            git checkout --orphan status-data
+            git rm -rf . > /dev/null
+          fi
+
+      - name: Probe every target
+        run: main/deploy/status/probe.sh main/deploy/status/targets.json > readings.jsonl
+
+      - name: Fold the readings into the history and render the page
+        run: main/deploy/status/render.sh data readings.jsonl
+
+      - name: Commit and push, only if something actually changed
+        working-directory: data
+        run: |
+          git add history.json index.html
+          if git diff --cached --quiet; then
+            echo "no change in this probe's readings; nothing to commit"
+            exit 0
+          fi
+          git commit -m "status: probe at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # A concurrent run of this same workflow is the only expected
+          # conflict, five minutes apart at most; the concurrency group above
+          # already serialises runs of this workflow, so a rejection here means
+          # something else pushed to status-data, and one rebase and retry is
+          # enough rather than a force push overwriting whatever that was.
+          for attempt in 1 2 3; do
+            if git push origin status-data; then
+              exit 0
+            fi
+            echo "push rejected, attempt $attempt: fetching and rebasing"
+            git fetch origin status-data
+            git rebase origin/status-data
+          done
+          echo "::error::could not push status-data after three attempts"
+          exit 1
