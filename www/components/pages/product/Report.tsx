@@ -227,6 +227,7 @@ export function ReportPage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/report"
         eyebrow="Safety Report and Release Gate"
         title="Pass, warning, or block. With evidence."
         lead="Overall decision, fidelity, migration findings, functional and performance regressions, attempted external effects, sanitization status, and cleanup proof."

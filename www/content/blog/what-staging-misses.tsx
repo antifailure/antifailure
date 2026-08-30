@@ -15,7 +15,6 @@ export const MIGRATION_LOCKS: Post = {
   summary:
     "Why migrations that pass on staging take production down: lock duration scales with data, and staging has no data.",
   published: "2026-08-29",
-  author: { name: "Antifailure", url: "https://antifailure.dev/company" },
   tags: ["Postgres", "Migrations", "Testing"],
   body: (
     <>

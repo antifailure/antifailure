@@ -83,6 +83,7 @@ export function PrivacyPage() {
   return (
     <PageShell>
       <PageHero
+        path="/privacy"
         eyebrow="Privacy Notice"
         title="Production data stays in the customer boundary."
         lead="The hosted control plane holds organizations, policy, aggregated reports, and plan limits. Raw snapshots, secrets, and captured request bodies stay in your cloud by default."
@@ -198,6 +199,7 @@ export function TermsPage() {
   return (
     <PageShell>
       <PageHero
+        path="/terms"
         eyebrow="Terms of Use"
         title="A proving ground, not a guarantee."
         lead="The product reports whether a deployment is safe to ship under the conditions it could observe and reproduce. It does not mathematically guarantee that a deployment cannot fail."
@@ -278,6 +280,7 @@ export function DpaPage() {
   return (
     <PageShell>
       <PageHero
+        path="/dpa"
         eyebrow="Data Processing Agreement"
         title="The terms under which we would process data on your behalf."
         lead="A draft, published before there is anything to sign, so that a security review can read it now and tell us where it is wrong. Its subprocessor annex is a separate page because that is the part that goes stale."
@@ -488,6 +491,7 @@ export function SubprocessorsPage() {
   return (
     <PageShell>
       <PageHero
+        path="/subprocessors"
         eyebrow="Subprocessors"
         title="Everyone who receives data, and everyone who deliberately does not."
         lead={`Established by reading the code that talks to each vendor, not by recalling what a product like this usually uses. Last checked against the code on ${SUBPROCESSORS_REVIEWED}.`}
@@ -620,6 +624,7 @@ export function ServiceLevelsPage() {
   return (
     <PageShell>
       <PageHero
+        path="/sla"
         eyebrow="Service levels"
         title="There is no service level agreement."
         lead="There is no generally available control plane to make one about. Rather than leave a security review to discover that, this page says what is not committed, what holds anyway, and what would have to be true before a number here meant anything."
@@ -745,6 +750,7 @@ export function DataRetentionPage() {
   return (
     <PageShell>
       <PageHero
+        path="/data-retention"
         eyebrow="Retention and deletion"
         title="How long each thing is kept, and how it goes away."
         lead="Every period below is one the running system already enforces, or one this page says plainly that it does not. A retention promise the code cannot keep is worse than no promise, because somebody plans around it."

@@ -22,8 +22,28 @@ import { fileURLToPath } from "node:url";
 
 const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "out");
 
-/** Everything whose text is chrome rather than content. */
-const DROP = ["script", "style", "svg", "noscript", "template", "nav", "footer", "header"];
+/**
+ * Never content, wherever they appear.
+ *
+ * `nav` is here rather than in the fallback list because the one nav inside
+ * <main> is the breadcrumb trail, and a twin that opens with "Home / Writing /
+ * <the title again>" wastes the first thing a reader of it sees.
+ */
+const DROP = ["script", "style", "svg", "noscript", "template", "nav"];
+
+/**
+ * Site chrome, dropped only when there is no <main> to scope to.
+ *
+ * `header` and `footer` are structural, not positional: inside <main> they are
+ * an article's own header and footer, which is content. Dropping them
+ * unconditionally cost the three blog posts their <h1>, their date, their tags
+ * and their standfirst, because those live in <article><header>. The twins
+ * still looked right, because the missing heading was silently replaced by the
+ * <title> further down, suffix and all. That is the failure this whole file is
+ * supposed to prevent, so check-seo.mjs now asserts every twin's first heading
+ * is the page's real h1.
+ */
+const DROP_WITHOUT_MAIN = [...DROP, "footer", "header"];
 
 /**
  * Removes an element and everything inside it, counting depth.
@@ -95,7 +115,13 @@ function extract(html) {
   // exactly the content region and is not affected by how the chrome around it
   // is built.
   const main = html.match(/<main\b[^>]*>([\s\S]*)<\/main>/i)?.[1];
-  const body = stripElements(main ?? html.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? html, DROP);
+  const body =
+    main !== undefined
+      ? stripElements(main, DROP)
+      : stripElements(
+          html.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? html,
+          DROP_WITHOUT_MAIN,
+        );
 
   const out = [];
   const seen = new Set();
@@ -157,7 +183,13 @@ for (const file of htmlFiles(OUT)) {
     "",
     ...(canonical ? [`> Canonical: ${canonical}`, ""] : []),
     ...(description ? [`> ${description}`, ""] : []),
-    ...(blocks[0]?.startsWith("# ") ? [] : [`# ${title}`, ""]),
+    // A fallback, and it should be rare: a page whose content region has no
+    // h1 at all. The site name comes off, because the twin already states its
+    // canonical URL and a heading that ends in the site's name reads as a
+    // browser tab rather than as the title of the thing.
+    ...(blocks[0]?.startsWith("# ")
+      ? []
+      : [`# ${title.replace(/\s+\u2014\s+Antifailure$/, "")}`, ""]),
     blocks.join("\n\n"),
     "",
   ].join("\n");

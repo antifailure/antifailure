@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+import { Picture } from "@/components/Picture";
 import SoftAurora from "@/components/SoftAurora";
 
 /**
@@ -9,12 +9,11 @@ import SoftAurora from "@/components/SoftAurora";
 export function GreenAurora({ className = "" }: { className?: string }) {
   return (
     <div className={`absolute inset-0 overflow-hidden ${className}`.trim()} aria-hidden>
-      <Image
+      <Picture
         src="/home/hero-aurora.png"
         alt=""
         fill
         sizes="100vw"
-        quality={90}
         className="object-cover object-center"
       />
       <SoftAurora

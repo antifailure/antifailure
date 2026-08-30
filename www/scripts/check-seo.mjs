@@ -149,8 +149,11 @@ const missing = {
   twitter: [],
   description: [],
   jsonld: [],
+  breadcrumb: [],
   h1: [],
+  oneMain: [],
   markdownTwin: [],
+  twinHeading: [],
 };
 
 for (const file of pages) {
@@ -165,8 +168,38 @@ for (const file of pages) {
   if (!/name="twitter:card"/i.test(html)) missing.twitter.push(rel);
   if (!/<meta name="description"/i.test(html)) missing.description.push(rel);
   if (!/application\/ld\+json/i.test(html)) missing.jsonld.push(rel);
+  // A trail a reader can see and no BreadcrumbList describing it is the failure
+  // this catches: the blog posts rendered the visible trail and shipped no
+  // markup for it, because they use PostJsonLd rather than the PageHero that
+  // emits both. The home page is exempt, since a trail of one is the page
+  // pointing at itself.
+  if (rel !== "index.html" && !html.includes('"BreadcrumbList"')) missing.breadcrumb.push(rel);
+  // Exactly one, because the markdown twins are cut from it and because a
+  // second one is a second content landmark. The home page had two: a
+  // decorative drawing of an application used a real <main> as a layout box,
+  // so anybody navigating by landmark met the page and then met a picture.
+  const mains = (html.match(/<main\b/gi) ?? []).length;
+  if (mains !== 1) missing.oneMain.push(`${rel} (${mains})`);
   if (!/<h1[\s>]/i.test(html)) missing.h1.push(rel);
-  if (!existsSync(file.replace(/\.html$/, ".md"))) missing.markdownTwin.push(rel);
+  const twin = file.replace(/\.html$/, ".md");
+  if (!existsSync(twin)) missing.markdownTwin.push(rel);
+  else {
+    // The twin's first heading has to be the page's own h1. It is the check
+    // that catches content being dropped rather than merely absent: the three
+    // blog posts lost their whole <article><header> to a chrome filter, and
+    // the twin still opened with a plausible heading because the generator
+    // silently substituted the <title>. A twin missing a section is worse than
+    // no twin, because nothing about it looks wrong.
+    const pageH1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+    const twinH1 = readFileSync(twin, "utf8").match(/^# (.+)$/m)?.[1];
+    const flatten = (v) =>
+      v ? v.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim() : "";
+    if (pageH1 && flatten(pageH1) !== flatten(twinH1)) {
+      missing.twinHeading.push(
+        `${rel} (page "${flatten(pageH1).slice(0, 40)}" vs twin "${flatten(twinH1).slice(0, 40)}")`,
+      );
+    }
+  }
 }
 
 // The skip link is in the root layout, so it is on every page, but the element
@@ -198,8 +231,11 @@ const LABELS = {
   twitter: "every indexable page has a twitter card",
   description: "every indexable page has a meta description",
   jsonld: "every indexable page has JSON-LD",
+  breadcrumb: "every indexable page below the root has a BreadcrumbList",
   h1: "every indexable page has an h1",
+  oneMain: "every indexable page has exactly one <main>",
   markdownTwin: "every indexable page has its markdown twin",
+  twinHeading: "every twin opens with the page's own h1",
 };
 
 for (const [key, list] of Object.entries(missing)) {
@@ -207,6 +243,56 @@ for (const [key, list] of Object.entries(missing)) {
     list.length === 0,
     LABELS[key],
     list.length > 0 ? `missing on ${list.length}: ${list.slice(0, 5).join(", ")}${list.length > 5 ? " ..." : ""}` : "",
+  );
+}
+
+// Reachability, which is a different question from "does this link resolve".
+//
+// Every link on the site pointed somewhere real and the blog was still an
+// island: /blog was linked only from its own three posts, and each post only
+// from /blog. Nothing anywhere else on the site pointed into the cluster, so
+// the only route in was the sitemap. A page a crawler reaches only through a
+// sitemap is a page it treats as unimportant, and a reader cannot reach it at
+// all.
+//
+// So: walk out from the home page the way a crawler does, and require that
+// every indexable route is found. Depth is reported rather than asserted,
+// because "three clicks" is a guideline and this is a small site.
+console.log("\nReachability");
+{
+  const hrefs = (html) =>
+    [...html.matchAll(/href="(\/[^"#?][^"]*)"/g)].map((m) => m[1].replace(/\/$/, "") || "/");
+  const fileFor = (route) =>
+    [route === "/" ? "index.html" : `${route.slice(1)}.html`, `${route.slice(1)}/index.html`]
+      .map((r) => path.join(OUT, r))
+      .find(existsSync);
+
+  const seen = new Set(["/"]);
+  const depth = new Map([["/", 0]]);
+  const queue = ["/"];
+  while (queue.length > 0) {
+    const here = queue.shift();
+    const file = fileFor(here);
+    if (!file) continue;
+    for (const href of hrefs(readFileSync(file, "utf8"))) {
+      if (seen.has(href) || href.startsWith("/docs") || href.startsWith("/_next")) continue;
+      seen.add(href);
+      depth.set(href, depth.get(here) + 1);
+      queue.push(href);
+    }
+  }
+
+  const sitemapRoutes = [...readFileSync(path.join(OUT, "sitemap.xml"), "utf8")
+    .matchAll(/<loc>[^<]*?(\/[^<]*)?<\/loc>/g)]
+    .map((m) => new URL(m[0].replace(/<\/?loc>/g, "")).pathname.replace(/\/$/, "") || "/");
+  const unreachable = sitemapRoutes.filter((r) => !seen.has(r));
+  const deepest = Math.max(...[...depth.values()]);
+  assert(
+    unreachable.length === 0,
+    `every route in the sitemap is reachable from the home page (deepest is ${deepest} clicks)`,
+    unreachable.length > 0
+      ? `${unreachable.length} reachable only through the sitemap: ${unreachable.join(", ")}`
+      : "",
   );
 }
 

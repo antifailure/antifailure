@@ -5,6 +5,7 @@ export function DevtoolsPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/devtools"
         eyebrow="Solutions · Developer tools"
         title="Schema changes on large tables."
         lead="The flagship wedge, felt first by teams whose users notice p99 immediately. Measure lock duration, blocked statements, and whether old instances can still read the new schema."

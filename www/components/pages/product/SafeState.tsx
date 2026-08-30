@@ -339,6 +339,7 @@ export function SafeStatePage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/safe-state"
         eyebrow="Safe State Engine"
         title="Production-shaped Postgres without production identities."
         lead="Snapshot restore, referentially consistent subsetting, and deterministic masking inside the customer boundary. Tokens, sessions, and secrets are deleted — not disguised. The output is a sanitization evidence report, not a dataset."

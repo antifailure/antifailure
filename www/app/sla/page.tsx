@@ -1,10 +1,11 @@
 import { ServiceLevelsPage } from "@/components/pages/company/Legal";
-import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Service levels — Antifailure",
-  description: "There is no service level agreement. What is not committed, what holds anyway, and what would have to change.",
-};
+// From lib/routes.ts, like every other page. Written out by hand these
+// four had a title and a description and nothing else: no canonical, no
+// OpenGraph, no Twitter card, no markdown alternate, and no place in the
+// sitemap, because the registry is what the sitemap is built from.
+export const metadata = pageMetadata("/sla");
 
 export default function Page() {
   return <ServiceLevelsPage />;

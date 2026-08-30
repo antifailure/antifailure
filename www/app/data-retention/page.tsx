@@ -1,10 +1,11 @@
 import { DataRetentionPage } from "@/components/pages/company/Legal";
-import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Retention and deletion — Antifailure",
-  description: "How long each thing is kept, how it goes away, and where the period is not exact.",
-};
+// From lib/routes.ts, like every other page. Written out by hand these
+// four had a title and a description and nothing else: no canonical, no
+// OpenGraph, no Twitter card, no markdown alternate, and no place in the
+// sitemap, because the registry is what the sitemap is built from.
+export const metadata = pageMetadata("/data-retention");
 
 export default function Page() {
   return <DataRetentionPage />;

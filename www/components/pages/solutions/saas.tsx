@@ -14,6 +14,7 @@ export function SaasPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/saas"
         eyebrow="Solutions · B2B SaaS"
         title="Daily deploys. Expanding schemas. Staging that drifted years ago."
         lead="The first twin should catch the migration that locks subscriptions during peak traffic — against sanitized tenant-shaped state, not a fixture dump."

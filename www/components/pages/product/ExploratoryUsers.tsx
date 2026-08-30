@@ -52,6 +52,7 @@ export function ExploratoryUsersPage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/exploratory-users"
         eyebrow="Workload Studio"
         title="AI discovers. Deterministic systems prove."
         lead="Exploratory users live in Workload Studio, beside observed and deterministic traffic. Agents pursue goals, find unanticipated paths, and compile them into versioned scenarios the runner can scale."

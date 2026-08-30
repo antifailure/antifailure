@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+import { Picture } from "@/components/Picture";
 import { cn } from "@/lib/cn";
 import { Grain } from "./icons";
 
@@ -17,7 +17,7 @@ function Frame({
 }) {
   return (
     <div className="absolute inset-0 bg-[#111315]">
-      <Image src={src} alt={alt} fill sizes="512px" className="object-cover opacity-90" />
+      <Picture src={src} alt={alt} fill sizes="512px" className="object-cover opacity-90" />
       <div
         className={cn(
           "absolute inset-0 transition-opacity duration-200",
@@ -127,7 +127,7 @@ function FirewallDemo({ active }: { active: boolean }) {
 function WorkloadDemo({ active }: { active: boolean }) {
   return (
     <div className="absolute inset-0 bg-[#111315]">
-      <Image src="/home/ide-stage.png" alt="" fill sizes="512px" className="object-cover object-top opacity-80" />
+      <Picture src="/home/ide-stage.png" alt="" fill sizes="512px" className="object-cover object-top opacity-80" />
       <div className={cn("absolute inset-0", active ? "opacity-100" : "opacity-50")}>
         <div className="absolute top-3 left-3 right-3 h-5 bg-black/50">
           <div className="flex h-full items-center gap-1 px-2">

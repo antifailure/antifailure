@@ -5,6 +5,7 @@ export function MarketplacesPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/marketplaces"
         eyebrow="Solutions · Marketplaces"
         title="Queues, workers, dual-writes, matching logic staging never reproduces."
         lead="The twin includes workers and queues. Production webhooks are blocked. Impatient retries and multi-tab checkout become deterministic scenarios."

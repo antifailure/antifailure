@@ -185,6 +185,7 @@ export function FidelityPage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/fidelity"
         eyebrow="Fidelity Graph"
         title="Say what the twin actually reproduced."
         lead="Application services, databases, volume, queues, jobs, third parties, secrets, network, capacity, and traffic shape. Fidelity is a number you can gate on — not a magical truth score."

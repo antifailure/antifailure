@@ -39,6 +39,7 @@ export function SolutionsHubPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions"
         eyebrow="Solutions"
         title="The same question, for the teams who feel it first."
         lead="Before a risky change meets production, prove it on a disposable twin. Built for teams who already feel migration anxiety, staging drift, and release incidents."

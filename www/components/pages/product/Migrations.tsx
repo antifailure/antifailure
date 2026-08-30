@@ -53,6 +53,7 @@ export function MigrationsPage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/migrations"
         eyebrow="Migration Safety Engine"
         title="Catch exclusive locks before they take checkout down."
         lead="The flagship module. A disposable production twin applies the proposed schema change under production-shaped traffic, then returns an evidence-backed pass, warning, or block — with the lock, the p99, and a safer pattern."

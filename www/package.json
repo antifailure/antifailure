@@ -6,7 +6,8 @@
   "license": "MIT",
   "scripts": {
     "dev": "next dev",
-    "build": "next build && node scripts/markdown-twins.mjs",
+    "images": "node scripts/optimize-images.mjs",
+    "build": "node scripts/optimize-images.mjs && next build && node scripts/markdown-twins.mjs",
     "start": "next start",
     "check:seo": "node scripts/check-seo.mjs",
     "og": "node scripts/make-og.mjs"

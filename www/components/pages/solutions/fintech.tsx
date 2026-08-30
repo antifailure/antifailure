@@ -6,6 +6,7 @@ export function FintechPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/fintech"
         eyebrow="Solutions · Fintech"
         title="Billing, ledgers, and side effects that must never hit live processors."
         lead="The firewall simulates Stripe. Safe State masks account identifiers. The oracle compares ledger writes. Duplicate events are incidents — they belong in a report, not in production."

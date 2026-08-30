@@ -32,7 +32,6 @@ export type Post = {
   published: string;
   /** ISO 8601, only when the post is substantively revised. */
   updated?: string;
-  author: { name: string; url: string };
   tags: string[];
   body: ReactNode;
 };
