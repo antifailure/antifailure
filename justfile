@@ -558,6 +558,7 @@ _generated:
     (cd engine && go test ./internal/hud -update-frames)
     git diff --exit-code -- \
       engine/internal/errors/codes.gen.go \
+      docs/src/content/docs/reference/errors.md \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
       schemas/events.v1.json \
