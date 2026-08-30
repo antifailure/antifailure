@@ -222,10 +222,15 @@ func TestTheBaselineCheckoutIsTheManifestsOwnSubtree(t *testing.T) {
 	_, err = os.Stat(filepath.Join(dir, "README.md"))
 	require.True(t, os.IsNotExist(err), "a file outside the manifest's directory was archived")
 
-	// The checkout lives under the manifest's own state directory and the
-	// cleanup removes it, because a tree left behind is a copy of the source
-	// nobody is watching.
-	require.Contains(t, dir, filepath.Join(env.StateDir, "oracle"))
+	// Outside the repository, because a build context is the whole root minus
+	// what .dockerignore excludes and nothing excludes the state directory: a
+	// checkout under it would put a second copy of the source in the
+	// candidate's own image and change the context digest on every run.
+	require.NotContains(t, dir, root, "the checkout is inside the repository")
+	require.Contains(t, filepath.Base(dir), "af-oracle-")
+
+	// And the cleanup removes it, because a tree left behind is a copy of the
+	// source nobody is watching.
 	clean()
 	_, err = os.Stat(dir)
 	require.True(t, os.IsNotExist(err), "the checkout outlived the comparison")

@@ -63,6 +63,9 @@ af env list / prune   what this machine is holding, and a cutoff to clear it
 af insights    what the database noticed: the N+1, the index that stopped
                being used, the scan on a table that grew
 
+af oracle      run this change beside the version it replaces, on the same
+               data, and report what the two did differently
+
 af env pull    what the control plane recorded for one environment
 
 af license     what this installation is licensed for, in both editions
@@ -295,6 +298,33 @@ and if it changes in one it changes in both.
 | `internal/load` run | proven | measured against a real server; achieved rate reported, not the target |
 | `internal/load` access log | proven | paths normalised, or the mix collapses into a list |
 | `af load` and `af load smoke` | proven | run against a live environment; a route with no baseline is never a breach |
+
+## The differential oracle
+
+| Component | State | Notes |
+| --- | --- | --- |
+| `internal/oracle` comparison | proven | The half that decides what counts as a difference: normalised HTTP responses and Postgres contents, ranked. Proved end to end on 2026-08-30 against two real servers backed by two real Postgres databases branched from one template, not against fixtures. The case it is for: a candidate that wraps its order insert in a transaction and never commits it returns byte for byte what the baseline returned, 201 with the order and the identifier the sequence handed out, and the row is gone. One critical finding on `public.orders`, attributed to the traffic rather than to the migrations. The same application with indented JSON, a tracing header, and its own `served_at` and `request_id` in every response reports nothing at all, and the test requires that the two servers really did produce different bytes. Running it found two defects in this package that reading it did not, both now fixed and both with a test that fails against the old behaviour: the timestamp normaliser was unbounded, so a change that shifted an expiry by a day was absorbed silently, and the reordering check decided membership from the canonical form alone, so two lists whose dates had all shifted were reported as a reordering and the shift never printed. |
+| `internal/env` second environment | proven | The baseline revision is resolved from git, checked out with `git archive` and untarred in Go, and brought up as a second environment pinned to the golden the candidate branched. `env.Options` gains `BuildRoot` and `PinGolden` and nothing else: only the images come from the baseline checkout, so the manifest, the secrets, the egress policy, the personas and the journal all stay the candidate's, and a manifest change in the pull request cannot move the application and the harness at once. The checkout is untarred here rather than by shelling out to `tar` so the path confinement belongs to this package: a commit can carry a name with parent segments or a symlink out of the tree, five escapes are tested, and a control proves the check still accepts what it should. The checkout lives outside the repository, because nothing excludes `.antifailure` from a build context and a copy of the source under the state directory would land in the candidate's own image. Proved end to end on 2026-08-30 against a real Docker daemon: two environments up at once, the baseline pinned to the golden the candidate branched, four probes to each, four snapshots, and the baseline torn down afterwards with 13 resources removed. Two runs, and the second is the one that matters. A candidate that wraps its order insert in a transaction and never commits it returned exactly what the baseline returned on all four requests, 201 with the order in it, and `af oracle` reported one critical finding on `public.proof_orders`, `id=2`, phase traffic. The run was detached, so its process exit code was not captured; the mapping from AF-ORC-010 to exit 8 is the catalog's and `just errcheck` holds it. The first run, on a candidate that only changes how the JSON is rendered, reported nothing. The timestamp skew was measured rather than guessed on those runs: the two environments were built five and eight minutes apart, so a row written by the migrations differed by up to 8m1s on the two sides, which is why the default tolerance is an hour and why the report prints the widest gap it absorbed. |
+| `af oracle` | proven | Reachable, wired into the orchestrator, and the only way to run the comparison. It prints the report before returning any error, because a run that reached the probes and then failed to read a branch has still found everything the responses had to say. It never tears the candidate environment down, whether or not it brought it up, and when teardown of the baseline fails it prints the exact `af down --branch` line to finish by hand. Ten AF-ORC codes. The comparison is NOT in the pull request comment yet: `internal/report` and `af ci` belong to another lane, and what they need to render is `oracle.Result`, whose `Summary` already produces the block. |
+
+Four of the six things the site lists are deliberately not built. Events,
+outbound effects, traces and query plans are not compared at all, and that is a
+decision rather than a gap: six shallow comparisons are worse than two complete
+ones, because the first check that reports a difference which is not one is the
+last check anybody looks at. The egress decisions are the cheapest of the four
+to add, since the sidecar already records every attempt, and a comparison of
+them still needs its own normalisation for idempotency keys and bodies. Nothing
+about the two that exist assumes the other four are absent.
+
+The normalisation layer is the part that decides whether anyone turns this on,
+so everything it declines to compare is printed on every run, defaults
+included, assembled while comparing rather than described in documentation. Two
+things it deliberately does NOT normalise carried the most reasoning. Integer
+identifiers are compared exactly, because both sides branch one golden and
+receive one request sequence, so a sequence at 41 on one side and 42 on the
+other is the candidate having written a row the baseline did not. And a numeric
+epoch is compared exactly, because deciding a number is a clock from the name of
+its field would silently ignore an expiry that moved by a day.
 
 ## Continuous integration
 
