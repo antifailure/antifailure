@@ -73,21 +73,41 @@ build, and so does an entry that no longer matches a real finding. The file is
 short and it is meant to be read.
 
 **Release artifacts.** Built with `-trimpath` and CGO disabled from the tagged
-commit. Each release carries an SPDX bill of materials read out of the built
-binaries, so it describes what shipped rather than what was requested, and
-`checksums.txt` and the bill of materials are both signed with cosign keyless
-signing. There is no signing key to steal: cosign proves to Sigstore that this
-workflow in this repository produced the files and the certificate expires
-immediately. Verification instructions are in the release notes.
+commit, by `tools/release/build.sh`, which is the one copy of the build that
+both the release workflow and `just build-release` call.
+
+**Reproducible archives.** Two builds of one commit produce the same release
+archive, byte for byte, and `tools/release/reproducible.sh` proves it on every
+pull request by building twice in two directories with two caches. This used to
+compare the binary only. The binaries always matched and all four archives
+always differed, because `tar` takes each entry's timestamp from the filesystem
+and `gzip` writes another into its own header. `tools/reltar` writes the archive
+now. You can rebuild a release and compare hashes yourself, and the instructions
+are on the releases page.
+
+**Bill of materials.** Each release carries an SPDX document read out of the
+built binaries, so it describes what shipped rather than what was requested.
+`tools/sbomcheck` validates it against the SPDX 2.3 schema and then requires it
+to record the SHA256 of every binary in the release. That second half is not
+decoration: the document this pipeline produced before the check existed was
+valid SPDX listing one package, because the generator was pointed at a directory
+of archives it does not open.
+
+**Signing, and checking the signature.** `checksums.txt` and the bill of
+materials are both signed with cosign keyless signing. There is no signing key
+to steal: cosign proves to Sigstore that this workflow in this repository
+produced the files and the certificate expires immediately. The release
+workflow then verifies both signatures, and separately requires that a copy
+with one byte changed is REJECTED. A release does not publish unless both
+happen. Verification instructions are in the release notes and on the releases
+page.
 
 **Attribution.** `THIRD_PARTY_NOTICES.md` is generated at release time from
 what is actually linked, not maintained by hand.
 
-Two things people reasonably expect that we do not yet have, said plainly
-rather than left to be discovered: the release build is not rebuilt and
-compared, so it is reproducible by construction but not verified to be; and
-there is no adversarial test suite attempting sandbox escape and proxy bypass.
-Both are tracked and neither is done.
+One thing people reasonably expect that we do not yet have, said plainly rather
+than left to be discovered: there is no adversarial test suite attempting
+sandbox escape and proxy bypass. It is tracked and it is not done.
 
 ## Incident history
 
