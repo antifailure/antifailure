@@ -767,13 +767,7 @@ func (o *Orchestrator) exportCommit(ref string) (string, func(), error) {
 			"usual reason; actions/checkout needs fetch-depth: 0 for this check: %w",
 			shortSHA(ref), err)
 	}
-	cleanup := func() {
-		if _, err := o.git("worktree", "remove", "--force", dir); err != nil {
-			_ = os.RemoveAll(dir)
-			_, _ = o.git("worktree", "prune")
-		}
-	}
-	return filepath.Join(dir, inner), cleanup, nil
+	return filepath.Join(dir, inner), o.pruneWorktree, nil
 }
 
 // git runs one git command in the repository and returns its trimmed output.
@@ -847,14 +841,31 @@ func (o *Orchestrator) rollingDown(ctx context.Context, s *session, td *Teardown
 			})
 		}
 	}
+	o.pruneWorktree()
+}
+
+// pruneWorktree removes the linked worktree the check checks the previous
+// commit out into, and the registration git keeps for it.
+//
+// Both halves are needed and neither is enough. The directory can outlive the
+// run that made it, and the registration can outlive the directory, because a
+// temporary directory sweeper takes files away without telling git.
+//
+// `git worktree prune` runs only when git still believes in OUR path, never
+// unconditionally. It is a write to a repository this function does not own,
+// and af down is called on every teardown of every environment, so a prune
+// that fires whether or not this check ever ran is a side effect on somebody
+// else's repository for nothing.
+func (o *Orchestrator) pruneWorktree() {
 	dir := filepath.Join(os.TempDir(), "af-previous-"+o.envID)
 	if _, err := os.Stat(dir); err == nil {
 		if _, err := o.git("worktree", "remove", "--force", dir); err != nil {
 			_ = os.RemoveAll(dir)
 		}
 	}
-	// Unconditionally, because the registration outlives the directory: a
-	// killed run leaves git believing in a worktree whose files a temporary
-	// directory sweeper has already taken away.
+	list, err := o.git("worktree", "list", "--porcelain")
+	if err != nil || !strings.Contains(list, dir) {
+		return
+	}
 	_, _ = o.git("worktree", "prune")
 }
