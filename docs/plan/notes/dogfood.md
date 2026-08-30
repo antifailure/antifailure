@@ -183,14 +183,14 @@ while the recording rotted.
 
 ## What it found
 
-Forty-four findings, forty-three fixed with a regression test. Two came from
+Forty-six findings, forty-five fixed with a regression test. Two came from
 writing the manifest, four from the golden refresh, three from the web
-application, six from wiring the pipeline itself, eleven from merging main and
-from the first four runs in CI, and the rest from running the pieces against each
+application, six from wiring the pipeline itself, thirteen from merging main and
+from the first five runs in CI, and the rest from running the pieces against each
 other. Every one of them was invisible in the files, and five of them are the
 same shape: a thing that was written, tested, documented, and never called.
 
-The last eleven are worth separating out, because they came from the two things
+The last thirteen are worth separating out, because they came from the two things
 this exercise had not yet done. Merging a branch that had been open for a while
 found a manifest whose invariants could never fail and two migrations sharing a
 number. Pushing found the rest: the first CI run failed on the first build, on
@@ -673,6 +673,42 @@ at the top of the file that green here means green there, and the console was
 in neither the web workspace's typecheck loop nor the runner's, so a type error
 in it passed the local gate and failed the www job twenty minutes later.
 `just typecheck` builds it now. CI needed nothing.
+
+**46. A workflow that does not start is invisible to every gate.**
+An edit meant to raise a job's `timeout-minutes` deleted its `runs-on` line.
+GitHub refused the workflow, produced no job, no log and no failing step, and
+reported the run under the file's path rather than its name because it never
+got far enough to read one. A red check with nothing inside it.
+
+Twenty-nine gates had nothing to say. The file was valid YAML the whole time,
+which is why a parse check would not have caught it either: what was wrong was
+the workflow schema. `actionlint` is in `just gate` and in ci.yml now, and it
+also reads the shell inside every `run:` block, which is where the next one of
+these will be.
+
+The edit was mine, and it is the second time in this session that a string
+replacement took a line I did not mean it to take. The first moved a job's
+steps into another job. Neither was a thinking error; both were an editing
+technique that does not check what it removed.
+
+**45. A compiled binary, committed for the third time.**
+`go build ./tools/dogfood` writes `./dogfood` into whatever directory it ran
+in, and `git add -A` committed 4.2MB of arm64 Mach-O to a repository that ships
+Linux binaries. `tools/gatecheck` caught it, which is what it is for.
+
+The interesting failure is not the binary. `.gitignore` names each tool's
+command, the comment above the list says this has happened twice before, and
+the list named the tools that existed when somebody wrote it. Eleven tools were
+added since and nobody thought about that file while adding them. Both earlier
+occurrences were fixed by adding one line, which is why there was a third.
+
+A list maintained by remembering is wrong by default, so the completeness of
+this one is checked now rather than remembered:
+`TestEveryToolsBinaryNameIsIgnored` fails when a directory under `tools/` has
+no line in `.gitignore` and no recorded reason for not having one. `docs` has
+one, being a tool and the documentation site at once, which is the collision
+the file's own comment warns about. Verified by removing `/dogfood` and
+watching it fail.
 
 **44. A good error message is not a working environment.**
 With the masking rules fixed, the run reached `af golden refresh` and stopped:

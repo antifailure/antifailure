@@ -75,6 +75,7 @@ gate: _reports
     run "prose stays readable"           just readability
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
+    run "the workflows are valid"        just workflows
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
@@ -473,6 +474,27 @@ manifestcheck:
 # This justfile runs what CI runs.
 gatecheck:
     go run ./tools/gatecheck .
+
+# The workflows themselves parse and start.
+#
+# Nothing here checked that, and a workflow that does not start is invisible to
+# every other gate in this file: it produces no job, no log and no failing
+# step, and GitHub reports the run under the file's path because it never got
+# far enough to read its name. A `timeout-minutes` edit deleted the `runs-on`
+# line from a job, and the only symptom was a red check with nothing inside it.
+#
+# actionlint rather than a YAML parse, because the file was valid YAML the
+# whole time. What was wrong was the workflow schema, and the same tool also
+# reads the shell in every `run:` block, which is where the next one of these
+# will be.
+workflows:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v actionlint > /dev/null; then
+      go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+    fi
+    "$(command -v actionlint || echo "$(go env GOPATH)/bin/actionlint")" .github/workflows/*.yml
+    echo "workflows: $(ls .github/workflows/*.yml | wc -l | tr -d ' ') files, every job can start"
 
 # The TypeScript that ships: the control plane packages, the agent runner, and
 # the console.

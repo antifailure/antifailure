@@ -471,3 +471,78 @@ func executableKind(m [4]byte) string {
 	}
 	return ""
 }
+
+// Every tool's command name is ignored, or has a reason not to be.
+//
+// The list in .gitignore named the tools that existed when somebody wrote it,
+// eleven tools were added since, and nobody thought about that file while
+// adding them. A 4.2MB `dogfood` was then committed by `git add -A` and caught
+// by the test above, which is the third time a compiled binary has reached
+// this repository the same way.
+//
+// So the interesting failure is not the binary, it is the list. A list
+// maintained by remembering is wrong by default, and the two earlier
+// occurrences did not change that because each was fixed by adding one line.
+// This checks the list is complete instead, which is the difference between a
+// gate and a habit.
+//
+// The backstop above still matters and this does not replace it: it only knows
+// about names under tools/, and a binary can arrive from anywhere.
+func TestEveryToolsBinaryNameIsIgnored(t *testing.T) {
+	root := filepath.Join("..", "..")
+
+	// `docs` is a tool and also the documentation site. `/docs` in .gitignore
+	// would ignore the whole tree, which is the collision the file's own
+	// comment warns about, so it is exempt here and the backstop above is what
+	// covers it. A name is exempt only with a reason, so that an exemption is
+	// a decision somebody reads rather than a hole somebody widens.
+	exempt := map[string]string{
+		"docs": "also the documentation site at the repository root, so ignoring " +
+			"the name would ignore the tree",
+	}
+
+	entries, err := os.ReadDir(filepath.Join(root, "tools"))
+	if err != nil {
+		t.Skipf("no tools directory here: %v", err)
+	}
+
+	// Whether git can answer at all, asked once and separately.
+	//
+	// Without this, a checkout git cannot read reports every tool as
+	// unignored, because `check-ignore` exits non-zero both for "this is not
+	// ignored" and for "I could not look". That is the same mistake the
+	// insights report was fixed for: could not look and looked and found
+	// nothing are different answers, and a check that conflates them fails
+	// loudly for a reason that has nothing to do with what it checks.
+	if err := exec.Command("git", "-C", root, "rev-parse", "--git-dir").Run(); err != nil {
+		t.Skipf("git cannot read this checkout, so it cannot be asked what it ignores: %v", err)
+	}
+
+	checked := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if why, ok := exempt[name]; ok {
+			t.Logf("%s is exempt: %s", name, why)
+			continue
+		}
+		checked++
+
+		// git itself, rather than a parse of .gitignore, because the question
+		// is what git would do with a file of that name and the answer depends
+		// on rule order, negations and anchoring that a reimplementation gets
+		// subtly wrong.
+		cmd := exec.Command("git", "-C", root, "check-ignore", "-q", name)
+		if err := cmd.Run(); err != nil {
+			t.Errorf("`go build ./tools/%s` writes ./%s and nothing ignores it, so the "+
+				"next `git add -A` commits a platform specific executable. Add /%s to "+
+				".gitignore, or add it to the exempt map above with the reason it "+
+				"cannot be ignored.", name, name, name)
+		}
+	}
+	if checked < 5 {
+		t.Fatalf("only %d tools were checked, so this has stopped looking", checked)
+	}
+}

@@ -42,6 +42,7 @@ jobs:
     # else's shape, and that answer does not change between two commits an hour
     # apart. They run on the schedule below.
     name: control plane
+    runs-on: ubuntu-latest
     # Larger than the budgets inside it, deliberately. The harness fails a step
     # that runs over its budget and writes a report saying which one and by how
     # much; a runner timeout kills the job and writes nothing, so a budget that

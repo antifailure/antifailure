@@ -90,6 +90,23 @@ jobs:
         # supposed to prevent.
         run: go run ./tools/gatecheck .
 
+      - name: The workflows themselves parse and start
+        # A workflow that does not start is invisible to every other gate here.
+        # It produces no job, no log and no failing step, and the run is
+        # reported under the file's path rather than its name because GitHub
+        # never got far enough to read one. A `timeout-minutes` edit deleted a
+        # job's `runs-on` line, and the only symptom was a red check with
+        # nothing inside it to read.
+        #
+        # actionlint rather than a YAML parse: the file was valid YAML the
+        # whole time, and what was wrong was the workflow schema. It also reads
+        # the shell in every `run:` block, which is where the next one of these
+        # will be.
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$(go env GOPATH)/bin/actionlint" .github/workflows/*.yml
+          echo "every workflow parses and every job can start"
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         # For the examples that are not Go. Pinned to the same major the
         # runtime images use, so the version that builds an example here is the

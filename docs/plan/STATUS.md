@@ -484,7 +484,7 @@ including every finding and what is not built, is in
 | Gates for what the suite is blind to | proven | Twenty-nine gates were passing while four defects sat in the tree, and the pattern is one thing: the suite checks one artifact against a rule, and every one of those four was two artifacts each individually valid and jointly wrong. Three are now caught mechanically as well: this repository's own manifest is validated by `just examples` and ci.yml rather than only the examples', the transforms page's hand-written prose is checked against the registry its table is generated from, and `af mask plan` runs in the pipeline. Each was verified by reintroducing the original defect and watching it fail. The fourth, two consoles doing the same job, has no cheap mechanical form. |
 | The ten-green streak | planned | **No streak exists and none is claimed.** |
 
-What it found: forty-four defects, forty-three fixed with regression tests,
+What it found: forty-six defects, forty-five fixed with regression tests,
 one issue open at
 [antifailure/antifailure#24](https://github.com/antifailure/antifailure/issues/24).
 Every one of them was invisible in the files, and five are the same shape: a
