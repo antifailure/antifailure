@@ -1,8 +1,10 @@
 package manifest
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/antifailure/antifailure/engine/internal/oracle"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -30,6 +33,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.auth(m)
 	v.workflows(m)
 	v.invariants(m)
+	v.oracle(m)
 	v.load(m)
 	v.runtime(m)
 
@@ -666,6 +670,111 @@ func (v *validator) invariants(m *schema.Manifest) {
 				"An invariant holds when its statement returns no rows, and a bare count returns one row saying zero. Select the offending rows themselves: SELECT id FROM ... WHERE ... rather than SELECT count(*) FROM ... WHERE ....")
 		}
 	}
+}
+
+// oracle checks that a comparison somebody asked for can actually be made.
+//
+// Each rule here prevents a failure that would otherwise arrive after two
+// environments have been built, which is minutes of Docker and two database
+// branches spent to learn that a path was missing a slash.
+func (v *validator) oracle(m *schema.Manifest) {
+	o := m.Oracle
+	if o == nil {
+		return
+	}
+
+	if _, ok := oracle.ParseSeverity(o.FailOn); !ok {
+		v.add("oracle.fail_on",
+			fmt.Sprintf("%q is not a severity.", o.FailOn),
+			"Use none, minor, major, or critical.")
+	}
+
+	if o.Baseline == schema.BaselineRef && o.BaseRef == "" {
+		v.add("oracle.base_ref",
+			"The baseline is an explicit ref and no ref is given.",
+			"Name the branch, tag, or commit to compare against, or use baseline: merge_base.")
+	}
+
+	if len(o.Probes) == 0 && deref(o.Enabled) {
+		v.add("oracle.probes",
+			"The oracle is on and declares no requests to send.",
+			"Add at least one probe. Both versions have to receive the same requests in the same "+
+				"order, so the plan is written down rather than discovered.")
+	}
+
+	names := map[string]int{}
+	for i := range o.Probes {
+		p := &o.Probes[i]
+		base := fmt.Sprintf("oracle.probes[%d]", i)
+
+		if prev, dup := names[p.Name]; dup {
+			v.add(base+".name",
+				fmt.Sprintf("Two probes are both named %q.", p.Name),
+				fmt.Sprintf("The first is oracle.probes[%d]. The name is how a difference is "+
+					"reported, so two of them make a report nobody can act on.", prev))
+		}
+		names[p.Name] = i
+
+		if !strings.HasPrefix(p.Path, "/") {
+			v.add(base+".path",
+				fmt.Sprintf("The path %q does not start with a slash.", p.Path),
+				"A probe path is a path and a query, such as /orders?limit=10.")
+		}
+		if p.Body != "" && p.Method == http.MethodGet {
+			v.add(base+".body",
+				fmt.Sprintf("Probe %q is a GET and declares a body.", p.Name),
+				"Most servers ignore a body on a GET, so this would be sent and have no effect. "+
+					"Set a method, or move the values into the query.")
+		}
+		if p.Body != "" && jsonContentType(p.Headers) && !json.Valid([]byte(p.Body)) {
+			v.add(base+".body",
+				fmt.Sprintf("Probe %q declares a JSON content type and a body that is not JSON.", p.Name),
+				"Both versions would refuse it identically, so the comparison would prove nothing.")
+		}
+		for name, value := range p.Headers {
+			if looksLikeACredential(value) {
+				v.add(base+".headers",
+					fmt.Sprintf("The header %q on probe %q carries what looks like a credential.", name, p.Name),
+					"A probe is committed to the repository. Credentials come from the secrets "+
+						"subsystem; a probe that needs a session should sign in through one.")
+			}
+		}
+	}
+
+	if o.Ignore != nil {
+		for i, f := range o.Ignore.Fields {
+			if !oracle.ValidPattern(f) {
+				v.add(fmt.Sprintf("oracle.ignore.fields[%d]", i),
+					fmt.Sprintf("%q is not a field path.", f),
+					"Write $.field, $.list[0].field, $.list[*].field, $..field, or $.object.*.")
+			}
+		}
+	}
+
+	if o.Database != nil {
+		for i, t := range append(append([]string(nil), o.Database.Tables...), o.Database.Exclude...) {
+			if strings.Count(t, ".") > 1 {
+				key := "oracle.database.tables"
+				if i >= len(o.Database.Tables) {
+					key = "oracle.database.exclude"
+				}
+				v.add(key,
+					fmt.Sprintf("%q is not a table pattern.", t),
+					"Write a table name, or schema.table, with an asterisk for either half.")
+			}
+		}
+	}
+}
+
+// jsonContentType reports whether a probe declares a JSON body.
+func jsonContentType(headers map[string]string) bool {
+	for k, v := range headers {
+		if strings.EqualFold(k, "content-type") {
+			lower := strings.ToLower(v)
+			return strings.Contains(lower, "json")
+		}
+	}
+	return false
 }
 
 func (v *validator) load(m *schema.Manifest) {

@@ -526,6 +526,9 @@ var knownKeys = []string{
 	// so a typo of any of them got no suggestion. Found by the drift test,
 	// which is the point of having one.
 	"project", "api_key_env", "max_branches", "to",
+	"oracle", "baseline", "base_ref", "fail_on", "probes", "method", "body",
+	"compare_timestamps", "compare_uuids", "ignore", "headers", "fields",
+	"tables", "exclude",
 }
 
 func editDistance(a, b string) int {
