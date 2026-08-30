@@ -359,6 +359,23 @@ type Insights struct {
 	RegressionFactor   float64 `json:"regression_factor,omitempty" yaml:"regression_factor,omitempty"`
 	RegressionMinMS    float64 `json:"regression_min_ms,omitempty" yaml:"regression_min_ms,omitempty"`
 	LargeTableRows     int     `json:"large_table_rows,omitempty" yaml:"large_table_rows,omitempty"`
+	// RollingCompatibility is the check that runs the PREVIOUS release against
+	// the migrated schema. It is a block rather than a bool because two of its
+	// three answers are not on and off: which commit the previous release is,
+	// and whether to pay for the check when the migration cannot break
+	// anything.
+	RollingCompatibility *RollingCompatibility `json:"rolling_compatibility,omitempty" yaml:"rolling_compatibility,omitempty"`
+}
+
+// RollingCompatibility configures the rolling deploy check.
+type RollingCompatibility struct {
+	// When is never, risky or always. Risky is the default and runs the check
+	// only when the pending migrations contain a change the previous release
+	// could notice.
+	When string `json:"when,omitempty" yaml:"when,omitempty"`
+	// Against names the previous release: merge-base, previous-commit, or any
+	// revision git can resolve, such as a tag.
+	Against string `json:"against,omitempty" yaml:"against,omitempty"`
 }
 
 // LoadSource names where the endpoint mix comes from.

@@ -31,6 +31,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.workflows(m)
 	v.invariants(m)
 	v.load(m)
+	v.insights(m)
 	v.runtime(m)
 
 	if v.suppressed > 0 {
@@ -693,6 +694,40 @@ func (v *validator) load(m *schema.Manifest) {
 				fmt.Sprintf("The route %q is listed as both safe and unsafe.", r),
 				"Unsafe wins, and the ambiguity will confuse whoever reads this next. Remove one.")
 		}
+	}
+}
+
+// insights checks the one part of the block the JSON Schema cannot: whether
+// `against` names something git could resolve.
+//
+// Only the obviously wrong shapes are refused here, because whether a
+// revision exists is a question about the checkout rather than about the
+// manifest, and a manifest that stops validating when somebody does a shallow
+// clone is a manifest that fails for the wrong reason. A revision that does
+// not resolve at run time is reported as `blocked` by the check itself, which
+// is where it belongs.
+func (v *validator) insights(m *schema.Manifest) {
+	i := m.Insights
+	if i == nil || i.RollingCompatibility == nil {
+		return
+	}
+	r := i.RollingCompatibility
+	switch r.When {
+	case "", "never", "risky", "always":
+	default:
+		v.add("insights.rolling_compatibility.when",
+			fmt.Sprintf("The value %q is not one of never, risky or always.", r.When),
+			"risky, the default, runs the check only when the migration contains something the previous release could notice.")
+	}
+	if strings.ContainsAny(r.Against, " \t\n") {
+		v.add("insights.rolling_compatibility.against",
+			fmt.Sprintf("The revision %q contains whitespace, so git cannot resolve it.", r.Against),
+			"Use merge-base, previous-commit, or a single revision such as a tag name.")
+	}
+	if strings.HasPrefix(r.Against, "-") {
+		v.add("insights.rolling_compatibility.against",
+			fmt.Sprintf("The revision %q starts with a hyphen, which git would read as an option.", r.Against),
+			"Use merge-base, previous-commit, or a single revision such as a tag name.")
 	}
 }
 

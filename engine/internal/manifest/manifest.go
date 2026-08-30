@@ -515,7 +515,7 @@ var knownKeys = []string{
 	"description", "persona", "start_path", "independent", "budget", "expect", "tags",
 	"steps", "usd", "duration", "sql",
 	"migration_rehearsal", "query_regression", "plan_diff", "regression_factor",
-	"regression_min_ms", "large_table_rows",
+	"regression_min_ms", "large_table_rows", "rolling_compatibility", "when", "against",
 	"source", "source_config", "scale", "safe_routes", "unsafe_routes", "thresholds",
 	"p95_increase", "error_rate", "query_count_increase",
 	"ttl", "idle_sleep", "domain", "namespace_prefix", "kubeconfig_context",

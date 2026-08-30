@@ -783,6 +783,33 @@
           "minimum": 0,
           "default": 100000,
           "description": "Row count above which a migration lint treats a table as large, where a rewrite or an exclusive lock is an outage rather than a pause."
+        },
+        "rolling_compatibility": {
+          "$ref": "#/$defs/rolling_compatibility"
+        }
+      }
+    },
+    "rolling_compatibility": {
+      "title": "Rolling compatibility",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Run the previous release against the migrated schema and see whether its workflows still pass, which is the invariant a rolling deploy actually depends on.",
+      "properties": {
+        "when": {
+          "type": "string",
+          "enum": [
+            "never",
+            "risky",
+            "always"
+          ],
+          "default": "risky",
+          "description": "risky runs the check only when the pending migrations contain a change the previous release could notice, such as a dropped or renamed column. always runs it for every migration, and costs a second image build and a second environment every time."
+        },
+        "against": {
+          "type": "string",
+          "maxLength": 256,
+          "default": "merge-base",
+          "description": "Which commit the previous release is: merge-base, previous-commit, or any revision git can resolve, such as a release tag."
         }
       }
     },
