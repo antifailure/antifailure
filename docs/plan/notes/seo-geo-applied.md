@@ -132,6 +132,22 @@ Azure DNS in the `af-web` resource group, and GoDaddy is at most the registrar.
 - `deploy/blog-redirect/` holds the two files that app serves, so the redirect
   is version controlled rather than living only in a portal.
 
+## IndexNow
+
+Shipped. `www/public/<key>.txt` is the ownership proof, `scripts/indexnow.mjs`
+submits, and `deploy.yml` runs it after a successful publish and never before.
+
+Only URLs whose sitemap `lastmod` falls inside the last seven days are
+submitted. Re-sending the whole sitemap on every deploy is what the protocol
+asks people not to do, and `lastmod` here comes from real git history, so it is
+a truthful basis for deciding what is new.
+
+The key is deliberately committed. IndexNow proves ownership by fetching it
+back from the site root, so publishing it is the mechanism rather than a leak.
+
+Google does not participate. Bing, Yandex, Seznam and Naver do, and
+participants share submissions.
+
 ## Needs an account. Cannot be done from here.
 
 These are the items in the catalog that require logging in as somebody. Each
@@ -144,9 +160,9 @@ one is a real technique from the list, not a gap in the work.
 2. **Google Search Console.** Verify the property, submit the sitemap. (SEO 19, 22)
 3. **Bing Webmaster Tools.** Verify and submit. This one matters more than it
    looks: Bing's index is the retrieval layer behind ChatGPT search and
-   Copilot, so a page Bing has not indexed cannot be cited there. (SEO 20, GEO 96)
-4. **IndexNow key.** Generate a key, serve it at the root, ping on deploy.
-   (SEO 21, GEO 95)
+   Copilot, so a page Bing has not indexed cannot be cited there. IndexNow now
+   pushes changes automatically, but the console is still where you confirm
+   they were accepted and see what was indexed. (SEO 20, GEO 96)
 5. **Wikidata item.** Create it, then add the QID to `SAME_AS` in
    `lib/site.ts`. (GEO 53)
 6. **Owned profiles.** LinkedIn, X, Crunchbase. Create them with the identical

@@ -123,6 +123,25 @@ jobs:
           skip_app_build: true
           skip_api_build: true
 
+      - name: Tell Bing what changed
+        # Only after a real publish, because IndexNow is a claim that a URL is
+        # live and fetchable. Submitting before the deploy asks a crawler to
+        # look at something that is not there yet, which is how a key gets
+        # distrusted.
+        #
+        # This matters beyond Bing's own results: Bing's index is the retrieval
+        # layer behind ChatGPT search and Copilot, so a page it has not indexed
+        # cannot be cited there regardless of how it ranks on Google.
+        #
+        # The script exits 0 on a rejected submission. The site is already
+        # published at this point and a crawler will find it anyway; failing
+        # the deploy over a notification would be the wrong trade.
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: node scripts/indexnow.mjs
+        working-directory: www
+
       - name: Say so when it was not published
         if: ${{ env.TOKEN == '' }}
         env:
