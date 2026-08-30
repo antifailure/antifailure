@@ -121,6 +121,8 @@ export interface Fixture {
   slug: string
   /** The seeded single sign-on connection, for suites that need one. */
   connectionId: string
+  /** The seeded Stripe customer, for the billing policies. */
+  customerId: string
 }
 
 /**
@@ -245,7 +247,37 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
     INSERT INTO provider_budgets (org_id, provider, period, cap_usd, spent_usd)
     VALUES (${orgId}, 'anthropic', date_trunc('month', now())::date, 100, 0)`
 
-  return { orgId, userId, repoId, envId, runId, slug, connectionId }
+  // Billing. Every one of these carries org_id, so the cross-tenant suite
+  // picks them up from the database and needs a row per tenant to attack: a
+  // query that returns nothing because the fixture never inserted anything
+  // looks exactly like isolation working.
+  const customerId = `cus_${slug.replace(/-/g, '')}`
+  await admin`
+    INSERT INTO billing_customers (org_id, stripe_customer_id, email)
+    VALUES (${orgId}, ${customerId}, ${`billing@${slug}.test`})`
+  await admin`
+    INSERT INTO payment_methods (
+      org_id, stripe_payment_method_id, stripe_customer_id, brand, last4,
+      exp_month, exp_year, last_event_at)
+    VALUES (${orgId}, ${`pm_${slug}`}, ${customerId}, 'visa', '4242', 12, 2034, now())`
+  await admin`
+    INSERT INTO subscriptions (
+      org_id, stripe_subscription_id, stripe_customer_id, plan, price_id,
+      status, current_period_start, current_period_end, last_event_at)
+    VALUES (${orgId}, ${`sub_${slug}`}, ${customerId}, 'team', ${`price_${label}`},
+            'active', now(), now() + interval '30 days', now())`
+  await admin`
+    INSERT INTO invoices (
+      org_id, stripe_invoice_id, stripe_customer_id, stripe_subscription_id,
+      number, status, amount_due, amount_paid, last_event_at)
+    VALUES (${orgId}, ${`in_${slug}`}, ${customerId}, ${`sub_${slug}`},
+            ${`AF-${slug.slice(0, 6)}`}, 'paid', 4900, 4900, now())`
+  await admin`
+    INSERT INTO billing_events (
+      stripe_event_id, org_id, stripe_customer_id, type, event_created_at, outcome)
+    VALUES (${`evt_${slug}`}, ${orgId}, ${customerId}, 'invoice.paid', now(), 'applied')`
+
+  return { orgId, userId, repoId, envId, runId, slug, connectionId, customerId }
 }
 
 export function tokenHash(value: string): Buffer {
