@@ -50,6 +50,11 @@ func (f Full) Explain() string {
 		b.WriteString(r.Explain())
 	}
 
+	// Second, because a previous release that cannot talk to the new schema is
+	// an outage during the deploy window rather than a slow deploy, and the
+	// only thing above it is a migration that did not apply at all.
+	b.WriteString(f.Rolling.Explain())
+
 	if len(f.PlanFindings) > 0 {
 		b.WriteString("Query plans that changed:\n")
 		for _, p := range f.PlanFindings {

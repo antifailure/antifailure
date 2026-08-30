@@ -40,6 +40,11 @@ type Config struct {
 	RegressionFactor   float64
 	RegressionMinMS    float64
 	LargeTableRows     int
+	// Rolling is the rolling deploy compatibility check. It is resolved here
+	// with the rest for the reason in this type's comment: one place answers
+	// "is this check on", and a second place that reads the manifest itself
+	// is a second answer waiting to disagree.
+	Rolling RollingConfig
 }
 
 // Configure resolves the manifest block. A nil block is the default, which is
@@ -50,6 +55,7 @@ func Configure(in *schema.Insights) Config {
 		RegressionFactor: DefaultRegressionFactor,
 		RegressionMinMS:  DefaultRegressionMinMS,
 		LargeTableRows:   LargeTableRows,
+		Rolling:          ConfigureRolling(nil),
 	}
 	if in == nil {
 		return c
@@ -73,6 +79,7 @@ func Configure(in *schema.Insights) Config {
 	if in.LargeTableRows > 0 {
 		c.LargeTableRows = in.LargeTableRows
 	}
+	c.Rolling = ConfigureRolling(in.RollingCompatibility)
 	return c
 }
 
@@ -151,6 +158,11 @@ type Full struct {
 	Regression *Diff `json:"regression,omitempty"`
 	// PlanFindings are the plans that got worse.
 	PlanFindings []PlanFinding `json:"plan_findings,omitempty"`
+	// Rolling is whether the previous release survives this migration. It is
+	// filled by the caller rather than by Run, because proving it needs a
+	// second image, a second environment and a browser, none of which this
+	// package has or should have.
+	Rolling *Rolling `json:"rolling,omitempty"`
 	// Off names the checks the manifest turned off. A report that silently
 	// omits a check reads like a check that found nothing.
 	Off []string `json:"off,omitempty"`
@@ -164,6 +176,9 @@ func (f Full) Clean() bool {
 		return false
 	}
 	if f.Regression != nil && !f.Regression.Empty() {
+		return false
+	}
+	if f.Rolling.Failed() {
 		return false
 	}
 	return len(f.PlanFindings) == 0

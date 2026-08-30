@@ -166,6 +166,9 @@ func Explain(m *schema.Manifest) string {
 	fmt.Fprintf(&b, "  regression   %s, above %.1fx and %.0f ms\n",
 		enabledWord(deref(m.Insights.QueryRegression)), m.Insights.RegressionFactor, m.Insights.RegressionMinMS)
 	fmt.Fprintf(&b, "  plan diff    %s\n", enabledWord(deref(m.Insights.PlanDiff)))
+	if r := m.Insights.RollingCompatibility; r != nil {
+		fmt.Fprintf(&b, "  rolling      %s, against %s\n", r.When, r.Against)
+	}
 	b.WriteString("\n")
 
 	// Only the keys that stop a merge, and the lock thresholds. The full

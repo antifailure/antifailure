@@ -1587,7 +1587,20 @@ func readIgnore(root string) (*build.Ignore, error) {
 func (o *Orchestrator) buildOne(
 	ctx context.Context, s *session, svc schema.Service, ig *build.Ignore,
 ) (string, bool, error) {
-	root := o.buildRoot()
+	return o.buildOneFrom(ctx, s, o.buildRoot(), svc, ig)
+}
+
+// buildOneFrom builds a service out of a tree that is not necessarily this
+// repository's working copy.
+//
+// The root is a parameter because the rolling deploy check builds the PREVIOUS
+// commit's services out of an exported copy of that commit. Everything else
+// about the build is identical, including the image reference, which is
+// derived from the build context's digest and so distinguishes the two trees
+// without anybody naming them differently.
+func (o *Orchestrator) buildOneFrom(
+	ctx context.Context, s *session, root string, svc schema.Service, ig *build.Ignore,
+) (string, bool, error) {
 	dir := strings.Trim(filepath.ToSlash(svc.Path), "/")
 	o.event(s, events.BuildStarted, svc.Name+": build starting", events.F("service", svc.Name))
 
@@ -1741,6 +1754,12 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 		td.Removed++
 		o.progress("removed the database branch")
 	}
+
+	// The rolling deploy check's own environments, which carry identifiers of
+	// their own so the sweep above does not see them. They exist only while
+	// that check is running, which means they are here for exactly the case
+	// that matters: a run somebody interrupted.
+	o.rollingDown(ctx, s, td)
 
 	// Last, and only after the sweep, because the two find different things.
 	//

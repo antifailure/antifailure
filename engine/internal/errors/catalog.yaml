@@ -240,6 +240,13 @@ errors:
     docs: concepts/insights
     retryable: false
     exit_code: 5
+  - code: AF-DB-032
+    area: DB
+    message: "The previous release does not survive this migration: {detail}"
+    next_step: "A rolling deploy runs both releases at once, so make the change backward compatible: add the new column and write to both, migrate the readers, and drop the old one in a later deploy."
+    docs: concepts/insights
+    retryable: false
+    exit_code: 8
 
   # Masking
   - code: AF-MSK-001

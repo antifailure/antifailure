@@ -90,6 +90,8 @@ const (
 	AFDB030 Code = "AF-DB-030"
 	// The migration finding {rule} fails this project's policy: {detail}
 	AFDB031 Code = "AF-DB-031"
+	// The previous release does not survive this migration: {detail}
+	AFDB032 Code = "AF-DB-032"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -597,6 +599,15 @@ var catalog = map[Code]Entry{
 		Message:   "The migration finding {rule} fails this project's policy: {detail}",
 		NextStep:  "The report above names the table and the statement. Fix the migration, or lower the rule to 'warn' in the manifest's policy block.",
 		Docs:      "concepts/verdicts",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
+	},
+	AFDB032: {
+		Code:      AFDB032,
+		Area:      "DB",
+		Message:   "The previous release does not survive this migration: {detail}",
+		NextStep:  "A rolling deploy runs both releases at once, so make the change backward compatible: add the new column and write to both, migrate the readers, and drop the old one in a later deploy.",
+		Docs:      "concepts/insights",
 		Retryable: false,
 		ExitCode:  ExitTestFailure,
 	},

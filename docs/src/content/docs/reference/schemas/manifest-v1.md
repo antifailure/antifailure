@@ -192,6 +192,7 @@ The Postgres native checks that turn a preview environment into a database revie
 | `query_regression` | boolean | no | Diff pg_stat_statements between the base branch and this one after running the same workflows, to catch a query loop before it reaches production. Defaults to `true`. |
 | `regression_factor` | number | no | How much slower a query may get before it is reported. Defaults to `1.5`. Minimum 1. |
 | `regression_min_ms` | number | no | Minimum absolute change in mean milliseconds before a regression is reported, so that a query going from 0.1 to 0.2 milliseconds is not news. Defaults to `5`. Minimum 0. |
+| `rolling_compatibility` | [Rolling compatibility](#rolling-compatibility) | no | Run the previous release against the migrated schema and see whether its workflows still pass, which is the invariant a rolling deploy actually depends on. |
 
 ## Invariant
 
@@ -315,6 +316,15 @@ What one replica of a service is allowed to use. Absent means the runtime decide
 | --- | --- | --- | --- |
 | `cpu` | string | no | CPU limit, in cores or millicores. Defaults to `1`. Matches `^[0-9]+(\.[0-9]+)?m?$`. |
 | `memory` | string | no | Memory limit. Defaults to `1Gi`. Matches `^[0-9]+(Mi\|Gi\|M\|G)$`. |
+
+## Rolling compatibility
+
+Run the previous release against the migrated schema and see whether its workflows still pass, which is the invariant a rolling deploy actually depends on.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `against` | string | no | Which commit the previous release is: merge-base, previous-commit, or any revision git can resolve, such as a release tag. Defaults to `merge-base`. Max length 256. |
+| `when` | `never`, `risky`, `always` | no | risky runs the check only when the pending migrations contain a change the previous release could notice, such as a dropped or renamed column. always runs it for every migration, and costs a second image build and a second environment every time. Defaults to `risky`. |
 
 ## Runtime
 

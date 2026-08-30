@@ -178,34 +178,23 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		return nil, err
 	}
 
-	self, err := os.Executable()
-	if err != nil {
-		// Without the engine's own path the runner cannot read the inbox, so
-		// a workflow waiting on a message is blocked rather than failed. That
-		// is the right answer and it is said out loud rather than guessed at.
-		self = ""
-	}
-
-	job := jobDocument{
-		BaseURL:   status.URL,
-		Artifacts: filepath.Join(o.opts.Root, StateDir, "artifacts", o.envID),
-		Workflows: workflows, Personas: o.personaDocs(provisioned),
-		AF: self, WorkDir: o.opts.Root,
-		Attempts: opts.Attempts, Headless: !opts.Headed,
-	}
-
-	started := o.opts.Clock.Now()
-	stdout, err := o.invokeRunner(ctx, opts.RunnerPath, job)
+	runner, err := o.findRunner(opts.RunnerPath)
 	if err != nil {
 		return nil, err
 	}
-
-	var report TestReport
-	if err := json.Unmarshal(stdout, &report); err != nil {
-		return nil, aferrors.Wrap(err, aferrors.AFAGT003,
-			"detail", "the runner's output could not be read: "+err.Error())
+	artifacts := filepath.Join(o.opts.Root, StateDir, "artifacts", o.envID)
+	if err := os.MkdirAll(artifacts, 0o755); err != nil {
+		return nil, aferrors.Wrap(err, aferrors.AFAGT001, "detail", err.Error())
 	}
-	report.Duration = o.opts.Clock.Since(started)
+
+	report, err := o.driveRunner(ctx, runnerJob{
+		Runner: runner, BaseURL: status.URL, Artifacts: artifacts,
+		Workflows: workflows, Personas: o.personaDocs(provisioned),
+		WorkDir: o.opts.Root, Attempts: opts.Attempts, Headless: !opts.Headed,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	// Asked after the workflows, of the rows they left behind. This is the
 	// only part of a run that looks at the data rather than at the screen, and
@@ -228,6 +217,62 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		}
 	}
 	report.Invariants = invs
+	return report, nil
+}
+
+// runnerJob is one invocation of the agent runner.
+//
+// A struct rather than a growing parameter list because there are two callers
+// now: af test drives the environment's own services, and the rolling deploy
+// check drives a second environment running the PREVIOUS release, with that
+// release's own workflows and personas rather than this one's.
+type runnerJob struct {
+	Runner    string
+	BaseURL   string
+	Artifacts string
+	WorkDir   string
+	Workflows []workflowDoc
+	Personas  []personaDoc
+	Attempts  int
+	Headless  bool
+}
+
+// driveRunner writes the job document, runs the runner, and reads its verdict.
+//
+// A non zero exit with a readable report is a test failure, which the caller
+// decides about. Only an unreadable one is an error here, and it is reported
+// as AF-AGT-003 so that the runner's own failure is never counted against the
+// application.
+func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestReport, error) {
+	self, err := os.Executable()
+	if err != nil {
+		// Without the engine's own path the runner cannot read the inbox, so
+		// a workflow waiting on a message is blocked rather than failed. That
+		// is the right answer and it is said out loud rather than guessed at.
+		self = ""
+	}
+
+	started := o.opts.Clock.Now()
+	// Through invokeRunner rather than starting the subprocess here, so there
+	// is still one place that decides how the runner is started and what a
+	// runner that writes nothing means. This landed as a second copy of that
+	// code, which is the drift its comment was written to prevent.
+	stdout, err := o.invokeRunner(ctx, job.Runner, jobDocument{
+		BaseURL: job.BaseURL, Artifacts: job.Artifacts,
+		Workflows: job.Workflows, Personas: job.Personas,
+		AF: self, WorkDir: job.WorkDir,
+		Attempts: job.Attempts, Headless: job.Headless,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var report TestReport
+	if err := json.Unmarshal(stdout, &report); err != nil {
+		return nil, aferrors.Wrap(err, aferrors.AFAGT003,
+			"detail", "the runner's output could not be read: "+err.Error())
+	}
+	report.Duration = o.opts.Clock.Since(started)
 	return &report, nil
 }
 

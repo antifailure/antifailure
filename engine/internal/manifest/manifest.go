@@ -516,7 +516,7 @@ var knownKeys = []string{
 	"steps", "usd", "duration", "sql",
 	"goals", "goal", "slow_ms",
 	"migration_rehearsal", "query_regression", "plan_diff", "regression_factor",
-	"regression_min_ms", "large_table_rows",
+	"regression_min_ms", "large_table_rows", "rolling_compatibility", "when", "against",
 	"source", "source_config", "scale", "safe_routes", "unsafe_routes", "thresholds",
 	"p95_increase", "error_rate", "query_count_increase",
 	"migration_lock", "warn_ms", "fail_ms", "migration_failed", "migration_rewrite",

@@ -57,8 +57,10 @@ const (
 	// advertised since before it could enforce it: past that, a lock on a busy
 	// table is an outage rather than a pause. Half a second is the point at
 	// which it is worth a line in the comment.
-	DefaultLockWarnMS = 500
-	DefaultLockFailMS = 2000
+	DefaultLockWarnMS  = 500
+	DefaultLockFailMS  = 2000
+	DefaultRollingWhen = "risky"
+	DefaultRollingRef  = "merge-base"
 	// DefaultPersonaDomain is reserved by RFC 6761 and can never receive mail,
 	// so a persona address cannot become a real one by accident.
 	DefaultPersonaDomain = "example.test"
@@ -300,6 +302,18 @@ func normalizeInsights(m *schema.Manifest) {
 	}
 	if i.LargeTableRows == 0 {
 		i.LargeTableRows = DefaultLargeTable
+	}
+	// Filled in rather than left nil, so that `af explain` can print which
+	// commit this repository's rolling check would compare against. A block
+	// nobody can see the effective value of is a block people set twice.
+	if i.RollingCompatibility == nil {
+		i.RollingCompatibility = &schema.RollingCompatibility{}
+	}
+	if i.RollingCompatibility.When == "" {
+		i.RollingCompatibility.When = DefaultRollingWhen
+	}
+	if i.RollingCompatibility.Against == "" {
+		i.RollingCompatibility.Against = DefaultRollingRef
 	}
 }
 
