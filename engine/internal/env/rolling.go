@@ -667,7 +667,10 @@ func (o *Orchestrator) previousCommit(against string) (ref, how string, err erro
 			return "", "", fmt.Errorf("the revision %q named by "+
 				"insights.rolling_compatibility.against does not resolve here: %w", against, err)
 		}
-		how = "the revision " + against + " named in the manifest"
+		// Not "named in the manifest": --against lands here too, and a report
+		// that names the wrong source is a report somebody edits the wrong
+		// file to change.
+		how = "the revision this run was pointed at, " + against
 	}
 
 	if ref == head {
