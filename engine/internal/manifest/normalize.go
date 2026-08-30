@@ -36,6 +36,20 @@ const (
 	DefaultRegressionFac = 1.5
 	DefaultRegressionMS  = 5
 	DefaultLargeTable    = 100000
+	// DefaultOracleFailOn is the lowest severity that fails af oracle.
+	//
+	// critical rather than any difference. A pull request exists to change
+	// behaviour, so failing on any difference at all would fail every branch
+	// and teach everybody to pass the flag that turns it off. critical is the
+	// short list of differences that are a regression unless somebody can say
+	// why they are not: a request the baseline served and the candidate did
+	// not, a status that fell into an error class, and a row the baseline
+	// wrote and the candidate did not.
+	DefaultOracleFailOn = "critical"
+	// DefaultOracleMaxRows is how many rows a table may hold and still have
+	// its contents compared. It matches oracle.DefaultMaxRowsPerTable, and the
+	// two are checked against each other by a test rather than by a comment.
+	DefaultOracleMaxRows = 10000
 	// DefaultPersonaDomain is reserved by RFC 6761 and can never receive mail,
 	// so a persona address cannot become a real one by accident.
 	DefaultPersonaDomain = "example.test"
@@ -73,6 +87,7 @@ func normalize(m *schema.Manifest, root string) {
 	normalizeAuth(m)
 	normalizeWorkflows(m)
 	normalizeInsights(m)
+	normalizeOracle(m)
 	normalizeLoad(m)
 	normalizeRuntime(m)
 	normalizeGitHub(m)
@@ -274,6 +289,67 @@ func normalizeInsights(m *schema.Manifest) {
 	}
 	if i.LargeTableRows == 0 {
 		i.LargeTableRows = DefaultLargeTable
+	}
+}
+
+// normalizeOracle fills the defaults, and only when the block is present.
+//
+// Every other normaliser in this file creates its block when it is missing,
+// because every other subsystem runs whether or not the manifest mentions it.
+// The oracle does not: it doubles the environments a run costs and it needs a
+// probe plan somebody wrote. So an absent block stays absent, which is what
+// lets `af oracle` tell "not configured" from "configured and turned off" and
+// say something different about each.
+func normalizeOracle(m *schema.Manifest) {
+	o := m.Oracle
+	if o == nil {
+		return
+	}
+	setTrue(&o.Enabled)
+	if o.Baseline == "" {
+		o.Baseline = schema.BaselineMergeBase
+	}
+	if o.FailOn == "" {
+		o.FailOn = DefaultOracleFailOn
+	}
+	o.FailOn = strings.ToLower(strings.TrimSpace(o.FailOn))
+
+	for i := range o.Probes {
+		p := &o.Probes[i]
+		p.Name = strings.TrimSpace(p.Name)
+		p.Method = strings.ToUpper(strings.TrimSpace(p.Method))
+		if p.Method == "" {
+			p.Method = "GET"
+		}
+		p.Path = strings.TrimSpace(p.Path)
+		if p.Path != "" && !strings.HasPrefix(p.Path, "/") {
+			p.Path = "/" + p.Path
+		}
+	}
+
+	if o.Ignore == nil {
+		o.Ignore = &schema.OracleIgnore{}
+	}
+	for i, h := range o.Ignore.Headers {
+		// Lowercased here so the comparison never has to case fold, which is
+		// the same reason egress hosts are lowercased above.
+		o.Ignore.Headers[i] = strings.ToLower(strings.TrimSpace(h))
+	}
+	for i, f := range o.Ignore.Fields {
+		o.Ignore.Fields[i] = strings.TrimSpace(f)
+	}
+	if o.Database == nil {
+		o.Database = &schema.OracleDatabase{}
+	}
+	setTrue(&o.Database.Enabled)
+	if o.Database.MaxRows == 0 {
+		o.Database.MaxRows = DefaultOracleMaxRows
+	}
+	for i, t := range o.Database.Tables {
+		o.Database.Tables[i] = strings.TrimSpace(t)
+	}
+	for i, t := range o.Database.Exclude {
+		o.Database.Exclude[i] = strings.TrimSpace(t)
 	}
 }
 

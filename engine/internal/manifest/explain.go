@@ -180,6 +180,31 @@ func Explain(m *schema.Manifest) string {
 	fmt.Fprintf(&b, "  forks        %s\n", forkWord(m.GitHub.ForkPolicy))
 	fmt.Fprintf(&b, "  teardown on  %s\n", strings.Join(m.GitHub.TeardownOn, ", "))
 
+	// Printed only when the block is there, because the oracle is the one
+	// subsystem that does not run unless a manifest asks for it. A section
+	// saying "off" on every manifest in the world would be noise in the one
+	// command whose job is to show what is actually in force.
+	if o := m.Oracle; o != nil {
+		b.WriteString("\nOracle\n")
+		fmt.Fprintf(&b, "  comparison   %s\n", enabledWord(deref(o.Enabled)))
+		fmt.Fprintf(&b, "  baseline     %s\n", baselineWord(o))
+		fmt.Fprintf(&b, "  fails on     %s\n", o.FailOn)
+		fmt.Fprintf(&b, "  requests     %d %s\n", len(o.Probes), plural("probe", len(o.Probes)))
+		for _, p := range o.Probes {
+			fmt.Fprintf(&b, "    %-20s %s %s\n", p.Name, p.Method, p.Path)
+		}
+		fmt.Fprintf(&b, "  database     %s, up to %d rows a table\n",
+			enabledWord(deref(o.Database.Enabled)), o.Database.MaxRows)
+		fmt.Fprintf(&b, "  timestamps   %s\n", normalisedWord(o.CompareTimestamps))
+		fmt.Fprintf(&b, "  identifiers  %s\n", normalisedWord(o.CompareUUIDs))
+		if len(o.Ignore.Headers) > 0 {
+			fmt.Fprintf(&b, "  also ignores %s\n", strings.Join(o.Ignore.Headers, ", "))
+		}
+		if len(o.Ignore.Fields) > 0 {
+			fmt.Fprintf(&b, "  ignores      %s\n", strings.Join(o.Ignore.Fields, ", "))
+		}
+	}
+
 	if m.Load.Enabled {
 		b.WriteString("\nLoad\n")
 		fmt.Fprintf(&b, "  source       %s at %.0f%% of production rate for %s\n",
@@ -270,4 +295,24 @@ func Hosts(m *schema.Manifest) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// baselineWord says which revision the oracle compares against, in words.
+func baselineWord(o *schema.Oracle) string {
+	ref := o.BaseRef
+	if ref == "" {
+		ref = "origin/HEAD, or main, or master"
+	}
+	if o.Baseline == schema.BaselineRef {
+		return "the ref " + ref
+	}
+	return "the merge base with " + ref
+}
+
+// normalisedWord reports whether a class of value is compared or absorbed.
+func normalisedWord(compared bool) string {
+	if compared {
+		return "compared exactly"
+	}
+	return "two well formed values are equal"
 }

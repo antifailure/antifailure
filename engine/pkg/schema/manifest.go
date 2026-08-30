@@ -24,6 +24,7 @@ type Manifest struct {
 	Workflows  []Workflow  `json:"workflows,omitempty" yaml:"workflows,omitempty"`
 	Invariants []Invariant `json:"invariants,omitempty" yaml:"invariants,omitempty"`
 	Insights   *Insights   `json:"insights,omitempty" yaml:"insights,omitempty"`
+	Oracle     *Oracle     `json:"oracle,omitempty" yaml:"oracle,omitempty"`
 	Load       *Load       `json:"load,omitempty" yaml:"load,omitempty"`
 	Runtime    *Runtime    `json:"runtime,omitempty" yaml:"runtime,omitempty"`
 	GitHub     *GitHub     `json:"github,omitempty" yaml:"github,omitempty"`
@@ -359,6 +360,69 @@ type Insights struct {
 	RegressionFactor   float64 `json:"regression_factor,omitempty" yaml:"regression_factor,omitempty"`
 	RegressionMinMS    float64 `json:"regression_min_ms,omitempty" yaml:"regression_min_ms,omitempty"`
 	LargeTableRows     int     `json:"large_table_rows,omitempty" yaml:"large_table_rows,omitempty"`
+}
+
+// BaselineSource names how the version to compare against is chosen.
+//
+// The two answer different questions and a project has to say which it wants.
+// The merge base answers "what does this branch change", and it does not move
+// when somebody else lands a commit on main halfway through a review. An
+// explicit ref answers "what changes when this ships", which is what a release
+// gate wants and what a tag names. There is no third value for "the revision
+// currently deployed", because the engine has no way to know what that is: a
+// deployment pipeline does, and it passes the commit as base_ref.
+type BaselineSource string
+
+const (
+	// BaselineMergeBase is the commit this branch and the base branch share.
+	BaselineMergeBase BaselineSource = "merge_base"
+	// BaselineRef is a git ref named outright: a branch, a tag, or a commit.
+	BaselineRef BaselineSource = "ref"
+)
+
+// Oracle configures the differential comparison of two versions.
+type Oracle struct {
+	Enabled           *bool           `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Baseline          BaselineSource  `json:"baseline,omitempty" yaml:"baseline,omitempty"`
+	BaseRef           string          `json:"base_ref,omitempty" yaml:"base_ref,omitempty"`
+	FailOn            string          `json:"fail_on,omitempty" yaml:"fail_on,omitempty"`
+	Probes            []Probe         `json:"probes,omitempty" yaml:"probes,omitempty"`
+	CompareTimestamps bool            `json:"compare_timestamps,omitempty" yaml:"compare_timestamps,omitempty"`
+	CompareUUIDs      bool            `json:"compare_uuids,omitempty" yaml:"compare_uuids,omitempty"`
+	Ignore            *OracleIgnore   `json:"ignore,omitempty" yaml:"ignore,omitempty"`
+	Database          *OracleDatabase `json:"database,omitempty" yaml:"database,omitempty"`
+}
+
+// Probe is one request sent to both versions.
+//
+// Written down rather than discovered, because both sides have to receive the
+// same bytes in the same order. The agents that drive a workflow decide their
+// next step from what is on the screen, so two runs of one workflow send two
+// different request sequences, and a diff of those compares the agent with
+// itself.
+type Probe struct {
+	Name    string            `json:"name" yaml:"name"`
+	Method  string            `json:"method,omitempty" yaml:"method,omitempty"`
+	Path    string            `json:"path" yaml:"path"`
+	Headers map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
+	Body    string            `json:"body,omitempty" yaml:"body,omitempty"`
+}
+
+// OracleIgnore is what the comparison is told not to look at.
+//
+// Everything named here is printed in the report along with the defaults, so a
+// reader can see what was skipped rather than wondering.
+type OracleIgnore struct {
+	Headers []string `json:"headers,omitempty" yaml:"headers,omitempty"`
+	Fields  []string `json:"fields,omitempty" yaml:"fields,omitempty"`
+}
+
+// OracleDatabase configures the comparison of the two branches' contents.
+type OracleDatabase struct {
+	Enabled *bool    `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Tables  []string `json:"tables,omitempty" yaml:"tables,omitempty"`
+	Exclude []string `json:"exclude,omitempty" yaml:"exclude,omitempty"`
+	MaxRows int      `json:"max_rows,omitempty" yaml:"max_rows,omitempty"`
 }
 
 // LoadSource names where the endpoint mix comes from.

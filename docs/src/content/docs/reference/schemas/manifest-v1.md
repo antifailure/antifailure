@@ -21,6 +21,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
 | `load` | [Load](#load) | no | Traffic shaped like production, compared between the base branch and this one. |
 | `name` | string | no | A short name for this application, used in environment hostnames and in the control plane. Defaults to the repository directory name. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
+| `oracle` | [Oracle](#oracle) | no | Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database. |
 | `personas` | list of [Persona](#persona) | no | The accounts agents log in as. Each is created or reconciled in the golden by the authentication adapter, so a persona is a real user of the application rather than a bypass. Max items 50. |
 | `runtime` | [Runtime](#runtime) | no | Where and how long the environment runs. |
 | `services` | list of [Service](#service) | no | Every process the environment runs: web servers, API servers, background workers, and scheduled jobs. Min items 1, max items 50. |
@@ -192,6 +193,42 @@ Traffic shaped like production, compared between the base branch and this one. R
 | `thresholds` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
 | `unsafe_routes` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
 
+## Oracle
+
+Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `base_ref` | string | no | The git ref the baseline comes from, or the ref the merge base is taken against. Empty tries origin/HEAD, then origin/main, then origin/master, and says which it used. Max length 256. |
+| `baseline` | `merge_base`, `ref` | no | How the version to compare against is chosen. merge_base answers what this branch changes; ref answers what changes when it ships. Defaults to `merge_base`. |
+| `compare_timestamps` | boolean | no | Compare timestamp strings exactly instead of treating two well formed timestamps as equal. Turn it on when timestamps come from the data rather than from the clock. Defaults to `false`. |
+| `compare_uuids` | boolean | no | Compare UUIDs exactly instead of treating two well formed UUIDs as equal. Turn it on when identifiers are stored rather than generated per request. Defaults to `false`. |
+| `database` | [Oracle database](#oracle-database) | no | The comparison of the two branches' contents. |
+| `enabled` | boolean | no | Whether the comparison runs. Present but false is how a project keeps its probe plan and turns the check off for a while. Defaults to `true`. |
+| `fail_on` | `none`, `minor`, `major`, `critical` | no | The lowest severity that fails the command. critical is a request the baseline served and the candidate did not, a status that fell into an error class, or a row the baseline wrote and the candidate did not. Defaults to `critical`. |
+| `ignore` | [Oracle ignore](#oracle-ignore) | no | What the comparison is told not to look at. |
+| `probes` | list of [Probe](#probe) | no | The requests sent to both versions, in order, byte for byte the same on each side. Max items 200. |
+
+## Oracle database
+
+The comparison of the two branches' contents.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | no | Defaults to `true`. |
+| `exclude` | list of string | no | Tables to leave out, applied after tables. Max items 500. |
+| `max_rows` | integer | no | How many rows a table may hold and still be compared. A table over the bound is reported as not compared, never silently skipped. Defaults to `10000`. Minimum 1, maximum 1e+06. |
+| `tables` | list of string | no | Tables to compare. Empty compares every table. A pattern is schema.table, and either half may be an asterisk. Max items 500. |
+
+## Oracle ignore
+
+What the comparison is told not to look at. Everything here is printed in the report along with the defaults, because an oracle that silently ignores a field is worse than one that reports it.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `fields` | list of string | no | JSON paths to skip, in a response body and in a table row alike. $.token, $.orders[*].placed_at and $..created_at are all accepted. Max items 200. |
+| `headers` | list of string | no | Response headers to skip, in addition to the defaults. Max items 100. |
+
 ## password rules
 
 The application's password policy, so the generated password satisfies it. Without this, an application stricter than the generator refuses a correct password at sign in and the run reports a login failure that looks like the application's fault.
@@ -215,6 +252,18 @@ One account an agent logs in as. Personas are created or reconciled in the golde
 | `name` | string | **yes** | Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `phone` | string | no | Number an SMS code is sent to. Defaults to a number in the +1 555 0100 block, which is reserved for fictional use and can never reach a real handset. Only sms_code uses it. Max length 32. |
 | `role` | string | no | Application role to provision, for example admin or member. Interpreted by the authentication adapter. Max length 64. |
+
+## Probe
+
+One request sent to both versions.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `body` | string | no | The request body, sent byte for byte to both sides. Max length 65536. |
+| `headers` | object | no | Headers sent on both sides. Credentials come from the secrets subsystem, never from here. Max properties 20. |
+| `method` | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` | no | Defaults to `GET`. |
+| `name` | string | **yes** | Identifies the request in the report. Min length 1, max length 64, matches `^[a-z0-9][a-z0-9-]*$`. |
+| `path` | string | **yes** | The path and query, starting with a slash. Min length 1, max length 2048. |
 
 ## Resources
 

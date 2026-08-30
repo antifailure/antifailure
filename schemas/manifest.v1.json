@@ -67,6 +67,9 @@
     "insights": {
       "$ref": "#/$defs/insights"
     },
+    "oracle": {
+      "$ref": "#/$defs/oracle"
+    },
     "load": {
       "$ref": "#/$defs/load"
     },
@@ -783,6 +786,183 @@
           "minimum": 0,
           "default": 100000,
           "description": "Row count above which a migration lint treats a table as large, where a rewrite or an exclusive lock is an outage rather than a pause."
+        }
+      }
+    },
+    "oracle": {
+      "title": "Oracle",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the comparison runs. Present but false is how a project keeps its probe plan and turns the check off for a while."
+        },
+        "baseline": {
+          "type": "string",
+          "enum": [
+            "merge_base",
+            "ref"
+          ],
+          "default": "merge_base",
+          "description": "How the version to compare against is chosen. merge_base answers what this branch changes; ref answers what changes when it ships."
+        },
+        "base_ref": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "The git ref the baseline comes from, or the ref the merge base is taken against. Empty tries origin/HEAD, then origin/main, then origin/master, and says which it used."
+        },
+        "fail_on": {
+          "type": "string",
+          "enum": [
+            "none",
+            "minor",
+            "major",
+            "critical"
+          ],
+          "default": "critical",
+          "description": "The lowest severity that fails the command. critical is a request the baseline served and the candidate did not, a status that fell into an error class, or a row the baseline wrote and the candidate did not."
+        },
+        "probes": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/probe"
+          },
+          "description": "The requests sent to both versions, in order, byte for byte the same on each side."
+        },
+        "compare_timestamps": {
+          "type": "boolean",
+          "default": false,
+          "description": "Compare timestamp strings exactly instead of treating two well formed timestamps as equal. Turn it on when timestamps come from the data rather than from the clock."
+        },
+        "compare_uuids": {
+          "type": "boolean",
+          "default": false,
+          "description": "Compare UUIDs exactly instead of treating two well formed UUIDs as equal. Turn it on when identifiers are stored rather than generated per request."
+        },
+        "ignore": {
+          "$ref": "#/$defs/oracleIgnore"
+        },
+        "database": {
+          "$ref": "#/$defs/oracleDatabase"
+        }
+      }
+    },
+    "probe": {
+      "title": "Probe",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path"
+      ],
+      "description": "One request sent to both versions.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Identifies the request in the report."
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "HEAD",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS"
+          ],
+          "default": "GET"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "description": "The path and query, starting with a slash."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "maxProperties": 20,
+          "description": "Headers sent on both sides. Credentials come from the secrets subsystem, never from here."
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 65536,
+          "description": "The request body, sent byte for byte to both sides."
+        }
+      }
+    },
+    "oracleIgnore": {
+      "title": "Oracle ignore",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the comparison is told not to look at. Everything here is printed in the report along with the defaults, because an oracle that silently ignores a field is worse than one that reports it.",
+      "properties": {
+        "headers": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "description": "Response headers to skip, in addition to the defaults."
+        },
+        "fields": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": "JSON paths to skip, in a response body and in a table row alike. $.token, $.orders[*].placed_at and $..created_at are all accepted."
+        }
+      }
+    },
+    "oracleDatabase": {
+      "title": "Oracle database",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The comparison of the two branches' contents.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "tables": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "description": "Tables to compare. Empty compares every table. A pattern is schema.table, and either half may be an asterisk."
+        },
+        "exclude": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "description": "Tables to leave out, applied after tables."
+        },
+        "max_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000,
+          "default": 10000,
+          "description": "How many rows a table may hold and still be compared. A table over the bound is reported as not compared, never silently skipped."
         }
       }
     },

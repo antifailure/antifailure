@@ -554,6 +554,128 @@ The webhook could not be delivered to {service}: {detail}
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/webhooks](/docs/guides/webhooks/) |
 
+## Differential oracle
+
+### AF-ORC-001
+
+The manifest declares no oracle block, so there is nothing to compare.
+
+**What to do.** Add an oracle block with at least one probe; the manifest reference has the shape.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-002
+
+The oracle is on and declares no requests to send.
+
+**What to do.** Add at least one entry under oracle.probes. Both versions have to receive the same requests in the same order, so the plan is written down rather than discovered.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-003
+
+The baseline revision could not be resolved: {detail}
+
+**What to do.** Set oracle.base_ref to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-004
+
+The baseline and the candidate are both {commit}, so there is nothing to compare.
+
+**What to do.** Commit the change, or point oracle.base_ref at the revision you meant to compare against.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-005
+
+The baseline revision {commit} could not be checked out: {detail}
+
+**What to do.** Check that the commit is present in this clone; a shallow clone often is not deep enough to reach it.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-006
+
+There is no web service to send requests to in the {side} environment.
+
+**What to do.** Declare a service of kind web in the manifest; the oracle compares HTTP responses and needs somewhere to send them.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-007
+
+The baseline environment did not come up: {detail}
+
+**What to do.** Bring the baseline revision up on its own with 'af up' from a checkout of it to see the build or migration failure in full.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-008
+
+The {side} branch could not be read for comparison: {detail}
+
+**What to do.** Check the branch is reachable, or turn the contents comparison off with oracle.database.enabled: false to compare responses alone.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-009
+
+The golden version {version} the comparison pinned is no longer present or no longer verified.
+
+**What to do.** Run the comparison again; both sides branch one golden and the one the candidate used has gone.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-010
+
+The candidate behaves differently from the baseline: {detail}
+
+**What to do.** Read the differences above. Each one is either the change you meant to make or a regression; raise oracle.fail_on if this class of difference is expected.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
 ## Runtime
 
 ### AF-RUN-001
