@@ -195,6 +195,32 @@ one is a real technique from the list, not a gap in the work.
 - **`Last-Modified` response headers** (GEO 91). Set by the host, not by the
   build.
 
+## The one thing to carry across when #42 lands
+
+PR #42 (www/ui-pass) and this work touch seven of the same files:
+
+    www/app/solutions/[slug]/page.tsx
+    www/components/pages/company/Pricing.tsx
+    www/components/pages/product/Migrations.tsx
+    www/components/pages/product/Report.tsx
+    www/components/pages/solutions/Hub.tsx
+    www/components/pages/solutions/Vertical.tsx
+    www/next.config.ts
+
+Six are ordinary conflicts. The one that needs attention is `Vertical.tsx`:
+#42 splits it into per-slug files, and this work added a `path=` prop to each
+of its nine `<PageHero>` calls. That single prop is what produces the visible
+breadcrumb trail, the WebPage node and the BreadcrumbList node, so a refactor
+that drops it silently removes structured data from nine solution pages.
+
+Carry `path="/solutions/<slug>"` into each new per-slug file.
+
+If it is missed, `npm run check:seo` fails on "every indexable page has
+JSON-LD" and names the files. That is the point of the check, and it runs in
+`deploy.yml` before publishing, so the failure is loud and lands before
+anything ships. It is still cheaper to carry the prop across than to debug it
+afterwards.
+
 ## Known issues found along the way, outside this scope
 
 - `www/auth.ts` was deleted. It imported `next-auth`, which was not in
