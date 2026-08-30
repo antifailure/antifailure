@@ -8,7 +8,7 @@ import { Container } from "./Container";
 import { Logo } from "./Logo";
 import { cn } from "@/lib/cn";
 import { FOOTER_MENUS, GITHUB_URL, HEADER_MENUS } from "@/lib/nav";
-import { HeaderMini, ProductMiniStyles } from "@/components/home/visuals/headerMinis";
+import { MenuCardArt, ProductMiniStyles } from "@/components/home/visuals/headerMinis";
 import { Chevron, DiscordIcon, GitHubIcon } from "../icons";
 
 function HeaderLink({
@@ -250,67 +250,58 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                 )}
               >
                 {sections.length > 0 && (
-                  <Container
-                    className="flex w-full items-start justify-between gap-x-12 overflow-visible pt-8 pb-10 xl:gap-x-8"
-                    size="1920"
-                  >
-                    <ul className="flex flex-1 gap-x-[128px] pl-[195px] xl:gap-x-14 xl:pl-[143px] max-xl:pl-0">
-                      {sections.map((section) => (
-                        <li key={section.title} className={cn(menu.text === "Product" ? "w-[320px] min-w-[280px]" : "min-w-[220px]")}>
-                          <span className="mb-6 block text-[10px] font-medium uppercase leading-none tracking-snug text-gray-new-50">
-                            {section.title}
-                          </span>
-                          <ul className={cn("flex flex-col", menu.text === "Product" ? "gap-y-3" : "gap-y-3.5")}>
-                            {section.items.map((item) => {
-                              const withMini = menu.text === "Product";
-                              return (
-                              <li key={item.href}>
-                                <HeaderLink
-                                  href={item.href}
-                                  className={cn(
-                                    "main-navigation-submenu-link group block text-[15px] leading-none tracking-extra-tight text-black transition-colors duration-200",
-                                    withMini
-                                      ? "flex w-full items-center gap-3.5 rounded-[4px] py-0.5 pr-3 hover:bg-black/[0.03]"
-                                      : "hover:text-black/60",
-                                  )}
-                                  onClick={closeNow}
-                                >
-                                  {withMini ? <HeaderMini title={item.title} /> : null}
-                                  <span className="min-w-0">
-                                    {item.title}
-                                    <span className="mt-1.5 block text-[13px] leading-snug text-gray-new-50">
+                  <Container className="overflow-visible pt-8 pb-10" size="1920">
+                    <div className="flex items-start gap-x-20 pl-[195px] xl:gap-x-16 xl:pl-[143px] max-xl:pl-0">
+                      <ul className="flex shrink-0 gap-x-16">
+                        {sections.map((section) => (
+                          <li key={section.title} className="w-[240px]">
+                            <span className="mb-6 block text-[11px] font-medium uppercase leading-none tracking-[0.1em] text-black/40">
+                              {section.title}
+                            </span>
+                            <ul className="flex flex-col gap-y-6">
+                              {section.items.map((item) => (
+                                <li key={item.href}>
+                                  <HeaderLink href={item.href} className="group block" onClick={closeNow}>
+                                    <span className="block text-[16px] font-medium leading-none tracking-tight text-black transition-colors duration-200 group-hover:text-black/55">
+                                      {item.title}
+                                    </span>
+                                    <span className="mt-1.5 block text-[13.5px] leading-snug tracking-tight text-black/45">
                                       {item.description}
                                     </span>
+                                  </HeaderLink>
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                      </ul>
+                      {menu.featured?.length ? (
+                        <div className="w-[540px] max-w-full shrink-0">
+                          <div className="flex flex-col gap-3">
+                            {menu.featured.map((card) => (
+                              <Link
+                                key={card.href}
+                                href={card.href}
+                                onClick={closeNow}
+                                className="flex h-[128px] items-center justify-between gap-6 rounded-[14px] border border-black/[0.1] bg-[#f6f6f4] py-4 pr-4 pl-6 transition-colors duration-200 hover:bg-[#E4F1EB]"
+                              >
+                                <span className="min-w-0 max-w-[260px]">
+                                  <span className="block text-[16px] font-medium leading-snug tracking-tight text-black">
+                                    {card.title}
                                   </span>
-                                </HeaderLink>
-                              </li>
-                              );
-                            })}
-                          </ul>
-                        </li>
-                      ))}
-                    </ul>
-                    {menu.featured ? (
-                      <Link
-                        href={menu.featured.href}
-                        onClick={closeNow}
-                        className="mr-8 w-[280px] shrink-0 rounded-[10px] bg-[#E4F1EB] p-6 transition-colors hover:bg-[#d7ebe3] max-xl:mr-0"
-                      >
-                        <span className="mb-3 block text-[10px] font-medium uppercase leading-none tracking-snug text-black/45">
-                          Featured
-                        </span>
-                        <span className="block text-[18px] leading-snug tracking-extra-tight text-black">
-                          {menu.featured.title}
-                        </span>
-                        <span className="mt-2 block text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
-                          {menu.featured.description}
-                        </span>
-                        <span className="mt-5 inline-flex items-center gap-1 text-[13px] font-medium tracking-extra-tight text-black">
-                          {menu.featured.cta}
-                          <span aria-hidden>→</span>
-                        </span>
-                      </Link>
-                    ) : null}
+                                  <span className="mt-1.5 block text-[13.5px] leading-5 tracking-tight text-black/45">
+                                    {card.description}
+                                  </span>
+                                </span>
+                                {card.visual === "twin" || card.visual === "fleet" ? (
+                                  <MenuCardArt kind={card.visual} />
+                                ) : null}
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                   </Container>
                 )}
               </div>
@@ -370,15 +361,19 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                           </div>
                         </div>
                       ))}
-                      {menu.featured ? (
-                        <Link
-                          href={menu.featured.href}
-                          onClick={closeNow}
-                          className="rounded-[10px] bg-[#E4F1EB] p-4 text-[15px] tracking-extra-tight"
-                        >
-                          {menu.featured.title}
-                        </Link>
-                      ) : null}
+                      {menu.featured?.length
+                        ? menu.featured.map((card) => (
+                            <Link
+                              key={card.href}
+                              href={card.href}
+                              onClick={closeNow}
+                              className="rounded-[12px] border border-black/[0.08] bg-[#f7f7f5] p-4 text-[15px] tracking-tight"
+                            >
+                              {card.title}
+                              <span className="mt-1 block text-[13px] text-gray-new-50">{card.description}</span>
+                            </Link>
+                          ))
+                        : null}
                     </div>
                   ) : null}
                 </div>

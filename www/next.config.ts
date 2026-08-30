@@ -12,8 +12,10 @@ const nextConfig: NextConfig = {
 
   // Local only. Production does not use this: deploy.yml builds the Starlight
   // site separately and assemble.sh places it at /docs. `next dev` has no such
-  // step, so without a proxy the Docs link 404s. Omitted from the export build
-  // because `output: "export"` refuses rewrites.
+  // step, so without a proxy the Docs link 404s.
+  //
+  // `output: "export"` refuses rewrites, including in `next dev`, so the
+  // static export is production-only. The deploy still publishes `www/out`.
   ...(isDev
     ? {
         async rewrites() {
@@ -23,18 +25,8 @@ const nextConfig: NextConfig = {
           ];
         },
       }
-    : {}),
+    : { output: "export" }),
 
-  // The site is served as static files by Azure Static Web Apps, alongside the
-  // documentation build at /docs and the installer at /install.sh. Nothing on
-  // the marketing site needs a server: the one dynamic thing it does, the
-  // waitlist, is a managed function under /api.
-  //
-  // This is load bearing rather than a preference. deploy.yml publishes
-  // `www/out`, and without `output: "export"` there is no `out` to publish, so
-  // dropping this line does not fail the build that produces it. It fails the
-  // deploy, later, somewhere else.
-  output: "export",
   trailingSlash: false,
   images: {
     // A static export has no server to run the optimiser on, and five

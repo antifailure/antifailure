@@ -256,7 +256,7 @@ export const DESIGN_PARTNERS_PAGE: MarketingContent = {
     { title: "Deterministic reproduce", body: "The finding can be replayed. Containment holds. Cleanup completes." },
   ],
   related: [
-    { href: "/solutions/migrations", title: "Schema migrations", description: "The intended first pilot." },
+    { href: "/product/migrations", title: "Migration Safety", description: "The intended first pilot." },
     { href: "/pricing", title: "Pricing", description: "What paid use looks like after the pilot." },
     { href: "/signup", title: "Sign up", description: "Join the waitlist." },
   ],

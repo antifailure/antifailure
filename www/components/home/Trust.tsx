@@ -19,7 +19,7 @@ export function Trust() {
   return (
     <section
       id="trust"
-      className="relative overflow-hidden bg-[#E4F1EB] pt-40 pb-[168px] text-black safe-paddings max-xl:py-[136px] max-lg:py-[88px] max-md:py-14"
+      className="relative overflow-hidden bg-[#cadcc4] pt-40 pb-[168px] text-black safe-paddings max-xl:py-[136px] max-lg:py-[88px] max-md:py-14"
     >
       <Container className="z-10" size="1344">
         <div className="relative z-10 flex gap-16 max-xl:flex-col max-xl:gap-10">

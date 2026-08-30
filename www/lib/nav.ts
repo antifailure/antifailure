@@ -4,13 +4,14 @@ export type FeaturedCard = {
   title: string;
   description: string;
   href: string;
-  cta: string;
+  cta?: string;
+  visual?: string;
 };
 export type HeaderMenu = {
   text: string;
   href?: string;
   sections?: NavSection[];
-  featured?: FeaturedCard;
+  featured?: FeaturedCard[];
 };
 
 export const HEADER_MENUS: HeaderMenu[] = [
@@ -83,13 +84,20 @@ export const HEADER_MENUS: HeaderMenu[] = [
         ],
       },
     ],
-    featured: {
-      title: "The migration wedge",
-      description:
-        "The first complete stack is Postgres schema safety — exclusive locks, plan regressions, and rollback that is no longer safe.",
-      href: "/product/migrations",
-      cta: "See migration safety",
-    },
+    featured: [
+      {
+        title: "The migration wedge",
+        description: "Exclusive locks, plan regressions, and rollback that is no longer safe.",
+        href: "/product/migrations",
+        visual: "fleet",
+      },
+      {
+        title: "Pass, warning, or block",
+        description: "An evidence-backed gate on the pull request, not a preview URL alone.",
+        href: "/product/report",
+        visual: "twin",
+      },
+    ],
   },
   {
     text: "Solutions",
@@ -108,11 +116,6 @@ export const HEADER_MENUS: HeaderMenu[] = [
             description: "Billing and ledger-safe twins",
           },
           {
-            title: "E-commerce",
-            href: "/solutions/ecommerce",
-            description: "Checkout under production-shaped load",
-          },
-          {
             title: "Marketplaces",
             href: "/solutions/marketplaces",
             description: "Queues, workers, dual-writes",
@@ -124,39 +127,21 @@ export const HEADER_MENUS: HeaderMenu[] = [
           },
         ],
       },
+    ],
+    featured: [
       {
-        title: "Jobs",
-        items: [
-          {
-            title: "Platform engineering",
-            href: "/solutions/platform",
-            description: "Ephemeral twins instead of shared staging",
-          },
-          {
-            title: "Schema migrations",
-            href: "/solutions/migrations",
-            description: "The failure mode staging never catches",
-          },
-          {
-            title: "Release gates",
-            href: "/solutions/release-gates",
-            description: "Evidence-backed pass, warning, or block",
-          },
-          {
-            title: "Workflow products",
-            href: "/solutions/workflow",
-            description: "Workers, schedules, and long-tail state",
-          },
-        ],
+        title: "Give us one nervous deploy",
+        description: "A real upcoming migration, not a generic demo.",
+        href: "/signup",
+        visual: "twin",
+      },
+      {
+        title: "The migration wedge",
+        description: "Exclusive locks, plan regressions, and rollback that is no longer safe.",
+        href: "/product/migrations",
+        visual: "fleet",
       },
     ],
-    featured: {
-      title: "Give us one nervous deploy",
-      description:
-        "The design-partner offer is a real upcoming migration, not a generic demo. We show what staging missed.",
-      href: "/signup",
-      cta: "Design-partner offer",
-    },
   },
   { text: "Docs", href: "/docs" },
   { text: "Pricing", href: "/pricing" },
@@ -195,7 +180,6 @@ export const FOOTER_MENUS = [
       { text: "Solutions", href: "/solutions" },
       { text: "B2B SaaS", href: "/solutions/saas" },
       { text: "Fintech", href: "/solutions/fintech" },
-      { text: "E-commerce", href: "/solutions/ecommerce" },
       { text: "Marketplaces", href: "/solutions/marketplaces" },
       { text: "Developer tools", href: "/solutions/devtools" },
       { text: "Sign up", href: "/signup" },
@@ -209,7 +193,6 @@ export const FOOTER_MENUS = [
       { text: "Manifest", href: "/docs/reference/manifest" },
       { text: "Error reference", href: "/docs/reference/errors" },
       { text: "Enterprise", href: "/docs/enterprise/licensing" },
-      { text: "Platform engineering", href: "/solutions/platform" },
     ],
   },
   {

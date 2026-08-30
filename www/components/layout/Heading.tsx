@@ -9,7 +9,7 @@ export function Heading({
 }: {
   title: string;
   theme?: "light" | "dark";
-  icon?: "migrations" | "twins" | "firewall" | "features";
+  icon?: "migrations" | "workload" | "twins" | "firewall" | "features";
   className?: string;
 }) {
   return (

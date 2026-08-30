@@ -1,14 +1,11 @@
 import { Button } from "@/components/layout/Button";
+import { Chevron } from "@/components/icons";
 import { cn } from "@/lib/cn";
 import {
-  Callout,
   PageHeading,
   PageHero,
   PageSection,
   PageShell,
-  Prose,
-  RelatedGrid,
-  SpecTable,
 } from "@/components/pages/kit";
 
 type PlanCta = {
@@ -167,34 +164,23 @@ export function PricingPage() {
           kicker="Value metrics"
           title="<strong>We meter what the twin actually does.</strong> Not how many exploratory users you named."
         />
-        <div className="mt-14">
-          <SpecTable rows={VALUE_METRICS} />
+        <div className="mt-14 max-w-[960px] pl-24 max-xl:pl-16 max-md:pl-0">
+          {VALUE_METRICS.map(([title, body]) => (
+            <details
+              key={title}
+              className="group border-b border-black/10 first:border-t"
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-6 py-5 text-[18px] tracking-extra-tight text-black [&::-webkit-details-marker]:hidden">
+                {title}
+                <Chevron className="h-2.5 w-2.5 shrink-0 text-black/40 transition-transform duration-200 group-open:rotate-180" />
+              </summary>
+              <p className="pb-5 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+                {body}
+              </p>
+            </details>
+          ))}
         </div>
       </PageSection>
-      <PageSection tone="sage">
-        <PageHeading title="<strong>Illustrative, not a quote.</strong> Customer-cloud execution exists to control margin and data exposure." />
-        <div className="mt-10 max-w-[720px]">
-          <Callout label="Hosted compute is not free">
-            Unlimited free hosted compute is not viable. Free usage has strict credits, or it
-            requires your own cloud and model credentials. Community stays useful because it runs
-            on infrastructure you already pay for.
-          </Callout>
-        </div>
-        <Prose className="mt-8">
-          <p>
-            Early Team and Growth figures are planning ranges from the August 2026 brief. Enterprise
-            depends on scale and governance scope. Nothing here is an offer, invoice, or committed
-            rate.
-          </p>
-        </Prose>
-      </PageSection>
-      <RelatedGrid
-        items={[
-          { href: "/docs", title: "Docs", description: "How a twin run works." },
-          { href: "/product", title: "Product", description: "The modules that make a decision." },
-          { href: "/signup", title: "Sign up", description: "Join the waitlist." },
-        ]}
-      />
     </PageShell>
   );
 }

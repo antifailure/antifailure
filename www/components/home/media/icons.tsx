@@ -4,7 +4,7 @@ export function HeadingIcon({
   name,
   className,
 }: {
-  name: "migrations" | "twins" | "firewall" | "features";
+  name: "migrations" | "workload" | "twins" | "firewall" | "features";
   className?: string;
 }) {
   const cls = cn("pointer-events-none size-14 max-xl:size-12 max-lg:size-10 max-md:size-9", className);
@@ -16,6 +16,18 @@ export function HeadingIcon({
         <path d="M14 34l8-10 7 6 9-14 4 6" stroke="#33bf00" strokeWidth="1.8" />
         <circle cx="14" cy="34" r="1.6" fill="#33bf00" />
         <circle cx="38" cy="16" r="1.6" fill="#33bf00" />
+      </svg>
+    );
+  }
+  if (name === "workload") {
+    return (
+      <svg viewBox="0 0 56 56" className={cls} fill="none" aria-hidden>
+        <path d="M10 18h36" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M10 28h36" stroke="#33bf00" strokeWidth="1.6" />
+        <path d="M10 38h36" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="18" cy="18" r="2.2" fill="currentColor" />
+        <circle cx="30" cy="28" r="2.2" fill="#33bf00" />
+        <circle cx="42" cy="38" r="2.2" fill="currentColor" />
       </svg>
     );
   }

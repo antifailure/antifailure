@@ -45,21 +45,34 @@ export default function NotFound() {
         </p>
 
         <ul className="mt-12 max-w-[46rem] border-t border-gray-new-90">
-          {ROUTES.map((r) => (
-            <li key={r.href} className="border-b border-gray-new-90">
-              <Link
-                href={r.href}
-                className="group grid grid-cols-[minmax(0,14rem)_minmax(0,1fr)] items-baseline gap-x-8 py-4 max-sm:grid-cols-1 max-sm:gap-y-1"
-              >
+          {ROUTES.map((r) => {
+            const docs = r.href === "/docs" || r.href.startsWith("/docs/");
+            const cls =
+              "group grid grid-cols-[minmax(0,14rem)_minmax(0,1fr)] items-baseline gap-x-8 py-4 max-sm:grid-cols-1 max-sm:gap-y-1";
+            const inner = (
+              <>
                 <span className="text-[15px] font-medium tracking-extra-tight text-black group-hover:underline group-hover:underline-offset-4">
                   {r.label}
                 </span>
                 <span className="text-[14px] leading-[1.5] tracking-extra-tight text-gray-new-40">
                   {r.note}
                 </span>
-              </Link>
-            </li>
-          ))}
+              </>
+            );
+            return (
+              <li key={r.href} className="border-b border-gray-new-90">
+                {docs ? (
+                  <a href={r.href} className={cls}>
+                    {inner}
+                  </a>
+                ) : (
+                  <Link href={r.href} className={cls}>
+                    {inner}
+                  </Link>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </Container>
     </SiteLayout>

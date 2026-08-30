@@ -422,7 +422,7 @@ assertions:
       { title: "Rollback", body: "Whether candidate writes make rolling rollback unsafe." },
     ],
     related: [
-      { href: "/solutions/migrations", title: "Schema migrations", description: "Why this is the starting wedge." },
+      { href: "/product/migrations", title: "Migration Safety", description: "Why this is the starting wedge." },
       { href: "/product/report", title: "Safety Report", description: "A 27-second lock is a block." },
       { href: "/docs/guides/invariants", title: "Invariants docs", description: "The subscriptions demo in full." },
     ],
@@ -493,7 +493,7 @@ the constraint in a later migration.`}</PagePre>
     related: [
       { href: "/product/oracle", title: "Differential Oracle", description: "Where comparisons are produced." },
       { href: "/product/fidelity", title: "Fidelity Graph", description: "What the twin actually reproduced." },
-      { href: "/solutions/release-gates", title: "Release gates", description: "Organization-wide ship policy." },
+      { href: "/product/report", title: "Safety Report", description: "Organization-wide ship policy." },
     ],
     body: (
       <>

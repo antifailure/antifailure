@@ -38,6 +38,14 @@ export function Button({
   );
 
   if (href) {
+    const docs = href === "/docs" || href.startsWith("/docs/");
+    if (docs) {
+      return (
+        <a href={href} className={cls}>
+          {children}
+        </a>
+      );
+    }
     return (
       <Link href={href} className={cls}>
         {children}

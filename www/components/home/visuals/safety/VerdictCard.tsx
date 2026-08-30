@@ -24,11 +24,11 @@ const MARK_SIZE = 24;
 
 type Level = "PASS" | "WARN" | "BLOCK" | "STEP";
 
-const TONE: Record<Level, { color: string; background: string }> = {
-  PASS: { color: "#285D49", background: "rgba(51,191,0,0.12)" },
-  WARN: { color: "#92400e", background: "rgba(217,119,6,0.12)" },
-  BLOCK: { color: "#b91c1c", background: "rgba(220,38,38,0.10)" },
-  STEP: { color: "#797d86", background: "transparent" },
+const TONE: Record<Level, { background: string }> = {
+  PASS: { background: "rgba(51,191,0,0.12)" },
+  WARN: { background: "rgba(217,119,6,0.12)" },
+  BLOCK: { background: "rgba(220,38,38,0.10)" },
+  STEP: { background: "transparent" },
 };
 
 const ROWS: { level: Level; time: string }[] = [
@@ -65,9 +65,8 @@ function LogRow({ level, time }: { level: Level; time: string }) {
       }}
     >
       <span
-        className="font-sans tracking-extra-tight"
+        className="font-sans tracking-extra-tight text-black"
         style={{
-          color: tone.color,
           background: tone.background,
           borderRadius: u(3),
           paddingLeft: u(2.5),
@@ -81,7 +80,7 @@ function LogRow({ level, time }: { level: Level; time: string }) {
         {level}
       </span>
       <span
-        className="font-sans tabular-nums tracking-extra-tight text-gray-new-50"
+        className="font-sans tabular-nums tracking-extra-tight text-black"
         style={{ fontSize: u(6.5), lineHeight: 1 }}
       >
         {time}
