@@ -42,8 +42,8 @@ const SHEETS: Record<
     lead: "A disposable production twin that proves whether a deployment is safe before it ships.",
     points: [
       "Category: pre-production deployment safety. Not AI QA, synthetic-user, staging, or load-testing.",
-      "Twin, safe state, side-effect firewall, workload (including exploratory users), comparison, judgment, evidence, cleanup.",
-      "Exploratory AI users live in Workload Studio, beside observed and deterministic traffic.",
+      "Twin, safe state, side-effect firewall, load, judgment, evidence, cleanup.",
+      "Agents drive the workflows the manifest declares, and return a verdict with a trace and a video.",
       "The promise is evidence, not a mathematical guarantee that production cannot fail.",
     ],
     cta: "migration",
@@ -55,7 +55,7 @@ const SHEETS: Record<
       "Default architecture: customer-hosted data plane. The control plane never sees raw production state.",
       "No default internet route. Mandatory egress gateway, clone-local DNS, fail-closed policies, attempted-effect ledger.",
       "Unknown outbound destinations, unresolved secrets, or missing isolation block the run.",
-      "Cleanup is a safety property: TTL, cost ceiling, independent destruction path, verifiable record.",
+      "Cleanup is a safety property: every resource journaled as it is made, replayed in reverse, counted afterwards.",
     ],
     cta: "waitlist",
   },
@@ -82,7 +82,7 @@ const SHEETS: Record<
     lead: "When the product ships, the customer-hosted agent, isolation policy, and cleanup proof are the contract surface.",
     points: [
       "A run that cannot contain side effects, resolve secrets, or prove cleanup should block rather than proceed.",
-      "Fidelity is disclosed. The platform does not claim a perfect clone of every cloud topology.",
+      "What a run could not measure is stated. The platform does not claim a perfect clone of every cloud topology.",
       "Design-partner work is a pilot on a real upcoming migration, not unlimited hosted compute.",
     ],
   },

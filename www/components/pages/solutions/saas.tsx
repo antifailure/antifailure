@@ -26,7 +26,7 @@ export function SaasPage() {
             items={[
               { value: "Daily", label: "or weekly production deploys. Staging cannot keep up with schema change." },
               { value: "N tenants", label: "Long-tail accounts and malformed historical seats that fixtures omit." },
-              { value: "Old + new", label: "Application instances still running while the new column lands." },
+              { value: "Rare rows", label: "The historical account whose shape no fixture has, and which the constraint fails on." },
             ]}
           />
         </div>
@@ -39,16 +39,16 @@ export function SaasPage() {
                 ["Restore", "Referential subset of orgs, seats, subscriptions, invoices"],
                 ["Mask", "Account identifiers replaced inside the customer boundary"],
                 ["Exercise", "Checkout, upgrades, and seat changes at production-shaped concurrency"],
-                ["Decide", "Pass, warning, or block on the pull request — then destroy the twin"],
+                ["Decide", "Pass or fail on the pull request, then destroy the twin"],
               ]}
             />
           }
         >
           <SectionHeading title="<strong>Staging differs in too many dimensions at once.</strong>" />
           <Lead>
-            A change can pass unit, integration, end-to-end, and a manual staging check, then still fail in
-            production. The twin reproduces tenant shape, concurrency, and schema coexistence — then reports
-            whether the deploy is safe.
+            A change can pass unit, integration, end-to-end, and a manual staging check, then still
+            fail in production. The twin reproduces tenant shape and production's route mix, then
+            reports whether the deploy is safe.
           </Lead>
         </Split>
         <div className={AFTER_HEADING}>
@@ -56,7 +56,7 @@ export function SaasPage() {
             items={[
               { title: "Tenant-shaped state", body: "Referential subsets of accounts, seats, and billing without production identities." },
               { title: "Checkout and upgrades", body: "Critical workflows under production-shaped concurrency." },
-              { title: "Schema coexistence", body: "Old application instances still running while the new column lands." },
+              { title: "Rehearsed migrations", body: "The pending migrations applied to a branch with production's row counts, before they reach it." },
             ]}
           />
         </div>

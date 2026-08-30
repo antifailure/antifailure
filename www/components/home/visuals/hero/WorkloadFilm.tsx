@@ -1,26 +1,19 @@
 "use client";
 
 import { span, useHeroFilmClock, type FilmProps } from "./clock";
-import { Avatar, Bar, Hairline, Label, Meta, Pill, easeInOut, moveStyle, smooth } from "./linear";
+import { Bar, Hairline, Label, Meta, Pill, easeInOut, moveStyle, smooth } from "./linear";
 
 const LOOP = 8;
 
+/** The route mix, weighted the way the access log served it. */
 const JOURNEYS = [
-  { label: "observed", value: 0.4, display: "40%", avatars: null },
-  { label: "deterministic", value: 0.4, display: "40%", avatars: null },
-  {
-    label: "exploratory",
-    value: 0.2,
-    display: "20%",
-    avatars: [
-      { initial: "I", bg: "#c17a5a" },
-      { initial: "M", bg: "#6b8cae" },
-      { initial: "S", bg: "#5a8f6e" },
-    ],
-  },
+  { label: "GET /settings/billing", value: 0.34, display: "34%", slow: false },
+  { label: "GET /", value: 0.27, display: "27%", slow: false },
+  { label: "GET /api/subscriptions", value: 0.18, display: "18%", slow: true },
 ] as const;
 
-const STEPS = ["checkout", "retry", "unknown sku"] as const;
+/** Nothing named these safe, so nothing sent them. */
+const STEPS = ["POST /billing/upgrade", "POST /api/payments", "DELETE /api/seats"] as const;
 
 export function WorkloadFilm({ active, hovered }: FilmProps) {
   const { ref, t } = useHeroFilmClock({
@@ -50,28 +43,17 @@ export function WorkloadFilm({ active, hovered }: FilmProps) {
               {i > 0 ? <Hairline /> : null}
               <div className="px-2.5 py-2">
                 <div className="flex items-center gap-2">
-                  {row.label === "exploratory" ? (
-                    <Pill className="bg-[#4CB782]/12 text-[#2F7A56] ring-[#4CB782]/25">{row.label}</Pill>
-                  ) : (
-                    <span className="min-w-0 flex-1 truncate text-[11px] tracking-extra-tight text-[#1A1A1A]">
-                      {row.label}
-                    </span>
-                  )}
-                  {row.avatars ? (
-                    <span className="ml-auto flex -space-x-1.5">
-                      {row.avatars.map((a, ai) => {
-                        const show = smooth(span(t, 1.4 + ai * 0.18, 1.95 + ai * 0.18));
-                        return (
-                          <span key={a.initial} style={moveStyle({ opacity: show, scale: 0.7 + show * 0.3 })}>
-                            <Avatar initial={a.initial} bg={a.bg} />
-                          </span>
-                        );
-                      })}
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px] tracking-extra-tight text-[#1A1A1A]">
+                    {row.label}
+                  </span>
+                  {row.slow ? (
+                    <span style={moveStyle({ opacity: smooth(span(t, 1.4, 1.95)) })}>
+                      <Pill className="bg-[#D94841]/12 text-[#A8332C] ring-[#D94841]/25">129% slower</Pill>
                     </span>
                   ) : null}
                   <Meta className="tabular-nums">{row.display}</Meta>
                 </div>
-                <Bar className="mt-1.5" value={fill * row.value} tone={row.label === "exploratory" ? "ok" : "neutral"} />
+                <Bar className="mt-1.5" value={fill * row.value} tone={row.slow ? "block" : "neutral"} />
               </div>
             </div>
           ))}
@@ -83,12 +65,8 @@ export function WorkloadFilm({ active, hovered }: FilmProps) {
         style={moveStyle({ opacity: page, y: (1 - page) * 14, scale: 0.96 + page * 0.04 })}
       >
         <div className="mb-2 flex items-center justify-between">
-          <Label>exploratory</Label>
-          <span className="flex -space-x-1.5">
-            {JOURNEYS[2].avatars.map((a) => (
-              <Avatar key={a.initial} initial={a.initial} bg={a.bg} />
-            ))}
-          </span>
+          <Label>not sent</Label>
+          <Meta>no rule named them safe</Meta>
         </div>
         <div className="flex min-h-0 flex-1 flex-col justify-center overflow-hidden rounded-[10px] border border-black/[0.08] bg-white px-2.5 py-2">
           {STEPS.map((step, i) => {
@@ -98,7 +76,9 @@ export function WorkloadFilm({ active, hovered }: FilmProps) {
                 {i > 0 ? <Hairline className="my-1.5" /> : null}
                 <div className="flex items-center gap-2" style={moveStyle({ opacity: show, x: (1 - show) * 8 })}>
                   <Meta className="w-3 tabular-nums">{i + 1}</Meta>
-                  <span className="min-w-0 truncate text-[11px] tracking-extra-tight text-[#1A1A1A]">{step}</span>
+                  <span className="min-w-0 truncate font-mono text-[10px] tracking-extra-tight text-[#1A1A1A]">
+                    {step}
+                  </span>
                 </div>
               </div>
             );

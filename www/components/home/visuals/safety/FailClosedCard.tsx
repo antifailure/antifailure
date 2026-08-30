@@ -13,7 +13,7 @@ const MESSAGES = [
     initial: "D",
     tint: "#6b8cae",
     time: "8:55 PM",
-    body: "twin-4c1 hit api.stripe.com:443",
+    body: "env-4c1 reached for an unlisted host",
     opacity: 0.28,
   },
   {
@@ -21,13 +21,13 @@ const MESSAGES = [
     initial: "F",
     tint: "#5a8f6e",
     time: "8:56 PM",
-    body: "No simulator. Egress denied. Deploy blocked.",
+    body: "No rule for it. Denied, and written to the log.",
     opacity: 0.62,
   },
 ] as const;
 
 const SIMULATORS = [
-  { key: "payments", color: "#285D49" },
+  { key: "stripe", color: "#285D49" },
   { key: "email", color: "#33bf00" },
   { key: "sms", color: "#C4A035" },
   { key: "webhooks", color: "#C43D3D" },
@@ -122,7 +122,7 @@ function SimulatorGlyph({ kind, size }: { kind: (typeof SIMULATORS)[number]["key
     "aria-hidden": true,
   };
 
-  if (kind === "payments") {
+  if (kind === "stripe") {
     return (
       <svg viewBox="0 0 16 16" {...common}>
         <rect x="1.9" y="3.6" width="12.2" height="8.8" rx="1.9" stroke="currentColor" strokeWidth="1.4" />

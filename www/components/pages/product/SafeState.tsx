@@ -411,7 +411,7 @@ export function SafeStatePage() {
         items={[
           { href: "/product/firewall", title: "Side-Effect Firewall", description: "The twin cannot act on the real world." },
           { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
-          { href: "/product/fidelity", title: "Fidelity Graph", description: "Volume and distribution actually restored." },
+          { href: "/product/migrations", title: "Migration Safety", description: "What a branch with production's shape shows." },
         ]}
       />
     </PageShell>

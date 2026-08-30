@@ -5,7 +5,7 @@ import { Bar, Hairline, Label, Meta, Pill, StatusMoon, easeInOut, moveStyle, smo
 
 const LOOP = 8;
 
-const STEPS = ["LOCK", "QUEUE", "POOL", "BLOCK"] as const;
+const STEPS = ["LOCK", "QUEUE", "REWRITE", "PLAN"] as const;
 
 export function MigrationFilm({ active, hovered }: FilmProps) {
   const { ref, t } = useHeroFilmClock({
@@ -19,7 +19,7 @@ export function MigrationFilm({ active, hovered }: FilmProps) {
   const lock = smooth(span(t, 0.9, 3.05));
   const blocked = lock > 0.72;
   const page = easeInOut(span(t, 3.45, 4.6));
-  const p99 = smooth(span(t, 4.85, 5.8));
+  const found = smooth(span(t, 4.85, 5.8));
 
   return (
     <div ref={ref} className="absolute inset-0 overflow-hidden font-sans select-none" aria-hidden>
@@ -41,7 +41,7 @@ export function MigrationFilm({ active, hovered }: FilmProps) {
           <Hairline className="my-2" />
           <div className="flex items-center gap-2">
             <Meta className="w-8 shrink-0">Then</Meta>
-            <Pill tone={blocked ? "block" : "neutral"}>{blocked ? "BLOCK" : "watch"}</Pill>
+            <Pill tone={blocked ? "block" : "neutral"}>{blocked ? "84 queued" : "watching"}</Pill>
           </div>
         </div>
       </div>
@@ -58,7 +58,7 @@ export function MigrationFilm({ active, hovered }: FilmProps) {
           <div className="flex items-center justify-between gap-1">
             {STEPS.map((step, i) => {
               const show = smooth(span(t, 4.45 + i * 0.18, 5.0 + i * 0.18));
-              const hot = step === "BLOCK";
+              const hot = step === "PLAN";
               return (
                 <span
                   key={step}
@@ -71,9 +71,9 @@ export function MigrationFilm({ active, hovered }: FilmProps) {
             })}
           </div>
           <Hairline className="my-2" />
-          <div className="flex items-center gap-1.5" style={moveStyle({ opacity: p99, y: (1 - p99) * 5 })}>
-            <Pill tone="block">BLOCK</Pill>
-            <Meta className="tabular-nums">27.4s · p99 6.9s</Meta>
+          <div className="flex items-center gap-1.5" style={moveStyle({ opacity: found, y: (1 - found) * 5 })}>
+            <Pill tone="block">FINDING</Pill>
+            <Meta className="tabular-nums">27.4s · 84 queued</Meta>
           </div>
         </div>
       </div>
