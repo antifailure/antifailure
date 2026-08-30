@@ -34,10 +34,21 @@
 # region that passes all three here, and it is dearer than eastus for compute
 # and storage, which is why these numbers moved.
 
+# WHAT WAS RE-READ ON 2026-08-30 AND WHAT WAS NOT, because one date on a file
+# that is edited in parts is a claim about lines nobody looked at.
+#
+# Re-read and unchanged on 2026-08-30: every PostgreSQL compute and storage
+# number, Container Apps, Key Vault, Log Analytics. Added on that date:
+# GP_Standard_D2ds_v4 and the whole azure_monitor block.
+#
+# NOT re-read on 2026-08-30: the blob storage rates, which are still the
+# 2026-08-28 figures. Nothing in either stack creates a storage account
+# (goldens_enabled is false and the reason is in the module), so no estimate
+# this repository produces depends on them.
 meta:
   currency: USD
   region: centralus
-  checked: 2026-08-28
+  checked: 2026-08-30
   source: https://prices.azure.com/api/retail/prices
   hours_per_month: 730
 
@@ -55,12 +66,29 @@ postgres_flexible:
     B_Standard_B2ms: 0.15368
     B_Standard_B4ms: 0.30736
     B_Standard_B8ms: 0.61472
+    # THE LARGEST SINGLE LINE IN THE PRODUCTION BILL, AND IT HAD NO PRICE HERE
+    # UNTIL NOW, so `tools/cost estimate` reported UNKNOWN for it and suppressed
+    # the total for the only stack whose total anybody needed.
+    #
+    # high_availability forces a General Purpose SKU, and this is the only one
+    # bonfire-sku-allowlist permits. Its meter is per vCore:
+    #
+    #   Azure Database for PostgreSQL Flexible Server General Purpose Ddsv4
+    #   Series Compute, "vCore", 0.1005 per hour, centralus, read 2026-08-30
+    #
+    # D2ds_v4 is 2 vCores, so the whole instance is 0.2010 an hour and 146.73 a
+    # month. With high_availability that is billed twice.
+    GP_Standard_D2ds_v4: 0.2010
   storage_per_gb_month: 0.13
   # Backup up to the size of provisioned storage is included. This is the rate
   # beyond it, which is what a long retention actually costs.
   backup_lrs_per_gb_month: 0.108
   # Zone redundant HA runs a second server. It is not a surcharge, it is a
   # second bill, and burstable SKUs cannot do it at all.
+  #
+  # It multiplies COMPUTE AND STORAGE, because the standby is a whole server
+  # with its own disk. The estimator applied it to compute only until this note
+  # was written, which understated a production plan by the price of 64 GB.
   high_availability_multiplier: 2.0
 
 # --- Container Apps, consumption -------------------------------------------
@@ -97,7 +125,29 @@ log_analytics:
   retention_per_gb_month: 0.12
   free_ingestion_gb: 5
 
+# --- Azure Monitor ----------------------------------------------------------
+# What alerting costs, which is small and is not zero. The action group itself
+# is free and so are its first 1000 emails and 100 SMS a month; a rule and a
+# probe are not.
+azure_monitor:
+  # Per metric alert rule per month, for a rule watching one time series. Meter
+  # "Alerts Metric Monitored", 0.10, and the free tier appears as a second entry
+  # of the same meter at 0.0 which this file does not model: assuming a free
+  # grant is how an estimate comes out confidently low.
+  metric_alert_per_month: 0.10
+  # Per availability test execution, meter "Standard Web Test Execution".
+  # One execution is one location running once, so the cost of a test is this
+  # times the number of locations times how often it runs.
+  web_test_execution: 0.00056
+
 # --- Not priced here, on purpose -------------------------------------------
+# Geo-redundant backup storage for a flexible server. The retail prices API
+# exposes "Backup Storage LRS" for this service in centralus and no
+# geo-redundant equivalent under any product name found, so there is no number
+# to put here. It costs nothing at this size in any case: backup storage up to
+# the provisioned server storage is free, the production server provisions
+# 64 GB, and the control plane's database is a few hundred megabytes. If that
+# stops being true, this is the line that has to be filled in first.
 # azurerm_private_endpoint. The retail prices API does not expose a Private
 # Link meter for this region under any service name I could find, and this file
 # only carries numbers that came from it. So the estimator reports a private
