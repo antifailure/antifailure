@@ -38,7 +38,7 @@ import {
   SIGNATURE_TOLERANCE_SECONDS,
   type StripeEvent,
 } from '../src/billing/webhook.ts'
-import { planForPrice, planForStatus, stripeConfigFrom } from '../src/billing/plans.ts'
+import { PLANS, planForPrice, planForStatus, stripeConfigFrom } from '../src/billing/plans.ts'
 import {
   available, startApi, seedOrg, signInAs, callProcedure, errorCode, dropOrg,
   stripeAgainstMockPack, type ApiHarness, type Org, type SignedIn,
@@ -864,6 +864,35 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
 
     await dropOrg(h.admin, alice.org.orgId)
     await dropOrg(h.admin, bob.org.orgId)
+  })
+
+  it('the database and PLAN_QUOTAS agree about which plans exist', async () => {
+    // The plan list is written twice: once as the keys of PLAN_QUOTAS, which
+    // decides what a plan entitles, and once as a CHECK constraint on
+    // subscriptions, which decides what can be stored. A plan added to one and
+    // not the other fails the INSERT on the webhook, which is the one path that
+    // must never drop a message, and it fails only for the customers who bought
+    // the new plan.
+    const [constraint] = await h.admin<{ definition: string }[]>`
+      SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+      WHERE conname = 'subscriptions_plan'`
+    assert.ok(constraint, 'subscriptions has no plan constraint at all')
+
+    for (const plan of PLANS) {
+      assert.ok(
+        constraint.definition.includes(`'${plan}'`),
+        `PLAN_QUOTAS knows ${plan} and the database refuses it: ${constraint.definition}`,
+      )
+    }
+    // And nothing the database allows is a plan PLAN_QUOTAS has never heard of,
+    // which would enforce free limits on somebody paying.
+    for (const quoted of constraint.definition.match(/'[a-z_]+'/g) ?? []) {
+      const plan = quoted.slice(1, -1)
+      assert.ok(
+        PLANS.includes(plan),
+        `the database allows the plan ${plan} and PLAN_QUOTAS has no limits for it`,
+      )
+    }
   })
 
   it('billing rows are append-only: the application role cannot delete one', async () => {

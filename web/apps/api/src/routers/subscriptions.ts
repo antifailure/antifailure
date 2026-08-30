@@ -253,9 +253,16 @@ export const subscriptionsRouter = router({
         })
 
       // Written here as well as when the webhook lands, so the screen reflects
-      // what was just asked for rather than waiting on a delivery. The
-      // watermark makes the two idempotent: whichever is second and older
-      // changes nothing.
+      // what was just asked for rather than waiting on a delivery.
+      //
+      // It deliberately leaves last_event_at alone. Advancing the watermark
+      // here would make the customer.subscription.updated that Stripe is about
+      // to send look stale, and that delivery is the one carrying the fields
+      // this response does not: the period the cancellation takes effect at,
+      // and eventually the deleted event that drops the plan. What it writes is
+      // only what Stripe just returned about this subscription, and it never
+      // touches the plan, because the plan follows the subscription's status
+      // and the status is still active until the period ends.
       await c.pool.withTenant(c.tenant, async (db) => {
         await db.execute(sql`
           UPDATE subscriptions
