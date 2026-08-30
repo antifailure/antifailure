@@ -50,4 +50,5 @@ trufflehog
 unmask
 unmasked
 vale
+versionless
 vhs
