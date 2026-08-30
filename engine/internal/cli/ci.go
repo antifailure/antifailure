@@ -106,6 +106,12 @@ change.`),
 						Steps: r.Outcome.Reproduction, Trace: r.Evidence.Trace,
 					})
 				}
+				for _, i := range test.Invariants {
+					run.Invariants = append(run.Invariants, report.Invariant{
+						Name: i.Name, Description: i.Description, Held: i.Held,
+						Columns: i.Columns, Rows: i.Rows, More: i.More, Error: i.Error,
+					})
+				}
 			}
 
 			if decisions, dErr := o.Decisions(ctx, 500); dErr == nil && len(decisions) > 0 {
@@ -120,8 +126,14 @@ change.`),
 			// rendered is the same as a section that does not exist, and this
 			// one was the product's central promise.
 			run.Verification = attestedMasking(ctx, o, run.Golden)
-			if rep, iErr := o.Insights(ctx, 25); iErr == nil {
-				run.Insights = summariseInsights(rep)
+			// The statistics only. The migration rehearsal is a separate
+			// check with its own command and its own failure, and running it
+			// a second time here would rehearse migrations that `af ci` has
+			// already applied, which measures nothing.
+			if full, iErr := o.RunInsights(ctx, env.InsightsOptions{
+				Limit: 25, SkipRehearsal: true,
+			}); iErr == nil {
+				run.Insights = summariseInsights(full.Stats)
 			}
 
 			if withLoad {
@@ -143,6 +155,19 @@ change.`),
 			writeReport(e, run, output)
 
 			if run.Verdict() == "fail" {
+				// Named, because a run can now fail two ways and the exit
+				// message is the only part a script keeps.
+				if run.InvariantsViolated() > 0 {
+					var first string
+					for _, i := range run.Invariants {
+						if i.Violated() {
+							first = i.Name
+							break
+						}
+					}
+					return silent(aferrors.Coded(aferrors.AFAGT012,
+						"invariant", first, "detail", "the statement returned rows"))
+				}
 				return silent(aferrors.Coded(aferrors.AFAGT002,
 					"workflow", "a workflow", "budget", "its attempts"))
 			}

@@ -185,6 +185,7 @@ Subcommands:
 
 - [`af golden gc`](#af-golden-gc) Remove old goldens, keeping the newest.
 - [`af golden list`](#af-golden-list) List the goldens that exist.
+- [`af golden pull`](#af-golden-pull) Bring a published golden onto this machine.
 - [`af golden refresh`](#af-golden-refresh) Copy production, mask it, verify it, and publish it.
 - [`af golden verify`](#af-golden-verify) Re-check a published golden.
 
@@ -192,9 +193,16 @@ Subcommands:
 
 Remove old goldens, keeping the newest.
 
-A golden that something is still branched from is never removed, and that is
-reported rather than forced: taking away the copy an environment is running on
-breaks the environment rather than tidying it.
+How many to keep comes from database.golden.retain in the manifest, so that
+every machine and every runner collects the same way. --keep overrides it for
+one run.
+
+Two versions are never removed. One is any version an environment is still
+branched from: taking away the copy something is running on breaks the
+environment rather than tidying it, and that refusal comes from the provider,
+which is the only thing that knows. The other is the newest verified golden,
+whatever the count says, because a project with nothing left to branch cannot
+bring an environment up at all, which is worse than the disk it saved.
 
 ```
 af golden gc [flags]
@@ -203,7 +211,7 @@ af golden gc [flags]
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch context to use, defaulting to the checked out one. |
-| `--keep` | `3` | How many of the newest goldens to keep. |
+| `--keep` | `0` | How many of the newest goldens to keep, overriding database.golden.retain. |
 
 ### `af golden list`
 
@@ -211,6 +219,31 @@ List the goldens that exist.
 
 ```
 af golden list [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch context to use, defaulting to the checked out one. |
+
+### `af golden pull`
+
+Bring a published golden onto this machine.
+
+One machine holds the production credential and refreshes; every other machine
+pulls what it published and never reads production at all. That is what
+database.golden.storage and storage_url are for.
+
+With no version, the newest complete one is taken. A version is complete when
+its attestation is in the store: the dump is written first and the attestation
+second, so a version with only a dump is a publish that did not finish, and it
+is invisible here rather than offered.
+
+A pulled golden is NOT trusted because it came from the store. The verification
+scan runs again, here, against the database that actually arrived. A pull that
+skipped it would make the store a way to get an unverified database branched.
+
+```
+af golden pull [version] [flags]
 ```
 
 | Flag | Default | What it does |
@@ -343,20 +376,24 @@ af init [flags]
 
 ### `af insights`
 
-Show what the database noticed while the environment ran.
+What Postgres can tell you about this change before anybody clicks anything.
 
-The bugs this looks for are the ones no test catches, because the test passes:
-the endpoint that now runs four hundred queries instead of two, the index that
-stopped being used, the sequential scan on a table that grew. Each is correct
-and slow, and correct and slow is what takes a site down under load rather than
-in review.
+A branch is a real database with production's shape in it, which makes some
+questions answerable without running the application at all.
+
+The migrations are rehearsed against a throwaway branch and every statement is
+timed, so a migration that takes four seconds on an empty test database and
+ninety on production row counts is visible before the deploy window rather than
+during it. The plans on that branch are compared before and after, which is how
+a sequential scan appearing where an index scan was gets found. And the queries
+this environment ran are compared against a report saved on the base branch.
 
   af insights --save baseline.json     on main
   af insights --baseline baseline.json on the branch
 
-It says what it could not measure. pg_stat_statements is an extension somebody
-has to install, and an insight that silently reports nothing because it is
-missing looks exactly like a clean bill of health.
+It says what it could not measure, and it names any check the manifest turned
+off. A report that silently omits a check reads exactly like a check that found
+nothing.
 
 ```
 af insights [flags]
@@ -367,7 +404,35 @@ af insights [flags]
 | `--baseline` | - | Compare against a report saved earlier. |
 | `--branch` | - | Branch to read, defaulting to the checked out one. |
 | `--limit` | `20` | How many queries to show. |
+| `--no-rehearsal` | `false` | Skip the migration rehearsal, which is the only check that makes a second branch. |
 | `--save` | - | Save this report to compare against later. |
+
+### `af invariants`
+
+Ask the data the questions the manifest declares.
+
+An invariant is a read only statement that must return no rows, asked of the
+branch, so that a flow which appears to succeed while corrupting data is caught
+by the data rather than by the screen.
+
+They are asked automatically after the workflows in 'af test' and 'af ci'. This
+runs them on their own, which is what you want while writing one, or after a
+migration, or when a run failed and you want to know whether the data is the
+reason.
+
+Every statement runs inside a transaction opened READ ONLY, so a write is
+refused by Postgres rather than trusted not to happen, and each one has its own
+timeout. Rows returned means the invariant is violated, and the rows are the
+evidence: they are printed, because a check that tells you something is wrong
+without telling you which rows has told you to go and do the work yourself.
+
+```
+af invariants [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to ask, defaulting to the checked out one. |
 
 ### `af license`
 
@@ -469,6 +534,62 @@ af load smoke [flags]
 | `--duration` | `10s` | How long to send for. |
 | `--scale` | `0.1` | Multiplier on production's rate. |
 | `--seed` | `1` | Makes two runs send the same sequence. |
+
+### `af login`
+
+Sign in to a control plane from this terminal.
+
+Signs this machine in to a control plane using the device authorization grant.
+
+af login prints a short code and opens a browser. Approve it there, and the
+token arrives here over TLS and goes straight into the operating system's
+credential store. The credential is never shown, never copied through a
+clipboard, and never written to a shell history file.
+
+By default the token can read environments and runs and write events, and
+nothing else: it cannot manage members, change policy, or touch a provider key.
+
+--scope asks for more. The scope is shown on the screen where the login is
+approved, so nobody grants a capability without seeing the words:
+
+  af login --scope providers.write
+
+Nothing reads a key back. There is no scope for it, because storing a secret and
+retrieving one are different capabilities and a terminal needs only the first.
+
+Run af logout to remove it from this machine and revoke it everywhere.
+
+```
+af login [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to sign in to (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+| `--no-browser` | `false` | Do not try to open a browser; print the address instead. |
+| `--scope` | - | Ask for a capability beyond the default, e.g. providers.write. Repeatable. |
+
+### `af logout`
+
+Remove this machine's credential and revoke it.
+
+Removes the stored token and tells the control plane to revoke it.
+
+Both halves matter. Removing it locally stops this machine using it; revoking
+it stops anybody who copied it. A logout that only deleted the local copy would
+leave a working credential in whatever backup or screen recording captured it.
+
+If the control plane cannot be reached, the local credential is still removed
+and the command says the revocation did not happen, so nobody is left believing
+a token is dead when it is not.
+
+```
+af logout [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to sign out of (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
 
 ### `af logs`
 
@@ -645,6 +766,129 @@ in the decision, no matter where it sits in the file.
 ```
 af net policy
 ```
+
+### `af provider`
+
+Your own model provider keys and their monthly caps.
+
+Stores your Anthropic and OpenAI keys on the control plane, sealed with a secret
+that is not in its database, and caps what may be spent on each one per month.
+
+Runs use your key. We never see it after you save it: what any screen or any
+command here can read is the last four characters and a fingerprint.
+
+These commands need a token that asked for the capability:
+
+  af login --scope providers.write
+
+A token from a plain af login cannot reach a key, which is deliberate. The scope
+appears on the screen where the login is approved, so nobody grants this without
+seeing the words.
+
+```
+af provider
+```
+
+Subcommands:
+
+- [`af provider budget`](#af-provider-budget) Cap what may be spent on a provider this month.
+- [`af provider list`](#af-provider-list) What is stored, and what it may spend this month.
+- [`af provider rm`](#af-provider-rm) Remove a stored key.
+- [`af provider set`](#af-provider-set) Store or rotate a key, without it touching the command line.
+
+### `af provider budget`
+
+Cap what may be spent on a provider this month.
+
+Sets the monthly cap in US dollars. The cap is checked BEFORE the key is
+decrypted, so a run with no allowance never causes the key to exist in the
+control plane's memory at all. That ordering is the difference between a cap and
+a suggestion.
+
+A provider with no cap cannot spend anything. A missing cap reads as zero rather
+than as unlimited, because the alternative on somebody else's key is an
+unbounded bill.
+
+A cap of zero is allowed and means exactly that: spend nothing on this provider.
+
+```
+af provider budget <provider> <usd> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af provider list`
+
+What is stored, and what it may spend this month.
+
+Shows which providers have a key, the last four characters of each, and the
+monthly cap against what has been spent.
+
+It does not show a key, and there is no flag that would. The last four and the
+fingerprint are enough to answer the question this is usually asked to answer:
+whether the key here is the one you think it is.
+
+```
+af provider list [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af provider rm`
+
+Remove a stored key.
+
+Removes the stored key. Runs that need this provider are refused afterwards,
+with a message saying why, rather than falling back to a key of ours.
+
+This does not reach the provider. If the key leaked, revoke it there as well:
+removing it here stops us using it and stops nobody else.
+
+Removing a key that is not there is not an error. This is the command somebody
+runs in a hurry, and a retry after a timeout must not report failure for
+reaching the state they asked for.
+
+```
+af provider rm <provider> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af provider set`
+
+Store or rotate a key, without it touching the command line.
+
+Stores a key for anthropic or openai, replacing whatever was there.
+
+The key is never an argument. There is no --key flag, deliberately: a secret on
+a command line is in the shell's history file, is visible in ps to everybody
+else on the machine, and is in any recording of the terminal. So there are three
+ways to give it, and none of them put it in the argument vector:
+
+  af provider set anthropic                      asks, without echoing
+  af provider set anthropic --stdin < key.txt    reads one line
+  af provider set anthropic --from-env NAME      reads that environment variable
+
+Rotating stores the new key and revokes the old one together. If the key given
+is the one already stored, that is reported rather than accepted quietly: it is
+the mistake people make at the moment they believe they have replaced a leaked
+key.
+
+```
+af provider set <provider> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+| `--from-env` | - | Read the key from this environment variable instead of asking. |
+| `--stdin` | `false` | Read the key from standard input, one line. |
 
 ### `af runner`
 
@@ -899,4 +1143,26 @@ af webhook trigger <provider> <event> [flags]
 | `--secret` | - | Signing secret, defaulting to the provider's variable in this shell. |
 | `--service` | - | Service to deliver to, defaulting to the first reachable one. |
 | `--set` | - | Set a field on the event payload, as key=value. |
+
+### `af whoami`
+
+Who this machine is signed in as.
+
+Asks the control plane who the stored token belongs to.
+
+It asks rather than reading the stored copy, because the stored copy is what
+this machine believed at login time and the control plane is what is true now.
+A token whose membership has been removed still looks perfectly good on disk,
+and reporting it would tell somebody they have access they do not have.
+
+--offline reports the stored copy without a network call, and says so.
+
+```
+af whoami [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to ask (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+| `--offline` | `false` | Report the stored credential without asking the control plane. |
 

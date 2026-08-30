@@ -4,8 +4,8 @@ name: antifailure-control-plane
 # This repository's own manifest.
 #
 # Every pull request against antifailure/antifailure gets a preview of the
-# control plane built from this file: the web application, the API, and a
-# Postgres branched from a masked copy of the staging control plane. The agents
+# control plane built from this file: the API with its console, and a Postgres
+# branched from a masked copy of the staging control plane. The agents
 # then use it the way a customer does, and whatever that surfaces is a bug we
 # fix rather than a report we file about somebody else.
 #
@@ -15,40 +15,19 @@ name: antifailure-control-plane
 # fix is in the product.
 
 services:
-  # The application a person looks at. It proxies /auth and /trpc to the API
-  # under its own origin, because a session cookie set by one host is not sent
-  # to another, so a browser talking to the API directly would sign in and come
-  # back holding nothing.
-  - name: app
-    kind: web
-    path: web/apps/app
-    port: 3100
-    health_path: /login
-    # Generous. This is a Next.js production build starting from a cold image
-    # on a CI runner, and the failure this guards against is a service that
-    # never comes up, not one that takes eleven seconds instead of nine.
-    health_timeout: 180s
-    build:
-      strategy: dockerfile
-      dockerfile: deploy/docker/app.Dockerfile
-      # What this build needs to reach, recorded rather than enforced. The
-      # list is parsed, validated and shown by `af explain`, and nothing
-      # applies it: the build is not sealed in this release. It is written
-      # anyway, because the record is what makes the day it becomes a control
-      # a configuration change rather than an investigation.
-      #
-      # npm is the only entry, and that is a property of the Dockerfile worth
-      # keeping: both faces the application uses come from a package rather
-      # than from a font service, so there is no fonts.googleapis.com here and
-      # a sealed build would still work.
-      allow_hosts:
-        - registry.npmjs.org
-    env:
-      - name: AF_API_URL
-        value: http://api:8080
-    depends_on:
-      - api
-
+  # One service, and that is the point rather than a simplification.
+  #
+  # The control plane image serves its own console: the pages are a static
+  # export copied into the image beside the API, handed out by the same
+  # process on the same origin. A session is a SameSite=Lax cookie on that
+  # origin, so splitting the console onto a second host would mean
+  # SameSite=None and credentialed CORS on every endpoint, which is a wider
+  # cross-site surface bought to move a dashboard.
+  #
+  # A second application was built here and then taken out. It worked, and
+  # dogfooding it would still have been wrong: a preview that exercises a
+  # console the product does not ship proves nothing about the console it
+  # does. The environment runs the artifact a customer gets.
   - name: api
     kind: web
     path: web/apps/api
@@ -161,16 +140,22 @@ workflows:
   # says so and returns `unverified`, which is the honest answer and not a
   # useful one. Naming the page's own labels makes the same check verifiable at
   # zero cost, and a model key still improves on it rather than being required.
+  #
+  # Each string below was taken from the console's own source rather than
+  # remembered, because the last set was written against a different
+  # application and every workflow that used it came back unverified.
   - name: sign-in-with-a-link
     description: >-
       As the owner, ask for a sign-in link with the email address, read the
       link out of the captured message, follow it, and confirm you land on a
       signed in page.
     persona: owner
-    start_path: /login
+    # Signed out, every path shows the sign-in screen, so this is the
+    # environment's front door rather than a route of its own.
+    start_path: /environments
     expect:
+      - "Send a sign-in link"
       - "Sign out"
-      - "Environments"
     tags: [smoke, auth]
 
   - name: view-the-environment-matrix
@@ -178,7 +163,7 @@ workflows:
       As the owner, look at the list of environments and check that it shows
       environments with their repository, branch, and state.
     persona: owner
-    start_path: /
+    start_path: /environments
     expect:
       - "Repository"
       - "Branch"
@@ -187,13 +172,14 @@ workflows:
 
   - name: open-a-run
     description: >-
-      As the owner, open an environment from the list, then open one of its
-      runs, and check that the run shows what the agents concluded.
+      As the owner, open the runs list and check that a run shows which
+      environment it belongs to and what the agents concluded.
     persona: owner
-    start_path: /
+    start_path: /runs
     expect:
-      - "Environments"
-      - "Repository"
+      - "Recent runs"
+      - "Environment"
+      - "Verdicts"
     tags: [smoke]
 
   - name: edit-a-network-policy
@@ -203,21 +189,21 @@ workflows:
     persona: owner
     start_path: /network
     expect:
+      - "Effective policy"
       - "Host"
-      - "Mode"
-      - "Explain"
+      - "Explain a request"
     tags: [policy]
 
   - name: read-the-audit-log
     description: >-
-      As the owner, open the audit log and check that it shows entries, can be
-      filtered by action, and offers the page before this one.
+      As the owner, open the audit log and check that it shows entries and can
+      be filtered by action.
     persona: owner
     start_path: /audit
     expect:
       - "Action"
-      - "Filter"
-      - "Older entries"
+      - "Actor"
+      - "Filter by action"
     tags: [smoke, audit]
 
   - name: a-viewer-cannot-edit-policy
@@ -227,18 +213,26 @@ workflows:
     persona: viewer
     start_path: /network
     expect:
+      - "Effective policy"
       - "Host"
-      - "Mode"
     tags: [policy, rbac]
 
 invariants:
+  # Each of these returns the rows that break it rather than a count of them.
+  #
+  # All four were written as SELECT count(*) first, and `af explain` refused
+  # them: an invariant holds when its statement returns no rows, so a bare
+  # count returns one row saying zero and the check can never fail. Four
+  # invariants that looked like evidence and were not. Finding that in this
+  # repository's own manifest, with the product's own validator, is the reason
+  # this file exists.
   - name: every-environment-belongs-to-a-repository
     description: >-
       The join the matrix is built on. A masking run that remapped one side of
       it and not the other would empty the page while every table still had
       rows in it, which is the failure that looks like an application bug.
     sql: |
-      SELECT count(*) AS violations
+      SELECT e.id, e.repository_id
       FROM environments e
       LEFT JOIN repositories r ON r.id = e.repository_id
       WHERE r.id IS NULL
@@ -246,7 +240,7 @@ invariants:
   - name: every-member-belongs-to-a-user
     description: Masking remaps user identifiers, and membership has to follow them.
     sql: |
-      SELECT count(*) AS violations
+      SELECT m.org_id, m.user_id
       FROM members m
       LEFT JOIN users u ON u.id = m.user_id
       WHERE u.id IS NULL
@@ -257,7 +251,7 @@ invariants:
       not touch the hash columns, and this is what says so: a rule that
       nullified them would leave a log that fails its own verification.
     sql: |
-      SELECT count(*) AS violations
+      SELECT a.org_id, a.seq
       FROM audit_entries a
       WHERE a.prev_hash IS NULL
         AND a.seq > (SELECT min(seq) FROM audit_entries b WHERE b.org_id = a.org_id)
@@ -265,7 +259,7 @@ invariants:
   - name: no-session-outlives-its-user
     description: A session pointing at a user that masking removed is a session nothing can resolve.
     sql: |
-      SELECT count(*) AS violations
+      SELECT s.id, s.user_id
       FROM sessions s
       LEFT JOIN users u ON u.id = s.user_id
       WHERE u.id IS NULL
@@ -285,8 +279,8 @@ load:
   scale: 0.05
   duration: 60s
   safe_routes:
-    - GET /login
-    - GET /
+    - GET /environments
+    - GET /runs
     - GET /audit
     - GET /network
   unsafe_routes:

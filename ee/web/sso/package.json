@@ -1,0 +1,26 @@
+{
+  "name": "@antifailure-ee/sso",
+  "version": "0.1.0",
+  "private": true,
+  "license": "SEE LICENSE IN ../../LICENSE.md",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@antifailure/api": "file:../../../web/apps/api",
+    "@antifailure/db": "file:../../../web/packages/db",
+    "@xmldom/xmldom": "^0.9.8",
+    "xml-crypto": "^6.1.2",
+    "xpath": "^0.0.34"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "postgres": "^3.4.9"
+  }
+}

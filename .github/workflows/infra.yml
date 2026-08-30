@@ -4,9 +4,22 @@
 # rather than discovered by the person who runs apply. A plan in a comment is
 # the cheapest code review a piece of infrastructure ever gets.
 #
-# The plan job needs Azure. When the federated credential is not configured it
-# is SKIPPED rather than passed: a green check that did not check anything is
-# worse than a missing one, so the job says out loud which it was.
+# THE PLAN JOB HAS THREE MODES AND IT ALWAYS SAYS WHICH ONE IT RAN IN. This
+# matters more than it sounds, because two of the three cannot see a destroy,
+# and a green check that cannot see the thing it exists to see is worse than no
+# check at all:
+#
+#   no credential      SKIPPED. Nothing was checked, and the job says so.
+#   credential, no     PLANNED FROM EMPTY STATE. Real Azure, real provider,
+#   state backend      real cost estimate, and it CANNOT REPORT A DESTROY
+#                      because from an empty state everything is a create.
+#                      The summary says this in the first line.
+#   credential and     PLANNED AGAINST REAL STATE. The only mode in which
+#   state backend      "0 to destroy" is evidence of anything.
+#
+# The middle mode exists because the subscription's bonfire-deny-public-data
+# policy forces a Terraform state storage account to publicNetworkAccess =
+# Disabled, which no hosted runner can reach. See infra/terraform/stacks/tfstate.
 name: infra
 
 on:
@@ -90,16 +103,30 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Is Azure configured?
+      - name: Which mode can this run manage?
         id: azure
         env:
           CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TFSTATE_RG: ${{ secrets.AZURE_TFSTATE_RG }}
+          TFSTATE_ACCOUNT: ${{ secrets.AZURE_TFSTATE_ACCOUNT }}
         run: |
-          if [ -n "$CLIENT_ID" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
+          set -euo pipefail
+          if [ -z "$CLIENT_ID" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "remote_state=false" >> "$GITHUB_OUTPUT"
             echo "::notice title=Plan skipped::AZURE_CLIENT_ID is not set, so no plan was produced. This job checked nothing; it did not pass."
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          # BOTH halves, not either. An account name with no resource group
+          # fails inside `terraform init` with a message about the backend
+          # rather than about the missing secret, which sends the reader to the
+          # wrong file.
+          if [ -n "$TFSTATE_RG" ] && [ -n "$TFSTATE_ACCOUNT" ]; then
+            echo "remote_state=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "remote_state=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Planning from empty state::AZURE_TFSTATE_RG and AZURE_TFSTATE_ACCOUNT are not both set, so this plan started from an empty state. Every resource reads as a create and THIS PLAN CANNOT REPORT A DESTROY."
           fi
 
       - uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
@@ -108,6 +135,17 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The third gate, asked BEFORE the plan rather than discovered by an apply.
+      #
+      # A region can be within quota and permitted by every policy and still
+      # refuse the database. eastus on this subscription returns
+      # supportedServerVersions: [] with "Provisioning is restricted in this
+      # region", and an apply there created twenty six of twenty seven
+      # resources before finding out. Neither a plan nor a policy can see this.
+      - name: The region can actually run the database
+        if: steps.azure.outputs.ready == 'true'
+        run: go run ./tools/azguard region centralus
 
       - name: Install Terraform
         if: steps.azure.outputs.ready == 'true'
@@ -123,6 +161,7 @@ jobs:
         working-directory: infra/terraform/stacks/control-plane
         env:
           ARM_USE_OIDC: "true"
+          ARM_USE_AZUREAD: "true"
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
@@ -132,15 +171,96 @@ jobs:
           TF_VAR_github_client_id: plan-only
           TF_VAR_github_client_secret: plan-only
           TF_VAR_github_redirect_uri: https://example.invalid/auth/callback
+          # A VARIABLE RATHER THAN A SECRET, because an object id identifies a
+          # principal and unlocks nothing, and because this job's plan must be
+          # run with the SAME inputs as the apply it is reviewing.
+          #
+          # If this is unset the count on the role assignment goes to zero and
+          # the plan reports "1 to destroy" on every pull request, forever, for
+          # a resource nobody proposed to remove. Every value in this block has
+          # that property: a plan run with different inputs is a plan about a
+          # different desired state, and its destroy count is noise.
+          TF_VAR_ci_principal_id: ${{ vars.AZURE_CI_PRINCIPAL_ID }}
+          # budget_contact_emails is deliberately NOT passed. The module
+          # notifies by ROLE, so the default of [] is what the apply uses too
+          # and the two agree without a secret existing. If you do set addresses
+          # for a real apply, you must pass the same ones here or every plan
+          # proposes to delete the notification blocks, which reads as a small
+          # in-place update and would quietly switch the alerts off.
         run: |
           set -euo pipefail
-          terraform init -input=false \
-            -backend-config="resource_group_name=${{ secrets.AZURE_TFSTATE_RG }}" \
-            -backend-config="storage_account_name=${{ secrets.AZURE_TFSTATE_ACCOUNT }}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=control-plane.tfstate" \
-            -backend-config="use_oidc=true"
-          terraform plan -input=false -lock-timeout=5m -out=plan.tfplan
+          if [ "${{ steps.azure.outputs.remote_state }}" = "true" ]; then
+            # use_azuread_auth IS NOT OPTIONAL AND ITS ABSENCE DOES NOT LOOK
+            # LIKE ITS ABSENCE.
+            #
+            # Without it the azurerm backend authenticates to the blob service
+            # with a STORAGE KEY, so `terraform init` calls listKeys on an
+            # account created with shared_access_key_enabled = false and gets:
+            #
+            #   AuthorizationFailed: ... 'Microsoft.Storage/storageAccounts/listKeys/action'
+            #
+            # which reads as a missing role. Adding the role would be the wrong
+            # fix twice over: it would hand a pull request a credential that
+            # bypasses every RBAC assignment on the account, and listKeys would
+            # still fail because there are no keys to list.
+            #
+            # stacks/tfstate emits a `backend_hcl` output containing exactly
+            # these settings, precisely so the two cannot disagree. This job
+            # cannot read that output, because reading it means running that
+            # stack, so it repeats them by hand. THAT REPETITION IS THE BUG
+            # THIS COMMENT EXISTS TO STOP RECURRING: if you change the backend
+            # in stacks/tfstate/outputs.tf, change it here in the same commit.
+            terraform init -input=false \
+              -backend-config="resource_group_name=${{ secrets.AZURE_TFSTATE_RG }}" \
+              -backend-config="storage_account_name=${{ secrets.AZURE_TFSTATE_ACCOUNT }}" \
+              -backend-config="container_name=tfstate" \
+              -backend-config="key=control-plane.tfstate" \
+              -backend-config="use_azuread_auth=true" \
+              -backend-config="use_oidc=true"
+          else
+            # main.tf declares an empty `backend "azurerm" {}` and Terraform
+            # would sit at an interactive prompt for its settings. An override
+            # file replaces the block outright, which is the documented way to
+            # change a backend without editing the file everybody else reads.
+            cat > zz_ci_backend_override.tf <<'OVERRIDE'
+            terraform {
+              backend "local" {}
+            }
+          OVERRIDE
+            terraform init -input=false
+          fi
+          # -lock=false ON PURPOSE, AND IT IS HALF OF A SECURITY DECISION.
+          #
+          # The azurerm backend takes a blob LEASE to lock, and a lease is a
+          # write. Letting this job lock would mean granting it Storage Blob
+          # Data Contributor on the state account, and a pull request can edit
+          # this very file in the same commit that runs it. So the identity
+          # holds Storage Blob Data READER (see infra/terraform/stacks/tfstate)
+          # and this plan does not lock.
+          #
+          # What that costs: two plans running at once may read a state that is
+          # mid write and produce a wrong plan. It can never produce a wrong
+          # STATE, because this job writes nothing. A wrong plan is visible in
+          # review; a corrupted state is not.
+          #
+          # -refresh=false is the other half, and it is also a security
+          # decision rather than a speed one. Refreshing an
+          # azurerm_key_vault_secret reads the secret's VALUE, so a refreshing
+          # plan needs Key Vault Secrets User and would pull the live database
+          # URLs into this job on every pull request. The identity is Reader on
+          # the resource group and holds no Key Vault data role at all.
+          #
+          # What that costs: a resource deleted or altered outside Terraform
+          # will not show up here. Comparing the configuration against the
+          # recorded state is precisely the question this job exists to answer,
+          # and drift detection is a different job that has not been built.
+          # -var-file is main's and is not optional: signin_allowlist has no
+          # default, deliberately, so a plan without it fails on a required
+          # variable. The two flags before it are this branch's and are the
+          # security decisions explained above. Losing either half breaks a
+          # different thing, so both are here.
+          terraform plan -input=false -lock=false -refresh=false \
+            -var-file=staging.tfvars -out=plan.tfplan
           terraform show -json plan.tfplan > plan.json
           terraform show -no-color plan.tfplan > plan.txt
 
@@ -173,7 +293,15 @@ jobs:
           {
             echo "## Terraform plan"
             echo
-            if [ "$destroys" -gt 0 ]; then
+            if [ "${{ steps.azure.outputs.remote_state }}" != "true" ]; then
+              echo "> **Planned from an EMPTY STATE.** \`AZURE_TFSTATE_RG\` and"
+              echo "> \`AZURE_TFSTATE_ACCOUNT\` are not both set, so Terraform has no record"
+              echo "> of what already exists and every resource below reads as a create."
+              echo "> **A destroy cannot appear in this plan even if the change would cause"
+              echo "> one.** The provider, the credential and the cost estimate are real;"
+              echo "> the destroy count is not evidence."
+              echo
+            elif [ "$destroys" -gt 0 ]; then
               echo "**This plan DESTROYS $destroys resource(s).** Read it before approving."
             else
               echo "Nothing is destroyed by this plan."

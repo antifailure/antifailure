@@ -13,13 +13,14 @@ import (
 
 // TestJSON is the machine readable result of a run.
 type TestJSON struct {
-	Passed     int                  `json:"passed"`
-	Failed     int                  `json:"failed"`
-	Flaky      int                  `json:"flaky"`
-	Blocked    int                  `json:"blocked"`
-	Unverified int                  `json:"unverified"`
-	Duration   string               `json:"duration"`
-	Results    []env.WorkflowResult `json:"results"`
+	Passed     int                   `json:"passed"`
+	Failed     int                   `json:"failed"`
+	Flaky      int                   `json:"flaky"`
+	Blocked    int                   `json:"blocked"`
+	Unverified int                   `json:"unverified"`
+	Duration   string                `json:"duration"`
+	Results    []env.WorkflowResult  `json:"results"`
+	Invariants []env.InvariantResult `json:"invariants,omitempty"`
 }
 
 func newTestCommand(e *Env) *cobra.Command {
@@ -56,14 +57,14 @@ people learn to ignore the results. Only a real failure exits non zero.`),
 				if err := e.Out.JSON(TestJSON{
 					Passed: report.Passed, Failed: report.Failed, Flaky: report.Flaky,
 					Blocked: report.Blocked, Unverified: report.Unverified,
-					Duration: report.Duration.Round(time.Millisecond).String(),
-					Results:  report.Results,
+					Duration:   report.Duration.Round(time.Millisecond).String(),
+					Results:    report.Results,
+					Invariants: report.Invariants,
 				}); err != nil {
 					return err
 				}
 				if report.AnyFailed() {
-					return silent(aferrors.Coded(aferrors.AFAGT002,
-						"workflow", firstFailing(report), "budget", "its attempts"))
+					return silent(failure(report))
 				}
 				return nil
 			}
@@ -90,6 +91,8 @@ people learn to ignore the results. Only a real failure exits non zero.`),
 				}
 			}
 
+			printInvariants(e, report)
+
 			e.Out.Println("")
 			e.Out.Printf("  %d passed, %d failed, %d flaky, %d blocked, %d unverified, in %s\n",
 				report.Passed, report.Failed, report.Flaky, report.Blocked,
@@ -100,8 +103,7 @@ people learn to ignore the results. Only a real failure exits non zero.`),
 						"through, so it is not counted against the application.", 2))
 			}
 			if report.AnyFailed() {
-				return silent(aferrors.Coded(aferrors.AFAGT002,
-					"workflow", firstFailing(report), "budget", "its attempts"))
+				return silent(failure(report))
 			}
 			return nil
 		},
@@ -127,6 +129,76 @@ func verdictStyle(e *Env, verdict string) (string, string) {
 	default:
 		return e.Out.S(StyleDim, SymbolSkip), "unverified"
 	}
+}
+
+// printInvariants writes what the data said, under the workflows.
+//
+// The violating rows are printed rather than summarised, because the rows are
+// the diagnosis. "no-orphan-orders does not hold" tells somebody to go and
+// look; the two order ids that have no user tell them where.
+func printInvariants(e *Env, report *env.TestReport) {
+	if len(report.Invariants) == 0 {
+		return
+	}
+	e.Out.Println("")
+	e.Out.Printf("  %s\n", e.Out.S(StyleDim, "invariants"))
+	for _, inv := range report.Invariants {
+		switch {
+		case inv.Error != "":
+			e.Out.Status(e.Out.S(StyleAccent, SymbolSkip), inv.Name, "could not be checked")
+			e.Out.Printf("      %s\n", e.Out.Wrap(inv.Error, 6))
+		case inv.Held:
+			e.Out.Status(e.Out.S(StyleGood, SymbolOK), inv.Name,
+				fmt.Sprintf("held in %s", (time.Duration(inv.DurationMs)*time.Millisecond).Round(time.Millisecond)))
+		default:
+			e.Out.Status(e.Out.S(StyleBad, SymbolFail), inv.Name, "does not hold")
+			if inv.Description != "" {
+				e.Out.Printf("      %s\n", e.Out.Wrap(inv.Description, 6))
+			}
+			if len(inv.Columns) > 0 {
+				e.Out.Printf("      %s\n", e.Out.S(StyleDim, strings.Join(inv.Columns, "  ")))
+			}
+			for _, row := range inv.Rows {
+				e.Out.Printf("      %s\n", strings.Join(row, "  "))
+			}
+			if inv.More {
+				e.Out.Printf("      %s\n", e.Out.S(StyleDim, "and more; run the statement to see them all"))
+			}
+		}
+	}
+}
+
+// firstViolated names an invariant that does not hold, for the error message.
+func firstViolated(report *env.TestReport) string {
+	for _, inv := range report.Invariants {
+		if inv.Violated() {
+			return inv.Name
+		}
+	}
+	return ""
+}
+
+// failure turns a failed run into the error that names its cause.
+//
+// A run can fail two ways now, and saying "workflow X exhausted its budget"
+// when every workflow passed and the data is broken sends somebody to read a
+// trace that shows nothing wrong. The workflows are named first because a
+// broken flow usually explains a broken invariant, and not the other way
+// round.
+func failure(report *env.TestReport) error {
+	if report.Failed > 0 {
+		return aferrors.Coded(aferrors.AFAGT002,
+			"workflow", firstFailing(report), "budget", "its attempts")
+	}
+	name := firstViolated(report)
+	detail := "the statement returned rows"
+	for _, inv := range report.Invariants {
+		if inv.Name == name && inv.Description != "" {
+			detail = inv.Description
+			break
+		}
+	}
+	return aferrors.Coded(aferrors.AFAGT012, "invariant", name, "detail", detail)
 }
 
 func firstFailing(report *env.TestReport) string {

@@ -41,7 +41,7 @@ file://$PWD /tmp/fresh` is a clean machine for the length of one command.
 ```
 git clone https://github.com/antifailure/antifailure
 cd antifailure
-git config core.hooksPath .githooks   # see below
+just hooks     # turns on the commit hooks; see below
 just setup     # checks your toolchain and names what is missing
 just db        # starts the Postgres the control plane suites need
 just build     # builds the af binary into bin/af
@@ -52,7 +52,7 @@ just test      # unit and property tests
 `brew install just`, or see https://just.systems. `just` with no argument
 lists every recipe.
 
-The hooks line is worth the ten seconds. It adds the sign-off trailer for you
+`just hooks` is worth the ten seconds. It adds the sign-off trailer for you
 and refuses a commit authored by an address that is known to belong to somebody
 else's GitHub account, which is a mistake this repository has actually made.
 CI checks both, so the hooks only decide whether you find out before the push

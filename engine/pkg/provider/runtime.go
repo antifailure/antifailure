@@ -22,6 +22,16 @@ type Runtime interface {
 	// Name identifies the runtime in output and in errors.
 	Name() string
 
+	// Capabilities declares what this runtime can do.
+	//
+	// It exists so that the conformance suite can skip a behavior by name
+	// rather than silently pass one it never ran. Note what is deliberately
+	// absent: there is no capability for containment. A runtime that cannot
+	// keep an environment off the network is not a runtime this product has,
+	// so the egress behaviors are not skippable and no field here can turn
+	// them off.
+	Capabilities() RuntimeCaps
+
 	// Up creates the environment and returns it once every service that
 	// declares readiness has answered.
 	//
@@ -48,6 +58,27 @@ type Runtime interface {
 
 	// Close releases the runtime's own resources.
 	Close() error
+}
+
+// RuntimeCaps declares what a runtime supports.
+//
+// Every field gates something: a conformance behavior that is skipped by name,
+// or a decision the engine makes about which path to take. Nothing else
+// belongs here. A capability that gates nothing is a claim no code reads,
+// which is how a provider ends up advertising something it does not do.
+type RuntimeCaps struct {
+	// Ingress reports that a web service is reachable from the machine that
+	// called Up, at the URL Status returns. A runtime in a cluster the caller
+	// cannot route to answers false, and says so rather than reporting a URL
+	// that does not resolve.
+	Ingress bool
+	// Logs reports that the runtime implements LogReader.
+	Logs bool
+	// AttachesLocalDatabase reports that the runtime can put a database
+	// container from the local daemon onto the environment's network. It is
+	// false for anything running off this machine, where the only usable
+	// database is one with an address the environment can already reach.
+	AttachesLocalDatabase bool
 }
 
 // EnvSpec is everything needed to bring one environment up.
@@ -186,6 +217,18 @@ type RunningService struct {
 	State string
 	// Detail explains a state that is not running, such as an exit code.
 	Detail string
+	// ExitCode is the code a finished service exited with, and nil while it
+	// is still running or where the runtime cannot say.
+	//
+	// Detail carries the same fact in the runtime's own words, and that is
+	// the problem: "Exited (9) 3 seconds ago" and a terminated container
+	// status are the same event in two formats, so anything that wanted the
+	// number parsed one of them with a regular expression. The conformance
+	// suite needs it for every behavior that asks whether a service could
+	// reach a host, because the answer is the probe's exit code, so the
+	// number is part of the contract rather than a detail of Docker's
+	// phrasing.
+	ExitCode *int
 }
 
 // Teardown is what Down managed to remove, and what it could not.
@@ -203,4 +246,27 @@ type PendingResource struct {
 	Kind   string
 	ID     string
 	Reason string
+}
+
+// LogReader is implemented by a runtime that can return a service's output.
+//
+// Optional rather than part of Runtime, because it is the one capability a
+// runtime can honestly lack: reading logs out of a cluster the caller cannot
+// reach is not something to fake. A runtime that does not implement it
+// declares Logs false, and the command that wanted them says which runtime
+// could not supply them instead of printing nothing.
+type LogReader interface {
+	// Logs returns recent output from an environment's services, already
+	// redacted. An empty service name means every service.
+	Logs(ctx context.Context, envID, service string, tail int) ([]LogLine, error)
+}
+
+// LogLine is one line of a service's output.
+type LogLine struct {
+	// Service is which service wrote it.
+	Service string
+	// Stream is "stdout" or "stderr".
+	Stream string
+	// Text is the line, already redacted.
+	Text string
 }

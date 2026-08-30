@@ -103,10 +103,9 @@ errors:
     retryable: false
     exit_code: 3
   - code: AF-SEC-002
-    planned: true
     area: SEC
-    message: "The credential for {source} was rejected after one refresh."
-    next_step: "Rotate the credential and store the new value where {source} reads it."
+    message: "The credential for {source} was rejected after one refresh: {detail}"
+    next_step: "Rotate the credential and store the new value where {source} reads it. A rejection that survives a refresh is a credential that was revoked or was never right, so retrying will not help."
     docs: guides/secrets
     retryable: false
     exit_code: 4
@@ -176,14 +175,14 @@ errors:
     docs: providers/limits
     retryable: false
     exit_code: 5
-  - code: AF-DB-009
+  - code: AF-DB-013
     area: DB
     message: "The database seed command failed: {detail}"
     next_step: "Run the command yourself against an empty database of the same version. It is: {command}"
     docs: concepts/goldens
     retryable: false
     exit_code: 5
-  - code: AF-DB-008
+  - code: AF-DB-012
     area: DB
     message: "No golden matches this manifest's masking rules, and {count} were made under different ones."
     next_step: "Run 'af golden refresh' to make one from the source this manifest names."
@@ -198,6 +197,20 @@ errors:
     docs: providers/overview
     retryable: false
     exit_code: 5
+  - code: AF-DB-008
+    area: DB
+    message: "The database provider {provider} at {endpoint} rejected the configured credential."
+    next_step: "Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing."
+    docs: providers/overview
+    retryable: false
+    exit_code: 4
+  - code: AF-DB-009
+    area: DB
+    message: "The Database Lab Engine at {endpoint} has no snapshot to build a golden from: {detail}"
+    next_step: "Wait for the engine's own data retrieval to finish, then refresh again; its progress is at GET /instance/retrieval."
+    docs: providers/dblab
+    retryable: true
+    exit_code: 5
   - code: AF-DB-010
     planned: true
     area: DB
@@ -206,19 +219,31 @@ errors:
     docs: concepts/goldens
     retryable: false
     exit_code: 5
-  - code: AF-DB-020
-    planned: true
+  - code: AF-DB-011
     area: DB
-    message: "Personas cannot be provisioned because {provider} creates users only through its own API."
-    next_step: "Configure SANDBOX mode for {provider} so that personas are created in its sandbox tenant."
+    message: "The subset could not be taken: {detail}"
+    next_step: "Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has."
+    docs: concepts/subsetting
+    retryable: false
+    exit_code: 4
+  - code: AF-DB-020
+    area: DB
+    message: "Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured."
+    next_step: "Point auth.url or auth.domain at a sandbox, development or staging tenant and set auth.sandbox: true, so that personas are never created in production."
     docs: guides/personas
     retryable: false
     exit_code: 3
+  - code: AF-DB-021
+    area: DB
+    message: "{provider} rejected the admin token used to create personas."
+    next_step: "Check that the variable named by auth.token_env holds a key for the sandbox tenant with permission to create users."
+    docs: guides/personas
+    retryable: false
+    exit_code: 4
   - code: AF-DB-030
-    planned: true
     area: DB
     message: "Migrations failed on the branch: {detail}"
-    next_step: "Read the migration log at {location}, fix the migration, and push again."
+    next_step: "The rehearsal names the statement that failed and times the ones before it. Fix the migration and push again: a migration that fails on a branch with production's shape is one that would have failed in production."
     docs: concepts/insights
     retryable: false
     exit_code: 5
@@ -372,6 +397,27 @@ errors:
     message: "Service {service} depends on {missing}, which the manifest does not declare."
     next_step: "Add a service called {missing}, or correct the depends_on entry."
     docs: reference/manifest
+    retryable: false
+    exit_code: 3
+  - code: AF-RUN-043
+    area: RUN
+    message: "This cluster is not containing the environment: {detail}"
+    next_step: "Use a cluster whose CNI enforces NetworkPolicy rather than only accepting it, then run 'af up' again."
+    docs: guides/kubernetes-runtime
+    retryable: false
+    exit_code: 3
+  - code: AF-RUN-044
+    area: RUN
+    message: "This runtime cannot do that: {detail}"
+    next_step: "Use the runtime that supports it, or run the command against an environment placed by one that does."
+    docs: guides/kubernetes-runtime
+    retryable: false
+    exit_code: 3
+  - code: AF-RUN-045
+    area: RUN
+    message: "{kind} {name} was not created by this runtime, so it was not removed."
+    next_step: "Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns."
+    docs: guides/kubernetes-runtime
     retryable: false
     exit_code: 3
   - code: AF-RUN-009
@@ -539,7 +585,6 @@ errors:
     retryable: true
     exit_code: 1
   - code: AF-AGT-010
-    planned: true
     area: AGT
     message: "Invariant {invariant} did not finish within {timeout}."
     next_step: "Make the invariant cheaper; it runs after every workflow and must be a quick read."
@@ -547,13 +592,19 @@ errors:
     retryable: false
     exit_code: 8
   - code: AF-AGT-011
-    planned: true
     area: AGT
     message: "Invariant {invariant} is not read only."
     next_step: "Rewrite it as a single SELECT; invariants run inside a read only transaction."
     docs: guides/invariants
     retryable: false
     exit_code: 3
+  - code: AF-AGT-012
+    area: AGT
+    message: "Invariant {invariant} does not hold: {detail}"
+    next_step: "The rows the statement returned are the violation. Run it against the branch to see them all."
+    docs: guides/invariants
+    retryable: false
+    exit_code: 8
 
   # Load
   - code: AF-LOD-010
@@ -610,7 +661,7 @@ errors:
     planned: true
     area: CP
     message: "The control plane at {url} could not be reached."
-    next_step: "Antifailure works without it. Unset control_plane.url to run fully locally."
+    next_step: "Antifailure works without it. Run af logout, or unset AF_CONTROL_PLANE_URL, to work fully locally."
     docs: self-hosting/control-plane
     retryable: true
     exit_code: 5

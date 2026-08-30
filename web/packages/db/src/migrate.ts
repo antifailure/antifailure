@@ -71,7 +71,40 @@ async function run(
   try {
     return await apply(sql, dir, log)
   } finally {
-    await sql`SELECT pg_advisory_unlock(hashtext('antifailure.migrations'))`
+    // THIS IS WHY A FAILED MIGRATION USED TO BE UNDIAGNOSABLE, and it is worth
+    // the paragraph because the symptom names nothing useful.
+    //
+    // A migration file is one transaction. When a statement in it fails, the
+    // connection is left in an aborted transaction, and EVERY subsequent
+    // statement on that connection is refused with 25P02, "current transaction
+    // is aborted". The unlock below is such a statement. An exception thrown
+    // from a finally block REPLACES the exception being propagated, so the
+    // caller was told "current transaction is aborted" and never told which
+    // statement aborted it. The real error had already happened and was
+    // discarded on the way out.
+    //
+    // It cost an hour on a real deploy: `CREATE EXTENSION pgcrypto` was refused
+    // by a managed Postgres that had not allow-listed it, and the operator saw
+    // only 25P02 with a stack trace pointing at this unlock.
+    //
+    // Rolling back first puts the connection back in a usable state so the
+    // unlock succeeds and nothing is masked. The rollback is separately
+    // guarded because on the success path there is no open transaction and
+    // ROLLBACK there is a warning, not an error.
+    try {
+      await sql`ROLLBACK`
+    } catch {
+      // No transaction was open, which is the successful path.
+    }
+    try {
+      await sql`SELECT pg_advisory_unlock(hashtext('antifailure.migrations'))`
+    } catch (err) {
+      // Reported and not thrown. If we are unwinding, the migration failure is
+      // the useful error and this one would replace it again; if we are not,
+      // the connection is about to be released and a session-scoped advisory
+      // lock goes with it.
+      log(`could not release the migration lock: ${String(err)}`)
+    }
   }
 }
 

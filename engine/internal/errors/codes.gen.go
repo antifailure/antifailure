@@ -18,6 +18,8 @@ const (
 	AFAGT010 Code = "AF-AGT-010"
 	// Invariant {invariant} is not read only.
 	AFAGT011 Code = "AF-AGT-011"
+	// Invariant {invariant} does not hold: {detail}
+	AFAGT012 Code = "AF-AGT-012"
 
 	// Build
 	// The build for service {service} failed after {duration}.
@@ -70,17 +72,27 @@ const (
 	// Extension {extension} is required by the golden and is not available
 	// on the target.
 	AFDB007 Code = "AF-DB-007"
-	// No golden matches this manifest's masking rules, and {count} were
-	// made under different ones.
+	// The database provider {provider} at {endpoint} rejected the
+	// configured credential.
 	AFDB008 Code = "AF-DB-008"
-	// The database seed command failed: {detail}
+	// The Database Lab Engine at {endpoint} has no snapshot to build a
+	// golden from: {detail}
 	AFDB009 Code = "AF-DB-009"
 	// The storage pool has {available} free and the operation needs
 	// {needed}.
 	AFDB010 Code = "AF-DB-010"
+	// The subset could not be taken: {detail}
+	AFDB011 Code = "AF-DB-011"
+	// No golden matches this manifest's masking rules, and {count} were
+	// made under different ones.
+	AFDB012 Code = "AF-DB-012"
+	// The database seed command failed: {detail}
+	AFDB013 Code = "AF-DB-013"
 	// Personas cannot be provisioned because {provider} creates users only
-	// through its own API.
+	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
+	// {provider} rejected the admin token used to create personas.
+	AFDB021 Code = "AF-DB-021"
 	// Migrations failed on the branch: {detail}
 	AFDB030 Code = "AF-DB-030"
 
@@ -225,6 +237,13 @@ const (
 	// Service {service} depends on {missing}, which the manifest does not
 	// declare.
 	AFRUN042 Code = "AF-RUN-042"
+	// This cluster is not containing the environment: {detail}
+	AFRUN043 Code = "AF-RUN-043"
+	// This runtime cannot do that: {detail}
+	AFRUN044 Code = "AF-RUN-044"
+	// {kind} {name} was not created by this runtime, so it was not
+	// removed.
+	AFRUN045 Code = "AF-RUN-045"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -237,7 +256,7 @@ const (
 	// The variables {names} are declared in the manifest but were not
 	// found in any configured source.
 	AFSEC001 Code = "AF-SEC-001"
-	// The credential for {source} was rejected after one refresh.
+	// The credential for {source} was rejected after one refresh: {detail}
 	AFSEC002 Code = "AF-SEC-002"
 	// The value supplied for {name} carries a live credential prefix, and
 	// {name} is configured for sandbox use.
@@ -304,6 +323,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/invariants",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFAGT012: {
+		Code:      AFAGT012,
+		Area:      "AGT",
+		Message:   "Invariant {invariant} does not hold: {detail}",
+		NextStep:  "The rows the statement returned are the violation. Run it against the branch to see them all.",
+		Docs:      "guides/invariants",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
 	},
 	AFBLD001: {
 		Code:      AFBLD001,
@@ -372,7 +400,7 @@ var catalog = map[Code]Entry{
 		Code:      AFCP001,
 		Area:      "CP",
 		Message:   "The control plane at {url} could not be reached.",
-		NextStep:  "Antifailure works without it. Unset control_plane.url to run fully locally.",
+		NextStep:  "Antifailure works without it. Run af logout, or unset AF_CONTROL_PLANE_URL, to work fully locally.",
 		Docs:      "self-hosting/control-plane",
 		Retryable: true,
 		ExitCode:  ExitProvider,
@@ -479,19 +507,19 @@ var catalog = map[Code]Entry{
 	AFDB008: {
 		Code:      AFDB008,
 		Area:      "DB",
-		Message:   "No golden matches this manifest's masking rules, and {count} were made under different ones.",
-		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names.",
-		Docs:      "concepts/goldens",
+		Message:   "The database provider {provider} at {endpoint} rejected the configured credential.",
+		NextStep:  "Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing.",
+		Docs:      "providers/overview",
 		Retryable: false,
-		ExitCode:  ExitProvider,
+		ExitCode:  ExitAuth,
 	},
 	AFDB009: {
 		Code:      AFDB009,
 		Area:      "DB",
-		Message:   "The database seed command failed: {detail}",
-		NextStep:  "Run the command yourself against an empty database of the same version. It is: {command}",
-		Docs:      "concepts/goldens",
-		Retryable: false,
+		Message:   "The Database Lab Engine at {endpoint} has no snapshot to build a golden from: {detail}",
+		NextStep:  "Wait for the engine's own data retrieval to finish, then refresh again; its progress is at GET /instance/retrieval.",
+		Docs:      "providers/dblab",
+		Retryable: true,
 		ExitCode:  ExitProvider,
 	},
 	AFDB010: {
@@ -503,20 +531,56 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitProvider,
 	},
+	AFDB011: {
+		Code:      AFDB011,
+		Area:      "DB",
+		Message:   "The subset could not be taken: {detail}",
+		NextStep:  "Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has.",
+		Docs:      "concepts/subsetting",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFDB012: {
+		Code:      AFDB012,
+		Area:      "DB",
+		Message:   "No golden matches this manifest's masking rules, and {count} were made under different ones.",
+		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB013: {
+		Code:      AFDB013,
+		Area:      "DB",
+		Message:   "The database seed command failed: {detail}",
+		NextStep:  "Run the command yourself against an empty database of the same version. It is: {command}",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
 	AFDB020: {
 		Code:      AFDB020,
 		Area:      "DB",
-		Message:   "Personas cannot be provisioned because {provider} creates users only through its own API.",
-		NextStep:  "Configure SANDBOX mode for {provider} so that personas are created in its sandbox tenant.",
+		Message:   "Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured.",
+		NextStep:  "Point auth.url or auth.domain at a sandbox, development or staging tenant and set auth.sandbox: true, so that personas are never created in production.",
 		Docs:      "guides/personas",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFDB021: {
+		Code:      AFDB021,
+		Area:      "DB",
+		Message:   "{provider} rejected the admin token used to create personas.",
+		NextStep:  "Check that the variable named by auth.token_env holds a key for the sandbox tenant with permission to create users.",
+		Docs:      "guides/personas",
+		Retryable: false,
+		ExitCode:  ExitAuth,
 	},
 	AFDB030: {
 		Code:      AFDB030,
 		Area:      "DB",
 		Message:   "Migrations failed on the branch: {detail}",
-		NextStep:  "Read the migration log at {location}, fix the migration, and push again.",
+		NextStep:  "The rehearsal names the statement that failed and times the ones before it. Fix the migration and push again: a migration that fails on a branch with production's shape is one that would have failed in production.",
 		Docs:      "concepts/insights",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -998,6 +1062,33 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
+	AFRUN043: {
+		Code:      AFRUN043,
+		Area:      "RUN",
+		Message:   "This cluster is not containing the environment: {detail}",
+		NextStep:  "Use a cluster whose CNI enforces NetworkPolicy rather than only accepting it, then run 'af up' again.",
+		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN044: {
+		Code:      AFRUN044,
+		Area:      "RUN",
+		Message:   "This runtime cannot do that: {detail}",
+		NextStep:  "Use the runtime that supports it, or run the command against an environment placed by one that does.",
+		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN045: {
+		Code:      AFRUN045,
+		Area:      "RUN",
+		Message:   "{kind} {name} was not created by this runtime, so it was not removed.",
+		NextStep:  "Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns.",
+		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
 	AFSCH001: {
 		Code:      AFSCH001,
 		Area:      "SCH",
@@ -1028,8 +1119,8 @@ var catalog = map[Code]Entry{
 	AFSEC002: {
 		Code:      AFSEC002,
 		Area:      "SEC",
-		Message:   "The credential for {source} was rejected after one refresh.",
-		NextStep:  "Rotate the credential and store the new value where {source} reads it.",
+		Message:   "The credential for {source} was rejected after one refresh: {detail}",
+		NextStep:  "Rotate the credential and store the new value where {source} reads it. A rejection that survives a refresh is a credential that was revoked or was never right, so retrying will not help.",
 		Docs:      "guides/secrets",
 		Retryable: false,
 		ExitCode:  ExitAuth,

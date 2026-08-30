@@ -27,6 +27,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.database(m)
 	v.egress(m)
 	v.personas(m)
+	v.auth(m)
 	v.workflows(m)
 	v.invariants(m)
 	v.load(m)
@@ -457,6 +458,7 @@ func (v *validator) egress(m *schema.Manifest) {
 func (v *validator) personas(m *schema.Manifest) {
 	names := map[string]bool{}
 	emails := map[string]int{}
+	phones := map[string]int{}
 	for i := range m.Personas {
 		p := &m.Personas[i]
 		base := fmt.Sprintf("personas[%d]", i)
@@ -480,7 +482,126 @@ func (v *validator) personas(m *schema.Manifest) {
 				fmt.Sprintf("Persona %q logs in with an SMS code.", p.Name),
 				"The message provider must be set to capture mode for the runner to read it.")
 		}
+		if p.Phone != "" {
+			if prev, dup := phones[p.Phone]; dup {
+				// The inbox routes a text by recipient exactly as it routes
+				// mail by recipient, so two personas on one number means each
+				// can read the other's code.
+				v.add(base+".phone",
+					fmt.Sprintf("Personas %q and %q share the number %q.",
+						m.Personas[prev].Name, p.Name, p.Phone),
+					"Each persona needs its own number, because the inbox routes messages by recipient.")
+			}
+			phones[p.Phone] = i
+		}
 	}
+}
+
+// auth checks that the configured adapter has what it needs.
+//
+// Every rule here prevents a failure that would otherwise happen much later,
+// after a golden refresh, when the branch is up and the agent cannot sign in.
+// The cost of finding out at `af doctor` time rather than then is the whole
+// reason this function exists.
+func (v *validator) auth(m *schema.Manifest) {
+	a := m.Auth
+	if a == nil {
+		return
+	}
+
+	hosted := map[schema.AuthAdapter]bool{
+		schema.AuthSupabaseAPI: true, schema.AuthClerk: true,
+		schema.AuthAuth0: true, schema.AuthWorkOS: true,
+	}
+
+	switch a.Adapter {
+	case schema.AuthSeed:
+		if strings.TrimSpace(a.Seed) == "" {
+			v.add("auth.seed",
+				"The seed adapter is selected and no command is configured.",
+				"Set auth.seed to the command that creates a persona.")
+		}
+	case schema.AuthDirect:
+		if a.Table == nil {
+			// Not an error: detection can describe the table from the live
+			// schema. Worth saying, because detection guesses and this does
+			// not.
+			v.add("auth.table",
+				"The direct adapter is selected and no table is described.",
+				"Add auth.table with the users table's name and columns, or leave "+
+					"auth.adapter unset so detection reads them from the database.")
+		} else if strings.TrimSpace(a.Table.Name) == "" {
+			v.add("auth.table.name", "The users table has no name.", "")
+		}
+	case schema.AuthSupabaseAPI:
+		if strings.TrimSpace(a.URL) == "" {
+			v.add("auth.url",
+				"The Supabase auth API adapter is selected and no project URL is set.",
+				"Set auth.url to the project's API root, for example https://abc.supabase.co.")
+		}
+	case schema.AuthAuth0:
+		if strings.TrimSpace(a.Domain) == "" {
+			v.add("auth.domain",
+				"The Auth0 adapter is selected and no tenant domain is set.",
+				"Set auth.domain to the tenant, for example dev-abc123.us.auth0.com.")
+		}
+	}
+
+	if hosted[a.Adapter] {
+		if strings.TrimSpace(a.TokenEnv) == "" {
+			v.add("auth.token_env",
+				fmt.Sprintf("The %s adapter needs an admin token and none is named.", a.Adapter),
+				"Set auth.token_env to the variable holding it. The variable name, never the token.")
+		}
+		if !a.Sandbox {
+			// The same refusal AF-DB-020 makes at run time, made early. A
+			// hosted adapter with no sandbox has nowhere to put a persona
+			// except the production tenant.
+			v.add("auth.sandbox",
+				fmt.Sprintf("The %s adapter is selected and auth.sandbox is not set.", a.Adapter),
+				"Point it at a sandbox, development or staging tenant and set "+
+					"auth.sandbox: true. Without one the only tenant left is production.")
+		}
+	}
+
+	if a.TokenEnv != "" && looksLikeACredential(a.TokenEnv) {
+		v.add("auth.token_env",
+			"auth.token_env holds something shaped like a credential rather than a variable name.",
+			"Put the variable's NAME here and the credential in that variable.")
+	}
+
+	for i, name := range a.Sessions {
+		if strings.Count(name, ".") > 1 || strings.TrimSpace(name) == "" {
+			v.add(fmt.Sprintf("auth.sessions[%d]", i),
+				fmt.Sprintf("%q is not a table name.", name),
+				"Write it as table or schema.table.")
+		}
+	}
+
+	if a.Password != nil && a.Password.MinLength > 128 {
+		v.add("auth.password.min_length",
+			"A minimum password length above 128 is longer than most applications accept.", "")
+	}
+}
+
+// looksLikeACredential reports whether a value is a secret rather than the
+// name of the variable holding one.
+//
+// A generated token is long, mixed case and often prefixed. A variable name is
+// short, upper case and underscored. The test is deliberately loose, because
+// the cost of a false positive is one confused message and the cost of a false
+// negative is a credential committed to a repository.
+func looksLikeACredential(value string) bool {
+	if len(value) < 20 {
+		return false
+	}
+	for _, prefix := range []string{"sk_", "sk-", "pk_", "eyJ", "ey", "whsec_", "Bearer "} {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	upper := strings.ToUpper(value)
+	return value != upper && !strings.Contains(value, " ")
 }
 
 func (v *validator) workflows(m *schema.Manifest) {
@@ -538,6 +659,11 @@ func (v *validator) invariants(m *schema.Manifest) {
 			v.add(base+".sql",
 				fmt.Sprintf("The invariant %q is not read only: %s", inv.Name, err),
 				"Write it as a single SELECT that returns the violating rows. It runs inside a read only transaction, so a write would be refused at run time as well.")
+		}
+		if alwaysReturnsARow(inv.SQL) {
+			v.add(base+".sql",
+				fmt.Sprintf("The invariant %q counts the violations instead of returning them, so it can never hold.", inv.Name),
+				"An invariant holds when its statement returns no rows, and a bare count returns one row saying zero. Select the offending rows themselves: SELECT id FROM ... WHERE ... rather than SELECT count(*) FROM ... WHERE ....")
 		}
 	}
 }
@@ -737,6 +863,43 @@ func validateReadOnlySQL(sql string) error {
 		}
 	}
 	return nil
+}
+
+// alwaysReturnsARow reports whether the statement is a bare aggregate, which
+// returns exactly one row whatever the data says and so describes an invariant
+// that can never hold.
+//
+// This is the mistake everybody makes first, including this repository's own
+// example, which said `SELECT count(*) AS violations FROM orders o LEFT JOIN
+// ...` and would have been red on every run from the day invariants started
+// running. Counting the violations feels like the natural way to ask, and the
+// contract is that the rows ARE the answer.
+//
+// Deliberately narrow. It fires only when the select list opens with an
+// aggregate call and the statement has no GROUP BY or HAVING to make the row
+// count depend on the data. That leaves `SELECT id FROM t WHERE x > (SELECT
+// avg(y) FROM t)` alone, which mentions an aggregate and is a perfectly good
+// invariant, because refusing a correct manifest is worse than missing a
+// wrong one.
+func alwaysReturnsARow(sql string) bool {
+	lower := strings.ToLower(strings.TrimSpace(stripSQLComments(sql)))
+	if !strings.HasPrefix(lower, "select") {
+		return false
+	}
+	// A grouped or filtered aggregate returns a row per group, and no groups
+	// when nothing matches, which is exactly the shape that works.
+	if containsKeyword(lower, "group by") || containsKeyword(lower, "having ") {
+		return false
+	}
+	list := strings.TrimSpace(strings.TrimPrefix(lower, "select"))
+	list = strings.TrimPrefix(list, "distinct ")
+	for _, fn := range []string{"count(", "sum(", "avg(", "min(", "max(",
+		"bool_and(", "bool_or(", "every("} {
+		if strings.HasPrefix(strings.TrimSpace(list), fn) {
+			return true
+		}
+	}
+	return false
 }
 
 // containsKeyword looks for a keyword at a word boundary, so that a column

@@ -46,6 +46,34 @@ RUN test ! -d node_modules/next \
   || (echo 'the web framework is in the API image: the workspace scoping above stopped working' && exit 1)
 
 # ---------------------------------------------------------------------------
+# The console.
+#
+# A Next.js static export, built here and copied into the runtime image, so the
+# control plane serves its own web application from its own origin. That is the
+# security model rather than a packaging choice: the session is a SameSite=Lax
+# cookie on this origin, and a console served from a second hostname would need
+# SameSite=None and credentialed CORS on every endpoint of the API.
+#
+# Its own lockfile and its own node_modules. The console depends on React and
+# Next; the control plane must not, and putting it in the web/ workspace would
+# have put both into `npm ci --omit=dev` and into the runtime image.
+# ---------------------------------------------------------------------------
+FROM node:24-alpine AS console
+
+# Off, in the image and in CI. A build step that reports anonymous usage to a
+# third party from a machine holding this repository is not a trade anybody
+# here agreed to, and it is one line.
+ENV NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /console
+
+COPY console/package.json console/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY console/ ./
+RUN npm run build && test -f out/index.html
+
+# ---------------------------------------------------------------------------
 # Runtime.
 # ---------------------------------------------------------------------------
 FROM node:24-alpine AS runtime
@@ -60,7 +88,12 @@ ARG AF_BUILD_DATE=unknown
 LABEL org.opencontainers.image.title="Antifailure control plane" \
       org.opencontainers.image.description="Environments that outlive a CI job, quotas, and history." \
       org.opencontainers.image.source="https://github.com/antifailure/antifailure" \
-      org.opencontainers.image.documentation="https://antifailure.dev/self-hosting/control-plane/" \
+      # /docs/ IS PART OF THE PATH. The site is served under it, so the URL
+      # without it is a 404, and this label is the one thing in the image that
+      # tells an operator where to read about what they are running. It was
+      # wrong in every image published so far, and nothing could have caught it:
+      # claimcheck reads markdown, and a string in a Dockerfile is not markdown.
+      org.opencontainers.image.documentation="https://antifailure.dev/docs/self-hosting/control-plane/" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${AF_VERSION}" \
       org.opencontainers.image.revision="${AF_COMMIT}" \
@@ -90,11 +123,22 @@ COPY deploy/docker/maintenance.mjs ./maintenance.mjs
 # created; see the file for why that check is not a formality.
 COPY deploy/docker/personas.mjs ./personas.mjs
 
+# The console's build. src/console/static.ts looks here by default; the path is
+# overridable with AF_CONSOLE_DIR for a self-hosted operator who serves it some
+# other way.
+COPY --from=console /console/out ./console-out
+
 # The migrations are read from disk at runtime by AF_MIGRATE=1, so they have to
 # be in the image. Asserted rather than assumed: an image whose migration
 # directory is empty fails at deploy time here instead of at three in the
 # morning when someone sets AF_MIGRATE and it silently applies nothing.
 RUN test -n "$(ls -A ./packages/db/migrations)" || (echo 'no migrations in image' && exit 1)
+
+# The same assertion for the console, for the same reason. An image whose
+# console directory is empty answers every page with a 503 that explains
+# itself -- which is far better than a blank 404 and still not something to
+# discover in production.
+RUN test -f ./console-out/index.html || (echo 'no console build in image' && exit 1)
 
 # Runs as the unprivileged `node` user that the base image already provides.
 # Nothing in the container is owned by it, so nothing in the container can be

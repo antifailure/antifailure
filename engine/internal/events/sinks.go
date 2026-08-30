@@ -470,16 +470,21 @@ var _ redactor = (*redact.Redactor)(nil)
 
 // LastSequence reads the highest sequence number an environment's log holds.
 //
-// It is how a new command continues the counter the last one left, so that
-// `Event.Seq` means what its own documentation says: monotonic per
-// environment, and a gap in it is a gap rather than a restart.
+// It is how a command continues the counter the last one left when the durable
+// sequence cannot be read, so that `Event.Seq` means what its own documentation
+// says: monotonic per environment, and a gap in it is a gap rather than a
+// restart.
+//
+// The file and the environment are separate arguments because they are
+// separate things: a log is named for a sanitised environment identifier, and
+// the events inside it carry the real one.
 //
 // A missing, empty, or unreadable log returns zero, which starts the counter
 // at one. That is the right answer for a first run and the safe answer for a
 // damaged file: numbering from the beginning is confusing, and refusing to run
 // a command because its log could not be read would be worse.
-func LastSequence(dir, env string) uint64 {
-	f, err := os.Open(filepath.Join(dir, env+".ndjson"))
+func LastSequence(dir, file, env string) uint64 {
+	f, err := os.Open(filepath.Join(dir, file+".ndjson"))
 	if err != nil {
 		return 0
 	}

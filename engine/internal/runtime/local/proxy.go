@@ -54,6 +54,7 @@ type sidecarConfig struct {
 	EnvID       string            `json:"env_id"`
 	MockPacks   []string          `json:"mock_packs,omitempty"`
 	Credentials map[string]string `json:"credentials,omitempty"`
+	Resolver    string            `json:"resolver,omitempty"`
 	CACert      string            `json:"ca_cert,omitempty"`
 	CAKey       string            `json:"ca_key,omitempty"`
 }
@@ -84,7 +85,7 @@ func (r *Runtime) startProxy(
 	}
 
 	name := proxyName(envID)
-	if err := journal("container", name); err != nil {
+	if err := journal(kindContainer, name); err != nil {
 		return "", err
 	}
 	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
@@ -393,6 +394,16 @@ type Decision struct {
 	// Substituted marks a request whose credential the sidecar replaced on
 	// the way out, so a reader can tell a sandbox call from a live one.
 	Substituted bool `json:"substituted"`
+	// WaitedMs and Limit are how long a rate limit held this request and what
+	// that limit is in words.
+	//
+	// The sidecar has always written both halves of this and nothing read
+	// them: waited_ms was absent from this struct, so it was decoded into
+	// nothing, and the limit was never written at all because describeRate
+	// had no caller outside its own test. A request shaped for half a second
+	// looked in af net log exactly like a slow application.
+	WaitedMs int64  `json:"waited_ms"`
+	Limit    string `json:"limit"`
 }
 
 // Decisions reads the sidecar's decision log for an environment.
@@ -675,4 +686,24 @@ func orAny(s string) string {
 		return "any"
 	}
 	return s
+}
+
+// EnsureProxyImage builds the egress sidecar's image on the local Docker
+// daemon if it is not already there, and returns its reference.
+//
+// Exported because the Kubernetes runtime needs the same image and cannot
+// build it: it talks to an API server, not to a daemon, and the sidecar is
+// compiled from source carried in this binary. So the engine builds it here,
+// on the machine that ran af, and hands the reference to whichever runtime is
+// going to place it. A cluster that has no access to this machine's daemon
+// gets the reference from configuration instead, which is the same path an air
+// gapped install uses.
+func (r *Runtime) EnsureProxyImage(ctx context.Context, progress func(string)) (string, error) {
+	if progress == nil {
+		progress = func(string) {}
+	}
+	if err := r.ensureProxyImage(ctx, progress); err != nil {
+		return "", err
+	}
+	return proxyimage.Tag(), nil
 }

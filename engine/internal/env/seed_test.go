@@ -77,7 +77,7 @@ database:
 	err := env.RunSeedForTest(context.Background(), o,
 		"echo 'relation does not exist' >&2; exit 3", "postgres://x@127.0.0.1/y")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "AF-DB-009")
+	require.Contains(t, err.Error(), "AF-DB-013")
 	require.Contains(t, err.Error(), "relation does not exist",
 		"the reason the script gave has to reach the person reading this")
 }

@@ -15,6 +15,7 @@ import {
 import { safeRedirect, completeSignIn, syncMembership, SignInError } from '../src/auth/signin.ts'
 import { FakeClock } from '../src/clock.ts'
 import { FakeGitHub } from '../src/auth/fakegithub.ts'
+import { GitHubError } from '../src/auth/github.ts'
 import {
   available, startApi, seedOrg, dropOrg, signInAs, callProcedure, errorCode,
   type ApiHarness, type Org,
@@ -157,6 +158,116 @@ describe('the OAuth exchange', { skip: hasDatabase ? false : 'no Postgres' }, ()
         WHERE token_hash = ${createHash('sha256').update(token, 'utf8').digest()}`
       assert.equal(row?.ip ?? null, expected, `"${header}" was recorded as ${row?.ip ?? 'nothing'}`)
     }
+  })
+
+  /**
+   * Signs the SAME person in twice, which the helper above cannot do: it mints
+   * a fresh GitHub id per call, and a fresh id is a different person as far as
+   * every join in this schema is concerned.
+   */
+  async function signInAgain(login: string, githubId: number) {
+    h.github.addUser({ id: githubId, login, email: `${login}@example.test`, name: login })
+    h.github.addOrganization(login, { id: 1, login: org.slug })
+    // Past the rate limit window. These tests start more exchanges than a real
+    // browser would in a minute, and a 429 here reads as a sign-in bug.
+    h.clock.advance(60_000)
+    const res = await h.fetch('/auth/github')
+    const state = new URL(res.headers.get('location')!).searchParams.get('state')!
+    const code = h.github.approve(login)
+    const done = await h.fetch(`/auth/github/callback?code=${code}&state=${state}`)
+    assert.equal(done.status, 302)
+    return done
+  }
+
+  async function roleOf(login: string): Promise<string | null> {
+    const rows = await h.admin<{ role: string; source: string }[]>`
+      SELECT m.role, m.source FROM members m JOIN users u ON u.id = m.user_id
+      WHERE u.github_login = ${login}`
+    return rows[0]?.role ?? null
+  }
+
+  it('an organization owner on GitHub arrives as an admin, not as a member', async () => {
+    // The defect this closes, seen on the real deployment: the person who
+    // installed the App on their own organization signed in and could not
+    // store a provider key, mint an engine token, manage members, export the
+    // audit log, or approve a masking change. Their own control plane refused
+    // them, because sign-in wrote 'member' for everybody and the function that
+    // maps a GitHub owner to an admin had no caller anywhere in the codebase.
+    const login = `owner-${randomUUID().slice(0, 6)}`
+    const id = Math.floor(Math.random() * 1e9)
+    h.github.setMembers(org.slug, [
+      { user: { id, login, email: `${login}@example.test`, name: login, avatarUrl: null }, role: 'admin' },
+    ])
+    await signInAgain(login, id)
+    assert.equal(await roleOf(login), 'admin')
+  })
+
+  it('a plain member on GitHub arrives as a member', async () => {
+    const login = `plain-${randomUUID().slice(0, 6)}`
+    const id = Math.floor(Math.random() * 1e9)
+    h.github.setMembers(org.slug, [
+      { user: { id, login, email: `${login}@example.test`, name: login, avatarUrl: null }, role: 'member' },
+    ])
+    await signInAgain(login, id)
+    assert.equal(await roleOf(login), 'member')
+  })
+
+  it('a role set by hand here is not overwritten by GitHub on the next sign-in', async () => {
+    // members.setRole marks a row source = 'manual'. Somebody promoted to
+    // owner in this application stays an owner, or the promotion silently
+    // expires the next time they sign in and nobody can explain why.
+    const login = `manual-${randomUUID().slice(0, 6)}`
+    const id = Math.floor(Math.random() * 1e9)
+    h.github.setMembers(org.slug, [
+      { user: { id, login, email: `${login}@example.test`, name: login, avatarUrl: null }, role: 'member' },
+    ])
+    await signInAgain(login, id)
+    await h.admin`
+      UPDATE members SET role = 'owner', source = 'manual'
+      WHERE user_id = (SELECT id FROM users WHERE github_login = ${login})`
+    await signInAgain(login, id)
+    assert.equal(await roleOf(login), 'owner')
+  })
+
+  it('GitHub failing to answer leaves the role alone rather than demoting', async () => {
+    // The ordering that makes this matter: an administrator signs in during a
+    // GitHub rate limit. Reading "could not establish the role" as "member"
+    // would strip them of members.manage on their own organization, and the
+    // only way back is another sign-in that happens to succeed -- which they
+    // can no longer grant themselves if they were the only administrator.
+    const login = `flaky-${randomUUID().slice(0, 6)}`
+    const id = Math.floor(Math.random() * 1e9)
+    h.github.setMembers(org.slug, [
+      { user: { id, login, email: `${login}@example.test`, name: login, avatarUrl: null }, role: 'admin' },
+    ])
+    await signInAgain(login, id)
+    assert.equal(await roleOf(login), 'admin')
+
+    h.github.breakRoleLookups()
+    try {
+      await signInAgain(login, id)
+    } finally {
+      h.github.breakRoleLookups(false)
+    }
+    assert.equal(await roleOf(login), 'admin', 'a failed role lookup demoted an administrator')
+  })
+
+  it('a first sign-in during an outage is a member, not an administrator', async () => {
+    // The other direction of the same null. With no row to preserve, the
+    // fallback has to guess, and guessing upward hands somebody administrative
+    // rights because GitHub was slow.
+    const login = `newflaky-${randomUUID().slice(0, 6)}`
+    const id = Math.floor(Math.random() * 1e9)
+    h.github.setMembers(org.slug, [
+      { user: { id, login, email: `${login}@example.test`, name: login, avatarUrl: null }, role: 'admin' },
+    ])
+    h.github.breakRoleLookups()
+    try {
+      await signInAgain(login, id)
+    } finally {
+      h.github.breakRoleLookups(false)
+    }
+    assert.equal(await roleOf(login), 'member')
   })
 
   it('refuses a state value it never issued', async () => {
@@ -505,5 +616,125 @@ describe('the fake GitHub behaves like the real one', () => {
     const gh = new FakeGitHub(clock)
     const user = gh.addUser({ id: 1, login: 'ada', email: 'Ada@Example.Test', name: 'Ada' })
     assert.equal(user.email, 'ada@example.test')
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The route, not the function.
+ *
+ * syncMembership had five tests above and zero callers: it was written,
+ * correct, covered, and unreachable. Every one of those tests passed against a
+ * feature that did not exist from a user's point of view, which is exactly what
+ * dead code looks like from the inside. These are the cases that only hold once
+ * something calls it over HTTP with a session and a permission.
+ */
+describe('members.sync over the route', { skip: hasDatabase ? false : 'no Postgres' }, () => {
+  let h: ApiHarness
+  let org: Org
+
+  before(async () => {
+    h = await startApi()
+    org = await seedOrg(h.admin, 'syncroute')
+  })
+  after(async () => {
+    await dropOrg(h.admin, org.orgId)
+    await h.close()
+  })
+
+  const run = randomUUID().slice(0, 6)
+  function ghUser(name: string) {
+    const login = `${name}-${run}`
+    return { id: Math.floor(Math.random() * 1e9), login, email: `${login}@example.test`, name: login, avatarUrl: null }
+  }
+
+  async function installFor(orgId: string, slug: string): Promise<number> {
+    const id = Math.floor(Math.random() * 1e12)
+    await h.admin`
+      INSERT INTO github_installations (org_id, installation_id, account_login, account_type)
+      VALUES (${orgId}, ${id}, ${slug}, 'Organization')`
+    return id
+  }
+
+  it('an organization with no installation is told so, rather than failing', async () => {
+    const admin = await signInAs(h, org, 'admin')
+    const { status, body } = await callProcedure(h, admin, 'members.sync', 'mutation', {})
+    assert.equal(errorCode(body), 'PRECONDITION_FAILED', `${status} ${JSON.stringify(body).slice(0, 200)}`)
+  })
+
+  it('adds and removes members, and the effect is visible on the next request', async () => {
+    // defined -> called -> effective. The assertion that matters is the last
+    // one: members.list, the thing the console actually renders, changes.
+    await installFor(org.orgId, org.slug)
+    const admin = await signInAs(h, org, 'admin')
+    const stays = ghUser('stays')
+    const arrives = ghUser('arrives')
+    h.github.setMembers(org.slug, [{ user: stays, role: 'admin' }, { user: arrives, role: 'member' }])
+
+    const { status, body } = await callProcedure(h, admin, 'members.sync', 'mutation', {})
+    assert.equal(status, 200, JSON.stringify(body).slice(0, 300))
+    const report = (body as { result: { data: { added: string[]; removed: string[] } } }).result.data
+    assert.ok(report.added.includes(stays.login), JSON.stringify(report))
+    assert.ok(report.added.includes(arrives.login), JSON.stringify(report))
+
+    const listed = await callProcedure(h, admin, 'members.list', 'query', {})
+    const logins = ((listed.body as { result: { data: { github_login: string }[] } }).result.data).map(
+      (m) => m.github_login,
+    )
+    assert.ok(logins.includes(stays.login), 'members.list does not show the synced member')
+
+    // And the removal, which is the half sign-in can never do: somebody taken
+    // off the GitHub organization has no reason to come back and sign in.
+    h.github.setMembers(org.slug, [{ user: stays, role: 'admin' }])
+    const second = await callProcedure(h, admin, 'members.sync', 'mutation', {})
+    assert.equal(second.status, 200, JSON.stringify(second.body).slice(0, 300))
+    const after2 = await callProcedure(h, admin, 'members.list', 'query', {})
+    const logins2 = ((after2.body as { result: { data: { github_login: string }[] } }).result.data).map(
+      (m) => m.github_login,
+    )
+    assert.ok(!logins2.includes(arrives.login), 'a member GitHub no longer reports is still listed')
+  })
+
+  it('an empty answer from GitHub is a refusal with a reason, not a 500', async () => {
+    // syncMembership throws SignInError here on purpose: applying an empty
+    // list would remove every owner, and an outage looks exactly like this.
+    // Over HTTP that has to arrive as a 4xx with the explanation, or an
+    // operator reads it as a bug in the control plane.
+    await installFor(org.orgId, `${org.slug}-empty`)
+    const admin = await signInAs(h, org, 'admin')
+    h.github.setMembers(org.slug, [])
+    const { status, body } = await callProcedure(h, admin, 'members.sync', 'mutation', {})
+    assert.equal(errorCode(body), 'PRECONDITION_FAILED', `${status} ${JSON.stringify(body).slice(0, 200)}`)
+    assert.match(JSON.stringify(body), /remove everyone/)
+  })
+
+  it('a control plane with no GitHub App says so, rather than answering 500', async () => {
+    // The community edition runs without an App, and this is the route that
+    // needs one. What an operator has to see is the sentence that names the
+    // three variables to set, not "internal server error".
+    await installFor(org.orgId, `${org.slug}-noapp`)
+    const admin = await signInAs(h, org, 'admin')
+    const previous = h.github.membersOf
+    h.github.membersOf = async () => {
+      throw new GitHubError(
+        'Membership sync needs a GitHub App. Set AF_GITHUB_APP_ID, ' +
+          'AF_GITHUB_APP_PRIVATE_KEY and AF_GITHUB_APP_WEBHOOK_SECRET.',
+      )
+    }
+    try {
+      const { status, body } = await callProcedure(h, admin, 'members.sync', 'mutation', {})
+      assert.equal(errorCode(body), 'PRECONDITION_FAILED', `${status} ${JSON.stringify(body).slice(0, 200)}`)
+      assert.match(JSON.stringify(body), /AF_GITHUB_APP_ID/)
+    } finally {
+      h.github.membersOf = previous
+    }
+  })
+
+  it('a member cannot run it, because it takes access away', async () => {
+    const member = await signInAs(h, org, 'member')
+    const { body } = await callProcedure(h, member, 'members.sync', 'mutation', {})
+    assert.equal(errorCode(body), 'FORBIDDEN')
   })
 })

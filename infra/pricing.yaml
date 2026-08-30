@@ -16,11 +16,28 @@
 #   It is not automatically current. Azure moves prices. The `checked` date is
 #   how you know whether to distrust it, which is why it is a field rather than
 #   a comment.
+#
+# THE REGION IS centralus AND IT IS THE THIRD ONE THIS PROJECT HAS TRIED.
+# southcentralus, because that is what the spec named, until
+# bonfire-allowed-locations denied it. Then eastus, which the policy allows and
+# which is cheaper, until an apply came back
+#
+#   ParameterOutOfRange: The value of 'Version' should be in: []
+#
+# and `az postgres flexible-server list-skus -l eastus` explained the empty
+# list: "Provisioning is restricted in this region", with supportedServerVersions
+# literally []. So THREE independent gates decide whether a region works, and
+# they are checked at three different times by three different systems: quota
+# (which was never the constraint, both regions have 65 cores), Azure Policy
+# (evaluated at write time, invisible to a plan), and regional service
+# availability for the subscription (invisible to both). centralus is the only
+# region that passes all three here, and it is dearer than eastus for compute
+# and storage, which is why these numbers moved.
 
 meta:
   currency: USD
-  region: eastus
-  checked: 2026-08-27
+  region: centralus
+  checked: 2026-08-28
   source: https://prices.azure.com/api/retail/prices
   hours_per_month: 730
 
@@ -33,15 +50,15 @@ postgres_flexible:
     # subscription's bonfire-sku-allowlist. The rest are here so that a plan
     # naming one is priced rather than reported UNKNOWN, and so the cost of
     # asking for an exemption is visible.
-    B_Standard_B1ms: 0.017
-    B_Standard_B2s: 0.068
-    B_Standard_B2ms: 0.136
-    B_Standard_B4ms: 0.272
-    B_Standard_B8ms: 0.544
-  storage_per_gb_month: 0.115
+    B_Standard_B1ms: 0.01921
+    B_Standard_B2s: 0.07684
+    B_Standard_B2ms: 0.15368
+    B_Standard_B4ms: 0.30736
+    B_Standard_B8ms: 0.61472
+  storage_per_gb_month: 0.13
   # Backup up to the size of provisioned storage is included. This is the rate
   # beyond it, which is what a long retention actually costs.
-  backup_lrs_per_gb_month: 0.095
+  backup_lrs_per_gb_month: 0.108
   # Zone redundant HA runs a second server. It is not a surcharge, it is a
   # second bill, and burstable SKUs cannot do it at all.
   high_availability_multiplier: 2.0
@@ -66,8 +83,8 @@ key_vault:
 
 # --- Storage, general purpose v2, hot -------------------------------------
 storage:
-  hot_lrs_per_gb_month: 0.0208
-  hot_grs_per_gb_month: 0.0416
+  hot_lrs_per_gb_month: 0.018
+  hot_grs_per_gb_month: 0.0368
   write_operations_per_10k: 0.065
   read_operations_per_10k: 0.005
 
@@ -76,8 +93,8 @@ storage:
 # a chatty diagnostic setting costs, which is the usual reason a small
 # deployment's bill is not small.
 log_analytics:
-  ingestion_per_gb: 2.30
-  retention_per_gb_month: 0.10
+  ingestion_per_gb: 2.76
+  retention_per_gb_month: 0.12
   free_ingestion_gb: 5
 
 # --- Not priced here, on purpose -------------------------------------------

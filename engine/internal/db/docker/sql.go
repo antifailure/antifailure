@@ -13,8 +13,17 @@ import (
 //
 // Postgres initialises a data directory on first start, which on a cold Docker
 // virtual machine can take twenty seconds. Being generous here costs nothing
-// when things are fast and avoids a flaky failure when they are not.
-const readyTimeout = 90 * time.Second
+// when things are fast, because the wait polls and returns the moment the
+// database answers, and it avoids a flaky failure when they are not.
+//
+// Five minutes rather than the ninety seconds this was, and the number is
+// measured rather than guessed. On a busy machine a candidate container was
+// watched from creation to a healthy Postgres at about a hundred seconds,
+// which is over the old limit, and the failure it produced was the worst kind:
+// every Docker backed test in the repository calls t.Skipf on it, so a whole
+// suite reported ok while proving nothing. A false green is worse than a slow
+// test, and generosity here is free.
+const readyTimeout = 5 * time.Minute
 
 // waitReady blocks until the database accepts a query, or the deadline passes.
 //

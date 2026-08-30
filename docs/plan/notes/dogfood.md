@@ -428,7 +428,7 @@ daemon as "cannot locate specified Dockerfile" about a file anybody can see.
 golden every branch is then copied from, which is what makes it the counterpart
 of `source_url_env` rather than a cost paid per environment. Changing the seed
 changes the golden's identity, so editing it does not leave environments
-branching stale data. A seed that fails stops the refresh with `AF-DB-009` and
+branching stale data. A seed that fails stops the refresh with `AF-DB-013` and
 the script's own last line, because a golden published from a failed seed is an
 empty database that looks like a working one.
 
@@ -627,10 +627,32 @@ tsconfig resolves it through `baseUrl`, and fails in webpack with "Module not
 found". `npx tsc --noEmit` was green; `next build` was not; the container would
 not start.
 
-`ci.yml` typechecked `packages/db`, `packages/policy` and `apps/api`, and did
-not mention `apps/app` at all. So the application a person looks at was never
-compiled by anything before this. Both the workflow and `just gate` now run the
-production build, which is the same command the Dockerfile runs.
+`ci.yml` typechecked `packages/db`, `packages/policy` and `apps/api`, and named
+no web application at all. So the pages a person looks at were never compiled by
+anything before this.
+
+That finding outlived the application it was found in. While this branch was
+open, main landed its own console at `console/`, a static export the control
+plane serves from its own process on its own origin, and that is the one the
+published image ships. Two consoles is one too many, so the one written here is
+deleted and the preview runs the shipped image alone. The gap the finding names
+is still there and is worse in the survivor: `console/` is a separate npm
+project with its own lockfile, so it is in neither the web workspace's
+typecheck loop nor the runner's, and the only thing standing between a broken
+console and a release was the image build asserting `index.html` exists, in a
+different workflow. Both `ci.yml` and `just typecheck` now run its production
+build, which is the same command the Dockerfile runs.
+
+**34. Four invariants in this repository's own manifest could never fail.**
+Every one of them was written as `SELECT count(*) ... WHERE ...`. An invariant
+holds when its statement returns no rows, and a bare count returns one row
+saying zero, so all four reported clean against any database at all, including
+one where the join they check is broken. They were the evidence that masking
+had not severed a relationship, and they were not evidence.
+
+`af explain` refused the manifest and named all four with the fix. Nothing here
+found this by reading it; the product found it in the product's own file, which
+is the entire argument for this exercise. They now return the offending rows.
 
 **33. Editing the manifest rebuilt every image.**
 An image's tag is derived from the build context's digest, and the manifest was

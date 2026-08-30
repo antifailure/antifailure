@@ -88,6 +88,247 @@ against, it can be made to fail on purpose, and it does not depend on an
 upstream project's release schedule. The real applications are added on top,
 not instead.
 
+### Q7. Go cannot measure the branch coverage C.5 asks for
+
+C.5 sets "100 percent branch coverage" on `masking`, `subset`, `verify`,
+`policy`, `journal`, `redact`, `secrets` and `webhook`, and G4 makes it a gate.
+Go does not measure branch coverage. `go test -cover` instruments statements,
+so `if err != nil { return err }` counts as covered when the error path never
+ran, and `a && b` counts once however many ways it was reached. The number the
+Go toolchain can produce is not the number the plan names.
+
+The options are a third party branch-coverage tool, which for Go means
+rewriting the instrumentation and none of the candidates are widely used, or
+holding those packages at 100 percent STATEMENT coverage and being explicit
+that it is a weaker bar, or dropping the requirement.
+
+**Proceeding under:** 100 percent statement coverage for those packages, with
+`tools/coverage/thresholds.yaml` saying in as many words that it is standing in
+for the branch requirement rather than satisfying it. A gate that measures
+something real and says what it measures is worth more than one that claims a
+number nothing computes, which is the state this replaced.
+
+### Q8. G3 asks for goleak in every package that starts goroutines, and five do not have it
+
+G3 reads "`goleak` verifies no goroutine leaks in every package that starts
+goroutines". Nine packages contain a real `go` statement outside their tests,
+and five of them call `goleak` nowhere: `cmd/af-proxy`, `conformance`,
+`internal/insights`, `internal/load` and `internal/subset`. The other four,
+`internal/cli`, `internal/controlplane`, `internal/events` and `internal/hud`,
+already verify.
+
+Counted with a parser rather than a grep. The obvious `grep -l 'go '` says
+nineteen packages, because it matches prose: "spans go anywhere" and "events
+that go to the control plane" are comments, not goroutines. The wrong number
+was written here first and is recorded because the correction is the useful
+part.
+
+This is not a formality. `goleak` in `internal/hud` found a goroutine leaked
+per dashboard, from a cancellation watcher receiving on a nil `Done` channel,
+which is exactly the shape that costs a long running `af up` its memory.
+
+**Proceeding under:** added package by package, each with the leak it found or
+a statement that it found none. Adding all five at once and reaching for
+`goleak.IgnoreTopFunction` on whatever turned red would produce a gate that
+reports nothing, which is worse than the gap.
+
+Four are done and clean, in CI as well as locally: `cmd/af-proxy`,
+`conformance`, `internal/load` and `internal/subset`.
+
+**Answered, on the second try, and the first try is worth reading.**
+`internal/insights` verifies now. The stacks with no frame from this repository
+were this package's after all, and the audit that cleared every
+`dockerutil.Client()` was correct and beside the point: the connections were
+not idle, so `Client.Close` could not reclaim them, because
+`CloseIdleConnections` only touches connections that are idle.
+
+The FIRST answer was wrong, and the wrongness was instructive. `ContainerWait`
+returns an UNBUFFERED result channel and a goroutine that closes the response
+body only after handing its result over, and both call sites here also selected
+on `ctx.Done()`, so a deadline arriving at the same moment as a result could
+park that goroutine forever. That is a real hazard, it is fixed in
+`dockerutil.AwaitExit`, and it was not this. The check went back on with that
+fix in and CI failed in exactly the same way. A mechanism that could explain
+the symptom is not evidence that it did.
+
+What it actually was: `requireBranchContainer` handed back a stop function and
+the tests called it with `defer`. A deferred call in a test body runs BEFORE
+any `t.Cleanup`, so the client was closed first and `waitForBranch`'s cleanup
+then asked that same closed client to disconnect and remove a network. Those
+calls dial again, and by then nothing remains to close what they dial. One
+connection per test, outliving the process.
+
+Two things made this hard to see for a week. It cannot be reproduced on a
+workstation: it was chased with a full run, a `-short` run, and a run against a
+daemon with the image deliberately missing, and all three were clean. And the
+leaked goroutines carry no frame from this repository, so every stack says
+`net/http` and invites the conclusion that it is somebody else's.
+
+The evidence that closed it is the `edition boundary` job, which reproduces the
+failure in twenty four seconds and went from fail to pass across that one
+commit, with the check on and nothing else changed.
+
+### Q9. A golden image disappears between RefreshGolden and the next Branch
+
+`TestConformance/Branch_IsIsolatedFromTheGolden` in `internal/db/docker` fails
+intermittently, on CI more often than locally, and it is now a required check
+so it blocks real pull requests.
+
+    db.go:656: Branch(gv_20260829030220_7969f160, env_conformance00005):
+    AF-DB-004: The golden version gv_20260829030220_7969f160 no longer exists.
+
+Line 656 is the FIRST `Branch`, so the window is narrow: the image is gone
+between `RefreshGolden` returning it and the `ImageInspect` at the top of
+`Branch`, with nothing of the suite's own running in between.
+
+An earlier fix gave every golden a unique id, and it is live: the `7969f160`
+above is a per-refresh sha256 rather than the constant that used to truncate to
+the same eight characters. Identifier collision is fixed and this is a second
+cause.
+
+What has been ruled out, so nobody pays for it twice:
+
+- `sweepCandidates` cannot be it. It lists containers labelled `candidate` and
+  removes containers; it never touches an image. (It does carry a separate bug:
+  `parseErr != nil || created.Before(cutoff)` removes a candidate whose created
+  label will not parse whatever its age, which can kill another process's
+  in-flight refresh. Worth fixing, but it produces a different failure.)
+- The behaviours are not parallel. There is no `t.Parallel` anywhere in
+  `internal/db/docker`, so nothing in this suite runs beside itself.
+- The conformance selftest is not a second writer. `conformance/db_selftest_test.go`
+  runs the same suite against an in-memory fake, so it commits no images.
+- `DestroyGolden` refuses a version a branch still references, and the harness
+  registers its cleanup on the subtest, so the suite's own teardown cannot run
+  in this window.
+
+What is left, in the order worth trying: another test package creating goldens
+on the same daemon while this one runs, since Go runs packages in parallel and
+the suite's own leak check already carries a comment about exactly that; a
+daemon race where a freshly committed image is not immediately inspectable; and
+`ImageRemove` with `PruneChildren: true` reaching a sibling committed from the
+same base image.
+
+**Answered, partly.** The identifier was still colliding, along an axis the
+first repair did not consider.
+
+The rules hash was `sha256(t.Name() + "#" + refreshCount)`. That is unique
+within one process and identical across processes: every package running this
+suite calls its entry point `TestConformance`, so `internal/db/docker`,
+`internal/db/dblab`, `internal/db/neon` and `internal/db/supabase` all produce
+the behaviour name `TestConformance/Branch_IsIsolatedFromTheGolden` and
+therefore the same eight characters, on every run. Go runs test packages in
+parallel, so "unique within one process" was never the property needed.
+
+The evidence had been in the failures the whole time and I read past it twice:
+the failure on 2026-08-29 at 03:02 and the one at 10:11 quote the SAME hash,
+`7969f160`, differing only in the timestamp. A hash that repeats across hours
+and runs is derived, not unique.
+
+It is four random bytes now, which is what `internal/masking`'s
+`uniqueRulesHash` already did for the same reason. Randomness cannot collide by
+construction, where both derivations collided along an axis nobody thought of.
+
+Not claimed as proven. The suite is green against a real daemon after the
+change, but this flake is intermittent and one green run is not evidence. What
+IS established is that the collision was real and is now impossible; if the
+failure returns, the cause is something else and the ruled-out list above still
+stands.
+
+Still open underneath it: `provider.NewGoldenVersionID` resolves to the second,
+so two refreshes in one second still depend on their hashes differing. That is
+production code, not test code, and two refreshes in a second is not something
+only a test does.
+
+**The flake survived the fix.** On 2026-08-29 at 11:12, after the random hash
+was on main, the same behaviour failed again:
+
+    Branch(gv_20260829111232_ebaff111, env_conformance00005):
+    AF-DB-004: The golden version gv_20260829111232_ebaff111 no longer exists.
+
+`ebaff111` is random, not the repeated `7969f160`, so the fix is live and the
+identifier collision really is gone. It was simply not the cause of this. The
+commit that made the change said in as many words that one green run of an
+intermittent failure is not evidence and that if the failure returned the cause
+was elsewhere. It returned; the cause is elsewhere.
+
+That leaves the ruled-out list above plus one entry: identifier collision, now
+impossible by construction rather than merely unlikely. The remaining
+candidates, in the order worth trying, are a daemon race where a freshly
+committed image is not immediately inspectable, and `ImageRemove` with
+`PruneChildren: true` reaching an image committed from the same base. Both want
+instrumentation inside `RefreshGolden` and `Branch` rather than more reading:
+log the image id at commit, list it back immediately, and log again at the
+`ImageInspect` that fails.
+
+**Answered, and it was the first candidate on that list.** Another test package
+was destroying this one's goldens.
+
+The evidence was in the failure text and neither earlier pass read it. The
+message names the versions that DO exist, and on 2026-08-29 at 12:37 it named
+exactly one:
+
+    Branch(gv_20260829123613_c2f585fe, env_conformance00001): AF-DB-004:
+    The golden version gv_20260829123613_c2f585fe no longer exists.
+    Available: gv_20260829123601_store-te
+
+`store-te` is not a hash. It is the first eight characters of the literal
+`store-test`, which `internal/env/goldenstore_test.go` passes as its
+`RulesHash`. So at the moment `internal/db/docker` could not find the golden it
+had committed twelve seconds earlier, the only golden on the daemon belonged to
+a different package.
+
+The cause is that package's teardown, which listed every golden on the daemon
+and destroyed all of them:
+
+    goldens, listErr := o.Goldens(c)
+    if listErr == nil {
+        for _, g := range goldens {
+            _ = o.DestroyGolden(c, g.ID)
+        }
+    }
+
+Its comment said "whatever this machine made, it takes away", which is exactly
+what it did, on a machine shared with every other package `go test ./...` runs
+in parallel. The window it hit is the one between a conformance behaviour
+refreshing a golden and branching from it, because `DestroyGolden` refuses a
+version a branch already references. That is also why its own `store-te` golden
+survived its own sweep: a branch was pinning it.
+
+The teardown now removes only the versions that orchestrator created, and
+`TestOrchestratorTeardown_LeavesGoldensItDidNotCreate` asserts both halves: a
+golden it did not create survives, and one it did create does not, so the test
+cannot pass by the teardown quietly removing nothing. Against the old teardown
+that test fails with the first assertion, which is the negative control this
+answer rests on rather than a green run.
+
+Still open underneath it, unchanged: `provider.NewGoldenVersionID` resolves to
+the second, so two refreshes inside one second still depend on their hashes
+differing. And `sweepCandidates` still removes a candidate whose `created`
+label will not parse whatever its age.
+
+### Q10. Six call sites raise AF-DB-004 without the field its message names
+
+`fill` renders a placeholder it has no value for by printing it verbatim, so an
+error raised without every field its template names reaches a reader with
+`{version}` in it.
+
+AF-DB-004's message is "The golden version {version} no longer exists." Six
+sites raise it with an `env` field and no `version`: `internal/env/insights.go`
+twice, and `internal/env/golden.go` four times. Every one of those prints the
+literal `{version}` to somebody whose environment has just failed.
+
+Found while adding the available-versions listing to the same code, which is
+why that listing is wrapped onto the error rather than added as a catalog
+field: adding `{available}` to the template would have given those six a second
+placeholder to leak.
+
+**Proceeding under:** recorded, not fixed. The repair is either passing the
+right field at each site or making `fill` refuse a template it cannot complete,
+and the second is the better one: a placeholder that reaches a user is always a
+bug, so the catalog should not be able to produce one. That is a change to how
+every error in the product renders and wants its own pass rather than being
+tacked onto this one.
+
 ## Answered
 
 *(none yet)*

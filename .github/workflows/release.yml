@@ -52,7 +52,7 @@ jobs:
             -ldflags "-s -w \
               -X github.com/antifailure/antifailure/engine/internal/cli.Version=$version \
               -X github.com/antifailure/antifailure/engine/internal/cli.Commit=$GITHUB_SHA \
-              -X github.com/antifailure/antifailure/engine/internal/cli.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              -X github.com/antifailure/antifailure/engine/internal/cli.BuildDate=$(git show -s --format=%cI HEAD)" \
             -o "../dist/af" ./cmd/af
 
       - name: Package

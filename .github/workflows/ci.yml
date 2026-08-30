@@ -59,6 +59,21 @@ jobs:
           (cd engine && go test ./internal/hud -update-frames)
           git diff --exit-code
 
+      - name: The engine's parsers survive arbitrary input
+        # The manifest is a file from the repository under test, and the
+        # detection engine reads that repository's contents, so both parse
+        # bytes somebody else wrote. C.7 says the customer's repository is data
+        # and never code, and a parser that panics on a crafted file is the
+        # cheapest way to break that promise.
+        #
+        # Both targets existed before this step and neither was ever fuzzed.
+        # `go test ./...` runs a fuzz target against its committed seed corpus
+        # and nothing else, which passes while exploring no input at all.
+        run: |
+          cd engine
+          go test ./internal/manifest -run FuzzParse -fuzz FuzzParse -fuzztime 60s
+          go test ./internal/detect -run FuzzAnalyzers -fuzz FuzzAnalyzers -fuzztime 60s
+
       - name: The release stamps a version that exists
         # The linker accepts -X for a symbol it cannot find and says nothing.
         # v0.1.0 shipped with every version flag pointing at main, where the
@@ -75,16 +90,49 @@ jobs:
         # supposed to prevent.
         run: go run ./tools/gatecheck .
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        # For the examples that are not Go. Pinned to the same major the
+        # runtime images use, so the version that builds an example here is the
+        # version that builds it in the Dockerfile a user copies.
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: examples/*/package-lock.json
+
       - name: The examples still compile and their manifests are valid
         # An example that does not compile is worse than no example: it is the
         # first thing a user copies. They are separate modules, outside the
         # workspace so their dependencies never enter the engine's module
         # graph, which means nothing else in this job would build them.
+        #
+        # All three languages, because checking only the compiled ones would
+        # leave the other two examples unchecked by the gate whose whole point
+        # is this sentence. Go builds, JavaScript builds, and Python runs the
+        # framework's own check, which loads the settings, the URL conf and
+        # every model.
         run: |
           set -euo pipefail
           for dir in examples/*/; do
             [ -f "$dir/go.mod" ] || continue
             (cd "$dir" && GOWORK=off go build -o /dev/null ./... && GOWORK=off go vet ./...)
+          done
+          for dir in examples/*/; do
+            [ -f "$dir/package.json" ] || continue
+            (cd "$dir" && npm ci --no-audit --no-fund --silent && npm run build)
+          done
+          for dir in examples/*/; do
+            [ -f "$dir/requirements.txt" ] || continue
+            (
+              cd "$dir"
+              python3 -m venv .venv-gate
+              ./.venv-gate/bin/pip install -q --disable-pip-version-check -r requirements.txt
+              ./.venv-gate/bin/python -m compileall -q . -x '\.venv-gate'
+              if [ -f manage.py ]; then
+                DATABASE_URL="postgres://gate:gate@127.0.0.1:5432/gate" \
+                  ./.venv-gate/bin/python manage.py check
+              fi
+              rm -rf .venv-gate
+            )
           done
           go build -o /tmp/af-examples ./engine/cmd/af
           for dir in examples/*/; do
@@ -146,6 +194,74 @@ jobs:
             echo "These files are not formatted:"; echo "$unformatted"; exit 1
           fi
 
+      - name: A pg_dump new enough to read that Postgres
+        # The step below starts a Postgres 17, matching `just db` so local and
+        # CI agree. The runner ships a 16 client, and pg_dump refuses outright
+        # to read a server newer than itself. pgcopy detects that and refuses
+        # by name rather than failing obscurely, which is why the symptom is a
+        # clear message rather than a mystery, but every suite that copies a
+        # database still fails.
+        #
+        # Installing the matching client is exactly what that message tells a
+        # person to do, and STATUS.md records the same thing: a golden refresh
+        # from a Postgres 17 source needs a 17 client, and the runners ship 16.
+        # toolFor already looks in /usr/lib/postgresql/*/bin, which is where
+        # this puts it.
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          # Proof, not hope: the version that will actually be chosen.
+          pg_dump --version
+          test -x /usr/lib/postgresql/17/bin/pg_dump
+
+      - name: A Postgres the database suites can use
+        # This job had none, and the failure that produced is the one this
+        # repository keeps finding: every test in engine/internal/insights that
+        # needs a real server called t.Skipf, `go test` printed nothing for a
+        # skip, and the job went green having examined almost nothing. A green
+        # that examined nothing is worse than a red.
+        #
+        # Started as a step rather than a `services:` block because the two
+        # -c flags matter and a service cannot override the image's command.
+        # pg_stat_statements has to be preloaded at start: without it the
+        # extension can be created and records nothing, so the query
+        # regression checks read a permanently empty table. It is the same
+        # container `just db` starts, deliberately, so local and CI agree.
+        run: |
+          set -euo pipefail
+          docker run -d --name af-cp-test -p 55432:5432 \
+            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine \
+            -c shared_preload_libraries=pg_stat_statements \
+            -c pg_stat_statements.track=all
+          # A real query against the target database, not pg_isready. During
+          # its first start the image runs a temporary server to initialise
+          # the data directory, and pg_isready answers on that one before
+          # POSTGRES_DB exists: the wait returns and the next command fails
+          # with `database "antifailure" does not exist`. Verified by running
+          # this block, not by reading it.
+          ready=0
+          for _ in $(seq 1 90); do
+            if docker exec af-cp-test psql -U postgres -d antifailure -tAc 'select 1' \
+                 > /dev/null 2>&1; then
+              ready=1; break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then
+            docker logs af-cp-test; echo "postgres never came up"; exit 1
+          fi
+          # The preload is the half that is easy to lose: without it the
+          # extension can be created and records nothing, which reads as an
+          # application that ran no queries.
+          docker exec af-cp-test psql -U postgres -d antifailure -tAc \
+            "SHOW shared_preload_libraries" | grep -q pg_stat_statements
+
       - name: Test
         # The race detector always. A data race that only shows up under load
         # is the kind of bug this product exists to find, and shipping one
@@ -155,6 +271,15 @@ jobs:
           # Docker is available on this runner, so the provider and runtime
           # suites run for real rather than skipping.
           GOTOOLCHAIN: local
+          AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:55432/antifailure
+          # And if that Postgres is not there, say so loudly rather than
+          # skipping every test that needed it.
+          AF_REQUIRE_DATABASE: '1'
+          # The comment above says the provider and runtime suites run for
+          # real on this runner. This is what makes that a gate rather than a
+          # claim: a suite that cannot reach the daemon now fails instead of
+          # reporting ok having skipped itself.
+          AF_REQUIRE_DOCKER: '1'
 
       - name: Nothing was left behind
         # The suites assert this themselves, and this catches the case where a
@@ -196,182 +321,34 @@ jobs:
         working-directory: runner
 
       - name: Typecheck
-        # Strict, with exactOptionalPropertyTypes. There is no build step, so
-        # this is the only thing standing between a type error and a run.
-        run: npx tsc --noEmit
-        working-directory: runner
-
-      - name: Test
-        run: node --experimental-strip-types --test test/*.test.ts
-        working-directory: runner
-
-  www:
-    name: www
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: www/package-lock.json
-
-      - run: npm ci --no-audit --no-fund
-        working-directory: www
-
-      - name: Build the marketing site
-        # The site is the thing we ship to antifailure.dev. A type error or a
-        # broken import is a blank page rather than a failed unit test, so the
-        # proof is the production export itself.
-        run: npm run build
-        working-directory: www
-
-      - run: npm ci --no-audit --no-fund
-        working-directory: docs
-
-      - name: Build the documentation site
-        run: npm run build
-        working-directory: docs
-
-      - name: Every documented error path has a page at the URL the engine prints
-        # errors.go builds "https://antifailure.dev/docs/" + the catalog's docs
-        # field. errcheck proves the source file exists; this proves the built
-        # site actually serves it at that path, which is a different claim and
-        # the one users experience. A rename that keeps the file but moves the
-        # route would pass errcheck and 404 in production.
-        run: |
-          missing=0
-          for path in $(grep -oE '^[[:space:]]*docs:[[:space:]]*[a-z0-9/_-]+' \
-              engine/internal/errors/catalog.yaml | awk '{print $2}' | sort -u); do
-            if [ ! -f "docs/dist/$path/index.html" ]; then
-              echo "::error::no page built for https://antifailure.dev/docs/$path"
-              missing=1
-            fi
-          done
-          exit $missing
-
-      - name: Spelling
-        # cspell owns spelling, with the project dictionary in
-        # tools/docs/dictionary.txt. Adding a word is a one line diff a
-        # reviewer can read.
-        run: npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" "examples/**/*.md" README.md CONTRIBUTING.md SECURITY.md
-
-      - name: Prose style
-        # The Google developer documentation style at error level, plus the
-        # rule about em dashes. Warnings are not enforced: three quarters of
-        # them are contractions and passive voice, and this documentation's
-        # voice declines both on purpose.
-        #
-        # The binary rather than the official action, because the action's
-        # files input takes one folder and this checks five paths, and because
-        # running the same command `just vale` runs is what keeps the two
-        # honest. Pinned by version and checksum.
-        run: |
-          set -euo pipefail
-          version=3.19.0
-          sha=c8f9d6c8055442bc7e9c121b2498e6f0e3fb670f4665e6ee577f1897f7665cf6
-          curl -sfLo vale.tar.gz \
-            "https://github.com/errata-ai/vale/releases/download/v${version}/vale_${version}_Linux_64-bit.tar.gz"
-          echo "${sha}  vale.tar.gz" | sha256sum -c -
-          sudo tar -xzf vale.tar.gz -C /usr/local/bin vale
-          rm vale.tar.gz
-          vale sync
-          vale docs/src/content/docs examples README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
-
-      - name: Assemble the site
-        # Exactly what deploy.yml publishes: the marketing site at the root and
-        # the documentation under /docs. The link check and the preview both
-        # need the real layout, because /docs/reference/cli/#af-init is only a
-        # real address once both halves are in the same tree.
-        run: |
-          rm -rf site && mkdir -p site
-          cp -R www/out/. site/
-          cp -R docs/dist site/docs
-          echo "assembled $(find site -type f | wc -l) files"
-
-      - name: Every link on the assembled site resolves
-        # Offline: internal links and fragments only. A fragment is the case
-        # worth having, because a renamed heading leaves a link that still
-        # loads a page and silently lands at the top of it. The external
-        # addresses are checked on the daily schedule, where a slow upstream
-        # cannot block a pull request.
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
-        with:
-          args: --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
-          fail: true
-
-      - name: Upload the preview
-        # The pull request preview. An artifact rather than a deployment,
-        # because a pull request from a fork must not be able to publish to the
-        # address people trust.
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: site-preview
-          path: site
-          retention-days: 14
-
-  control-plane:
-    name: control plane
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-
-    # A real Postgres, because the thing under test is what Postgres enforces.
-    # Row-level security cannot be tested against a fake: the whole property is
-    # that the database refuses what the application asks for, and a fake would
-    # only prove the application asks nicely.
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: antifailure
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/antifailure
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - run: npm ci --no-audit --no-fund
-        working-directory: web
-
-      - name: Typecheck
         # There is no build step for the API, so this is the only thing between
-        # a type error and a running server. apps/app is included here and is
-        # also built below, because for that one a typecheck is not enough.
+        # a type error and a running server.
         run: |
-          for p in packages/db packages/policy apps/api apps/app; do
+          for p in packages/db packages/policy apps/api; do
             npx tsc --noEmit -p "$p/tsconfig.json"
           done
         working-directory: web
 
-      - name: The web application builds
-        # A typecheck is not a build, and the difference is not academic. An
-        # import written as ../lib/guard from a page two directories deep
+      - name: The console builds
+        # Nothing here was checking the console, and it ships in the published
+        # image. It is a separate npm project with its own lockfile, so it is
+        # not in the workspace loop above, and the only thing standing between
+        # a broken console and a release was the image build asserting that
+        # index.html exists, which runs in a different workflow.
+        #
+        # A build rather than a typecheck, and the difference is not academic.
+        # An import written as ../lib/guard from a page two directories deep
         # typechecks clean, because tsconfig resolves it through baseUrl, and
         # fails in webpack with "Module not found". That shipped a broken image
-        # and was caught by a container that would not start.
-        #
-        # The production build, not a dev server, because that is the artifact:
-        # this is the same command the Dockerfile runs.
-        run: npm run build --workspace @antifailure/app
-        working-directory: web
+        # and was caught by a container that would not start. `next build` runs
+        # the typecheck too, so this is the stricter of the two rather than a
+        # second one.
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+        working-directory: console
         env:
-          NEXT_TELEMETRY_DISABLED: '1' 
+          NEXT_TELEMETRY_DISABLED: '1'
 
       - name: The suites did not skip
         # Every suite here skips itself when there is no database, which is
@@ -400,6 +377,26 @@ jobs:
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
+
+      - name: A pg_dump new enough for the servers those suites build
+        # The same step the engine job carries, and for the same reason. This
+        # job runs the engine's own suites too, and several of them build a
+        # Postgres 17 and copy a schema out of it. The runner ships a 16
+        # client, pg_dump refuses to read a server newer than itself, and the
+        # failure lands in this job rather than in the one people expect.
+        #
+        # Two jobs repeating it is the honest cost of not having a composite
+        # action here. If you change one, change the other.
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          test -x /usr/lib/postgresql/17/bin/pg_dump
 
       - name: The community build does not need ee
         # The proof rather than the assertion. ee is deleted and everything
@@ -436,7 +433,33 @@ jobs:
   enterprise:
     name: enterprise
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+
+    # A real Postgres, for the same reason the control plane job has one. The
+    # enterprise web packages carry integration suites that drive single sign-on
+    # and provisioning through the real server against the real row-level
+    # security policies, and there is no version of that against a fake: the
+    # property under test is what Postgres refuses.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: antifailure
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/antifailure
+      # Every one of these suites skips itself when there is no database, which
+      # is right on a laptop and wrong here. Without this the job can go green
+      # having run none of them.
+      AF_REQUIRE_DATABASE: '1'
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -464,12 +487,17 @@ jobs:
         # install cannot pull enterprise code in by accident. It depends on the
         # community API for the permission catalog and the community API
         # depends on nothing here, which the boundary check below asserts.
+        #
+        # Fanned out over the workspaces list rather than naming each package.
+        # The previous version named rbac and audit by hand, so a package added
+        # later was neither typechecked nor tested and this job went green
+        # having not run it. That is the silent gap this repository keeps
+        # finding, in the gate meant to catch it.
         run: |
           npm --prefix web ci --no-audit --no-fund
           npm --prefix ee/web install --no-audit --no-fund
-          npx --prefix ee/web tsc --noEmit -p ee/web/rbac/tsconfig.json
-          node --test ee/web/rbac/test/*.test.ts ee/web/audit/test/*.test.ts
-          npx --prefix ee/web tsc --noEmit -p ee/web/audit/tsconfig.json
+          npm --prefix ee/web run typecheck
+          npm --prefix ee/web test
 
       - name: Nothing in the community web depends on the enterprise one
         run: |
@@ -505,6 +533,15 @@ jobs:
         # dead end somebody finds only after following our instructions, and
         # the security one was a promise to researchers.
         run: go run ./tools/claimcheck .
+
+      - name: The manifests in the documentation are ones the engine accepts
+        # The gates above read style, spelling, links and repository paths. None
+        # of them knows what a manifest is, and a getting started page shipped
+        # telling readers to set control_plane.url. The engine refuses that with
+        # AF-MAN-002, "Unknown key", because the schema closes itself so that a
+        # typo cannot silently change an environment. The page was live on the
+        # site and every documentation gate was green.
+        run: go run ./tools/manifestcheck .
 
       - name: The prose reads like a person wrote it
         # The build plan asks for vale with "a custom rule that flags em dashes
@@ -557,7 +594,23 @@ jobs:
           wrong='potatogreenbean204@gmail.com'
 
           if [ -n "${BASE:-}" ]; then
-            range="$BASE..HEAD"
+            # On a pull request the checkout is the MERGE commit, so ^1 is the
+            # base branch tip and ^2 is this branch, and the commits the pull
+            # request ADDS are the ones reachable from ^2 but not from ^1.
+            #
+            # This used to be "$BASE..HEAD", where BASE is the base sha as it
+            # was when the pull request was OPENED. That range grows every time
+            # the base branch moves, so it ends up containing commits the pull
+            # request did not write. An unsigned commit landed on main and this
+            # check then failed on every open pull request whose base predated
+            # it, blaming each author for somebody else's commit. The comment
+            # above already promised "only the commits this push or pull
+            # request added"; this makes that true.
+            if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
+              range="HEAD^1..HEAD^2"
+            else
+              range="$BASE..HEAD"
+            fi
           elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
                && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             range="$BEFORE..HEAD"
@@ -596,7 +649,23 @@ jobs:
           set -euo pipefail
 
           if [ -n "${BASE:-}" ]; then
-            range="$BASE..HEAD"
+            # On a pull request the checkout is the MERGE commit, so ^1 is the
+            # base branch tip and ^2 is this branch, and the commits the pull
+            # request ADDS are the ones reachable from ^2 but not from ^1.
+            #
+            # This used to be "$BASE..HEAD", where BASE is the base sha as it
+            # was when the pull request was OPENED. That range grows every time
+            # the base branch moves, so it ends up containing commits the pull
+            # request did not write. An unsigned commit landed on main and this
+            # check then failed on every open pull request whose base predated
+            # it, blaming each author for somebody else's commit. The comment
+            # above already promised "only the commits this push or pull
+            # request added"; this makes that true.
+            if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
+              range="HEAD^1..HEAD^2"
+            else
+              range="$BASE..HEAD"
+            fi
           elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
                && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             range="$BEFORE..HEAD"

@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-37 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+32 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -79,6 +79,42 @@ The agent runner could not be found: {detail}
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/agents](/docs/concepts/agents/) |
+
+### AF-AGT-010
+
+Invariant {invariant} did not finish within {timeout}.
+
+**What to do.** Make the invariant cheaper; it runs after every workflow and must be a quick read.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/invariants](/docs/guides/invariants/) |
+
+### AF-AGT-011
+
+Invariant {invariant} is not read only.
+
+**What to do.** Rewrite it as a single SELECT; invariants run inside a read only transaction.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/invariants](/docs/guides/invariants/) |
+
+### AF-AGT-012
+
+Invariant {invariant} does not hold: {detail}
+
+**What to do.** The rows the statement returned are the violation. Run it against the branch to see them all.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/invariants](/docs/guides/invariants/) |
 
 ## Build
 
@@ -256,6 +292,42 @@ The provider's concurrent branch limit ({limit}) is reached.
 
 ### AF-DB-008
 
+The database provider {provider} at {endpoint} rejected the configured credential.
+
+**What to do.** Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/overview](/docs/providers/overview/) |
+
+### AF-DB-009
+
+The Database Lab Engine at {endpoint} has no snapshot to build a golden from: {detail}
+
+**What to do.** Wait for the engine's own data retrieval to finish, then refresh again; its progress is at GET /instance/retrieval.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [providers/dblab](/docs/providers/dblab/) |
+
+### AF-DB-011
+
+The subset could not be taken: {detail}
+
+**What to do.** Run 'af explain' to see the effective subset block, and check that the seed table and its predicate name columns this database has.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/subsetting](/docs/concepts/subsetting/) |
+
+### AF-DB-012
+
 No golden matches this manifest's masking rules, and {count} were made under different ones.
 
 **What to do.** Run 'af golden refresh' to make one from the source this manifest names.
@@ -266,7 +338,7 @@ No golden matches this manifest's masking rules, and {count} were made under dif
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens/) |
 
-### AF-DB-009
+### AF-DB-013
 
 The database seed command failed: {detail}
 
@@ -277,6 +349,42 @@ The database seed command failed: {detail}
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens/) |
+
+### AF-DB-020
+
+Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured.
+
+**What to do.** Point auth.url or auth.domain at a sandbox, development or staging tenant and set auth.sandbox: true, so that personas are never created in production.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/personas](/docs/guides/personas/) |
+
+### AF-DB-021
+
+{provider} rejected the admin token used to create personas.
+
+**What to do.** Check that the variable named by auth.token_env holds a key for the sandbox tenant with permission to create users.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/personas](/docs/guides/personas/) |
+
+### AF-DB-030
+
+Migrations failed on the branch: {detail}
+
+**What to do.** The rehearsal names the statement that failed and times the ones before it. Fix the migration and push again: a migration that fails on a branch with production's shape is one that would have failed in production.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/insights](/docs/concepts/insights/) |
 
 ## Detection
 
@@ -640,6 +748,42 @@ Service {service} depends on {missing}, which the manifest does not declare.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/manifest](/docs/reference/manifest/) |
 
+### AF-RUN-043
+
+This cluster is not containing the environment: {detail}
+
+**What to do.** Use a cluster whose CNI enforces NetworkPolicy rather than only accepting it, then run 'af up' again.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
+### AF-RUN-044
+
+This runtime cannot do that: {detail}
+
+**What to do.** Use the runtime that supports it, or run the command against an environment placed by one that does.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
+### AF-RUN-045
+
+{kind} {name} was not created by this runtime, so it was not removed.
+
+**What to do.** Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
 ## Secrets
 
 ### AF-SEC-001
@@ -651,6 +795,18 @@ The variables {names} are declared in the manifest but were not found in any con
 | | |
 | --- | --- |
 | Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/secrets](/docs/guides/secrets/) |
+
+### AF-SEC-002
+
+The credential for {source} was rejected after one refresh: {detail}
+
+**What to do.** Rotate the credential and store the new value where {source} reads it. A rejection that survives a refresh is a credential that was revoked or was never right, so retrying will not help.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/secrets](/docs/guides/secrets/) |
 

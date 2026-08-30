@@ -37,6 +37,20 @@ export interface GitHubClient {
     installationId: number,
     orgLogin: string,
   ): Promise<{ user: GitHubUser; role: 'admin' | 'member' }[]>
+  /**
+   * The role GitHub reports for one person in one organization.
+   *
+   * Null means "could not be established", which is deliberately not the same
+   * answer as "member". Sign-in leans on the difference: it writes `member` for
+   * somebody who has no membership row yet, and leaves an existing role exactly
+   * as it was when this returns null, so a rate limit cannot demote an
+   * administrator out of their own organization.
+   */
+  roleIn(
+    installationId: number,
+    orgLogin: string,
+    login: string,
+  ): Promise<'admin' | 'member' | null>
 }
 
 export interface GitHubConfig {
@@ -45,6 +59,9 @@ export interface GitHubConfig {
   redirectUri: string
   apiBase?: string
   webBase?: string
+  /** Mints installation tokens. Absent when no GitHub App is configured, and
+   *  membersOf says so rather than returning an empty list. */
+  installationTokens?: { for(installationId: number): Promise<string> }
 }
 
 export class GitHubError extends Error {}
@@ -131,12 +148,133 @@ export class RealGitHubClient implements GitHubClient {
     return orgs.map((o) => ({ id: o.id, login: o.login }))
   }
 
-  async membersOf(): Promise<{ user: GitHubUser; role: 'admin' | 'member' }[]> {
-    // Needs an installation token rather than a user token, which the
-    // installation flow supplies. Left unimplemented rather than half
-    // implemented: a sync that silently returns nobody would remove every
-    // member of the organization on its first run.
-    throw new GitHubError('membership sync needs a GitHub App installation token')
+  /**
+   * Everyone in an organization, with the role GitHub reports.
+   *
+   * Needs an INSTALLATION token, not a user token. A user token can only see
+   * the members a user can see, which for an outside collaborator is almost
+   * nobody, so a sync built on one would quietly shrink the member list
+   * depending on whose token happened to run it.
+   *
+   * It THROWS when no App is configured rather than returning an empty list.
+   * That distinction is the whole reason this stayed unimplemented for so long:
+   * a sync that returns nobody looks exactly like an organization where
+   * everybody left, and a caller that reconciles against it would remove every
+   * member on its first run. An exception cannot be mistaken for an answer.
+   */
+  async membersOf(
+    installationId: number,
+    orgLogin: string,
+  ): Promise<{ user: GitHubUser; role: 'admin' | 'member' }[]> {
+    const tokens = this.config.installationTokens
+    if (!tokens) {
+      throw new GitHubError(
+        'Membership sync needs a GitHub App. Set AF_GITHUB_APP_ID, ' +
+          'AF_GITHUB_APP_PRIVATE_KEY and AF_GITHUB_APP_WEBHOOK_SECRET.',
+      )
+    }
+    const token = await tokens.for(installationId)
+    const base = this.config.apiBase ?? 'https://api.github.com'
+
+    const members: { user: GitHubUser; role: 'admin' | 'member' }[] = []
+    // Paged, because an organization with more than thirty members would
+    // otherwise be silently truncated to its first page, and a truncated list
+    // fed to a reconciler removes everybody past member thirty.
+    for (let page = 1; page <= 20; page++) {
+      const url = new URL(`/orgs/${encodeURIComponent(orgLogin)}/members`, base)
+      url.searchParams.set('per_page', '100')
+      url.searchParams.set('page', String(page))
+      // The role each member holds, which /members alone does not carry.
+      url.searchParams.set('role', 'all')
+
+      const res = await fetch(url, {
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'user-agent': 'antifailure',
+        },
+      })
+      if (!res.ok) {
+        throw new GitHubError(
+          `GitHub refused the member list for ${orgLogin}: ${res.status}`,
+        )
+      }
+      const batch = (await res.json()) as { id: number; login: string }[]
+      if (!Array.isArray(batch) || batch.length === 0) break
+
+      for (const m of batch) {
+        // The role comes from a second call per member, because GitHub reports
+        // it on the membership resource rather than in the list. Worth the
+        // calls: without it every member syncs as a plain member and an
+        // organization owner loses their own admin rights on first sync.
+        const role = (await this.roleOf(token, base, orgLogin, m.login)) ?? 'member'
+        members.push({
+          user: {
+            id: m.id,
+            login: m.login,
+            // The member list carries no email and no name, and an installation
+            // token cannot read a private address. Left empty rather than
+            // invented; sign-in fills both in from the person's own token.
+            email: '',
+            name: null,
+            avatarUrl: null,
+          },
+          role,
+        })
+      }
+      if (batch.length < 100) break
+    }
+    return members
+  }
+
+  async roleIn(
+    installationId: number,
+    orgLogin: string,
+    login: string,
+  ): Promise<'admin' | 'member' | null> {
+    const tokens = this.config.installationTokens
+    // No App, no installation token, no way to read a membership. Null rather
+    // than 'member', because the caller's fallback is its own decision to make.
+    if (!tokens) return null
+    try {
+      const token = await tokens.for(installationId)
+      const base = this.config.apiBase ?? 'https://api.github.com'
+      return await this.roleOf(token, base, orgLogin, login)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Null when GitHub would not say, rather than a guess.
+   *
+   * membersOf reads that null as 'member', which is the safe direction for a
+   * list that is about to be reconciled. roleIn passes it through, because the
+   * safe direction there is "change nothing".
+   */
+  private async roleOf(
+    token: string,
+    base: string,
+    orgLogin: string,
+    login: string,
+  ): Promise<'admin' | 'member' | null> {
+    const res = await fetch(
+      new URL(`/orgs/${encodeURIComponent(orgLogin)}/memberships/${encodeURIComponent(login)}`, base),
+      {
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'user-agent': 'antifailure',
+        },
+      },
+    )
+    // Anything but a clear "admin" is a member. Guessing upward on a failed
+    // read would hand somebody administrative rights because of a rate limit.
+    if (!res.ok) return null
+    const body = (await res.json()) as { role?: string }
+    return body.role === 'admin' ? 'admin' : 'member'
   }
 
   private async get(accessToken: string, path: string): Promise<unknown> {

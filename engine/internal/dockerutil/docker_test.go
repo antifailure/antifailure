@@ -14,6 +14,8 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -118,6 +120,27 @@ func create(t *testing.T, cli *client.Client, labels map[string]string) string {
 	defer cancel()
 	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{Image: testImage, Cmd: []string{"true"}, Labels: labels},
+		&container.HostConfig{}, nil, nil, "")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_ = cli.ContainerRemove(c, resp.ID, container.RemoveOptions{Force: true, RemoveVolumes: true})
+	})
+	return resp.ID
+}
+
+// createRunning makes a container with a command of its own, for tests about
+// waiting rather than about labels, and guarantees its removal.
+func createRunning(t *testing.T, cli *client.Client, cmd []string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	resp, err := cli.ContainerCreate(ctx,
+		&container.Config{
+			Image: testImage, Cmd: cmd,
+			Labels: dockerutil.Managed(dockerutil.KindService, "await-exit", time.Now()),
+		},
 		&container.HostConfig{}, nil, nil, "")
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -235,6 +258,107 @@ func TestFilter_FindsAResourceStampedByAnOlderRelease(t *testing.T) {
 	require.Contains(t, ids, id)
 	require.NoError(t, dockerutil.RemoveContainer(ctx, cli, id),
 		"and it can be removed, which is the point of finding it")
+}
+
+// The network and volume halves of the same invariant.
+//
+// RemoveContainer has refused a container it does not own since it was written.
+// Its two counterparts did not exist, so callers that needed them reached for
+// cli.NetworkRemove and cli.VolumeRemove, which remove whatever the name
+// resolves to. The engine's journal replay was one of those callers.
+//
+// The volume case is the one that cannot be undone. A container and a network
+// can be recreated from a manifest; the data in somebody else's volume cannot
+// be recreated from anything.
+
+func createNetwork(t *testing.T, cli *client.Client, labels map[string]string) string {
+	t.Helper()
+	ctx := context.Background()
+	res, err := cli.NetworkCreate(ctx, "af-test-net-"+strings.ToLower(t.Name()),
+		network.CreateOptions{Labels: labels})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_ = cli.NetworkRemove(c, res.ID)
+	})
+	return res.ID
+}
+
+func createVolume(t *testing.T, cli *client.Client, labels map[string]string) string {
+	t.Helper()
+	ctx := context.Background()
+	v, err := cli.VolumeCreate(ctx, volume.CreateOptions{
+		Name: "af-test-vol-" + strings.ToLower(t.Name()), Labels: labels,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_ = cli.VolumeRemove(c, v.Name, true)
+	})
+	return v.Name
+}
+
+func TestRemoveNetwork_RemovesOurOwn(t *testing.T) {
+	cli := requireDaemon(t)
+	ctx := context.Background()
+
+	id := createNetwork(t, cli, dockerutil.Managed(dockerutil.KindNetwork, "env-net", time.Now()))
+	require.NoError(t, dockerutil.RemoveNetwork(ctx, cli, id))
+
+	_, err := cli.NetworkInspect(ctx, id, network.InspectOptions{})
+	require.True(t, cerrdefs.IsNotFound(err), "the network is gone")
+}
+
+func TestRemoveNetwork_RefusesANetworkThatIsNotOurs(t *testing.T) {
+	cli := requireDaemon(t)
+	ctx := context.Background()
+
+	id := createNetwork(t, cli, map[string]string{"com.docker.compose.project": "their-app"})
+
+	err := dockerutil.RemoveNetwork(ctx, cli, id)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, dockerutil.ErrNotOurs))
+
+	_, inspectErr := cli.NetworkInspect(ctx, id, network.InspectOptions{})
+	require.NoError(t, inspectErr, "the network somebody else owns is untouched")
+}
+
+func TestRemoveVolume_RemovesOurOwn(t *testing.T) {
+	cli := requireDaemon(t)
+	ctx := context.Background()
+
+	name := createVolume(t, cli, dockerutil.Managed(dockerutil.KindVolume, "env-vol", time.Now()))
+	require.NoError(t, dockerutil.RemoveVolume(ctx, cli, name))
+
+	_, err := cli.VolumeInspect(ctx, name)
+	require.True(t, cerrdefs.IsNotFound(err), "the volume is gone")
+}
+
+func TestRemoveVolume_RefusesAVolumeThatIsNotOurs(t *testing.T) {
+	cli := requireDaemon(t)
+	ctx := context.Background()
+
+	name := createVolume(t, cli, map[string]string{"com.docker.compose.project": "their-app"})
+
+	err := dockerutil.RemoveVolume(ctx, cli, name)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, dockerutil.ErrNotOurs))
+
+	_, inspectErr := cli.VolumeInspect(ctx, name)
+	require.NoError(t, inspectErr, "the data somebody else owns is untouched")
+}
+
+// A resource that is already gone is the ordinary state a compensating delete
+// finds, and both must treat it as success or a journal record describing a
+// resource that does not exist stays live forever.
+func TestRemoveNetworkAndVolume_TreatAlreadyGoneAsSuccess(t *testing.T) {
+	cli := requireDaemon(t)
+	ctx := context.Background()
+
+	require.NoError(t, dockerutil.RemoveNetwork(ctx, cli, "af-test-net-that-never-existed"))
+	require.NoError(t, dockerutil.RemoveVolume(ctx, cli, "af-test-vol-that-never-existed"))
 }
 
 // The guard's own decision, checked directly. A TestMain cannot be tested, so

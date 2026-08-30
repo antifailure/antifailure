@@ -13,6 +13,12 @@ import { createServer } from './server.ts'
 import { RealGitHubClient } from './auth/github.ts'
 import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
+import { sweepDeviceAuthorizations } from './auth/device.ts'
+import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
+import { sealingKeyFrom } from './providers/seal.ts'
+import { findConsoleBuild } from './console/static.ts'
+import { appConfigFrom, InstallationTokens } from './github/app.ts'
+import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
 import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
@@ -57,10 +63,24 @@ if (process.env.AF_MIGRATE === '1') {
 
 const pool = createPool({ url: databaseUrl, max: Number(process.env.AF_POOL_MAX ?? 10) })
 
+// The GitHub App, if there is one. Null is a supported state: sign-in works
+// without it, and the parts that need an installation say which variables are
+// missing rather than failing on the one request they exist for.
+const appConfig = appConfigFrom(process.env)
+const installationTokens = appConfig
+  ? new InstallationTokens(appConfig, systemClock)
+  : undefined
+console.log(
+  appConfig
+    ? `GitHub App ${appConfig.appId} is configured: webhook deliveries are verified and membership can be synced`
+    : 'no GitHub App: webhook deliveries are refused and membership cannot be synced (AF_GITHUB_APP_ID is not set)',
+)
+
 const github = new RealGitHubClient({
   clientId: required('AF_GITHUB_CLIENT_ID'),
   clientSecret: required('AF_GITHUB_CLIENT_SECRET'),
   redirectUri: required('AF_GITHUB_REDIRECT_URI'),
+  installationTokens,
 })
 
 // Signing in with a link, off unless it is configured.
@@ -110,12 +130,45 @@ function emailSignInFromEnv(): EmailSignInConfig | undefined {
 
 const emailSignIn = emailSignInFromEnv()
 
+// Said out loud at startup, every time. Whether an instance is open to the
+// world is not something anybody should have to infer from a deployment
+// template, and a closed instance that quietly opened is the failure that has
+// no symptom until it has a very large one.
+const signInAllowlist = parseAllowlist(process.env.AF_SIGNIN_ALLOWLIST)
+console.log(describeAllowlist(signInAllowlist))
+
+// Read at start-up rather than on first use, so a secret of the wrong length
+// stops the process here instead of on the one request the feature exists for.
+const sealingKey = sealingKeyFrom(process.env.AF_PROVIDER_KEY_SECRET)
+console.log(
+  sealingKey
+    ? 'provider keys can be stored: AF_PROVIDER_KEY_SECRET is set'
+    : 'provider keys CANNOT be stored: AF_PROVIDER_KEY_SECRET is not set',
+)
+
+// Read at start-up so a malformed price stops the process here rather than on
+// the first model call, which is the one request where being wrong costs money.
+const modelPrices = pricesFrom(process.env.AF_MODEL_PRICES)
+console.log(`model prices configured for ${Object.keys(modelPrices).length} models`)
+
+// Located once, here, and said out loud either way. A control plane running
+// without its console is a legitimate way to run this; a control plane that
+// silently answers 404 on every page because a COPY was dropped from a
+// Dockerfile is not, and the two are indistinguishable without this line.
+const consoleBuild = await findConsoleBuild()
+console.log(consoleBuild.summary)
+
 const { app, ingestLimiter, authLimiter } = createServer({
   pool,
   github,
   clock: systemClock,
   secureCookies: process.env.AF_INSECURE_COOKIES !== '1',
   appBaseUrl: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL,
+  signInAllowlist,
+  sealingKey,
+  githubWebhookSecret: appConfig?.webhookSecret ?? null,
+  modelPrices,
+  consoleBuild,
   ...(emailSignIn ? { emailSignIn } : {}),
 })
 
@@ -150,6 +203,14 @@ const housekeeping = setInterval(
     if (emailSignIn) {
       void sweepEmailSignInTokens(pool, systemClock).catch((err) => console.error('link sweep', err))
     }
+
+    // Beside the session sweep for the same reason and with the same cost:
+    // expiry is checked on every read, so being late costs table size. It was
+    // written with this comment on it and then never called from anywhere, so
+    // device_authorizations grew for the life of the process.
+    void sweepDeviceAuthorizations(pool, systemClock).catch((err) =>
+      console.error('device authorization sweep', err),
+    )
     ingestLimiter.sweep()
     authLimiter.sweep()
   },

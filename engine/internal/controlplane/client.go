@@ -87,6 +87,17 @@ func New(opts Options) (*Client, error) {
 	if strings.TrimSpace(opts.Token) == "" {
 		return nil, ErrNotConfigured
 	}
+	if opts.Redactor == nil {
+		// Refused rather than defaulted. This client is the only thing in the
+		// engine that sends an event off the machine, every payload it carries
+		// was assembled somewhere else, and a redactor that may be nil is a
+		// redaction that may be skipped. Defaulting to redact.New() here would
+		// be worse than refusing: it would silently disagree with whatever
+		// secrets the caller had registered, and scrub less than the caller
+		// believed it was scrubbing.
+		return nil, errors.New(
+			"controlplane: a client needs a redactor, because everything it sends leaves the machine")
+	}
 
 	c := opts.Clock
 	if c == nil {
@@ -167,7 +178,7 @@ func (c *Client) Send(ctx context.Context, events []Event) (SendResult, error) {
 			MaxBatch, len(events))
 	}
 
-	body, err := json.Marshal(map[string]any{"events": events})
+	body, err := json.Marshal(map[string]any{"events": scrub(c.redactor, events)})
 	if err != nil {
 		return zero, fmt.Errorf("controlplane: %w", err)
 	}
@@ -339,4 +350,65 @@ func retryAfter(res *http.Response, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
+}
+
+// scrub redacts every payload string in a batch on its way to the wire.
+//
+// It is here, in the one function through which every event leaves the machine,
+// rather than at the call sites that build events. Both paths to the network
+// pass through Send: the live one from the sink's buffer and the drained one
+// from the spool. A call site somebody forgot is how a secret reaches a log,
+// and this is the writer.
+//
+// The local log, the spool, span attributes and the bytes sent to an OTLP
+// collector each redact at their own writer for the same reason. This one was
+// missing, and it was the only one of the five that leaves the machine.
+//
+// Identifiers are left alone deliberately. ID is the idempotency key the
+// control plane deduplicates on, Type is a closed vocabulary, and EnvID is
+// named by the operator; passing them through the redactor could only change a
+// value that has to match on the other side.
+func scrub(r *redact.Redactor, in []Event) []Event {
+	if r == nil {
+		return in
+	}
+	out := make([]Event, len(in))
+	for i, e := range in {
+		// A nil payload is left nil rather than turned into an empty object,
+		// so redaction cannot change the shape of what is sent.
+		if e.Payload != nil {
+			if scrubbed, ok := scrubValue(r, e.Payload).(map[string]any); ok {
+				e.Payload = scrubbed
+			}
+		}
+		out[i] = e
+	}
+	return out
+}
+
+// scrubValue copies a payload value, redacting every string it contains.
+//
+// It copies rather than editing in place because the batch it is handed is
+// still owned by the sink's buffer and by the spool, and a failed send is
+// retried from those. Editing in place would work here and would silently
+// corrupt anything that later wanted the original.
+func scrubValue(r *redact.Redactor, v any) any {
+	switch t := v.(type) {
+	case string:
+		return r.String(t)
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, inner := range t {
+			out[k] = scrubValue(r, inner)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, inner := range t {
+			out[i] = scrubValue(r, inner)
+		}
+		return out
+	default:
+		return v
+	}
 }

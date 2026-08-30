@@ -20,6 +20,7 @@ type Manifest struct {
 	Database   *Database   `json:"database,omitempty" yaml:"database,omitempty"`
 	Egress     *Egress     `json:"egress,omitempty" yaml:"egress,omitempty"`
 	Personas   []Persona   `json:"personas,omitempty" yaml:"personas,omitempty"`
+	Auth       *Auth       `json:"auth,omitempty" yaml:"auth,omitempty"`
 	Workflows  []Workflow  `json:"workflows,omitempty" yaml:"workflows,omitempty"`
 	Invariants []Invariant `json:"invariants,omitempty" yaml:"invariants,omitempty"`
 	Insights   *Insights   `json:"insights,omitempty" yaml:"insights,omitempty"`
@@ -234,8 +235,93 @@ type Persona struct {
 	Email      string            `json:"email,omitempty" yaml:"email,omitempty"`
 	Role       string            `json:"role,omitempty" yaml:"role,omitempty"`
 	Login      LoginStrategy     `json:"login,omitempty" yaml:"login,omitempty"`
+	Phone      string            `json:"phone,omitempty" yaml:"phone,omitempty"`
 	MFA        bool              `json:"mfa,omitempty" yaml:"mfa,omitempty"`
 	Attributes map[string]string `json:"attributes,omitempty" yaml:"attributes,omitempty"`
+}
+
+// AuthAdapter names how personas are created.
+type AuthAdapter string
+
+const (
+	// AuthAuto picks the adapter from the dependencies and the live schema,
+	// which is what a manifest that says nothing gets.
+	AuthAuto AuthAdapter = "auto"
+	// AuthDirect writes rows into the application's own users table.
+	AuthDirect AuthAdapter = "direct"
+	// AuthSupabase writes rows into Supabase's auth schema.
+	AuthSupabase AuthAdapter = "supabase"
+	// AuthSupabaseAPI goes through a Supabase project's auth admin API,
+	// which hashes the password the way its own signup does.
+	AuthSupabaseAPI AuthAdapter = "supabase_api"
+	// AuthNextAuth writes rows into the NextAuth and Auth.js tables.
+	AuthNextAuth AuthAdapter = "nextauth"
+	// AuthClerk creates personas through Clerk's backend API.
+	AuthClerk AuthAdapter = "clerk"
+	// AuthAuth0 creates personas through the Auth0 Management API.
+	AuthAuth0 AuthAdapter = "auth0"
+	// AuthWorkOS creates personas through WorkOS User Management.
+	AuthWorkOS AuthAdapter = "workos"
+	// AuthSeed runs a command the manifest names, for a scheme nothing else
+	// covers.
+	AuthSeed AuthAdapter = "seed"
+)
+
+// Auth configures how personas come to exist.
+//
+// Absent from most manifests, because detection answers it. Present when
+// detection is wrong, when the users table has names nothing could guess, or
+// when the application's users live somewhere only a script can reach.
+type Auth struct {
+	Adapter AuthAdapter `json:"adapter,omitempty" yaml:"adapter,omitempty"`
+	// Seed is the command AuthSeed runs, once per persona.
+	Seed string `json:"seed,omitempty" yaml:"seed,omitempty"`
+	// Sandbox declares that the configured tenant is not the production one.
+	// A hosted adapter refuses to create anybody without it, because the only
+	// tenant it could otherwise fall back to is the real one.
+	Sandbox bool `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+	// TokenEnv names the variable holding the provider's admin credential.
+	// The variable name, never the credential.
+	TokenEnv string `json:"token_env,omitempty" yaml:"token_env,omitempty"`
+	// URL is the project's API root, for Supabase.
+	URL string `json:"url,omitempty" yaml:"url,omitempty"`
+	// Domain is the tenant, for Auth0.
+	Domain string `json:"domain,omitempty" yaml:"domain,omitempty"`
+	// Connection is the Auth0 database connection users are created in.
+	Connection string `json:"connection,omitempty" yaml:"connection,omitempty"`
+	// Table describes the application's own users table, for AuthDirect.
+	Table *AuthTable `json:"table,omitempty" yaml:"table,omitempty"`
+	// Sessions are extra tables holding sessions or tokens, emptied so that
+	// no real session survives into a branch.
+	Sessions []string `json:"sessions,omitempty" yaml:"sessions,omitempty"`
+	// Password shapes the generated password for an application whose rules
+	// are stricter than the generator's.
+	Password *PasswordRules `json:"password,omitempty" yaml:"password,omitempty"`
+}
+
+// AuthTable names the columns of an application's own users table.
+type AuthTable struct {
+	Schema     string            `json:"schema,omitempty" yaml:"schema,omitempty"`
+	Name       string            `json:"name" yaml:"name"`
+	ID         string            `json:"id,omitempty" yaml:"id,omitempty"`
+	Email      string            `json:"email,omitempty" yaml:"email,omitempty"`
+	Password   string            `json:"password,omitempty" yaml:"password,omitempty"`
+	Role       string            `json:"role,omitempty" yaml:"role,omitempty"`
+	JSON       string            `json:"json,omitempty" yaml:"json,omitempty"`
+	Attributes map[string]string `json:"attributes,omitempty" yaml:"attributes,omitempty"`
+	Timestamps []string          `json:"timestamps,omitempty" yaml:"timestamps,omitempty"`
+}
+
+// PasswordRules describe an application's password policy.
+//
+// Stated so that the generated password satisfies it. Without this, an
+// application stricter than the generator refuses a correct password at sign
+// in, and the run reports a login failure that looks like the application's
+// fault.
+type PasswordRules struct {
+	MinLength int    `json:"min_length,omitempty" yaml:"min_length,omitempty"`
+	Symbols   string `json:"symbols,omitempty" yaml:"symbols,omitempty"`
+	Forbid    string `json:"forbid,omitempty" yaml:"forbid,omitempty"`
 }
 
 // Workflow is something an agent does.

@@ -69,7 +69,15 @@ personas:
   - name: returning-customer
     email: ada@example.test
     role: customer
-    login: password
+    # none, because this service is an API and has no sign in page. It said
+    # `password` until `af ci` was actually run against it, and every run came
+    # back blocked with "locator.fill: Timeout 10000ms exceeded, waiting for
+    # getByLabel(/^(email|email address|e-mail|username or email)$/i)": the
+    # agent was looking for a login form on a service that serves JSON. A
+    # persona that cannot sign in blocks its workflow forever, and blocked does
+    # not count against a change, so it would have sat there looking like a
+    # feature.
+    login: none
 
 workflows:
   - name: place-an-order
@@ -83,6 +91,11 @@ workflows:
       - "the new order is returned with a total of 2599"
     tags: [smoke]
 
+# Asked of the branch after the workflows run, inside a READ ONLY transaction.
+# An invariant holds when its statement returns NO ROWS, so these select the
+# violating rows rather than counting them: count(*) returns one row saying
+# zero, which is a row, which is a violation. Both of these said count(*) until
+# something actually ran them.
 invariants:
   - name: no-orphaned-orders
     description: >-
@@ -90,12 +103,13 @@ invariants:
       API cannot make from the outside, and the one a masking run that broke
       the join would fail.
     sql: |
-      SELECT count(*) AS violations
+      SELECT o.id AS order_id, o.customer_id
       FROM orders o
       LEFT JOIN customers c ON c.id = o.customer_id
       WHERE c.id IS NULL
+      ORDER BY o.id
 
   - name: no-negative-totals
     description: An order's total is always positive, whatever the masking did to it.
     sql: |
-      SELECT count(*) AS violations FROM orders WHERE total_cents <= 0
+      SELECT id AS order_id, total_cents FROM orders WHERE total_cents <= 0

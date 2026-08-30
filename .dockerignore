@@ -28,7 +28,6 @@ deploy
 # context to the daemon and names the Dockerfile *inside* it, so an excluded
 # one is simply not there, and the daemon answers "cannot locate specified
 # Dockerfile" about a file that is plainly on disk.
-!deploy/docker/app.Dockerfile
 !deploy/docker/control-plane.Dockerfile
 !deploy/docker/bootstrap.mjs
 !deploy/docker/maintenance.mjs
@@ -47,6 +46,12 @@ web/**/test
 .gate-reports
 .playwright-mcp
 **/*.broken.*
+# console/ is not like www above: the control plane serves it, so its source
+# has to reach the build context. Its own node_modules and previous output must
+# not, because the image builds them from the lockfile.
+console/node_modules
+console/.next
+console/out
 **/.env
 **/.env.*
 *.md

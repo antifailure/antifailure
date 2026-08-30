@@ -5,24 +5,38 @@ variable "subscription_id" {
 
 variable "resource_group_name" {
   type    = string
-  default = "af-cp-eastus"
+  default = "af-cp-centralus"
 }
 
 variable "location" {
   type        = string
-  default     = "eastus"
+  default     = "centralus"
   description = <<-EOT
-    The spec names the control plane's group af-cp-scus, and South Central US
-    is not available on this subscription.
+    THE THIRD REGION THIS STACK HAS TRIED, AND EACH MOVE WAS FORCED BY A
+    DIFFERENT SYSTEM THAT A PLAN CANNOT SEE.
 
-    A policy assignment called bonfire-allowed-locations denies every region
-    except eastus, centralus and global. It is a deny effect, so a plan in
+    southcentralus, which the spec names, is denied by a policy assignment
+    called bonfire-allowed-locations. It is a deny EFFECT, so a plan in
     southcentralus is perfectly clean and every resource is refused at apply.
-    Quota was never the constraint: both regions have 65 cores.
 
-    eastus is also cheaper for what this stack uses. A B1ms flexible server is
-    0.017/hour here against 0.0204 in southcentralus, and storage is 0.115 per
-    GB against 0.138.
+    eastus is allowed by that policy and is cheaper, so this defaulted there.
+    An apply then failed on the database with
+
+      ParameterOutOfRange: The value of 'Version' should be in: []
+
+    and the empty list is literal. `az postgres flexible-server list-skus -l
+    eastus` returns supportedServerVersions: [] with the reason "Provisioning
+    is restricted in this region." PostgreSQL flexible server cannot be created
+    in eastus on this subscription at all, at any version, in any SKU. Every
+    other resource in this stack creates there quite happily, which is why the
+    apply got 26 resources deep before finding out.
+
+    centralus offers versions 11 through 18 and every burstable SKU, and is
+    allowed by the policy. It is the only region that satisfies all three
+    gates. It costs about 2 USD a month more than eastus would have.
+
+    QUOTA WAS NEVER THE CONSTRAINT. Both regions have 65 cores. Quota is the
+    thing everybody checks and it was the one thing that was never in the way.
   EOT
 
   # This validation lives HERE and not only on the module, and that is the
@@ -35,9 +49,14 @@ variable "location" {
   # guard that quietly does not run is worse than no guard, because somebody
   # trusts it. This variable is a real input, known at plan time, so this one
   # actually runs.
+  #
+  # It cannot check the third gate. Regional service restriction is not
+  # expressible in a variable validation because it is a property of the
+  # subscription that has to be asked for over the network. `azguard region`
+  # asks, and self-hosting/azure.md says to run it first.
   validation {
-    condition     = contains(["eastus", "centralus"], var.location)
-    error_message = "This subscription carries a policy assignment named bonfire-allowed-locations which denies every region except eastus, centralus and global. The spec names this group af-cp-scus; South Central US is not available here. A plan elsewhere is clean and every resource is refused at apply."
+    condition     = contains(["centralus"], var.location)
+    error_message = "bonfire-allowed-locations denies every region except eastus, centralus and global, and PostgreSQL flexible server provisioning is RESTRICTED in eastus on this subscription (az postgres flexible-server list-skus -l eastus returns supportedServerVersions: []). centralus is the only region that satisfies both. Run `go run ./tools/azguard region centralus` before changing this."
   }
 }
 
@@ -52,8 +71,10 @@ variable "monthly_budget_usd" {
 }
 
 variable "budget_contact_emails" {
-  type    = list(string)
-  default = []
+  type        = list(string)
+  default     = []
+  sensitive   = true
+  description = "Marked sensitive so it cannot reach a public pull request plan summary. See the foundation module's copy for the full reason."
 }
 
 variable "log_retention_days" {
@@ -123,4 +144,64 @@ variable "github_client_secret" {
 
 variable "github_redirect_uri" {
   type = string
+}
+
+variable "event_retention_months" {
+  type        = number
+  default     = null
+  description = "Null keeps every event forever. Staging sets a year, because a partitioned table with no retention is a partition per month and no reason to ever drop one."
+}
+
+variable "key_vault_name" {
+  type        = string
+  default     = ""
+  description = "Overrides the computed vault name, for a vault that already exists under a different one."
+}
+
+variable "database_extensions" {
+  type        = list(string)
+  default     = ["PGCRYPTO"]
+  description = "Allow-listed in azure.extensions. Azure refuses CREATE EXTENSION for anything absent from it, and it defaults to empty."
+}
+
+# No default. See the module's variable of the same name: an unset allowlist
+# means the control plane accepts any GitHub account, and a default is a value
+# somebody gets by forgetting.
+variable "signin_allowlist" {
+  type        = list(string)
+  description = "GitHub logins that may sign in. Empty means nobody."
+}
+
+variable "provider_key_secret_enabled" {
+  type        = bool
+  default     = true
+  description = "Generate a sealing secret so customers' provider keys can be stored."
+}
+
+# Empty means no GitHub App, which is a supported state: sign-in works and the
+# webhook endpoint refuses deliveries rather than accepting unsigned ones. Set
+# it and the two secrets must already be in the vault, because GitHub mints the
+# private key and Terraform cannot.
+variable "assign_deployer_secret_officer" {
+  type        = bool
+  default     = false
+  description = "Whether this stack manages the Key Vault Secrets Officer grant on the human or identity that runs Terraform. See deployer_principal_id: leaving that null makes the grant caller-dependent, which is why the module defaults this off."
+}
+
+variable "deployer_principal_id" {
+  type        = string
+  default     = null
+  description = "Pins the principal that gets Key Vault Secrets Officer instead of taking whoever is calling, so two identities planning the same stack do not each propose to replace the other's grant."
+}
+
+variable "github_app_id" {
+  type        = string
+  default     = ""
+  description = "The numeric GitHub App ID, or empty for no App."
+}
+
+variable "ci_principal_id" {
+  type        = string
+  default     = ""
+  description = "Object id of the service principal GitHub Actions federates into. Gets Reader on this resource group and nothing else. Empty disables the grant."
 }

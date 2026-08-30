@@ -3,8 +3,6 @@ package env
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -14,6 +12,7 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/load"
+	"github.com/antifailure/antifailure/engine/internal/personas"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -46,7 +45,37 @@ type TestReport struct {
 	Flaky      int              `json:"flaky"`
 	Blocked    int              `json:"blocked"`
 	Unverified int              `json:"unverified"`
-	Duration   time.Duration    `json:"-"`
+	// Invariants is what the data said after the workflows ran. Filled by the
+	// engine rather than by the runner, which never sees the database.
+	Invariants []InvariantResult `json:"invariants,omitempty"`
+	Duration   time.Duration     `json:"-"`
+}
+
+// InvariantsViolated counts the invariants shown to be broken.
+func (r TestReport) InvariantsViolated() int {
+	n := 0
+	for _, inv := range r.Invariants {
+		if inv.Violated() {
+			n++
+		}
+	}
+	return n
+}
+
+// InvariantsBlocked counts the invariants that produced no verdict.
+//
+// Named blocked rather than failed for the same reason a workflow is: the
+// check not happening is a fact about us, and counting it against the
+// application would make an incomplete environment indistinguishable from
+// broken data.
+func (r TestReport) InvariantsBlocked() int {
+	n := 0
+	for _, inv := range r.Invariants {
+		if inv.Error != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // WorkflowResult is one workflow's outcome.
@@ -74,7 +103,14 @@ type WorkflowResult struct {
 // Blocked does not, and that is deliberate: an incomplete environment must not
 // be indistinguishable from a broken application, or people stop reading
 // either.
-func (r TestReport) AnyFailed() bool { return r.Failed > 0 }
+//
+// A violated invariant does count, and it is the reason invariants exist. A
+// workflow that signed in, placed an order and saw a success page has passed
+// on the screen; if that order now has no user, the run is a failure and the
+// screen was never going to say so.
+func (r TestReport) AnyFailed() bool {
+	return r.Failed > 0 || r.InvariantsViolated() > 0
+}
 
 // jobDocument is what the runner reads.
 type jobDocument struct {
@@ -99,9 +135,14 @@ type workflowDoc struct {
 type personaDoc struct {
 	Name     string `json:"name"`
 	Email    string `json:"email"`
+	Phone    string `json:"phone,omitempty"`
 	Password string `json:"password,omitempty"`
 	Role     string `json:"role,omitempty"`
 	Login    string `json:"login"`
+	// TOTPSecret is the base32 secret the adapter enrolled, present when the
+	// persona has a second factor. The runner holds it so that it can
+	// complete a challenge, which is what the manifest's `mfa` field promises.
+	TOTPSecret string `json:"totpSecret,omitempty"`
 }
 
 // Test runs the manifest's workflows against the running environment.
@@ -119,6 +160,21 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	if len(workflows) == 0 {
 		return nil, aferrors.Coded(aferrors.AFAGT001,
 			"detail", "the manifest declares no workflows to run")
+	}
+
+	// The personas have to exist before the browser opens. Until this call
+	// was here, the runner was handed a name, an address and a derived
+	// password for an account nobody had created, the application refused the
+	// sign in, and settle() reported it as the application refusing a
+	// correct password. Every workflow failed, and it failed with a finding
+	// against the application rather than against the environment, which is
+	// the most expensive kind of wrong answer this product can give.
+	//
+	// Idempotent, so a persona already provisioned into the golden or by an
+	// earlier run is reconciled rather than duplicated.
+	provisioned, err := o.ProvisionPersonas(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	runner, err := o.findRunner(opts.RunnerPath)
@@ -140,7 +196,7 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 
 	job := jobDocument{
 		BaseURL: status.URL, Artifacts: artifacts,
-		Workflows: workflows, Personas: o.personaDocs(),
+		Workflows: workflows, Personas: o.personaDocs(provisioned),
 		AF: self, WorkDir: o.opts.Root,
 		Attempts: opts.Attempts, Headless: !opts.Headed,
 	}
@@ -171,6 +227,28 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 			"detail", "the runner's output could not be read: "+err.Error())
 	}
 	report.Duration = o.opts.Clock.Since(started)
+
+	// Asked after the workflows, of the rows they left behind. This is the
+	// only part of a run that looks at the data rather than at the screen, and
+	// until it was here the manifest's invariants were parsed, validated,
+	// shown in `af explain` and never executed, so a green run said nothing
+	// whatsoever about whether they held.
+	//
+	// A failure to run them does not fail the run. The workflows have already
+	// produced a real result and discarding it because a follow up check could
+	// not be made would throw away the more expensive answer of the two; the
+	// invariants that could not be asked are reported as blocked instead.
+	invs, invErr := o.RunInvariants(ctx)
+	if invErr != nil {
+		for _, inv := range o.opts.Manifest.Invariants {
+			invs = append(invs, InvariantResult{
+				Name:        inv.Name,
+				Description: inv.Description,
+				Error:       o.opts.Redactor.String(invErr.Error()),
+			})
+		}
+	}
+	report.Invariants = invs
 
 	// A non zero exit with a readable report is a test failure, which the
 	// caller decides about. Only an unreadable one is an error here.
@@ -231,29 +309,33 @@ func (o *Orchestrator) workflowDocs(only []string) []workflowDoc {
 	return out
 }
 
-func (o *Orchestrator) personaDocs() []personaDoc {
+func (o *Orchestrator) personaDocs(provisioned *personas.Result) []personaDoc {
 	var out []personaDoc
 	for _, p := range o.opts.Manifest.Personas {
 		login := string(p.Login)
 		if login == "" {
 			login = string(schema.LoginPassword)
 		}
-		doc := personaDoc{Name: p.Name, Email: p.Email, Role: p.Role, Login: login}
-		if login == string(schema.LoginPassword) {
-			// A password nobody set, derived from the environment so both the
-			// seed and the runner arrive at the same one without anybody
-			// writing it down twice.
-			doc.Password = personaPassword(o.envID, p.Name)
+		doc := personaDoc{Name: p.Name, Email: p.Email, Phone: p.Phone, Role: p.Role, Login: login}
+
+		// Taken from what provisioning actually created, rather than derived
+		// again here. Two derivations that agree today are two derivations
+		// that can disagree tomorrow, and the symptom would be a sign in
+		// refused for a password that is correct everywhere except in the one
+		// place it is typed.
+		if provisioned != nil {
+			if account, ok := provisioned.Account(p.Name); ok {
+				doc.Email = account.Email
+				doc.Phone = account.Phone
+				doc.Password = account.Password.Reveal()
+				doc.TOTPSecret = account.TOTPSecret.Reveal()
+				out = append(out, doc)
+				continue
+			}
 		}
 		out = append(out, doc)
 	}
 	return out
-}
-
-// personaPassword derives a persona's password from the environment.
-func personaPassword(envID, persona string) string {
-	sum := sha256.Sum256([]byte("antifailure/persona/v1\x00" + envID + "\x00" + persona))
-	return "Af-" + hex.EncodeToString(sum[:8]) + "!1"
 }
 
 // LoadOptions configure a load run.

@@ -66,6 +66,7 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "documented manifests are valid" just manifestcheck
     run "prose reads like a person"      just prosecheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
@@ -79,12 +80,17 @@ gate: _reports
     run "format"                         just fmt-check
     run "lint"                           just lint
     run "the gates themselves"           just test-tools
+    run "coverage"                       just coverage
     run "engine"                         just test-engine
+    run "this platform's keyring"        just keyring
+    run "the other platforms lint"       just lint-platforms
     run "control plane"                  just test-web
     run "runner"                         just test-runner
     run "edition boundary"               just edition
     run "enterprise"                     just test-ee
+    run "builds are reproducible"        just reproducible
     run "license parser fuzz"            just fuzz-license
+    run "engine parser fuzz"             just fuzz-engine
     run "authorship and sign-off"        just authorship
 
     echo
@@ -146,7 +152,7 @@ setup:
     if [ "$(git config core.hooksPath || true)" = ".githooks" ]; then
       echo "on"
     else
-      echo "off            run: git config core.hooksPath .githooks"
+      echo "off            run: just hooks"
       missing=$((missing+1))
     fi
     printf '  %-12s' "identity"
@@ -172,6 +178,32 @@ setup:
       echo "Everything this repository needs is here. Next: just gate"
     else
       echo "$missing things to fix, each with its command above."
+      exit 1
+    fi
+
+# CONTRIBUTING.md has always required a Developer Certificate of Origin
+# trailer, and `just setup` has always been able to tell you the hook was off.
+# Neither turned it on, and the gap between knowing and doing is how an
+# unsigned commit reached main: the author's clone had never run the one line,
+# nothing local objected, and the check that would have caught it is a check
+# that runs after the commit exists.
+#
+# Local config rather than anything global, so it cannot affect another
+# repository on this machine.
+[doc("Point git at this repository's hooks, so commits carry a sign-off.")]
+hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git config core.hooksPath .githooks
+    echo "hooks       on   .githooks"
+    printf 'identity    '
+    if email=$(git config user.email) && [ -n "$email" ]; then
+      echo "$email"
+    else
+      echo "UNSET -- run: git config user.email you@example.com"
+      echo
+      echo "The sign-off trailer is built from this, so a commit made without" >&2
+      echo "one cannot be signed off." >&2
       exit 1
     fi
 
@@ -233,7 +265,7 @@ build-release version="dev":
     cd engine && go build -trimpath -ldflags "-s -w \
       -X github.com/antifailure/antifailure/engine/internal/cli.Version={{version}} \
       -X github.com/antifailure/antifailure/engine/internal/cli.Commit=$(git rev-parse HEAD) \
-      -X github.com/antifailure/antifailure/engine/internal/cli.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      -X github.com/antifailure/antifailure/engine/internal/cli.BuildDate=$(git show -s --format=%cI HEAD)" \
       -o ../bin/af ./cmd/af
     @./bin/af version
 
@@ -247,6 +279,22 @@ test: test-engine test-tools test-web test-runner
 test-engine:
     cd engine && go test ./... -race -timeout 30m
 
+# G4. The coverage thresholds in the build plan's C.5, per package.
+#
+# Two recipes rather than one, because producing the profile needs the whole
+# engine suite with a Docker daemon and a Postgres and takes the better part of
+# an hour, while checking it takes a moment. A single recipe would mean nobody
+# could look at the numbers without paying for the run again.
+#
+# -coverpkg over the whole module on purpose: without it a package's number
+# counts only what its OWN tests reached, so a package exercised end to end by
+# the conformance suite reads as untested. C.5 says the integration tests count.
+coverage-profile:
+    cd engine && go test ./... -coverpkg=./... -coverprofile=../{{reports}}/coverage.out -timeout 60m
+
+coverage:
+    go run ./tools/coverage -profile {{reports}}/coverage.out
+
 test-tools:
     cd tools && go test ./... -timeout 5m
 
@@ -256,11 +304,13 @@ test-web:
 test-runner:
     npm --prefix runner test
 
+# Fanned out over ee/web's workspaces rather than naming each package, so an
+# enterprise package added later is covered without editing this or CI. Naming
+# them by hand is how two of them ended up untested.
 test-ee:
     cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./... -race -timeout 15m
-    npx --prefix ee/web tsc --noEmit -p ee/web/rbac/tsconfig.json
-    npx --prefix ee/web tsc --noEmit -p ee/web/audit/tsconfig.json
-    node --test ee/web/rbac/test/*.test.ts ee/web/audit/test/*.test.ts
+    npm --prefix ee/web run typecheck
+    npm --prefix ee/web test
 
 # The fast ones, for a tight loop.
 test-short:
@@ -351,6 +401,36 @@ examples:
       # happened here twice.
       (cd "$dir" && GOWORK=off go build -o /dev/null ./... && GOWORK=off go vet ./...)
     done
+    # The same rule for the examples that are not Go. An example that does not
+    # build is worse than no example whatever it is written in, and checking
+    # only the compiled ones would have left the newest one unchecked by the
+    # gate that exists to say exactly this.
+    for dir in examples/*/; do
+      [ -f "$dir/package.json" ] || continue
+      echo "  $dir"
+      (cd "$dir" && npm ci --no-audit --no-fund --silent && npm run build)
+    done
+    # And the ones written in Python. There is no compile step, so the check
+    # that means something is the framework's own: `manage.py check` loads the
+    # settings, the URL conf and every model, which is where a typo in any of
+    # them shows up. DATABASE_URL is a placeholder because check does not
+    # connect; the example refuses to start without one, deliberately, and this
+    # gate should not be the thing that discovers that.
+    for dir in examples/*/; do
+      [ -f "$dir/requirements.txt" ] || continue
+      echo "  $dir"
+      (
+        cd "$dir"
+        python3 -m venv .venv-gate
+        ./.venv-gate/bin/pip install -q --disable-pip-version-check -r requirements.txt
+        ./.venv-gate/bin/python -m compileall -q . -x '\.venv-gate'
+        if [ -f manage.py ]; then
+          DATABASE_URL="postgres://gate:gate@127.0.0.1:5432/gate" \
+            ./.venv-gate/bin/python manage.py check
+        fi
+        rm -rf .venv-gate
+      )
+    done
     go build -o /tmp/af-examples ./engine/cmd/af
     for dir in examples/*/; do
       [ -f "$dir/antifailure.yaml" ] || continue
@@ -377,29 +457,93 @@ forbidden:
 claimcheck:
     go run ./tools/claimcheck .
 
+# Every manifest shown in the documentation is one the engine would accept.
+#
+# The gates already read style, spelling, links and repository paths, and none
+# of them knows what a manifest is. A getting started page shipped telling
+# readers to set control_plane.url, which the engine refuses with AF-MAN-002
+# because the schema closes itself so a typo cannot silently change an
+# environment.
+manifestcheck:
+    go run ./tools/manifestcheck .
+
 # This justfile runs what CI runs.
 gatecheck:
     go run ./tools/gatecheck .
 
-# The TypeScript that ships: the control plane packages and the agent runner.
+# The TypeScript that ships: the control plane packages, the console, and the
+# agent runner.
 typecheck:
     #!/usr/bin/env bash
     set -euo pipefail
-    for p in packages/db packages/policy apps/api apps/app; do
+    for p in packages/db packages/policy apps/api; do
       npx --prefix web tsc --noEmit -p "web/$p/tsconfig.json"
     done
     npx --prefix runner tsc --noEmit -p runner/tsconfig.json
-    # A typecheck is not a build. An import written as ../lib/guard from a page
-    # two directories deep typechecks clean, because tsconfig resolves it
-    # through baseUrl, and fails in webpack with "Module not found". That
-    # shipped a broken image once already.
-    NEXT_TELEMETRY_DISABLED=1 npm --prefix web run build --workspace @antifailure/app
+    # The console, which nothing here was checking. It is a separate npm
+    # project with its own lockfile, so it is neither in the web workspace's
+    # typecheck loop above nor in the runner's, and it was reaching the
+    # published image unchecked by any gate: the only thing standing between a
+    # broken console and a release was the image build asserting index.html
+    # exists, which happens in a different workflow.
+    #
+    # A build rather than a typecheck, and the difference is not academic. An
+    # import written as ../lib/guard from a page two directories deep
+    # typechecks clean, because tsconfig resolves it through baseUrl, and
+    # fails in webpack with "Module not found". That shipped a broken image
+    # once already. `next build` runs the typecheck too, so this is the
+    # stricter of the two and not an extra one.
+    [ -d console/node_modules ] || npm --prefix console ci --no-audit --no-fund
+    NEXT_TELEMETRY_DISABLED=1 npm --prefix console run build
+
+# G11. Two builds of one commit produce the same binary.
+#
+# It did not. The release recipe stamped BuildDate with $(date -u), so every
+# build of the same commit differed, and release.yml carried the identical
+# line: the shipping path was non-reproducible, not just the local one. The
+# date comes from the commit now, which is deterministic and still means
+# something to whoever reads `af version`.
+#
+# A gate rather than a note, because this is the kind of property that is true
+# until somebody adds one more -X flag.
+reproducible version="v0.0.0-gate":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-release {{version}} > /dev/null
+    a=$(shasum -a 256 bin/af | cut -d' ' -f1)
+    just build-release {{version}} > /dev/null
+    b=$(shasum -a 256 bin/af | cut -d' ' -f1)
+    if [ "$a" != "$b" ]; then
+      echo "two builds of this commit differ:"
+      echo "  $a"
+      echo "  $b"
+      echo
+      echo "Something in the build embeds the moment it ran. The usual cause is a"
+      echo "timestamp in an -X flag; derive it from the commit instead."
+      exit 1
+    fi
+    echo "two builds of this commit are identical: $a"
 
 # The license parser has to survive arbitrary input, because a licence token
 # arrives from outside and a parser that panics on one is a denial of service
 # with extra steps. Sixty seconds here, longer in a nightly run.
 fuzz-license seconds="60":
     cd ee/engine && GOWORK=off go test ./license -run FuzzParse -fuzz FuzzParse -fuzztime {{seconds}}s
+
+# G6, for the two parsers that read untrusted input from the customer's side.
+#
+# The manifest is a file from the repository under test and the detection
+# engine reads that repository's contents, so both are parsing bytes somebody
+# else wrote. C.7 says the customer's repository is data and never code; a
+# parser that panics on a crafted file is the cheapest way to break that.
+#
+# These targets already existed and were never fuzzed. `go test ./...` runs a
+# fuzz target against its committed seed corpus only, which is a unit test
+# wearing a fuzzer's name: it proves the seeds still pass and explores nothing.
+# Sixty seconds each here, matching the licence parser, longer in a nightly.
+fuzz-engine seconds="60":
+    cd engine && go test ./internal/manifest -run FuzzParse -fuzz FuzzParse -fuzztime {{seconds}}s
+    cd engine && go test ./internal/detect -run FuzzAnalyzers -fuzz FuzzAnalyzers -fuzztime {{seconds}}s
 
 # Regenerate everything that is generated, then prove nothing changed.
 #
@@ -440,6 +584,34 @@ generate:
     cd engine && go test ./internal/events -update-schema
     cd engine && go test ./internal/masking -update-transforms
     cd engine && go test ./internal/hud -update-frames
+
+# This machine's own credential store, against the real thing.
+#
+# The same command the keyring workflow runs, which is what lets `just gate` and
+# CI agree about it. What it actually exercises differs per platform and that is
+# the point: macOS runs the keychain tests here, Linux runs the Secret Service
+# ones, and Windows runs the Credential Manager ones. No single machine can run
+# all three, which is why that workflow has a job per platform, and why running
+# the local one here is the most a developer's gate can honestly do.
+#
+# A machine with no keyring daemon skips rather than fails. That is correct: the
+# chain's whole design is that an unavailable source is named and stepped over.
+keyring:
+    cd engine && go test ./internal/secrets/
+
+# Lint the code the other platforms compile.
+#
+# The main lint runs on one machine, so it only ever sees the files that
+# machine's build tags select. keyring_windows.go and keyring_darwin.go are
+# invisible to it, and a file nothing lints drifts: GOOS=windows found an
+# unchecked return in the Windows keyring that had been merged and green for a
+# day, because no linter on any runner had ever compiled it.
+#
+# Cross compiling for the lint costs nothing. It needs no runner of that
+# platform, since it type checks rather than runs.
+lint-platforms:
+    cd engine && GOOS=windows golangci-lint run --timeout 15m
+    cd engine && GOOS=darwin golangci-lint run --timeout 15m
 
 # The community build does not contain or need the enterprise edition.
 edition:
@@ -482,7 +654,7 @@ authorship:
       fi
     done
     if [ "$missing" -gt 0 ]; then
-      echo "Add one with 'git commit -s', or: git config core.hooksPath .githooks"
+      echo "Add one with 'git commit -s', or turn the hook on once: just hooks"
       exit 1
     fi
     echo "attributed and signed off"

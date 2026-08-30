@@ -21,7 +21,12 @@ bin/
 dist/
 .tools/
 .gate-reports/
-coverage/
+# Anchored to the root. Unanchored, `coverage/` matches a directory of that
+# name at ANY depth, which silently swallowed tools/coverage, the source of
+# gate G4: the files existed on disk, `go build` and `go test` were happy, and
+# git could not see them. A tool that cannot be committed is a gate that does
+# not exist.
+/coverage/
 *.out
 *.test
 *.prof
@@ -31,6 +36,15 @@ coverage/
 *.tfstate
 *.tfstate.*
 *.tfplan
+# `terraform show -json plan.tfplan` writes this, and it is NOT the human
+# readable plan in another format. The JSON carries actual values alongside a
+# separate `after_sensitive` structure that merely MARKS which of them are
+# sensitive, so what the text plan prints as (sensitive value) is present in
+# full here. A create-only plan happens to be safe because the value is not
+# known yet; the moment there is real state to compare against, this file
+# contains the generated database passwords. The cost job in CI reads it from
+# the runner's disk and it never leaves.
+plan.json
 .terraform.lock.hcl.local
 crash.log
 
@@ -122,3 +136,14 @@ tools/docs/styles/Google/
 # An example builds into the directory it lives in unless you say otherwise,
 # and `go build ./...` does not say otherwise. One of these was staged.
 /examples/*/go-api
+
+# Python bytecode, from examples/django-api. Committed once by a `git add`
+# on a directory that had been run, which is exactly how build output gets
+# into a repository.
+__pycache__/
+*.pyc
+
+# The report `af ci --output report.md` writes. Running an example produces one
+# in that example's directory, and it is an artifact of a run rather than part
+# of the example.
+examples/*/report.md

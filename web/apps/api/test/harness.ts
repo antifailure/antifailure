@@ -9,6 +9,7 @@ import { FakeGitHub } from '../src/auth/fakegithub.ts'
 import { RecordingMailer } from '../src/auth/mail.ts'
 import { issueSession } from '../src/auth/session.ts'
 import type { Role } from '../src/permissions.ts'
+import { findConsoleBuild } from '../src/console/static.ts'
 
 export const adminUrl =
   process.env.AF_TEST_DATABASE_URL ?? 'postgres://postgres:test@127.0.0.1:55432/antifailure'
@@ -20,13 +21,37 @@ export function appUrl(): string {
   return u.toString()
 }
 
+/**
+ * Whether there is a database to test against.
+ *
+ * Two things here are deliberate and both were paid for.
+ *
+ * The timeout is thirty seconds rather than three. Three is plenty on an idle
+ * machine and nowhere near enough on a busy one: measured on a loaded laptop,
+ * accepting a connection took between two and thirty seconds, so the probe
+ * timed out, the suite skipped, and the run went green having tested nothing.
+ * A skip that machine load can cause is a pass with extra steps, and it is
+ * invisible precisely when the machine is busy, which is when tests are being
+ * run in bulk.
+ *
+ * AF_REQUIRE_DATABASE=1 turns the skip into a failure. Somewhere, usually
+ * continuous integration, there has to be a place where "no database" is not an
+ * acceptable answer, or every one of these suites is optional forever.
+ */
 export async function available(): Promise<boolean> {
+  const timeout = Number(process.env.AF_TEST_CONNECT_TIMEOUT ?? 30)
   try {
-    const probe = postgres(adminUrl, { max: 1, connect_timeout: 3, onnotice: () => {} })
+    const probe = postgres(adminUrl, { max: 1, connect_timeout: timeout, onnotice: () => {} })
     await probe`SELECT 1`
-    await probe.end({ timeout: 2 })
+    await probe.end({ timeout: 5 })
     return true
-  } catch {
+  } catch (err) {
+    if (process.env.AF_REQUIRE_DATABASE === '1') {
+      throw new Error(
+        `AF_REQUIRE_DATABASE is set and ${adminUrl} did not answer within ${timeout}s: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
     return false
   }
 }
@@ -45,12 +70,39 @@ export interface ApiHarness {
   close(): Promise<void>
 }
 
-export async function startApi(): Promise<ApiHarness> {
-  const admin = postgres(adminUrl, { max: 4, connect_timeout: 10, onnotice: () => {} })
+export interface StartApiOptions {
+  /** Who may sign in. Undefined leaves the server open, which is its default. */
+  signInAllowlist?: ReadonlySet<string> | null
+  /** The secret that seals provider keys. Undefined means none is configured,
+   *  which is a state the server has to serve rather than crash in, and there
+   *  are tests for that. */
+  sealingKey?: Buffer | null
+  /** The GitHub App's webhook secret. Undefined means no App, and the webhook
+   *  endpoint refuses every delivery rather than accepting unsigned ones. */
+  githubWebhookSecret?: string | null
+  /** What each model costs, for the budgeted model proxy. */
+  modelPrices?: Record<string, { inputPerMillion: number; outputPerMillion: number }>
+  /** Where the providers live, so no test reaches a real one. */
+  providerBases?: Record<string, string>
+  /** A directory holding an exported console. Undefined means the server runs
+   *  without one, which is a real way to run it and has its own test. */
+  consoleDir?: string
+}
+
+export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
+  const admin = postgres(adminUrl, {
+    max: 4,
+    connect_timeout: Number(process.env.AF_TEST_CONNECT_TIMEOUT ?? 30),
+    onnotice: () => {},
+  })
   await migrate(admin)
   await admin.unsafe(`ALTER ROLE antifailure_app LOGIN PASSWORD 'app-test-password'`)
 
-  const pool = createPool({ url: appUrl(), max: 6 })
+  const pool = createPool({
+    url: appUrl(),
+    max: 6,
+    connectTimeoutSeconds: Number(process.env.AF_TEST_CONNECT_TIMEOUT ?? 30),
+  })
   const clock = new FakeClock()
   const github = new FakeGitHub(clock)
   const mailer = new RecordingMailer()
@@ -65,6 +117,12 @@ export async function startApi(): Promise<ApiHarness> {
     // back. Production defaults the other way and there is a test for that.
     secureCookies: false,
     appBaseUrl: 'http://app.test/',
+    signInAllowlist: options.signInAllowlist ?? null,
+    sealingKey: options.sealingKey ?? null,
+    githubWebhookSecret: options.githubWebhookSecret ?? null,
+    ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
+    ...(options.providerBases ? { providerBases: options.providerBases } : {}),
+    ...(options.consoleDir ? { consoleBuild: await findConsoleBuild(options.consoleDir) } : {}),
   })
 
   return {

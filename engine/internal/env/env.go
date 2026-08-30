@@ -29,8 +29,10 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/build"
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	dblabdb "github.com/antifailure/antifailure/engine/internal/db/dblab"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
+	supabasedb "github.com/antifailure/antifailure/engine/internal/db/supabase"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
@@ -39,9 +41,11 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/redact"
+	"github.com/antifailure/antifailure/engine/internal/runtime/k8s"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/state"
+	"github.com/antifailure/antifailure/engine/internal/telemetry"
 	"github.com/antifailure/antifailure/engine/internal/webhook"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -82,6 +86,9 @@ type Options struct {
 	// default chain: this process's environment, then a .env beside the
 	// manifest, then the encrypted local store.
 	Secrets *secrets.Chain
+	// Version is the engine version, reported as a trace attribute so that a
+	// span can be attributed to the build that produced it.
+	Version string
 	// Extensions is consulted before an environment is created. Nil uses the
 	// process-wide registry, which in the community build is empty, so the
 	// check costs one function call that returns nil.
@@ -216,6 +223,10 @@ type Result struct {
 	Proxied bool
 	// Rules is how many egress rules the sidecar is enforcing.
 	Rules int
+	// Personas counts the accounts provisioned, so a caller can say that the
+	// environment has somebody to sign in as rather than leaving it to be
+	// discovered when a sign in fails.
+	Personas int
 }
 
 // session holds everything Up opens and must close.
@@ -223,9 +234,10 @@ type session struct {
 	lock    *lock.Lock
 	db      *state.DB
 	bus     *events.Bus
+	tel     *telemetry.Telemetry
 	journal *journal.Journal
 	dbProv  provider.Database
-	runtime *local.Runtime
+	runtime provider.Runtime
 	builder *build.DockerBuilder
 }
 
@@ -242,7 +254,13 @@ func (s *session) close() {
 	if s.dbProv != nil {
 		_ = s.dbProv.Close()
 	}
-	if s.bus != nil {
+	// The telemetry owns the bus: closing it drains every sink queue, closes
+	// each sink, and settles the durable event sequence, in that order. Closing
+	// the bus directly would skip the last two and lose whatever the control
+	// plane sink was still holding.
+	if s.tel != nil {
+		_ = s.tel.Close(context.Background())
+	} else if s.bus != nil {
 		_ = s.bus.Close()
 	}
 	if s.db != nil {
@@ -274,10 +292,33 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 		s.close()
 		return nil, err
 	}
-	// Continued from where the last command left it, so that Seq means what
-	// it says: monotonic per environment, and a gap in it is a gap.
-	s.bus = events.NewBus(o.opts.Clock, events.ResumeSequence(o.envID,
-		events.LastSequence(filepath.Join(o.opts.Root, StateDir, "events"), o.envID)))
+	s.bus = events.NewBus(o.opts.Clock)
+
+	// The bus is attached to its consumers here, and this is the only place it
+	// happens. Until this line existed, nothing in the engine had ever called
+	// AddSink: forty event types were declared, two were emitted, and every one
+	// of them went into a bus with no sinks on it. The local NDJSON log was
+	// never written and no engine event had ever reached a control plane.
+	//
+	// A failure to attach is reported and survived. An environment must not
+	// fail to come up because a log directory is read only.
+	tel, terr := telemetry.Attach(ctx, s.bus, telemetry.Options{
+		StateDir: stateDir,
+		EnvID:    o.envID,
+		Redactor: o.opts.Redactor,
+		Clock:    o.opts.Clock,
+		State:    s.db,
+		Getenv:   o.opts.Getenv,
+		Version:  o.opts.Version,
+		OnWarning: func(msg string) {
+			o.progress(msg)
+		},
+	})
+	if terr != nil {
+		o.progress(fmt.Sprintf("this run is not being recorded: %v", terr))
+	}
+	s.tel = tel
+
 	// Before the journal, so that a sink attached by the caller sees the very
 	// first resource intent rather than joining part way through a run.
 	for _, sink := range o.sinks {
@@ -320,7 +361,12 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	return secrets.NewChain(
+	registry := o.opts.Extensions
+	if registry == nil {
+		registry = extension.Default
+	}
+
+	local := []secrets.Source{
 		&secrets.EnvSource{
 			Label: "this shell's environment",
 			Getenv: func(name string) (string, bool) {
@@ -333,11 +379,16 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 			filepath.Join(o.opts.Root, ".antifailure", "secrets.enc"),
 			secrets.StorePassphrase(getenv),
 		),
-		// Last, and only where the platform has one. A keyring entry is the
-		// long lived default on a workstation; everything above it is a way to
-		// override that for one run.
+		// Last of the local sources, and only where the platform has one. A
+		// keyring entry is the long lived default on a workstation; everything
+		// above it is a way to override that for one run.
 		secrets.NewKeyringSource(secrets.NewSystemKeyring(), secrets.DefaultKeyringService),
-	)
+	}
+	// Anything an enterprise build registered comes after every local source,
+	// for the same reason the keyring comes after .env: a company secret
+	// manager is the default the local ones exist to override. With nothing
+	// registered this appends nothing and the chain is unchanged.
+	return secrets.NewChain(append(local, secrets.Registered(registry)...)...)
 }
 
 // resolveSecrets looks up everything the manifest declares.
@@ -369,6 +420,17 @@ func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, e
 			// to that provider, which is the opposite of what sandbox mode is
 			// for and charges real cards.
 			return nil, aferrors.Coded(aferrors.AFSEC003, "name", live.Name)
+		}
+		var rejected *extension.CredentialRejectedError
+		if errors.As(err, &rejected) {
+			// A store that refused the credential, after the one refresh it is
+			// allowed. Its own code, because the next step differs: an
+			// unreachable store is worth retrying and a refused credential is a
+			// configuration problem that will refuse again for ever. Telling
+			// somebody to try again would be telling them to wait for something
+			// that is not going to change.
+			return nil, aferrors.Coded(aferrors.AFSEC002,
+				"source", rejected.Source, "detail", rejected.Detail)
 		}
 		return nil, err
 	}
@@ -574,23 +636,97 @@ func needsInspection(e *schema.Egress) bool {
 // difference nobody would notice until they went looking for their environment
 // in a cluster.
 //
-// Only the local runtime ships today, so this returns a concrete type rather
-// than an interface. An interface with one implementation is scaffolding that
-// has to be maintained before anything needs it; the day a second runtime
-// exists is the day to introduce one, and this function is where it goes.
-func (o *Orchestrator) newRuntime() (*local.Runtime, error) {
+// Every path that needs a runtime comes through here, and that is load
+// bearing rather than tidy. For a long time this was the only runtime aware
+// constructor in the engine and eight other places built the local one
+// directly, so the day a second runtime existed, af up would have placed an
+// environment in a cluster while af status, af logs, af net log, af inbox and
+// af webhook trigger all asked this machine's Docker daemon about it and
+// found nothing. They agreed only because this function refused everything
+// except local.
+func (o *Orchestrator) newRuntime() (provider.Runtime, error) {
 	kind := schema.RuntimeLocal
-	if m := o.opts.Manifest; m != nil && m.Runtime != nil && m.Runtime.Provider != "" {
-		kind = m.Runtime.Provider
+	var cfg *schema.Runtime
+	if m := o.opts.Manifest; m != nil && m.Runtime != nil {
+		cfg = m.Runtime
+		if cfg.Provider != "" {
+			kind = cfg.Provider
+		}
 	}
-	if kind != schema.RuntimeLocal {
+	switch kind {
+	case schema.RuntimeLocal:
+		return local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	case schema.RuntimeKubernetes:
+		return o.newKubernetesRuntime(cfg)
+	default:
 		return nil, aferrors.Coded(aferrors.AFMAN002,
 			"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
 			"detail", fmt.Sprintf(
-				"runtime.provider is %q, and this build has only the local runtime. "+
-					"Remove the field or set it to local", kind))
+				"runtime.provider is %q, and this build has the local and kubernetes "+
+					"runtimes. Remove the field or set it to one of those", kind))
 	}
-	return local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+}
+
+// Runtime builds the runtime this manifest asks for.
+//
+// Exported for the commands that inventory a machine rather than act on one
+// environment, which need the same selection and are not part of a lifecycle.
+func (o *Orchestrator) Runtime() (provider.Runtime, error) { return o.newRuntime() }
+
+// newKubernetesRuntime builds the cluster runtime, including finding it a
+// sidecar image.
+//
+// The sidecar is compiled from source carried in this binary, so something has
+// to build it, and the only thing that can is a container daemon on this
+// machine. A cluster cannot see that daemon, so the image is built here and
+// either copied into a development cluster or, for a real one, named by
+// AF_PROXY_IMAGE and pulled from wherever it was published. Those are the only
+// two honest answers, and an environment with no sidecar is not a third: it
+// would have no egress policy at all.
+func (o *Orchestrator) newKubernetesRuntime(cfg *schema.Runtime) (provider.Runtime, error) {
+	opts := k8s.Options{
+		Clock:    o.opts.Clock,
+		Redactor: o.opts.Redactor,
+		// Resolved when something needs it, which is only ever bringing an
+		// environment up. Building it here instead made af status, af logs
+		// and af down each compile the sidecar before answering, which on a
+		// cold cache is a quarter of an hour to be told what is running.
+		ResolveProxyImage: o.resolveProxyImage,
+	}
+	if cfg != nil {
+		opts.Context = cfg.KubeconfigContext
+		opts.NamespacePrefix = cfg.NamespacePrefix
+		opts.Domain = cfg.Domain
+	}
+	return k8s.New(opts)
+}
+
+// resolveProxyImage produces the sidecar image the cluster needs.
+//
+// The sidecar is compiled from source carried in this binary, so something has
+// to build it, and the only thing that can is a container daemon on this
+// machine. A cluster cannot see that daemon, so the image is built here and
+// either copied into a development cluster or, for a real one, named by
+// AF_PROXY_IMAGE and pulled from wherever it was published. Those are the only
+// two honest answers, and an environment with no sidecar is not a third: it
+// would have no egress policy at all.
+func (o *Orchestrator) resolveProxyImage(ctx context.Context) (string, error) {
+	getenv := o.opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if image := getenv("AF_PROXY_IMAGE"); image != "" {
+		return image, nil
+	}
+	builder, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	if err != nil {
+		return "", aferrors.Coded(aferrors.AFRUN044, "detail",
+			"the egress sidecar image is built on a local container daemon and none "+
+				"is reachable. Either start one, or publish the sidecar image and "+
+				"name it in AF_PROXY_IMAGE")
+	}
+	defer func() { _ = builder.Close() }()
+	return builder.EnsureProxyImage(ctx, o.progress)
 }
 
 // newDatabaseProvider builds the provider the manifest asked for.
@@ -607,11 +743,30 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 		kind = m.Database.Provider
 	}
 
+	// Every case here assigns, checks, and returns an explicit nil.
+	//
+	// `return dockerdb.New(...)` reads better and is a crash. The constructors
+	// return a concrete *Provider, and a nil *Provider assigned to a
+	// provider.Database interface produces an interface that is NOT nil. The
+	// caller does `if s.dbProv, err = o.newDatabaseProvider(ctx); err != nil {
+	// s.close() }`, close() guards with `if s.dbProv != nil`, that guard is
+	// true, and Close runs on a nil receiver.
+	//
+	// The result was a segmentation fault from `af down` whenever the Docker
+	// daemon was unreachable, which is the single most common failure this
+	// product will ever meet: a user who has not started Docker Desktop got a
+	// stack trace rather than a remediation. It survived because every test
+	// either has a working daemon or skips. A chaos test that points
+	// DOCKER_HOST at a socket that is not there found it.
 	switch kind {
 	case schema.DBDocker:
-		return dockerdb.New(dockerdb.Options{
+		p, err := dockerdb.New(dockerdb.Options{
 			Version: databaseVersion(m), Clock: o.opts.Clock,
 		})
+		if err != nil {
+			return nil, err
+		}
+		return p, nil
 
 	case schema.DBNeon:
 		db := m.Database
@@ -634,9 +789,75 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 				"names", name,
 				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
 		}
-		return neondb.New(neondb.Options{
+		p, err := neondb.New(neondb.Options{
 			APIKey:      key,
 			ProjectID:   db.Project,
+			Clock:       o.opts.Clock,
+			MaxBranches: db.MaxBranches,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return p, nil
+
+	case schema.DBSupabase:
+		db := m.Database
+		if db.Project == "" {
+			return nil, aferrors.Coded(aferrors.AFMAN002,
+				"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+				"detail", "database.provider is supabase and database.project is empty; "+
+					"the provider needs the Supabase project reference to create branches in")
+		}
+		name := db.APIKeyEnv
+		if name == "" {
+			name = "SUPABASE_ACCESS_TOKEN"
+		}
+		token, _, found, err := o.secretChain().Lookup(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || token.IsZero() {
+			return nil, aferrors.Coded(aferrors.AFSEC001,
+				"names", name,
+				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
+		}
+		return supabasedb.New(supabasedb.Options{
+			Token:       token,
+			ProjectRef:  db.Project,
+			Clock:       o.opts.Clock,
+			Version:     databaseVersion(m),
+			MaxBranches: db.MaxBranches,
+		})
+
+	case schema.DBDBLab:
+		db := m.Database
+		if db.Project == "" {
+			return nil, aferrors.Coded(aferrors.AFMAN002,
+				"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+				"detail", "database.provider is dblab and database.project is empty; "+
+					"the provider needs the Database Lab Engine's API root, such as "+
+					"http://127.0.0.1:2345, because the engine is self hosted and there "+
+					"is no account to discover it from")
+		}
+		name := db.APIKeyEnv
+		if name == "" {
+			name = "DBLAB_VERIFICATION_TOKEN"
+		}
+		token, _, found, err := o.secretChain().Lookup(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || token.IsZero() {
+			// Refused rather than defaulted to an empty token. The engine will
+			// run without one, and an engine with no verification token is one
+			// anybody who can reach the port can clone production data from.
+			return nil, aferrors.Coded(aferrors.AFSEC001,
+				"names", name,
+				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
+		}
+		return dblabdb.New(dblabdb.Options{
+			Endpoint:    db.Project,
+			Token:       token,
 			Clock:       o.opts.Clock,
 			MaxBranches: db.MaxBranches,
 		})
@@ -744,9 +965,26 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		return nil, err
 	}
 	defer s.close()
+	ctx = s.tel.StartCommand(ctx, "af up")
 
-	res := &Result{EnvID: o.envID}
+	result = &Result{EnvID: o.envID}
 
+	// The lifecycle events. Everything downstream of the engine is built on
+	// these three: the control plane's environment row advances on them, the
+	// dashboard shows what it shows because of them, and the local NDJSON log
+	// is how `af support bundle` explains a run afterwards. Until this lane
+	// they were declared and never emitted, so all three consumers were views
+	// over an empty stream.
+	//
+	// ONE lifecycle handler, not two. Both sides of this merge added their own
+	// and git kept both, because they do not overlap textually: every `af up`
+	// would have emitted environment.creating twice and environment.ready or
+	// environment.failed twice, the control plane storing each pair as two
+	// events with different identifiers and the dashboard drawing both.
+	//
+	// Emitted through the bus rather than written anywhere directly, because
+	// the bus is where redaction happens and a second path is a second thing to
+	// remember to redact.
 	o.event(s, events.EnvCreating, "creating "+o.envID, events.F("branch", o.opts.Branch))
 	// Registered after s.close, so it runs before it: defers unwind last in
 	// first out and the bus has to still be open for the last event to reach a
@@ -754,18 +992,22 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// the function, including the ones added after this was written.
 	defer func() {
 		if rerr != nil {
-			o.eventErr(s, events.EnvFailed, rerr.Error())
+			// The error code travels with the event so that the control plane
+			// and the pull request comment can say why without parsing a
+			// sentence written for a terminal.
+			o.eventErr(s, events.EnvFailed, rerr.Error(),
+				events.F("code", string(codeOf(rerr))))
 			return
 		}
 		o.event(s, events.EnvReady, o.envID+" is ready",
-			events.F("url", result.URL), events.F("proxied", result.Proxied))
+			readyFields(result, "local", o.opts.Clock.Since(started).Seconds())...)
 	}()
 
 	// Before anything is created, so that a refusal costs nothing. Checking
 	// after the database branch exists would leave a branch behind every time a
 	// policy refused, which is how a policy control becomes a resource leak.
 	if err := o.checkPolicy(ctx); err != nil {
-		return res, err
+		return result, err
 	}
 	defer func() {
 		// Reported whether the environment came up or not, because a failed
@@ -785,23 +1027,46 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// than the configuration.
 	resolved, err := o.resolveSecrets(ctx)
 	if err != nil {
-		return res, err
+		return result, err
 	}
 
 	golden, branch, dbURL, migrateURL, err := o.database(ctx, s)
 	if err != nil {
-		return res, err
+		return result, err
 	}
-	res.Golden = golden
+	result.Golden = golden
 
 	specs, built, cached, err := o.buildServices(ctx, s)
 	if err != nil {
-		return res, err
+		return result, err
 	}
-	res.Built, res.Cached = built, cached
+	result.Built, result.Cached = built, cached
 
+	// The runtime names itself rather than being named "local" here.
+	//
+	// The journal's provider field is not a label: Replay looks a deleter up
+	// by it, so a record filed under the wrong runtime is a resource the
+	// compensation path either hands to something that cannot delete it or
+	// skips entirely. It was a true constant for as long as there was one
+	// runtime, and it became a stored lie the moment there were two.
+	runtimeName := s.runtime.Name()
+
+	// The runtime records every resource here before it creates it.
+	//
+	// There is deliberately no matching commit, because the contract has no
+	// place for one: the callback fires before the create and the runtime never
+	// calls back afterwards. That leaves each record in the intent state, which
+	// the journal treats as "this may or may not exist at the provider", and
+	// which is exactly right for a name the runtime is about to use. The
+	// compensating delete addresses it by that name, so a crash between this
+	// line and the create compensates identically to a crash after it.
+	//
+	// A post-create hook would let the record carry the provider's own
+	// identifier, which is worth having for a runtime whose names are not
+	// addressable. That is a change to provider.EnvSpec and belongs with
+	// whoever owns the runtime contract rather than here.
 	recordIntent := func(kind, id string) error {
-		_, jerr := s.journal.Intent(ctx, o.envID, "local", journal.Kind(kind), id, nil)
+		_, jerr := s.journal.Intent(ctx, o.envID, runtimeName, journal.Kind(kind), id, nil)
 		return jerr
 	}
 
@@ -811,20 +1076,52 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// database by its alias on this network. Attaching after the services
 	// started would hand every one of them an address that did not resolve
 	// when it read it, which is what the first run of this actually did.
-	networkID, err := s.runtime.EnsureNetworks(ctx, o.envID, recordIntent)
-	if err != nil {
-		return res, err
-	}
 	// Only a provider whose branches are local containers has anything to
 	// attach. A cloud provider's connection string already works from inside a
 	// container, so the URL handed to the services is the one it gave us. The
 	// interface says as much; this is where that becomes true rather than a
 	// comment.
 	insideURL, insideMigrateURL := dbURL, migrateURL
-	if attachable, ok := s.dbProv.(local.Attachable); ok {
-		insideURL, err = s.runtime.AttachDatabase(ctx, attachable, branch.ProviderRef, networkID, dbURL)
+	attachable, isLocalBranch := s.dbProv.(local.Attachable)
+	switch {
+	case !isLocalBranch:
+		// Nothing to do. The provider handed over an address that already
+		// works from wherever the services are going to run.
+	case !s.runtime.Capabilities().AttachesLocalDatabase:
+		// A database that is a container on this machine and a runtime that
+		// is not on this machine. Every service would come up holding a
+		// connection string pointing at an address inside a daemon its
+		// cluster cannot route to, and the failure would arrive later as an
+		// application that cannot reach its database, which sends people
+		// looking at their own code.
+		return result, aferrors.Coded(aferrors.AFRUN044, "detail", fmt.Sprintf(
+			"the database provider makes branches as containers on this machine and the "+
+				"%s runtime cannot reach them. Use a database provider the environment "+
+				"can already reach", s.runtime.Name()))
+	default:
+		networked, ok := s.runtime.(interface {
+			EnsureNetworks(context.Context, string, func(string, string) error) (string, error)
+			AttachDatabase(context.Context, local.Attachable, string, string, secrets.Value) (secrets.Value, error)
+		})
+		if !ok {
+			return result, aferrors.Coded(aferrors.AFRUN044, "detail", fmt.Sprintf(
+				"the %s runtime declares that it attaches a local database and does not "+
+					"implement it", s.runtime.Name()))
+		}
+		// The network comes before the database, and the database before the
+		// services, and the order is not arbitrary. A service reads
+		// DATABASE_URL out of its environment at creation time, and that
+		// string names the database by its alias on this network. Attaching
+		// after the services started would hand every one of them an address
+		// that did not resolve when it read it, which is what the first run of
+		// this actually did.
+		networkID, err := networked.EnsureNetworks(ctx, o.envID, recordIntent)
 		if err != nil {
-			return res, err
+			return result, err
+		}
+		insideURL, err = networked.AttachDatabase(ctx, attachable, branch.ProviderRef, networkID, dbURL)
+		if err != nil {
+			return result, err
 		}
 		insideMigrateURL = insideURL
 	}
@@ -880,7 +1177,7 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 
 	packs, err := o.mockPacks()
 	if err != nil {
-		return res, err
+		return result, err
 	}
 	spec.MockPacks = packs
 
@@ -903,7 +1200,7 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	if needsInspection(o.opts.Manifest.Egress) {
 		ca, caErr := envcert.Generate(o.envID, o.opts.Clock.Now())
 		if caErr != nil {
-			return res, caErr
+			return result, caErr
 		}
 		spec.CACertPEM, spec.CAKeyPEM = ca.CertPEM, ca.KeyPEM
 		o.opts.Redactor.Register(ca.KeyPEM.Reveal())
@@ -917,7 +1214,7 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	}
 
 	env, err := s.runtime.Up(ctx, spec)
-	res.Services = env.Services
+	result.Services = env.Services
 	// Emitted before the error is returned, not after. A run that failed with
 	// three of five services up is exactly when somebody needs to see which
 	// three, and returning first would leave the dashboard showing all five
@@ -936,13 +1233,89 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 				"url", svc.URL, "state", svc.State, "detail", svc.Detail)...)
 	}
 	if err != nil {
-		return res, err
+		return result, err
 	}
 
-	res.URL = env.URL()
-	res.Proxied = env.ProxyReady
-	res.Duration = o.opts.Clock.Since(started)
-	return res, nil
+	// After the services, because the migrations run as part of bringing them
+	// up and a persona is a row in a table those migrations create. Before
+	// this, running af up and then opening the application by hand gave you an
+	// environment with no accounts in it, and the sign in page had nothing to
+	// accept. Provisioning is idempotent, so af test reconciling the same
+	// personas afterwards is a no-op rather than a second set.
+	//
+	// A failure here does not fail af up. The environment is running and can
+	// be browsed; what is missing is the accounts, and that is worth saying
+	// loudly rather than tearing down everything that did work. af test, where
+	// a missing persona genuinely blocks the agents, still treats it as fatal.
+	if provisioned, perr := o.provisionPersonas(ctx, s); perr != nil {
+		o.progress("the personas could not be created, so signing in will not work: " +
+			o.opts.Redactor.String(perr.Error()))
+	} else if provisioned != nil {
+		result.Personas = len(provisioned.Accounts)
+	}
+
+	result.URL = env.URL()
+	result.Proxied = env.ProxyReady
+	result.Duration = o.opts.Clock.Since(started)
+	return result, nil
+}
+
+// codeOf reports the engine error code carried by err, or the empty string.
+//
+// The code travels on the failure event so that a consumer can react to
+// AF-DB-001 rather than to a sentence written for a terminal, which is the
+// difference between a dashboard that can group failures and one that shows a
+// list of English.
+// readyFields is the payload of the environment.ready event.
+//
+// A function rather than a literal inside Up so that the one decision it makes
+// can be tested without a Docker daemon. What it decides is whether to send
+// preview_url at all.
+//
+// Omitted rather than sent empty. Result.URL is documented as empty when the
+// manifest declares no web service, and a consumer reading preview_url cannot
+// tell an empty string from a field somebody forgot to set: one means "there
+// is nothing to open" and the other means "this is broken", and they want
+// opposite responses. An absent key says the first and cannot be rendered as a
+// link by accident.
+//
+// This will matter more than it does today. Lane 4 reports that a Kubernetes
+// environment with no runtime.domain configured has no reachable address for
+// any service, so empty becomes the ordinary case there rather than the
+// unusual one. The runtime name is a parameter for the same reason: there is
+// one runtime on this branch and there is about to be more than one.
+func readyFields(res *Result, runtime string, seconds float64) []events.Field {
+	fields := []events.Field{
+		events.F("golden_version", res.Golden),
+		events.F("runtime", runtime),
+		events.F("seconds", seconds),
+		events.F("proxied", res.Proxied),
+	}
+	// Two keys for one value, deliberately, because two consumers already
+	// disagree about the name and both are shipped. The dashboard reads `url`
+	// (internal/hud/model.go, and its committed golden frames assert it). The
+	// control plane reads `preview_url` and writes it to the environments row
+	// (web/apps/api/src/ingest.ts). Emitting one of them silently empties the
+	// other: the dashboard would draw no address, or the column the web
+	// application serves would stay null forever.
+	//
+	// They should converge on one name. That is a change to a stored column and
+	// a rendered frame at once, so it belongs to whoever owns both rather than
+	// to a merge, and this carries the cost of the disagreement in the meantime.
+	if res.URL != "" {
+		fields = append(fields,
+			events.F("url", res.URL),
+			events.F("preview_url", res.URL))
+	}
+	return fields
+}
+
+func codeOf(err error) aferrors.Code {
+	var e *aferrors.Error
+	if aferrors.As(err, &e) {
+		return e.Code()
+	}
+	return ""
 }
 
 // nonEmpty builds fields from key and value pairs, leaving out the values that
@@ -1028,8 +1401,39 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	// volume in it, which is the one thing a preview is for.
 	if version == "" && o.opts.Manifest.Database != nil && o.opts.Manifest.Database.SourceURLEnv != "" {
 		return "", zero, secrets.Value{}, secrets.Value{},
-			aferrors.Coded(aferrors.AFDB008, "count", fmt.Sprint(refused))
+			aferrors.Coded(aferrors.AFDB012, "count", fmt.Sprint(refused))
 	}
+
+	// A cron expression on a laptop has nothing to fire it, so the next
+	// command that would use a golden asks whether one was due since the last
+	// refresh. That is what makes database.golden.schedule and max_age
+	// settings rather than documentation: without this they parse, validate,
+	// take defaults, print under `af explain`, and change nothing.
+	//
+	// A refresh here reads production, which is slow and which the person
+	// running `af up` did not explicitly ask for, so the reason is printed
+	// before it starts rather than after.
+	if version != "" {
+		why, dueErr := o.RefreshDue(ctx, s, goldens)
+		if dueErr != nil {
+			return "", zero, secrets.Value{}, secrets.Value{}, dueErr
+		}
+		if why != "" {
+			o.progress("refreshing the golden first: " + why)
+			res, refreshErr := o.refreshWithin(ctx, s)
+			switch {
+			case refreshErr != nil:
+				// Not fatal. An environment branched from yesterday's golden
+				// is worth more than no environment at all, and the reason it
+				// could not be refreshed is said rather than swallowed.
+				o.progress("the refresh did not finish, so this environment " +
+					"branches the golden that is already there: " + refreshErr.Error())
+			case res.Version != "":
+				version = res.Version
+			}
+		}
+	}
+
 	if version == "" {
 		o.progress("no golden yet, creating one")
 		o.event(s, events.GoldenRefreshing, "no golden yet, creating one",
@@ -1072,11 +1476,26 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	o.event(s, events.DBBranching, "branching from "+version,
 		events.F("phase", "branching"), events.F("version", version))
 
-	if _, err := s.journal.Intent(ctx, o.envID, "docker", journal.Kind("database"), o.envID, nil); err != nil {
+	// Recorded against the provider that is about to create it, not against
+	// "docker". The provider name is the first half of the key the compensating
+	// deleter is looked up by, so a record naming a provider that did not make
+	// the branch is a record nothing can ever delete. It said "docker"
+	// unconditionally, which was invisible while nothing replayed the journal
+	// and would have been a leak per environment on Neon the moment something
+	// did.
+	rec, err := s.journal.Intent(
+		ctx, o.envID, s.dbProv.Name(), journal.KindDatabaseBranch, o.envID, nil)
+	if err != nil {
 		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
 	branch, err := s.dbProv.Branch(ctx, version, o.envID)
 	if err != nil {
+		return "", zero, secrets.Value{}, secrets.Value{}, err
+	}
+	// The provider's own reference for the branch, which for a hosted provider
+	// is not derivable from the environment identifier. Without it a
+	// compensating delete has nothing to address.
+	if err := s.journal.Commit(ctx, rec.ID, branch.ProviderRef); err != nil {
 		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
 	direct, err := s.dbProv.ConnString(ctx, branch, provider.ConnDirect)
@@ -1405,6 +1824,7 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 		return nil, err
 	}
 	defer s.close()
+	ctx = s.tel.StartCommand(ctx, "af down")
 
 	td := &Teardown{EnvID: o.envID}
 	o.event(s, events.EnvDestroying, "removing "+o.envID)
@@ -1432,6 +1852,25 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 		o.progress("removed the database branch")
 	}
 
+	// Last, and only after the sweep, because the two find different things.
+	//
+	// The sweep asks the daemon what carries this environment's labels, which
+	// covers everything running and nothing else. The journal knows what was
+	// recorded, which covers a resource created in the instant before a crash,
+	// a resource at a provider with no daemon to sweep, and every kind no sweep
+	// looks for. Running both and merging what each leaves behind is the only
+	// combination in which neither gap is silent.
+	//
+	// Until this call existed the journal was written and never read: Replay,
+	// NewRegistry and Commit each had zero callers in the engine, so the
+	// compensating half of "everything that is created has a recorded,
+	// compensating deletion" had never run.
+	o.reconcile(ctx, s, td)
+
+	// Ordering, and it is load bearing rather than stylistic: the replay above
+	// can append to td.Pending, and the event below reports len(td.Pending).
+	// Emitting first would publish a count taken before the last thing that can
+	// change it.
 	// Emitted before observe and before the return, so it is still inside the
 	// session and the bus is still open. A teardown that left resources behind
 	// still says destroyed, with the count, because the environment is gone as
@@ -1469,7 +1908,7 @@ func (o *Orchestrator) observe(ctx context.Context, event extension.LifecycleEve
 
 // Status reports what is currently running.
 func (o *Orchestrator) Status(ctx context.Context) (*Result, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	rt, err := o.newRuntime()
 	if err != nil {
 		return nil, err
 	}
@@ -1526,11 +1965,11 @@ func (o *Orchestrator) orderByManifest(running []provider.RunningService) {
 
 // Decisions returns what the environment's egress proxy has decided.
 func (o *Orchestrator) Decisions(ctx context.Context, limit int) ([]local.Decision, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	rt, err := o.sidecarRuntime()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rt.Close() }()
+	defer rt.close()
 	// No lock, for the same reason Status takes none: the moment somebody most
 	// wants to know what the environment reached is while it is doing it.
 	return rt.Decisions(ctx, o.envID, limit)
@@ -1538,11 +1977,11 @@ func (o *Orchestrator) Decisions(ctx context.Context, limit int) ([]local.Decisi
 
 // Messages returns what the environment captured instead of sending.
 func (o *Orchestrator) Messages(ctx context.Context, limit int) ([]local.Message, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	rt, err := o.sidecarRuntime()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rt.Close() }()
+	defer rt.close()
 	return rt.Messages(ctx, o.envID, limit)
 }
 
@@ -1550,11 +1989,11 @@ func (o *Orchestrator) Messages(ctx context.Context, limit int) ([]local.Message
 func (o *Orchestrator) WaitForMessage(
 	ctx context.Context, to, subject string, timeout time.Duration,
 ) (local.Message, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	rt, err := o.sidecarRuntime()
 	if err != nil {
 		return local.Message{}, err
 	}
-	defer func() { _ = rt.Close() }()
+	defer rt.close()
 
 	return rt.WaitForMessage(ctx, o.envID, func(m local.Message) bool {
 		if to != "" {
@@ -1580,22 +2019,72 @@ func (o *Orchestrator) WaitForMessage(
 func (o *Orchestrator) DeliverWebhook(
 	ctx context.Context, service, path string, body []byte, headers map[string]string,
 ) (local.Delivery, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	rt, err := o.sidecarRuntime()
 	if err != nil {
 		return local.Delivery{}, err
 	}
-	defer func() { _ = rt.Close() }()
+	defer rt.close()
 	return rt.Deliver(ctx, o.envID, service, path, body, headers)
 }
 
 // Logs returns recent output from the environment's services.
-func (o *Orchestrator) Logs(ctx context.Context, service string, tail int) ([]local.LogLine, error) {
-	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+func (o *Orchestrator) Logs(ctx context.Context, service string, tail int) ([]provider.LogLine, error) {
+	rt, err := o.newRuntime()
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rt.Close() }()
-	return rt.Logs(ctx, o.envID, service, tail)
+
+	reader, ok := rt.(provider.LogReader)
+	if !ok {
+		return nil, aferrors.Coded(aferrors.AFRUN044, "detail", fmt.Sprintf(
+			"the %s runtime cannot read logs", rt.Name()))
+	}
+	return reader.Logs(ctx, o.envID, service, tail)
+}
+
+// sidecarObserver is a runtime whose egress sidecar can be questioned.
+//
+// Optional rather than part of provider.Runtime, because these four are the
+// engine asking the sidecar what it saw and what it captured, and how you
+// reach a sidecar is the thing that differs most between a container on this
+// machine and a pod in a cluster. A runtime that cannot answer says so by not
+// implementing it, and the command that wanted an answer names the runtime
+// that could not give one. That is the whole point of the interface: the
+// alternative, which is what this code did before, was to build a local
+// runtime regardless and quietly report on the wrong machine's containers.
+type sidecarObserver interface {
+	Decisions(ctx context.Context, envID string, limit int) ([]local.Decision, error)
+	Messages(ctx context.Context, envID string, limit int) ([]local.Message, error)
+	WaitForMessage(ctx context.Context, envID string, match func(local.Message) bool,
+		timeout time.Duration) (local.Message, error)
+	Deliver(ctx context.Context, envID, service, path string, body []byte,
+		headers map[string]string) (local.Delivery, error)
+}
+
+// observingRuntime is a sidecarObserver with the runtime it came from, so the
+// caller can close it.
+type observingRuntime struct {
+	sidecarObserver
+	close func()
+}
+
+// sidecarRuntime builds the selected runtime and requires that it can answer
+// questions about its sidecar.
+func (o *Orchestrator) sidecarRuntime() (observingRuntime, error) {
+	rt, err := o.newRuntime()
+	if err != nil {
+		return observingRuntime{}, err
+	}
+	observer, ok := rt.(sidecarObserver)
+	if !ok {
+		_ = rt.Close()
+		return observingRuntime{}, aferrors.Coded(aferrors.AFRUN044, "detail", fmt.Sprintf(
+			"the %s runtime cannot report what its egress sidecar decided or captured, "+
+				"so af net log, af inbox and af webhook trigger have nothing to read",
+			rt.Name()))
+	}
+	return observingRuntime{sidecarObserver: observer, close: func() { _ = rt.Close() }}, nil
 }
 
 // serviceDir resolves a file inside a service's directory, as the build
@@ -1656,7 +2145,7 @@ func (o *Orchestrator) runSeed(
 		o.progress("  " + o.opts.Redactor.String(line))
 	}
 	if err != nil {
-		return aferrors.Coded(aferrors.AFDB009,
+		return aferrors.Coded(aferrors.AFDB013,
 			"command", seed, "detail", o.opts.Redactor.String(strings.TrimSpace(lastLine(string(out)))))
 	}
 	return nil

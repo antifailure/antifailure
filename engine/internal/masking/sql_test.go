@@ -2,7 +2,7 @@ package masking_test
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -74,6 +74,47 @@ INSERT INTO events (occurred_at, kind, actor_email) VALUES
   ('2026-02-15', 'signed-in', 'grace@hopper-systems.io');
 `
 
+// uniqueRulesHash returns eight hex characters, because that is how many of it
+// survive into a golden version id.
+func uniqueRulesHash() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Cannot happen on any platform this runs on, and a fallback that
+		// returned a constant would reintroduce the collision it exists to
+		// avoid, so it is loud instead.
+		panic("masking test: no randomness available: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// The bug this file had, encoded so it cannot come back.
+//
+// Needs no Docker and no database, which is the point: the failure it describes
+// only ever appeared on a machine fast enough to publish two goldens inside one
+// second, so a test that needs the slow path to reproduce it is a test that
+// passes everywhere except where the bug is.
+func TestGoldenIDsFromThisHelperDoNotCollideWithinASecond(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 29, 1, 22, 58, 0, time.UTC)
+
+	// What it used to do. A constant rules hash truncates to its first eight
+	// characters, so every golden published in the same second got one id.
+	first := provider.NewGoldenVersionID(at, "masking-test")
+	second := provider.NewGoldenVersionID(at, "masking-test")
+	require.Equal(t, first, second,
+		"the collision this test exists for is supposed to be reproducible")
+	require.Equal(t, "gv_20260829012258_masking-", first,
+		"the id in the CI failure, reproduced exactly")
+
+	// What it does now.
+	seen := map[string]bool{}
+	for i := 0; i < 500; i++ {
+		id := provider.NewGoldenVersionID(at, uniqueRulesHash())
+		require.False(t, seen[id], "two goldens in the same second shared an id: %s", id)
+		seen[id] = true
+	}
+}
+
 func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 	t.Helper()
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
@@ -100,8 +141,21 @@ func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 
+	// A UNIQUE rules hash per call, and it has to be unique in its first eight
+	// characters.
+	//
+	// NewGoldenVersionID builds gv_<timestamp to the second>_<hash[:8]>, so a
+	// constant like "masking-test" truncates to "masking-" and every golden this
+	// helper makes inside the same second gets the SAME id. Two tests in this
+	// package that land in one second then share a golden: the first one's
+	// cleanup drops it, and the second fails with "the golden version
+	// gv_..._masking- no longer exists".
+	//
+	// It passed locally and failed in CI for exactly that reason. The local run
+	// takes minutes and the tests fall in different seconds; a CI runner puts
+	// them in the same one.
 	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
-		Version: 17, RulesHash: "masking-test-" + testName(t),
+		Version: 17, RulesHash: uniqueRulesHash(),
 		Mask:   func(context.Context, secrets.Value) error { return nil },
 		Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
 	})
@@ -110,7 +164,20 @@ func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 		_ = p.Close()
 		t.Skipf("skipped: no golden could be made: %v", err)
 	}
-	branch, err := p.Branch(ctx, gv.ID, testName(t))
+	// Unique per call, for the same reason the rules hash above is.
+	//
+	// That comment fixed half of this. The golden id is unique now, and the
+	// BRANCH name was still the constant "maskingtest", which the Docker
+	// provider turns into a container named af-db-maskingtest. A container of
+	// that name still running is reused rather than created, so the schema
+	// below is applied to a branch that already has it and every test in this
+	// file fails with "relation customers already exists".
+	//
+	// It gets left behind whenever a run does not reach its cleanup, which for
+	// a suite that takes ten minutes means any control C and any test timeout.
+	// One interrupted run then breaks every later run until somebody finds the
+	// stray container, and the error names a table rather than the cause.
+	branch, err := p.Branch(ctx, gv.ID, fmt.Sprintf("maskingtest%d", time.Now().UnixNano()%1e9))
 	require.NoError(t, err)
 
 	url, err := p.ConnString(ctx, branch, provider.ConnDirect)
@@ -479,16 +546,6 @@ func TestApply_MasksThroughAPartitionedParent(t *testing.T) {
 	require.Equal(t, 2, addresses,
 		"the address column inside the partitions was not masked, so masking the parent did "+
 			"not reach the rows")
-}
-
-// testName reduces a test's name to something a container name accepts.
-//
-// Hashed rather than truncated, because two subtests can share their first
-// twenty characters and the whole point is that two tests never collide.
-func testName(t *testing.T) string {
-	t.Helper()
-	sum := sha256.Sum256([]byte(t.Name()))
-	return "masking" + hex.EncodeToString(sum[:4])
 }
 
 // freePort asks the kernel for a port nothing is using.

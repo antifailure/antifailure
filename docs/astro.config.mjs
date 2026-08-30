@@ -24,6 +24,8 @@ export default defineConfig({
       components: {
         Header: "./src/components/Header.astro",
         Footer: "./src/components/Footer.astro",
+        Pagination: "./src/components/Pagination.astro",
+        Search: "./src/components/Search.astro",
       },
       social: [
         {
@@ -32,10 +34,6 @@ export default defineConfig({
           href: "https://github.com/antifailure/antifailure",
         },
       ],
-      editLink: {
-        baseUrl:
-          "https://github.com/antifailure/antifailure/edit/main/docs/",
-      },
       lastUpdated: true,
       pagination: true,
       head: [
@@ -53,15 +51,15 @@ export default defineConfig({
       // group the order comes from each page's own `sidebar.order` frontmatter,
       // which is already declared on all 35 pages.
       sidebar: [
-        { label: "Getting started", autogenerate: { directory: "getting-started" } },
-        { label: "Concepts", autogenerate: { directory: "concepts" } },
-        { label: "Guides", autogenerate: { directory: "guides" } },
-        { label: "Providers", autogenerate: { directory: "providers" } },
-        { label: "Reference", autogenerate: { directory: "reference" } },
-        { label: "Security", autogenerate: { directory: "security" } },
-        { label: "Self-hosting", autogenerate: { directory: "self-hosting" } },
-        { label: "Enterprise", autogenerate: { directory: "enterprise" } },
-        { label: "Contributing", autogenerate: { directory: "contributing" } },
+        { label: "Getting started", items: [{ autogenerate: { directory: "getting-started" } }] },
+        { label: "Concepts", items: [{ autogenerate: { directory: "concepts" } }] },
+        { label: "Guides", items: [{ autogenerate: { directory: "guides" } }] },
+        { label: "Providers", items: [{ autogenerate: { directory: "providers" } }] },
+        { label: "Reference", items: [{ autogenerate: { directory: "reference" } }] },
+        { label: "Security", items: [{ autogenerate: { directory: "security" } }] },
+        { label: "Self-hosting", items: [{ autogenerate: { directory: "self-hosting" } }] },
+        { label: "Enterprise", items: [{ autogenerate: { directory: "enterprise" } }] },
+        { label: "Contributing", items: [{ autogenerate: { directory: "contributing" } }] },
       ],
     }),
   ],

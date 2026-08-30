@@ -51,7 +51,7 @@ function MigrationStudio() {
 
 export function MigrationsPage() {
   return (
-    <PageShell>
+    <PageShell inset>
       <PageHero
         eyebrow="Migration Safety Engine"
         title="Catch exclusive locks before they take checkout down."
@@ -137,7 +137,6 @@ rolling rollback is unsafe`}
 
       <PageSection>
         <Split
-          reverse
           visual={
             <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">
               <LockChart state={1} />
@@ -185,7 +184,7 @@ rolling rollback is unsafe`}
         items={[
           { href: "/solutions/migrations", title: "Schema migrations", description: "Why this is the starting wedge." },
           { href: "/product/report", title: "Safety Report", description: "How the lock becomes a GitHub check." },
-          { href: "/docs/migration-safety", title: "Migration docs", description: "The subscriptions demo in full." },
+          { href: "/docs/guides/invariants", title: "Invariants docs", description: "The subscriptions demo in full." },
         ]}
       />
     </PageShell>

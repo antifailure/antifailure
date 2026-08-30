@@ -71,7 +71,7 @@ export const OPEN_SOURCE_PAGE: MarketingContent = {
   related: [
     { href: "/product/architecture", title: "Architecture", description: "What stays in the customer cloud." },
     { href: "/pricing", title: "Pricing", description: "Community, team cloud, and enterprise." },
-    { href: "/docs/open-source", title: "Open-source docs", description: "Planned surface in full." },
+    { href: "/docs/contributing/provider-authoring", title: "Provider authoring", description: "Writing a provider against the open interface." },
   ],
   body: (
     <>

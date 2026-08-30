@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+/*
+ * The same palette and type scale as the marketing site, because a person
+ * signs in from antifailure.dev and should not arrive somewhere that looks
+ * like a different company. What is deliberately NOT shared is the density:
+ * a landing page is read once and a console is read every day, so the type is
+ * smaller, the rows are tighter, and nothing is centred.
+ */
+@theme {
+  --color-ink: #101010;
+  --color-neon: #33bf00;
+
+  /* Text on white. #33bf00 is 1.9:1 on white, so it is a mark and a fill and
+     never a word. This is the green that passes 4.5:1. */
+  --color-pass: #1e7a3a;
+  --color-fail: #b3261e;
+  --color-warn: #8a5a00;
+
+  --color-paper: #f7f7f5;
+  --color-card: #ffffff;
+  --color-rule: rgba(16, 16, 16, 0.1);
+  --color-rule-strong: rgba(16, 16, 16, 0.22);
+  --color-muted: #6b6b64;
+  --color-dim: #8a8a83;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  --leading-dense: 1.125;
+  --tracking-tighter: -0.04em;
+  --tracking-extra-tight: -0.02em;
+  --tracking-snug: -0.01em;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  min-width: 320px;
+}
+
+::selection {
+  background: #39a57d;
+  color: #fff;
+}
+
+/*
+ * A table that is wider than the phone it is on scrolls inside its own box.
+ * Pure CSS shadows at the edges, present only while there is more to see, so
+ * the reader knows the row continues rather than assuming it was truncated.
+ * background-attachment does the work: the covers scroll with the content and
+ * the shadows do not, so each shadow appears exactly when its cover slides
+ * away.
+ */
+.scroll-x {
+  overflow-x: auto;
+  background:
+    linear-gradient(to right, var(--color-card) 30%, rgba(255, 255, 255, 0)) left center,
+    linear-gradient(to left, var(--color-card) 30%, rgba(255, 255, 255, 0)) right center,
+    radial-gradient(farthest-side at 0 50%, rgba(16, 16, 16, 0.14), transparent) left center,
+    radial-gradient(farthest-side at 100% 50%, rgba(16, 16, 16, 0.14), transparent) right center;
+  background-repeat: no-repeat;
+  background-size:
+    32px 100%,
+    32px 100%,
+    12px 100%,
+    12px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+/* Numbers in a table have to line up, and proportional digits do not. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * One focus ring, defined once, used by every interactive element. The
+ * alternative is what usually happens: focus:outline-none on the components
+ * somebody styled and a browser default on the ones they forgot.
+ */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

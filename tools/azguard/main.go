@@ -11,9 +11,10 @@
 // deliberately paranoid: it fails closed, so an error talking to Azure is a
 // refusal rather than an assumption that the target was fine.
 //
-//	azguard check af-cp-scus              # is this group ours?
-//	azguard check --tags af-cp-scus       # ...and does it carry the tag?
+//	azguard check af-cp-centralus         # is this group ours?
+//	azguard check --tags af-cp-centralus  # ...and does it carry the tag?
 //	azguard guard -- terraform apply      # refuse unless every -var group is ours
+//	azguard region centralus              # can this region actually run the database?
 //
 // Exit codes: 0 allowed, 1 refused, 2 the guard could not tell.
 package main
@@ -57,6 +58,8 @@ func main() {
 		os.Exit(cmdCheck(os.Args[2:]))
 	case "guard":
 		os.Exit(cmdGuard(os.Args[2:]))
+	case "region":
+		os.Exit(cmdRegion(os.Args[2:]))
 	case "-h", "--help", "help":
 		usage()
 		os.Exit(0)
@@ -76,8 +79,17 @@ func usage() {
 
   azguard guard [--tags] -- <command> [args...]
       Extract every resource group named in the command (-g, --resource-group,
-      and Terraform's -var resource_group_name=) , check them, and run the
-      command only if every one is ours.
+      Terraform's -var resource_group_name=, and the resourceGroups segment of
+      any ARM resource id, which is how --scope and --ids name one), check
+      them, and run the command only if every one is ours.
+
+  azguard region [--postgres-version V] [--postgres-sku S] <location>...
+      Ask Azure whether a region can actually create this stack's PostgreSQL
+      flexible server. This is a THIRD gate, separate from quota and from Azure
+      Policy, and neither a plan nor a policy can see it: eastus on this
+      subscription returns supportedServerVersions: [] with "Provisioning is
+      restricted in this region", so an apply gets twenty six resources in and
+      then fails on the database.
 
 Exit codes: 0 allowed, 1 refused, 2 could not tell.
 `)
@@ -91,6 +103,23 @@ func nameIsOurs(group string) error {
 	}
 	if owner, ok := knownForeign[strings.ToLower(group)]; ok {
 		return fmt.Errorf("%s belongs to %s, not to Antifailure. ISOLATION.md lists it as a group this project never touches", group, owner)
+	}
+	// AZURE CREATES RESOURCE GROUPS THIS PROJECT DID NOT ASK FOR, and refusing
+	// them with "belongs to another project" would be a confident, wrong answer.
+	//
+	// A Container Apps environment produces a second group called
+	// ME_<environment>_<group>_<location> holding the platform's own
+	// infrastructure. It is created and deleted by Azure, its `managedBy` points
+	// back at the environment, and it inherits the environment's tags, so a
+	// cleanup scoped to project=antifailure DOES reach it even though the name
+	// rule cannot. Deleting the environment deletes it; touching it directly is
+	// how a running environment gets broken.
+	//
+	// This is still a REFUSAL. The message is the whole difference: it says why
+	// the group exists and what to operate on instead.
+	if strings.HasPrefix(group, "ME_") {
+		return fmt.Errorf("%s is created and owned by Azure, not by this project: it holds the infrastructure for a Container Apps environment and its lifecycle belongs to that environment. Delete the environment instead. It inherits the environment's tags, so a cleanup scoped to %s=%s reaches it even though its name cannot start with %s",
+			group, requiredTagKey, requiredTagVal, requiredPrefix)
 	}
 	if !strings.HasPrefix(group, requiredPrefix) {
 		return fmt.Errorf("%s is not prefixed %q. Antifailure creates and operates on resource groups it owns and nothing else; this subscription holds other projects' groups", group, requiredPrefix)
@@ -162,6 +191,12 @@ func cmdGuard(args []string) int {
 	}
 
 	groups := groupsIn(rest)
+	if len(groups) == 0 && subscriptionScoped(rest) {
+		fmt.Fprintf(os.Stderr, "azguard: refusing %q because it is scoped to the whole subscription.\n", strings.Join(rest, " "))
+		fmt.Fprintln(os.Stderr, "  ISOLATION.md: no role is ever assigned at subscription scope, and this")
+		fmt.Fprintln(os.Stderr, "  subscription holds other projects. Scope it to a resource group this project owns.")
+		return 1
+	}
 	if len(groups) == 0 {
 		// Fails closed. A command naming no group might be harmless, and it
 		// might be `az group delete` reading a name from somewhere this guard
@@ -216,9 +251,58 @@ func groupsIn(args []string) []string {
 			add(varGroup(next()))
 		case strings.HasPrefix(a, "-var="):
 			add(varGroup(strings.TrimPrefix(a, "-var=")))
+		default:
+			// An ARM resource id names its group in the path rather than in a
+			// flag, and that is how `az role assignment create --scope` and
+			// every `--ids` command name one. Matched on the value's own shape
+			// rather than on the flag in front of it, because the flags that
+			// carry one are open-ended: --scope, --scopes, --id, --ids, and
+			// whatever the next command group adds.
+			if g, ok := groupInResourceID(a); ok {
+				add(g)
+			}
 		}
 	}
 	return found
+}
+
+// subscriptionScoped reports whether the command line carries an ARM id that
+// stops at the subscription. ISOLATION.md says no role is ever assigned at
+// subscription scope, and such an id names no resource group at all, so
+// without this it would be refused by the generic "names no group" path with a
+// message telling the operator to name a group -- advice that cannot be
+// followed, because naming one is precisely what they were trying not to do.
+func subscriptionScoped(args []string) bool {
+	for _, a := range args {
+		lower := strings.ToLower(a)
+		if !strings.HasPrefix(lower, "/subscriptions/") {
+			continue
+		}
+		if _, ok := groupInResourceID(a); !ok {
+			return true
+		}
+	}
+	return false
+}
+
+// groupInResourceID pulls the resource group out of an ARM resource id.
+//
+// The segment is spelled resourceGroups by the portal, resourcegroups by some
+// SDKs, and ResourceGroups by at least one generator. ARM treats all three as
+// the same path, so a case-sensitive match here would be a hole rather than a
+// stricter check.
+func groupInResourceID(v string) (string, bool) {
+	parts := strings.Split(v, "/")
+	for i, p := range parts {
+		if strings.EqualFold(p, "resourceGroups") && i+1 < len(parts) {
+			name := strings.TrimSpace(parts[i+1])
+			if name == "" {
+				return "", false
+			}
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // varGroup reads `resource_group_name=af-cp-scus`, with or without the quotes

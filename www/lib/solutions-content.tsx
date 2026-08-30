@@ -3,7 +3,7 @@ import { PageCallout } from "@/components/layout/MarketingPage";
 
 const RELATED = [
   { href: "/product/migrations", title: "Migration Safety", description: "The failure mode these teams feel first." },
-  { href: "/design-partners", title: "Design partners", description: "One real upcoming migration, not a generic demo." },
+  { href: "/signup", title: "Sign up", description: "Join the waitlist." },
   { href: "/product", title: "Product", description: "How a twin run actually decides." },
 ];
 

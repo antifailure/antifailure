@@ -18,10 +18,22 @@
 // The suite is itself tested, against a fake provider that is deliberately
 // broken one behavior at a time. A suite nobody has proved can fail is a suite
 // that proves nothing.
+//
+// That second rule is met by the runtime suite, in fakeruntime_test.go and
+// runtime_selftest_test.go, and is NOT yet met by the database suite below.
+// This paragraph used to claim it for both, which was the more comfortable of
+// the two things it could have said and the wrong one: STATUS.md has recorded
+// the gap for some time, and a package doc asserting a guarantee the package
+// does not make is exactly the kind of thing this suite exists to catch in
+// other people's code. The runtime files are the pattern to copy; the cost is
+// an afternoon and the thing it buys is knowing that a green run means
+// anything at all.
 package conformance
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -365,12 +377,54 @@ func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory
 	}
 }
 
+// rulesHash is different for every refresh this suite makes, and different in
+// every process that runs it.
+//
+// A golden's identifier is gv_<timestamp to the second>_<first eight
+// characters of the rules hash>, so two refreshes that share a second and a
+// hash get the SAME identifier. For a provider whose goldens are images the
+// second commit retags the first, and then one cleanup destroys the golden
+// something else is about to branch. It surfaces as "the golden version no
+// longer exists" from Branch, nowhere near the refresh that caused it.
+//
+// This has now been wrong twice, in the same place, for two different reasons.
+//
+// It was the constant "conformance", which collided between two refreshes in
+// one second on a fast machine. The repair derived it from the behaviour name
+// and a refresh counter, which is unique within one process and IDENTICAL
+// ACROSS PROCESSES: every package that runs this suite calls its entry point
+// TestConformance, so internal/db/docker, internal/db/dblab, internal/db/neon
+// and internal/db/supabase all produce the behaviour name
+// TestConformance/Branch_IsIsolatedFromTheGolden and therefore the same eight
+// characters, on every run for ever. The evidence was sitting in the failures:
+// two of them hours apart quoted the same hash, 7969f160, differing only in
+// the timestamp. Go runs test packages in parallel, so "unique within one
+// process" was never the property this needed.
+//
+// Four random bytes are exactly the eight hex characters that survive into an
+// identifier, which is what internal/masking's uniqueRulesHash already does
+// for the same reason. Randomness cannot collide by construction, where every
+// derivation so far has collided along an axis nobody thought about.
+//
+// The one-second resolution in provider.NewGoldenVersionID is the underlying
+// sharp edge and is still there: two refreshes in one second is not something
+// only a test does. This stops the suite depending on it either way.
+func (h *harness) rulesHash() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// A fallback that returned a constant would reintroduce the collision
+		// this exists to prevent, so it is loud instead.
+		h.t.Fatalf("no randomness available for a rules hash: %v", err)
+	}
+	return hex.EncodeToString(b[:])
+}
+
 // spec builds a refresh specification whose callbacks record what happened.
 func (h *harness) spec() provider.GoldenSpec {
 	return provider.GoldenSpec{
 		SourceURL: secrets.New("postgres://conformance@source/db"),
 		Version:   17,
-		RulesHash: "conformance",
+		RulesHash: h.rulesHash(),
 		Mask: func(_ context.Context, _ secrets.Value) error {
 			h.masked++
 			return nil

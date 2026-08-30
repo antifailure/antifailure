@@ -1,0 +1,188 @@
+# Alerting rules for the Antifailure control plane.
+#
+# Every metric named here is exported by web/apps/api/src/metrics.ts, and a test
+# in web/apps/api/test/metrics.test.ts fails if one is not. That test is the
+# point of this file living in the repository rather than in a Grafana UI: an
+# alert on a metric that does not exist is an alert that fires never, and the
+# way you find out is the outage it was written for.
+#
+# The service level objectives are the ones in the plan:
+#
+#   environment creation success   99.5 percent
+#   time to preview                p95 under 8 minutes
+#   API availability               99.9 percent
+#   ingestion loss                 zero
+#
+# The two availability-shaped objectives are alerted on burn rate over two
+# windows rather than on a threshold over one. A threshold alert on a ratio is
+# either slow enough to miss a total outage or twitchy enough that people mute
+# it, and a muted alert is the same as no alert with extra steps. Two windows
+# means the short one has to agree before it pages, so a single bad minute is
+# not a page and a sustained burn is.
+
+groups:
+  - name: antifailure-slo-api-availability
+    interval: 30s
+    rules:
+      # 99.9 percent over 30 days is a budget of 43 minutes. Burning it 14.4
+      # times faster than sustainable exhausts it in about two days, which is
+      # the standard fast-burn page.
+      - alert: ControlPlaneAvailabilityBudgetBurningFast
+        expr: |
+          (
+            sum(rate(af_http_requests_total{status_class="5xx"}[1h]))
+            /
+            clamp_min(sum(rate(af_http_requests_total[1h])), 0.001)
+          ) > (14.4 * 0.001)
+          and
+          (
+            sum(rate(af_http_requests_total{status_class="5xx"}[5m]))
+            /
+            clamp_min(sum(rate(af_http_requests_total[5m])), 0.001)
+          ) > (14.4 * 0.001)
+        for: 2m
+        labels:
+          severity: page
+          slo: api-availability
+        annotations:
+          summary: The control plane is failing enough requests to exhaust a month of error budget in two days.
+          runbook: https://antifailure.dev/docs/self-hosting/operations
+          description: >-
+            Five percent of the API availability budget has gone in the last hour and the
+            last five minutes agree. Start with the operations page: check whether the
+            database is reachable, whether a deploy landed, and whether one route is
+            responsible by looking at af_http_requests_total by route.
+
+      - alert: ControlPlaneAvailabilityBudgetBurningSlowly
+        expr: |
+          (
+            sum(rate(af_http_requests_total{status_class="5xx"}[6h]))
+            /
+            clamp_min(sum(rate(af_http_requests_total[6h])), 0.001)
+          ) > (6 * 0.001)
+        for: 30m
+        labels:
+          severity: ticket
+          slo: api-availability
+        annotations:
+          summary: The control plane is failing requests steadily rather than sharply.
+          runbook: https://antifailure.dev/docs/self-hosting/operations
+          description: >-
+            Not an outage and not nothing. At this rate the month's error budget is gone
+            before the month is. Worth a ticket rather than a page.
+
+  - name: antifailure-slo-environment-creation
+    interval: 30s
+    rules:
+      - alert: EnvironmentCreationFailing
+        expr: |
+          (
+            sum(rate(af_environment_outcomes_total{outcome="failed"}[30m]))
+            /
+            clamp_min(sum(rate(af_environment_outcomes_total[30m])), 0.001)
+          ) > 0.005
+        for: 15m
+        labels:
+          severity: page
+          slo: environment-creation
+        annotations:
+          summary: More than one environment in two hundred is failing to come up.
+          runbook: https://antifailure.dev/docs/self-hosting/operations
+          description: >-
+            Break it down by the code label on af_environment_outcomes_total before
+            anything else. A single error code across many organizations is a platform
+            fault; many codes in one organization is that organization's repository.
+
+      - alert: TimeToPreviewOverObjective
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(af_environment_ready_seconds_bucket[30m])) by (le)
+          ) > 480
+        for: 15m
+        labels:
+          severity: ticket
+          slo: time-to-preview
+        annotations:
+          summary: The slowest one in twenty environments is taking more than eight minutes to be reachable.
+          runbook: https://antifailure.dev/docs/self-hosting/operations
+          description: >-
+            The objective is a p95 under eight minutes. This is almost always either a
+            golden that is being copied in full rather than branched, or a build cache
+            that is not being hit.
+
+  - name: antifailure-slo-ingestion
+    interval: 30s
+    rules:
+      # The objective here is zero rather than a ratio, so the alert is on any
+      # rejection at all. A rejected event is one an engine sent, believes it
+      # delivered, and will not send again.
+      - alert: IngestionIsLosingEvents
+        expr: sum(rate(af_ingest_events_total{outcome="rejected"}[10m])) > 0
+        for: 10m
+        labels:
+          severity: page
+          slo: ingestion-loss
+        annotations:
+          summary: The control plane is rejecting engine events.
+          runbook: https://antifailure.dev/docs/self-hosting/operations
+          description: >-
+            An engine treats a rejection as delivery and does not retry, so every one of
+            these is a permanently missing event and an environment row that may never
+            advance again. The reason is on the ingestion response; look at the API log
+            for the batch.
+
+      - alert: IngestionHasStopped
+        expr: |
+          sum(rate(af_ingest_batches_total[15m])) == 0
+          and
+          sum(af_control_plane_info) > 0
+        for: 15m
+        labels:
+          severity: ticket
+          slo: ingestion-loss
+        annotations:
+          summary: No engine has reported anything for fifteen minutes.
+          runbook: https://antifailure.dev/docs/self-hosting/operations
+          description: >-
+            Either nobody is using it, which is fine and common on a small installation,
+            or ingestion is unreachable from where the engines are and every one of them
+            is quietly spooling to disk. The second is invisible from here, which is why
+            this is a ticket rather than nothing.
+
+  - name: antifailure-saturation
+    interval: 30s
+    rules:
+      - alert: RateLimitingIsRefusingRealTraffic
+        expr: |
+          (
+            sum(rate(af_rate_limited_total[15m]))
+            /
+            clamp_min(sum(rate(af_http_requests_total[15m])), 0.001)
+          ) > 0.01
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than one request in a hundred is being refused with 429.
+          runbook: https://antifailure.dev/docs/self-hosting/operations
+          description: >-
+            A limit doing its job against an abusive caller looks the same from here as a
+            limit set too low for an honest one. Check af_rate_limited_total by route: one
+            route is a misconfigured limit, everything at once is a caller.
+
+      - alert: ControlPlaneIsSlow
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(af_http_request_seconds_bucket[10m])) by (le)
+          ) > 2
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The control plane's p95 response time is over two seconds.
+          runbook: https://antifailure.dev/docs/self-hosting/operations
+          description: >-
+            The statement timeout is fifteen seconds, so this is well short of failing and
+            well past comfortable. Usually the database rather than the process.

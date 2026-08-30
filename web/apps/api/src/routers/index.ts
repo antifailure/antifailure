@@ -12,6 +12,8 @@ import { PolicyEngine, type Egress, type EgressRule, type Mode } from '@antifail
 import { router, publicProcedure, orgProcedure, audit, registerRouter, type OrgContext } from '../trpc.ts'
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLES, ROLE_PERMISSIONS, rolesWith } from '../permissions.ts'
 import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
+import { syncMembership, SignInError } from '../auth/signin.ts'
+import { GitHubError } from '../auth/github.ts'
 
 const uuid = z.string().uuid()
 
@@ -126,10 +128,103 @@ interface EnvironmentRow extends Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// Repositories
+//
+// Small, and it exists because three other screens are useless without it.
+// masking.rules, masking.attestations and network.effective all take a
+// repository full name, and until now the only way to learn one was to read an
+// environment row and hope the organization had an environment. A tenant with
+// a repository connected and nothing built yet had no way to see its own
+// masking rules.
+// ---------------------------------------------------------------------------
+
+const repositoriesRouter = router({
+  list: orgProcedure('environments.view')
+    .input(z.object({ includeArchived: z.boolean().default(false) }).default({ includeArchived: false }))
+    .query(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      return c.pool.withTenant(c.tenant, async (db) =>
+        db.execute(sql`
+          SELECT id, full_name, default_branch, private, archived_at, created_at
+          FROM repositories
+          WHERE (${input.includeArchived} OR archived_at IS NULL)
+          ORDER BY full_name`),
+      )
+    }),
+})
+
+// ---------------------------------------------------------------------------
 // Runs and verdicts
 // ---------------------------------------------------------------------------
 
 const runsRouter = router({
+  /**
+   * The organization's runs, newest first, across every environment.
+   *
+   * `list` takes an envId, which is the right shape for "what has this
+   * environment done" and the wrong one for the question somebody opening a
+   * console actually has, which is "what happened". Answering that by listing
+   * environments and then fanning out one query per environment is N+1 against
+   * a replica, so it is one query here.
+   */
+  recent: orgProcedure('environments.view')
+    .input(
+      z
+        .object({
+          envId: z.string().optional(),
+          state: z.enum(['queued', 'running', 'complete', 'failed', 'cancelled']).optional(),
+          limit: z.number().int().min(1).max(200).default(50),
+          before: z.string().optional(),
+        })
+        .default({ limit: 50 }),
+    )
+    .query(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      return c.pool.withTenant(c.tenant, async (db) => {
+        const rows = await db.execute<Record<string, unknown>>(sql`
+          SELECT r.id, r.kind, r.state, r.started_at, r.finished_at, r.created_at,
+                 e.env_id, e.branch, e.pull_request, rep.full_name AS repository,
+                 (SELECT count(*) FROM verdicts v WHERE v.run_id = r.id) AS verdicts,
+                 (SELECT count(*) FROM verdicts v
+                   WHERE v.run_id = r.id AND v.value IN ('fail', 'blocked')) AS failing
+          FROM runs r
+          JOIN environments e ON e.id = r.environment_id
+          JOIN repositories rep ON rep.id = e.repository_id
+          WHERE (${input.envId ?? null}::text IS NULL OR e.env_id = ${input.envId ?? null})
+            AND (${input.state ?? null}::text IS NULL OR r.state::text = ${input.state ?? null})
+            AND (${input.before ?? null}::text IS NULL
+                 OR r.created_at < ${input.before ?? null}::timestamptz)
+          ORDER BY r.created_at DESC
+          LIMIT ${input.limit + 1}`)
+        const page = rows.slice(0, input.limit)
+        return {
+          runs: page,
+          nextCursor:
+            rows.length > input.limit ? asIso(page[page.length - 1]!.created_at as string) : null,
+        }
+      })
+    }),
+
+  /** One run, with the environment it belongs to. A detail page that had to
+   *  scan a list to title itself would break the moment the run fell off it. */
+  get: orgProcedure('environments.view')
+    .input(z.object({ runId: uuid }))
+    .query(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      return c.pool.withTenant(c.tenant, async (db) => {
+        const rows = await db.execute<Record<string, unknown>>(sql`
+          SELECT r.id, r.kind, r.state, r.started_at, r.finished_at, r.created_at,
+                 e.env_id, e.branch, e.pull_request, rep.full_name AS repository
+          FROM runs r
+          JOIN environments e ON e.id = r.environment_id
+          JOIN repositories rep ON rep.id = e.repository_id
+          WHERE r.id = ${input.runId}`)
+        const run = rows[0]
+        if (!run) throw notFound('run', input.runId)
+        return run
+      })
+    }),
+
   list: orgProcedure('environments.view')
     .input(z.object({ envId: z.string(), limit: z.number().int().min(1).max(100).default(25) }))
     .query(async ({ ctx, input }) => {
@@ -494,6 +589,64 @@ const membersRouter = router({
     )
   }),
 
+  /**
+   * Reconciles this organization's members against GitHub's.
+   *
+   * The reason this route exists rather than the sync running only at sign-in:
+   * sign-in can only ever speak for the person signing in. Somebody added to
+   * the GitHub organization yesterday is not here until they happen to sign in,
+   * and somebody REMOVED from it keeps whatever role they had until they sign
+   * in again, which a person who has been removed has no reason to do. This is
+   * the route that acts on everybody at once, and the one that takes access
+   * away.
+   *
+   * It is also, deliberately, the caller syncMembership never had. The function
+   * was written, tested and complete, and nothing invoked it, which is a
+   * feature that reads as finished from every angle except the only one that
+   * counts.
+   */
+  sync: orgProcedure('members.manage').mutation(async ({ ctx }) => {
+    const c = ctx as OrgContext
+    const installation = await c.pool.withTenant(c.tenant, async (db) => {
+      const rows = await db.execute<{ installation_id: string; account_login: string }>(sql`
+        SELECT installation_id, account_login FROM github_installations
+        WHERE suspended_at IS NULL ORDER BY created_at ASC LIMIT 1`)
+      return rows[0] ?? null
+    })
+    if (!installation) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'This organization has no active GitHub App installation, so there is no membership ' +
+          'to read. Install the App on the organization first.',
+      })
+    }
+    try {
+      return await syncMembership(c.pool, c.clock, c.github, {
+        orgId: c.actor.orgId,
+        installationId: Number(installation.installation_id),
+        orgLogin: installation.account_login,
+        actorLabel: c.actor.label,
+      })
+    } catch (error) {
+      // Two refusals that are answers rather than faults, and both used to
+      // arrive as a 500 that reads as a bug in this control plane.
+      //
+      // SignInError: syncMembership will not apply an empty member list,
+      // because doing so would remove every owner and an outage looks exactly
+      // like an organization where everybody left.
+      //
+      // GitHubError: no App is configured, or GitHub would not answer. Its
+      // messages are written to be read by the operator who has to fix it --
+      // "Membership sync needs a GitHub App. Set AF_GITHUB_APP_ID..." -- and
+      // they are worth nothing behind a generic internal error.
+      if (error instanceof SignInError || error instanceof GitHubError) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message })
+      }
+      throw error
+    }
+  }),
+
   setRole: orgProcedure('members.manage')
     .input(z.object({ githubLogin: z.string(), role: z.enum(ROLES) }))
     .mutation(async ({ ctx, input }) => {
@@ -666,6 +819,7 @@ export const appRouter = router({
     roles: ROLES.map((r) => ({ name: r, permissions: ROLE_PERMISSIONS[r] })),
   })),
 
+  repositories: repositoriesRouter,
   environments: environmentsRouter,
   runs: runsRouter,
   network: networkRouter,

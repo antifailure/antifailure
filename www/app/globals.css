@@ -38,6 +38,12 @@ html {
   scroll-padding-top: 64px;
 }
 
+@media (max-width: 1279px) {
+  html {
+    scroll-padding-top: 56px;
+  }
+}
+
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;

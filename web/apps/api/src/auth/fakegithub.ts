@@ -24,6 +24,7 @@ export class FakeGitHub implements GitHubClient {
   private readonly orgs = new Map<string, GitHubOrg[]>()
   private readonly members = new Map<string, { user: GitHubUser; role: 'admin' | 'member' }[]>()
   private readonly codes = new Map<string, PendingCode>()
+  private unreachable = false
   private readonly tokens = new Map<string, string>()
 
   /** How long a code is good for. GitHub's is ten minutes. */
@@ -88,5 +89,30 @@ export class FakeGitHub implements GitHubClient {
     orgLogin: string,
   ): Promise<{ user: GitHubUser; role: 'admin' | 'member' }[]> {
     return this.members.get(orgLogin) ?? []
+  }
+
+  /**
+   * Answers from the same member list membersOf reads, so a test cannot set up
+   * an organization where the two disagree.
+   *
+   * Null for somebody the list does not name, which is what the real client
+   * returns when GitHub will not say, and what makes the "leave the role
+   * alone" branch in sign-in reachable from a test.
+   */
+  async roleIn(
+    _installationId: number,
+    orgLogin: string,
+    login: string,
+  ): Promise<'admin' | 'member' | null> {
+    if (this.unreachable) throw new Error('GitHub is unreachable')
+    const found = (this.members.get(orgLogin) ?? []).find(
+      (m) => m.user.login.toLowerCase() === login.toLowerCase(),
+    )
+    return found ? found.role : null
+  }
+
+  /** Makes roleIn throw, the way a network failure or a rate limit does. */
+  breakRoleLookups(broken = true): void {
+    this.unreachable = broken
   }
 }

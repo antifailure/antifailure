@@ -22,6 +22,37 @@ terraform {
 provider "azurerm" {
   features {}
   subscription_id = var.subscription_id
+
+  # ENTRA FOR THE DATA PLANE, NOT A STORAGE KEY.
+  #
+  # This is not a preference, it is required by the account below. After it
+  # creates a storage account the provider polls the BLOB SERVICE to see whether
+  # the data plane is up, and by default it authenticates that poll with a
+  # shared key. `shared_access_key_enabled = false` makes that poll fail:
+  #
+  #   403 Key based authentication is not permitted on this storage account
+  #
+  # The account is created and healthy at that point, so the failure looks like
+  # a transient Azure problem rather than a provider configuration one, and
+  # running apply again reproduces it exactly. `storage_use_azuread` switches
+  # every data plane call, including that poll, to the caller's Entra token.
+  storage_use_azuread = true
+
+  # The CI identity must never need permission at SUBSCRIPTION scope, and this
+  # is the line that decides it.
+  #
+  # azurerm 4.x defaults to registering a core set of resource providers when it
+  # starts, and registration is a write at subscription scope. That single
+  # default would force the plan job's identity to hold a subscription level
+  # role, which is exactly what infra/ISOLATION.md refuses. Every provider this
+  # stack touches is already registered on this subscription and registration is
+  # a one time act, so nothing is lost by never asking.
+  #
+  # THE TRADE, STATED: on a subscription where a provider is NOT yet registered,
+  # apply fails with a message naming the namespace. The fix is one command,
+  # `az provider register --namespace <name>`, run by somebody who is allowed
+  # to, and self-hosting/azure.md says so.
+  resource_provider_registrations = "none"
 }
 
 module "foundation" {
@@ -62,35 +93,15 @@ resource "azurerm_storage_account" "state" {
   https_traffic_only_enabled      = true
   allow_nested_items_to_be_public = false
 
-  # bonfire-deny-public-data on this subscription refuses any storage account
-  # whose publicNetworkAccess is not "Disabled". That is not negotiable from
-  # here, and it has a consequence worth stating rather than discovering:
+  # Reachable, and ONLY because exemption.tf exempts this one resource group
+  # from bonfire-deny-public-data. Read that file before changing this line:
+  # every reason it is safe to be reachable lives there, and four of the five
+  # reasons are settings in this very block. Delete the exemption and the next
+  # write to this account is denied, which is the correct behaviour.
   #
-  # WITH THIS DISABLED, TERRAFORM CANNOT REACH ITS OWN STATE from a laptop or
-  # from a hosted CI runner. There is no clever way around it: `Disabled` is not
-  # a firewall default that a network rule can carve an exception out of, it
-  # turns the data plane off for everything that is not a private endpoint.
-  #
-  # THAT LEAVES EXACTLY THREE OPTIONS AND THEY ARE NOT TECHNICAL, SO THIS STACK
-  # IS STILL NOT APPLIED:
-  #
-  # 1. An `azurerm_resource_policy_exemption` on THIS resource group only, with
-  #    a waiver category and an expiry. It changes no assignment and no
-  #    definition and touches nothing bonfire owns; it is the mechanism Azure
-  #    provides for precisely this. The account would still be Entra-only
-  #    (shared_access_key_enabled = false), private, and RBAC gated, so reaching
-  #    it needs a directory identity holding a data role rather than a URL. This
-  #    is what most organisations actually run.
-  # 2. A private endpoint plus a self hosted runner inside the VNet. No
-  #    exemption, about 7.30 USD a month, and a runner to maintain.
-  # 3. Local state, which is where the control plane stack sits today.
-  #
-  # Option 1 weakens a control somebody deliberately turned on, and that is a
-  # decision for the person whose subscription this is, not for the person who
-  # finds it inconvenient. Applying this file without settling that first
-  # produces a state account nobody can read, which is strictly worse than no
-  # remote state at all.
-  public_network_access_enabled = false
+  # Reachable is not readable. There is no storage key, nothing here can be made
+  # anonymously public, and a read needs an Entra identity holding a data role.
+  public_network_access_enabled = true
 
   # Entra identity only. A storage key is a credential that cannot be revoked
   # per person and appears in no audit trail as a name, and this account holds
@@ -111,14 +122,105 @@ resource "azurerm_storage_account" "state" {
 
   tags = module.foundation.tags
 
+  # The exemption must exist BEFORE the account is written, and Terraform has no
+  # way to know that from the arguments alone: nothing in this resource refers
+  # to the exemption. Without this the two are created in parallel and the
+  # account loses the race about half the time, with an error that names the
+  # policy and gives no hint that the fix is ordering.
+  #
+  # AZURE POLICY IS EVENTUALLY CONSISTENT, so depends_on is necessary and not
+  # sufficient. A first apply can still be denied while the exemption
+  # propagates, which takes up to about fifteen minutes in the worst case. If
+  # that happens the answer is to run apply again, not to change anything here.
+  depends_on = [azurerm_resource_group_policy_exemption.state_is_reachable]
+
   lifecycle {
     # Losing this account loses the record of everything else that exists.
+    #
+    # ONE SHARP EDGE, BECAUSE IT COST TIME HERE. If a create fails AFTER Azure
+    # has made the resource but before Terraform finishes with it, Terraform
+    # marks the instance TAINTED, and the next plan proposes to replace it,
+    # which prevent_destroy then refuses. The result is a stack that will not
+    # move in either direction and an error naming prevent_destroy rather than
+    # the taint. The account is fine; the fix is `terraform untaint
+    # azurerm_storage_account.state`, not removing this guard.
     prevent_destroy = true
   }
+}
+
+data "azurerm_client_config" "current" {}
+
+# Owner on the subscription does NOT let you read a blob.
+#
+# Azure splits storage into a control plane (create the account, read its
+# settings) and a data plane (read and write the bytes). Owner covers the first
+# and grants nothing on the second, and with shared keys disabled there is no
+# back door. So the identity running Terraform needs an explicit data role or
+# the container below cannot be created and no state can ever be written.
+#
+# Scoped to this one storage account, not the resource group and certainly not
+# the subscription.
+resource "azurerm_role_assignment" "deployer_writes_state" {
+  scope                = azurerm_storage_account.state.id
+  role_definition_name = "Storage Blob Data Owner"
+  principal_id         = data.azurerm_client_config.current.object_id
 }
 
 resource "azurerm_storage_container" "state" {
   name                  = "tfstate"
   storage_account_id    = azurerm_storage_account.state.id
   container_access_type = "private"
+
+  # Nothing in the container's arguments refers to the role assignment, so
+  # without this Terraform creates them in parallel and the container loses.
+  # Azure RBAC is also eventually consistent: a role assignment takes up to a
+  # couple of minutes to be honoured on the data plane, so a first apply can
+  # still fail with 403 AuthorizationPermissionMismatch. Run apply again.
+  depends_on = [azurerm_role_assignment.deployer_writes_state]
+}
+
+# The CI identity's access to the state, and why it is READ ONLY.
+#
+# The plan job has to read the state or it cannot see a destroy, which is the
+# whole reason it runs. It does NOT have to write it. The azurerm backend takes
+# a blob lease for a lock even on a plan, and a lease is a write, so the natural
+# grant here is Storage Blob Data Contributor. That would give every pull request
+# in this repository the ability to corrupt or delete the record of everything
+# the project owns, and a pull request can edit the workflow file that uses the
+# credential in the same commit that runs it.
+#
+# So: Reader here, and `terraform plan -lock=false` in .github/workflows/infra.yml.
+# The pair only makes sense together. A plan that writes nothing does not need a
+# lock, and the cost of skipping it is that two plans running at once might read
+# a state mid write, which produces a wrong plan and never a wrong state.
+resource "azurerm_role_assignment" "ci_reads_state" {
+  count                = var.ci_principal_id == "" ? 0 : 1
+  scope                = azurerm_storage_account.state.id
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = var.ci_principal_id
+}
+
+# AND A CONTROL PLANE READ, WHICH IS THE EXACT MIRROR OF AN EARLIER SURPRISE.
+#
+# Further up this file there is a note that Owner on the subscription grants
+# nothing on the storage DATA plane. The reverse is just as true and cost just
+# as much: a data role grants nothing on the CONTROL plane. Before the azurerm
+# backend reads a single byte of state it does a control plane GET on the
+# account, to resolve its blob endpoint, and Storage Blob Data Reader does not
+# permit that:
+#
+#   AuthorizationFailed: ... does not have authorization to perform action
+#   'Microsoft.Storage/storageAccounts/read'
+#
+# The message names a read action, the identity is called a Reader, and it
+# still fails, which is why this is worth a comment rather than a line.
+#
+# Reader here is the CONTROL plane only: it can see that the account exists and
+# what its settings are, and it can read nothing inside it. The pair is what
+# makes the plan job work, and both halves are read-only.
+resource "azurerm_role_assignment" "ci_sees_the_account" {
+  count                = var.ci_principal_id == "" ? 0 : 1
+  scope                = azurerm_storage_account.state.id
+  role_definition_name = "Reader"
+  principal_id         = var.ci_principal_id
 }

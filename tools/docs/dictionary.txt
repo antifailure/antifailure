@@ -29,6 +29,7 @@ ndjson
 neon
 pgbouncer
 pgvector
+PKCE
 pooler
 postgres
 reprovision
@@ -38,6 +39,7 @@ SIEM
 Sigstore
 starlight
 subsetted
+subsetter
 subsetting
 supabase
 testcontainers

@@ -1,0 +1,9 @@
+# YAML blocks in the documentation that belong to another product's
+# configuration file rather than to an Antifailure manifest.
+#
+# Three tab separated fields: the page, the top level key, and why. A reason is
+# required, because an exemption with no argument behind it is
+# indistinguishable from somebody silencing a finding they did not understand.
+# An exemption that stops being needed is reported, so this list cannot rot.
+docs/src/content/docs/providers/dblab.md	cloning	the Database Lab Engine's own server configuration, not a manifest. The page documents an idle timeout that has to be disabled on any engine Antifailure points at.
+docs/src/content/docs/providers/dblab.md	databaseConfigs	the Database Lab Engine's own server configuration, not a manifest. The page documents which Postgres extensions its sample config preloads that the official image does not ship.

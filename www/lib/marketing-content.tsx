@@ -177,7 +177,7 @@ export const PRODUCT_PAGES: Record<string, MarketingContent> = {
     ],
     related: [
       { href: "/product/firewall", title: "Side-Effect Firewall", description: "The twin cannot act on the real world." },
-      { href: "/security", title: "Security", description: "Production data stays in the customer boundary." },
+      { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
       { href: "/product/fidelity", title: "Fidelity Graph", description: "What volume and distribution were actually restored." },
     ],
     body: (
@@ -239,9 +239,9 @@ export const PRODUCT_PAGES: Record<string, MarketingContent> = {
       { title: "Attempted-effect ledger", body: "Every outbound attempt is recorded, including denies." },
     ],
     related: [
-      { href: "/security", title: "Security", description: "Fail closed is a product principle, not a slogan." },
+      { href: "/product/architecture", title: "Architecture", description: "Fail closed is a product principle, not a slogan." },
       { href: "/product/oracle", title: "Differential Oracle", description: "Third-party effects are compared, not ignored." },
-      { href: "/docs/firewall", title: "Firewall docs", description: "Controls and example behavior." },
+      { href: "/docs/concepts/egress", title: "Egress docs", description: "Controls and example behavior." },
     ],
     body: (
       <>
@@ -299,7 +299,7 @@ export const PRODUCT_PAGES: Record<string, MarketingContent> = {
     related: [
       { href: "/product/exploratory-users", title: "Exploratory users", description: "Exploratory users inside Workload Studio, beside observed and deterministic traffic." },
       { href: "/product/oracle", title: "Differential Oracle", description: "Same workload against baseline and candidate." },
-      { href: "/docs/workload", title: "Workload docs", description: "Scenario IR and traffic controls." },
+      { href: "/docs/concepts/load", title: "Load docs", description: "Scenario IR and traffic controls." },
     ],
     body: (
       <>
@@ -424,7 +424,7 @@ assertions:
     related: [
       { href: "/solutions/migrations", title: "Schema migrations", description: "Why this is the starting wedge." },
       { href: "/product/report", title: "Safety Report", description: "A 27-second lock is a block." },
-      { href: "/docs/migration-safety", title: "Migration docs", description: "The subscriptions demo in full." },
+      { href: "/docs/guides/invariants", title: "Invariants docs", description: "The subscriptions demo in full." },
     ],
     body: (
       <>
@@ -680,9 +680,9 @@ Missing: Twilio voice callbacks, internal recommendations service`}</PagePre>
       { title: "Cost controls", body: "Estimate before provisioning, per-run and daily caps, subsetting, BYOC, TTL." },
     ],
     related: [
-      { href: "/security", title: "Security", description: "Fail closed. Data stays in your boundary." },
-      { href: "/open-source", title: "Open source", description: "The inspectable surface inside the boundary." },
-      { href: "/docs/architecture", title: "Architecture docs", description: "Lifecycle and isolation in full." },
+      { href: "/product/firewall", title: "Firewall", description: "How side effects are contained." },
+      { href: "/docs", title: "Docs", description: "How a twin run works." },
+      { href: "/docs/concepts/journal", title: "Journal docs", description: "Lifecycle and isolation in full." },
     ],
     body: (
       <>

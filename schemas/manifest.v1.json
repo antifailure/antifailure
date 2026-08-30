@@ -45,6 +45,9 @@
       },
       "description": "The accounts agents log in as. Each is created or reconciled in the golden by the authentication adapter, so a persona is a real user of the application rather than a bypass."
     },
+    "auth": {
+      "$ref": "#/$defs/auth"
+    },
     "workflows": {
       "type": "array",
       "maxItems": 200,
@@ -591,6 +594,11 @@
           "maxLength": 254,
           "description": "Login address. Defaults to name@example.test, which is a reserved domain that can never receive mail."
         },
+        "phone": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Number an SMS code is sent to. Defaults to a number in the +1 555 0100 block, which is reserved for fictional use and can never reach a real handset. Only sms_code uses it."
+        },
         "role": {
           "type": "string",
           "maxLength": 64,
@@ -599,6 +607,7 @@
         "login": {
           "type": "string",
           "enum": [
+            "none",
             "password",
             "magic_link",
             "email_code",
@@ -607,7 +616,7 @@
             "session"
           ],
           "default": "password",
-          "description": "How this persona signs in. magic_link and email_code read the message from the captured inbox, so they work with no mail provider at all."
+          "description": "How this persona signs in. none is for an application with no sign in, or a page that is public: the agent goes straight to start_path. magic_link and email_code read the message from the captured inbox, so they work with no mail provider at all. The runner drives none, password, magic_link, email_code and sms_code today; a persona set to totp or session is reported as blocked with the reason, rather than failing the change."
         },
         "mfa": {
           "type": "boolean",
@@ -957,6 +966,157 @@
             ]
           },
           "description": "Events that tear the environment down."
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How personas come to exist. Absent from most manifests, because detection answers it; present when detection is wrong, when the users table has names nothing could guess, or when the application's users live somewhere only a script can reach.",
+      "properties": {
+        "adapter": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "direct",
+            "supabase",
+            "supabase_api",
+            "nextauth",
+            "clerk",
+            "auth0",
+            "workos",
+            "seed"
+          ],
+          "default": "auto",
+          "description": "Which authentication scheme personas are created in. auto picks it from the dependency list and the live schema."
+        },
+        "seed": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "The command the seed adapter runs, once per persona, with the persona in the environment as AF_PERSONA_NAME, AF_PERSONA_EMAIL, AF_PERSONA_PASSWORD, AF_PERSONA_TOTP_SECRET, AF_PERSONA_ROLE, AF_PERSONA_LOGIN and AF_PERSONA_ATTRIBUTES. It must be idempotent, because it runs again on every branch."
+        },
+        "sandbox": {
+          "type": "boolean",
+          "default": false,
+          "description": "That the configured tenant is a sandbox, development or staging tenant rather than the production one. A hosted adapter refuses to create anybody without this, because the only tenant it could otherwise fall back to is the real one."
+        },
+        "token_env": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "The variable holding the provider's admin credential. The variable name, never the credential."
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "The project's API root, for Supabase."
+        },
+        "domain": {
+          "type": "string",
+          "maxLength": 253,
+          "description": "The tenant, for Auth0, for example dev-abc123.us.auth0.com."
+        },
+        "connection": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "The Auth0 database connection users are created in. Defaults to Username-Password-Authentication."
+        },
+        "table": {
+          "$ref": "#/$defs/authTable"
+        },
+        "sessions": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "description": "Extra tables holding sessions or tokens, emptied so that no real session survives into a branch. Masking does not touch them, because a session token is not personal data by any rule a scanner applies."
+        },
+        "password": {
+          "$ref": "#/$defs/passwordRules"
+        }
+      }
+    },
+    "authTable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "description": "The columns of an application's own users table, for the direct adapter. Named rather than guessed, because guessing a column name is how provisioning writes a row the application cannot read.",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "maxLength": 63,
+          "default": "public"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 63
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 63,
+          "default": "id"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 63,
+          "default": "email"
+        },
+        "password": {
+          "type": "string",
+          "maxLength": 63,
+          "description": "The column the bcrypt hash goes in. Absent for a table that keeps no password."
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 63
+        },
+        "json": {
+          "type": "string",
+          "maxLength": 63,
+          "description": "A JSONB column that persona attributes with no column of their own are written into."
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 63
+          },
+          "maxProperties": 50,
+          "description": "Maps a persona attribute name to the column it is stored in."
+        },
+        "timestamps": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 63
+          },
+          "description": "Columns set to now() on insert, and on update where the name contains 'updated'."
+        }
+      }
+    },
+    "passwordRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The application's password policy, so the generated password satisfies it. Without this, an application stricter than the generator refuses a correct password at sign in and the run reports a login failure that looks like the application's fault.",
+      "properties": {
+        "min_length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "symbols": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Replaces the default symbol set, for an application that rejects the ones it uses."
+        },
+        "forbid": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Characters the application will not accept."
         }
       }
     }

@@ -10,17 +10,17 @@ const MINI_CSS = `
 .mini-frame { --hovered: 0; }
 .group:hover .mini-frame { --hovered: 1; }
 
-.mini-twin-ring { stroke-dasharray: 113.1; stroke-dashoffset: 0; }
+.mini-twin-ring { stroke-dasharray: 100.53; stroke-dashoffset: 0; }
 .mini-twin-inset { fill: ${GREEN}; }
 .mini-scramble {
-  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  font-size: 7px;
+  font-family: var(--font-geist-sans), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-size: 6.5px;
   letter-spacing: -0.02em;
   color: ${GREEN};
   white-space: nowrap;
 }
-.mini-scramble::after { content: "m***@twin.local"; }
-.mini-packet { transform: translate(40px, 0); }
+.mini-scramble::after { content: "m***@twin"; }
+.mini-packet { transform: translate(28px, 0); }
 .mini-fw-block,
 .mini-report-block,
 .mini-high {
@@ -36,82 +36,76 @@ const MINI_CSS = `
 }
 .mini-lock { transform-origin: 0 50%; transform-box: fill-box; transform: scaleX(1); }
 .mini-pip { fill: #dc2626; stroke: #dc2626; }
-.mini-scan { transform: translateY(36px); }
 .mini-bar { transform-origin: 0 50%; transform-box: fill-box; transform: scaleX(1); }
 
 @media (prefers-reduced-motion: no-preference) {
-  .group:hover .mini-twin-ring { animation: mini-twin-ring 400ms ${EASE} both; }
-  .group:hover .mini-twin-inset { animation: mini-twin-inset 400ms ${EASE} both; }
-  .group:hover .mini-scramble::after { animation: mini-scramble 500ms steps(1, end) both; }
-  .group:hover .mini-packet { animation: mini-packet 450ms ${EASE} both; }
+  .group:hover .mini-twin-ring { animation: mini-twin-pulse 900ms ${EASE} both; }
+  .group:hover .mini-twin-inset { animation: mini-twin-glow 900ms ${EASE} both; }
+  .group:hover .mini-scramble::after { animation: mini-scramble 720ms steps(1, end) both; }
+  .group:hover .mini-packet { animation: mini-packet 880ms ${EASE} both; }
   .group:hover .mini-fw-block,
   .group:hover .mini-report-block,
-  .group:hover .mini-high { animation: mini-stamp 450ms ${EASE} both; }
-  .group:hover .mini-fader { animation: mini-fader 400ms ${EASE} both; }
-  .group:hover .mini-lock { animation: mini-lock 500ms ${EASE} both; }
-  .group:hover .mini-pip { animation: mini-pip 450ms ${EASE} both; }
-  .group:hover .mini-scan { animation: mini-scan 600ms ${EASE} both; }
-  .group:hover .mini-hit { animation: mini-hit 600ms ${EASE} both; }
+  .group:hover .mini-high { animation: mini-stamp 720ms ${EASE} both; }
+  .group:hover .mini-fader { animation: mini-fader 820ms ${EASE} both; }
+  .group:hover .mini-lock { animation: mini-lock 900ms ${EASE} both; }
+  .group:hover .mini-pip { animation: mini-pip 720ms ${EASE} both; }
+  .group:hover .mini-hit { animation: mini-hit 820ms ${EASE} both; }
   .group:hover .mini-bar {
-    animation: mini-bar 600ms ${EASE} both;
-    animation-delay: calc(var(--stagger, 0) * 40ms);
+    animation: mini-bar 820ms ${EASE} both;
+    animation-delay: calc(var(--stagger, 0) * 50ms);
   }
 }
 
-@keyframes mini-twin-ring {
-  from { stroke-dashoffset: 113.1; }
-  to { stroke-dashoffset: 0; }
+@keyframes mini-twin-pulse {
+  0%, 100% { opacity: 1; }
+  40% { opacity: 0.28; }
 }
-@keyframes mini-twin-inset {
-  from { fill: ${CREAM}; }
-  to { fill: ${GREEN}; }
+@keyframes mini-twin-glow {
+  0%, 100% { fill: ${GREEN}; }
+  40% { fill: ${CREAM}; }
 }
 @keyframes mini-scramble {
   0% { content: "ada@corp.io"; color: ${INK}; }
-  20% { content: "a#a@c*rp.io"; color: ${INK}; }
-  40% { content: "m**@twin.**"; color: ${INK}; }
-  70% { content: "m***@twin.local"; color: ${GREEN}; }
-  100% { content: "m***@twin.local"; color: ${GREEN}; }
+  22% { content: "a#a@c*rp.io"; color: ${INK}; }
+  45% { content: "m**@twin.**"; color: ${INK}; }
+  72% { content: "m***@twin"; color: ${GREEN}; }
+  100% { content: "m***@twin"; color: ${GREEN}; }
 }
 @keyframes mini-packet {
-  from { transform: translate(0, 0); }
-  to { transform: translate(40px, 0); }
+  0%, 100% { transform: translate(28px, 0); }
+  38% { transform: translate(0, 0); }
 }
 @keyframes mini-stamp {
-  0% { transform: scale(1.18); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
+  0%, 100% { transform: scale(1); opacity: 1; }
+  40% { transform: scale(0.96); opacity: 0.55; }
 }
 @keyframes mini-fader {
-  from { transform: scaleY(0.12); }
-  to { transform: scaleY(1); }
+  0%, 100% { transform: scaleY(1); }
+  40% { transform: scaleY(0.7); }
 }
 @keyframes mini-lock {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
+  0%, 100% { transform: scaleX(1); }
+  42% { transform: scaleX(0.76); }
 }
 @keyframes mini-pip {
-  0%, 40% { fill: ${CREAM}; stroke: #9a9a9a; }
-  100% { fill: #dc2626; stroke: #dc2626; }
-}
-@keyframes mini-scan {
-  from { transform: translateY(0); }
-  to { transform: translateY(36px); }
+  0%, 100% { fill: #dc2626; stroke: #dc2626; }
+  40% { fill: ${CREAM}; stroke: #9a9a9a; }
 }
 @keyframes mini-hit {
-  0%, 55% { opacity: 0; }
-  100% { opacity: 1; }
+  0%, 100% { opacity: 1; }
+  40% { opacity: 0.2; }
 }
 @keyframes mini-bar {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
+  0%, 100% { transform: scaleX(1); }
+  40% { transform: scaleX(0.8); }
 }
 `;
 
-const SANS = "var(--font-inter), ui-sans-serif, system-ui, sans-serif";
+const SANS = "var(--font-geist-sans), var(--font-inter), ui-sans-serif, system-ui, sans-serif";
 
 function Svg({ children }: { children: ReactNode }) {
   return (
-    <svg viewBox="0 0 96 64" className="absolute inset-0 h-full w-full" aria-hidden>
+    <svg viewBox="0 0 96 64" className="absolute inset-0 h-full w-full overflow-hidden" aria-hidden>
       {children}
     </svg>
   );
@@ -119,17 +113,17 @@ function Svg({ children }: { children: ReactNode }) {
 
 function OverviewMini() {
   const cells = [
-    { x: 10, y: 10, label: "twin" },
+    { x: 12, y: 10, label: "twin" },
     { x: 50, y: 10, label: "state" },
-    { x: 10, y: 34, label: "fire" },
+    { x: 12, y: 34, label: "fire" },
     { x: 50, y: 34, label: "gate" },
   ];
   return (
     <Svg>
       {cells.map((c) => (
         <g key={c.label}>
-          <rect x={c.x} y={c.y} width="36" height="20" fill="none" stroke="rgba(0,0,0,0.16)" />
-          <text x={c.x + 18} y={c.y + 13} textAnchor="middle" fill={INK} fontFamily={SANS} fontSize="7">
+          <rect x={c.x} y={c.y} width="34" height="20" fill="none" stroke="rgba(0,0,0,0.16)" />
+          <text x={c.x + 17} y={c.y + 13} textAnchor="middle" fill={INK} fontFamily={SANS} fontSize="7">
             {c.label}
           </text>
         </g>
@@ -141,21 +135,13 @@ function OverviewMini() {
 function IsolatedTwinMini() {
   return (
     <Svg>
-      <circle cx="48" cy="28" r="18" fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth="1" />
-      <circle
-        className="mini-twin-ring"
-        cx="48"
-        cy="28"
-        r="18"
-        fill="none"
-        stroke={INK}
-        strokeWidth="1.25"
-      />
-      <rect className="mini-twin-inset" x="38" y="18" width="20" height="20" rx="1" />
-      <line x1="42" y1="24" x2="54" y2="24" stroke={INK} strokeOpacity="0.4" strokeWidth="1" />
-      <line x1="42" y1="28" x2="51" y2="28" stroke={INK} strokeOpacity="0.3" strokeWidth="1" />
-      <line x1="42" y1="32" x2="53" y2="32" stroke={INK} strokeOpacity="0.22" strokeWidth="1" />
-      <text x="48" y="58" textAnchor="middle" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="7">
+      <circle cx="48" cy="27" r="16" fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth="1" />
+      <circle className="mini-twin-ring" cx="48" cy="27" r="16" fill="none" stroke={INK} strokeWidth="1.25" />
+      <rect className="mini-twin-inset" x="40" y="19" width="16" height="16" rx="1" />
+      <line x1="43" y1="24" x2="53" y2="24" stroke={INK} strokeOpacity="0.4" strokeWidth="1" />
+      <line x1="43" y1="27" x2="51" y2="27" stroke={INK} strokeOpacity="0.3" strokeWidth="1" />
+      <line x1="43" y1="30" x2="52" y2="30" stroke={INK} strokeOpacity="0.22" strokeWidth="1" />
+      <text x="48" y="56" textAnchor="middle" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="7">
         candidate
       </text>
     </Svg>
@@ -166,20 +152,20 @@ function SafeStateMini() {
   return (
     <>
       <Svg>
-        <rect x="6" y="10" width="84" height="44" fill="none" stroke="rgba(0,0,0,0.14)" />
-        <line x1="6" y1="32" x2="90" y2="32" stroke="rgba(0,0,0,0.1)" />
-        <line x1="30" y1="10" x2="30" y2="54" stroke="rgba(0,0,0,0.1)" />
-        <text x="10" y="24" fill="rgba(0,0,0,0.4)" fontFamily={SANS} fontSize="7">
+        <rect x="10" y="10" width="76" height="44" fill="none" stroke="rgba(0,0,0,0.14)" />
+        <line x1="10" y1="32" x2="86" y2="32" stroke="rgba(0,0,0,0.1)" />
+        <line x1="28" y1="10" x2="28" y2="54" stroke="rgba(0,0,0,0.1)" />
+        <text x="14" y="24" fill="rgba(0,0,0,0.4)" fontFamily={SANS} fontSize="7">
           em
         </text>
-        <text x="10" y="46" fill="rgba(0,0,0,0.4)" fontFamily={SANS} fontSize="7">
+        <text x="14" y="46" fill="rgba(0,0,0,0.4)" fontFamily={SANS} fontSize="7">
           tok
         </text>
-        <text x="36" y="46" fill={INK} fontFamily={SANS} fontSize="7">
+        <text x="34" y="46" fill={INK} fontFamily={SANS} fontSize="7">
           deleted
         </text>
       </Svg>
-      <span className="mini-scramble pointer-events-none absolute top-[16px] left-[36px] w-[50px] overflow-hidden leading-none" />
+      <span className="mini-scramble pointer-events-none absolute top-[22%] left-[34%] right-[12%] overflow-hidden leading-none" />
     </>
   );
 }
@@ -187,14 +173,14 @@ function SafeStateMini() {
 function FirewallMini() {
   return (
     <Svg>
-      <line x1="8" y1="32" x2="50" y2="32" stroke="rgba(0,0,0,0.16)" strokeDasharray="3 3" />
+      <line x1="12" y1="32" x2="50" y2="32" stroke="rgba(0,0,0,0.16)" strokeDasharray="3 3" />
       <g className="mini-packet">
-        <rect x="8" y="27" width="10" height="10" fill={INK} />
+        <rect x="12" y="27" width="9" height="10" fill={INK} />
       </g>
-      <line x1="58" y1="12" x2="58" y2="52" stroke={INK} strokeWidth="1.5" />
+      <line x1="56" y1="16" x2="56" y2="48" stroke={INK} strokeWidth="1.5" />
       <g className="mini-fw-block">
-        <rect x="64" y="24" width="26" height="16" fill={CREAM} stroke="#dc2626" strokeWidth="1" />
-        <text x="77" y="35" textAnchor="middle" fill="#b91c1c" fontFamily={SANS} fontSize="7">
+        <rect x="62" y="25" width="22" height="14" fill={CREAM} stroke="#dc2626" strokeWidth="1" />
+        <text x="73" y="35" textAnchor="middle" fill="#b91c1c" fontFamily={SANS} fontSize="6.5">
           DENY
         </text>
       </g>
@@ -204,19 +190,19 @@ function FirewallMini() {
 
 function WorkloadMini() {
   const tracks = [
-    { x: 16, h: 28, label: "obs" },
-    { x: 42, h: 20, label: "det" },
-    { x: 68, h: 14, label: "ai" },
+    { x: 18, h: 26, label: "obs" },
+    { x: 42, h: 18, label: "det" },
+    { x: 66, h: 12, label: "ai" },
   ];
   return (
     <Svg>
       {tracks.map((t) => (
         <g key={t.x}>
-          <rect x={t.x} y="8" width="12" height="36" fill="none" stroke="rgba(0,0,0,0.16)" />
+          <rect x={t.x} y="10" width="12" height="34" fill="none" stroke="rgba(0,0,0,0.16)" />
           <g className="mini-fader">
-            <rect x={t.x + 2} y={44 - t.h} width="8" height={t.h} fill={t.x === 16 ? GREEN : "rgba(0,0,0,0.2)"} />
+            <rect x={t.x + 2} y={42 - t.h} width="8" height={t.h} fill={t.x === 18 ? GREEN : "rgba(0,0,0,0.2)"} />
           </g>
-          <text x={t.x + 6} y="58" textAnchor="middle" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
+          <text x={t.x + 6} y="56" textAnchor="middle" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
             {t.label}
           </text>
         </g>
@@ -228,15 +214,15 @@ function WorkloadMini() {
 function MigrationMini() {
   return (
     <Svg>
-      <text x="8" y="16" fill="#b91c1c" fontFamily={SANS} fontSize="7">
+      <text x="12" y="16" fill="#b91c1c" fontFamily={SANS} fontSize="7">
         ACCESS EXCL
       </text>
-      <rect x="8" y="24" width="80" height="16" fill="rgba(0,0,0,0.06)" />
-      <rect className="mini-lock" x="8" y="24" width="58" height="16" fill="#dc2626" />
-      <text x="8" y="56" fill="rgba(0,0,0,0.5)" fontFamily={SANS} fontSize="7">
+      <rect x="12" y="24" width="72" height="14" fill="rgba(0,0,0,0.06)" />
+      <rect className="mini-lock" x="12" y="24" width="52" height="14" fill="#dc2626" />
+      <text x="12" y="56" fill="rgba(0,0,0,0.5)" fontFamily={SANS} fontSize="7">
         subscriptions
       </text>
-      <text x="88" y="56" textAnchor="end" fill="#b91c1c" fontFamily={SANS} fontSize="7">
+      <text x="84" y="56" textAnchor="end" fill="#b91c1c" fontFamily={SANS} fontSize="7">
         27.4s
       </text>
     </Svg>
@@ -246,16 +232,16 @@ function MigrationMini() {
 function SafetyReportMini() {
   return (
     <Svg>
-      <circle className="mini-pip" cx="16" cy="32" r="5" fill="none" strokeWidth="1.5" />
-      <text x="28" y="29" fill="rgba(0,0,0,0.4)" fontFamily={SANS} fontSize="6">
+      <circle className="mini-pip" cx="16" cy="32" r="4.5" fill="none" strokeWidth="1.5" />
+      <text x="26" y="27" fill="rgba(0,0,0,0.4)" fontFamily={SANS} fontSize="6">
         check
       </text>
-      <text x="28" y="40" fill={INK} fontFamily={SANS} fontSize="7">
+      <text x="26" y="41" fill={INK} fontFamily={SANS} fontSize="7">
         lock
       </text>
       <g className="mini-report-block">
-        <rect x="62" y="24" width="28" height="16" fill={CREAM} stroke="#dc2626" strokeWidth="1" />
-        <text x="76" y="35" textAnchor="middle" fill="#b91c1c" fontFamily={SANS} fontSize="7">
+        <rect x="60" y="25" width="24" height="14" fill={CREAM} stroke="#dc2626" strokeWidth="1" />
+        <text x="72" y="35" textAnchor="middle" fill="#b91c1c" fontFamily={SANS} fontSize="6.5">
           BLOCK
         </text>
       </g>
@@ -266,20 +252,20 @@ function SafetyReportMini() {
 function ChangeIntelligenceMini() {
   return (
     <Svg>
-      <text x="8" y="18" fill="rgba(0,0,0,0.4)" fontFamily={SANS} fontSize="7">
+      <text x="12" y="18" fill="rgba(0,0,0,0.4)" fontFamily={SANS} fontSize="7">
         app.ts
       </text>
-      <text x="8" y="36" fill={INK} fontFamily={SANS} fontSize="7">
+      <text x="12" y="34" fill={INK} fontFamily={SANS} fontSize="7">
         migrate.sql
       </text>
       <g className="mini-high">
-        <rect x="62" y="26" width="26" height="14" fill={CREAM} stroke="#dc2626" strokeWidth="1" />
-        <text x="75" y="36" textAnchor="middle" fill="#b91c1c" fontFamily={SANS} fontSize="7">
+        <rect x="62" y="22" width="22" height="14" fill={CREAM} stroke="#dc2626" strokeWidth="1" />
+        <text x="73" y="32" textAnchor="middle" fill="#b91c1c" fontFamily={SANS} fontSize="6.5">
           HIGH
         </text>
       </g>
-      <line x1="8" y1="46" x2="88" y2="46" stroke="rgba(0,0,0,0.1)" />
-      <text x="8" y="58" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
+      <line x1="12" y1="44" x2="84" y2="44" stroke="rgba(0,0,0,0.1)" />
+      <text x="12" y="56" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
         migration detected
       </text>
     </Svg>
@@ -289,34 +275,34 @@ function ChangeIntelligenceMini() {
 function DifferentialOracleMini() {
   return (
     <Svg>
-      <line x1="8" y1="32" x2="88" y2="32" stroke={GREEN} strokeWidth="1.4" />
-      <circle cx="18" cy="32" r="2.2" fill={GREEN} />
-      <path d="M34 32 C34 22, 34 16, 44 16 H78" fill="none" stroke={GREEN} strokeWidth="1.2" strokeDasharray="2 3" />
-      <path d="M58 32 C58 42, 58 48, 68 48 H88" fill="none" stroke={GREEN} strokeWidth="1.2" strokeDasharray="2 3" />
-      <rect className="mini-hit" x="46" y="11" width="28" height="10" rx="5" fill="#111" />
-      <circle cx="78" cy="16" r="3" fill="#dc2626" />
-      <circle cx="82" cy="48" r="3" fill={GREEN} />
+      <line x1="12" y1="32" x2="82" y2="32" stroke={GREEN} strokeWidth="1.4" />
+      <circle cx="20" cy="32" r="2.2" fill={GREEN} />
+      <path d="M36 32 C36 24, 36 18, 46 18 H70" fill="none" stroke={GREEN} strokeWidth="1.2" strokeDasharray="2 3" />
+      <path d="M56 32 C56 40, 56 46, 66 46 H80" fill="none" stroke={GREEN} strokeWidth="1.2" strokeDasharray="2 3" />
+      <rect className="mini-hit" x="46" y="13" width="22" height="10" rx="5" fill="#111" />
+      <circle cx="74" cy="18" r="2.6" fill="#dc2626" />
+      <circle cx="78" cy="46" r="2.6" fill={GREEN} />
     </Svg>
   );
 }
 
 function FidelityGraphMini() {
   const rows = [
-    { label: "svc", w: 58 },
+    { label: "svc", w: 50 },
     { label: "pg", w: 10 },
-    { label: "3p", w: 44 },
-    { label: "cov", w: 50 },
+    { label: "3p", w: 38 },
+    { label: "cov", w: 44 },
   ];
   return (
     <Svg>
       {rows.map((row, i) => {
-        const y = 10 + i * 13;
+        const y = 10 + i * 12;
         return (
           <g key={row.label}>
-            <text x="8" y={y + 7} fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
+            <text x="10" y={y + 7} fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
               {row.label}
             </text>
-            <rect x="28" y={y} width="60" height="8" fill="rgba(0,0,0,0.06)" />
+            <rect x="28" y={y} width="56" height="8" fill="rgba(0,0,0,0.06)" />
             <rect
               className="mini-bar"
               x="28"
@@ -336,19 +322,19 @@ function FidelityGraphMini() {
 function ArchitectureMini() {
   return (
     <Svg>
-      <rect x="6" y="10" width="38" height="44" fill="none" stroke="rgba(0,0,0,0.16)" />
-      <rect x="52" y="10" width="38" height="44" fill="none" stroke="rgba(0,0,0,0.16)" />
-      <line x1="48" y1="10" x2="48" y2="54" stroke={GREEN} strokeWidth="1.5" />
-      <text x="25" y="24" textAnchor="middle" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
+      <rect x="10" y="10" width="34" height="44" fill="none" stroke="rgba(0,0,0,0.16)" />
+      <rect x="52" y="10" width="34" height="44" fill="none" stroke="rgba(0,0,0,0.16)" />
+      <line x1="48" y1="12" x2="48" y2="52" stroke={GREEN} strokeWidth="1.5" />
+      <text x="27" y="24" textAnchor="middle" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
         control
       </text>
-      <text x="71" y="24" textAnchor="middle" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
+      <text x="69" y="24" textAnchor="middle" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
         data
       </text>
-      <line x1="12" y1="32" x2="38" y2="32" stroke="rgba(0,0,0,0.14)" />
-      <line x1="12" y1="40" x2="34" y2="40" stroke="rgba(0,0,0,0.1)" />
-      <line x1="58" y1="32" x2="84" y2="32" stroke="rgba(0,0,0,0.14)" />
-      <line x1="58" y1="40" x2="80" y2="40" stroke="rgba(0,0,0,0.1)" />
+      <line x1="16" y1="32" x2="38" y2="32" stroke="rgba(0,0,0,0.14)" />
+      <line x1="16" y1="40" x2="34" y2="40" stroke="rgba(0,0,0,0.1)" />
+      <line x1="58" y1="32" x2="80" y2="32" stroke="rgba(0,0,0,0.14)" />
+      <line x1="58" y1="40" x2="76" y2="40" stroke="rgba(0,0,0,0.1)" />
     </Svg>
   );
 }
@@ -377,12 +363,14 @@ export function HeaderMini({ title }: { title: string }) {
   return (
     <span
       className={cn(
-        "mini-frame pointer-events-none relative isolate block h-12 w-[72px] shrink-0 overflow-hidden",
+        "mini-frame pointer-events-none relative isolate block h-14 w-[84px] shrink-0 overflow-hidden rounded-[3px]",
         "bg-[#f4f7f5] ring-1 ring-black/10",
       )}
       aria-hidden
     >
-      <Mini />
+      <span className="absolute inset-[2px] overflow-hidden">
+        <Mini />
+      </span>
     </span>
   );
 }

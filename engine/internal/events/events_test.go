@@ -474,10 +474,11 @@ func TestBus_ContinuesAnEnvironmentsSequenceAcrossCommands(t *testing.T) {
 	require.Equal(t, uint64(5), first.Seq(env))
 
 	// A second command, as a second process would see it.
-	resume := events.LastSequence(dir, env)
+	resume := events.LastSequence(dir, env, env)
 	require.Equal(t, uint64(5), resume, "the log has to carry the number forward")
 
-	second := events.NewBus(clock.New(), events.ResumeSequence(env, resume))
+	second := events.NewBus(clock.New())
+	second.ResumeSequence(env, resume)
 	second.Emit(env, events.EnvDestroyed, events.LevelInfo, "the second command")
 	require.Equal(t, uint64(6), second.Seq(env),
 		"the second command restarted the counter, so a gap cannot be detected")
@@ -487,12 +488,25 @@ func TestBus_ContinuesAnEnvironmentsSequenceAcrossCommands(t *testing.T) {
 func TestLastSequence_StartsAtZeroWhenThereIsNothingToResume(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	require.Zero(t, events.LastSequence(dir, "never-seen"))
+	require.Zero(t, events.LastSequence(dir, "never-seen", "never-seen"))
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "damaged.ndjson"),
 		[]byte("this is not json\n{\"env\":\"damaged\",\"seq\":\n"), 0o600))
-	require.Zero(t, events.LastSequence(dir, "damaged"),
+	require.Zero(t, events.LastSequence(dir, "damaged", "damaged"),
 		"an unreadable log must not stop a command, only fail to help it")
+}
+
+// A log is named for a sanitised identifier and carries the real one, so the
+// two arguments are two different things and reading it has to use both.
+func TestLastSequence_ReadsALogNamedForSomethingElse(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "shop-main-a1b2c3.ndjson"),
+		[]byte(`{"env":"shop/main@a1b2c3","seq":7}`+"\n"), 0o600))
+	require.Equal(t, uint64(7),
+		events.LastSequence(dir, "shop-main-a1b2c3", "shop/main@a1b2c3"))
+	require.Zero(t, events.LastSequence(dir, "shop-main-a1b2c3", "shop-main-a1b2c3"),
+		"matching the file's name against the events inside it finds nothing")
 }
 
 // Another environment's numbers are not this one's.
@@ -501,5 +515,5 @@ func TestLastSequence_IgnoresOtherEnvironments(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "mine.ndjson"),
 		[]byte(`{"env":"theirs","seq":900}`+"\n"+`{"env":"mine","seq":3}`+"\n"), 0o600))
-	require.Equal(t, uint64(3), events.LastSequence(dir, "mine"))
+	require.Equal(t, uint64(3), events.LastSequence(dir, "mine", "mine"))
 }

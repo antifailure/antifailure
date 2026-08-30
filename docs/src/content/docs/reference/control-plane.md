@@ -26,9 +26,100 @@ is a process that fails in production rather than at deploy time.
 | `AF_PORT` | `8080` | The port to listen on. |
 | `AF_POOL_MAX` | `10` | Connections in the application pool. |
 | `AF_APP_BASE_URL` | unset | The public origin, used to build absolute links. |
+| `AF_SIGNIN_ALLOWLIST` | unset | GitHub logins, comma or whitespace separated, that may sign in. Unset means any GitHub account may sign in, which is the right default for an installation whose network already decides who reaches it. **Set but empty means nobody**, not everybody: a deployment that lost this value should close, not open. The mode is printed at startup. |
 | `AF_INSECURE_COOKIES` | unset | Set to `1` to drop the `Secure` attribute from cookies. For local development over plain HTTP and nothing else. |
 | `AF_MIGRATE` | unset | Set to `1` to apply migrations at startup. Requires `AF_MIGRATION_DATABASE_URL`. |
 | `AF_MIGRATION_DATABASE_URL` | unset | A connection string for a role that may run DDL. |
+| `AF_VERSION` | `dev` | The build's version, reported by `/readyz`. Stamped into the image at build time; setting it by hand only makes the endpoint lie. |
+| `AF_COMMIT` | `unknown` | The commit the build came from, reported by `/readyz`. Stamped the same way. |
+| `AF_GITHUB_APP_ID` | unset | The numeric App ID from the GitHub App's settings page. Needed together with the private key and the webhook secret; setting some and not others stops the process at startup rather than producing a half-working App. |
+| `AF_GITHUB_APP_PRIVATE_KEY` | unset | The PEM GitHub generated when the App's private key was created, or that PEM base64 encoded. Literal `\n` sequences are turned back into newlines, because most ways of getting a multi-line value into a container flatten it, and the resulting key fails with a message about DECODER routines that sends you somewhere else entirely. |
+| `AF_GITHUB_APP_WEBHOOK_SECRET` | unset | The webhook secret set on the App. Every delivery is verified against it before its body is parsed. Unset means `/webhooks/github` answers 503 rather than accepting unsigned deliveries. |
+| `AF_GITHUB_API_BASE` | `https://api.github.com` | Where the GitHub API lives. For GitHub Enterprise Server, and for tests. |
+| `AF_MODEL_PRICES` | unset | What a model costs, as `model=input/output` in US dollars per million tokens, comma separated: `claude-sonnet-5=3/15,gpt-4.1=2/8`. Adds to the built-in defaults rather than replacing them. A model with no price is **refused** rather than charged nothing, because a request that spends money and adds nothing to the total is a spend cap that does not cap spending. A malformed entry stops the process at startup rather than being skipped, since a skipped entry is a model silently falling back to another price. |
+| `AF_PROVIDER_KEY_SECRET` | unset | 32 bytes of base64, the secret that seals customers' Anthropic and OpenAI keys. Generate one with `openssl rand -base64 32`. Unset means keys cannot be stored at all: saving one is refused rather than written in the clear. It must not live in the same place as the database, or a database dump carries both halves. Anything other than 32 bytes stops the process at startup rather than failing later on the one action the feature exists for. |
+| `AF_CONSOLE_DIR` | `/app/console-out` | Where the console's build is. The published image carries it at the default and nothing needs setting. Point it elsewhere only if you build `console/` yourself. A directory that is not there is not fatal: the API serves normally, the start-up log says the console is missing, and every page answers with that sentence rather than a blank 404 that reads like a routing bug. |
+
+## Who may sign in
+
+Two gates, and they are not the same one.
+
+`AF_SIGNIN_ALLOWLIST` decides who may complete a GitHub sign-in at all. An
+account not on it is refused during the OAuth callback, before any row is
+written, so a refused person leaves no account behind.
+
+Membership decides what a signed-in person can see, and it is derived from
+GitHub rather than granted here: an account is a member of an organization only
+where a GitHub App installation exists for that organization. That installation
+row is written by `/webhooks/github` when somebody installs the App, so a
+control plane with no App configured has no installations, and everybody who
+signs in lands with no tenant. Somebody can
+therefore sign in successfully and have no tenant at all, which is what happens
+to any account added to the allowlist before it is invited anywhere.
+
+Both are needed. The allowlist is a closed door; the installation check is what
+makes an open one safe.
+
+## What role somebody gets
+
+The role comes from GitHub, read at sign-in with an installation token: an
+organization owner on GitHub becomes an `admin` here, and everybody else
+becomes a `member`.
+
+An owner on GitHub deliberately does not become an `owner` here. That role also
+holds `billing.manage`, and who pays is this application's decision rather than
+GitHub's. Promote somebody with the role control on the Members page; a role set
+that way is marked `manual` and is never overwritten by a later sign-in.
+
+Two cases where nothing changes rather than something being guessed. Sometimes
+GitHub will not say what somebody's role is: no App configured, a rate limit, an
+outage. An existing membership then keeps the role it already had, because a
+transient failure must not demote the only administrator out of their own
+organization. A first sign-in during the same failure gets `member`, because
+guessing upward would hand out administrative rights on a timeout.
+
+Sign-in can only ever speak for the person signing in. **Sync from GitHub** on
+the Members page reconciles everybody at once, and it is the only thing that
+takes access away: somebody removed from the GitHub organization keeps their
+role until it runs, because a person who has been removed has no reason to come
+back and sign in. It needs `members.manage`, it refuses an empty member list
+from GitHub rather than removing every owner, and it records what it changed in
+the audit log.
+
+## Health
+
+Two endpoints, answering two different questions. Point the right thing at the
+right one.
+
+| Endpoint | Answers | Touches the database |
+| --- | --- | --- |
+| `GET /health` | Is the process alive? | No |
+| `GET /readyz` | Can it serve a request? | Yes, one trivial query |
+
+`/health` is a static literal, and it stays one. A liveness probe restarts the
+container when it fails, so wiring it to the database turns a slow Postgres
+into a restart loop that makes the outage worse.
+
+`/readyz` takes a connection from the pool the application serves with and asks
+the database a question. It answers `200` with the build, or `503` with the
+reason:
+
+```json
+{ "ready": true, "version": "v0.2.0", "commit": "31ce3f7" }
+```
+
+```json
+{ "ready": false, "version": "v0.2.0", "commit": "31ce3f7",
+  "reason": "password authentication failed for user \"af_app\"" }
+```
+
+Use `/readyz` for a deploy gate, and check the `commit` as well as the status.
+The first deploy of this application to Azure answered `/health` with `200` for
+thirteen minutes while every endpoint that touched a table returned `500`: the
+schema had never applied, because the managed Postgres refused
+`CREATE EXTENSION pgcrypto`. A gate watching `/health` would have called that
+deploy a success. Checking the commit catches the other half, a rollout that
+silently did not happen and left the previous build serving.
 
 ## Signing in with a link
 

@@ -93,7 +93,7 @@ function MaskingPanel() {
         </div>
       </div>
       <Hairline />
-      <div className="flex min-w-0">
+      <div className="flex min-w-0 max-xl:flex-col">
         <div className="min-w-0 flex-1">
           <div className="px-4 py-2">
             <MonoLabel className="uppercase">production</MonoLabel>
@@ -123,8 +123,8 @@ function MaskingPanel() {
             </div>
           ))}
         </div>
-        <Hairline vertical />
-        <div className="min-w-0 flex-1 shadow-[inset_2px_0_0_#33bf00]">
+        <Hairline vertical className="max-xl:hidden" />
+        <div className="min-w-0 flex-1 shadow-[inset_2px_0_0_#33bf00] max-xl:shadow-[inset_0_2px_0_#33bf00]">
           <div className="flex items-center justify-between px-4 py-2">
             <MonoLabel className="uppercase text-[#285D49]">twin</MonoLabel>
             <MonoLabel className="uppercase">sanitized</MonoLabel>
@@ -160,11 +160,11 @@ function MaskingPanel() {
         <MonoLabel className="uppercase">notes.body</MonoLabel>
         <MonoLabel>free-text PII</MonoLabel>
       </div>
-      <div className="grid grid-cols-2 px-4 pb-3">
-        <p className="pr-3 font-mono text-[11px] leading-5 tracking-extra-tight text-black/70">
+      <div className="grid grid-cols-2 px-4 pb-3 max-xl:grid-cols-1">
+        <p className="pr-3 font-mono text-[11px] leading-5 tracking-extra-tight text-black/70 max-xl:pr-0">
           email ajay@acme.com if the card fails
         </p>
-        <p className="border-l border-black/10 pl-4 font-mono text-[11px] leading-5 tracking-extra-tight text-black/70">
+        <p className="border-l border-black/10 pl-4 font-mono text-[11px] leading-5 tracking-extra-tight text-black/70 max-xl:border-l-0 max-xl:border-t max-xl:pl-0 max-xl:pt-2">
           email [redacted] if the card fails
         </p>
       </div>
@@ -261,7 +261,7 @@ function SubsetPanel() {
       </div>
       <Hairline />
       <div className="overflow-x-auto">
-        <table className="w-full text-left">
+        <table className="w-full text-left max-md:min-w-[32rem]">
           <thead>
             <tr className="border-b border-black/8">
               {["table", "row", "parent", "fate", "reason"].map((col) => (
@@ -337,7 +337,7 @@ function LifecyclePanel() {
 
 export function SafeStatePage() {
   return (
-    <PageShell>
+    <PageShell inset>
       <PageHero
         eyebrow="Safe State Engine"
         title="Production-shaped Postgres without production identities."
@@ -374,7 +374,7 @@ export function SafeStatePage() {
         </Split>
       </PageSection>
       <PageSection>
-        <Split reverse visual={<LifecyclePanel />}>
+        <Split visual={<LifecyclePanel />}>
           <PageHeading title="<strong>Postgres first.</strong> Deep enterprise data platforms can be an external provider, not a rebuild." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             The built-in engine covers common Postgres cases: restore, subset, mask, delete credentials,
@@ -410,7 +410,7 @@ export function SafeStatePage() {
       <RelatedGrid
         items={[
           { href: "/product/firewall", title: "Side-Effect Firewall", description: "The twin cannot act on the real world." },
-          { href: "/security", title: "Security", description: "Fail closed. Data stays in your boundary." },
+          { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
           { href: "/product/fidelity", title: "Fidelity Graph", description: "Volume and distribution actually restored." },
         ]}
       />
