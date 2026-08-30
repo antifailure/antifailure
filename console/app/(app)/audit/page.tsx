@@ -49,7 +49,7 @@ const MAY_EXPORT = new Set(["owner", "admin"]);
 function Integrity() {
   const state = useApi<Chain>(() => query("audit.verify"), []);
   return (
-    <Loaded state={state} skeleton={<div className="h-9 w-56 animate-pulse rounded-[5px] bg-[rgba(16,16,16,0.07)]" />}>
+    <Loaded state={state} skeleton={<div className="h-9 w-56 rounded-[5px] bg-[rgba(16,16,16,0.07)]" />}>
       {(chain) => (
         <div className="flex flex-wrap items-center gap-3">
           <Badge tone={chain.ok ? "pass" : "fail"}>{chain.ok ? "chain intact" : "chain broken"}</Badge>

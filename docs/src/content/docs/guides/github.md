@@ -27,6 +27,59 @@ reading the results.
 
 **`off`** disables the integration. `af up` still works locally.
 
+## What the App must be granted
+
+Repository permissions, in `app` mode:
+
+| Permission | Access | What needs it |
+| --- | --- | --- |
+| Metadata | read | Mandatory for every App. |
+| Contents | read | Reading the manifest and the workflow file. |
+| Pull requests | write | Leaving the report comment, and opening the pull request a masking rule change becomes. |
+| Actions | write | Starting a run from the console. Without it, **Create environment**, **Run agents** and **Run load** answer 404. |
+
+Organization permissions: Members, read. That is what membership sync reads, and
+it is the difference between everybody landing with no tenant and the console
+knowing who belongs where.
+
+Grant Actions write only if you use the console's controls. GitHub answers a
+dispatch with 404 whether the App lacks the permission, the workflow file is
+missing, or the App was never installed on that repository, so a missing
+permission looks exactly like a missing file.
+
+## Starting a run from the console
+
+The console's **Create environment**, **Run agents** and **Run load** controls
+do not run anything on the control plane. They dispatch a run of your own
+workflow, in your own repository, on the branch the environment is on. Your
+database, your secrets and your captured traffic stay where they already are.
+
+That needs two things. The App has Actions write, above. And the workflow
+accepts a dispatch:
+
+```yaml
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      command:     { type: choice, options: [up, agents, load], default: up }
+      workflows:   { required: false, default: '' }
+      duration:    { required: false, default: '' }
+      scale:       { required: false, default: '' }
+```
+
+`examples/github-workflow.yml` carries the whole file, including the step that
+turns each input into the flag it belongs to. Two things about this cost an
+afternoon if you meet them the hard way: GitHub reads the trigger list from the
+**default branch**, so adding `workflow_dispatch` on a feature branch alone
+changes nothing, and a dispatch to a workflow without it answers 404 rather
+than saying what is wrong.
+
+The control plane records nothing about the environment when it dispatches.
+The run appears in your Actions tab, and the environment appears in the console
+when the engine reports it, the same way it does for a run you started
+yourself.
+
 ## Comments
 
 `comment: true` posts one comment per pull request and edits it in place rather

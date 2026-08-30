@@ -1,14 +1,17 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ago, bytes, when } from "@/lib/format";
-import { query, useApi } from "@/lib/api";
+import { mutate, query, useApi } from "@/lib/api";
+import { may } from "@/lib/roles";
+import { useSessionContext } from "@/components/session";
 import {
   Badge,
   Button,
   Card,
   Empty,
+  Field,
   Loaded,
   Page,
   Row,
@@ -17,8 +20,16 @@ import {
   TableWrap,
   Td,
   Th,
+  inputClass,
   toneFor,
 } from "@/components/ui";
+
+interface Environment {
+  env_id: string;
+  branch: string;
+  state: string;
+  repository: string;
+}
 
 interface Run {
   id: string;
@@ -193,7 +204,163 @@ function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
   );
 }
 
+
+/**
+ * Starting a run against an environment that is already up.
+ *
+ * Deliberately not `af ci`, which brings an environment up, runs everything and
+ * tears it down again. Somebody pressing this has an environment and wants one
+ * more thing run against it, so the dispatch carries the command and the
+ * console says which environment it is going to.
+ *
+ * The environments offered are the ones that are not torn down. Dispatching at
+ * a torn down environment is refused by the control plane before GitHub is
+ * asked, and offering it here would be a control that exists to be refused.
+ */
+function Start({ onStarted }: { onStarted: () => void }) {
+  const session = useSessionContext();
+  const environments = useApi<{ environments: Environment[] }>(
+    () => query("environments.list", { limit: 100 }),
+    [],
+  );
+  const csrf = session.data?.csrfToken ?? "";
+  const [envId, setEnvId] = useState("");
+  const [kind, setKind] = useState<"agents" | "load">("agents");
+  const [workflows, setWorkflows] = useState("");
+  const [seconds, setSeconds] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [asked, setAsked] = useState<string | null>(null);
+
+  return (
+    <Card
+      title="Start a run"
+      note="Dispatches your workflow in your repository, on the branch the environment is on."
+    >
+      <Loaded state={environments} skeleton={<TableSkeleton rows={1} cols={3} />}>
+        {(data) => {
+          const live = data.environments.filter((e) => e.state !== "torn_down");
+          if (live.length === 0) {
+            return (
+              <Empty title="No environment to run against">
+                A run needs an environment that is up. Ask for one on the
+                Environments page, and this fills when the engine reports it.
+              </Empty>
+            );
+          }
+          const chosen = live.find((e) => e.env_id === envId)?.env_id ?? live[0]!.env_id;
+          return (
+            <form
+              className="px-4 py-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setBusy(true);
+                setError(null);
+                setAsked(null);
+                try {
+                  if (kind === "agents") {
+                    const only = workflows
+                      .split(",")
+                      .map((w) => w.trim())
+                      .filter(Boolean);
+                    await mutate(
+                      "agents.run",
+                      { envId: chosen, ...(only.length ? { workflows: only } : {}) },
+                      csrf,
+                    );
+                  } else {
+                    const n = Number(seconds);
+                    await mutate(
+                      "load.run",
+                      {
+                        envId: chosen,
+                        ...(Number.isFinite(n) && n > 0 ? { seconds: Math.round(n) } : {}),
+                      },
+                      csrf,
+                    );
+                  }
+                  setAsked(`Asked GitHub to run ${kind} against ${chosen}.`);
+                  onStarted();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "That did not work.");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <div className="grid gap-3 sm:grid-cols-[2fr_1fr_2fr_auto] sm:items-end">
+              <Field label="Environment">
+                <select
+                  className={inputClass}
+                  value={chosen}
+                  onChange={(e) => setEnvId(e.target.value)}
+                >
+                  {live.map((e) => (
+                    <option key={e.env_id} value={e.env_id}>
+                      {e.env_id} ({e.branch})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Run">
+                <select
+                  className={inputClass}
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value === "load" ? "load" : "agents")}
+                >
+                  <option value="agents">agents</option>
+                  <option value="load">load</option>
+                </select>
+              </Field>
+              {kind === "agents" ? (
+                <Field label="Workflows">
+                  <input
+                    className={inputClass}
+                    value={workflows}
+                    onChange={(e) => setWorkflows(e.target.value)}
+                    placeholder="sign-up, checkout"
+                  />
+                </Field>
+              ) : (
+                <Field label="Seconds">
+                  <input
+                    className={inputClass}
+                    inputMode="numeric"
+                    value={seconds}
+                    onChange={(e) => setSeconds(e.target.value)}
+                    placeholder="60"
+                  />
+                </Field>
+              )}
+              <Button type="submit" variant="primary" busy={busy}>
+                {busy ? "Asking" : "Start"}
+              </Button>
+              </div>
+              {/* Under the row rather than in a Field: a hint inside one grid
+                  cell makes it taller, and items-end then lifts that input
+                  clear of the ones beside it. */}
+              {error ? (
+                <p role="alert" className="mt-2.5 text-[12px] leading-5 text-fail">
+                  {error}
+                </p>
+              ) : (
+                <p role={asked ? "status" : undefined} className="mt-2.5 text-[12px] leading-5 text-dim">
+                  {asked ??
+                    (kind === "agents"
+                      ? "Workflows are comma separated. Empty runs all of them."
+                      : "Empty leaves the command's own default, which is a minute.")}
+                </p>
+              )}
+            </form>
+          );
+        }}
+      </Loaded>
+    </Card>
+  );
+}
+
 function Runs() {
+  const session = useSessionContext();
   const params = useSearchParams();
   const router = useRouter();
   const selected = params.get("run");
@@ -215,6 +382,12 @@ function Runs() {
       title="Runs"
       lede="Every run across every environment, newest first. A run with failing verdicts is one that found something."
     >
+      {may(session.data?.role, "agents.run") ? (
+        <div className="mb-6">
+          <Start onStarted={state.reload} />
+        </div>
+      ) : null}
+
       <Card title="Recent runs">
         <Loaded state={state} skeleton={<TableSkeleton rows={6} cols={5} />}>
           {(data) =>

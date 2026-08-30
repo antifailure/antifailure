@@ -11,6 +11,7 @@ import {
   IconMasking,
   IconMembers,
   IconNetwork,
+  IconPlan,
   IconRuns,
   IconSignOut,
   LogoMark,
@@ -26,6 +27,7 @@ const NAV = [
   { href: "/network", label: "Network", Icon: IconNetwork },
   { href: "/audit", label: "Audit", Icon: IconAudit },
   { href: "/members", label: "Members", Icon: IconMembers },
+  { href: "/plan", label: "Plan", Icon: IconPlan },
   { href: "/keys", label: "Provider keys", Icon: IconKeys },
 ];
 

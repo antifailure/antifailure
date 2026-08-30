@@ -35,7 +35,7 @@ export function WithRepository({
 
   if (state.status === "loading") {
     return (
-      <div className="h-9 w-[260px] animate-pulse rounded-[5px] bg-[rgba(16,16,16,0.07)]" role="status">
+      <div className="h-9 w-[260px] rounded-[5px] bg-[rgba(16,16,16,0.07)]" role="status">
         <span className="sr-only">Loading repositories</span>
       </div>
     );
