@@ -15,6 +15,18 @@ var ruleTitle = map[Rule]string{
 	RuleForeignKeyNotValid: "foreign key added without NOT VALID",
 	RuleRenameColumnInUse:  "column renamed while something still reads it",
 	RuleDropColumnInView:   "column dropped while a view still selects it",
+
+	RuleNoLockTimeout:          "no lock_timeout, so a lock wait becomes an outage",
+	RuleSetNotNull:             "NOT NULL set on a column that already exists",
+	RuleCheckNotValid:          "CHECK constraint added without NOT VALID",
+	RuleUniqueConstraint:       "unique constraint that builds its index in place",
+	RuleBackfillWithDDL:        "rows changed in the same transaction as the schema",
+	RuleDropIndexNotConcurrent: "index dropped without CONCURRENTLY",
+	RuleReindexNotConcurrent:   "index rebuilt without CONCURRENTLY",
+	RuleVacuumFull:             "VACUUM FULL, which rewrites the table offline",
+	RuleCluster:                "CLUSTER, which rewrites the table offline",
+	RuleDropTable:              "table dropped",
+	RuleTruncate:               "table truncated",
 }
 
 // Title is the rule's one line summary.
