@@ -30,10 +30,10 @@ const SLOT = { x: 126, y: 196 };
 const GW_X = 322;
 
 const RULES = [
-  { at: 0.72, key: "stripe", label: "stripe:simulate" },
+  { at: 0.72, key: "stripe", label: "stripe:mock" },
   { at: 0.88, key: "sendgrid", label: "sendgrid:capture" },
-  { at: 1.04, key: "slack", label: "slack:store" },
-  { at: 1.2, key: "s3", label: "s3:clone-bucket" },
+  { at: 1.04, key: "slack", label: "slack:capture" },
+  { at: 1.2, key: "sandbox", label: "auth0:sandbox" },
   { at: 1.36, key: "deny", label: "*:deny" },
 ] as const;
 
@@ -112,7 +112,7 @@ const PACKETS: PacketDef[] = [
     id: "slack",
     method: "POST",
     path: "/hooks",
-    host: "slack.hooks",
+    host: "hooks.slack.com",
     suffix: "91c0",
     t0: 6.2,
     travel: 0.5,
@@ -125,16 +125,21 @@ const PACKETS: PacketDef[] = [
     rest: { x: 408, y: 448 },
   },
   {
-    id: "s3",
-    method: "PUT",
-    path: "/prod-bucket",
-    host: "s3.amazonaws.com",
-    suffix: "s3a1",
+    // Sandbox mode, not a bucket rewrite. Nothing in the engine rewrites an S3
+    // bucket name; *.amazonaws.com is classified as SES and captured. What the
+    // proxy really does with a rewrite shape is swap a placeholder credential
+    // for the provider's sandbox key on the way out, so the application never
+    // holds a working key and the mistake cannot be made.
+    id: "sandbox",
+    method: "POST",
+    path: "sk_live_…",
+    host: "tenant.auth0.com",
+    suffix: "sbx1",
     t0: 8.0,
     travel: 0.72,
     hitDur: 0.14,
     kind: "rewrite",
-    rule: "s3",
+    rule: "sandbox",
     rewriteAt: 0.42,
     hit: { x: GW_X, y: 186 },
     ctrl: { x: 228, y: 176 },
@@ -201,14 +206,14 @@ const LEDGER: LedgerRow[] = [
   {
     id: "stripe1",
     typeStart: 2.18,
-    body: "POST /v1/charges  $49.00  simulate  clone-local  cus_sim_11",
+    body: "POST /v1/charges  $49.00  mock  clone-local  cus_sim_11",
     receipt: "ch_sim_08f2",
     tone: "ok",
   },
   {
     id: "stripe2",
     typeStart: 2.48,
-    body: "POST /v1/charges  $49.00  simulate  clone-local  cus_sim_11",
+    body: "POST /v1/charges  $49.00  mock  clone-local  cus_sim_11",
     receipt: "ch_sim_08f3",
     tone: "ok",
   },
@@ -222,15 +227,15 @@ const LEDGER: LedgerRow[] = [
   {
     id: "slack",
     typeStart: 6.82,
-    body: "POST slack.hooks  store  preview  channel:releases",
+    body: "POST hooks.slack.com  capture  recorded, never posted",
     receipt: "evt_sim_91",
     tone: "store",
   },
   {
-    id: "s3",
+    id: "sandbox",
     typeStart: 8.92,
-    body: "PUT s3.amazonaws.com/twin-bucket  clone-bucket  write-local",
-    receipt: "obj_sim_44",
+    body: "POST tenant.auth0.com  sandbox  key swapped on the way out",
+    receipt: "req_sbx_44",
     tone: "ok",
   },
   {
@@ -440,7 +445,7 @@ function livePacket(t: number, def: PacketDef): LivePacket {
 function PacketCapsule({ live }: { live: LivePacket }) {
   const { def, x, y, opacity, rot, rewrite, strike, fragment } = live;
   const rewritten = rewrite > 0.55;
-  const pathLabel = def.id === "s3" && rewritten ? "/twin-bucket" : def.path;
+  const pathLabel = def.id === "sandbox" && rewritten ? "sk_test_…" : def.path;
   const hostLabel = def.host.length > 18 ? `${def.host.slice(0, 16)}…` : def.host;
 
   return (
@@ -510,7 +515,7 @@ function PacketCapsule({ live }: { live: LivePacket }) {
           >
             {def.suffix}
           </text>
-          {def.id === "s3" && rewrite > 0 && !rewritten ? (
+          {def.id === "sandbox" && rewrite > 0 && !rewritten ? (
             <line
               x1={-8}
               y1={-2.4}
@@ -987,7 +992,7 @@ export function FirewallScene() {
 
             <rect x="28" y="388" width="150" height="72" rx="2" fill="#fff" stroke="rgba(0,0,0,0.12)" />
             <text x="40" y="408" fill="rgba(0,0,0,0.45)" fontSize="10" fontFamily="var(--font-mono), ui-monospace, monospace">
-              stripe · simulate
+              stripe · mock
             </text>
             <text x="40" y="428" fill="#111" fontSize="11" fontFamily="var(--font-mono), ui-monospace, monospace">
               clone-local ledger
@@ -1020,7 +1025,7 @@ export function FirewallScene() {
               fontFamily="var(--font-mono), ui-monospace, monospace"
               opacity={0.4 + slackGhost * 0.6}
             >
-              slack.hooks · stored
+              slack · captured
             </text>
             <text
               x="412"
@@ -1045,13 +1050,13 @@ export function FirewallScene() {
 
             <rect x="190" y="496" width="196" height="52" rx="2" fill="#fff" stroke="rgba(0,0,0,0.12)" />
             <text x="202" y="516" fill="rgba(0,0,0,0.45)" fontSize="10" fontFamily="var(--font-mono), ui-monospace, monospace">
-              s3 · clone-bucket
+              auth0 · sandbox
             </text>
             <text x="202" y="534" fill="#111" fontSize="10" fontFamily="var(--font-mono), ui-monospace, monospace">
               <tspan fill="rgba(0,0,0,0.35)" style={{ textDecoration: clock >= 8.55 ? "line-through" : "none" }}>
-                prod-bucket
+                sk_live_…
               </tspan>
-              <tspan fill="#111">{clock >= 8.62 ? "  twin-bucket" : ""}</tspan>
+              <tspan fill="#111">{clock >= 8.62 ? "  sk_test_…" : ""}</tspan>
             </text>
 
             {lives.map((live) => (
