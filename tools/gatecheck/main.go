@@ -367,6 +367,20 @@ var exemptFromGate = map[string]string{
 		"which is where a scan whose input is a moving database belongs. Run it by " +
 		"hand with `just vuln`.",
 
+	"tool dogfood": "" +
+		"Its input is not in the tree either, and it is not one thing. tools/dogfood " +
+		"runs the product against itself: it needs a container runtime, a staging " +
+		"database to copy, a browser, and about twenty minutes, and what it " +
+		"produces is a report about the product rather than a verdict on the diff. " +
+		"`just gate` has to work on a plane and has to finish while somebody is " +
+		"still looking at it, and this does neither. " +
+		"What IS a function of the tree is the harness's own behaviour, and " +
+		"`go test ./tools/dogfood` covers it inside `just test-tools`, which " +
+		"`gate` runs: that the budgets are well formed, that a phase is timed " +
+		"from the events that bound it, and that a run with a leak is not green. " +
+		"It runs on every pull request and nightly in dogfood.yml, which is where " +
+		"a check whose input is a live environment belongs.",
+
 	"tool azguard": "" +
 		"Its answer is a property of the SUBSCRIPTION, not of the tree. " +
 		"`azguard region` asks Azure whether a region can actually create this " +
@@ -385,7 +399,6 @@ var exemptFromGate = map[string]string{
 		"than passed, and a positive control asserts a good region IS allowed " +
 		"so that a guard which refuses everything cannot pass the suite. " +
 		"It runs in infra.yml's plan job, which has a credential.",
-
 	"tool cost": "" +
 		"Its input is not in the tree. tools/cost reads a Terraform plan, and a " +
 		"plan only exists after authenticating to Azure and resolving every " +

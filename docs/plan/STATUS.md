@@ -446,6 +446,44 @@ community engine, and `af up` calls them. That matters: they shipped once with
 no call site anywhere, which is a socket nothing is plugged into and is
 indistinguishable from one that works until somebody relies on it.
 
+## Dogfooding
+
+Antifailure run against Antifailure's own control plane. The full write-up,
+including every finding and what is not built, is in
+[docs/plan/notes/dogfood.md](notes/dogfood.md).
+
+| Piece | State | Notes |
+| --- | --- | --- |
+| `antifailure.yaml` and `masking.yaml` for the control plane | proven | An ordinary manifest with no special case in it. `af explain` resolves it and `af golden refresh` runs it end to end. |
+| What the preview runs | proven | The shipped control plane image and nothing else: it serves its own console as a static export on its own origin, which is what a customer gets. A second web application was written on this branch, and it worked; it is deleted here rather than dogfooded, because a preview that exercises a console the product does not ship proves nothing about the console it does. |
+| The console reaches the local gate | proven | A correction to my own first claim here, which said the console had no gate at all. It has one: main's `www` job builds it and then asserts every route the control plane routes to was exported, which is stricter than what I was about to add. What was missing is that `just gate` did not, so a type error in `console/` passed locally and failed CI twenty minutes later, against a file whose own first line says green here means green there. `just typecheck` builds it now; CI needed nothing. |
+| Signing in with a link | proven | `web/apps/api`, migration 0012, 14 tests covering the race, expiry, open redirect, and fixation. It exists because a preview environment has no route to github.com, which is the product working rather than a problem to solve. The console offers the form only when the API reports mail is configured, on the session endpoint, because one static export is served by every installation and a sign-in method that cannot work here must not be on the page. |
+| `af golden refresh` on the control plane | proven | Copy, mask, verify, publish: 19 tables, 2620 rows, 84 columns verified, 28s. It took six engine fixes to get there, listed in the note. |
+| Recorded model answers | proven | `AF_MODEL_CASSETTE`, 11 tests. A replay that misses refuses rather than calling the model or silently degrading. |
+| `af up` on the control plane | written | Branches the golden, builds both images, issues an environment certificate, starts the egress proxy, and runs migrations. Reached the migration step and stopped there on a variable name the published image expects and the engine does not inject, which is fixed. Not yet observed green end to end on one machine. |
+| `af test`, `af insights`, `af load smoke` on the control plane | planned | Configured in the manifest, and none of the three has run against the control plane. |
+| The builder | proven | Every image used the deprecated legacy builder, at roughly 25 seconds a step against a 34 step Dockerfile. BuildKit is negotiated from the daemon's ping, with a legacy fall back that says so, and its status stream is decoded into the same redacted log. |
+| `tools/dogfood` | proven | Runs `af ci` the way a customer does and adds three things: a budget per step taken from the environment's own event stream, a JSON record per run, and a leak check afterwards. Ten tests. Run against a real `af` binary: it times each step, applies the budget, writes the record, and exits non-zero on a failure. |
+| `.github/workflows/dogfood.yml` | written | A pull request job against the control plane, a nightly against the corpus with a load smoke, both in recorded model mode. Pushed, and not yet observed green. |
+| The invariants in this repository's own manifest | proven | All four were written as `SELECT count(*)` and every one of them could never fail: an invariant holds when its statement returns no rows, and a bare count returns one row saying zero. `af explain` refused the manifest and named all four. Four checks that read as evidence and were not, found in this repository's own file by this repository's own validator. |
+| Gates for what the suite is blind to | proven | Twenty-nine gates were passing while four defects sat in the tree, and the pattern is one thing: the suite checks one artifact against a rule, and every one of those four was two artifacts each individually valid and jointly wrong. Three are now caught mechanically as well: this repository's own manifest is validated by `just examples` and ci.yml rather than only the examples', the transforms page's hand-written prose is checked against the registry its table is generated from, and `af mask plan` runs in the pipeline. Each was verified by reintroducing the original defect and watching it fail. The fourth, two consoles doing the same job, has no cheap mechanical form. |
+| The ten-green streak | planned | **No streak exists and none is claimed.** |
+
+What it found: forty-six defects, forty-five fixed with regression tests,
+one issue open at
+[antifailure/antifailure#24](https://github.com/antifailure/antifailure/issues/24).
+Every one of them was invisible in the files, and five are the same shape: a
+thing that was written, tested, documented, and never called.
+
+The two that matter most: a golden could not be made of any database using
+row-level security, which is the pattern this product's own documentation
+recommends; and masking rules did not follow a table to its partitions, so a
+column explicitly marked `preserve` was emptied through a partition with
+nothing saying so. Two more were about scoping rather than correctness: `af up`
+branched whichever verified golden was newest regardless of which manifest made
+it, so a preview of one project could come up holding a masked copy of another
+project's database.
+
 ## Phase 14. Scaling
 
 | Sub-phase | State | Notes |

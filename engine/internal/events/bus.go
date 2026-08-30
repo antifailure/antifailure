@@ -64,8 +64,6 @@ type sinkState struct {
 // Option configures a Bus.
 type Option func(*Bus)
 
-// WithIDFunc replaces the event identifier generator. Tests use it to get
-// stable identifiers.
 func WithIDFunc(f func() string) Option {
 	return func(b *Bus) { b.idFn = f }
 }

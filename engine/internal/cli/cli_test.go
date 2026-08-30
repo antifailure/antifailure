@@ -600,3 +600,29 @@ func TestExecute_IgnoresTheProcessArguments(t *testing.T) {
 		"a nil argument list picked up this test binary's flags instead of meaning none")
 	require.Contains(t, out.String(), "af")
 }
+
+// -o means the same thing on every command.
+//
+// The regression: a local --output on `af ci` shadowed the persistent one, so
+// -o meant "a file to write" there and "text or json" everywhere else.
+// `af ci -o json` wrote the pull request comment to a file called `json`,
+// silently, and the one command written for CI had no machine readable
+// output.
+func TestCI_DoesNotShadowTheGlobalOutputFlag(t *testing.T) {
+	t.Parallel()
+	help := runCLI(t, t.TempDir(), nil, "ci", "--help")
+	require.Zero(t, help.code)
+
+	require.Contains(t, help.stdout, "--report",
+		"the report path needs a name of its own")
+	require.Contains(t, help.stdout, "Output format: text or json",
+		"-o has to still mean on af ci what it means everywhere else")
+
+	// The local flag, if one is ever added back, must not take -o. The help
+	// lists global flags separately, so a shorthand in the command's own
+	// section is the thing to refuse.
+	own, _, found := strings.Cut(help.stdout, "Global flags:")
+	require.True(t, found, "the help separates a command's flags from the global ones")
+	require.NotContains(t, own, "-o, --output",
+		"af ci defines its own -o again, which is the collision this guards")
+}

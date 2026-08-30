@@ -221,6 +221,11 @@ type Assignment struct {
 	// user wrote. A plan shows these separately so somebody can see what was
 	// decided for them.
 	FromDefault bool
+	// Unmatched reports that no rule named this column at all, so the
+	// transform it carries is the fail-closed default rather than a decision
+	// anybody made. A plan still lists it as a question, because "emptied
+	// because nobody looked" is not the same fact as "emptied on purpose".
+	Unmatched bool
 	// Problem, when set, says why this column cannot be masked as assigned.
 	Problem string
 }
@@ -249,6 +254,62 @@ func (rs *RuleSet) Assign(tables []Table) []Assignment {
 				best = score
 				a.Transform, a.Link, a.Why = r.Transform, r.Link, r.Why
 				a.FromDefault = defaults[r.describe()+"/"+r.Transform]
+			}
+
+			// Nothing matched. A column nobody has classified is not a column
+			// anybody has confirmed is safe, so free text and JSON are emptied
+			// rather than copied.
+			//
+			// This is the documented behaviour and it was not the implemented
+			// one. `Assign` used to leave an unmatched column with no transform,
+			// `BuildPlan` skips a column with no transform, and the result was
+			// that a `notes` column nobody had written a rule for was copied
+			// verbatim into every preview environment. The plan did report it,
+			// which is why this was survivable, and reporting is not the same
+			// as refusing: a report is read once and a default runs every time.
+			//
+			// Only the types that can hold a sentence. A bigint called quantity
+			// needs no rule and emptying it would break every environment for
+			// nothing, which is how a fail-closed default gets turned off.
+			if a.Transform == "" && looksSensitive(c) {
+				a.Unmatched = true
+				switch {
+				case isJSON(c):
+					// A JSON column is emptied whether or not it can hold
+					// null, because `empty_json` writes a value rather than
+					// removing one. That matters: `jsonb NOT NULL DEFAULT '{}'`
+					// is the ordinary way to hold a payload or a detail blob,
+					// every one of those is free-form, and nullify is refused
+					// on it. Without this the default for the commonest shape
+					// of free-form column was to copy it.
+					a.Transform = "empty_json"
+					a.Link = ""
+					a.Why = "No rule names this column, and free-form JSON holds whatever " +
+						"the code that wrote it decided to include."
+				case c.Generated:
+					// The database computes it, so nothing can be written to
+					// it at all. Assigning a transform here would turn a
+					// column nobody classified into a plan that refuses to
+					// run, which is a fail-closed default that closes the
+					// wrong thing: the whole environment rather than the one
+					// column.
+					a.Why = "No rule names this column, and the database computes it, " +
+						"so it cannot be emptied. Its value comes from columns that can be."
+				case !c.Nullable:
+					// It cannot hold null, so the default cannot apply. Said
+					// out loud rather than silently skipped: this is the one
+					// case where an unclassified column is copied as it is,
+					// and the person reading the plan is the one who can fix
+					// it with a rule.
+					a.Why = "No rule names this column and it cannot hold null, so it is " +
+						"copied unchanged. Give it a transform, or the verification scan " +
+						"is the only thing standing between it and a preview environment."
+				default:
+					a.Transform = "nullify"
+					a.Link = ""
+					a.Why = "No rule names this column, and a column nobody has classified " +
+						"is not one anybody has confirmed is safe."
+				}
 			}
 
 			// Columns holding the same kind of thing mask identically unless
@@ -305,12 +366,20 @@ func checkFeasible(a Assignment) Assignment {
 // Unclassified returns the assignments nothing matched.
 //
 // These are the point of the whole exercise. A column called customer_notes
-// that no rule covers holds whatever somebody typed, and shipping it because
-// nobody wrote a rule is the failure this reports rather than allows.
+// that no rule covers holds whatever somebody typed. It is emptied, because
+// the safe default is the one that runs when nobody is paying attention, and
+// it is listed here because being emptied is not the same as being understood:
+// a column that should have been `free_text` so the layout still gets three
+// paragraphs, or `preserve` because it holds a currency code, is a rule
+// somebody has to write.
 func Unclassified(assignments []Assignment) []Assignment {
 	var out []Assignment
 	for _, a := range assignments {
-		if a.Transform == "" && looksSensitive(a.Column) {
+		// Keyed on Unmatched rather than on an empty transform, because these
+		// now carry one: they are emptied by default, and they are still the
+		// list somebody has to work through. A column that is emptied because
+		// nobody looked at it is a question, not an answer.
+		if a.Unmatched {
 			out = append(out, a)
 		}
 	}
@@ -329,6 +398,15 @@ func Unclassified(assignments []Assignment) []Assignment {
 // column in the schema would produce a list nobody reads, which is the same as
 // producing no list at all. Free text and unbounded strings are where anything
 // unexpected actually lives.
+// isJSON reports whether a column holds JSON, which decides how it is emptied.
+func isJSON(c ColumnInfo) bool {
+	switch strings.ToLower(c.Type) {
+	case "json", "jsonb":
+		return true
+	}
+	return false
+}
+
 func looksSensitive(c ColumnInfo) bool {
 	switch strings.ToLower(c.Type) {
 	case "text", "character varying", "character", "json", "jsonb", "xml":

@@ -2,6 +2,7 @@ package build
 
 import (
 	"archive/tar"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -42,8 +43,39 @@ type Context struct {
 	// Excluded counts the paths .dockerignore left out, which is the number
 	// worth printing when a build is slower than somebody expected.
 	Excluded int
+	// Largest names the top level entry holding most of Bytes, and
+	// LargestBytes is how much of it that entry is.
+	//
+	// A build context is almost never large on purpose. It is large because
+	// one directory nobody thought about is in it, and the only useful thing
+	// to say about a slow build is which directory. Knowing the total is
+	// what makes somebody ask; knowing the name is what makes them fix it.
+	Largest      string
+	LargestBytes int64
 	// tarball holds the built archive.
 	tarball []byte
+}
+
+// Oversized reports whether this context is large enough to be worth
+// mentioning, which is a different question from whether it is refused.
+//
+// The refusal at DefaultMaxBytes catches a mistake so large the build cannot
+// work. This catches the mistake that does work, slowly, forever: a context
+// under the limit is sent in full on every build, hashed, and held in memory
+// twice, and nothing about the run says why it takes four minutes. The
+// threshold is set where a source tree stops being plausible. Nothing a
+// compiler reads is a quarter of a gigabyte; a directory of dependencies or
+// build output is, immediately.
+func (c *Context) Oversized() bool { return c.Bytes >= OversizedBytes }
+
+// Explain describes the context in one line, for a build that is about to
+// send more than anybody intended.
+func (c *Context) Explain() string {
+	s := fmt.Sprintf("%s in %d files", humanBytes(c.Bytes), len(c.Files))
+	if c.Largest != "" && c.Bytes > 0 {
+		s += fmt.Sprintf(", %d%% of it %s", c.LargestBytes*100/c.Bytes, c.Largest)
+	}
+	return s
 }
 
 // ContextOptions configure a context walk.
@@ -69,6 +101,19 @@ const (
 	DefaultMaxBytes = 2 << 30 // 2 GiB
 	DefaultMaxFiles = 200_000
 )
+
+// OversizedBytes is where a build context stops looking like source.
+//
+// A quarter of a gigabyte. The engine's own tree is 5 MiB of Go; this
+// repository's control plane build sent 598 MiB, all but 2 of it a marketing
+// site the image has no use for, because the ignore file named the six
+// sibling directories its author thought of and not the seventh.
+const OversizedBytes int64 = 256 << 20
+
+// maxInt is the largest value an int holds on this platform. The size limits
+// above are int64 and a 32 bit build cannot allocate 2 GiB, so the one place
+// that converts a byte count to an int checks against this first.
+const maxInt = int(^uint(0) >> 1)
 
 func (o ContextOptions) withDefaults() ContextOptions {
 	if o.MaxBytes <= 0 {
@@ -139,8 +184,14 @@ func NewContext(opts ContextOptions) (*Context, error) {
 			excluded++
 			if d.IsDir() {
 				// Skipping the whole subtree is what makes ignoring
-				// node_modules fast rather than merely correct.
-				return fs.SkipDir
+				// node_modules fast rather than merely correct. It is skipped
+				// only when nothing inside it could be re-included, because
+				// pruning a directory that holds an exception is how a file
+				// somebody explicitly asked for goes missing with no error.
+				if !ig.MayHoldAnException(rel) {
+					return fs.SkipDir
+				}
+				return nil
 			}
 			return nil
 		}
@@ -201,9 +252,46 @@ func NewContext(opts ContextOptions) (*Context, error) {
 	// happened to return. Two clones of one commit must hash the same.
 	sort.Slice(entries, func(a, b int) bool { return entries[a].rel < entries[b].rel })
 
-	var buf strings.Builder
+	// Which top level entry the weight is in. Top level rather than deepest,
+	// because the fix is a line in .dockerignore and that line names a
+	// directory somebody recognizes. "www" is a thing to exclude;
+	// "www/node_modules/.pnpm/next@15.5.4/dist" is a thing to stare at.
+	byTop := make(map[string]int64, 16)
+	for _, e := range entries {
+		top, _, nested := strings.Cut(e.rel, "/")
+		if !nested {
+			top = e.rel
+		} else {
+			top += "/"
+		}
+		byTop[top] += e.size
+	}
+	var largest string
+	var largestBytes int64
+	for top, n := range byTop {
+		// Ties broken by name so two clones report the same thing.
+		if n > largestBytes || (n == largestBytes && top < largest) {
+			largest, largestBytes = top, n
+		}
+	}
+
+	// Sized from the walk rather than grown from nothing. A buffer that
+	// doubles reallocates twenty times for a 600 MiB context and holds both
+	// halves at the peak, so the archive costs a gigabyte of headroom to
+	// assemble. The tar layout is arithmetic: one 512 byte header an entry,
+	// contents padded up to the next 512, and two empty blocks at the end.
+	// A long path adds a PAX header this does not count, which is why Grow
+	// is a hint and not a bound.
+	hint := int64(2 * 512)
+	for _, e := range entries {
+		hint += 512 + (e.size+511)/512*512
+	}
+	var buf bytes.Buffer
+	if hint > 0 && hint <= int64(maxInt) {
+		buf.Grow(int(hint))
+	}
 	sum := sha256.New()
-	tw := tar.NewWriter(io.MultiWriter(hashOnly{sum}, &writerTo{&buf}))
+	tw := tar.NewWriter(io.MultiWriter(hashOnly{sum}, &buf))
 
 	files := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -237,17 +325,24 @@ func NewContext(opts ContextOptions) (*Context, error) {
 	}
 
 	return &Context{
-		Root:     absRoot,
-		Digest:   hex.EncodeToString(sum.Sum(nil)),
-		Files:    files,
-		Bytes:    total,
-		Excluded: excluded,
-		tarball:  []byte(buf.String()),
+		Root:         absRoot,
+		Digest:       hex.EncodeToString(sum.Sum(nil)),
+		Files:        files,
+		Bytes:        total,
+		Excluded:     excluded,
+		Largest:      largest,
+		LargestBytes: largestBytes,
+		tarball:      buf.Bytes(),
 	}, nil
 }
 
 // Tar returns a reader over the archive to send to the daemon.
-func (c *Context) Tar() io.Reader { return strings.NewReader(string(c.tarball)) }
+//
+// Over the bytes rather than a copy of them. `strings.NewReader(string(b))`
+// reads as a cheap adapter and is a full copy of the archive on every call,
+// which for a real monorepo is hundreds of megabytes allocated to hand the
+// daemon something it only reads. A bytes.Reader never writes through.
+func (c *Context) Tar() io.Reader { return bytes.NewReader(c.tarball) }
 
 // Size is the archive's size in bytes.
 func (c *Context) Size() int { return len(c.tarball) }
@@ -340,10 +435,6 @@ func (h hashOnly) Write(p []byte) (int, error) {
 	_, _ = h.w.Write(p)
 	return len(p), nil
 }
-
-type writerTo struct{ b *strings.Builder }
-
-func (w *writerTo) Write(p []byte) (int, error) { return w.b.Write(p) }
 
 func humanBytes(n int64) string {
 	switch {

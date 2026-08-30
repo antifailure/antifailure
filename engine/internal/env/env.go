@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -337,6 +338,7 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 	}
 	if s.builder, err = build.NewDockerBuilder(build.DockerOptions{
 		Clock: o.opts.Clock, Redactor: o.opts.Redactor, NoCache: o.opts.Rebuild,
+		Getenv: o.opts.Getenv,
 	}); err != nil {
 		s.close()
 		return nil, err
@@ -870,6 +872,42 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 	}
 }
 
+// pickGolden chooses the version a branch is made from.
+//
+// Verified, and made under the rules this manifest declares. It returns how
+// many verified versions were refused for the second reason so that the
+// caller can say something better than "no golden": a store with six goldens
+// in it and none of them usable here is a different situation from an empty
+// one, and telling them apart is the difference between "run af golden
+// refresh" and "something is wrong".
+//
+// A version that records no rules at all is refused too, and that is the part
+// worth arguing about. The first version of this accepted one, reasoning that
+// a missing record should not break a machine that had goldens on it already.
+// That reasoning is wrong: a golden whose provenance is unknown cannot be shown
+// to match this manifest, and branching it is exactly the cross contamination
+// this exists to stop. It is not hypothetical. With the lenient rule in place,
+// bringing the control plane up branched an empty golden the masking test suite
+// had published minutes earlier, and the environment came up with a schema and
+// no data in it.
+//
+// Refusing costs a refresh, and the error says to run one. Accepting costs
+// somebody a preview built on another project's data, and says nothing.
+func pickGolden(goldens []provider.GoldenVersion, wantRules string) (string, int) {
+	refused := 0
+	for _, g := range goldens {
+		if !g.Verified {
+			continue
+		}
+		if g.RulesHash != wantRules {
+			refused++
+			continue
+		}
+		return g.ID, refused
+	}
+	return "", refused
+}
+
 func databaseVersion(m *schema.Manifest) int {
 	if m.Database != nil && m.Database.Version > 0 {
 		return m.Database.Version
@@ -1328,12 +1366,42 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	if err != nil {
 		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
-	var version string
-	for _, g := range goldens {
-		if g.Verified {
-			version = g.ID
-			break
-		}
+
+	// Which rules produced it, not merely that something produced it.
+	//
+	// The store is per repository and a repository holds more than one
+	// manifest. Selecting the newest verified golden and nothing else means a
+	// preview of one project branches a masked copy of another project's
+	// database, which is what actually happened here: bringing the control
+	// plane up branched a golden an example had refreshed thirty seconds
+	// earlier, and the environment came up with the wrong schema entirely.
+	// Copying one project's data into another project's preview is the failure
+	// this product is sold to prevent.
+	//
+	// The rules digest is the right key and it was already recorded for this,
+	// unread: GoldenVersion.RulesHash says it "identifies the masking rules
+	// that produced it, so that a rules change can be detected without
+	// re-reading the data". Matching on it is stronger than matching on a
+	// name, because it also refuses a golden of the right database masked
+	// under rules somebody has since changed, which is a golden whose
+	// attestation is about a different question than the one being asked.
+	_, wantRules, rulesErr := o.rules()
+	if rulesErr != nil {
+		return "", zero, secrets.Value{}, secrets.Value{}, rulesErr
+	}
+	version, refused := pickGolden(goldens, wantRules)
+	// A configured source and nothing to branch is a refusal rather than an
+	// empty database.
+	//
+	// The fallback below makes an empty golden and says so in its comment: "No
+	// source database is configured, so the golden is an empty one". That
+	// condition was never checked. A manifest naming a source and reaching
+	// this line got an empty database, the migrations ran against it, and the
+	// environment came up looking correct with none of production's shape or
+	// volume in it, which is the one thing a preview is for.
+	if version == "" && o.opts.Manifest.Database != nil && o.opts.Manifest.Database.SourceURLEnv != "" {
+		return "", zero, secrets.Value{}, secrets.Value{},
+			aferrors.Coded(aferrors.AFDB012, "count", fmt.Sprint(refused))
 	}
 
 	// A cron expression on a laptop has nothing to fire it, so the next
@@ -1370,14 +1438,22 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 		o.progress("no golden yet, creating one")
 		o.event(s, events.GoldenRefreshing, "no golden yet, creating one",
 			events.F("phase", "refreshing"))
+		seed := ""
+		if o.opts.Manifest.Database != nil {
+			seed = o.opts.Manifest.Database.Seed
+		}
 		gv, refreshErr := s.dbProv.RefreshGolden(ctx, provider.GoldenSpec{
 			Version:   databaseVersion(o.opts.Manifest),
-			RulesHash: "empty",
-			// No source database is configured, so the golden is an empty one
-			// and the schema arrives with the migrations. Masking and
-			// verification still run, and both trivially pass on no rows,
-			// which is the honest answer rather than a skipped step.
-			Mask:   func(context.Context, secrets.Value) error { return nil },
+			RulesHash: seedRulesHash(seed),
+			// No source database is configured, so the golden is built from
+			// nothing. Where the manifest names a seed command, that command
+			// is what puts data in it; otherwise the schema arrives with the
+			// migrations and the golden is empty. Masking and verification
+			// still run either way, because a seeded database is still a
+			// database somebody could have put an address into.
+			Mask: func(ctx context.Context, candidate secrets.Value) error {
+				return o.runSeed(ctx, s, seed, candidate)
+			},
 			Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
 		})
 		if refreshErr != nil {
@@ -1525,6 +1601,21 @@ func (o *Orchestrator) buildOne(
 	dir := strings.Trim(filepath.ToSlash(svc.Path), "/")
 	o.event(s, events.BuildStarted, svc.Name+": build starting", events.F("service", svc.Name))
 
+	// build.context, which until now was validated, printed by af explain, and
+	// read by nothing: every service got the whole repository whatever the
+	// manifest said. That is the worst of the three possible behaviours,
+	// because a user who set it believed something was happening.
+	//
+	// The directory is relative to the repository root, as the schema says.
+	// Everything else in the manifest stays relative to the root as well, so
+	// the paths a person writes do not change meaning depending on a field
+	// somewhere else in the file; they are translated into the context below.
+	contextRoot := root
+	if svc.Build != nil && svc.Build.Context != "" {
+		contextRoot = filepath.Join(root, filepath.FromSlash(
+			strings.TrimPrefix(filepath.ToSlash(svc.Build.Context), "./")))
+	}
+
 	if svc.Build != nil && svc.Build.Strategy == schema.BuildImage {
 		if svc.Build.Image == "" {
 			err := aferrors.Coded(aferrors.AFBLD010, "service", svc.Name)
@@ -1538,9 +1629,54 @@ func (o *Orchestrator) buildOne(
 		return svc.Build.Image, true, nil
 	}
 
-	bctx, err := build.NewContext(build.ContextOptions{Root: root, Ignore: ig, Service: svc.Name})
+	bctx, err := build.NewContext(build.ContextOptions{Root: contextRoot, Ignore: ig, Service: svc.Name})
 	if err != nil {
 		return "", false, err
+	}
+	// Paths in the manifest are relative to the repository; paths in a build
+	// are relative to its context. Where those differ, translate once here
+	// rather than at each of the three places below that needs it.
+	inContext := func(repoRelative string) (string, bool) {
+		if contextRoot == root {
+			return repoRelative, true
+		}
+		abs := filepath.Join(root, filepath.FromSlash(repoRelative))
+		rel, relErr := filepath.Rel(contextRoot, abs)
+		if relErr != nil {
+			return "", false
+		}
+		rel = filepath.ToSlash(rel)
+		// A path outside the context is not a path the daemon can be asked
+		// for. Docker refuses the same thing, and the reason is the same: a
+		// build that reads outside its context is not reproducible anywhere
+		// else.
+		if rel == ".." || strings.HasPrefix(rel, "../") {
+			return "", false
+		}
+		return rel, true
+	}
+
+	// A context nobody meant to send. Said out loud, because the whole cost of
+	// it is invisible: it is walked, hashed, held in memory and streamed to
+	// the daemon on every build, and the only symptom is that a build which
+	// takes forty seconds by hand takes half an hour here. The refusal at two
+	// gigabytes does not catch this. Six hundred megabytes builds, slowly,
+	// every time, and says nothing.
+	//
+	// A warning rather than a failure: a repository with a legitimate corpus
+	// in it is somebody's real situation, and refusing their build over a
+	// number would be worse than the number. It names the directory, because
+	// the fix is one line in .dockerignore and that line needs a name.
+	if bctx.Oversized() {
+		o.progress(fmt.Sprintf("%s: the build context is %s", svc.Name, bctx.Explain()))
+		o.progress(fmt.Sprintf(
+			"%s: that is sent to the builder on every build. Exclude what the image does not read in .dockerignore, which currently excludes %d paths",
+			svc.Name, bctx.Excluded))
+		o.event(s, events.Progress, svc.Name+": the build context is "+bctx.Explain(),
+			events.F("service", svc.Name),
+			events.F("contextBytes", bctx.Bytes),
+			events.F("contextFiles", len(bctx.Files)),
+			events.F("contextLargest", bctx.Largest))
 	}
 
 	explained := false
@@ -1562,13 +1698,41 @@ func (o *Orchestrator) buildOne(
 
 	switch {
 	case svc.Build != nil && svc.Build.Dockerfile != "":
-		req.DockerfilePath = strings.TrimPrefix(filepath.ToSlash(svc.Build.Dockerfile), "./")
-	case bctx.Has(joinPath(dir, "Dockerfile")):
-		req.DockerfilePath = joinPath(dir, "Dockerfile")
+		named := strings.TrimPrefix(filepath.ToSlash(svc.Build.Dockerfile), "./")
+		translated, inside := inContext(named)
+		if !inside {
+			err := aferrors.Coded(aferrors.AFBLD012,
+				"service", svc.Name, "dockerfile", named, "context", svc.Build.Context)
+			o.eventErr(s, events.BuildFailed, err.Error(), events.F("service", svc.Name))
+			return "", false, err
+		}
+		req.DockerfilePath = translated
+		// Named, on disk, and not in the context. The manifest validator
+		// checks the file exists and it does; the build sends a filtered copy
+		// of the tree to the daemon and names the Dockerfile inside it, so a
+		// path the ignore file excludes is simply absent. The daemon then says
+		// "cannot locate specified Dockerfile" about a file anybody can see,
+		// and the next hour is spent looking at the wrong thing.
+		//
+		// `docker build -f` does not have this problem, which is what makes it
+		// so confusing: the same Dockerfile builds by hand and not here,
+		// because -f reads from the host and never consults .dockerignore.
+		if !bctx.Has(req.DockerfilePath) {
+			err := aferrors.Coded(aferrors.AFBLD011,
+				"service", svc.Name, "dockerfile", req.DockerfilePath)
+			o.eventErr(s, events.BuildFailed, err.Error(), events.F("service", svc.Name))
+			return "", false, err
+		}
+	case bctx.Has(serviceDir(inContext, dir, "Dockerfile")):
+		req.DockerfilePath = serviceDir(inContext, dir, "Dockerfile")
 	case dir == "" && bctx.Has("Dockerfile"):
 		req.DockerfilePath = "Dockerfile"
 	default:
-		bp, ok := build.DetectBuildpack(bctx, dir, svc.Command, svc.Port)
+		detectIn, inside := inContext(dir)
+		if !inside {
+			detectIn = dir
+		}
+		bp, ok := build.DetectBuildpack(bctx, detectIn, svc.Command, svc.Port)
 		if !ok {
 			err := aferrors.Coded(aferrors.AFBLD010, "service", svc.Name)
 			o.eventErr(s, events.BuildFailed, err.Error(), events.F("service", svc.Name))
@@ -1581,6 +1745,18 @@ func (o *Orchestrator) buildOne(
 
 	if !explained {
 		o.progress(svc.Name + ": building")
+	}
+	// Which builder, said out loud, once per service.
+	//
+	// The legacy builder costs roughly twenty five seconds a step on a modern
+	// daemon, so a thirty four step Dockerfile spends a quarter of an hour
+	// before it does any work. Falling back to it silently would be a
+	// regression that looks exactly like a slow machine, and Docker is
+	// removing it, so the day it disappears the message is already there.
+	if s.builder != nil && !s.builder.UsesBuildKit() {
+		o.progress(svc.Name + ": the daemon has no BuildKit, so this build uses the legacy builder and will be slow")
+		o.event(s, events.Warning, svc.Name+": building with the legacy builder",
+			events.F("service", svc.Name), events.F("builder", "legacy"))
 	}
 	res, err := s.builder.Build(ctx, req)
 	if err != nil {
@@ -1745,10 +1921,46 @@ func (o *Orchestrator) Status(ctx context.Context) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Status sorts by name, which is a reasonable default for a runtime that
+	// has no manifest and the wrong one for a caller that does. `api` sorts
+	// before `app`, so the environment's URL became the API's, and `af test`
+	// drove the API with a browser: six workflows blocked on a login form that
+	// was never going to be there. The manifest is where the author says which
+	// service the product is.
+	o.orderByManifest(env.Services)
 	return &Result{
 		EnvID: o.envID, URL: env.URL(), Services: env.Services,
 		Proxied: env.ProxyReady,
 	}, nil
+}
+
+// orderByManifest puts running services into the order they were declared in.
+//
+// Every reader of this list wants that order: the status table, the pull
+// request comment, and the address a person is told to open. Neither the
+// dependency sort that starts them nor an alphabetical one says anything about
+// which service somebody came to look at.
+func (o *Orchestrator) orderByManifest(running []provider.RunningService) {
+	position := make(map[string]int, len(o.opts.Manifest.Services))
+	for i, s := range o.opts.Manifest.Services {
+		position[s.Name] = i
+	}
+	sort.SliceStable(running, func(i, j int) bool {
+		pi, oki := position[running[i].Name]
+		pj, okj := position[running[j].Name]
+		switch {
+		case oki && okj:
+			return pi < pj
+		case oki:
+			return true
+		case okj:
+			return false
+		}
+		// A service the manifest no longer declares, which happens when a
+		// branch is checked out over a running environment. Left where it was
+		// found rather than given an invented position.
+		return false
+	})
 }
 
 // Decisions returns what the environment's egress proxy has decided.
@@ -1873,4 +2085,80 @@ func (o *Orchestrator) sidecarRuntime() (observingRuntime, error) {
 			rt.Name()))
 	}
 	return observingRuntime{sidecarObserver: observer, close: func() { _ = rt.Close() }}, nil
+}
+
+// serviceDir resolves a file inside a service's directory, as the build
+// context sees it.
+func serviceDir(inContext func(string) (string, bool), dir, name string) string {
+	rel, ok := inContext(joinPath(dir, name))
+	if !ok {
+		return joinPath(dir, name)
+	}
+	return rel
+}
+
+// seedRulesHash identifies a golden built from a seed command.
+//
+// A golden is chosen by the rules that produced it, and a seeded one is
+// produced by a command rather than by a rule set. Hashing the command gives
+// the same property: change the seed, and the next `af up` refuses the golden
+// the old one made instead of quietly branching stale data.
+func seedRulesHash(seed string) string {
+	if seed == "" {
+		return "empty"
+	}
+	sum := sha256.Sum256([]byte("seed\x00" + seed))
+	return "seed-" + hex.EncodeToString(sum[:5])
+}
+
+// runSeed executes the manifest's database.seed command against a candidate.
+//
+// The field was validated, refused alongside source_url_env, printed by
+// `af explain`, and executed by nothing, so a project with no production
+// database got an empty environment and no indication that the command it
+// configured had not run. Silently ignoring configuration is worse than not
+// offering it.
+//
+// It runs against the candidate rather than against each branch, which is what
+// makes it the counterpart of source_url_env: the seed pays once, at refresh,
+// and every branch after that is a copy. The command sees DATABASE_URL, the
+// same name a migration sees, so one script can serve both.
+func (o *Orchestrator) runSeed(
+	ctx context.Context, s *session, seed string, candidate secrets.Value,
+) error {
+	if strings.TrimSpace(seed) == "" {
+		return nil
+	}
+	o.progress("seeding the golden with the manifest's command")
+	o.event(s, events.MaskProgress, "seeding the golden", events.F("phase", "seed"))
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", seed)
+	cmd.Dir = o.opts.Root
+	cmd.Env = append(os.Environ(), "DATABASE_URL="+candidate.Reveal())
+	out, err := cmd.CombinedOutput()
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		// Through the redactor, because a seed script prints connection
+		// strings and the golden's own URL is in its environment.
+		o.progress("  " + o.opts.Redactor.String(line))
+	}
+	if err != nil {
+		return aferrors.Coded(aferrors.AFDB013,
+			"command", seed, "detail", o.opts.Redactor.String(strings.TrimSpace(lastLine(string(out)))))
+	}
+	return nil
+}
+
+// lastLine returns the final non-empty line, which is where a script that
+// failed says why.
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return lines[i]
+		}
+	}
+	return "the command produced no output"
 }

@@ -26,6 +26,7 @@ type Run struct {
 	Load         *Load
 	Egress       *Egress
 	Verification *Verification
+	Insights     *Insights
 	Duration     string
 	// DocsBase is where links point, so a self hosted instance can point at
 	// its own copy rather than at ours.
@@ -85,6 +86,34 @@ type Verification struct {
 	Columns     int
 	RowsSampled int64
 	Findings    []string
+}
+
+// Insights is what the database noticed while the environment ran.
+//
+// The part of a change nothing else in a pull request can see. A migration
+// reviews as a diff and behaves as a plan, and the plan is only visible
+// against real data volume, which is the one thing a preview environment has.
+type Insights struct {
+	// Sequential is a table the run scanned end to end often enough to be
+	// worth naming, with how many rows it holds.
+	Sequential []Scan
+	// Slowest is the single query that spent the most time, and how much.
+	Slowest   string
+	SlowestMs float64
+	// Unused names indexes nothing read, which on a preview is weaker
+	// evidence than a scan and is still the thing somebody wants to know
+	// before adding another one.
+	Unused []string
+	// Missing names the extensions that were not installed, so a section
+	// that found nothing is distinguishable from one that could not look.
+	Missing []string
+}
+
+// Scan is one table read end to end.
+type Scan struct {
+	Table string
+	Scans int64
+	Rows  int64
 }
 
 // Verdict is the one word answer for the whole run.
@@ -314,6 +343,37 @@ func (r Run) Markdown() string {
 				v.Columns, v.RowsSampled)
 		} else {
 			fmt.Fprintf(&b, "**Masking did not verify.** %s\n\n", strings.Join(v.Findings, " "))
+		}
+	}
+
+	if i := r.Insights; i != nil {
+		switch {
+		case len(i.Missing) > 0 && len(i.Sequential) == 0 && i.Slowest == "":
+			// Said out loud rather than rendered as a clean result. An
+			// insights section that looked at nothing and a section that
+			// looked and found nothing are the same four words on a pull
+			// request, and only one of them is evidence.
+			fmt.Fprintf(&b, "Insights could not look: %s.\n\n", strings.Join(i.Missing, ", "))
+		default:
+			fmt.Fprintf(&b, "Insights: ")
+			parts := []string{}
+			if len(i.Sequential) > 0 {
+				names := make([]string, 0, len(i.Sequential))
+				for _, s := range i.Sequential {
+					names = append(names, fmt.Sprintf("`%s` (%d rows)", s.Table, s.Rows))
+				}
+				parts = append(parts, "read end to end: "+strings.Join(names, ", "))
+			}
+			if i.Slowest != "" {
+				parts = append(parts, fmt.Sprintf("slowest query %.0fms", i.SlowestMs))
+			}
+			if len(i.Unused) > 0 {
+				parts = append(parts, fmt.Sprintf("%d indexes nothing read", len(i.Unused)))
+			}
+			if len(parts) == 0 {
+				parts = append(parts, "no table read end to end and no slow query")
+			}
+			fmt.Fprintf(&b, "%s.\n\n", strings.Join(parts, "; "))
 		}
 	}
 

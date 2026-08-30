@@ -33,6 +33,12 @@ const (
 	AFBLD004 Code = "AF-BLD-004"
 	// No build strategy could be detected for {service}.
 	AFBLD010 Code = "AF-BLD-010"
+	// The Dockerfile {dockerfile} for {service} is excluded from the build
+	// context by .dockerignore.
+	AFBLD011 Code = "AF-BLD-011"
+	// The Dockerfile {dockerfile} for {service} is outside the build
+	// context {context}.
+	AFBLD012 Code = "AF-BLD-012"
 
 	// Control plane
 	// The control plane at {url} could not be reached.
@@ -77,6 +83,13 @@ const (
 	AFDB010 Code = "AF-DB-010"
 	// The subset could not be taken: {detail}
 	AFDB011 Code = "AF-DB-011"
+	// No golden matches this manifest's masking rules, and {count} were
+	// made under different ones.
+	AFDB012 Code = "AF-DB-012"
+	// The database seed command failed: {detail}
+	AFDB013 Code = "AF-DB-013"
+	// No database branch exists for {env}.
+	AFDB014 Code = "AF-DB-014"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
@@ -367,6 +380,24 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
+	AFBLD011: {
+		Code:      AFBLD011,
+		Area:      "BLD",
+		Message:   "The Dockerfile {dockerfile} for {service} is excluded from the build context by .dockerignore.",
+		NextStep:  "Add '!{dockerfile}' to .dockerignore. The file exists, and the build sends a filtered copy of the tree to the daemon, so a path the ignore file excludes is not there to build from.",
+		Docs:      "guides/build",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFBLD012: {
+		Code:      AFBLD012,
+		Area:      "BLD",
+		Message:   "The Dockerfile {dockerfile} for {service} is outside the build context {context}.",
+		NextStep:  "Widen build.context, or move the Dockerfile inside it. A build cannot read a file the context does not carry.",
+		Docs:      "guides/build",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
 	AFCP001: {
 		Code:      AFCP001,
 		Area:      "CP",
@@ -510,6 +541,33 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/subsetting",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFDB012: {
+		Code:      AFDB012,
+		Area:      "DB",
+		Message:   "No golden matches this manifest's masking rules, and {count} were made under different ones.",
+		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB013: {
+		Code:      AFDB013,
+		Area:      "DB",
+		Message:   "The database seed command failed: {detail}",
+		NextStep:  "Run the command yourself against an empty database of the same version. It is: {command}",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB014: {
+		Code:      AFDB014,
+		Area:      "DB",
+		Message:   "No database branch exists for {env}.",
+		NextStep:  "Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
 	},
 	AFDB020: {
 		Code:      AFDB020,

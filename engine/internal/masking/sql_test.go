@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -54,6 +55,23 @@ INSERT INTO orders (customer_id, customer_email, total_cents)
   SELECT id, email, 1999 FROM customers;
 INSERT INTO audit_log (actor_email, detail) VALUES
   ('ada@lovelace-analytics.co.uk', 'signed in'), ('grace@hopper-systems.io', 'changed plan');
+-- A partitioned table, because the product partitions one of its own and a
+-- partition is a way for a rule to be silently not applied. See
+-- TestCatalog_DoesNotSeePartitionsAsTablesOfTheirOwn.
+CREATE TABLE events (
+  id        bigserial,
+  occurred_at timestamptz NOT NULL,
+  kind      text NOT NULL,
+  actor_email text,
+  PRIMARY KEY (id, occurred_at)
+) PARTITION BY RANGE (occurred_at);
+CREATE TABLE events_2026_01 PARTITION OF events
+  FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+CREATE TABLE events_2026_02 PARTITION OF events
+  FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+INSERT INTO events (occurred_at, kind, actor_email) VALUES
+  ('2026-01-15', 'signed-in', 'ada@lovelace-analytics.co.uk'),
+  ('2026-02-15', 'signed-in', 'grace@hopper-systems.io');
 `
 
 // uniqueRulesHash returns eight hex characters, because that is how many of it
@@ -102,7 +120,22 @@ func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
 		t.Skip("skipped: AF_SKIP_DOCKER is set")
 	}
-	p, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: 46500})
+	// A name and a port derived from the test, not fixed for the package.
+	//
+	// Every test here used to share one container name and one starting port,
+	// so a run that failed before its cleanup left the container behind and
+	// poisoned the next run with "port is already allocated" and then
+	// "container name already in use". The second failure hides the first and
+	// points at the runtime rather than at the test that actually broke, which
+	// happened twice while dogfooding.
+	//
+	// The port is taken from the kernel rather than chosen: binding :0 and
+	// reading back what was assigned is the only way to pick one nothing else
+	// holds, because any number this code picks can be taken between the
+	// picking and the binding.
+	p, err := dockerdb.New(dockerdb.Options{
+		Version: 17, Clock: clock.New(), PortFrom: freePort(t),
+	})
 	if err != nil {
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
 	}
@@ -419,3 +452,117 @@ func queryOne(t *testing.T, conn *pgx.Conn, sql string) int64 {
 
 var _ = fmt.Sprint
 var _ = strings.TrimSpace
+
+// A partition is storage for its parent, not a table of its own.
+//
+// The bug this is about was silent and it destroyed data somebody had asked to
+// keep. information_schema reports a partitioned parent and every one of its
+// partitions as a BASE TABLE, so the catalogue held both. They hold the same
+// rows, so those rows were masked twice; and because a rule names a table, and
+// `events` is not `events_2026_01`, the parent got the rules somebody wrote
+// while each partition got the fail-closed default. The partitions sort after
+// the parent and so ran last, which meant a column explicitly marked
+// `preserve` came out emptied.
+//
+// It was found by refreshing a golden of this product's own control plane,
+// whose events table is partitioned by month.
+func TestCatalog_DoesNotSeePartitionsAsTablesOfTheirOwn(t *testing.T) {
+	conn, done := requireDatabase(t)
+	defer done()
+	ctx := context.Background()
+
+	// Row estimates come from the statistics collector, and a table that has
+	// just been filled has none: reltuples is zero until something analyses it.
+	// Asked for before that, this test would be asserting about the fixture's
+	// age rather than about the query.
+	_, err := conn.Exec(ctx, "ANALYZE")
+	require.NoError(t, err)
+
+	tables, err := masking.ReadCatalog(ctx, conn)
+	require.NoError(t, err)
+
+	named := map[string]masking.Table{}
+	for _, tb := range tables {
+		named[tb.Name] = tb
+	}
+
+	parent, ok := named["events"]
+	require.True(t, ok, "the partitioned parent is missing, so its rows would never be masked")
+	require.NotEmpty(t, parent.Columns)
+
+	for _, partition := range []string{"events_2026_01", "events_2026_02"} {
+		_, listed := named[partition]
+		require.False(t, listed,
+			"%s is catalogued as a table in its own right. Its rows are the parent's, so they "+
+				"would be masked twice, and by whichever rules happen to match a name nobody "+
+				"writes rules against", partition)
+	}
+
+	// The estimate has to come from where the rows are. A parent carries none
+	// of its own, so left alone it looks empty and the planner masks the
+	// largest table in the database in one unchunked statement.
+	require.Greater(t, parent.Rows, int64(0),
+		"the partitioned parent is estimated at %d rows, so it would be masked in one "+
+			"statement holding a lock on every partition", parent.Rows)
+}
+
+// The rules somebody wrote reach the rows inside the partitions.
+//
+// The other half of the same fix, and the half that is about data rather than
+// about a catalogue. `kind` is preserved on purpose; before the fix it came
+// back empty, because the default emptied it through a partition after the
+// rule had preserved it through the parent.
+func TestApply_MasksThroughAPartitionedParent(t *testing.T) {
+	conn, done := requireDatabase(t)
+	defer done()
+	ctx := context.Background()
+
+	tables, err := masking.ReadCatalog(ctx, conn)
+	require.NoError(t, err)
+
+	rules, err := masking.NewRuleSet([]masking.Rule{
+		{Table: "events", Column: "kind", Transform: "preserve", Why: "a fixed vocabulary"},
+	})
+	require.NoError(t, err)
+
+	plan := masking.BuildPlan(tables, rules.Assign(tables), "partition-test")
+	require.True(t, plan.Runnable(), "%v", plan.Problems)
+
+	key, err := masking.NewKeyFromBytes([]byte("a-test-master-key-for-masking-000"))
+	require.NoError(t, err)
+	exec, err := masking.NewExecutor(masking.ExecutorOptions{Key: key, Clock: clock.New()})
+	require.NoError(t, err)
+	_, err = exec.Apply(ctx, conn, plan)
+	require.NoError(t, err)
+
+	var kinds, addresses int
+	require.NoError(t, conn.QueryRow(ctx,
+		`SELECT count(*) FROM events WHERE kind = 'signed-in'`).Scan(&kinds))
+	require.Equal(t, 2, kinds,
+		"a column marked preserve on the parent was emptied through its partitions")
+
+	require.NoError(t, conn.QueryRow(ctx,
+		`SELECT count(*) FROM events WHERE actor_email LIKE '%@example.test'`).Scan(&addresses))
+	require.Equal(t, 2, addresses,
+		"the address column inside the partitions was not masked, so masking the parent did "+
+			"not reach the rows")
+}
+
+// freePort asks the kernel for a port nothing is using.
+//
+// The listener is closed before the value is returned, so there is a window in
+// which something else could take it. That window is unavoidable without
+// handing the socket to Docker, and it is far smaller than the certainty of a
+// collision that a constant guarantees.
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("skipped: no free port: %v", err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	if err := l.Close(); err != nil {
+		t.Fatalf("closing the probe listener: %v", err)
+	}
+	return port
+}

@@ -292,22 +292,55 @@ func matchPaymentCard(s string) bool {
 
 // digitRuns extracts maximal digit sequences, ignoring the spaces and dashes a
 // card number is usually written with.
+// digitRuns finds the runs of digits that could be a number somebody wrote.
+//
+// A run glued to a letter is not one of them, and that exclusion is the whole
+// reason this function is more than three lines. A sha256 digest is sixty-four
+// hex characters, so it contains long runs of digits separated by the letters
+// a to f, and with a thousand digests one of those runs will eventually be
+// thirteen digits, start with a real issuer prefix, and pass the Luhn check by
+// chance. The scanner then refuses to publish a golden because a checksum
+// column looks like a payment card, which is a finding nobody can act on and
+// the fastest way to teach somebody to turn verification off.
+//
+// What is given up is a card number written with a letter immediately against
+// it, with no space, punctuation, or quote between them. That is not how
+// anybody writes a card number, and the scan for values known to be in the
+// source catches it anyway.
 func digitRuns(s string, minLen, maxLen int) []string {
+	rs := []rune(s)
 	var out []string
 	var cur strings.Builder
+	// Where the current run starts and ends in rs, so its neighbours can be
+	// looked at. A run's own contents cannot say whether it is a token or a
+	// number; only what is on either side of it can.
+	first, last := -1, -1
+
 	flush := func() {
-		if cur.Len() >= minLen && cur.Len() <= maxLen {
-			out = append(out, cur.String())
+		if first >= 0 && cur.Len() >= minLen && cur.Len() <= maxLen {
+			gluedBefore := first > 0 && unicode.IsLetter(rs[first-1])
+			gluedAfter := last+1 < len(rs) && unicode.IsLetter(rs[last+1])
+			if !gluedBefore && !gluedAfter {
+				out = append(out, cur.String())
+			}
 		}
 		cur.Reset()
+		first, last = -1, -1
 	}
-	for _, r := range s {
+
+	for i, r := range rs {
 		switch {
 		case unicode.IsDigit(r):
+			if first < 0 {
+				first = i
+			}
+			last = i
 			cur.WriteRune(r)
 		case r == ' ' || r == '-':
 			// A separator inside a number is skipped rather than ending the
 			// run, which is how "4111 1111 1111 1111" is seen as one number.
+			// It does not move `last`, so a card followed by a space and then
+			// a word is still a card rather than something glued to a letter.
 		default:
 			flush()
 		}

@@ -80,6 +80,24 @@ type ColumnInfo struct {
 // masking pg_catalog is neither possible nor desirable, and a plan that listed
 // them would bury the tables somebody actually has to look at.
 func ReadCatalog(ctx context.Context, conn *pgx.Conn) ([]Table, error) {
+	// Partitions are excluded, and that is a correctness fix rather than a
+	// saving.
+	//
+	// information_schema reports a partitioned parent and every one of its
+	// partitions as a BASE TABLE, so both used to be catalogued. They hold the
+	// same rows: a partition is where the parent's rows live, and an UPDATE on
+	// the parent rewrites every one of them. Cataloguing both meant masking
+	// those rows twice.
+	//
+	// Twice would only be wasteful. The damage is that a rule names a table,
+	// and `events` is not `events_2026_08`, so the parent got the rules
+	// somebody wrote and each partition got the fail-closed default instead.
+	// The partitions sort after the parent, so they ran last and won: a column
+	// deliberately marked `preserve` on the parent was emptied through its
+	// partition, and nothing said so.
+	//
+	// relispartition is the only reliable way to tell. A name convention is
+	// not: a partition may be called anything.
 	const query = `
 SELECT c.table_schema, c.table_name, c.column_name, c.data_type,
        c.is_nullable = 'YES' AS nullable,
@@ -88,7 +106,10 @@ SELECT c.table_schema, c.table_name, c.column_name, c.data_type,
 FROM information_schema.columns c
 JOIN information_schema.tables t
   ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+JOIN pg_namespace ns ON ns.nspname = c.table_schema
+JOIN pg_class cl ON cl.relname = c.table_name AND cl.relnamespace = ns.oid
 WHERE t.table_type = 'BASE TABLE'
+  AND NOT cl.relispartition
   AND c.table_schema NOT IN ('pg_catalog', 'information_schema')
   AND c.table_schema NOT LIKE 'pg_toast%'
 ORDER BY c.table_schema, c.table_name, c.ordinal_position`
@@ -236,11 +257,25 @@ WHERE idx.indisunique AND array_length(idx.indkey::int[], 1) = 1
 // to decide how to chunk them would read the whole database before masking any
 // of it, and the number is only used to size the work.
 func readEstimates(ctx context.Context, conn *pgx.Conn, tables map[string]*Table) error {
+	// A partitioned parent carries no rows of its own, so its own reltuples is
+	// zero however much data it holds. Left that way the planner sizes the
+	// largest table in the database as empty, masks it in one unchunked
+	// statement, and holds a lock on every partition for the length of it.
+	// The estimate has to be the sum over the partitions, which is where the
+	// rows actually are.
 	const query = `
-SELECT ns.nspname, cl.relname, GREATEST(cl.reltuples, 0)::bigint
+SELECT ns.nspname, cl.relname,
+       GREATEST(cl.reltuples, 0)::bigint + COALESCE((
+         SELECT sum(GREATEST(part.reltuples, 0))::bigint
+         FROM pg_inherits inh
+         JOIN pg_class part ON part.oid = inh.inhrelid
+         WHERE inh.inhparent = cl.oid
+       ), 0) AS estimate
 FROM pg_class cl
 JOIN pg_namespace ns ON ns.oid = cl.relnamespace
-WHERE cl.relkind = 'r' AND ns.nspname NOT IN ('pg_catalog', 'information_schema')`
+WHERE cl.relkind IN ('r', 'p')
+  AND NOT cl.relispartition
+  AND ns.nspname NOT IN ('pg_catalog', 'information_schema')`
 
 	rows, err := conn.Query(ctx, query)
 	if err != nil {

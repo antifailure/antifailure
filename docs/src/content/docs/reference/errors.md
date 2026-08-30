@@ -178,6 +178,30 @@ No build strategy could be detected for {service}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/build](/docs/guides/build/) |
 
+### AF-BLD-011
+
+The Dockerfile {dockerfile} for {service} is excluded from the build context by .dockerignore.
+
+**What to do.** Add '!{dockerfile}' to .dockerignore. The file exists, and the build sends a filtered copy of the tree to the daemon, so a path the ignore file excludes is not there to build from.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/build](/docs/guides/build/) |
+
+### AF-BLD-012
+
+The Dockerfile {dockerfile} for {service} is outside the build context {context}.
+
+**What to do.** Widen build.context, or move the Dockerfile inside it. A build cannot read a file the context does not carry.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/build](/docs/guides/build/) |
+
 ## Control plane
 
 ### AF-CPL-001
@@ -301,6 +325,42 @@ The subset could not be taken: {detail}
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/subsetting](/docs/concepts/subsetting/) |
+
+### AF-DB-012
+
+No golden matches this manifest's masking rules, and {count} were made under different ones.
+
+**What to do.** Run 'af golden refresh' to make one from the source this manifest names.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens/) |
+
+### AF-DB-013
+
+The database seed command failed: {detail}
+
+**What to do.** Run the command yourself against an empty database of the same version. It is: {command}
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens/) |
+
+### AF-DB-014
+
+No database branch exists for {env}.
+
+**What to do.** Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens/) |
 
 ### AF-DB-020
 

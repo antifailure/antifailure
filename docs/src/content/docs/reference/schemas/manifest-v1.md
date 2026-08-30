@@ -86,7 +86,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | `max_branches` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | `project` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
 | `provider` | `docker`, `neon`, `supabase`, `dblab` | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service. Defaults to `docker`. |
-| `seed` | string | no | Command that seeds a branch, for a project with no production database yet. Mutually exclusive with source_url_env. Max length 1024. |
+| `seed` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | `source_url_env` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
 | `subset` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
 | `url_env` | string | no | Name of the environment variable to inject into services with the branch's connection string. Defaults to `DATABASE_URL`. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |

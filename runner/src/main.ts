@@ -15,7 +15,8 @@ import { promisify } from 'node:util';
 import { run, type Job, type WorkflowResult } from './execute.ts';
 import { CommandInbox } from './inbox.ts';
 import { exitCodeFor } from './verdict.ts';
-import { fromEnvironment } from './model.ts';
+import { callModel, fromEnvironment, type ModelConfig } from './model.ts';
+import { cassetteFromEnvironment } from './cassette.ts';
 import type { Persona } from './login.ts';
 import type { Workflow } from './workflow.ts';
 
@@ -55,10 +56,39 @@ async function main(): Promise<number> {
   const doc = JSON.parse(raw) as JobDocument;
   mkdirSync(doc.artifacts, { recursive: true });
 
-  const model = fromEnvironment(process.env);
+  // A cassette, if one is configured, and the model configuration that goes
+  // with it. The two interact in one way worth spelling out: in replay mode
+  // there does not have to be a key at all. That is the whole point. A
+  // scheduled run reads answers off disk, reaches no network, and costs
+  // nothing, and it must not silently become a deterministic run just because
+  // nobody set ANTHROPIC_API_KEY on the schedule.
+  const cassette = cassetteFromEnvironment(process.env);
+  let model = fromEnvironment(process.env);
+  if (!model && cassette?.mode === 'replay') {
+    model = replayOnlyConfig(process.env);
+  }
+
+  // In replay the network is not merely unused, it is unreachable: a miss
+  // throws rather than falling through to this, and this exists so that a
+  // future edit which removes that guard fails loudly instead of spending.
+  const complete = cassette
+    ? cassette.wrap(
+        cassette.mode === 'record'
+          ? callModel
+          : () => {
+              throw new Error(
+                'a replaying cassette tried to call the model, which it must never do',
+              );
+            },
+      )
+    : undefined;
+
   if (model) {
+    const how = cassette
+      ? `${cassette.mode === 'record' ? 'recording' : 'replaying'} ${cassette.size()} answers in ${cassette.dir}`
+      : 'live';
     process.stderr.write(
-      `af-runner: reading pages with ${model.provider}/${model.model}\n`,
+      `af-runner: reading pages with ${model.provider}/${model.model}, ${how}\n`,
     );
   }
 
@@ -72,6 +102,7 @@ async function main(): Promise<number> {
     // key never passes through a file the engine wrote or a document anybody
     // logged.
     ...(model ? { model } : {}),
+    ...(complete ? { complete } : {}),
     ...(doc.headless === undefined ? {} : { headless: doc.headless }),
     ...(doc.af
       ? {
@@ -87,6 +118,12 @@ async function main(): Promise<number> {
   };
 
   const results = await run(job);
+
+  if (cassette) {
+    process.stderr.write(
+      `af-runner: cassette ${cassette.mode}: ${cassette.read} replayed, ${cassette.written} recorded\n`,
+    );
+  }
   const counted = { passed: 0, failed: 0, flaky: 0, blocked: 0, unverified: 0 };
   for (const r of results) {
     switch (r.outcome.verdict) {
@@ -100,6 +137,24 @@ async function main(): Promise<number> {
   const out: ResultDocument = { results, ...counted };
   process.stdout.write(JSON.stringify(out, replaceRegExp, 2) + '\n');
   return exitCodeFor(results.map((r) => r.outcome));
+}
+
+/** The model to replay as, when there is no key to read one from.
+ *
+ * A replaying run never sends a request, so the key is not merely unused, it
+ * is not needed. The provider and the model name still are: they are part of
+ * the key a recording is filed under, so replaying as the wrong model finds
+ * nothing rather than finding the wrong thing.
+ */
+function replayOnlyConfig(env: Record<string, string | undefined>): ModelConfig {
+  const provider = env.AF_MODEL_PROVIDER === 'openai' ? 'openai' : 'anthropic';
+  return {
+    provider,
+    // Deliberately empty. Nothing reads it in replay, and a placeholder that
+    // looked like a key would be the kind of string that ends up in a log.
+    apiKey: '',
+    model: env.AF_MODEL ?? (provider === 'anthropic' ? 'claude-sonnet-5' : 'gpt-4.1'),
+  };
 }
 
 /** replaceRegExp makes the patterns readable in the output document.

@@ -23,6 +23,7 @@ before anything runs.
 | `credit_card` | no | Replaces a card number with a Luhn valid test number, so a payment form still validates it and no real card is ever present. |
 | `date_shift` | no | Moves a date or timestamp by a deterministic offset of up to a year, keeping its format and its time of day. |
 | `email` | yes | Replaces an address with a unique synthetic one at example.test, which is reserved and can never receive mail. |
+| `empty_json` | no | Replaces a JSON value with an empty one of the same kind, an object or an array. This is what empties a JSON column that cannot hold null, which nullify cannot do. |
 | `first_name` | no | Replaces a given name with a synthetic one. |
 | `free_text` | no | Replaces prose with synthetic prose of a similar length, so a layout built for three paragraphs still gets three paragraphs. |
 | `hash_hex` | yes | Replaces a value with a keyed hash of the same length. Equality is preserved and nothing else is. |
@@ -72,6 +73,13 @@ does not.
 A column that nothing reads can have `nullify`, and that is the default for
 unclassified free text on purpose: it makes the absence visible.
 
+`nullify` cannot empty a column that is `NOT NULL`, and the commonest shape of
+free-form column in any schema is `jsonb NOT NULL DEFAULT '{}'`. That is what
+`empty_json` is for: it writes an empty object or an empty array rather than
+removing the value, so the constraint still holds and a reader that indexes
+into an array still finds one. It is the default for an unclassified JSON
+column for the same reason `nullify` is the default for unclassified text.
+
 ## Uniqueness
 
 ```
@@ -81,10 +89,22 @@ unique constraint users_email_key.
   for users.email.
 ```
 
-`email`, `uuid_remap`, `username`, `hash_hex`, `int_fpe` and `string_fpe`
-preserve uniqueness. `name`, `city`, `company` and the rest do not, because two
-people can share a name and pretending otherwise would mean generating
-increasingly unlikely ones to satisfy a constraint the data never had.
+`email`, `uuid_remap`, `username`, `hash_hex` and `preserve` preserve
+uniqueness. `name`, `city`, `company`, `string_fpe`, `int_fpe` and the rest do
+not, because two people can share a name and pretending otherwise would mean
+generating increasingly unlikely ones to satisfy a constraint the data never
+had.
+
+The format preserving pair are the ones worth saying twice, because they read
+like they should be safe here and are not. `string_fpe` keeps a value's length
+and character classes, and `int_fpe` keeps a number's digit count and sign, so
+in both cases two different inputs of the same shape can land on the same
+output. Keeping a value's shape says nothing about keeping values apart.
+
+This paragraph said otherwise about both of them, one at a time. It is checked
+against the registry now, by the same test that generates the table above it,
+because the table was right the whole time and sitting directly above the
+sentence contradicting it.
 
 ## Determinism
 

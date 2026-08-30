@@ -9,6 +9,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
 // Branching a version that is not there says what IS there.
@@ -34,4 +35,40 @@ func TestBranchingAMissingGoldenNamesTheOnesThatExist(t *testing.T) {
 	require.NotContains(t, err.Error(), "{",
 		"no unfilled placeholder reaches a reader")
 
+}
+
+// Asking for a branch that was never made is not a missing golden.
+//
+// It reported one, and the report had a hole in it. A branch asked for by
+// environment carries no From, and the not-found path named `b.From` in a
+// message whose placeholder is the golden version, so the output read "The
+// golden version  no longer exists" with nothing between the spaces, and the
+// next step sent the reader to `af golden list` about a golden that was never
+// involved. The reader had not run `af up` yet, which is the actual answer and
+// the one thing the message did not say.
+//
+// Found by running `af mask plan` in a fresh checkout: the first thing anybody
+// does with masking, and it could not be done.
+func TestConnectingToABranchThatWasNeverMadeSaysToBringItUp(t *testing.T) {
+	p, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: 47400})
+	if err != nil {
+		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+
+	_, err = p.ConnString(context.Background(),
+		provider.Branch{EnvID: "env_never_created_0001"}, provider.ConnDirect)
+	require.Error(t, err)
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFDB014),
+		"a branch that does not exist is not a golden that does not exist, and the two "+
+			"have different answers")
+	require.NotErrorIs(t, err, aferrors.Coded(aferrors.AFDB004))
+
+	var coded *aferrors.Error
+	require.True(t, aferrors.As(err, &coded))
+	require.Contains(t, coded.Message(), "env_never_created_0001",
+		"the environment is named, where the old message left a blank")
+	require.NotContains(t, coded.Message(), "{",
+		"an unfilled placeholder means the fields do not match the message")
+	require.Contains(t, coded.NextStep(), "af up")
 }

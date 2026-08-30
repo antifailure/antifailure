@@ -17,16 +17,27 @@ credentials.json
 service-account*.json
 
 # Build output
-bin/
-dist/
-.tools/
-.gate-reports/
-# Anchored to the root. Unanchored, `coverage/` matches a directory of that
-# name at ANY depth, which silently swallowed tools/coverage, the source of
-# gate G4: the files existed on disk, `go build` and `go test` were happy, and
-# git could not see them. A tool that cannot be committed is a gate that does
-# not exist.
-/coverage/
+#
+# Anchored, every one of them. Unanchored, a rule like `coverage/` matches a
+# directory of that name at ANY depth, and this has now cost the repository
+# twice. It swallowed tools/coverage, the source of gate G4: the files existed
+# on disk, `go build` and `go test` were happy, and git could not see them. A
+# tool that cannot be committed is a gate that does not exist. Then `bin/`
+# swallowed web/packages/db/bin, the seeder's entry point, and the failure
+# arrived in CI as "Cannot find module" on a path that plainly exists locally,
+# with package.json cheerfully declaring the script the whole time.
+#
+# The rule is the lesson rather than the two directories: if a name is only
+# meant to mean the one at the root, write the slash.
+/bin/
+/dist/
+/.tools/
+/.gate-reports/
+# No trailing slash, unlike the four above, and that is not an oversight. The
+# build output is a directory and `tools/coverage` is also a command, so a
+# stray binary of that name lands here as a FILE. A directory-only rule ignored
+# the first and not the second.
+/coverage
 *.out
 *.test
 *.prof
@@ -79,8 +90,7 @@ engine/**/testdata/tmp/
 runner/artifacts/
 
 # Local gate output. Generated per run, never committed.
-.gate-reports/
-bin/
+/.gate-reports/
 
 # Compiled binaries built in place.
 #
@@ -90,20 +100,40 @@ bin/
 # twice here: a 10MB engine/af-proxy and a 3.2MB claimcheck, both arm64 Mach-O,
 # in a repository that ships Linux binaries.
 #
+# It has now happened a third time, with a 4.2MB `dogfood`, and the third time
+# is the one that says something about the list rather than about the mistake.
+# The list named the tools that existed when it was written, eleven tools were
+# added since, and nobody thought about this file while adding them. A list
+# that has to be maintained by remembering is a list that is wrong by default.
+#
 # Named rather than globbed, because a glob wide enough to catch every future
-# one would also catch source directories that share a name with their command.
-# tools/gatecheck's TestNoCompiledBinaryIsTracked is the real backstop; this
-# just keeps them out of `git status` in the meantime.
+# one would also catch source directories that share a name with their command,
+# and `docs` is exactly that: a tool and a site, so `/docs` here would ignore
+# the whole documentation tree.
+#
+# So the completeness of this list is now checked instead of remembered.
+# tools/gatecheck's TestEveryToolsBinaryNameIsIgnored fails when a tool has no
+# line here and no reason recorded for not having one, and
+# TestNoCompiledBinaryIsTracked remains the backstop for when one lands anyway.
+/azguard
 /claimcheck
-/gatecheck
-/vulncheck
+/cost
+/dogfood
 /errcheck
-/ldcheck
-/scanrepo
-/notices
-/proxysrc
 /errgen
+/gatecheck
+/ldcheck
 /licensegen
+/manifestcheck
+/notices
+/prosecheck
+/proxysrc
+/readability
+/schemadoc
+/scanrepo
+/site
+/vulncheck
+/walkthrough
 engine/af-proxy
 engine/af
 

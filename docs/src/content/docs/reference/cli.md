@@ -47,7 +47,7 @@ af ci [flags]
 | `--docs` | - | Where documentation links point. |
 | `--keep` | `false` | Leave the environment up, for debugging a failure. |
 | `--load` | `false` | Generate load as well as running the workflows. |
-| `-o`, `--output` | - | Write the report here as well as to the terminal. |
+| `--report` | - | Write the report here as well as to the terminal. |
 | `--runner` | - | Path to the runner's entry point. |
 | `--timeout` | `30m0s` | Give up after this long. |
 
