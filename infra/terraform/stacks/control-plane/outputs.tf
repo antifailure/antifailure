@@ -23,6 +23,25 @@ output "action_group_id" {
 # The value the asuid TXT record has to carry. Terraform writes that record
 # itself when the zone is in Azure DNS; this is for an installation whose DNS is
 # at a registrar, where binding the name is a person's job.
+#
+# SENSITIVE BECAUSE THE PROVIDER SAYS SO, AND WITHOUT THIS LINE NO PLAN OF THIS
+# STACK RUNS AT ALL. azurerm marks custom_domain_verification_id sensitive, and
+# Terraform refuses to evaluate a ROOT module output carrying a sensitive value
+# unless the output says it meant to. A module output infers its sensitivity, so
+# modules/control-plane needs nothing and this does. The refusal is
+#
+#   Error: Output refers to sensitive values
+#
+# and it is raised while evaluating outputs, which is AFTER the resource diff is
+# built and printed. So the plan appears in full, ends with "49 to add, 0 to
+# change, 0 to destroy", and then exits non-zero: it looks like a plan that
+# worked. It arrived with the production and alerting work and it broke BOTH
+# environments, staging included, because sensitivity is a property of the
+# expression rather than of custom_domain, which is empty on staging.
+#
+# Read with `terraform output -raw custom_domain_verification_id`; the bare form
+# prints "(sensitive value)".
 output "custom_domain_verification_id" {
-  value = module.control_plane.custom_domain_verification_id
+  value     = module.control_plane.custom_domain_verification_id
+  sensitive = true
 }

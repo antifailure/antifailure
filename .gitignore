@@ -116,8 +116,17 @@ engine/af
 *.tfplan
 crash.log
 local_backend_override.tf
-backend.hcl
+# backend*.hcl, not backend.hcl. Production initialises from
+# backend.production.hcl and self-hosting/production.md already told people both
+# were ignored while only the first one was, so the state storage account name
+# was one `git add` away from a public repository.
+backend*.hcl
 *.auto.tfvars
+# `terraform show -json plan.tfplan > plan.json` is written inside the stack
+# directory by infra.yml and by the production checklist. A plan file carries
+# the values of sensitive input variables, and github_client_secret is one.
+plan*.json
+plan*.txt
 
 # Assembled deploy output: www/out + docs/dist + the apex files, built by
 # `just site` and uploaded straight to the host. Nothing here is source.
