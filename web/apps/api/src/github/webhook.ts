@@ -89,7 +89,10 @@ export async function handleDelivery(
       // installation exists": recorded the same way, because the row we want is
       // the same row and writing it twice is harmless.
       const repos = Array.isArray(payload.repositories) ? (payload.repositories as Repo[]) : []
-      const orgId = await rememberInstallation(pool, clock, account, id)
+      // `live` here and nowhere else. This is the only event that means the
+      // installation exists right now, so it is the only one allowed to clear a
+      // suspension. See rememberInstallation.
+      const orgId = await rememberInstallation(pool, clock, account, id, { live: true })
       await rememberRepositories(pool, clock, account.login, orgId, repos)
       return {
         event,
@@ -178,6 +181,7 @@ async function rememberInstallation(
   clock: Clock,
   account: Account,
   installationId: number,
+  options: { live: boolean } = { live: false },
 ): Promise<string> {
   const login = account.login
   return pool.withGitHubAccount(login, async (db) => {
@@ -199,7 +203,16 @@ async function rememberInstallation(
       ON CONFLICT (installation_id) DO UPDATE SET
         account_login = EXCLUDED.account_login,
         account_type = EXCLUDED.account_type,
-        suspended_at = NULL,
+        -- Cleared only by a delivery that says the installation is live right
+        -- now, which is the installation event and nothing else. This used to
+        -- clear it unconditionally, and every caller reaches it: a repository
+        -- or installation_repositories delivery retried after a suspend or an
+        -- uninstall would put suspended_at back to null, and sign-in grants
+        -- membership on exactly "suspended_at IS NULL". GitHub does not promise
+        -- delivery order and retries a failed delivery for hours, so the
+        -- ordering that restores access somebody revoked is an ordinary one.
+        suspended_at = CASE WHEN ${options.live} THEN NULL
+                            ELSE github_installations.suspended_at END,
         updated_at = ${clock.now().toISOString()}`)
     return orgId
   })
