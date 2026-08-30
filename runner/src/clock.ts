@@ -7,55 +7,36 @@
 // takes minutes to prove one number. So the exploration takes every duration
 // from here, and a test hands it a clock it moves by hand.
 //
-// Deliberately identical in shape to web/apps/api/src/clock.ts rather than
-// clever, because two clocks that behave differently are worse than two
-// clocks. The declared workflow path in execute.ts still calls Date.now
-// directly; changing that is its own change and would touch the one part of
-// the runner that is proven against real browsers.
+// Narrower than web/apps/api/src/clock.ts on purpose. That one carries now()
+// and sleep() because session expiry, token lifetimes and the reaper are about
+// wall time. Nothing in the runner is: it measures durations and nothing else,
+// so this carries one method. Shipping the other two because the shapes ought
+// to match would be shipping three unused methods and calling it symmetry.
+//
+// The declared workflow path in execute.ts still calls Date.now directly.
+// Changing that is its own change and would touch the one part of the runner
+// that is proven against real browsers.
 
 export interface Clock {
-  now(): Date;
-  /** Milliseconds since an arbitrary origin, for measuring durations. Separate
-   *  from now() because wall time can go backwards and a duration cannot. */
+  /** Milliseconds since an arbitrary origin. Monotonic rather than wall time,
+   *  because wall time can go backwards under an NTP correction and a duration
+   *  cannot. */
   monotonicMs(): number;
-  sleep(ms: number): Promise<void>;
 }
 
 export const systemClock: Clock = {
-  now: () => new Date(),
   monotonicMs: () => Number(process.hrtime.bigint() / 1_000_000n),
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
 /** A clock the test moves by hand. */
 export class FakeClock implements Clock {
-  #current: number;
   #mono = 0;
-
-  constructor(start: Date | string = '2026-01-01T00:00:00.000Z') {
-    this.#current = new Date(start).getTime();
-  }
-
-  now(): Date {
-    return new Date(this.#current);
-  }
 
   monotonicMs(): number {
     return this.#mono;
   }
 
   advance(ms: number): void {
-    this.#current += ms;
     this.#mono += ms;
-  }
-
-  /** Moves wall time backwards without moving monotonic time, which is what an
-   *  NTP correction looks like and what a duration must survive. */
-  rollBack(ms: number): void {
-    this.#current -= ms;
-  }
-
-  async sleep(ms: number): Promise<void> {
-    this.advance(ms);
   }
 }

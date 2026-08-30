@@ -201,8 +201,11 @@ func TestAnExplorationNeverCountsAgainstTheChange(t *testing.T) {
 	r := explore.Report{Explorations: []explore.Exploration{{
 		Findings: []explore.Finding{finding(explore.KindNoEffect, "high", 1)},
 	}}}
-	assert.False(t, r.CountsAgainstTheApplication())
+	// Asserted on the sentence a person actually reads, because that is the
+	// only place in the engine where this decision is visible: the enforcement
+	// is the runner's cause to verdict mapping, tested there.
 	assert.Contains(t, r.Headline(), "None of it counts against this change.")
+	assert.NotContains(t, r.Headline(), "fail")
 }
 
 func TestABlockedExplorationDoesNotReadAsACleanRun(t *testing.T) {

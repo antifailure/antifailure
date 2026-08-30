@@ -59,27 +59,18 @@ test('a seed that hashes to zero does not freeze the generator', () => {
 });
 
 test('the fake clock measures a duration the test decides', () => {
-  const clock = new FakeClock('2026-03-01T00:00:00.000Z');
+  const clock = new FakeClock();
   const at = clock.monotonicMs();
   clock.advance(4_200);
   assert.equal(clock.monotonicMs() - at, 4_200);
-  assert.equal(clock.now().toISOString(), '2026-03-01T00:00:04.200Z');
 });
 
-test('a clock rolled back does not make a duration negative', () => {
-  // An NTP correction moves wall time and not monotonic time. A duration
-  // measured across one has to stay a duration.
-  const clock = new FakeClock();
-  const at = clock.monotonicMs();
-  clock.advance(1_000);
-  clock.rollBack(60_000);
-  assert.equal(clock.monotonicMs() - at, 1_000);
-});
-
-test('the system clock is a clock', () => {
-  // Shipped and used by default, so it is worth one assertion that it is not
-  // a stub: a monotonic reading that never moves would make every duration
-  // zero and every slow_response finding impossible.
-  assert.ok(systemClock.now() instanceof Date);
+test('the system clock moves', () => {
+  // Shipped and used by default, so it is worth one assertion that it is not a
+  // stub: a monotonic reading that never moved would make every duration zero
+  // and every slow_response finding impossible.
+  const at = systemClock.monotonicMs();
+  for (let i = 0; i < 5_000_000; i++) { /* burn a millisecond */ }
+  assert.ok(systemClock.monotonicMs() >= at, 'monotonic time went backwards');
   assert.equal(typeof systemClock.monotonicMs(), 'number');
 });

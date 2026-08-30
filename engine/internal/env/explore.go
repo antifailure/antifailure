@@ -46,15 +46,11 @@ type goalDoc struct {
 	SlowMs    int    `json:"slowMs,omitempty"`
 }
 
-// resultDocument is what the runner writes back.
+// resultDocument is the half of the runner's output an exploration cares
+// about. The workflow half of the same document is decoded into TestReport by
+// Test, which is why the counts and the results are not repeated here.
 type resultDocument struct {
-	Results      []WorkflowResult      `json:"results"`
 	Explorations []explore.Exploration `json:"explorations"`
-	Passed       int                   `json:"passed"`
-	Failed       int                   `json:"failed"`
-	Flaky        int                   `json:"flaky"`
-	Blocked      int                   `json:"blocked"`
-	Unverified   int                   `json:"unverified"`
 }
 
 // Explore sends agents at the manifest's goals with no declared workflow.

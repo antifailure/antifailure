@@ -216,17 +216,15 @@ func (r Report) Blocked() int {
 	return n
 }
 
-// CountsAgainstTheApplication is false, always, and this function exists to
-// say so where somebody would look for it.
-//
-// An exploration wanders pages nobody wrote a workflow for, so nothing
-// declared what should have happened there. Turning "people would hesitate at
-// this control" into a red mark on a pull request is how a check becomes one
-// people mute, and report.go opens by saying a muted comment is worse than
-// none. Findings go in the body; they never reach the exit code.
-func (r Report) CountsAgainstTheApplication() bool { return false }
-
 // Headline is the one line summary, for a person with thirty seconds.
+//
+// It ends by saying the findings do not count against the change, and that
+// sentence is the whole verdict decision made visible. An exploration wanders
+// pages nobody wrote a workflow for, so nothing declared what should have
+// happened there, and turning "people would hesitate at this control" into a
+// red mark is how a check becomes one people mute. The enforcement lives in
+// the runner, where the cause `explored` maps to `pass`; this is where a
+// reader is told.
 func (r Report) Headline() string {
 	if len(r.Explorations) == 0 {
 		return "No exploration ran."

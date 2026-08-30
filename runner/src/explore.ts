@@ -187,7 +187,6 @@ const DEFAULT_SLOW_MS = 3_000;
 export class Explorer {
   readonly #goal: Goal;
   readonly #identity: Identity;
-  readonly #clock: Clock;
   readonly #rng: Seeded;
   readonly #slowMs: number;
   readonly #goalWords: readonly string[];
@@ -212,9 +211,11 @@ export class Explorer {
 
   #reached = false;
 
-  constructor(goal: Goal, clock: Clock = systemClock) {
+  // No clock here on purpose. Durations are measured around the action by
+  // pursue, which is the only place that knows when one started, and a clock
+  // stored here as well would be a second time source nothing reads.
+  constructor(goal: Goal) {
     this.#goal = goal;
-    this.#clock = clock;
     this.#rng = new Seeded(goal.seed);
     // Derived from the seed rather than from the wall clock, which is the
     // trade this design makes on purpose: the same seed types the same email
@@ -252,7 +253,6 @@ export class Explorer {
   get missing(): readonly string[] { return this.#missing; }
   get visited(): readonly string[] { return this.#visited.map((u) => this.redact(u)); }
   get reached(): boolean { return this.#reached; }
-  get identity(): Identity { return this.#identity; }
 
   /** observe records what the page itself says, before anything is done to it.
    *
@@ -491,9 +491,6 @@ export class Explorer {
     });
   }
 
-  /** now is the injected clock, so the caller measures with the same one. */
-  get clock(): Clock { return this.#clock; }
-
   /** offered is every control at a URL an exploration is willing to press,
    *  whether or not it has pressed it yet. */
   #offered(url: string): string[] {
@@ -622,7 +619,7 @@ export interface Pursuit {
 export async function pursue(
   goal: Goal, surface: Surface, clock: Clock = systemClock,
 ): Promise<Pursuit> {
-  const explorer = new Explorer(goal, clock);
+  const explorer = new Explorer(goal);
   const steps: string[] = [];
   const journey: Move[] = [];
 
