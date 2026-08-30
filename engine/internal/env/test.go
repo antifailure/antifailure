@@ -1,11 +1,9 @@
 package env
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -117,11 +115,14 @@ type jobDocument struct {
 	BaseURL   string        `json:"base_url"`
 	Artifacts string        `json:"artifacts"`
 	Workflows []workflowDoc `json:"workflows"`
-	Personas  []personaDoc  `json:"personas"`
-	AF        string        `json:"af,omitempty"`
-	WorkDir   string        `json:"work_dir,omitempty"`
-	Attempts  int           `json:"attempts,omitempty"`
-	Headless  bool          `json:"headless"`
+	// Goals are the exploratory runs, empty for 'af test'. One document shape
+	// rather than two, because everything around the planner is identical.
+	Goals    []goalDoc    `json:"goals,omitempty"`
+	Personas []personaDoc `json:"personas"`
+	AF       string       `json:"af,omitempty"`
+	WorkDir  string       `json:"work_dir,omitempty"`
+	Attempts int          `json:"attempts,omitempty"`
+	Headless bool         `json:"headless"`
 }
 
 type workflowDoc struct {
@@ -177,15 +178,6 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		return nil, err
 	}
 
-	runner, err := o.findRunner(opts.RunnerPath)
-	if err != nil {
-		return nil, err
-	}
-	artifacts := filepath.Join(o.opts.Root, StateDir, "artifacts", o.envID)
-	if err := os.MkdirAll(artifacts, 0o755); err != nil {
-		return nil, aferrors.Wrap(err, aferrors.AFAGT001, "detail", err.Error())
-	}
-
 	self, err := os.Executable()
 	if err != nil {
 		// Without the engine's own path the runner cannot read the inbox, so
@@ -195,34 +187,21 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	}
 
 	job := jobDocument{
-		BaseURL: status.URL, Artifacts: artifacts,
+		BaseURL:   status.URL,
+		Artifacts: filepath.Join(o.opts.Root, StateDir, "artifacts", o.envID),
 		Workflows: workflows, Personas: o.personaDocs(provisioned),
 		AF: self, WorkDir: o.opts.Root,
 		Attempts: opts.Attempts, Headless: !opts.Headed,
 	}
-	body, err := json.Marshal(job)
+
+	started := o.opts.Clock.Now()
+	stdout, err := o.invokeRunner(ctx, opts.RunnerPath, job)
 	if err != nil {
 		return nil, err
 	}
 
-	started := o.opts.Clock.Now()
-	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, "node", "--experimental-strip-types", runner)
-	cmd.Stdin = bytes.NewReader(body)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	cmd.Dir = o.opts.Root
-
-	runErr := cmd.Run()
-	if stdout.Len() == 0 {
-		// The runner produced nothing, which is the runner's own failure and
-		// not the application's. Its output is the only thing that explains it.
-		return nil, aferrors.Coded(aferrors.AFAGT003,
-			"detail", strings.TrimSpace(o.opts.Redactor.String(stderr.String())))
-	}
-
 	var report TestReport
-	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+	if err := json.Unmarshal(stdout, &report); err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFAGT003,
 			"detail", "the runner's output could not be read: "+err.Error())
 	}
@@ -249,10 +228,6 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		}
 	}
 	report.Invariants = invs
-
-	// A non zero exit with a readable report is a test failure, which the
-	// caller decides about. Only an unreadable one is an error here.
-	_ = runErr
 	return &report, nil
 }
 

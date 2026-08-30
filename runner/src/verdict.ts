@@ -30,6 +30,9 @@ export type Cause =
   /** The workflow touched a response a model invented, so the result cannot be
    *  trusted either way. */
   | 'synthesized-response'
+  /** An exploration ran to the end of its budget and observed the
+   *  application. Findings, if there were any, are attached to it. */
+  | 'explored'
   /** It worked. */
   | 'succeeded';
 
@@ -38,9 +41,18 @@ export type Cause =
  * Kept as data rather than as branches, so the mapping can be read in one
  * place and argued with. The argument that matters: runner-failure is BLOCKED
  * and not FAIL, always, without exception.
+ *
+ * The second argument, which is newer: `explored` is PASS. An exploration
+ * wanders an application nobody wrote a workflow for, so nothing declared what
+ * should have happened, and a run that noticed people would hesitate at a
+ * control has not shown that the change under review broke anything. Mapping
+ * it to FAIL would put a red mark on a pull request that is fine, which is the
+ * exact thing report.go opens by saying produces a comment people mute. The
+ * findings go in the report body; they never reach the exit code.
  */
 const VERDICT_FOR_CAUSE: Record<Cause, Verdict> = {
   'succeeded': 'pass',
+  'explored': 'pass',
   'expectation-not-met': 'fail',
   'application-error': 'fail',
   'runner-failure': 'blocked',

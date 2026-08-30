@@ -205,6 +205,14 @@ func Explain(m *schema.Manifest) string {
 		}
 	}
 
+	if m.Explore != nil && m.Explore.Enabled && len(m.Explore.Goals) > 0 {
+		b.WriteString("\nExplore\n")
+		for _, g := range m.Explore.Goals {
+			fmt.Fprintf(&b, "  %-24s as %-14s seed %s, up to %d steps\n",
+				g.Name, g.Persona, g.Seed, g.Budget.Steps)
+		}
+	}
+
 	if m.Load.Enabled {
 		b.WriteString("\nLoad\n")
 		fmt.Fprintf(&b, "  source       %s at %.0f%% of production rate for %s\n",

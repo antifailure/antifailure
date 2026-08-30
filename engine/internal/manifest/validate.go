@@ -34,6 +34,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.workflows(m)
 	v.invariants(m)
 	v.oracle(m)
+	v.explore(m)
 	v.load(m)
 	v.runtime(m)
 
@@ -775,6 +776,83 @@ func jsonContentType(headers map[string]string) bool {
 		}
 	}
 	return false
+}
+
+func (v *validator) explore(m *schema.Manifest) {
+	e := m.Explore
+	if e == nil {
+		return
+	}
+	if e.Enabled && len(e.Goals) == 0 {
+		v.add("explore.goals",
+			"Exploration is enabled and declares no goals.",
+			"Add a goal saying what somebody is trying to do, or set explore.enabled to false.")
+	}
+	personas := map[string]bool{}
+	for _, p := range m.Personas {
+		personas[p.Name] = true
+	}
+	workflows := map[string]bool{}
+	for _, w := range m.Workflows {
+		workflows[w.Name] = true
+	}
+	names := map[string]bool{}
+	seeds := map[string]string{}
+	for i := range e.Goals {
+		g := &e.Goals[i]
+		base := fmt.Sprintf("explore.goals[%d]", i)
+		if names[g.Name] {
+			v.add(base+".name", fmt.Sprintf("Two goals are both named %q.", g.Name), "")
+		}
+		names[g.Name] = true
+		// A goal and a workflow with one name would produce two results a
+		// person cannot tell apart in a report, and 'af explore --only' and
+		// 'af test --only' would each match something different.
+		if workflows[g.Name] {
+			v.add(base+".name",
+				fmt.Sprintf("The goal %q has the same name as a workflow.", g.Name),
+				"Rename one. A report showing both would give two results the same label.")
+		}
+
+		if g.Persona == "" {
+			v.add(base+".persona",
+				fmt.Sprintf("Goal %q names no persona and the manifest declares none.", g.Name),
+				"Add a persona so that the agent has an account to explore as, or set login: none on one.")
+		} else if !personas[g.Persona] {
+			v.add(base+".persona",
+				fmt.Sprintf("Goal %q explores as %q, which is not a declared persona.", g.Name, g.Persona),
+				"Check the spelling against the persona names.")
+		}
+
+		// The agent has no script and no expectations, so this sentence is the
+		// only thing telling it where to go and the only thing deciding
+		// whether it arrived. A goal of two words matches half the page and
+		// reports itself reached on the front page.
+		if len(strings.Fields(g.Goal)) < 4 {
+			v.add(base+".goal",
+				fmt.Sprintf("The goal of %q is too short to explore towards.", g.Name),
+				"Say what somebody is trying to achieve, in a sentence. The agent has no other "+
+					"instruction, and these words are what decide whether it got there.")
+		}
+
+		// Two goals on one seed take correlated paths through the same
+		// application and the second explores very little that the first did
+		// not, which reads as two explorations and is closer to one.
+		if other, clash := seeds[g.Seed]; clash {
+			v.add(base+".seed",
+				fmt.Sprintf("Goals %q and %q share the seed %q.", other, g.Name, g.Seed),
+				"Give them different seeds. Two explorations on one seed walk the same tie breaks "+
+					"and cover less than their step counts suggest.")
+		}
+		seeds[g.Seed] = g.Name
+
+		if g.Budget != nil {
+			if _, err := ParseDuration(g.Budget.Duration); err != nil {
+				v.add(base+".budget.duration",
+					fmt.Sprintf("The budget duration %q is not a duration.", g.Budget.Duration), "")
+			}
+		}
+	}
 }
 
 func (v *validator) load(m *schema.Manifest) {

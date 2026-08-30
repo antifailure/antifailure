@@ -16,6 +16,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `auth` | [auth](#auth) | no | How personas come to exist. |
 | `database` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | `egress` | [Egress](#egress) | no | What the environment may reach on the network. |
+| `explore` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
 | `github` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
 | `insights` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
@@ -131,6 +132,15 @@ One variable a service needs. The manifest declares the name and where the value
 | `sandbox` | boolean | no | Marks a credential that must be a sandbox one. The secrets subsystem refuses a value carrying a known live prefix, and the proxy trips a wire if one reaches the network anyway. Defaults to `false`. |
 | `value` | string | no | A literal value for a variable that is configuration rather than a secret, such as a feature flag or a public URL. A value that looks like a credential is rejected. Max length 2048. |
 
+## Explore
+
+Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. An exploration is reproducible from its seed and never counts against the change.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | no | Defaults to `false`. |
+| `goals` | list of [Goal](#goal) | no | One thing an exploratory agent tries to achieve. Max items 50. |
+
 ## GitHub
 
 How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down.
@@ -141,6 +151,20 @@ How Antifailure appears on a pull request: what runs it, whether it comments, wh
 | `fork_policy` | `never`, `label`, `always` | no | What to do with a pull request from a fork. label requires a maintainer to add antifailure:allow first, which is the only safe default: a fork's code would otherwise run with the environment's credentials. Defaults to `label`. |
 | `mode` | `actions`, `app`, `off` | no | actions runs everything inside a workflow with no server. app uses the GitHub App and the control plane. Defaults to `actions`. |
 | `teardown_on` | list of string | no | Events that tear the environment down. Defaults to `[close merge ttl]`. Max items 5. |
+
+## Goal
+
+One thing an exploratory agent tries to achieve. Unlike a workflow this declares no outcome, so it cannot fail: what it produces is the path it took and the friction it met on the way.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `budget` | object | no | Hard caps. An exploration that exhausts its budget reports what it found up to that point and says the budget ran out. |
+| `goal` | string | **yes** | What somebody is trying to do, in one sentence. The agent has no script, so this is the only thing telling it where to go, and its words are what decide whether the goal was reached. Min length 10, max length 1000. |
+| `name` | string | **yes** | Max length 64, matches `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. |
+| `persona` | string | no | Which persona explores. Defaults to the first persona. Max length 40. |
+| `seed` | string | no | Decides every choice the agent makes. The same seed against the same application takes the same path, step for step, which is what lets a finding be replayed. Defaults to the goal's name. Max length 64. |
+| `slow_ms` | integer | no | How long one step may take before it is reported as friction. Defaults to `3000`. Minimum 1, maximum 600000. |
+| `start_path` | string | no | Where to begin. Defaults to the application root. Defaults to `/`. Max length 512. |
 
 ## Golden
 

@@ -25,6 +25,7 @@ type Manifest struct {
 	Invariants []Invariant `json:"invariants,omitempty" yaml:"invariants,omitempty"`
 	Insights   *Insights   `json:"insights,omitempty" yaml:"insights,omitempty"`
 	Oracle     *Oracle     `json:"oracle,omitempty" yaml:"oracle,omitempty"`
+	Explore    *Explore    `json:"explore,omitempty" yaml:"explore,omitempty"`
 	Load       *Load       `json:"load,omitempty" yaml:"load,omitempty"`
 	Runtime    *Runtime    `json:"runtime,omitempty" yaml:"runtime,omitempty"`
 	GitHub     *GitHub     `json:"github,omitempty" yaml:"github,omitempty"`
@@ -423,6 +424,39 @@ type OracleDatabase struct {
 	Tables  []string `json:"tables,omitempty" yaml:"tables,omitempty"`
 	Exclude []string `json:"exclude,omitempty" yaml:"exclude,omitempty"`
 	MaxRows int      `json:"max_rows,omitempty" yaml:"max_rows,omitempty"`
+}
+
+// Explore configures the exploratory runs.
+//
+// A separate block from Workflows rather than a flag on one, because the two
+// are different things asked of the same browser. A workflow declares an
+// outcome and is judged against it; a goal declares an intention and is judged
+// against nothing, which is why an exploration cannot fail a build. Overloading
+// workflows[] would also collide with its own validation: a workflow needs a
+// description of at least four words to plan from and a persona to run as, and
+// a goal needs neither.
+type Explore struct {
+	Enabled bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Goals   []Goal `json:"goals,omitempty" yaml:"goals,omitempty"`
+}
+
+// Goal is one thing an exploratory agent tries to achieve.
+type Goal struct {
+	Name string `json:"name" yaml:"name"`
+	// Goal is the sentence, written the way somebody would say it out loud.
+	// The agent has no script, so this is the only thing telling it where to
+	// go, and it is what the run is judged to have reached or not reached.
+	Goal    string `json:"goal" yaml:"goal"`
+	Persona string `json:"persona,omitempty" yaml:"persona,omitempty"`
+	// Seed decides every choice the agent makes. The same seed against the
+	// same application takes the same path, which is what makes a finding
+	// something somebody can replay rather than something they have to
+	// believe. Defaults to the goal's name.
+	Seed      string `json:"seed,omitempty" yaml:"seed,omitempty"`
+	StartPath string `json:"start_path,omitempty" yaml:"start_path,omitempty"`
+	// SlowMs is how long one step may take before it is reported as friction.
+	SlowMs int     `json:"slow_ms,omitempty" yaml:"slow_ms,omitempty"`
+	Budget *Budget `json:"budget,omitempty" yaml:"budget,omitempty"`
 }
 
 // LoadSource names where the endpoint mix comes from.
