@@ -29,23 +29,14 @@ reading the results.
 
 ## What the App must be granted
 
-Repository permissions, in `app` mode:
+[Standing up production](/docs/self-hosting/production/#8-create-the-production-github-app)
+carries the permission and event lists, with what each one is for and why the
+rest are refused. It is one list rather than two so that they cannot drift.
 
-| Permission | Access | What needs it |
-| --- | --- | --- |
-| Metadata | read | Mandatory for every App. |
-| Contents | read | Reading the manifest and the workflow file. |
-| Pull requests | write | Leaving the report comment, and opening the pull request a masking rule change becomes. |
-| Actions | write | Starting a run from the console. Without it, **Create environment**, **Run agents** and **Run load** answer 404. |
-
-Organization permissions: Members, read. That is what membership sync reads, and
-it is the difference between everybody landing with no tenant and the console
-knowing who belongs where.
-
-Grant Actions write only if you use the console's controls. GitHub answers a
-dispatch with 404 whether the App lacks the permission, the workflow file is
-missing, or the App was never installed on that repository, so a missing
-permission looks exactly like a missing file.
+The one worth knowing here: the console's controls need **Actions: write**, and
+GitHub answers a dispatch with 404 whether the App lacks that permission, the
+workflow file is missing, or the App was never installed on that repository. A
+missing permission looks exactly like a missing file.
 
 ## Starting a run from the console
 
