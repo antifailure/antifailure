@@ -34,7 +34,7 @@ function sourcesFor(routePath: string): string[] {
   const candidates: string[] = [];
 
   if (routePath === "/") {
-    candidates.push("app/page.tsx", "components/home", "lib/marketing-content.tsx");
+    candidates.push("app/page.tsx", "components/home");
   } else if (routePath.startsWith("/product/")) {
     const slug = routePath.slice("/product/".length);
     // Twins -> Twins.tsx, safe-state -> SafeState.tsx, and so on.
@@ -50,14 +50,16 @@ function sourcesFor(routePath: string): string[] {
     candidates.push("app/product/page.tsx", "components/pages/product/Overview.tsx");
   } else if (routePath.startsWith("/solutions/")) {
     candidates.push(
-      "lib/solutions-content.tsx",
+      `components/pages/solutions/${routePath.slice("/solutions/".length)}.tsx`,
       "components/pages/solutions/Vertical.tsx",
       "app/solutions/[slug]/page.tsx",
     );
   } else if (routePath === "/solutions") {
     candidates.push("app/solutions/page.tsx", "components/pages/solutions/Hub.tsx");
+  } else if (routePath === "/pricing") {
+    candidates.push("app/pricing/page.tsx", "components/pages/company/Pricing.tsx");
   } else {
-    candidates.push(`app${routePath}/page.tsx`, "lib/company-content.tsx");
+    candidates.push(`app${routePath}/page.tsx`);
   }
 
   return candidates.filter((c) => existsSync(path.join(ROOT, c)));

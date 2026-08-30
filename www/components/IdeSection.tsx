@@ -11,7 +11,6 @@ import {
 } from "react";
 import { motion } from "motion/react";
 import { EASE } from "@/lib/easing";
-import { CopyCli } from "./Pills";
 import { Caret } from "./motion/Caret";
 import { useInViewPlay } from "@/lib/useInViewPlay";
 
@@ -822,93 +821,3 @@ export function IdePlay() {
     </div>
   );
 }
-
-export function IdeSection() {
-  const glow = useRef<HTMLDivElement>(null);
-  const { story } = useInViewPlay(glow, 0.15);
-
-  return (
-    <section className="relative bg-[#f7f7f5] px-6 pb-24 pt-16 lg:px-12 lg:pt-20" id="ide">
-      <div className="flex gap-6">
-        <div className="hidden w-[200px] shrink-0 lg:block" />
-        <div className="relative mx-auto min-w-0 max-w-[1240px] flex-1">
-          <h2
-            id="from-pr"
-            className="max-w-[920px] scroll-mt-[88px] text-[36px] font-semibold leading-[1.12] tracking-[-0.035em] text-black md:text-[44px] lg:text-[48px]"
-          >
-            A disposable production twin for every risky change.{" "}
-            <span className="text-black/40">
-              Connect a repository and cloud environment. The platform proves whether it is safe to ship.
-            </span>
-          </h2>
-
-          <div className="relative mt-14 overflow-hidden border border-black/12 bg-[#f7f7f5]">
-            <div className="pointer-events-none absolute inset-0" aria-hidden>
-              <div
-                className="absolute inset-0"
-                style={{
-                  background:
-                    "radial-gradient(ellipse 58% 52% at 6% 100%, rgba(51,191,0,0.58), transparent 62%), radial-gradient(ellipse 58% 52% at 94% 100%, rgba(0,229,153,0.55), transparent 62%)",
-                  opacity: story ? 1 : 0.7,
-                  transition: "opacity 0.8s ease",
-                }}
-              />
-              <div
-                ref={glow}
-                className="ide-dots absolute inset-0"
-                style={{
-                  WebkitMaskImage:
-                    "radial-gradient(ellipse 60% 55% at 8% 100%, black 0%, transparent 70%), radial-gradient(ellipse 60% 55% at 92% 100%, black 0%, transparent 70%)",
-                  maskImage:
-                    "radial-gradient(ellipse 60% 55% at 8% 100%, black 0%, transparent 70%), radial-gradient(ellipse 60% 55% at 92% 100%, black 0%, transparent 70%)",
-                  opacity: story ? 0.85 : 0.5,
-                  transition: "opacity 0.8s ease",
-                }}
-              />
-              <div
-                className="auth-honeycomb absolute inset-0"
-                style={{
-                  WebkitMaskImage:
-                    "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 55%), linear-gradient(90deg, rgba(0,0,0,0.55), transparent 40%, transparent 60%, rgba(0,0,0,0.55))",
-                  maskImage:
-                    "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 55%), linear-gradient(90deg, rgba(0,0,0,0.55), transparent 40%, transparent 60%, rgba(0,0,0,0.55))",
-                  opacity: 0.4,
-                }}
-              />
-            </div>
-
-            <div className="relative px-6 pb-8 pt-[72px] sm:px-10 lg:px-14 lg:pb-10 lg:pt-[88px]">
-              <div
-                className="pointer-events-none absolute left-[16%] top-5 hidden items-start gap-2 lg:flex"
-                aria-hidden
-              >
-                <span className="h-[56px] w-px bg-black/25" />
-                <span className="pt-0.5 text-[12px] leading-4 text-black/45">
-                  Attaches the safety report to the PR
-                </span>
-              </div>
-              <div
-                className="pointer-events-none absolute right-[14%] top-5 hidden items-start gap-2 lg:flex"
-                aria-hidden
-              >
-                <span className="h-[56px] w-px bg-black/25" />
-                <span className="pt-0.5 text-[12px] leading-4 text-black/45">
-                  Provisions an isolated twin with contained integrations
-                </span>
-              </div>
-              <IdePlay />
-            </div>
-
-            <div className="relative flex flex-wrap items-center justify-between gap-4 border-t border-black/12 px-6 py-5 sm:px-10 lg:px-14">
-              <p className="text-[15px] tracking-[-0.01em] text-black">
-                Try for yourself, prove the next deploy before it ships.
-              </p>
-              <CopyCli variant="mint" />
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
