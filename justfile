@@ -552,6 +552,8 @@ _generated:
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
     (cd engine && go test ./internal/policy -update-vectors)
+    (cd engine && go test ./internal/mockpack -update-vectors)
+    (cd engine && go test ./internal/webhook -update-vectors)
     (cd engine && go test ./internal/cli -update-reference)
     (cd engine && go test ./internal/events -update-schema)
     (cd engine && go test ./internal/masking -update-transforms)
@@ -560,6 +562,8 @@ _generated:
       engine/internal/errors/codes.gen.go \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
+      schemas/mockpack-vectors.json \
+      schemas/webhook-vectors.json \
       schemas/events.v1.json \
       docs/src/content/docs/reference/cli.md \
       docs/src/content/docs/reference/transforms.md \
@@ -573,6 +577,8 @@ generate:
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
     cd engine && go test ./internal/policy -update-vectors
+    cd engine && go test ./internal/mockpack -update-vectors
+    cd engine && go test ./internal/webhook -update-vectors
     cd engine && go test ./internal/cli -update-reference
     cd engine && go test ./internal/events -update-schema
     cd engine && go test ./internal/masking -update-transforms
