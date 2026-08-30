@@ -39,6 +39,20 @@ export interface PoolOptions {
   statementTimeoutSeconds?: number
   /** Set by tests to keep the pool small and fail fast. */
   connectTimeoutSeconds?: number
+  /**
+   * Whether row-level security may apply to this connection. True everywhere
+   * except the operator command, and it grants nothing: `row_security = off`
+   * is not a privilege, and a role the policies already do not apply to is
+   * unaffected by it.
+   *
+   * What it changes is the failure. A privileged tool that turns out to be
+   * subject to the policies after all would UPDATE zero rows and report
+   * success, which is precisely the failure 0007 was written about: a policy
+   * does not raise on a statement that matches nothing. With this false,
+   * Postgres raises instead, so a break-glass run by the wrong role says so
+   * rather than looking like it worked.
+   */
+  rowSecurity?: boolean
   onNotice?: (notice: unknown) => void
 }
 
@@ -149,6 +163,9 @@ export function createPool(options: PoolOptions): Pool {
   ): Promise<T> {
     return root.transaction(async (tx) => {
       await tx.execute(rawSql`SELECT set_config('statement_timeout', ${String(statementTimeout)}, true)`)
+      if (options.rowSecurity === false) {
+        await tx.execute(rawSql`SELECT set_config('row_security', 'off', true)`)
+      }
       for (const [key, value] of Object.entries(settings)) {
         await tx.execute(rawSql`SELECT set_config(${key}, ${value}, true)`)
       }

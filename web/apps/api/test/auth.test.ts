@@ -12,7 +12,7 @@ import {
   ABSOLUTE_LIFETIME_MS, IDLE_TIMEOUT_MS, hashToken, issueSession, resolveSession,
   sessionCookie, readCookie, csrfTokenFor, csrfMatches,
 } from '../src/auth/session.ts'
-import { safeRedirect, completeSignIn, syncMembership, SignInError } from '../src/auth/signin.ts'
+import { safeRedirect, beginSignIn, completeSignIn, syncMembership, SignInError } from '../src/auth/signin.ts'
 import { FakeClock } from '../src/clock.ts'
 import { FakeGitHub } from '../src/auth/fakegithub.ts'
 import { GitHubError } from '../src/auth/github.ts'
@@ -315,6 +315,348 @@ describe('the OAuth exchange', { skip: hasDatabase ? false : 'no Postgres' }, ()
     const body = (await session.json()) as { signedIn: boolean; orgId: string | null }
     assert.equal(body.signedIn, true)
     assert.equal(body.orgId, null, 'a stranger was placed inside an organization')
+  })
+})
+
+/**
+ * The first member of an organization, and the orderings that reach that state.
+ *
+ * An organization here is created by an installation webhook, before anybody
+ * has signed in, so "no members at all" is the state every tenant starts in and
+ * passes through exactly once. What happens on that one sign-in decides whether
+ * the organization ever has an owner, and owner is the only role holding
+ * `billing.manage`.
+ *
+ * Every test below builds its own organization, because the question being
+ * asked is about an EMPTY one and a suite that shares a fixture would answer it
+ * once and then never again.
+ */
+describe('the first member of an organization', { skip: hasDatabase ? false : 'no Postgres' }, () => {
+  let h: ApiHarness
+  const created: string[] = []
+
+  before(async () => {
+    h = await startApi()
+  })
+  after(async () => {
+    for (const orgId of created) await dropOrg(h.admin, orgId)
+    await h.close()
+  })
+
+  /** An organization with an installation and nobody in it. */
+  async function unclaimed(label: string): Promise<Org & { installationId: number }> {
+    const org = await seedOrg(h.admin, label)
+    created.push(org.orgId)
+    const installationId = Math.floor(Math.random() * 1e12)
+    await h.admin`
+      INSERT INTO github_installations (org_id, installation_id, account_login, account_type)
+      VALUES (${org.orgId}, ${installationId}, ${org.slug}, 'Organization')`
+    return { ...org, installationId }
+  }
+
+  function person(label: string) {
+    const login = `${label}-${randomUUID().slice(0, 6)}`
+    return {
+      id: Math.floor(Math.random() * 1e9),
+      login,
+      email: `${login}@example.test`,
+      name: login,
+      avatarUrl: null,
+    }
+  }
+
+  async function signIn(orgSlug: string, p: ReturnType<typeof person>) {
+    h.github.addUser(p)
+    h.github.addOrganization(p.login, { id: 1, login: orgSlug })
+    // Past the rate limit window. These tests start more exchanges in a minute
+    // than a browser would, and a 429 here reads as a sign-in bug.
+    h.clock.advance(60_000)
+    const start = await h.fetch('/auth/github')
+    const state = new URL(start.headers.get('location')!).searchParams.get('state')!
+    const code = h.github.approve(p.login)
+    const done = await h.fetch(`/auth/github/callback?code=${code}&state=${state}`)
+    assert.equal(done.status, 302)
+    return done
+  }
+
+  async function memberRow(orgId: string, login: string) {
+    const rows = await h.admin<{ role: string; source: string }[]>`
+      SELECT m.role::text AS role, m.source FROM members m JOIN users u ON u.id = m.user_id
+      WHERE m.org_id = ${orgId} AND u.github_login = ${login}`
+    return rows[0] ?? null
+  }
+
+  async function owners(orgId: string): Promise<number> {
+    const rows = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM members WHERE org_id = ${orgId} AND role = 'owner'`
+    return Number(rows[0]!.n)
+  }
+
+  it('becomes the owner when GitHub says they administer it', async () => {
+    // THE DEFECT THIS CLOSES. Every organization on this control plane was
+    // created by a webhook and every member arrived through sign-in, which maps
+    // a GitHub administrator to `admin`. So no organization anywhere had an
+    // owner, and `billing.manage` is owner-only: nobody could see the plan, the
+    // payment method or the spending caps, on any tenant, ever.
+    const org = await unclaimed('bootstrap')
+    const boss = person('boss')
+    h.github.setMembers(org.slug, [{ user: boss, role: 'admin' }])
+
+    await signIn(org.slug, boss)
+
+    const row = await memberRow(org.orgId, boss.login)
+    assert.equal(row?.role, 'owner')
+    // manual, because this application decided it and GitHub has no opinion to
+    // overwrite it with. A later sync must not demote them.
+    assert.equal(row?.source, 'manual')
+
+    const audit = await h.admin<{ actor_label: string; detail: Record<string, unknown> }[]>`
+      SELECT actor_label, detail FROM audit_entries
+      WHERE org_id = ${org.orgId} AND action = 'member.bootstrapped'`
+    assert.equal(audit.length, 1, 'an organization acquired an owner and nothing recorded it')
+    assert.equal(audit[0]!.detail.githubRole, 'admin')
+  })
+
+  it('does not make the second one an owner as well', async () => {
+    const org = await unclaimed('second')
+    const first = person('first')
+    const second = person('second')
+    h.github.setMembers(org.slug, [
+      { user: first, role: 'admin' },
+      { user: second, role: 'admin' },
+    ])
+
+    await signIn(org.slug, first)
+    await signIn(org.slug, second)
+
+    assert.equal((await memberRow(org.orgId, first.login))?.role, 'owner')
+    assert.equal((await memberRow(org.orgId, second.login))?.role, 'admin')
+    assert.equal(await owners(org.orgId), 1)
+  })
+
+  it('a plain GitHub member arriving first is a member, not an owner', async () => {
+    // The rule is "the first member becomes the owner", and it is still GitHub
+    // that says who may be one. Somebody who administers nothing must not own
+    // the tenant because they happened to click first.
+    const org = await unclaimed('plainfirst')
+    const plain = person('plain')
+    h.github.setMembers(org.slug, [{ user: plain, role: 'member' }])
+
+    await signIn(org.slug, plain)
+
+    assert.equal((await memberRow(org.orgId, plain.login))?.role, 'member')
+    assert.equal(await owners(org.orgId), 0)
+  })
+
+  it('an outage during the first sign-in produces a member, not an owner', async () => {
+    // The other direction of the null `roleIn` returns. Guessing upward here
+    // would mean a rate limit hands ownership of a company's tenant, including
+    // its billing, to whoever was signing in at the time. The way out of an
+    // organization whose GitHub link is permanently broken is the break-glass
+    // command, which is a deliberate act by an operator holding the database
+    // credential, not a guess made by a web request.
+    const org = await unclaimed('outage')
+    const boss = person('unlucky')
+    h.github.setMembers(org.slug, [{ user: boss, role: 'admin' }])
+
+    h.github.breakRoleLookups()
+    try {
+      await signIn(org.slug, boss)
+    } finally {
+      h.github.breakRoleLookups(false)
+    }
+
+    assert.equal((await memberRow(org.orgId, boss.login))?.role, 'member')
+    assert.equal(await owners(org.orgId), 0)
+
+    // And it heals on the next sign-in as far as GitHub can take it: `admin`,
+    // which holds members.manage, so they can promote themselves the rest of
+    // the way. `source` is still github, so this is the ordinary update path.
+    await signIn(org.slug, boss)
+    assert.equal((await memberRow(org.orgId, boss.login))?.role, 'admin')
+    assert.equal(await owners(org.orgId), 0)
+  })
+
+  it('two people signing in at once produce exactly one owner', async () => {
+    // B-then-A, forced rather than hoped for.
+    //
+    // Both are administrators on GitHub and both would qualify. Reading the
+    // member count without a lock, two transactions in flight together each see
+    // an empty organization, each conclude they are the first, and it ends with
+    // two owners. Racing two sign-ins and hoping is not a test: they interleave
+    // at whatever points Node happens to schedule, and the run that matters is
+    // the one that never happens locally.
+    //
+    // So the window is held open. A gate transaction takes the same advisory
+    // lock the decision takes, B's sign-in queues behind it, A's membership is
+    // committed while B waits, and the gate opens. If the decision took no
+    // lock, B never queues, it finishes before A's row exists, and both are
+    // owners.
+    const org = await unclaimed('race')
+    const a = person('racer-a')
+    const b = person('racer-b')
+    h.github.setMembers(org.slug, [
+      { user: a, role: 'admin' },
+      { user: b, role: 'admin' },
+    ])
+    h.github.addUser(b)
+    h.github.addOrganization(b.login, { id: 1, login: org.slug })
+
+    const [firstUser] = await h.admin<{ id: string }[]>`
+      INSERT INTO users (github_id, github_login, email, name)
+      VALUES (${a.id}, ${a.login}, ${a.email}, ${a.name}) RETURNING id`
+
+    const key = `members:${org.orgId}`
+    let acquired!: () => void
+    let open!: () => void
+    const held = new Promise<void>((resolve) => { acquired = resolve })
+    const gate = new Promise<void>((resolve) => { open = resolve })
+    // One transaction on one connection, so the lock is taken and released by
+    // the same session. A session-scoped pg_advisory_lock on a pooled client
+    // can unlock on a different connection and then never release at all.
+    const holding = h.admin.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${key}))`
+      acquired()
+      await gate
+    })
+    await held
+
+    const state = await beginSignIn(h.pool, h.clock, h.github)
+    const code = h.github.approve(b.login)
+    let settled = false
+    const second = completeSignIn(h.pool, h.clock, h.github, { code, state: state.state })
+      .finally(() => { settled = true })
+
+    // Queued behind the gate, observed rather than waited out. A decision that
+    // takes no lock never queues and finishes instead, which is what `settled`
+    // is here to notice.
+    for (let i = 0; i < 500 && !settled; i++) {
+      const waiting = await h.admin<{ n: string }[]>`
+        SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`
+      if (Number(waiting[0]!.n) > 0) break
+    }
+
+    await h.admin`
+      INSERT INTO members (org_id, user_id, role, source)
+      VALUES (${org.orgId}, ${firstUser!.id}, 'owner', 'manual')`
+    open()
+    await holding
+    await second
+
+    assert.equal(await owners(org.orgId), 1, 'two sign-ins in flight both became owner')
+    assert.equal((await memberRow(org.orgId, b.login))?.role, 'admin')
+  })
+
+  it('a member removed and re-added does not become an owner while others remain', async () => {
+    const org = await unclaimed('readded')
+    const boss = person('stays')
+    const leaver = person('leaves')
+    h.github.setMembers(org.slug, [
+      { user: boss, role: 'admin' },
+      { user: leaver, role: 'admin' },
+    ])
+
+    await signIn(org.slug, boss)
+    await signIn(org.slug, leaver)
+    assert.equal((await memberRow(org.orgId, leaver.login))?.role, 'admin')
+
+    // Removed the way syncMembership removes somebody, then back on GitHub and
+    // signing in again. The organization is not unclaimed, so nothing here
+    // qualifies as a first member.
+    await h.admin`
+      DELETE FROM members WHERE org_id = ${org.orgId}
+        AND user_id = (SELECT id FROM users WHERE github_login = ${leaver.login})`
+    await signIn(org.slug, leaver)
+
+    assert.equal((await memberRow(org.orgId, leaver.login))?.role, 'admin')
+    assert.equal(await owners(org.orgId), 1)
+  })
+
+  it('an organization that empties can be claimed again', async () => {
+    // The same removal, applied to everybody. An organization with no members
+    // has nobody who can act, which is the state the rule exists for, and it is
+    // reachable long after the organization was created.
+    const org = await unclaimed('emptied')
+    const boss = person('returning')
+    h.github.setMembers(org.slug, [{ user: boss, role: 'admin' }])
+
+    await signIn(org.slug, boss)
+    await h.admin`DELETE FROM members WHERE org_id = ${org.orgId}`
+    await signIn(org.slug, boss)
+
+    assert.equal((await memberRow(org.orgId, boss.login))?.role, 'owner')
+    assert.equal(await owners(org.orgId), 1)
+  })
+
+  it('an uninstall and reinstall does not hand ownership to whoever signs in next', async () => {
+    // Suspended, so sign-in grants nothing at all: the installation is the
+    // reason membership exists and there is not one. What must not happen is
+    // that the reinstall makes a later arrival look like the first member of an
+    // organization that already has some.
+    const org = await unclaimed('reinstall')
+    const boss = person('installer')
+    const later = person('later')
+    h.github.setMembers(org.slug, [
+      { user: boss, role: 'admin' },
+      { user: later, role: 'admin' },
+    ])
+
+    await signIn(org.slug, boss)
+    assert.equal((await memberRow(org.orgId, boss.login))?.role, 'owner')
+
+    await h.admin`
+      UPDATE github_installations SET suspended_at = now() WHERE org_id = ${org.orgId}`
+    await signIn(org.slug, later)
+    assert.equal(await memberRow(org.orgId, later.login), null, 'a suspended installation granted membership')
+
+    await h.admin`
+      UPDATE github_installations SET suspended_at = NULL WHERE org_id = ${org.orgId}`
+    await signIn(org.slug, later)
+    assert.equal((await memberRow(org.orgId, later.login))?.role, 'admin')
+    assert.equal(await owners(org.orgId), 1)
+  })
+
+  it('an uninstall before anybody signs in leaves the organization claimable', async () => {
+    // The other ordering of the same two events: the App comes and goes before
+    // the first person ever arrives. The first sign-in after it comes back is
+    // still the first, and still becomes the owner.
+    const org = await unclaimed('suspended-first')
+    const boss = person('patient')
+    h.github.setMembers(org.slug, [{ user: boss, role: 'admin' }])
+
+    await h.admin`
+      UPDATE github_installations SET suspended_at = now() WHERE org_id = ${org.orgId}`
+    await signIn(org.slug, boss)
+    assert.equal(await memberRow(org.orgId, boss.login), null)
+
+    await h.admin`
+      UPDATE github_installations SET suspended_at = NULL WHERE org_id = ${org.orgId}`
+    await signIn(org.slug, boss)
+    assert.equal((await memberRow(org.orgId, boss.login))?.role, 'owner')
+  })
+
+  it('a sync from GitHub does not demote the owner it created', async () => {
+    // GitHub has two roles and neither is owner, so a sync that treated this
+    // row as GitHub's would map it back to admin every time anybody pressed the
+    // button. That is what marking it manual prevents.
+    const org = await unclaimed('resync')
+    const boss = person('kept')
+    h.github.setMembers(org.slug, [{ user: boss, role: 'admin' }])
+
+    await signIn(org.slug, boss)
+    assert.equal((await memberRow(org.orgId, boss.login))?.role, 'owner')
+
+    await syncMembership(h.pool, h.clock, h.github, {
+      orgId: org.orgId,
+      installationId: org.installationId,
+      orgLogin: org.slug,
+      actorLabel: 'test',
+    })
+    assert.equal(
+      (await memberRow(org.orgId, boss.login))?.role,
+      'owner',
+      'a membership sync demoted the owner sign-in created',
+    )
   })
 })
 
