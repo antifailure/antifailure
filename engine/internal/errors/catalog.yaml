@@ -576,6 +576,20 @@ errors:
     docs: guides/invariants
     retryable: false
     exit_code: 8
+  - code: AF-AGT-020
+    area: AGT
+    message: "There is nothing to explore: {detail}"
+    next_step: "Add a goal under explore in the manifest, and set explore.enabled to true."
+    docs: concepts/exploration
+    retryable: false
+    exit_code: 3
+  - code: AF-AGT-021
+    area: AGT
+    message: "No goal named {goal} is declared under explore."
+    next_step: "Run 'af explain' to see the goals this manifest declares, then check the spelling."
+    docs: concepts/exploration
+    retryable: false
+    exit_code: 2
 
   # Load
   - code: AF-LOD-010

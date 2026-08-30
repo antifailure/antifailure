@@ -67,6 +67,9 @@
     "insights": {
       "$ref": "#/$defs/insights"
     },
+    "explore": {
+      "$ref": "#/$defs/explore"
+    },
     "load": {
       "$ref": "#/$defs/load"
     },
@@ -783,6 +786,94 @@
           "minimum": 0,
           "default": 100000,
           "description": "Row count above which a migration lint treats a table as large, where a rewrite or an exclusive lock is an outage rather than a pause."
+        }
+      }
+    },
+    "explore": {
+      "title": "Explore",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. An exploration is reproducible from its seed and never counts against the change.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "goals": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/goal"
+          }
+        }
+      }
+    },
+    "goal": {
+      "title": "Goal",
+      "description": "One thing an exploratory agent tries to achieve. Unlike a workflow this declares no outcome, so it cannot fail: what it produces is the path it took and the friction it met on the way.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "goal"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+          "maxLength": 64
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1000,
+          "description": "What somebody is trying to do, in one sentence. The agent has no script, so this is the only thing telling it where to go, and its words are what decide whether the goal was reached."
+        },
+        "persona": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Which persona explores. Defaults to the first persona."
+        },
+        "seed": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Decides every choice the agent makes. The same seed against the same application takes the same path, step for step, which is what makes a finding replayable. Defaults to the goal's name."
+        },
+        "start_path": {
+          "type": "string",
+          "maxLength": 512,
+          "default": "/",
+          "description": "Where to begin. Defaults to the application root."
+        },
+        "slow_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600000,
+          "default": 3000,
+          "description": "How long one step may take before it is reported as friction."
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Hard caps. An exploration that exhausts its budget reports what it found up to that point and says the budget ran out.",
+          "properties": {
+            "steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 40
+            },
+            "usd": {
+              "type": "number",
+              "minimum": 0,
+              "default": 0.5
+            },
+            "duration": {
+              "type": "string",
+              "pattern": "^[0-9]+(s|m)$",
+              "default": "10m"
+            }
+          }
         }
       }
     },

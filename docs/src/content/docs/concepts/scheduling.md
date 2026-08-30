@@ -2,7 +2,7 @@
 title: Scheduling
 description: How runs are ordered when there is more work than capacity.
 sidebar:
-  order: 11
+  order: 12
 ---
 
 A busy repository asks for more environments than there is capacity for. The

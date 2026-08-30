@@ -166,6 +166,35 @@ one line answer.
 af explain
 ```
 
+### `af explore`
+
+Send agents at a goal with no declared workflow.
+
+An exploration is a goal without a script. The agent reads each page through
+the accessibility tree, chooses somewhere to go, and writes down every place
+the application cost it effort. It answers the question a workflow cannot ask:
+nothing broke, so why would somebody give up here.
+
+It cannot fail your build. Nobody declared what should happen on the pages it
+wanders onto, so a finding is an observation and never a red mark. Only a run
+that could not start is reported as blocked.
+
+Every choice comes from the goal's seed, so the same seed takes the same path
+and every finding arrives with the command that replays it.
+
+```
+af explore [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to run against, defaulting to the checked out one. |
+| `--emit-workflow` | `false` | Print the workflow block that replays what was explored, instead of the report. |
+| `--headed` | `false` | Show the browser rather than running it hidden. |
+| `--only` | - | Explore just these goals, by name. |
+| `--runner` | - | Path to the runner's entry point. |
+| `--seed` | - | Replay with this seed rather than the one the manifest declares. |
+
 ### `af golden`
 
 Manage the masked copies branches are made from.

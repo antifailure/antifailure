@@ -116,6 +116,30 @@ Invariant {invariant} does not hold: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/invariants](/docs/guides/invariants/) |
 
+### AF-AGT-020
+
+There is nothing to explore: {detail}
+
+**What to do.** Add a goal under explore in the manifest, and set explore.enabled to true.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/exploration](/docs/concepts/exploration/) |
+
+### AF-AGT-021
+
+No goal named {goal} is declared under explore.
+
+**What to do.** Run 'af explain' to see the goals this manifest declares, then check the spelling.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/exploration](/docs/concepts/exploration/) |
+
 ## Build
 
 ### AF-BLD-001

@@ -20,6 +20,10 @@ const (
 	AFAGT011 Code = "AF-AGT-011"
 	// Invariant {invariant} does not hold: {detail}
 	AFAGT012 Code = "AF-AGT-012"
+	// There is nothing to explore: {detail}
+	AFAGT020 Code = "AF-AGT-020"
+	// No goal named {goal} is declared under explore.
+	AFAGT021 Code = "AF-AGT-021"
 
 	// Build
 	// The build for service {service} failed after {duration}.
@@ -321,6 +325,24 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/invariants",
 		Retryable: false,
 		ExitCode:  ExitTestFailure,
+	},
+	AFAGT020: {
+		Code:      AFAGT020,
+		Area:      "AGT",
+		Message:   "There is nothing to explore: {detail}",
+		NextStep:  "Add a goal under explore in the manifest, and set explore.enabled to true.",
+		Docs:      "concepts/exploration",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFAGT021: {
+		Code:      AFAGT021,
+		Area:      "AGT",
+		Message:   "No goal named {goal} is declared under explore.",
+		NextStep:  "Run 'af explain' to see the goals this manifest declares, then check the spelling.",
+		Docs:      "concepts/exploration",
+		Retryable: false,
+		ExitCode:  ExitUsage,
 	},
 	AFBLD001: {
 		Code:      AFBLD001,

@@ -31,6 +31,8 @@ const (
 	DefaultWorkflowSteps = 60
 	DefaultWorkflowUSD   = 0.5
 	DefaultWorkflowTime  = "10m"
+	DefaultExploreSteps  = 40
+	DefaultExploreSlowMs = 3000
 	DefaultLoadScale     = 0.05
 	DefaultLoadDuration  = "2m"
 	DefaultRegressionFac = 1.5
@@ -73,6 +75,7 @@ func normalize(m *schema.Manifest, root string) {
 	normalizeAuth(m)
 	normalizeWorkflows(m)
 	normalizeInsights(m)
+	normalizeExplore(m)
 	normalizeLoad(m)
 	normalizeRuntime(m)
 	normalizeGitHub(m)
@@ -274,6 +277,50 @@ func normalizeInsights(m *schema.Manifest) {
 	}
 	if i.LargeTableRows == 0 {
 		i.LargeTableRows = DefaultLargeTable
+	}
+}
+
+func normalizeExplore(m *schema.Manifest) {
+	if m.Explore == nil {
+		m.Explore = &schema.Explore{}
+	}
+	firstPersona := ""
+	if len(m.Personas) > 0 {
+		firstPersona = m.Personas[0].Name
+	}
+	for i := range m.Explore.Goals {
+		g := &m.Explore.Goals[i]
+		if g.Persona == "" {
+			g.Persona = firstPersona
+		}
+		// The name, so that a manifest which sets no seed still replays. A
+		// seed derived from the wall clock or from the process would make the
+		// default case the one that cannot be reproduced, which is exactly
+		// backwards for the feature this key exists to make possible.
+		if g.Seed == "" {
+			g.Seed = g.Name
+		}
+		if g.StartPath == "" {
+			g.StartPath = DefaultStartPath
+		}
+		if !strings.HasPrefix(g.StartPath, "/") {
+			g.StartPath = "/" + g.StartPath
+		}
+		if g.SlowMs == 0 {
+			g.SlowMs = DefaultExploreSlowMs
+		}
+		if g.Budget == nil {
+			g.Budget = &schema.Budget{}
+		}
+		if g.Budget.Steps == 0 {
+			g.Budget.Steps = DefaultExploreSteps
+		}
+		if g.Budget.USD == 0 {
+			g.Budget.USD = DefaultWorkflowUSD
+		}
+		if g.Budget.Duration == "" {
+			g.Budget.Duration = DefaultWorkflowTime
+		}
 	}
 }
 

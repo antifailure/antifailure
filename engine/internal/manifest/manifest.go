@@ -501,7 +501,7 @@ func suggest(got string, siblings []string) string {
 // which keys are legal in which position.
 var knownKeys = []string{
 	"version", "name", "services", "database", "egress", "personas", "auth", "workflows",
-	"invariants", "insights", "load", "runtime", "github",
+	"invariants", "insights", "explore", "load", "runtime", "github",
 	"path", "kind", "build", "command", "port", "health_path", "health_timeout",
 	"env", "replicas", "resources", "schedule", "migrate", "depends_on",
 	"strategy", "dockerfile", "target", "context", "image", "args", "allow_hosts",
@@ -514,6 +514,7 @@ var knownKeys = []string{
 	"webhook_path", "note", "email", "phone", "role", "login", "mfa", "attributes",
 	"description", "persona", "start_path", "independent", "budget", "expect", "tags",
 	"steps", "usd", "duration", "sql",
+	"goals", "goal", "slow_ms",
 	"migration_rehearsal", "query_regression", "plan_diff", "regression_factor",
 	"regression_min_ms", "large_table_rows",
 	"source", "source_config", "scale", "safe_routes", "unsafe_routes", "thresholds",

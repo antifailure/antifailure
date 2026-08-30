@@ -2,7 +2,7 @@
 title: Subsetting
 description: Taking a production shaped slice of a database instead of all of it, and keeping every foreign key resolvable.
 sidebar:
-  order: 12
+  order: 13
 ---
 
 A golden the size of production is a golden nobody refreshes, and a golden
