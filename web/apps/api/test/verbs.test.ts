@@ -342,7 +342,10 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
       assert.equal(dispatch.repository, org.repository)
       assert.equal(dispatch.ref, 'main')
       assert.equal(dispatch.inputs.command, 'up')
-      assert.equal(dispatch.inputs.env_id, '')
+      // Only the inputs the workflow declares, and every one of them is a flag
+      // `af` actually has. Sending anything else would be an input the customer's
+      // workflow silently drops.
+      assert.deepEqual(Object.keys(dispatch.inputs).sort(), ['command', 'duration', 'scale', 'workflows'])
 
       // The boundary, asserted rather than described. The control plane asked
       // GitHub to run the workflow and recorded nothing about an environment,
@@ -434,20 +437,25 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
       )
       const agents = h.github.dispatches[seen]!
       assert.equal(agents.inputs.command, 'agents')
-      assert.equal(agents.inputs.env_id, org.envId)
+      // The environment is named by its branch and nothing else, because that
+      // is how the engine identifies one: `af test` acts on the checked out
+      // branch and has no environment flag to be given an id.
       assert.equal(agents.ref, 'main', 'the run was not dispatched on the branch the environment is on')
       assert.equal(agents.inputs.workflows, 'sign-up,checkout')
 
       data(
         await callProcedure(h, member, 'load.run', 'mutation', {
           envId: org.envId,
-          profile: 'black-friday',
+          seconds: 90,
+          scale: 2,
         }),
         'load.run',
       )
       const load = h.github.dispatches[seen + 1]!
       assert.equal(load.inputs.command, 'load')
-      assert.equal(load.inputs.profile, 'black-friday')
+      // A Go duration, because that is what `af load run --duration` parses.
+      assert.equal(load.inputs.duration, '90s')
+      assert.equal(load.inputs.scale, '2')
       assert.equal(load.inputs.workflows, '')
     })
 
@@ -476,7 +484,7 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
   // Runtimes
   // -------------------------------------------------------------------------
 
-  describe('the runtime registry decides where an environment may be asked for', () => {
+  describe('the runtime registry answers against what is actually running', () => {
     it('registers, tags, and refuses a second runtime of the same name', async () => {
       data(
         await callProcedure(h, admin, 'runtimes.register', 'mutation', {
@@ -516,63 +524,84 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
       assert.equal(found.provider, 'kubernetes')
     })
 
-    it('a registered runtime reaches the workflow and an unregistered one is refused', async () => {
-      const seen = h.github.dispatches.length
-      data(
-        await callProcedure(h, member, 'environments.create', 'mutation', {
-          repository: org.repository,
-          runtime: 'eu-cluster',
-        }),
-        'environments.create',
-      )
-      assert.equal(
-        h.github.dispatches[seen]!.inputs.runtime,
-        'eu-cluster',
-        'the runtime the person chose never reached the workflow',
-      )
+    it('reports what is running somewhere nobody registered', async () => {
+      // An environment comes up on a runtime the organization never agreed to.
+      // Nothing refuses that and nothing should: the engine reports where it
+      // ran, and the control plane's job is to make it visible.
+      await h.admin`
+        UPDATE environments SET runtime = 'somebodys-laptop'
+        WHERE org_id = ${org.orgId} AND env_id = ${org.envId}`
 
-      const res = await callProcedure(h, member, 'environments.create', 'mutation', {
-        repository: org.repository,
-        runtime: 'somewhere-nobody-agreed-to',
-      })
-      assert.equal(errorCode(res.body), 'NOT_FOUND')
-      assert.equal(
-        h.github.dispatches.length,
-        seen + 1,
-        'an environment was asked for on a runtime this organization never registered',
+      const listed = data<{ name: string; registered: boolean; environments: string }[]>(
+        await callProcedure(h, member, 'runtimes.list', 'query', { includeRemoved: false }),
+        'runtimes.list',
       )
+      const stranger = listed.find((r) => r.name === 'somebodys-laptop')
+      assert.ok(stranger, 'an environment is running somewhere the registry never mentions')
+      assert.equal(stranger.registered, false)
+      assert.equal(Number(stranger.environments), 1)
+
+      // Registering it moves it across rather than duplicating it.
+      data(
+        await callProcedure(h, admin, 'runtimes.register', 'mutation', {
+          name: 'somebodys-laptop',
+          provider: 'local',
+          labels: [],
+        }),
+        'runtimes.register',
+      )
+      const after = data<{ name: string; registered: boolean; environments: string }[]>(
+        await callProcedure(h, member, 'runtimes.list', 'query', { includeRemoved: false }),
+        'runtimes.list',
+      )
+      const rows = after.filter((r) => r.name === 'somebodys-laptop')
+      assert.equal(rows.length, 1, 'registering a runtime listed it twice')
+      assert.equal(rows[0]!.registered, true)
+      assert.equal(Number(rows[0]!.environments), 1, 'the count did not follow the registration')
     })
 
-    it('removing a runtime stops it being usable and tears nothing down', async () => {
+    it('removing a runtime tears nothing down and shows what is still on it', async () => {
       const before = await countEnvironments(org.orgId, true)
 
-      const removed = data<{ removed: boolean }>(
-        await callProcedure(h, admin, 'runtimes.remove', 'mutation', { name: 'eu-cluster' }),
+      const removed = data<{ removed: boolean; environmentsStillRunning: number }>(
+        await callProcedure(h, admin, 'runtimes.remove', 'mutation', { name: 'somebodys-laptop' }),
         'runtimes.remove',
       )
       assert.equal(removed.removed, true)
-
+      assert.equal(
+        removed.environmentsStillRunning,
+        1,
+        'removing a runtime did not say what was still running on it',
+      )
       assert.equal(
         await countEnvironments(org.orgId, true),
         before,
         'removing a runtime tore something down',
       )
 
-      const res = await callProcedure(h, member, 'environments.create', 'mutation', {
-        repository: org.repository,
-        runtime: 'eu-cluster',
-      })
-      assert.equal(errorCode(res.body), 'NOT_FOUND', 'a removed runtime is still being offered')
+      // Back to being an unregistered runtime with a live environment on it,
+      // which is the true state and the one worth showing.
+      const listed = data<{ name: string; registered: boolean }[]>(
+        await callProcedure(h, member, 'runtimes.list', 'query', { includeRemoved: false }),
+        'runtimes.list',
+      )
+      const rows = listed.filter((r) => r.name === 'somebodys-laptop')
+      assert.equal(rows.length, 1)
+      assert.equal(rows[0]!.registered, false, 'a removed runtime is still shown as registered')
 
-      const twice = await callProcedure(h, admin, 'runtimes.remove', 'mutation', { name: 'eu-cluster' })
+      const twice = await callProcedure(h, admin, 'runtimes.remove', 'mutation', {
+        name: 'somebodys-laptop',
+      })
       assert.equal(errorCode(twice.body), 'NOT_FOUND')
 
-      // Still readable, because environments that ran on it name it.
-      const listed = data<{ name: string; removed_at: string | null }[]>(
+      // Still readable with its history, because environments name it.
+      const withRemoved = data<{ name: string; removed_at: string | null; registered: boolean }[]>(
         await callProcedure(h, member, 'runtimes.list', 'query', { includeRemoved: true }),
         'runtimes.list',
       )
-      assert.ok(listed.find((r) => r.name === 'eu-cluster' && r.removed_at !== null))
+      assert.ok(
+        withRemoved.find((r) => r.name === 'somebodys-laptop' && r.registered && r.removed_at !== null),
+      )
     })
   })
 

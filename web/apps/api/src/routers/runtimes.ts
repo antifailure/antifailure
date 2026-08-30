@@ -1,15 +1,23 @@
 // The runtime registry.
 //
-// A runtime is a place an organization has agreed environments may run. The
-// control plane holds the name, the provider and whatever labels the
-// organization uses to tell them apart, and holds no credential and no
-// address: it never connects to one. What the registry is FOR is the list a
-// person picks from when they ask for an environment, and the name that
-// travels to the customer's CI as a workflow input.
+// A runtime is a place an organization has agreed its environments may run.
+// The control plane holds the name, the provider and the labels, and holds no
+// credential and no address: it never connects to one.
 //
-// That is the whole reason it is not a settings page nobody reads.
-// `environments.create` refuses a runtime that is not registered here, so
-// removing one is an act with an effect, not a row disappearing from a table.
+// What makes this a feature rather than a settings page nobody reads is that
+// `list` answers the registry AGAINST REALITY. Every environment reports the
+// runtime it came up on, so the list carries both the runtimes somebody
+// registered and the runtimes environments are actually running on that nobody
+// registered, each with its live count. The second half is the useful one: an
+// environment running somewhere the organization never agreed to is a thing
+// worth seeing, and it is invisible in a table of what was registered.
+//
+// What this deliberately does NOT do is send the runtime name to the engine.
+// `af up` has no runtime flag, the manifest does no environment interpolation,
+// and there is no path by which a name chosen here could change where an
+// environment comes up. Passing one as a workflow input anyway would be a
+// control that looks like it works, which is the exact defect this branch
+// exists to remove rather than relocate.
 
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
@@ -36,9 +44,8 @@ const label = z.string().min(1).max(60).regex(/^[a-z0-9][a-z0-9-]*$/, 'lower cas
 export const runtimesRouter = router({
   /**
    * Guarded by `environments.view` rather than `runtimes.manage`, because
-   * everybody who can ask for an environment has to be able to see the list
-   * they are choosing from. Managing the registry is the privileged act;
-   * reading it is not.
+   * everybody who can read an environment has to be able to see where it is
+   * running. Managing the registry is the privileged act; reading it is not.
    */
   list: orgProcedure('environments.view')
     .input(z.object({ includeRemoved: z.boolean().default(false) }).default({ includeRemoved: false }))
@@ -47,13 +54,29 @@ export const runtimesRouter = router({
       return c.pool.withTenant(c.tenant, async (db) =>
         db.execute(sql`
           SELECT r.id, r.name, r.provider, r.labels, r.note, r.created_at, r.removed_at,
-                 u.github_login AS registered_by,
+                 u.github_login AS registered_by, true AS registered,
                  (SELECT count(*) FROM environments e
                    WHERE e.runtime = r.name AND e.state <> 'torn_down') AS environments
           FROM runtimes r
           LEFT JOIN users u ON u.id = r.registered_by
           WHERE (${input.includeRemoved} OR r.removed_at IS NULL)
-          ORDER BY r.removed_at NULLS FIRST, r.name`),
+
+          UNION ALL
+
+          -- What is actually running somewhere nobody registered. A registry
+          -- that only lists what was registered answers the easy half of the
+          -- question and hides the half worth acting on.
+          SELECT NULL::uuid, e.runtime, NULL::text, NULL::text[], NULL::text,
+                 NULL::timestamptz, NULL::timestamptz, NULL::text, false,
+                 count(*)
+          FROM environments e
+          WHERE e.runtime IS NOT NULL AND e.state <> 'torn_down'
+            AND NOT EXISTS (
+              SELECT 1 FROM runtimes r
+              WHERE r.name = e.runtime AND r.removed_at IS NULL)
+          GROUP BY e.runtime
+
+          ORDER BY registered DESC, removed_at NULLS FIRST, name`),
       )
     }),
 

@@ -23,6 +23,11 @@
 // and a row invented here would be a ghost the moment a runner failed to pick
 // the job up: an environment on the page that no engine has ever heard of.
 // `environments.teardown` takes the same position from the other direction.
+//
+// The inputs a dispatch sends are exactly the flags the engine's CLI has, and
+// nothing else. `af up` takes no runtime and `af load run` has no profile, so
+// neither is sent: an input the workflow cannot act on is the same dead socket
+// this whole change exists to close, moved one process along.
 
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
@@ -156,7 +161,6 @@ interface Target {
   repository: string
   ref: string
   envId: string
-  runtime: string
 }
 
 /**
@@ -173,10 +177,9 @@ async function targetFor(db: Db, envId: string): Promise<Target> {
     env_id: string
     branch: string
     state: string
-    runtime: string | null
     repository: string
   }>(sql`
-    SELECT e.env_id, e.branch, e.state::text AS state, e.runtime, r.full_name AS repository
+    SELECT e.env_id, e.branch, e.state::text AS state, r.full_name AS repository
     FROM environments e JOIN repositories r ON r.id = e.repository_id
     WHERE e.env_id = ${envId}`)
   const env = rows[0]
@@ -192,12 +195,7 @@ async function targetFor(db: Db, envId: string): Promise<Target> {
       message: `${envId} has been torn down, so there is nothing left to run against.`,
     })
   }
-  return {
-    repository: env.repository,
-    ref: env.branch,
-    envId: env.env_id,
-    runtime: env.runtime ?? '',
-  }
+  return { repository: env.repository, ref: env.branch, envId: env.env_id }
 }
 
 // ---------------------------------------------------------------------------
@@ -211,10 +209,6 @@ export const createEnvironment = orgProcedure('environments.create')
       /** Absent means the repository's default branch, which is what the
        *  console offers when somebody has not chosen. */
       branch: gitRef.optional(),
-      /** A registered runtime's name. Checked against the registry rather than
-       *  passed through, or the workflow receives a name for a place this
-       *  organization never agreed environments may run. */
-      runtime: z.string().max(100).optional(),
       workflow: workflowFile,
     }),
   )
@@ -227,20 +221,6 @@ export const createEnvironment = orgProcedure('environments.create')
         SELECT id, default_branch FROM repositories WHERE full_name = ${input.repository}`)
       const repo = repos[0]
       if (!repo) throw noRepository(input.repository)
-
-      if (input.runtime) {
-        const found = await db.execute<{ name: string }>(sql`
-          SELECT name FROM runtimes WHERE name = ${input.runtime} AND removed_at IS NULL`)
-        if (found.length === 0) {
-          throw new TRPCError({
-            code: 'NOT_FOUND',
-            message:
-              `No runtime named ${input.runtime} is registered in this organization. ` +
-              `Register it on the Environments page, or leave the runtime unset and let ` +
-              `the manifest decide.`,
-          })
-        }
-      }
 
       // The quota is checked here rather than when the engine reports the
       // environment, because refusing after the workflow has already started
@@ -265,10 +245,9 @@ export const createEnvironment = orgProcedure('environments.create')
     const installation = await installationFor(c)
     await dispatch(c, installation, input.repository, input.workflow, prepared.ref, {
       command: 'up',
-      env_id: '',
-      runtime: input.runtime ?? '',
       workflows: '',
-      profile: '',
+      duration: '',
+      scale: '',
     })
 
     await c.pool.withTenant(c.tenant, async (db) => {
@@ -276,7 +255,7 @@ export const createEnvironment = orgProcedure('environments.create')
         action: 'environment.requested',
         targetType: 'repository',
         targetId: input.repository,
-        detail: { ref: prepared.ref, workflow: input.workflow, runtime: input.runtime ?? null },
+        detail: { ref: prepared.ref, workflow: input.workflow },
       })
     })
 
@@ -315,12 +294,12 @@ export const agentsRouter = router({
 
       await dispatch(c, installation, target.repository, input.workflow, target.ref, {
         command: 'agents',
-        env_id: target.envId,
-        runtime: target.runtime,
         // Comma separated, because a workflow_dispatch input is a string and
-        // there is no list type. The engine splits it.
+        // there is no list type. The workflow splits it back into one --only
+        // per name.
         workflows: (input.workflows ?? []).join(','),
-        profile: '',
+        duration: '',
+        scale: '',
       })
 
       await c.pool.withTenant(c.tenant, async (db) => {
@@ -341,9 +320,11 @@ export const loadRouter = router({
     .input(
       z.object({
         envId: z.string(),
-        /** A profile named in the manifest. Absent means the manifest's
-         *  default, which is the shape most people want. */
-        profile: z.string().max(100).optional(),
+        /** Seconds, sent to `af load run --duration`. Absent leaves the
+         *  command's own default, which is a minute. */
+        seconds: z.number().int().min(1).max(3600).optional(),
+        /** Multiplier on production's rate, sent to `--scale`. */
+        scale: z.number().min(0.01).max(100).optional(),
         workflow: workflowFile,
       }),
     )
@@ -355,10 +336,12 @@ export const loadRouter = router({
 
       await dispatch(c, installation, target.repository, input.workflow, target.ref, {
         command: 'load',
-        env_id: target.envId,
-        runtime: target.runtime,
         workflows: '',
-        profile: input.profile ?? '',
+        // A Go duration, because that is what `af load run --duration` parses.
+        // The input is seconds so that the console cannot send `1 hour` and
+        // have the engine refuse it after the job has started.
+        duration: input.seconds === undefined ? '' : `${input.seconds}s`,
+        scale: input.scale === undefined ? '' : String(input.scale),
       })
 
       await c.pool.withTenant(c.tenant, async (db) => {
@@ -366,7 +349,7 @@ export const loadRouter = router({
           action: 'load.run_requested',
           targetType: 'environment',
           targetId: target.envId,
-          detail: { repository: target.repository, profile: input.profile ?? null },
+          detail: { repository: target.repository, seconds: input.seconds ?? null, scale: input.scale ?? null },
         })
       })
 
