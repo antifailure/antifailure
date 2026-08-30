@@ -7,6 +7,7 @@ package cli
 // the check" a property with a test rather than a sentence in a comment.
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -159,6 +160,21 @@ func TestGate_TurnedOffChecksAreSaidRatherThanPassedOver(t *testing.T) {
 	require.Len(t, migration.Notes, 2)
 	r := report.Run{Migration: migration}
 	require.Contains(t, r.Markdown(), "no migration tool was recognised")
+}
+
+func TestGate_InsightsTurnedOffIsSaidBeforeAnythingIsOpened(t *testing.T) {
+	t.Parallel()
+	// A manifest that turns the checks off must not pay for a session and a
+	// connection to be told so, and the report must say the check did not run
+	// rather than showing nothing, which reads like a check that found
+	// nothing.
+	var run report.Run
+	findings := readDatabase(context.Background(), nil, nil, defaultGate(),
+		insights.Config{Enabled: false}, &run, "", "")
+	require.Nil(t, findings)
+	require.Len(t, run.Notes, 1)
+	require.Contains(t, run.Notes[0], "insights.enabled is false")
+	require.Contains(t, run.Markdown(), "insights.enabled is false")
 }
 
 func TestGate_AnUnknownDestinationDoesNotReportPass(t *testing.T) {

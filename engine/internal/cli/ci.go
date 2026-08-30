@@ -178,7 +178,8 @@ change.`),
 
 			// After the workflows, because the query regression and the plan
 			// statements come from what this environment actually ran.
-			migration = readDatabase(ctx, e, o, gate, &run, baseline, saveBaseline)
+			migration = readDatabase(ctx, e, o, gate,
+				insights.Configure(m.Insights), &run, baseline, saveBaseline)
 
 			if withLoad {
 				e.Out.Section("Generating load")
@@ -319,8 +320,16 @@ func verifyMasking(
 // running is a fact about us.
 func readDatabase(
 	ctx context.Context, e *Env, o *env.Orchestrator, gate report.Policy,
-	run *report.Run, baselinePath, savePath string,
+	cfg insights.Config, run *report.Run, baselinePath, savePath string,
 ) []report.Finding {
+	if !cfg.Enabled {
+		// Said rather than passed over, and said before opening anything. A
+		// report that silently omits a check reads exactly like a check that
+		// found nothing.
+		run.Notes = append(run.Notes,
+			"the database checks did not run, because insights.enabled is false")
+		return nil
+	}
 	e.Out.Section("Reading the database")
 	opts := env.InsightsOptions{Limit: 20}
 	if baselinePath != "" {
