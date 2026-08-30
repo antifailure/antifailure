@@ -42,8 +42,13 @@ jobs:
     # else's shape, and that answer does not change between two commits an hour
     # apart. They run on the schedule below.
     name: control plane
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Larger than the budgets inside it, deliberately. The harness fails a step
+    # that runs over its budget and writes a report saying which one and by how
+    # much; a runner timeout kills the job and writes nothing, so a budget that
+    # cannot fire before the timeout is a budget replaced by a blank. The whole
+    # check budgets 40 minutes and the golden refresh 12 before it, so this has
+    # to leave room for both to be exceeded and reported rather than cut off.
+    timeout-minutes: 75
 
     # The database the golden is copied from. A real Postgres, because
     # everything under test is what Postgres enforces: row level security, the

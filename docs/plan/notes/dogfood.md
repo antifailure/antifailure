@@ -111,11 +111,24 @@ because two services build inside one `up` and six workflows run inside one
 `test`, and what somebody waits for ends when the last of them finishes.
 
 Every budget is a measurement doubled, and carries the reason for its number
-next to it. A budget that fires on a normal day is a budget somebody deletes,
-and a deleted budget catches nothing. A test asserts that every budget names a
-step something actually produces, for the same reason `gatecheck` refuses a
-stale exemption: a guard for a thing that does not happen reads in review as a
-guard that is being enforced.
+next to it. Which machine the measurement came from matters and the code said
+the wrong thing about it for a while: the comment claimed hosted runner
+numbers, and they are laptop numbers, taken when no dogfood run had finished on
+a runner at all. They are provisional until one has, and the doubling is what
+makes them provisional rather than wrong. The `up` budget was the one that
+would have fired: ten minutes, for a step whose console build alone measured
+860 seconds cold on this machine.
+
+The job's own timeout is larger than the budgets inside it, which is not
+bookkeeping. The harness fails a step that runs over and writes a report saying
+which one and by how much; a runner timeout kills the job and writes nothing.
+A budget that cannot fire before the timeout is a budget replaced by a blank.
+
+A budget that fires on a normal day is a budget somebody deletes, and a deleted
+budget catches nothing. A test asserts that every budget names a step something
+actually produces, for the same reason `gatecheck` refuses a stale exemption: a
+guard for a thing that does not happen reads in review as a guard that is being
+enforced.
 
 **A record per run**, as JSON. Ten green runs is a claim about ten files, not
 about ten memories.

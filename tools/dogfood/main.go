@@ -93,10 +93,23 @@ func main() {
 
 // budget is how long a step may take before the run is red.
 //
-// Every number is a real measurement times two, taken on a GitHub hosted
-// runner, and doubling is what keeps a busy runner from reading as a
-// regression. A budget that fires on a normal day is a budget somebody
-// deletes, and a deleted budget catches nothing.
+// Where these numbers come from, stated because the first version of this
+// comment said something that was not true. It claimed every number was a real
+// measurement times two taken on a GitHub hosted runner. They are laptop
+// measurements times two, and at the time it was written no dogfood run had
+// finished on a runner at all, so there was nothing from one to measure. A
+// budget is a claim about how long something takes, and a claim about where a
+// number came from is part of it.
+//
+// They are provisional until a green hosted run exists, and the doubling is
+// what makes them provisional rather than wrong: it is wide enough that a
+// runner being slower than a laptop does not read as a regression, and narrow
+// enough to catch a step that has stopped working rather than slowed down.
+// Replace each one with its hosted measurement once there is one.
+//
+// A budget that fires on a normal day is a budget somebody deletes, and a
+// deleted budget catches nothing. That is the reason to be generous here, and
+// it is not a reason to be vague about which machine the number came from.
 type budget struct {
 	step string
 	max  time.Duration
@@ -112,9 +125,13 @@ var budgets = []budget{
 		"Copy, mask, verify and publish, over the whole staging control plane. " +
 			"The measured run is 28 seconds against 2,600 rows, and the budget is " +
 			"set for a corpus that grows rather than for the corpus today."},
-	{"up", 10 * time.Minute,
-		"Branching the golden is seconds. The rest is two container builds, and " +
-			"a cold layer cache is the normal case on a hosted runner."},
+	{"up", 25 * time.Minute,
+		"Branching the golden is seconds. The rest is the control plane image, " +
+			"and the number that matters is the console stage inside it: a cold " +
+			"build of it measured 860 seconds on this machine, so a ten minute " +
+			"budget was one this step could not have met on its first honest " +
+			"attempt. A cold layer cache is the normal case on a hosted runner, " +
+			"not the exception, which is what the earlier number assumed."},
 	{"test", 12 * time.Minute,
 		"Six workflows, two attempts each, driven by an agent. In recorded mode " +
 			"the model is a cassette lookup, so this measures the browser and the " +
@@ -125,7 +142,7 @@ var budgets = []budget{
 		"Removing containers, a network, a proxy and a database branch. Slower " +
 			"than this means something is not answering, and a teardown that " +
 			"hangs is how an environment outlives its pull request."},
-	{"ci", 25 * time.Minute,
+	{"ci", 40 * time.Minute,
 		"The whole thing, which is what a customer's pull request actually " +
 			"waits on. It is not the sum of the steps above: it is the number " +
 			"somebody watches a spinner for."},
