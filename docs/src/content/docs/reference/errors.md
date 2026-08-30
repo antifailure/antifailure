@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-32 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+30 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -351,6 +351,32 @@ No application could be detected in {path}.
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/detection](/docs/concepts/detection/) |
+
+## Enterprise
+
+### AF-EE-004
+
+The license covers {seats} seats and they are all in use.
+
+**What to do.** Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [enterprise/licensing](/docs/enterprise/licensing/) |
+
+### AF-EE-010
+
+Organization policy {policy} refuses this environment: {detail}
+
+**What to do.** Ask an organization administrator to review {policy}, or bring the repository into compliance.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [enterprise/policy](/docs/enterprise/policy/) |
 
 ## Infrastructure
 

@@ -688,7 +688,6 @@ errors:
     retryable: false
     exit_code: 4
   - code: AF-EE-004
-    planned: true
     area: EE
     message: "The license covers {seats} seats and they are all in use."
     next_step: "Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed."
@@ -696,7 +695,6 @@ errors:
     retryable: false
     exit_code: 6
   - code: AF-EE-010
-    planned: true
     area: EE
     message: "Organization policy {policy} refuses this environment: {detail}"
     next_step: "Ask an organization administrator to review {policy}, or bring the repository into compliance."
