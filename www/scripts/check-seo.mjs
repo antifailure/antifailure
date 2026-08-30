@@ -15,6 +15,7 @@
  * Run: npm run check:seo   (after npm run build)
  */
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -94,16 +95,30 @@ if (has("sitemap.xml")) {
   // changed in one commit would fail it, which is exactly what happened the
   // first time these files were committed together.
   //
-  // A build-clock fallback is detectable directly instead. contentLastModified
-  // returns `new Date()` when git is unavailable, so any timestamp within a few
-  // minutes of now is that fallback rather than a commit date.
+  // The second version compared each stamp against the wall clock and called
+  // anything inside ten minutes a build-clock fallback. That was wrong in the
+  // other direction, and it would have failed almost every pull request: the
+  // commit under test is usually a few minutes old when CI runs it, so the very
+  // pages a change touches look freshly stamped. It failed on this one.
+  //
+  // What separates the two cases exactly: contentLastModified falls back to
+  // `new Date()`, and no commit date can be later than the newest commit in the
+  // repository. A stamp after that came from the clock. A minute of slack
+  // covers clock skew between the machine that committed and the one building.
   const stamps = [...sitemap.matchAll(/<lastmod>([^<]+)<\/lastmod>/g)].map((m) => new Date(m[1]));
-  const freshlyStamped = stamps.filter((d) => Date.now() - d.getTime() < 10 * 60 * 1000);
+  let newest = null;
+  try {
+    newest = new Date(execFileSync("git", ["log", "-1", "--format=%cI"], { cwd: ROOT, encoding: "utf8" }).trim());
+  } catch {
+    newest = null;
+  }
+  const ceiling = newest ? newest.getTime() + 60 * 1000 : Date.now();
+  const fromTheClock = stamps.filter((d) => d.getTime() > ceiling);
   assert(
-    stamps.length > 0 && freshlyStamped.length === 0,
+    stamps.length > 0 && fromTheClock.length === 0,
     `sitemap lastmod comes from git history (${new Set(stamps.map(String)).size} distinct across ${stamps.length} URLs)`,
-    freshlyStamped.length > 0
-      ? `${freshlyStamped.length} URLs are stamped within 10 minutes of now, which is the build clock rather than a commit date. ` +
+    fromTheClock.length > 0
+      ? `${fromTheClock.length} URLs are stamped later than the newest commit, which is the build clock rather than a commit date. ` +
         "Usually a shallow checkout: set fetch-depth: 0 on actions/checkout."
       : stamps.length === 0
         ? "no lastmod at all"
