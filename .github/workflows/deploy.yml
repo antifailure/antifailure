@@ -65,10 +65,25 @@ jobs:
 
       - name: Build the marketing site
         # next.config.ts sets output: "export", so this writes static files and
-        # needs no server. The waitlist is a managed function under /api and is
-        # deployed by the platform rather than built here.
+        # needs no server.
         run: npm ci --no-audit --no-fund && npm run build
         working-directory: www
+
+      - name: Install the site API
+        # The waitlist function. This step is the whole reason the sign-up form
+        # on antifailure.dev worked for two days and then stopped: the publish
+        # below passed neither api_location nor an api build, so every deploy
+        # from here uploaded a site with no API, and Static Web Apps removed
+        # the managed function the first hand deploy had put there. Every path
+        # under /api answered 500 from that moment, and www/lib/waitlist.ts
+        # turns a 500 into "Something went wrong on our side", so every address
+        # anybody typed went nowhere and the form said so in a way that read
+        # like our fault, which it was.
+        #
+        # npm ci rather than letting the platform's builder run npm install:
+        # the lockfile is the point, and the same install runs in CI.
+        run: npm ci --omit=dev --no-audit --no-fund
+        working-directory: api
 
       - name: Check the SEO and GEO surfaces
         # Every one of these was missing from production when the check was
@@ -120,8 +135,65 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           action: upload
           app_location: site
+          # Relative to the repository root, not to app_location. The runtime
+          # to start it on is platform.apiRuntime in the configuration
+          # tools/site/assemble.sh writes, which skip_api_build makes required
+          # rather than optional.
+          api_location: api
           skip_app_build: true
           skip_api_build: true
+
+      - name: The API answers
+        # A publish is not a working endpoint, and this is the one part of the
+        # site that can be deployed, report success, and still be dead: a
+        # static file either exists or 404s, but a function app can be present
+        # and refuse every request. That is exactly what happened here for two
+        # days, with a green deploy every time.
+        #
+        # Two requests, and neither one writes anything. GET /api must return
+        # the index, which proves the function app started. POST /api/waitlist
+        # with a body that is not an address must return 400, which proves the
+        # route reaches the waitlist function and that it validates before it
+        # touches storage. A real address would put a row in the real table.
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: |
+          set -uo pipefail
+          site=https://antifailure.dev
+
+          # The CDN needs a moment to pick up a new function app, and a deploy
+          # that is merely slow must not read as a deploy that is broken.
+          for attempt in $(seq 1 15); do
+            index=$(curl -sS -m 15 -o /tmp/api-index.json -w '%{http_code}' "$site/api" || echo 000)
+            [ "$index" = "200" ] && break
+            echo "attempt $attempt: GET /api returned $index"
+            sleep 10
+          done
+
+          if [ "$index" != "200" ]; then
+            echo "::error::GET /api returned $index after 15 attempts. The managed function is not answering."
+            head -c 500 /tmp/api-index.json || true
+            exit 1
+          fi
+
+          if ! grep -q '/api/waitlist' /tmp/api-index.json; then
+            echo "::error::GET /api answered 200 but does not list the waitlist endpoint."
+            head -c 500 /tmp/api-index.json
+            exit 1
+          fi
+
+          reject=$(curl -sS -m 15 -o /tmp/api-reject.json -w '%{http_code}' \
+            -X POST -H 'content-type: application/json' \
+            -d '{"email":"not-an-address","source":"deploy-check"}' \
+            "$site/api/waitlist" || echo 000)
+          if [ "$reject" != "400" ]; then
+            echo "::error::POST /api/waitlist with an invalid address returned $reject, expected 400."
+            head -c 500 /tmp/api-reject.json || true
+            exit 1
+          fi
+
+          echo "GET /api is 200 and lists the waitlist; POST /api/waitlist rejects junk with 400"
 
       - name: Tell Bing what changed
         # Only after a real publish, because IndexNow is a claim that a URL is
