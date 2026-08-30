@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { migrationsDir } from '@antifailure/db'
+import { RealGitHubClient, GitHubError } from '../src/auth/github.ts'
 import {
   available, startApi, seedOrg, signInAs, callProcedure, errorCode, dropOrg,
   type ApiHarness, type Org, type SignedIn,
@@ -37,6 +38,131 @@ function data<T>(res: { status: number; body: unknown }, what: string): T {
 function message(body: unknown): string {
   return (body as { error?: { message?: string } })?.error?.message ?? ''
 }
+
+/**
+ * The real client against GitHub's documented answers.
+ *
+ * Needs no database and no Postgres, deliberately: what is under test is the
+ * request this builds and the sentence it turns each status into, and both are
+ * user-facing. A 404 here is the one that costs an afternoon, because GitHub
+ * gives the same answer for a missing workflow file, a repository the App was
+ * not given, and a missing Actions permission, and a message that only said
+ * "404" would send whoever read it to the wrong one of the three.
+ */
+describe('dispatching a workflow against GitHub', () => {
+  interface Call { url: string; method: string; body: unknown; headers: Record<string, string> }
+
+  /**
+   * Runs one body with global fetch answering a fixed status.
+   *
+   * The restore is in a finally rather than in an `after` hook, and that is
+   * not a style choice: an `after` registered from inside a test runs when the
+   * whole describe finishes, so a patched fetch would still be installed for
+   * every test after this one and for every suite sharing the process. This
+   * scopes it to exactly the call it is standing in for.
+   */
+  async function withGitHubAnswering(
+    status: number,
+    body: string,
+    run: (client: RealGitHubClient, calls: Call[]) => Promise<void>,
+  ): Promise<void> {
+    const calls: Call[] = []
+    const original = globalThis.fetch
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        method: init?.method ?? 'GET',
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        headers: (init?.headers ?? {}) as Record<string, string>,
+      })
+      // 204 has to be constructed with a null body. Passing an empty string
+      // throws, which is the Response constructor being stricter than the
+      // network is and worth knowing before writing a fake of anything.
+      return new Response(status === 204 ? null : body, { status })
+    }) as typeof fetch
+    try {
+      await run(realClient({ for: async () => 'ghs_installation_token' }), calls)
+    } finally {
+      globalThis.fetch = original
+    }
+  }
+
+  function realClient(installationTokens?: { for(id: number): Promise<string> }): RealGitHubClient {
+    return new RealGitHubClient({
+      clientId: 'id',
+      clientSecret: 'secret',
+      redirectUri: 'https://app.test/callback',
+      apiBase: 'https://api.github.test',
+      ...(installationTokens ? { installationTokens } : {}),
+    })
+  }
+
+  it('posts the ref and the inputs to the workflow dispatch endpoint', async () => {
+    await withGitHubAnswering(204, '', async (client, calls) => {
+      await client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {
+        command: 'agents',
+        workflows: 'sign-up',
+      })
+      const call = calls[0]!
+      assert.equal(call.method, 'POST')
+      assert.equal(
+        call.url,
+        'https://api.github.test/repos/acme/storefront/actions/workflows/antifailure.yml/dispatches',
+      )
+      // The slash between owner and name has to survive encoding, or every
+      // dispatch goes to a repository whose name contains a %2F.
+      assert.equal(call.url.includes('%2F'), false)
+      assert.deepEqual(call.body, {
+        ref: 'main',
+        inputs: { command: 'agents', workflows: 'sign-up' },
+      })
+      assert.equal(call.headers.authorization, 'Bearer ghs_installation_token')
+    })
+  })
+
+  it('404 says all three things it can mean', async () => {
+    await withGitHubAnswering(404, '{"message":"Not Found"}', async (client) => {
+      await assert.rejects(
+        () => client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {}),
+        (err: unknown) => {
+          assert.ok(err instanceof GitHubError)
+          assert.match(err.message, /\.github\/workflows\/antifailure\.yml/)
+          assert.match(err.message, /installed on this repository/)
+          assert.match(err.message, /Actions\s+write/)
+          return true
+        },
+      )
+    })
+  })
+
+  it('422 names the default branch rule, which is the part nobody guesses', async () => {
+    const body = '{"message":"Workflow does not have workflow_dispatch trigger"}'
+    await withGitHubAnswering(422, body, async (client) => {
+      await assert.rejects(
+        () => client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'wip', {}),
+        (err: unknown) => {
+          assert.ok(err instanceof GitHubError)
+          assert.match(err.message, /DEFAULT branch/)
+          assert.match(err.message, /wip/)
+          return true
+        },
+      )
+    })
+  })
+
+  it('no App configured is a message naming the variables, not a crash', async () => {
+    // No installationTokens, which is what a control plane running without a
+    // GitHub App looks like. It must not reach the network at all.
+    await assert.rejects(
+      () => realClient().dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {}),
+      (err: unknown) => {
+        assert.ok(err instanceof GitHubError)
+        assert.match(err.message, /AF_GITHUB_APP_ID/)
+        return true
+      },
+    )
+  })
+})
 
 describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
