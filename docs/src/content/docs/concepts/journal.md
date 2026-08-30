@@ -82,8 +82,12 @@ reading the record.
 
 ## Where it lives
 
-`~/.antifailure/`, or `AF_STATE_DIR`. It is local state and belongs in
-`.gitignore`, which `af init` adds. It holds no secrets: connection strings are
-resolved when needed and never written down.
+`.antifailure/` in the repository, next to the manifest. Per repository rather
+than per user, because the lock that stops two `af up` runs racing on one branch
+lives here, and a directory shared between checkouts would put two repositories'
+environments in one lock namespace. `af doctor` prints the path it is using.
+
+It is local state and belongs in `.gitignore`, which `af init` adds. It holds no
+secrets: connection strings are resolved when needed and never written down.
 
 Related: [the local runtime](/docs/guides/local-runtime/), [providers](/docs/providers/overview/).
