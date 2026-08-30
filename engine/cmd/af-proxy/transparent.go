@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -44,7 +45,19 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 
-	host, port := splitHostPort(req.Host, 80)
+	// The name comes from the Host header and the port does not.
+	//
+	// A transparent connection arrived on this listener, so the client dialed
+	// port 80: the name it wrote in the header is a claim about where it
+	// wanted to go, and the port it wrote there is a claim about nothing at
+	// all. Taking the port from the header let a client pick both the port
+	// the sidecar dialed upstream and the port the policy was evaluated
+	// against, so Host: allowed.example.com:6379 opened a raw socket to
+	// somebody's Redis through a rule whose author had written down a web
+	// API, and a rule scoped to :80 could be stepped around by naming any
+	// other number.
+	host, _ := splitHostPort(req.Host, 80)
+	const port = 80
 	if host == "" {
 		writeRawError(conn, http.StatusBadRequest,
 			"Antifailure could not tell which host this request was for, because it carried no Host header.")
@@ -106,7 +119,7 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 		}
 	}
 
-	upstream, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 30*time.Second)
+	upstream, err := p.dialGuarded(context.Background(), "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
 		rec.Error = err.Error()
 		rec.Status = http.StatusBadGateway
@@ -182,7 +195,7 @@ func (p *proxy) serveTransparentTLS(conn net.Conn) {
 		return
 	}
 
-	upstream, err := net.DialTimeout("tcp", net.JoinHostPort(sni, "443"), 30*time.Second)
+	upstream, err := p.dialGuarded(context.Background(), "tcp", net.JoinHostPort(sni, "443"))
 	if err != nil {
 		rec.Error = err.Error()
 		rec.Duration = time.Since(started).String()
