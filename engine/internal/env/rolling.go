@@ -304,10 +304,13 @@ type stagedRelease struct {
 // bringUpPreviousRelease branches the golden, puts the branch in the state the
 // experiment needs, and starts the previous commit's services against it.
 //
-// The order is production's. The personas exist first, because in production
-// the users are there before the migration runs, and because a migration that
-// adds a NOT NULL column to the users table would refuse an insert afterwards
-// and the refusal would be ours rather than the application's.
+// The personas come after the migrations, which is the order af up uses. It is
+// not the order production is in, where the users predate the migration, and
+// the reason it is not is that a golden with no production behind it has no
+// users table until the migrations create one. Provisioning first would fail
+// outright there. The cost is that a migration which makes a users column NOT
+// NULL is reported as personas that could not be created rather than as a
+// finding, which is a refusal to guess rather than a wrong answer.
 //
 // The returned function tears down everything this made, and is never nil once
 // anything has been created.
