@@ -57,11 +57,6 @@ func nounFollows(noun *regexp.Regexp, rest string) (string, bool) {
 	return between, true
 }
 
-// failureMode and its friends are the idioms that borrow one of these nouns
-// and mean something else. "two failure modes to watch for" is not a claim
-// about any set here.
-var idiom = regexp.MustCompile(`(?i)\b(failure|fail)\s+(mode|state)s?\b`)
-
 // hypothetical is a subordinating conjunction, and a count inside the clause
 // one introduces is not an assertion about how many of a thing exist.
 //
@@ -89,9 +84,6 @@ func checkCounts(name, body string, members map[string][]string) ([]finding, int
 	considered := 0
 
 	for _, s := range sentences(flat) {
-		if idiom.MatchString(s.text) {
-			continue
-		}
 		for _, m := range counted.FindAllStringSubmatchIndex(s.text, -1) {
 			word := strings.ToLower(s.text[m[2]:m[3]])
 			rest := s.text[m[1]:]
@@ -180,11 +172,18 @@ func flatten(body string) (string, func(int) int) {
 	}
 }
 
-// sentenceEnd is a full stop, question mark, colon or a markdown table cell
-// boundary. The pipe is there because a reference table puts a whole claim in
-// one cell and the cell beside it is a different claim: without it, the
-// context word from one row's cell would license a count in the next.
-var sentenceEnd = regexp.MustCompile(`(?:[.!?:]\s+|\|)`)
+// sentenceEnd is a full stop, question mark or colon.
+//
+// A table cell boundary was tried as a fourth and removed. The argument for it
+// was that a reference table puts a whole claim in each cell, so the context
+// word from one cell should not license a count in the next. It changed
+// nothing on the tree either way, no test of it could be made to fail, and it
+// only ever made the tool less sensitive: the real findings all carry their
+// context word in the same cell as their count, while a row reading
+// "| migration_lint | warn | six rules |" would have been missed. A guard with
+// no observed false alarm behind it is a guess, and this file keeps only the
+// guards a real false alarm demanded.
+var sentenceEnd = regexp.MustCompile(`(?:[.!?:]\s+)`)
 
 func sentences(flat string) []sentence {
 	var out []sentence
