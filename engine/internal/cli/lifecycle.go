@@ -417,9 +417,14 @@ it could not reach.`),
 			} else {
 				e.Out.Println("")
 				e.Out.Printf("  %d resources removed.\n", td.Removed)
+				// The reason is wrapped because it carries a provider's own
+				// error text, which is the longest string on this page and the
+				// only one a person has to read carefully: this is the list of
+				// what teardown could not remove.
 				for _, p := range td.Pending {
-					e.Out.Printf("  %s %s/%s: %s\n",
-						e.Out.S(StyleBad, SymbolFail), p.Kind, p.ID, p.Reason)
+					head := fmt.Sprintf("  %s %s/%s: ",
+						e.Out.S(StyleBad, SymbolFail), p.Kind, p.ID)
+					e.Out.Printf("%s%s\n", head, e.Out.Wrap(p.Reason, cells(head)))
 				}
 			}
 			if len(td.Pending) > 0 {

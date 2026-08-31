@@ -53,15 +53,6 @@ func (b *Block) Addf(label, format string, args ...any) *Block {
 	return b.Add(label, fmt.Sprintf(format, args...))
 }
 
-// AddIf appends only when the condition holds, so that a caller assembling a
-// block from optional facts does not need an if around every line.
-func (b *Block) AddIf(cond bool, label, value string) *Block {
-	if cond {
-		b.Add(label, value)
-	}
-	return b
-}
-
 // Flush renders the block.
 //
 // Values wrap under themselves rather than under the label, so a long one

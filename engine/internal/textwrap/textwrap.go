@@ -46,6 +46,36 @@ const minAvail = 20
 // if nothing closes it within a few tokens, which is what stops an unbalanced
 // quote from gluing a paragraph into one unbreakable line.
 func Wrap(s string, indent, width int) string {
+	// Line structure the caller already put in survives.
+	//
+	// This is not a nicety. The manifest validator reports several problems as
+	// one message with a newline and two spaces before each, so that a reader
+	// sees a list. Wrapping the whole thing as one paragraph collapsed that
+	// into a wall of prose in which two independent problems ran together into
+	// what looked like one sentence, and it did so at exactly the moment
+	// somebody is trying to work out what is wrong with their file.
+	//
+	// Each line keeps its own leading whitespace and is wrapped underneath
+	// itself, so a list stays a list and a paragraph stays a paragraph.
+	if strings.Contains(s, "\n") {
+		lines := strings.Split(s, "\n")
+		out := make([]string, 0, len(lines))
+		for i, line := range lines {
+			own := len(line) - len(strings.TrimLeft(line, " \t"))
+			body := wrapOne(line, indent+own, width)
+			if i > 0 {
+				body = strings.Repeat(" ", indent+own) + body
+			}
+			out = append(out, body)
+		}
+		return strings.Join(out, "\n")
+	}
+	return wrapOne(s, indent, width)
+}
+
+// wrapOne wraps a single line, which is where the word and quoted command
+// rules apply.
+func wrapOne(s string, indent, width int) string {
 	if width < MinWidth {
 		width = MinWidth
 	}

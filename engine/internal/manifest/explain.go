@@ -58,7 +58,23 @@ func Explain(m *schema.Manifest, width int) string {
 		if where == "" {
 			where = "."
 		}
-		fmt.Fprintf(&b, "  %-*s %-7s %-12s %s\n", gut, s.Name, s.Kind, port, where)
+		// A name wider than the gutter goes on its own line, and the facts
+		// hang under it in the columns they would have had.
+		//
+		// Without this a forty two character service name pushed its own kind,
+		// port and path off the right of the terminal and left them aligned
+		// with nothing, while the build and health lines beneath it still sat
+		// at the gutter: a row misaligned against its own continuation. It is
+		// the same answer Output.Table reaches when columns will not fit,
+		// which is what makes the two read as one design rather than two.
+		if textwrap.Cells(s.Name) > gut {
+			fmt.Fprintf(&b, "  %s\n", s.Name)
+			fmt.Fprintf(&b, "  %-*s %-7s %-12s %s\n", gut, "", s.Kind, port,
+				value(where, gut+24, width))
+		} else {
+			fmt.Fprintf(&b, "  %-*s %-7s %-12s %s\n", gut, s.Name, s.Kind, port,
+				value(where, gut+24, width))
+		}
 		fmt.Fprintf(&b, "  %-*s build %s", gut, "", s.Build.Strategy)
 		if s.Build.Dockerfile != "" {
 			fmt.Fprintf(&b, " (%s)", s.Build.Dockerfile)

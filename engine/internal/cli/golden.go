@@ -165,9 +165,18 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 				if g.Verified {
 					state = env.Out.S(StyleGood, "verified")
 				}
+				// An empty rules hash is said rather than left blank. A blank
+				// cell under a heading reads as zero or as none, and this is
+				// neither: it is a golden made before the hash was recorded,
+				// so what is not known is whether the rules have changed since.
+				// That is the one thing somebody scans this column to find out.
+				rules := g.RulesHash
+				if rules == "" {
+					rules = "not recorded"
+				}
 				rows = append(rows, []string{
 					g.ID, state, g.CreatedAt.Local().Format("2006-01-02 15:04"),
-					humanBytes(uint64(g.SizeBytes)), g.RulesHash,
+					humanBytes(uint64(g.SizeBytes)), rules,
 				})
 			}
 			env.Out.Table([]Column{

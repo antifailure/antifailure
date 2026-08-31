@@ -102,3 +102,50 @@ func TestCells_MeasuresDisplayColumnsNotBytes(t *testing.T) {
 	require.Equal(t, 4, textwrap.Cells("café"))
 	require.Equal(t, 0, textwrap.Cells(""))
 }
+
+// A caller that already put structure in gets it back.
+//
+// The manifest validator reports several problems as one message with a
+// newline and two spaces before each, so a reader sees a list. Wrapping that
+// as a single paragraph ran two independent problems together into what looked
+// like one sentence, at exactly the moment somebody is trying to work out what
+// is wrong with their file.
+func TestWrap_KeepsTheLinesTheCallerWrote(t *testing.T) {
+	t.Parallel()
+	in := "2 problems.\n  line 6: the directory does not exist and this explanation " +
+		"is long enough that it has to wrap onto another line\n  line 18: the rule names " +
+		"no credential and this one is long enough to wrap as well"
+
+	got := textwrap.Wrap(in, 0, 60)
+	lines := strings.Split(got, "\n")
+
+	require.Equal(t, "2 problems.", lines[0])
+	// Both problems still start their own block, rather than being run
+	// together into the paragraph above them.
+	starts := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, "  line ") {
+			starts++
+		}
+	}
+	require.Equal(t, 2, starts, "each problem must begin its own line:\n%s", got)
+
+	// And every continuation hangs under its own problem rather than under the
+	// left margin, so the block reads as one item.
+	for _, line := range lines[1:] {
+		require.True(t, strings.HasPrefix(line, "  "),
+			"a continuation lost the list indent: %q\n%s", line, got)
+	}
+	for _, line := range lines {
+		require.LessOrEqual(t, textwrap.Cells(line), 60, "a line ran long:\n%s", got)
+	}
+}
+
+// A single line is unchanged by the line-structure handling, which is what
+// keeps every existing caller rendering exactly as it did.
+func TestWrap_SingleLineIsUnaffected(t *testing.T) {
+	t.Parallel()
+	in := strings.Repeat("word ", 30)
+	require.Equal(t, textwrap.Wrap(in, 4, 60), textwrap.Wrap(strings.TrimSpace(in), 4, 60))
+	require.NotContains(t, textwrap.Wrap("short enough", 0, 60), "\n")
+}
