@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -417,11 +418,23 @@ func (o *Orchestrator) observeTraffic(obs *fidelity.Observation) {
 }
 
 // oneLine keeps a reason on one line of a report.
+//
+// Cut on a rune rather than on a byte. An error carrying a path with an accent
+// in it truncated mid rune is invalid UTF-8, which JSON encoding silently
+// replaces with a question mark, and the reason a component could not be
+// measured is the last string in this package that should arrive corrupted.
 func oneLine(err error) string {
 	text := strings.TrimSpace(strings.ReplaceAll(err.Error(), "\n", " "))
 	const max = 160
-	if len(text) > max {
-		return text[:max-1] + "…"
+	if utf8.RuneCountInString(text) <= max {
+		return text
+	}
+	cut := 0
+	for i := range text {
+		cut++
+		if cut > max-1 {
+			return text[:i] + "…"
+		}
 	}
 	return text
 }

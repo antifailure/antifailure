@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // Headline is the first line, and the only one most people read.
@@ -111,9 +112,21 @@ func ExplainRequirements(reqs []Requirement) string {
 	return b.String()
 }
 
+// trim fits a name into the column, cutting on a rune rather than on a byte.
+//
+// A component is named by whatever named it, and a service or a host can carry
+// a non ASCII character. Cutting mid rune produces invalid UTF-8, which is a
+// mangled name in the terminal and a replacement character in the JSON.
 func trim(s string, max int) string {
-	if len(s) <= max {
+	if utf8.RuneCountInString(s) <= max {
 		return s
 	}
-	return s[:max-1] + "…"
+	cut := 0
+	for i := range s {
+		cut++
+		if cut > max-1 {
+			return s[:i] + "…"
+		}
+	}
+	return s
 }

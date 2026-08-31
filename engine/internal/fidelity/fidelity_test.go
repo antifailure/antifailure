@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -233,6 +234,20 @@ func TestDatabase(t *testing.T) {
 			componentState(t, inv, schema.FidelityDatabase, "provenance").State)
 	})
 
+	// A count that stopped at its ceiling is a floor, and a floor printed as a
+	// total is a number somebody would quote at a customer. The word has to
+	// survive all the way to the line a person reads.
+	t.Run("a count that stopped at its ceiling says at least", func(t *testing.T) {
+		obs := full()
+		obs.RowsAreAFloor = true
+		c := componentState(t, fidelity.Build(obs), schema.FidelityDatabase, "data")
+		require.Contains(t, c.Detail, "at least 184000 rows")
+
+		exact := componentState(t, fidelity.Build(full()), schema.FidelityDatabase, "data")
+		require.NotContains(t, exact.Detail, "at least",
+			"a complete count must not hedge, or the word stops meaning anything")
+	})
+
 	t.Run("a subset is a substitution and says the row counts are not production's", func(t *testing.T) {
 		obs := full()
 		obs.Subset = true
@@ -334,6 +349,21 @@ func TestAStatefulMockOutranksABlockedHost(t *testing.T) {
 	blockedDim, _ := fidelity.Build(blocked).Dimension(schema.FidelityThirdParty)
 	require.Equal(t, fidelity.Substituted, mockedDim.Verdict())
 	require.Equal(t, fidelity.Refused, blockedDim.Verdict())
+
+	// Both in one dimension, which is the case that actually pins the order.
+	// Each host on its own reports its own state whatever the ranking says, so
+	// a dimension holding both is the only place a reversed rank shows up: the
+	// verdict has to be the refusal, because a policy that blocks a host has
+	// not reproduced it and a pack that answers for another one does not make
+	// up for that.
+	both := full()
+	both.Hosts = []fidelity.Host{
+		{Name: "api.stripe.com", Mode: schema.ModeMock, Pack: "stripe", Stateful: true},
+		{Name: "api.twilio.com", Mode: schema.ModeBlock},
+	}
+	bothDim, _ := fidelity.Build(both).Dimension(schema.FidelityThirdParty)
+	require.Equal(t, fidelity.Refused, bothDim.Verdict(),
+		"a dimension holding a substitution and a refusal reports the refusal")
 }
 
 func TestThirdPartyWithNoNamedHostsIsExcluded(t *testing.T) {
@@ -487,7 +517,10 @@ func TestCheckTellsUnmetApartFromUnmeasurable(t *testing.T) {
 	got = fidelity.Build(obs).Check([]schema.FidelityDimension{schema.FidelityDatabase})
 	require.False(t, got[0].Met)
 	require.False(t, got[0].Measurable)
-	require.Contains(t, got[0].Because, "could not be measured")
+	// The reason names the component and does not repeat the verdict, because
+	// both renderers already say the dimension could not be measured and the
+	// message stuttered when this said it too.
+	require.Equal(t, "no state could be read for provenance", got[0].Because)
 
 	// So is a dimension that had nothing to measure at all.
 	got = fidelity.Build(full()).Check([]schema.FidelityDimension{schema.FidelityTraffic})
@@ -499,6 +532,15 @@ func TestExplainCarriesTheDefinitionAndTheExclusions(t *testing.T) {
 	obs := full()
 	obs.Hosts[0] = fidelity.Host{Name: "api.stripe.com", Mode: schema.ModeSynth}
 	text := fidelity.Build(obs).Explain()
+
+	// The count and the definition travel with the number, every time. A bare
+	// percentage is the shape of an invented statistic even when it is not
+	// one, and "5 of 6" is the part a reader can check against the table above
+	// it.
+	require.Contains(t, text,
+		"5 of 6 measured components are production's own, which is 83 percent.",
+		"the headline dropped the count the percentage is derived from")
+	require.Contains(t, text, "3 components and dimensions are excluded and named below.")
 
 	require.Contains(t, text, "A component is production's own when the environment reaches the real thing.")
 	require.Contains(t, text, "Nothing unmeasured is counted either way.")
@@ -526,4 +568,18 @@ func TestExplainRequirementsSaysWhichKindOfFailureItWas(t *testing.T) {
 	require.Contains(t, text, "not measured, so neither met nor broken")
 	require.Equal(t, 1, strings.Count(text, "Required by the manifest:"))
 	require.Empty(t, fidelity.ExplainRequirements(nil))
+}
+
+// A name too long for its column is cut to fit, and a name is whatever named
+// it. A host or a service can carry a non ASCII character, and cutting one on
+// a byte rather than on a rune produces invalid UTF-8: a mangled name in the
+// terminal and a replacement character in the JSON somebody parses.
+func TestALongNameIsCutOnARuneAndNotOnAByte(t *testing.T) {
+	obs := full()
+	obs.Hosts = []fidelity.Host{
+		{Name: strings.Repeat("é", 30), Mode: schema.ModeBlock},
+	}
+	text := fidelity.Build(obs).Explain()
+	require.True(t, utf8.ValidString(text), "the rendered inventory is not valid UTF-8")
+	require.NotContains(t, text, "�", "a rune was cut in half")
 }

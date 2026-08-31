@@ -311,9 +311,13 @@ func (i Inventory) Check(require []schema.FidelityDimension) []Requirement {
 
 		switch {
 		case len(unmeasured) > 0:
+			// Names the components without repeating the verdict. Both callers
+			// that render this already say the dimension could not be
+			// measured, and a reason that says it a second time reads as a
+			// stutter in the one message somebody has to act on.
 			out = append(out, Requirement{
 				Dimension: name,
-				Because:   "could not be measured: " + join(unmeasured),
+				Because:   "no state could be read for " + join(unmeasured),
 			})
 		case len(notReproduced) > 0:
 			out = append(out, Requirement{
