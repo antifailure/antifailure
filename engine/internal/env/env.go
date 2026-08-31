@@ -38,6 +38,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/lock"
+	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/redact"
@@ -629,6 +630,33 @@ func needsInspection(e *schema.Egress) bool {
 	return eng.InspectsHost("probe.invalid", 443)
 }
 
+// ttl is how long an environment this orchestrator creates may live.
+//
+// runtime.ttl is normalized at load, so a manifest that says nothing arrives
+// here carrying the default rather than an empty string. A manifest that is
+// somehow absent, which is every command that inventories a machine rather
+// than acting on a repository, gets zero: nothing it creates has a lifetime
+// because it creates nothing.
+//
+// This value was declared, validated, defaulted and printed by af explain for
+// as long as the manifest has existed, and read by nothing. Until the reaper,
+// every environment lived until somebody remembered it.
+func (o *Orchestrator) ttl() time.Duration {
+	m := o.opts.Manifest
+	if m == nil || m.Runtime == nil {
+		return 0
+	}
+	d, err := manifest.ParseDuration(m.Runtime.TTL)
+	if err != nil {
+		// Unreachable through a loaded manifest: validation rejects a ttl that
+		// is not a duration before anything gets here. Zero rather than a
+		// panic, because the consequence of being wrong is an environment with
+		// no expiry, and the consequence of a panic is af up crashing.
+		return 0
+	}
+	return d
+}
+
 // newRuntime builds the runtime the manifest asked for.
 //
 // The same reason newDatabaseProvider exists. A manifest could say kubernetes,
@@ -655,7 +683,9 @@ func (o *Orchestrator) newRuntime() (provider.Runtime, error) {
 	}
 	switch kind {
 	case schema.RuntimeLocal:
-		return local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+		return local.New(local.Options{
+			Clock: o.opts.Clock, Redactor: o.opts.Redactor, TTL: o.ttl(),
+		})
 	case schema.RuntimeKubernetes:
 		return o.newKubernetesRuntime(cfg)
 	default:
@@ -693,6 +723,7 @@ func (o *Orchestrator) newKubernetesRuntime(cfg *schema.Runtime) (provider.Runti
 		// cold cache is a quarter of an hour to be told what is running.
 		ResolveProxyImage: o.resolveProxyImage,
 	}
+	opts.TTL = o.ttl()
 	if cfg != nil {
 		opts.Context = cfg.KubeconfigContext
 		opts.NamespacePrefix = cfg.NamespacePrefix
@@ -1826,51 +1857,13 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 	defer s.close()
 	ctx = s.tel.StartCommand(ctx, "af down")
 
-	td := &Teardown{EnvID: o.envID}
 	o.event(s, events.EnvDestroying, "removing "+o.envID)
+	td := o.teardown(ctx, s, o.envID)
 
-	rt, err := s.runtime.Down(ctx, o.envID)
-	td.Removed += rt.Removed
-	td.Pending = append(td.Pending, rt.Pending...)
-	if err != nil {
-		td.Pending = append(td.Pending, provider.PendingResource{
-			Kind: "runtime", ID: o.envID, Reason: err.Error(),
-		})
-	}
-	o.progress(fmt.Sprintf("removed %d runtime resources", rt.Removed))
-
-	// The database goes last, because a service still running against a
-	// database that has been taken away produces a page of connection errors
-	// in the logs that has nothing to do with why the environment went away.
-	branch := provider.Branch{EnvID: o.envID}
-	if err := s.dbProv.Destroy(ctx, branch); err != nil {
-		td.Pending = append(td.Pending, provider.PendingResource{
-			Kind: "database", ID: o.envID, Reason: err.Error(),
-		})
-	} else {
-		td.Removed++
-		o.progress("removed the database branch")
-	}
-
-	// Last, and only after the sweep, because the two find different things.
-	//
-	// The sweep asks the daemon what carries this environment's labels, which
-	// covers everything running and nothing else. The journal knows what was
-	// recorded, which covers a resource created in the instant before a crash,
-	// a resource at a provider with no daemon to sweep, and every kind no sweep
-	// looks for. Running both and merging what each leaves behind is the only
-	// combination in which neither gap is silent.
-	//
-	// Until this call existed the journal was written and never read: Replay,
-	// NewRegistry and Commit each had zero callers in the engine, so the
-	// compensating half of "everything that is created has a recorded,
-	// compensating deletion" had never run.
-	o.reconcile(ctx, s, td)
-
-	// Ordering, and it is load bearing rather than stylistic: the replay above
-	// can append to td.Pending, and the event below reports len(td.Pending).
-	// Emitting first would publish a count taken before the last thing that can
-	// change it.
+	// Ordering, and it is load bearing rather than stylistic: the replay inside
+	// teardown can append to td.Pending, and the event below reports
+	// len(td.Pending). Emitting first would publish a count taken before the
+	// last thing that can change it.
 	// Emitted before observe and before the return, so it is still inside the
 	// session and the bus is still open. A teardown that left resources behind
 	// still says destroyed, with the count, because the environment is gone as
@@ -1885,6 +1878,51 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 		Kind:       "environment.torn_down",
 	})
 	return td, nil
+}
+
+// teardown removes one environment and everything recorded against it.
+//
+// Separate from Down and taking the environment id rather than reading
+// o.envID, because the reaper tears down an environment this orchestrator did
+// not create and cannot name: an environment id is a project and a branch run
+// through a hash, and there is no way back from the id to the branch. Down
+// passes its own id and gets what it always got.
+//
+// The three steps and their order are the whole contract. The runtime sweep
+// asks the daemon what carries this environment's labels, which covers
+// everything running and nothing else. The database goes second, because a
+// service still running against a database that has been taken away produces a
+// page of connection errors that has nothing to do with why the environment
+// went away. The journal goes last, and only after the sweep, because the two
+// find different things: the journal knows what was recorded, which covers a
+// resource created in the instant before a crash, a resource at a provider
+// with no daemon to sweep, and every kind no sweep looks for. Running both and
+// merging what each leaves behind is the only combination in which neither gap
+// is silent.
+func (o *Orchestrator) teardown(ctx context.Context, s *session, envID string) *Teardown {
+	td := &Teardown{EnvID: envID}
+
+	rt, err := s.runtime.Down(ctx, envID)
+	td.Removed += rt.Removed
+	td.Pending = append(td.Pending, rt.Pending...)
+	if err != nil {
+		td.Pending = append(td.Pending, provider.PendingResource{
+			Kind: "runtime", ID: envID, Reason: err.Error(),
+		})
+	}
+	o.progress(fmt.Sprintf("removed %d runtime resources", rt.Removed))
+
+	if err := s.dbProv.Destroy(ctx, provider.Branch{EnvID: envID}); err != nil {
+		td.Pending = append(td.Pending, provider.PendingResource{
+			Kind: "database", ID: envID, Reason: err.Error(),
+		})
+	} else {
+		td.Removed++
+		o.progress("removed the database branch")
+	}
+
+	o.reconcile(ctx, s, envID, td)
+	return td
 }
 
 // observe reports a lifecycle event to whatever is registered.

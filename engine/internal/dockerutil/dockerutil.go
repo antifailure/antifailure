@@ -72,6 +72,19 @@ const (
 	// LabelCreated is RFC 3339, used to age out orphans whose creating
 	// process died before it could clean up.
 	LabelCreated = "dev.antifailure.created"
+	// LabelExpires is when the environment's lifetime ends, in Unix seconds.
+	//
+	// Unix seconds and not RFC 3339, unlike LabelCreated, because a Kubernetes
+	// label value may not contain a colon and every RFC 3339 timestamp does.
+	// The reaper reads this label on both runtimes, so the encoding has to be
+	// one that both accept, and a decimal integer is the only timestamp format
+	// that is.
+	//
+	// Absent means no stated lifetime, which the reaper treats as "leave it
+	// alone" rather than "expired". A resource created by an older release
+	// carries no expiry, and destroying those on sight would make an upgrade
+	// delete everything a machine was holding.
+	LabelExpires = "dev.antifailure.expires"
 )
 
 // ManagedValue is what LabelManaged is stamped with.
@@ -105,6 +118,42 @@ func Managed(kind, envID string, now time.Time) map[string]string {
 		l[LabelEnv] = envID
 	}
 	return l
+}
+
+// ManagedUntil returns the label set for a resource with a stated lifetime.
+//
+// One function rather than a caller that adds the label itself, because the
+// reaper's whole predicate is this label: a create site that stamps the rest
+// of the set and forgets this one produces a resource nothing will ever
+// collect, and that is the leak the reaper exists to close.
+//
+// A zero expiry returns the ordinary set. That is the honest answer for a
+// resource belonging to the machine rather than to an environment, such as
+// the sidecar image, which no environment's lifetime governs.
+func ManagedUntil(kind, envID string, now, expires time.Time) map[string]string {
+	l := Managed(kind, envID, now)
+	if !expires.IsZero() {
+		l[LabelExpires] = strconv.FormatInt(expires.UTC().Unix(), 10)
+	}
+	return l
+}
+
+// ExpiresAt reads the expiry a label set carries.
+//
+// The second result is false when there is no expiry and when there is one
+// that does not parse. Both mean the same thing to a caller that is deciding
+// whether to destroy something: nothing here states a lifetime, so nothing
+// here may be destroyed on account of one.
+func ExpiresAt(labels map[string]string) (time.Time, bool) {
+	raw, ok := labels[LabelExpires]
+	if !ok || raw == "" {
+		return time.Time{}, false
+	}
+	secs, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.Unix(secs, 0).UTC(), true
 }
 
 // IsOurs reports whether a label set belongs to Antifailure.

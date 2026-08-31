@@ -58,6 +58,8 @@ type Runtime struct {
 	redactor *redact.Redactor
 	// readyTimeout bounds how long a service may take to answer.
 	readyTimeout time.Duration
+	// ttl is how long an environment this runtime creates may live.
+	ttl time.Duration
 }
 
 // Options configure the runtime.
@@ -68,6 +70,15 @@ type Options struct {
 	PortFrom int
 	// ReadyTimeout bounds a readiness wait. Zero uses the default.
 	ReadyTimeout time.Duration
+	// TTL is runtime.ttl from the manifest: how long an environment created
+	// by this runtime may live before the reaper removes it.
+	//
+	// Held on the runtime rather than passed on EnvSpec because the network is
+	// created before the spec is assembled, and a network with no expiry
+	// outlives every container that was on it. Zero stamps no expiry, which is
+	// what a caller inventorying a machine gets: nothing it creates has a
+	// lifetime, because it creates nothing.
+	TTL time.Duration
 }
 
 // DefaultReadyTimeout is long enough for a framework that compiles on first
@@ -99,7 +110,27 @@ func New(opts Options) (*Runtime, error) {
 		cli: cli, clock: opts.Clock, redactor: opts.Redactor,
 		ports:        dockerutil.NewPortAllocator(opts.PortFrom),
 		readyTimeout: opts.ReadyTimeout,
+		ttl:          opts.TTL,
 	}, nil
+}
+
+// managed is the label set for one resource this runtime is about to create.
+//
+// Every create site goes through it, so that the expiry cannot be stamped on
+// three kinds of resource and forgotten on the fourth. A network without one
+// is the case that matters: it is the last thing left when the containers are
+// gone, and nothing would ever collect it.
+//
+// An empty environment id means the resource belongs to the machine rather
+// than to any environment, which is the sidecar and forwarder images. Those
+// are shared by every environment on the daemon and are not something one
+// environment's lifetime may destroy.
+func (r *Runtime) managed(kind, envID string) map[string]string {
+	now := r.clock.Now()
+	if envID == "" || r.ttl <= 0 {
+		return dockerutil.Managed(kind, envID, now)
+	}
+	return dockerutil.ManagedUntil(kind, envID, now, now.Add(r.ttl))
 }
 
 // Name identifies the runtime.
@@ -499,6 +530,11 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 				"name":    dockerutil.FirstName(c.Names),
 				"service": c.Labels[dockerutil.LabelService],
 				"state":   c.State,
+				// Carried through so the reaper reads one shape of resource
+				// rather than talking to each runtime's own client. Empty when
+				// the resource states no lifetime, which the reaper reads as
+				// "leave it alone".
+				"expires": c.Labels[dockerutil.LabelExpires],
 			},
 		})
 	}
@@ -511,7 +547,10 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		out = append(out, provider.Resource{
 			Kind: "network", ID: n.ID, EnvID: n.Labels[dockerutil.LabelEnv],
 			CreatedAt: n.Created.UTC(),
-			Labels:    map[string]string{"name": n.Name},
+			Labels: map[string]string{
+				"name":    n.Name,
+				"expires": n.Labels[dockerutil.LabelExpires],
+			},
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
