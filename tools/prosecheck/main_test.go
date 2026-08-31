@@ -86,3 +86,95 @@ func TestTheRealDocumentsAreClean(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 }
+
+// The inversion that let the whole site through. In Markdown a backtick span is
+// code and is emptied before the scan; in TypeScript it is a template literal,
+// which is a string, which is the copy a reader sees.
+func TestATemplateLiteralIsNotExempt(t *testing.T) {
+	src := "const title = `${name} — ${SITE_NAME}`;\n"
+	if got := Check("lib/site.ts", src); len(got) != 1 {
+		t.Fatalf("want the em dash found inside the template literal, got %d", len(got))
+	}
+	// The same characters in a Markdown backtick span are a code sample.
+	if got := Check("x.md", "Write `a — b` in the config.\n"); len(got) != 0 {
+		t.Errorf("markdown inline code should stay exempt, got %+v", got)
+	}
+}
+
+// A comment is a sentence somebody wrote, and it is where the tell survives
+// longest because nobody proofreads a comment.
+func TestACommentInSourceIsChecked(t *testing.T) {
+	if got := Check("components/Card.tsx", "// wider than the card — a long message — is clipped\n"); len(got) != 1 {
+		t.Errorf("want one finding in a comment, got %+v", got)
+	}
+}
+
+// The one construct in TypeScript that could be mistaken for punctuation.
+func TestTheDecrementOperatorIsNotADefect(t *testing.T) {
+	for _, s := range []string{
+		"for (let i = n; i > 0; i--) {\n",
+		"--count;\n",
+		"const flag = \"--no-audit\";\n",
+	} {
+		if got := Check("lib/x.ts", s); len(got) != 0 {
+			t.Errorf("%q should be clean, got %+v", s, got)
+		}
+	}
+}
+
+// A scan for a character cannot see the character spelled as an escape, and
+// www/scripts/markdown-twins.mjs was exactly that: the last em dash under www,
+// invisible after every literal one was gone.
+func TestAnEscapedEmDashInSourceIsFound(t *testing.T) {
+	for _, s := range []string{
+		`title.replace(/\s+\u2014\s+Antifailure$/, "")` + "\n",
+		"<p>a &mdash; b</p>\n",
+		"<p>a &#8212; b</p>\n",
+	} {
+		if got := Check("app/page.tsx", s); len(got) != 1 {
+			t.Errorf("%q should be one finding, got %+v", s, got)
+		}
+	}
+	// An en dash escape carries its own advice, which is different.
+	got := Check("app/page.tsx", `const r = /\u2013/;`+"\n")
+	if len(got) != 1 || !strings.Contains(got[0].what, "en dash") {
+		t.Fatalf("want an en dash finding, got %+v", got)
+	}
+}
+
+// Documentation writes about escapes and entities rather than rendering them,
+// so the escape rules are for source only.
+func TestAnEscapeInMarkdownIsNotADefect(t *testing.T) {
+	if got := Check("x.md", `The codepoint is \u2014 and the entity is &mdash;.`+"\n"); len(got) != 0 {
+		t.Errorf("markdown should not be scanned for escapes, got %+v", got)
+	}
+}
+
+// The one that matters for the site: www and console are actually reached, and
+// they are clean. The count guards against the walk quietly finding nothing,
+// which is how this checker reported green over sixty-eight em dashes.
+func TestTheRealSourceIsClean(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := source(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) < 100 {
+		t.Fatalf("found %d source files, which suggests this is looking in the wrong place", len(files))
+	}
+	var www, console bool
+	for _, f := range files {
+		www = www || strings.HasPrefix(f, "www/")
+		console = console || strings.HasPrefix(f, "console/")
+	}
+	if !www || !console {
+		t.Fatalf("www reached: %v, console reached: %v", www, console)
+	}
+	// Nothing from a dependency or a build directory, which would make the
+	// check both slow and somebody else's problem.
+	for _, f := range files {
+		if strings.Contains(f, "node_modules/") || strings.Contains(f, "/.next/") || strings.Contains(f, "/out/") {
+			t.Errorf("%s is not ours to style", f)
+		}
+	}
+}
