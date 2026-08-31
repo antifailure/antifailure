@@ -48,6 +48,15 @@ type Output struct {
 	Quiet bool
 	// Verbose adds detail, including stack traces on errors.
 	Verbose bool
+	// TTY is whether the output stream is an interactive terminal that can be
+	// drawn on rather than only written to.
+	//
+	// Separate from Color, and not derivable from it: NO_COLOR on a real
+	// terminal turns colour off and leaves a screen that can still have a line
+	// rewritten on it, and AF_FORCE_COLOR into a file turns colour on for a
+	// stream where rewriting a line would write escape codes into somebody's
+	// log. The two questions have different answers and used to be asked once.
+	TTY bool
 	// Width is how many columns a line may use.
 	//
 	// It is the terminal's real width when there is a terminal, and
@@ -130,6 +139,27 @@ func DetectWidth(w io.Writer, env func(string) string) int {
 		return defaultWidth
 	}
 	return clampWidth(n)
+}
+
+// DetectTTY reports whether output can be drawn on rather than only written
+// to: a line rewritten in place, a status line erased before the next record.
+//
+// A dumb terminal is excluded even though it is a character device, because it
+// has no erase-to-end-of-line and the escape would be printed rather than
+// obeyed.
+func DetectTTY(w io.Writer, env func(string) string) bool {
+	if term := env("TERM"); term == "dumb" || term == "" {
+		return false
+	}
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 func clampWidth(n int) int {

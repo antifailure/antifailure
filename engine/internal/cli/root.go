@@ -49,6 +49,10 @@ type Env struct {
 	// Credentials is where the personal token lives. Nil means this
 	// platform's own store; read through CredentialStore, never directly.
 	Credentials *auth.Store
+	// Progress is the status line a long run reports through, built on first
+	// use and closed once at the end of Execute. Nothing outside the lifecycle
+	// helpers should touch it.
+	Progress *Progress
 }
 
 // CredentialStore is where af login put the token.
@@ -169,6 +173,7 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	// terminal for itself would be a command that disagrees with its sibling
 	// about where the right margin is.
 	out.Width = DetectWidth(opts.Stdout, opts.Getenv)
+	out.TTY = DetectTTY(opts.Stdout, opts.Getenv)
 
 	env := &Env{
 		Out:         out,
@@ -208,6 +213,14 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	// is not the error at all, it is what the command actually takes, and
 	// without the command there is nothing to print it from.
 	ran, err := root.ExecuteContextC(ctx)
+	// Closed here rather than in each command, because the status line is a
+	// goroutine rewriting the last line of the terminal and every path out of
+	// every command has to stop it. Eleven commands build an orchestrator; the
+	// one that forgot would leave a line being rewritten underneath whatever
+	// was printed next, including the error that ended the run.
+	if env.Progress != nil {
+		env.Progress.Close()
+	}
 	if err == nil {
 		// A command that could not write what it was asked to write did not
 		// succeed. Reporting zero here tells a script that the output it just

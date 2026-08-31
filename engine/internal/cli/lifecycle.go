@@ -97,6 +97,20 @@ func orchestratorWithManifest(env2 *Env, branch string) (*env.Orchestrator, *sch
 	return orchestratorWithManifest2(env2, lifecycleOptions{branch: branch})
 }
 
+// progressFor returns the status line a run reports through, remembering it on
+// the Env so that the command can close it when the run ends.
+//
+// On the Env rather than returned alongside the orchestrator, because every
+// one of the eleven commands that builds an orchestrator would otherwise have
+// to thread a second value through, and the one that forgot would leave a
+// goroutine rewriting a line under whatever the command printed next.
+func progressFor(e *Env) *Progress {
+	if e.Progress == nil {
+		e.Progress = NewProgress(e.Out, e.Clock)
+	}
+	return e.Progress
+}
+
 func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestrator, *schema.Manifest, error) {
 	branch, rebuild := opts.branch, opts.rebuild
 	path, err := manifest.Find(env2.WorkDir)
@@ -123,7 +137,7 @@ func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestra
 			if opts.silent {
 				return
 			}
-			env2.Out.Printf("  %s\n", r.String(line))
+			progressFor(env2).Step(r.String(line))
 		},
 	})
 	if err != nil {
