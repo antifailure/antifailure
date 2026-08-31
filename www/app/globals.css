@@ -117,15 +117,6 @@ body {
   );
 }
 
-@keyframes wt-scan {
-  0% {
-    background-position: -120% 0;
-  }
-  100% {
-    background-position: 220% 0;
-  }
-}
-
 @keyframes wt-sheen {
   0% {
     opacity: 0;
@@ -149,41 +140,9 @@ body {
   }
 }
 
-@keyframes auth-glint {
-  0% {
-    transform: translateX(-45%);
-    opacity: 0;
-  }
-  6% {
-    opacity: 1;
-  }
-  38% {
-    transform: translateX(85%);
-    opacity: 0.2;
-  }
-  100% {
-    transform: translateX(85%);
-    opacity: 0;
-  }
-}
-
 .auth-bar {
   transform-origin: bottom;
   animation: auth-rise 1.1s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.auth-glint {
-  background: linear-gradient(
-    105deg,
-    transparent 44%,
-    rgba(255, 255, 255, 0.15) 48%,
-    rgba(255, 255, 255, 1) 50%,
-    rgba(232, 255, 246, 0.95) 51%,
-    rgba(51, 191, 0, 0.7) 53.5%,
-    transparent 58%
-  );
-  mix-blend-mode: plus-lighter;
-  animation: auth-glint 3.4s cubic-bezier(0.16, 1, 0.3, 1) 0.9s infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -191,9 +150,6 @@ body {
     animation: none !important;
     transform: none;
     opacity: 1;
-  }
-  .auth-glint {
-    display: none !important;
   }
 }
 
@@ -225,25 +181,6 @@ body {
   }
 }
 
-@keyframes film-scan {
-  0% {
-    transform: translateY(-100%);
-  }
-  100% {
-    transform: translateY(220%);
-  }
-}
-
-.hero-scan {
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(255, 255, 255, 0.08) 48%,
-    transparent 52%
-  );
-  animation: film-scan 7s linear infinite;
-}
-
 @keyframes film-clone {
   0% {
     transform: translateY(8px);
@@ -264,15 +201,6 @@ body {
   animation-delay: 0.35s;
 }
 
-.film-scanline {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to bottom, transparent, rgba(51, 191, 0, 0.18), transparent);
-  background-size: 100% 40%;
-  animation: film-scan 2.8s linear infinite;
-  pointer-events: none;
-}
-
 @keyframes film-row {
   from {
     opacity: 0;
@@ -286,23 +214,6 @@ body {
 
 .film-row {
   animation: film-row 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-@keyframes film-log {
-  0% {
-    transform: translateY(0);
-  }
-  100% {
-    transform: translateY(-50%);
-  }
-}
-
-.film-log {
-  animation: film-log 8s linear infinite;
-}
-
-.film-log-slow {
-  animation: film-log 14s linear infinite;
 }
 
 .film-bar {
@@ -383,30 +294,15 @@ body {
   animation: film-node 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-@keyframes film-dash {
-  to {
-    stroke-dashoffset: -168;
-  }
-}
-
-.film-dash {
-  animation: film-dash 2.4s linear infinite;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .hero-scan,
   .film-play,
-  .film-scanline,
   .film-row,
-  .film-log,
-  .film-log-slow,
   .film-bar,
   .film-type,
   .film-ide-line,
   .film-stroke,
   .film-area,
-  .film-node,
-  .film-dash {
+  .film-node {
     animation: none !important;
   }
 }
