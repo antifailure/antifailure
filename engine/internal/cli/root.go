@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"text/template"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -484,62 +485,7 @@ recoverable by replay.`),
 		newVersionCommand(env),
 	)
 	attachExamples(root)
-	// Help text is wrapped at render time rather than in the source.
-	//
-	// Cobra prints Long verbatim, so every Long in this tree was hand wrapped
-	// at eighty columns by whoever wrote it, which is a guess that is wrong in
-	// both directions: at forty columns every help page in the tool overflows
-	// and the terminal breaks it mid word, and at two hundred it is a ribbon
-	// down the left of an empty screen.
-	//
-	// A template function rather than rewriting Long, because the generated
-	// command reference reads Long directly and must keep the paragraphs the
-	// author wrote rather than one terminal's idea of where they end.
-	cobra.AddTemplateFunc("wrapped", func(s string) string {
-		var out []string
-		// Paragraph by paragraph, and a line that is indented is left alone:
-		// those are the command tours and worked fragments, where the
-		// alignment is the meaning.
-		for _, para := range strings.Split(strings.TrimSpace(s), "\n\n") {
-			if strings.HasPrefix(para, " ") || strings.Contains(para, "\n ") {
-				out = append(out, para)
-				continue
-			}
-			out = append(out, env.Out.Wrap(para, 0))
-		}
-		return strings.Join(out, "\n\n")
-	})
-	// Cobra pads its flag table and its command list and never wraps either,
-	// so at forty columns every help page in the tool spills its descriptions
-	// past the right margin. pflag has the wrapped form and cobra's template
-	// simply does not call it; the command list has no wrapped form at all and
-	// gets one here.
-	cobra.AddTemplateFunc("flags", func(set *pflag.FlagSet) string {
-		// Trailing spaces trimmed per line: pflag pads the name column to a
-		// fixed width and, when it wraps, leaves that padding on a line with
-		// nothing after it. Invisible on a screen and a diff full of
-		// whitespace anywhere the help text is captured.
-		lines := strings.Split(set.FlagUsagesWrapped(env.Out.Width), "\n")
-		for i := range lines {
-			lines[i] = strings.TrimRight(lines[i], " ")
-		}
-		return strings.TrimRight(strings.Join(lines, "\n"), "\n")
-	})
-	cobra.AddTemplateFunc("commands", func(c *cobra.Command) string {
-		var b strings.Builder
-		for _, sub := range c.Commands() {
-			if !sub.IsAvailableCommand() && sub.Name() != "help" {
-				continue
-			}
-			label := "  " + sub.Name() + strings.Repeat(" ", max(1, sub.NamePadding()-len(sub.Name())+1))
-			b.WriteString(label)
-			b.WriteString(env.Out.Wrap(sub.Short, len(label)))
-			b.WriteByte('\n')
-		}
-		return strings.TrimRight(b.String(), "\n")
-	})
-	root.SetHelpTemplate(helpTemplate)
-	root.SetUsageTemplate(usageTemplate)
+	setHelpRendering(root, env.Out)
 	// A flag that does not parse is a usage error, not a failure of the
 	// command, and the exit code has to say so.
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
@@ -582,6 +528,86 @@ func WithSignals(ctx context.Context) (context.Context, func() bool, func()) {
 		cancel()
 	}
 	return ctx, second, stop
+}
+
+// setHelpRendering makes the help and usage pages fit the terminal.
+//
+// Two problems, one mechanism. Cobra prints Long verbatim, so the width of
+// every help page in this tool was whatever the person who wrote it happened
+// to have; and it pads its flag table and its command list without wrapping
+// either. At forty columns the terminal breaks all three mid word, and at two
+// hundred they are a ribbon down the left of an empty screen.
+//
+// The templates are compiled here, with their own function map, rather than
+// through cobra.AddTemplateFunc. That function writes to a package level map
+// shared by every command tree in the process, which the race detector catches
+// the moment two Executes overlap, and which would have a second Execute's
+// terminal width silently deciding the layout of the first one's help. An
+// embedding binary is entitled to run this more than once.
+func setHelpRendering(root *cobra.Command, out *Output) {
+	funcs := template.FuncMap{
+		"trimTrailingWhitespaces": func(s string) string {
+			return strings.TrimRight(s, " \t\n")
+		},
+		// Long is wrapped at render time rather than rewritten, because the
+		// generated command reference reads it directly and must keep the
+		// paragraphs the author wrote rather than one terminal's idea of where
+		// they end. An indented paragraph is left alone: those are the command
+		// tours and worked fragments, where the alignment is the meaning.
+		"wrapped": func(s string) string {
+			var paras []string
+			for _, para := range strings.Split(strings.TrimSpace(s), "\n\n") {
+				if strings.HasPrefix(para, " ") || strings.Contains(para, "\n ") {
+					paras = append(paras, para)
+					continue
+				}
+				paras = append(paras, out.Wrap(para, 0))
+			}
+			return strings.Join(paras, "\n\n")
+		},
+		// pflag already has the wrapped form of a flag table and cobra's
+		// template simply never called it. Trailing spaces come off each line
+		// because pflag pads the name column to a fixed width and, when it
+		// wraps, leaves that padding on a line with nothing after it:
+		// invisible on a screen and a diff full of whitespace anywhere the
+		// help text is captured.
+		"flags": func(set *pflag.FlagSet) string {
+			lines := strings.Split(set.FlagUsagesWrapped(out.Width), "\n")
+			for i := range lines {
+				lines[i] = strings.TrimRight(lines[i], " ")
+			}
+			return strings.TrimRight(strings.Join(lines, "\n"), "\n")
+		},
+		// The command list has no wrapped form in cobra at all.
+		"commands": func(c *cobra.Command) string {
+			var b strings.Builder
+			for _, sub := range c.Commands() {
+				if !sub.IsAvailableCommand() && sub.Name() != "help" {
+					continue
+				}
+				pad := sub.NamePadding() - len(sub.Name()) + 1
+				if pad < 1 {
+					pad = 1
+				}
+				label := "  " + sub.Name() + strings.Repeat(" ", pad)
+				b.WriteString(label)
+				b.WriteString(out.Wrap(sub.Short, len(label)))
+				b.WriteByte('\n')
+			}
+			return strings.TrimRight(b.String(), "\n")
+		},
+	}
+	help := template.Must(template.New("help").Funcs(funcs).Parse(helpTemplate))
+	usage := template.Must(template.New("usage").Funcs(funcs).Parse(usageTemplate))
+
+	// Set on the root only. Cobra walks up to the parent for both, so every
+	// command in the tree renders through these.
+	root.SetHelpFunc(func(c *cobra.Command, _ []string) {
+		_ = help.Execute(c.OutOrStdout(), c)
+	})
+	root.SetUsageFunc(func(c *cobra.Command) error {
+		return usage.Execute(c.OutOrStderr(), c)
+	})
 }
 
 const helpTemplate = `{{with (or .Long .Short)}}{{. | wrapped | trimTrailingWhitespaces}}
