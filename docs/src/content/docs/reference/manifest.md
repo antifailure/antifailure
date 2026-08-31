@@ -189,7 +189,7 @@ and to the exit code.
 | Key | Notes |
 | --- | --- |
 | `enabled` | On by default. Turning it off means the inventory is not taken, which is not the same as everything having passed. |
-| `require` | Dimensions every component of which must be reproduced: `services`, `database`, `third_party`, `auth`, `runtime`, `traffic`. See [fidelity](/docs/concepts/fidelity/). |
+| `require` | Dimensions every component of which must be reproduced: `services`, `database`, `third_party`, `auth`, `runtime`, `traffic`. See [inventory](/docs/concepts/inventory/). |
 
 There is no threshold here. A single percentage hides the one dimension that
 matters to a particular change, so what a manifest requires is a dimension by

@@ -498,7 +498,7 @@ The environment does not reproduce {dimension}, which the manifest requires: {de
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/fidelity](/docs/concepts/fidelity/) |
+| More | [concepts/inventory](/docs/concepts/inventory/) |
 
 ### AF-FID-002
 
@@ -510,7 +510,7 @@ The environment does not reproduce {dimension}, which the manifest requires: {de
 | --- | --- |
 | Exit code | `1` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/fidelity](/docs/concepts/fidelity/) |
+| More | [concepts/inventory](/docs/concepts/inventory/) |
 
 ## Infrastructure
 

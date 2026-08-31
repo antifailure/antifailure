@@ -1,5 +1,5 @@
 ---
-title: Fidelity
+title: Inventory
 description: What an environment reproduces, component by component, and what it could not.
 sidebar:
   order: 5
@@ -98,7 +98,7 @@ and about neither. One averaged number hides whichever of those is yours,
 which is why the score comes after the table and carries its own definition
 every time it is printed.
 
-## Third party fidelity is mostly low today, and says so
+## Third party reproduction is mostly low today, and says so
 
 Only one mock pack ships, for Stripe. A host in `mock` mode with no pack
 answering it is `absent`, and the report says exactly that: every request to it
