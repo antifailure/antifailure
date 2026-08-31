@@ -376,10 +376,9 @@ Where and how long the environment runs. The provider decides the machinery; the
 | `domain` | string | no | Wildcard domain for environment hostnames. Defaults to localhost, which needs no DNS at all. Defaults to `localhost`. Max length 253. |
 | `idle_sleep` | string | no | How long an environment may sit idle before it is scaled to zero. It wakes on the next request. Defaults to `30m`. Matches `^[0-9]+(m\|h)$`. |
 | `kubeconfig_context` | string | no | Which kubeconfig context to use. Naming it prevents an environment landing on whatever cluster happened to be current. Max length 253. |
-| `max_ttl` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to `168h`. Matches `^[0-9]+(h\|d)$`. |
 | `namespace_prefix` | string | no | Prefix for Kubernetes namespaces. Defaults to `af`. Max length 40. |
 | `provider` | `local`, `kubernetes` | no | Defaults to `local`. |
-| `ttl` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to `24h`. Matches `^[0-9]+(h\|d)$`. |
+| `ttl` | string | no | How long an environment lives before automatic teardown. Defaults to `168h`. Matches `^[0-9]+(h\|d)$`. |
 
 ## Service
 

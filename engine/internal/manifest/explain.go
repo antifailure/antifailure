@@ -189,11 +189,6 @@ func Explain(m *schema.Manifest) string {
 	fmt.Fprintf(&b, "  provider     %s\n", m.Runtime.Provider)
 	fmt.Fprintf(&b, "  hostnames    *.%s\n", m.Runtime.Domain)
 	fmt.Fprintf(&b, "  lifetime     %s, sleeping after %s idle\n", m.Runtime.TTL, m.Runtime.IdleSleep)
-	// The ceiling is printed next to the lifetime rather than left to the
-	// manifest reference, because the two numbers only mean anything together:
-	// the first is what an environment gets, the second is the most af env
-	// extend can ever give it.
-	fmt.Fprintf(&b, "  extend to    %s at the most, from when it was created\n", m.Runtime.MaxTTL)
 	b.WriteString("\n")
 
 	b.WriteString("GitHub\n")

@@ -144,34 +144,9 @@ af env
 
 Subcommands:
 
-- [`af env extend`](#af-env-extend) Keep an environment past its lifetime, up to its maximum.
 - [`af env list`](#af-env-list) List the environments this machine is holding.
 - [`af env prune`](#af-env-prune) Remove environments older than a cutoff.
 - [`af env pull`](#af-env-pull) Read an environment's record from the control plane.
-- [`af env reap`](#af-env-reap) Remove the environments whose lifetime has ended.
-
-### `af env extend`
-
-Keep an environment past its lifetime, up to its maximum.
-
-Moves an environment's expiry, so a sweep does not take one you are still
-using.
-
-There is a bound, and it is the point. No extension may take an environment
-past runtime.max_ttl measured from when it was CREATED, not from now, so
-extending repeatedly cannot walk the limit forward. Asking for more than the
-maximum grants the maximum and says so rather than failing, because being given
-less time than you asked for silently is how you come back to an environment
-that is gone.
-
-```
-af env extend <environment> [flags]
-```
-
-| Flag | Default | What it does |
-| --- | --- | --- |
-| `--for` | `4h0m0s` | How long from now the environment should live. |
-| `--reason` | - | Why, recorded with the extension. |
 
 ### `af env list`
 
@@ -225,35 +200,6 @@ af env pull <environment> [flags]
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--control-plane` | - | The control plane to read from (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
-
-### `af env reap`
-
-Remove the environments whose lifetime has ended.
-
-Removes every environment on this machine that has passed the lifetime it was
-created with, and nothing else.
-
-The lifetime is read off each environment's own resources, stamped there when
-it was created from that repository's runtime.ttl. It is never taken from the
-manifest this command was run with, so a repository with a two hour lifetime
-cannot remove another project's week long environment on the same machine.
-
-Three things are never removed. An environment whose resources state no
-lifetime, which is everything created before this feature existed: use
-'af env prune --older-than' for those, where a person names the cutoff. An
-environment something is running against, which is deferred to the next sweep
-rather than pulled out from under a command. And anything that is not an
-environment, such as the shared sidecar image.
-
-An environment you are still using can be kept with 'af env extend'.
-
-```
-af env reap [flags]
-```
-
-| Flag | Default | What it does |
-| --- | --- | --- |
-| `--dry-run` | `false` | Print what would be removed without removing it. |
 
 ### `af explain`
 

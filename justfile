@@ -74,6 +74,7 @@ gate: _reports
     run "prose style"                    just vale
     run "every link resolves"            just links
     run "the built docs carry their head" just docscheck
+    run "the site's own claims"          just seo
     run "prose stays readable"           just readability
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
@@ -407,10 +408,51 @@ links:
     set -euo pipefail
     (cd www && npm run build)
     (cd docs && npm run build)
-    rm -rf site && mkdir -p site
-    cp -R www/out/. site/
-    cp -R docs/dist site/docs
+    # tools/site/assemble.sh, rather than a third hand-rolled copy of it.
+    #
+    # This recipe assembled the tree itself, which is the mistake assemble.sh
+    # was written to end: that script exists because CI and deploy had each
+    # grown their own copy and the two drifted, one learning to handle both
+    # shapes of the Astro output while the other never did. A third copy was
+    # free to drift the same way, and had: it copied www/out and docs/dist and
+    # nothing else, so install.sh and schemas/ were absent from the tree this
+    # checked while CI published them, and it skipped the host config merge
+    # entirely, so every assertion that merge makes could not fail here and
+    # first spoke up in CI twenty minutes later. The shadowed-page check is one
+    # of those, and it is the one a developer most wants before pushing,
+    # because the page it fails on is a page they just wrote.
+    #
+    # The link count does not move: the files this now adds are not HTML, and
+    # the absolute addresses that point at them are external links, which an
+    # offline run does not resolve either way.
+    tools/site/assemble.sh
     lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
+
+# The assertions the marketing site makes about itself, against the built site.
+#
+# Sitemap, robots, canonicals, OpenGraph, structured data, the markdown twins
+# and the skip link. Every one of them was absent from production at the time
+# it was written and nothing said so, because a missing meta tag breaks no page
+# and fails no type check. ci.yml has run this on every pull request since; the
+# justfile never has, so `just gate` was green on a tree that CI refused, on the
+# one surface a customer sees first. gatecheck could not say so either, because
+# `npm run <script>` matched no pattern it had.
+#
+# Its own recipe rather than a line inside `links`, for the reason `typecheck`
+# learned the hard way: a gate that takes an hour and is named after link
+# resolution is not where anybody looks for a missing canonical tag.
+#
+# It builds rather than reusing whatever is in www/out, even though `links`
+# built the same thing a moment earlier in `gate`. A check that runs against
+# whatever happened to be on disk can pass against last week's site, which is
+# the same class of defect it exists to catch, and Next's cache makes the
+# second build the cheap part of an hour long gate.
+seo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -d www/node_modules ] || npm --prefix www ci --no-audit --no-fund --silent
+    (cd www && npm run build)
+    (cd www && npm run check:seo)
 
 # The getting started path, run in order and timed.
 #

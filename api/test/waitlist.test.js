@@ -82,6 +82,19 @@ test("normaliseEmail rejects what is certainly not an address", () => {
   }
 });
 
+test("normaliseEmail accepts an address of exactly the length bound", () => {
+  // The rejection list above only reaches the length bound from far above it,
+  // so `>=` in place of `>` would pass every test in this file while turning
+  // away the longest address RFC 5321 allows. The boundary is the only place
+  // an off-by-one lives, so it is the place worth asserting: 254 is kept, 255
+  // is not.
+  const domain = "@example.com";
+  const longest = "a".repeat(MAX_EMAIL_LENGTH - domain.length) + domain;
+  assert.equal(longest.length, MAX_EMAIL_LENGTH);
+  assert.equal(normaliseEmail(longest), longest);
+  assert.equal(normaliseEmail("a" + longest), null);
+});
+
 test("normaliseEmail keeps the shapes a strict regex would turn away", () => {
   // Each of these is a real deliverable address. A validator that rejects any
   // of them costs a signup, which is far more expensive than one junk row.

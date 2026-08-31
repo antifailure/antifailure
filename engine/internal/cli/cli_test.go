@@ -259,7 +259,7 @@ egress:
 	require.Contains(t, got.stdout, "api.stripe.com")
 	// The whole point: a default nobody set is shown with its resolved value.
 	require.Contains(t, got.stdout, "default      block")
-	require.Contains(t, got.stdout, "lifetime     24h")
+	require.Contains(t, got.stdout, "lifetime     168h")
 }
 
 func TestExplain_JSONFormIsTheNormalizedManifest(t *testing.T) {
