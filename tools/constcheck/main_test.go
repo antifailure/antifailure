@@ -375,3 +375,96 @@ func TestRunReportsWhatItExamined(t *testing.T) {
 		t.Fatal("the deliberately unchecked list is empty, so the output claims a decision it no longer records")
 	}
 }
+
+// The reachability half, proved able to fail three ways rather than assumed.
+//
+// Each mutation was also run against the real report.go and produced the
+// message named here; these are the same three shapes as unit cases so they
+// stay proved without editing the engine.
+func TestReachabilityCatchesADeadConstant(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		p := filepath.Join(dir, "r.go")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	ref := reachRef{name: "x", file: "r.go", prefix: "V", fn: "Verdict", want: 3}
+
+	good := `package x
+const (
+	VA = "a"
+	VB = "b"
+	VC = "c"
+)
+func (r Run) Verdict() string {
+	switch {
+	case true:
+		return VA
+	case false:
+		return VB
+	}
+	return VC
+}
+`
+	write(good)
+	got, err := checkReachable(dir, ref)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("a complete function was rejected: %v %v", got, err)
+	}
+
+	// One constant no branch returns.
+	write(strings.Replace(good, "\t\treturn VB", "\t\treturn VA", 1))
+	got, err = checkReachable(dir, ref)
+	if err != nil || len(got) != 1 || !strings.Contains(got[0].why, "VB") {
+		t.Fatalf("a dead constant was not named: %v %v", got, err)
+	}
+
+	// A bare literal where a constant belongs.
+	write(strings.Replace(good, "\treturn VC", "\treturn \"c\"", 1))
+	got, err = checkReachable(dir, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawLiteral bool
+	for _, f := range got {
+		if strings.Contains(f.why, "bare string") {
+			sawLiteral = true
+		}
+	}
+	if !sawLiteral {
+		t.Fatalf("a bare literal return was not reported: %v", got)
+	}
+
+	// The precondition. A block that changed size stops the run rather than
+	// being checked against reasoning done for a different block.
+	write(strings.Replace(good, `	VC = "c"`, "\tVC = \"c\"\n\tVD = \"d\"", 1))
+	if _, err = checkReachable(dir, ref); err == nil {
+		t.Fatal("a block that grew did not stop the run")
+	}
+
+	// And it refuses to read the wrong block at all rather than passing.
+	write("package x\nconst QA = \"a\"\n")
+	if _, err = checkReachable(dir, ref); err == nil {
+		t.Fatal("a missing block did not stop the run")
+	}
+}
+
+// The real declaration has to keep resolving, so a package move fails the
+// build rather than quietly reducing this to nothing.
+func TestDeclaredReachabilityResolves(t *testing.T) {
+	root := filepath.Join("..", "..")
+	if len(reachable) == 0 {
+		t.Fatal("no reachability declarations")
+	}
+	for _, r := range reachable {
+		got, err := checkReachable(root, r)
+		if err != nil {
+			t.Fatalf("%s: %v", r.name, err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("%s: %v", r.name, got[0].why)
+		}
+	}
+}

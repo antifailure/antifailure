@@ -244,6 +244,15 @@ var unchecked = []struct{ name, why string }{
 			"sentence saying five would be flagged as wrong by two. Declaring " +
 			"it was tried and produced four findings, all false, one of them on " +
 			"a sentence somebody had just corrected"},
+	{"whether a declared value is produced ANYWHERE (as opposed to by one named function)",
+		"a reference is not a production, and that is not a tuning problem. " +
+			"events.EnvSleeping has a reference, in the control plane type map, " +
+			"and no emitter, so a reference count calls the motivating example " +
+			"live. Measured on the event types: 21 of 52 have no qualified " +
+			"reference outside the package and 5 more are reached only by that " +
+			"map, and separating dead from reserved-for-unbuilt needs a hand kept " +
+			"exemption per value. reach.go does the half that is decidable from " +
+			"syntax: one block, one function, no call graph"},
 	{"any count whose noun is elided",
 		`"governs all six together" names no noun, and the noun is the only ` +
 			"thing that says which set is meant. Tried with a proximity window " +
@@ -342,6 +351,16 @@ func run(root string, out io.Writer) error {
 		}
 	}
 
+	// Reachability, which is a different property from a count and a worse
+	// defect when it fails. See reach.go for what it deliberately does not do.
+	for _, r := range reachable {
+		f, err := checkReachable(root, r)
+		if err != nil {
+			return err
+		}
+		found = append(found, f...)
+	}
+
 	sort.Slice(found, func(i, j int) bool {
 		if found[i].file != found[j].file {
 			return found[i].file < found[j].file
@@ -391,6 +410,10 @@ func run(root string, out io.Writer) error {
 	// that rewrite and push people back towards a number somebody has to keep
 	// true forever.
 	report("constcheck: %d reference tables checked row for row\n", tablesRead)
+	for _, r := range reachable {
+		report("constcheck: every one of the %d %s constants in %s is returned by %s, "+
+			"and %s returns nothing else\n", r.want, r.name, r.file, r.fn, r.fn)
+	}
 	report("constcheck: %d miscounted claims\n", len(found))
 	report("constcheck: deliberately not checked, so that silence is not read as coverage:\n")
 	for _, u := range unchecked {
