@@ -14,8 +14,16 @@ class FakePage implements Page {
 
   constructor(outcome: RegExp | null) { this.outcome = outcome; }
 
+  /** Which paths show the sign-in form. Every path, by default, which is the
+   *  application that answers a protected route with its sign-in screen. */
+  signInAt: readonly string[] | null = null;
+
   async goto(url: string) { this.visited.push(url); this.current = url; }
   async fill(field: RegExp, value: string) { this.filled[field.source] = value; }
+  async has(_field: RegExp) {
+    if (this.signInAt === null) return true;
+    return this.signInAt.some((p) => this.current.endsWith(p));
+  }
   async click(control: RegExp) { this.clicked.push(control.source); }
   async waitForAny(patterns: readonly RegExp[]): Promise<RegExp | null> {
     if (this.outcome === null) return null;

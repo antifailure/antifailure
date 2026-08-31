@@ -9,6 +9,44 @@ import { chromium, type Browser, type BrowserContext, type Page as PWPage } from
 import type { Page } from './login.ts';
 import type { Snapshot } from './workflow.ts';
 
+/** The same pattern with its anchors taken off.
+ *
+ * The patterns in FIELD are anchored on purpose: an unanchored /email/ matches
+ * the newsletter box on a marketing page and /email address/ almost never
+ * does. What anchoring also excludes, and nobody noticed until this
+ * repository's own console was driven, is a field whose label carries its own
+ * hint text. A wrapping label computes ONE accessible name out of everything
+ * inside it, so
+ *
+ *     <label>Email address <input> We send a link that signs you in.</label>
+ *
+ * is named "Email address We send a link that signs you in.", the anchored
+ * pattern matches nothing at all, and the fill times out after ten seconds
+ * with an error naming the regex and not the reason.
+ */
+function unanchored(field: RegExp): RegExp {
+  return new RegExp(field.source.replace(/^\^/, '').replace(/\$$/, ''), field.flags);
+}
+
+/**
+ * The field with exactly this accessible name, or failing that the one whose
+ * name merely contains it.
+ *
+ * The exact match is waited for rather than counted, because a page that
+ * renders its form after a fetch has no fields at all for the first few
+ * hundred milliseconds, and counting would fall through to the loose pattern
+ * every time on exactly the applications where precision matters most.
+ */
+async function locate(pw: PWPage, field: RegExp, timeoutMs: number) {
+  const exact = pw.getByLabel(field).first();
+  try {
+    await exact.waitFor({ state: 'visible', timeout: timeoutMs });
+    return exact;
+  } catch {
+    return pw.getByLabel(unanchored(field)).first();
+  }
+}
+
 /** Evidence captured from a run. */
 export interface Evidence {
   /** Video is the recording, when one was made. */
@@ -88,7 +126,20 @@ export class Session {
         await pw.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       },
       async fill(field: RegExp, value: string) {
-        await pw.getByLabel(field).first().fill(value, { timeout: 10_000 });
+        // Three seconds to prefer the exact name, then ten for whichever
+        // locator that settled on. The loose pattern matches everything the
+        // exact one does, so the first wait buys precision rather than
+        // reachability and does not need to be long.
+        await (await locate(pw, field, 3_000)).fill(value, { timeout: 10_000 });
+      },
+      async has(field: RegExp, timeoutMs: number) {
+        const half = Math.max(250, Math.floor(timeoutMs / 2));
+        try {
+          await (await locate(pw, field, half)).waitFor({ state: 'visible', timeout: half });
+          return true;
+        } catch {
+          return false;
+        }
       },
       async click(control: RegExp) {
         const button = pw.getByRole('button', { name: control });
