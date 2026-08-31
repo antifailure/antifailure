@@ -242,24 +242,12 @@ func (i Inventory) Dimension(name schema.FidelityDimension) (Dimension, bool) {
 	return Dimension{}, false
 }
 
-// Unmeasured lists every component whose state could not be determined,
-// dimension first.
-//
-// Exported because the requirement check needs it and because a caller
-// rendering the score has to be able to name what the score left out.
-func (i Inventory) Unmeasured() []Exclusion {
-	var out []Exclusion
-	for _, d := range i.Dimensions {
-		for _, c := range d.Components {
-			if !c.State.Measured() {
-				out = append(out, Exclusion{
-					Dimension: d.Name, Component: c.Name, Because: c.Detail,
-				})
-			}
-		}
-	}
-	return out
-}
+// There is deliberately no Unmeasured method here. One existed, nothing called
+// it, and it would have been the wrong thing to reach for: it walked the
+// components and never the dimensions excluded whole, so a caller asking it
+// what the score left out would have been told about a synth host and never
+// about the runtime or the traffic. Score().Excluded is the complete answer and
+// is what the renderers use.
 
 // Requirement is the outcome of one entry in fidelity.require.
 type Requirement struct {
