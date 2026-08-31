@@ -100,8 +100,13 @@ function PlaneColumn({
     <div
       className={cn(
         "flex min-w-0 flex-col p-8 max-md:p-6",
-        tone === "control" && "bg-white",
-        tone === "data" && "bg-white",
+        // The trust boundary chip is 103px wide and centred on the divider, so
+        // it reaches 52px into each column. Against p-8 it painted its white
+        // box over the first word on both sides, and the data plane's node read
+        // "rovisioning". Only the divider side needs the air, and only where
+        // the divider exists.
+        tone === "control" && "bg-white xl:pr-16",
+        tone === "data" && "bg-white xl:pl-16",
       )}
     >
       <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">{kicker}</MonoLabel>

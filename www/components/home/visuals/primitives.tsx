@@ -22,7 +22,15 @@ export function Hairline({ className, vertical }: { className?: string; vertical
     <span
       className={cn(
         "pointer-events-none bg-black/12",
-        vertical ? "w-px self-stretch" : "h-px w-full",
+        // A span is inline by default, and an inline box takes neither h-px nor
+        // w-full, so a horizontal Hairline whose parent is not a flex container
+        // painted nothing at all and swallowed its own margin with it. Three
+        // call sites in Firewall.tsx had already passed className="block" to
+        // work around it one at a time. The last one that had not is
+        // Architecture.tsx, where the rule between the isolation minimums that
+        // are in force and the ones that are only designed simply was not
+        // there, and the two lists ran together.
+        vertical ? "w-px self-stretch" : "block h-px w-full",
         className,
       )}
       aria-hidden
