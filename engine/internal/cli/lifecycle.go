@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -115,6 +116,7 @@ func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestra
 	r := redact.New()
 	o, err := env.New(env.Options{
 		Root: root, Manifest: m, Branch: branch, Clock: env2.Clock,
+		Repository: currentRepository(env2, root), PullRequest: currentPullRequest(env2),
 		Rebuild: rebuild, Redactor: r, Verbose: env2.Out.Verbose, Getenv: env2.Getenv,
 		Progress: func(line string) {
 			// Progress is prose, not data, so it is suppressed in JSON mode
@@ -156,6 +158,74 @@ func currentBranch(root string) string {
 		return "default"
 	}
 	return branch
+}
+
+// currentRepository is owner/name for whatever this checkout is.
+//
+// The control plane keys environments on it, and a repository it has never
+// heard of is created from this name, so getting it wrong invents a row rather
+// than failing loudly. Both sources here are therefore exact rather than
+// guessed: GITHUB_REPOSITORY is literally the string GitHub uses, and the
+// origin remote's last two path segments are what every forge puts there.
+//
+// Empty when there is neither, which is a real state and not an error. Somebody
+// trying the tool in a directory with no remote gets an environment that runs;
+// what they do not get is a row in a hosted console they are not using.
+func currentRepository(e *Env, root string) string {
+	if r := strings.TrimSpace(e.Getenv("GITHUB_REPOSITORY")); r != "" {
+		return r
+	}
+	out, err := exec.Command("git", "-C", root, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	return repoFromRemote(strings.TrimSpace(string(out)))
+}
+
+// repoFromRemote pulls owner/name out of a git remote URL.
+//
+// The last two path segments and nothing else, which is what makes this safe
+// on the form CI actually produces. A GitHub Actions checkout rewrites origin
+// to https://x-access-token:<token>@github.com/owner/name, and any parser that
+// kept more of the URL than this would put a live credential on the event
+// stream. Taking the tail can only ever yield two path segments.
+func repoFromRemote(url string) string {
+	url = strings.TrimSuffix(url, ".git")
+	url = strings.TrimSuffix(url, "/")
+	// Colons become separators so that the scp form git@host:owner/name and
+	// the URL forms all reduce to the same list of segments, ports and
+	// credentials included, and all of them are then thrown away.
+	parts := strings.Split(strings.ReplaceAll(url, ":", "/"), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	owner, name := parts[len(parts)-2], parts[len(parts)-1]
+	if owner == "" || name == "" || strings.Contains(owner, "@") {
+		return ""
+	}
+	return owner + "/" + name
+}
+
+// currentPullRequest is the pull request number this run is for, or zero.
+//
+// GITHUB_REF is refs/pull/<n>/merge on a pull_request event and something else
+// on every other trigger, so the shape is checked rather than assumed. Zero
+// means a branch build, which is most of them.
+func currentPullRequest(e *Env) int {
+	ref := strings.TrimSpace(e.Getenv("GITHUB_REF"))
+	rest, ok := strings.CutPrefix(ref, "refs/pull/")
+	if !ok {
+		return 0
+	}
+	number, _, ok := strings.Cut(rest, "/")
+	if !ok {
+		return 0
+	}
+	n, err := strconv.Atoi(number)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // dashboard is the live view attached to a run, or nothing.

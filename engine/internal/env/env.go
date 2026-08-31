@@ -63,6 +63,17 @@ type Options struct {
 	Manifest *schema.Manifest
 	// Branch is the source control branch this environment is for.
 	Branch string
+	// Repository is owner/name, spelled the way the forge spells it.
+	//
+	// Reported on every lifecycle event and used for nothing locally, because
+	// the control plane cannot hold an environment without it: its
+	// environments table joins repositories on a NOT NULL column. Empty is a
+	// real state, not a bug, and means this engine is running somewhere with
+	// no forge to ask, such as a checkout with no remote.
+	Repository string
+	// PullRequest is the number of the pull request this environment is for,
+	// or zero when it is a branch rather than a proposal.
+	PullRequest int
 	// Clock is the time source.
 	Clock clock.Clock
 	// Progress receives human readable lines, already redacted.
@@ -1016,7 +1027,7 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// Emitted through the bus rather than written anywhere directly, because
 	// the bus is where redaction happens and a second path is a second thing to
 	// remember to redact.
-	o.event(s, events.EnvCreating, "creating "+o.envID, events.F("branch", o.opts.Branch))
+	o.event(s, events.EnvCreating, "creating "+o.envID, o.identity()...)
 	// Registered after s.close, so it runs before it: defers unwind last in
 	// first out and the bus has to still be open for the last event to reach a
 	// sink. Reading the named results is what makes this cover every return in
@@ -1027,11 +1038,12 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 			// and the pull request comment can say why without parsing a
 			// sentence written for a terminal.
 			o.eventErr(s, events.EnvFailed, rerr.Error(),
-				events.F("code", string(codeOf(rerr))))
+				append(o.identity(), events.F("code", string(codeOf(rerr))))...)
 			return
 		}
 		o.event(s, events.EnvReady, o.envID+" is ready",
-			readyFields(result, "local", o.opts.Clock.Since(started).Seconds())...)
+			append(o.identity(),
+				readyFields(result, "local", o.opts.Clock.Since(started).Seconds())...)...)
 	}()
 
 	// Before anything is created, so that a refusal costs nothing. Checking
@@ -1962,7 +1974,8 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 	// far as anybody looking at it is concerned and the pending list is what
 	// says otherwise.
 	o.event(s, events.EnvDestroyed, "removed "+o.envID,
-		events.F("removed", td.Removed), events.F("pending", len(td.Pending)))
+		append(o.identity(),
+			events.F("removed", td.Removed), events.F("pending", len(td.Pending)))...)
 
 	o.observe(ctx, extension.LifecycleEvent{
 		Repository: o.opts.Manifest.Name,
