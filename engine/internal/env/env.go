@@ -1034,6 +1034,28 @@ func (o *Orchestrator) checkPolicy(ctx context.Context) error {
 }
 
 // Up brings the environment up.
+//
+// THE RESULT IS NIL WHEN open FAILS, and that is the whole of the contract
+// worth knowing here. open is the state directory, the branch lock and the
+// journal, so every failure touching those returns before result is assigned
+// and the caller gets (nil, err).
+//
+// Three of the four callers are safe only because they read the result on the
+// SUCCESS path, after checking the error, where result is always the value
+// assigned below. That is a real invariant and it was written down nowhere, so
+// it survived as folklore until af up read Services off the nil on its FAILURE
+// path and printed a Go stack trace over an AF-RUN-040 it had already
+// diagnosed correctly. The fifth caller is the one this comment is for, and
+// the fifth caller is always somebody who was not there for that.
+//
+// The fix that removes the class rather than describing it is to assign result
+// at the top, before open, so it is never nil and the error path always
+// carries the environment id, which is what af up needs in order to say what
+// the failure left standing. It is deliberately not done here. cli/ci.go
+// checks `if up != nil` and then reads URL and Golden, so a non-nil result
+// with empty fields would send it down a branch it currently skips, and
+// deciding what it should do there is a real change rather than a mechanical
+// one. Whoever takes it should start with that caller.
 func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	started := o.opts.Clock.Now()
 	s, err := o.open(ctx, "af up")

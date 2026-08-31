@@ -245,6 +245,7 @@ func RunDoctor(ctx context.Context, env *Env, p Prober) DoctorReport {
 		checkProxyEnvironment,
 		checkGit,
 		checkModelKey,
+		checkLeftoverEnvironments,
 	}
 	report := DoctorReport{
 		OK:       true,
@@ -258,6 +259,75 @@ func RunDoctor(ctx context.Context, env *Env, p Prober) DoctorReport {
 		report.Checks = append(report.Checks, r)
 	}
 	return report
+}
+
+// pruneCutoff is the age af env prune treats as stale by default, so that this
+// check and that command cannot disagree about which environments are old.
+const pruneCutoff = 24 * time.Hour
+
+// checkLeftoverEnvironments counts what this machine is still holding.
+//
+// af env prune exists for exactly this, and until now the only thing that named
+// it was af env list, which is itself a command nobody is ever pointed at. So
+// the way to learn that leftovers accumulate was to read the whole command
+// reference, which means for practical purposes nobody learned it. Doctor is
+// where it belongs: it is the command the quickstart says to run first, it is
+// the one people run when something is wrong, and it already reports disk.
+//
+// Measured rather than assumed to be rare. The machine this was written on was
+// holding five environments from failed runs, the oldest forty one hours, none
+// of them running and all of them holding a database branch and a network.
+//
+// A failure to look is a skip, not a warning. The daemon being unreachable is
+// already reported by the Docker check above, and saying it twice trains
+// somebody to read past both.
+func checkLeftoverEnvironments(ctx context.Context, env *Env, _ Prober) CheckResult {
+	r := CheckResult{Name: "Leftover environments"}
+	r.Remediation = "Remove them with 'af env prune', which takes anything older than a day, " +
+		"or one at a time with 'af down --branch <branch>'. 'af env list' shows what is held."
+
+	envs, err := listEnvironments(ctx, env)
+	if err != nil {
+		r.Status = CheckSkip
+		r.Detail = "nothing could be counted, because the runtime did not answer"
+		return r
+	}
+	status, detail := leftoverVerdict(envs, env.Clock.Now())
+	r.Status, r.Detail = status, detail
+	return r
+}
+
+// leftoverVerdict decides what the count means, separately from reading it.
+//
+// Split out because the interesting cases are about ages, and reaching them
+// through the runtime would mean leaving real environments lying around on the
+// machine running the tests for a day, which is both slow and the exact fault
+// this check reports.
+func leftoverVerdict(envs []environment, now time.Time) (CheckStatus, string) {
+	if len(envs) == 0 {
+		return CheckPass, "none are being held"
+	}
+	stale := 0
+	oldest := time.Duration(0)
+	for _, e := range envs {
+		age := now.Sub(e.Oldest)
+		if age > oldest {
+			oldest = age
+		}
+		if age > pruneCutoff {
+			stale++
+		}
+	}
+	if stale == 0 {
+		// Held is not the same as leaked. An environment somebody is working in
+		// right now is the normal state, and warning about it would make this
+		// check noise on the machine of anybody actually using the product.
+		return CheckPass, fmt.Sprintf("%s being held, the oldest %s old",
+			plural(len(envs), "environment", "environments"), humanAge(oldest))
+	}
+	return CheckWarn, fmt.Sprintf(
+		"%s older than a day, out of %d being held; the oldest is %s old",
+		plural(stale, "environment", "environments"), len(envs), humanAge(oldest))
 }
 
 func checkDocker(ctx context.Context, _ *Env, p Prober) CheckResult {

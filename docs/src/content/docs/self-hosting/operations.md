@@ -390,9 +390,10 @@ af logs web
 af doctor
 ```
 
-`af doctor` runs ten checks and each one carries a remediation. It is the fastest
-way to find out that the thing you are debugging is a Docker daemon that is not
-running.
+`af doctor` runs a check for each thing that can stop a run, and every one of
+them carries a remediation. It is the fastest way to find out that the thing you
+are debugging is a Docker daemon that is not running, or that this machine is
+still holding environments from runs that failed days ago.
 
 ## Load testing the control plane itself
 

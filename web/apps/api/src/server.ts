@@ -14,6 +14,13 @@
 
 import { Hono } from 'hono'
 import type { Context } from 'hono'
+import {
+  mintEngineToken,
+  listEngineTokens,
+  revokeEngineToken,
+  MAY_MANAGE_TOKENS,
+  TokenError,
+} from './tokens.ts'
 import { sql as rawSql } from 'drizzle-orm'
 import { trpcServer } from '@hono/trpc-server'
 import type { Pool } from '@antifailure/db'
@@ -170,6 +177,11 @@ export const GRANTABLE_SCOPES: readonly string[] = [
   ...CLI_SCOPES,
   'providers.view',
   'providers.write',
+  // Minting an engine token is the one capability a self-hoster cannot do
+  // without, and it is not in CLI_SCOPES for the same reason the provider
+  // scopes are not: it produces a credential, so it has to be asked for by name
+  // and approved on a screen that shows what was asked for.
+  'tokens.manage',
 ]
 
 
@@ -823,9 +835,18 @@ export function createServer(options: ServerOptions) {
   }
 
   /** Applies the three gates and answers with the reason it refused. */
-  async function providerCaller(
+  /** The roles a scope needs on top of the token carrying it. A scope proves
+   *  the terminal was approved for something; the role proves the person still
+   *  holds it, which is re-read per request so that a demotion takes effect
+   *  without waiting for a ninety day token to expire. */
+  const SCOPE_NEEDS_ROLE: Record<string, ReadonlySet<string>> = {
+    'providers.write': MAY_MANAGE_KEYS,
+    'tokens.manage': MAY_MANAGE_TOKENS,
+  }
+
+  async function cliCaller(
     c: Context,
-    need: 'providers.view' | 'providers.write',
+    need: 'providers.view' | 'providers.write' | 'tokens.manage',
   ): Promise<CliCaller | Response> {
     const header = c.req.header('authorization') ?? ''
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
@@ -845,11 +866,9 @@ export function createServer(options: ServerOptions) {
         403,
       )
     }
-    if (need === 'providers.write' && !MAY_MANAGE_KEYS.has(who.role)) {
-      return c.json(
-        { error: `Changing a provider key needs owner or admin. You are ${who.role}.` },
-        403,
-      )
+    const roles = SCOPE_NEEDS_ROLE[need]
+    if (roles && !roles.has(who.role)) {
+      return c.json({ error: `${need} needs owner or admin. You are ${who.role}.` }, 403)
     }
     return { orgId: who.orgId, userId: who.userId, label: who.login }
   }
@@ -864,7 +883,7 @@ export function createServer(options: ServerOptions) {
   }
 
   app.get('/v1/providers', async (c) => {
-    const caller = await providerCaller(c, 'providers.view')
+    const caller = await cliCaller(c, 'providers.view')
     if (isResponse(caller)) return caller
     const [keys, budgets] = await Promise.all([
       listKeys(options.pool, caller.orgId),
@@ -893,7 +912,7 @@ export function createServer(options: ServerOptions) {
   })
 
   app.put('/v1/providers/:provider', async (c) => {
-    const caller = await providerCaller(c, 'providers.write')
+    const caller = await cliCaller(c, 'providers.write')
     if (isResponse(caller)) return caller
     const provider = providerParam(c.req.param('provider'))
     if (!provider) {
@@ -947,7 +966,7 @@ export function createServer(options: ServerOptions) {
   })
 
   app.delete('/v1/providers/:provider', async (c) => {
-    const caller = await providerCaller(c, 'providers.write')
+    const caller = await cliCaller(c, 'providers.write')
     if (isResponse(caller)) return caller
     const provider = providerParam(c.req.param('provider'))
     if (!provider) {
@@ -967,7 +986,7 @@ export function createServer(options: ServerOptions) {
   })
 
   app.put('/v1/providers/:provider/budget', async (c) => {
-    const caller = await providerCaller(c, 'providers.write')
+    const caller = await cliCaller(c, 'providers.write')
     if (isResponse(caller)) return caller
     const provider = providerParam(c.req.param('provider'))
     if (!provider) {
@@ -1018,6 +1037,94 @@ export function createServer(options: ServerOptions) {
       })
     } catch (err) {
       if (err instanceof ProviderKeyError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // Engine tokens
+  // -------------------------------------------------------------------------
+  //
+  // What a CI job or a self-hosted engine puts in AF_CONTROL_PLANE_TOKEN. The
+  // documentation told people to create one here long before anything could,
+  // and `tokens.list` and `tokens.revoke` in the tRPC router managed a resource
+  // that had no producer outside the test fixtures.
+  //
+  // On this surface rather than in tRPC, because tRPC needs a browser session
+  // and a self-hoster is at a terminal. The console keeps its own list through
+  // the tRPC router and both end up reading the same rows.
+
+  app.post('/v1/tokens', async (c) => {
+    const caller = await cliCaller(c, 'tokens.manage')
+    if (isResponse(caller)) return caller
+    let body: { name?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    const name = typeof body.name === 'string' ? body.name : ''
+    try {
+      const made = await mintEngineToken(options.pool, clock, {
+        orgId: caller.orgId,
+        name,
+        actorUserId: caller.userId,
+        actorLabel: caller.label,
+        origin: 'cli',
+      })
+      // The only response in the product that carries a usable credential, and
+      // the only time this one is ever readable. 201 rather than 200 so a
+      // client can tell a mint from a retry that found an existing row, which
+      // this route never does.
+      return c.json(
+        { id: made.id, name: made.name, prefix: made.prefix, token: made.token },
+        201,
+      )
+    } catch (err) {
+      if (err instanceof TokenError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+  })
+
+  app.get('/v1/tokens', async (c) => {
+    const caller = await cliCaller(c, 'tokens.manage')
+    if (isResponse(caller)) return caller
+    const rows = await listEngineTokens(options.pool, caller.orgId)
+    return c.json({
+      tokens: rows.map((t) => ({
+        id: t.id,
+        name: t.name,
+        prefix: t.prefix,
+        createdAt: t.createdAt.toISOString(),
+        lastUsedAt: t.lastUsedAt ? t.lastUsedAt.toISOString() : null,
+        revokedAt: t.revokedAt ? t.revokedAt.toISOString() : null,
+      })),
+    })
+  })
+
+  app.delete('/v1/tokens/:token', async (c) => {
+    const caller = await cliCaller(c, 'tokens.manage')
+    if (isResponse(caller)) return caller
+    try {
+      const result = await revokeEngineToken(options.pool, clock, {
+        orgId: caller.orgId,
+        idOrPrefix: c.req.param('token'),
+        actorUserId: caller.userId,
+        actorLabel: caller.label,
+        origin: 'cli',
+      })
+      if (!result.found) {
+        // The same answer whether it belongs to another organization or does
+        // not exist, which is what every other lookup on this server does.
+        return c.json({ error: 'No engine token here has that id or prefix.' }, 404)
+      }
+      return c.json({
+        revoked: true,
+        name: result.name,
+        alreadyRevoked: result.alreadyRevoked,
+      })
+    } catch (err) {
+      if (err instanceof TokenError) return c.json({ error: err.message }, 400)
       throw err
     }
   })

@@ -180,6 +180,13 @@ var commandExamples = map[string]string{
 	"af test": "" +
 		"af test\n" +
 		"af test --only checkout --headed",
+	"af token":      "af token list",
+	"af token list": "af token list",
+	"af token create": "" +
+		"# Shown once, at creation. There is no command that prints it again.\n" +
+		"af token create ci\n" +
+		"af token create ci --control-plane https://app.antifailure.dev",
+	"af token rm": "af token rm afe_1a2b3c4d",
 	"af up": "" +
 		"af up\n" +
 		"af up --rebuild --hud",

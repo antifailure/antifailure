@@ -63,7 +63,7 @@ func TestSynth_TheModelCallIsNotSubjectToTheEgressPolicy(t *testing.T) {
 		Default: schema.ModeBlock,
 		Rules:   []schema.EgressRule{{Host: "api.stripe.com", Mode: schema.ModeSynth}},
 	})
-	s.proxy.synth = &synthConfig{
+	s.synth = &synthConfig{
 		provider: "anthropic", apiKey: "sk-test", model: "claude-sonnet-5",
 		baseURL: model.URL,
 	}
@@ -74,7 +74,7 @@ func TestSynth_TheModelCallIsNotSubjectToTheEgressPolicy(t *testing.T) {
 
 	var out bytes.Buffer
 	var rec record
-	require.True(t, s.proxy.serveSynth(&out, req, "api.stripe.com", &rec))
+	require.True(t, s.serveSynth(&out, req, "api.stripe.com", &rec))
 
 	require.True(t, *reached,
 		"the sidecar's own model call was stopped by the policy it enforces on "+
@@ -97,7 +97,7 @@ func TestSynth_NoKeyRefusesWithoutBlamingThePolicy(t *testing.T) {
 		Default: schema.ModeBlock,
 		Rules:   []schema.EgressRule{{Host: "api.stripe.com", Mode: schema.ModeSynth}},
 	})
-	require.Nil(t, s.proxy.synth, "no key was configured, so there is nothing to call with")
+	require.Nil(t, s.synth, "no key was configured, so there is nothing to call with")
 
 	req, err := http.NewRequest(http.MethodPost,
 		"https://api.stripe.com/v1/customers", strings.NewReader(`{}`))
@@ -105,7 +105,7 @@ func TestSynth_NoKeyRefusesWithoutBlamingThePolicy(t *testing.T) {
 
 	var out bytes.Buffer
 	var rec record
-	require.True(t, s.proxy.serveSynth(&out, req, "api.stripe.com", &rec))
+	require.True(t, s.serveSynth(&out, req, "api.stripe.com", &rec))
 
 	require.Equal(t, http.StatusForbidden, rec.Status)
 	require.False(t, rec.Allowed)
@@ -125,7 +125,7 @@ func TestSynth_AnUnreachableModelSaysSo(t *testing.T) {
 		Default: schema.ModeBlock,
 		Rules:   []schema.EgressRule{{Host: "api.stripe.com", Mode: schema.ModeSynth}},
 	})
-	s.proxy.synth = &synthConfig{
+	s.synth = &synthConfig{
 		provider: "anthropic", apiKey: "sk-test", model: "claude-sonnet-5",
 		// Nothing listens here, and port 1 is never a real service.
 		baseURL: "http://127.0.0.1:1",
@@ -137,7 +137,7 @@ func TestSynth_AnUnreachableModelSaysSo(t *testing.T) {
 
 	var out bytes.Buffer
 	var rec record
-	require.True(t, s.proxy.serveSynth(&out, req, "api.stripe.com", &rec))
+	require.True(t, s.serveSynth(&out, req, "api.stripe.com", &rec))
 
 	require.Equal(t, http.StatusBadGateway, rec.Status)
 	require.Contains(t, out.String(), "could not reach the model")

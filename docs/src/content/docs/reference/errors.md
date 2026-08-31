@@ -256,7 +256,7 @@ The Dockerfile {dockerfile} for {service} is outside the build context {context}
 
 No control plane token is configured.
 
-**What to do.** Create an engine token in the control plane, then set AF_CONTROL_PLANE_TOKEN. Everything except this command works without one.
+**What to do.** Run 'af login' then 'af token create ci', and set AF_CONTROL_PLANE_TOKEN to what it prints. Everything except this command works without one.
 
 | | |
 | --- | --- |

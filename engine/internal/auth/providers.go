@@ -38,6 +38,7 @@ var GrantableScopes = []string{
 	"events.write",
 	"providers.view",
 	"providers.write",
+	"tokens.manage",
 }
 
 // ProviderKey is what a screen or a terminal may know about a stored key.

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -129,14 +130,20 @@ engine tokens.`),
 // the working tree, so there is nothing for a commit or a support bundle to
 // pick up.
 func controlPlaneClient(e *Env, baseURL string) (*controlplane.Client, error) {
-	if baseURL == "" {
-		baseURL = e.Getenv("AF_CONTROL_PLANE_URL")
-	}
+	// Resolved through the same function af login and af token resolve it
+	// through, flag then environment then the hosted instance, so that the
+	// origin the credential is looked up under is the origin it was stored
+	// under. This used to read the environment alone and then consult the
+	// store only when that produced something, so somebody who had run af
+	// login and set nothing else was told AF-CPL-001, no control plane token
+	// is configured, while holding one: the default was filled in afterwards,
+	// deeper down, where the lookup could no longer see it.
+	baseURL = controlPlaneFor(e, baseURL)
 	token := controlplane.TokenFromEnvironment(func(k string) (string, bool) {
 		v := e.Getenv(k)
 		return v, v != ""
 	})
-	if token == "" && baseURL != "" {
+	if token == "" {
 		// A credential stored by af login. Expiry is checked here so that the
 		// failure is "your session expired, run af login" rather than a 401
 		// from a server the user then goes and investigates.
@@ -168,14 +175,14 @@ type environment struct {
 	Running   int
 }
 
-func listEnvironments(cmd *cobra.Command, e *Env) ([]environment, error) {
+func listEnvironments(ctx context.Context, e *Env) ([]environment, error) {
 	rt, err := inventoryRuntime(e)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rt.Close() }()
 
-	items, err := rt.Inventory(cmd.Context())
+	items, err := rt.Inventory(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +229,7 @@ func newEnvListCommand(e *Env) *cobra.Command {
 		Short: "List the environments this machine is holding",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			envs, err := listEnvironments(cmd, e)
+			envs, err := listEnvironments(cmd.Context(), e)
 			if err != nil {
 				return err
 			}
@@ -278,7 +285,7 @@ before doing it, because removing somebody's environment while they are looking
 at it is the kind of help nobody wants.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			envs, err := listEnvironments(cmd, e)
+			envs, err := listEnvironments(cmd.Context(), e)
 			if err != nil {
 				return err
 			}
