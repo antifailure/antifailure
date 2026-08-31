@@ -432,6 +432,17 @@ jobs:
           done
           exit $missing
 
+      - name: The built documentation carries its head and resolves its entity graph
+        # www's check:seo above reads www/out and never opens docs/dist, so the
+        # documentation, which is 76 of the site's roughly 90 pages, had no
+        # check with an opinion about what it renders. Six head entries went
+        # missing for every one of those pages when #47 ported only the
+        # marketing half, and every stage stayed green because no stage was
+        # looking. This also resolves the three @id values the docs JSON-LD
+        # references against the constants www/lib/jsonld.tsx declares, so the
+        # two halves of one entity graph fail loudly when they drift apart.
+        run: go run ./tools/docscheck .
+
       - name: Spelling
         # cspell owns spelling, with the project dictionary in
         # tools/docs/dictionary.txt. Adding a word is a one line diff a

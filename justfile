@@ -72,6 +72,7 @@ gate: _reports
     run "spelling"                       just spell
     run "prose style"                    just vale
     run "every link resolves"            just links
+    run "the built docs carry their head" just docscheck
     run "prose stays readable"           just readability
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
@@ -549,6 +550,18 @@ forbidden:
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
+
+# The built documentation carries its head, and its entity graph resolves.
+#
+# check-seo.mjs reads www/out and never opens docs/dist, so the documentation,
+# which is 76 of the site's roughly 90 pages, had no gate with an opinion about
+# what it renders. Six head entries went missing for every one of those pages
+# and every stage stayed green, because no stage was looking.
+#
+# Needs the docs built. It fails rather than skipping when docs/dist is absent,
+# because a gate that is green about nothing is the gap it closes.
+docscheck:
+    go run ./tools/docscheck .
 
 # Every manifest shown in the documentation is one the engine would accept.
 #
