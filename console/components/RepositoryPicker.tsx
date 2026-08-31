@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { query, useApi } from "@/lib/api";
-import { Empty, ErrorState } from "@/components/ui";
+import { Bar, Empty, ErrorState, selectClass } from "@/components/ui";
 import type { ReactNode } from "react";
 
 export interface Repository {
@@ -35,7 +35,9 @@ export function WithRepository({
 
   if (state.status === "loading") {
     return (
-      <div className="h-9 w-[260px] animate-pulse rounded-[5px] bg-[rgba(16,16,16,0.07)]" role="status">
+      <div className="mb-5" role="status">
+        <Bar className="h-3 w-[74px]" />
+        <Bar className="mt-2.5 h-9 w-full max-w-[380px]" />
         <span className="sr-only">Loading repositories</span>
       </div>
     );
@@ -71,7 +73,7 @@ export function WithRepository({
               next.set("repo", e.target.value);
               router.replace(`?${next.toString()}`);
             }}
-            className="mt-1.5 h-9 w-full max-w-[380px] rounded-[5px] border border-rule bg-card px-2.5 text-[13px] text-ink outline-none focus:border-rule-strong"
+            className={`mt-1.5 w-full max-w-[380px] ${selectClass}`}
           >
             {repos.map((r) => (
               <option key={r.id} value={r.full_name}>

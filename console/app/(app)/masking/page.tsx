@@ -2,7 +2,7 @@
 
 import { Suspense } from "react";
 import { WithRepository } from "@/components/RepositoryPicker";
-import { ago, bytes, when } from "@/lib/format";
+import { bytes } from "@/lib/format";
 import { query, useApi } from "@/lib/api";
 import {
   Badge,
@@ -16,6 +16,7 @@ import {
   TableWrap,
   Td,
   Th,
+  When,
 } from "@/components/ui";
 
 interface Rule {
@@ -75,11 +76,11 @@ function Masking({ repository }: { repository: string }) {
                     {rows.map((r) => (
                       <Row key={`${r.table_name}.${r.column_name}`}>
                         <Td mono>{r.table_name}</Td>
-                        <Td mono>{r.column_name}</Td>
-                        <Td>{r.transform}</Td>
-                        <Td mono>{r.link ?? "--"}</Td>
-                        <Td className="max-w-[34ch]">{r.reason ?? "--"}</Td>
-                        <Td>
+                        <Td label="Column" mono>{r.column_name}</Td>
+                        <Td label="Transform">{r.transform}</Td>
+                        <Td label="Link" mono>{r.link ?? "--"}</Td>
+                        <Td label="Reason" className="max-w-[34ch]">{r.reason ?? "--"}</Td>
+                        <Td label="State">
                           <Badge tone={r.confirmed ? "pass" : "warn"}>
                             {r.confirmed ? "confirmed" : "proposed"}
                           </Badge>
@@ -125,17 +126,17 @@ function Masking({ repository }: { repository: string }) {
                       return (
                         <Row key={g.version}>
                           <Td mono>{g.version}</Td>
-                          <Td>
+                          <Td label="Verified">
                             <Badge tone={g.verified ? "pass" : "warn"}>
                               {g.verified ? "verified" : "unverified"}
                             </Badge>
                           </Td>
-                          <Td numeric>{report?.tables ?? "--"}</Td>
-                          <Td numeric>{report?.columns ?? "--"}</Td>
-                          <Td numeric>{report?.masked ?? "--"}</Td>
-                          <Td numeric>{bytes(g.size_bytes)}</Td>
-                          <Td>
-                            <span title={when(g.created_at)}>{ago(g.created_at)}</span>
+                          <Td label="Tables" numeric>{report?.tables ?? "--"}</Td>
+                          <Td label="Columns" numeric>{report?.columns ?? "--"}</Td>
+                          <Td label="Masked" numeric>{report?.masked ?? "--"}</Td>
+                          <Td label="Size" numeric>{bytes(g.size_bytes)}</Td>
+                          <Td label="Built">
+                            <When value={g.created_at} />
                           </Td>
                         </Row>
                       );
@@ -153,7 +154,15 @@ function Masking({ repository }: { repository: string }) {
 
 export default function MaskingPage() {
   return (
-    <Suspense fallback={<Page title="Masking"><TableSkeleton /></Page>}>
+    <Suspense
+      fallback={
+        <Page title="Masking">
+          <Card title="Rules">
+            <TableSkeleton rows={5} cols={5} />
+          </Card>
+        </Page>
+      }
+    >
       <Page
         title="Masking"
         lede="Which columns are transformed on the way out, and what each golden attests it did."

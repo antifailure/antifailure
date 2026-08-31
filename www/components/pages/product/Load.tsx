@@ -69,7 +69,7 @@ function TrafficResult() {
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <MonoLabel className="uppercase tracking-[0.14em]">af load</MonoLabel>
-          <MonoLabel className="text-black/45">source access_log</MonoLabel>
+          <MonoLabel className="text-black/60">source access_log</MonoLabel>
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] tracking-extra-tight text-black/55">
           <span>
@@ -110,7 +110,7 @@ function TrafficResult() {
               <span className="w-[44%] min-w-0 shrink-0 truncate font-mono text-[12px] tracking-extra-tight text-black max-md:w-full">
                 {row.route}
               </span>
-              <span className="w-[14%] shrink-0 text-right font-mono text-[11px] tracking-extra-tight text-black/45 max-md:w-auto max-md:text-left">
+              <span className="w-[14%] shrink-0 text-right font-mono text-[11px] tracking-extra-tight text-black/60 max-md:w-auto max-md:text-left">
                 {row.share}
               </span>
               <span className="w-[20%] shrink-0 text-right font-mono text-[12px] tracking-extra-tight text-black/70 max-md:w-auto">
@@ -119,7 +119,7 @@ function TrafficResult() {
               <span
                 className={cn(
                   "min-w-0 flex-1 text-right font-mono text-[11px] tracking-extra-tight max-md:flex-none",
-                  breach ? "text-red-700" : "text-black/45",
+                  breach ? "text-red-700" : "text-black/60",
                 )}
               >
                 {row.delta === null
@@ -138,7 +138,7 @@ function TrafficResult() {
           {REFUSED.map((route) => (
             <span
               key={route}
-              className="border border-black/[0.08] px-2 py-1 font-mono text-[10px] tracking-extra-tight text-black/45"
+              className="border border-black/[0.08] px-2 py-1 font-mono text-[10px] tracking-extra-tight text-black/60"
             >
               {route}
             </span>
@@ -151,7 +151,7 @@ function TrafficResult() {
 
 export function LoadPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product/load"
         eyebrow="Load"

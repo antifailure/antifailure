@@ -9,6 +9,7 @@ import {
   Badge,
   Button,
   Card,
+  CellLink,
   Empty,
   Loaded,
   Page,
@@ -18,6 +19,7 @@ import {
   TableWrap,
   Td,
   Th,
+  When,
   toneFor,
 } from "@/components/ui";
 
@@ -181,19 +183,23 @@ function Environments() {
                         key={env.id}
                         onClick={() => router.push(`/environments?env=${encodeURIComponent(env.env_id)}`)}
                       >
-                        <Td mono>{env.env_id}</Td>
-                        <Td>{env.repository}</Td>
-                        <Td>
+                        <Td mono>
+                          <CellLink href={`/environments?env=${encodeURIComponent(env.env_id)}`}>
+                            {env.env_id}
+                          </CellLink>
+                        </Td>
+                        <Td label="Repository">{env.repository}</Td>
+                        <Td label="Branch">
                           {env.branch}
                           {env.pull_request ? (
                             <span className="ml-1.5 text-dim">#{env.pull_request}</span>
                           ) : null}
                         </Td>
-                        <Td>
+                        <Td label="State">
                           <Badge tone={toneFor(env.state)}>{env.state.replace("_", " ")}</Badge>
                         </Td>
-                        <Td>
-                          <span title={when(env.created_at)}>{ago(env.created_at)}</span>
+                        <Td label="Created">
+                          <When value={env.created_at} />
                         </Td>
                       </Row>
                     ))}

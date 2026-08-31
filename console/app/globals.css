@@ -21,11 +21,26 @@
   --color-card: #ffffff;
   --color-rule: rgba(16, 16, 16, 0.1);
   --color-rule-strong: rgba(16, 16, 16, 0.22);
-  --color-muted: #6b6b64;
-  --color-dim: #8a8a83;
+  /* Three greys, and every one of them measured against every surface it is
+     used on rather than picked by eye. On the lightest ground here (#f7f7f5)
+     they are 17.7:1, 6.8:1 and 4.6:1, so the tertiary label under a heading is
+     still readable text and not decoration. The previous #8a8a83 was 3.2:1 --
+     it carried the column headings, the field hints and every card's
+     description, which is a lot of the console's prose sitting under the
+     line. */
+  --color-muted: #575752;
+  --color-dim: #70706b;
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  /* One radius vocabulary. A console that mixes 4, 5, 6 and 8 looks like four
+     people built it, which is what happened. Badges and skeleton bars take
+     the small one, every control takes the medium, every surface takes the
+     large. */
+  --radius-sm: 4px;
+  --radius-md: 5px;
+  --radius-lg: 6px;
 
   --leading-dense: 1.125;
   --tracking-tighter: -0.04em;
@@ -88,6 +103,117 @@ body {
   outline: 2px solid var(--color-ink);
   outline-offset: 2px;
   border-radius: 3px;
+}
+
+/*
+ * Density is a desktop decision.
+ *
+ * A 32px row of controls is right in a table somebody reads all day with a
+ * mouse, and it is wrong under a thumb: the target is too small to hit and,
+ * on iOS, any input whose text is under 16px makes Safari zoom the whole page
+ * on focus and leave it zoomed. So the console keeps its density from the
+ * `sm` breakpoint up and hands the phone a 44px control with 16px text. This
+ * is one rule rather than a size prop on every call site, because the call
+ * sites are what drifted in the first place.
+ */
+/*
+ * A table on a phone.
+ *
+ * Every list in here was a table that scrolled sideways inside its box. That
+ * keeps the page from breaking, which is why it was done, but it hides the
+ * two columns a person actually came for: on a 375px screen the environments
+ * list showed the id, the repository and half a branch, and put the state and
+ * the age behind a horizontal scroll nobody discovers. Squeezing six columns
+ * into 375px also wrapped single words onto three lines and left the rows
+ * ragged.
+ *
+ * So below `sm` the same markup becomes a stacked record: one card per row,
+ * every field on its own line with its column heading beside it, read top to
+ * bottom. The heading text comes from `data-label`, which `Td` writes from the
+ * same string the `Th` above it uses, so the two cannot drift. The table stays
+ * a table for a screen reader and for every viewport above this one.
+ */
+@media (max-width: 639px) {
+  .af-table,
+  .af-table tbody,
+  .af-table tr,
+  .af-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .af-table {
+    min-width: 0;
+  }
+
+  .af-table thead {
+    display: none;
+  }
+
+  .af-table tr {
+    border-bottom: 1px solid var(--color-rule);
+    padding: 14px 16px;
+  }
+
+  .af-table tr:last-child {
+    border-bottom: 0;
+  }
+
+  .af-table td {
+    display: grid;
+    grid-template-columns: minmax(0, 10.5ch) minmax(0, 1fr);
+    align-items: baseline;
+    /* start, or a badge stretches to the full width of the value column and
+       reads as a filled bar rather than as a word. */
+    justify-items: start;
+    gap: 14px;
+    max-width: none;
+    border: 0;
+    padding: 4px 0;
+    text-align: left;
+  }
+
+  .af-table td > .af-cell {
+    display: block;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  /* A cell with no heading -- the row's own name -- spans the full width and
+     leads the record, the way the first column leads the row. */
+  .af-table td:not([data-label]) {
+    display: block;
+    padding-bottom: 8px;
+  }
+
+  .af-table td[data-label]::before {
+    content: attr(data-label);
+    color: var(--color-dim);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    line-height: 1.45;
+    text-transform: uppercase;
+  }
+
+  /* The scrolling shell has nothing left to scroll, so it must not paint the
+     edge shadows that say there is. */
+  .scroll-x {
+    background: none;
+    overflow-x: visible;
+  }
+}
+
+@media (max-width: 639px) {
+  :where(input, select, textarea):not([type="checkbox"]):not([type="radio"]) {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  :where(button, a[role="button"], nav a, .control) {
+    min-height: 44px;
+  }
+
 }
 
 @media (prefers-reduced-motion: reduce) {

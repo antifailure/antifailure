@@ -17,7 +17,7 @@ import {
 } from "@/components/icons";
 import { rest, type Session } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
-import { Button, Field, inputClass } from "@/components/ui";
+import { Button, Field, Lede, LinkButton, Standalone, inputClass } from "@/components/ui";
 
 const NAV = [
   { href: "/environments", label: "Environments", Icon: IconEnvironments },
@@ -77,7 +77,7 @@ function EmailSignIn() {
     return (
       <p
         role="status"
-        className="mt-6 rounded-[6px] border border-rule bg-card px-3.5 py-3 text-[13px] leading-6 text-muted"
+        className="mt-6 rounded-lg border border-rule bg-card px-3.5 py-3 text-[13px] leading-6 text-muted"
       >
         Check your mail. If {email} has an account here, a sign-in link is on
         its way and it is good for fifteen minutes.
@@ -89,7 +89,7 @@ function EmailSignIn() {
     <>
       <div className="mt-6 flex items-center gap-3" aria-hidden="true">
         <span className="h-px flex-1 bg-rule" />
-        <span className="text-[11.5px] uppercase tracking-wide text-dim">or</span>
+        <span className="text-[11.5px] uppercase tracking-wide text-muted">or</span>
         <span className="h-px flex-1 bg-rule" />
       </div>
       <form className="mt-5" onSubmit={send}>
@@ -126,25 +126,19 @@ function SignIn({ session }: { session: Session }) {
   // instead of a page with none.
   const methods = session.methods ?? ["github"];
   return (
-    <main className="grid min-h-dvh place-items-center px-5 py-10">
-      <div className="w-full max-w-[400px]">
-        <LogoMark className="h-9 w-9" />
-        <h1 className="mt-7 text-[30px] font-semibold leading-dense tracking-tighter text-ink">
-          Sign in
-        </h1>
-        <p className="mt-3 text-[13.5px] leading-6 text-muted">
-          This control plane is invitation only while it is in development. Sign
-          in with the GitHub account that was invited.
-        </p>
-        <a
-          href="/auth/github"
-          className="mt-6 flex h-11 w-full items-center justify-center gap-2.5 rounded-[6px] bg-ink text-[14px] font-medium text-white transition-colors hover:bg-[#2b2b2b]"
-        >
+    <Standalone title="Sign in" width={400}>
+      <Lede>
+        This control plane is invitation only while it is in development. Sign
+        in with the GitHub account that was invited.
+      </Lede>
+      <div className="mt-6">
+        <LinkButton href="/auth/github" full>
           <GitHubMark />
           Continue with GitHub
-        </a>
-        {methods.includes("email") ? <EmailSignIn /> : null}
-        <p className="mt-6 text-[12.5px] leading-6 text-dim">
+        </LinkButton>
+      </div>
+      {methods.includes("email") ? <EmailSignIn /> : null}
+      <p className="mt-6 text-[12.5px] leading-6 text-muted">
           The engine itself needs none of this. It is open source, it runs on
           your own machine, and the{" "}
           <a
@@ -153,10 +147,9 @@ function SignIn({ session }: { session: Session }) {
           >
             quickstart
           </a>{" "}
-          works without an account.
-        </p>
-      </div>
-    </main>
+        works without an account.
+      </p>
+    </Standalone>
   );
 }
 
@@ -171,27 +164,20 @@ function SignIn({ session }: { session: Session }) {
  */
 function NoOrganization({ session }: { session: Session }) {
   return (
-    <main className="grid min-h-dvh place-items-center px-5 py-10">
-      <div className="w-full max-w-[440px]">
-        <LogoMark className="h-9 w-9" />
-        <h1 className="mt-7 text-[30px] font-semibold leading-dense tracking-tighter text-ink">
-          No organization yet
-        </h1>
-        <p className="mt-3 text-[13.5px] leading-6 text-muted">
-          You are signed in as {session.label}. Your account is not a member of
-          an organization on this control plane, so there is nothing to show you
-          yet. Not an empty dashboard. Nothing.
-        </p>
-        <p className="mt-3 text-[13.5px] leading-6 text-muted">
-          Membership follows a GitHub App installation. Once the app is
-          installed on an organization you belong to, this page becomes that
-          organization.
-        </p>
-        <div className="mt-6">
-          <SignOutButton />
-        </div>
+    <Standalone title="No organization yet" width={440}>
+      <Lede>
+        You are signed in as {session.label}. Your account is not a member of
+        an organization on this control plane, so there is nothing to show you
+        yet. Not an empty dashboard. Nothing.
+      </Lede>
+      <Lede>
+        Membership follows a GitHub App installation. Once the app is installed
+        on an organization you belong to, this page becomes that organization.
+      </Lede>
+      <div className="mt-6">
+        <SignOutButton />
       </div>
-    </main>
+    </Standalone>
   );
 }
 
@@ -231,7 +217,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
               href={href}
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
-              className={`flex h-9 items-center gap-2.5 rounded-[5px] px-2.5 text-[13px] tracking-snug transition-colors ${
+              className={`flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px] tracking-snug transition-colors ${
                 active
                   ? "bg-[rgba(16,16,16,0.06)] font-medium text-ink"
                   : "text-muted hover:bg-[rgba(16,16,16,0.035)] hover:text-ink"
@@ -297,18 +283,12 @@ export function Shell({ children }: { children: ReactNode }) {
   // sends them through an OAuth round trip to land back here.
   if (session.status === "error") {
     return (
-      <main className="grid min-h-dvh place-items-center px-5 py-10">
-        <div className="w-full max-w-[400px]" role="alert">
-          <LogoMark className="h-9 w-9" />
-          <h1 className="mt-7 text-[26px] font-semibold leading-dense tracking-tighter text-ink">
-            The control plane did not answer
-          </h1>
-          <p className="mt-3 text-[13.5px] leading-6 text-muted">{session.error?.message}</p>
-          <div className="mt-6">
-            <Button onClick={session.reload}>Try again</Button>
-          </div>
+      <Standalone title="The control plane did not answer" width={400} alert>
+        <Lede>{session.error?.message}</Lede>
+        <div className="mt-6">
+          <Button onClick={session.reload}>Try again</Button>
         </div>
-      </main>
+      </Standalone>
     );
   }
 
@@ -334,7 +314,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
       {/* Mobile bar */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-rule bg-paper px-4 lg:hidden">
-        <Link href="/environments" className="flex items-center gap-2">
+        <Link href="/environments" className="-ml-2 flex min-h-11 items-center gap-2 rounded-md px-2">
           <LogoMark className="h-[18px] w-[18px]" />
           <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-ink">
             Antifailure
@@ -345,7 +325,7 @@ export function Shell({ children }: { children: ReactNode }) {
           onClick={() => setMenu(true)}
           aria-expanded={menu}
           aria-label="Open the menu"
-          className="grid h-11 w-11 place-items-center rounded-[5px] text-ink"
+          className="grid h-11 w-11 place-items-center rounded-md text-ink hover:bg-[rgba(16,16,16,0.05)]"
         >
           <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" aria-hidden>
             <path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -361,7 +341,7 @@ export function Shell({ children }: { children: ReactNode }) {
             onClick={() => setMenu(false)}
             className="absolute inset-0 bg-[rgba(16,16,16,0.35)]"
           />
-          <div className="absolute inset-y-0 right-0 flex w-[min(300px,86vw)] flex-col border-l border-rule bg-paper px-3 py-4">
+          <div className="absolute inset-y-0 right-0 flex w-[min(300px,86vw)] flex-col overflow-y-auto border-l border-rule bg-paper px-3 py-4">
             <div className="flex items-center justify-between px-2.5">
               <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-ink">
                 Menu
@@ -371,7 +351,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 type="button"
                 onClick={() => setMenu(false)}
                 aria-label="Close the menu"
-                className="grid h-11 w-11 place-items-center rounded-[5px] text-ink"
+                className="grid h-11 w-11 place-items-center rounded-md text-ink hover:bg-[rgba(16,16,16,0.05)]"
               >
                 <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" aria-hidden>
                   <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

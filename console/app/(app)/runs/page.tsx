@@ -2,12 +2,13 @@
 
 import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ago, bytes, when } from "@/lib/format";
+import { bytes, when } from "@/lib/format";
 import { query, useApi } from "@/lib/api";
 import {
   Badge,
   Button,
   Card,
+  CellLink,
   Empty,
   Loaded,
   Page,
@@ -17,6 +18,7 @@ import {
   TableWrap,
   Td,
   Th,
+  When,
   toneFor,
 } from "@/components/ui";
 
@@ -125,13 +127,13 @@ function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
                     {rows.map((v, i) => (
                       <Row key={`${v.workflow}-${i}`}>
                         <Td mono>{v.workflow}</Td>
-                        <Td>{v.persona ?? "--"}</Td>
-                        <Td>
+                        <Td label="Persona">{v.persona ?? "--"}</Td>
+                        <Td label="Verdict">
                           <Badge tone={toneFor(v.value)}>{v.value}</Badge>
                         </Td>
-                        <Td className="max-w-[36ch]">{v.summary ?? "--"}</Td>
-                        <Td numeric>{v.steps ?? "--"}</Td>
-                        <Td numeric>{seconds(v.duration_ms)}</Td>
+                        <Td label="Summary" className="max-w-[36ch]">{v.summary ?? "--"}</Td>
+                        <Td label="Steps" numeric>{v.steps ?? "--"}</Td>
+                        <Td label="Duration" numeric>{seconds(v.duration_ms)}</Td>
                       </Row>
                     ))}
                   </tbody>
@@ -169,13 +171,13 @@ function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
                     {rows.map((a) => (
                       <Row key={a.id}>
                         <Td>{a.kind}</Td>
-                        <Td numeric>{a.step ?? "--"}</Td>
-                        <Td mono>{a.content_type ?? "--"}</Td>
-                        <Td numeric>{bytes(a.size_bytes)}</Td>
-                        <Td mono className="max-w-[18ch] truncate">
+                        <Td label="Step" numeric>{a.step ?? "--"}</Td>
+                        <Td label="Type" mono>{a.content_type ?? "--"}</Td>
+                        <Td label="Size" numeric>{bytes(a.size_bytes)}</Td>
+                        <Td label="Digest" mono className="max-w-[18ch] truncate">
                           {a.sha256 ? a.sha256.slice(0, 12) : "--"}
                         </Td>
-                        <Td>
+                        <Td label="Retained">
                           <Badge tone={a.retained ? "pass" : "neutral"}>
                             {a.retained ? "kept" : "dropped"}
                           </Badge>
@@ -243,13 +245,15 @@ function Runs() {
                       const total = Number(r.verdicts ?? 0);
                       return (
                         <Row key={r.id} onClick={() => router.push(`/runs?run=${r.id}`)}>
-                          <Td>{r.kind}</Td>
-                          <Td>{r.repository}</Td>
-                          <Td mono>{r.env_id}</Td>
                           <Td>
+                            <CellLink href={`/runs?run=${r.id}`}>{r.kind}</CellLink>
+                          </Td>
+                          <Td label="Repository">{r.repository}</Td>
+                          <Td label="Environment" mono>{r.env_id}</Td>
+                          <Td label="State">
                             <Badge tone={toneFor(r.state)}>{r.state}</Badge>
                           </Td>
-                          <Td numeric>
+                          <Td label="Verdicts" numeric>
                             {total === 0 ? (
                               "--"
                             ) : failing > 0 ? (
@@ -260,10 +264,8 @@ function Runs() {
                               <span className="text-pass">{total} passing</span>
                             )}
                           </Td>
-                          <Td>
-                            <span title={when(r.started_at ?? r.created_at)}>
-                              {ago(r.started_at ?? r.created_at)}
-                            </span>
+                          <Td label="Started">
+                            <When value={r.started_at ?? r.created_at} />
                           </Td>
                         </Row>
                       );
@@ -281,7 +283,15 @@ function Runs() {
 
 export default function RunsPage() {
   return (
-    <Suspense fallback={<Page title="Runs"><TableSkeleton /></Page>}>
+    <Suspense
+      fallback={
+        <Page title="Runs">
+          <Card title="Recent runs">
+            <TableSkeleton rows={6} cols={5} />
+          </Card>
+        </Page>
+      }
+    >
       <Runs />
     </Suspense>
   );

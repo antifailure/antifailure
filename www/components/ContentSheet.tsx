@@ -152,7 +152,7 @@ export function ContentSheet({
         ) : null}
         <button
           type="button"
-          className="mt-3 w-full text-center text-[12px] text-black/40"
+          className="mt-3 w-full text-center text-[12px] text-black/55"
           onClick={onClose}
         >
           Close

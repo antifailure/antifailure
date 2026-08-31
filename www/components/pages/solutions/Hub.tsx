@@ -50,7 +50,7 @@ export function SolutionsHubPage() {
         <div className={AFTER_HEADING}>
           <Metrics items={[...ICP]} />
         </div>
-        <p className={`${AFTER_HEADING} text-[14px] tracking-extra-tight text-black/45`}>
+        <p className={`${AFTER_HEADING} text-[14px] tracking-extra-tight text-black/60`}>
           Cloud-native or containerized · customer-hosted agent · history of migration anxiety · production-shaped traffic
         </p>
       </PageSection>

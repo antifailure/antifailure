@@ -8,11 +8,11 @@ import {
   Badge,
   Button,
   Card,
+  CardSkeleton,
   Field,
   Loaded,
   Page,
   Table,
-  TableSkeleton,
   TableWrap,
   Td,
   Th,
@@ -60,8 +60,8 @@ function NoticeBar({ notice }: { notice: Notice }) {
         : "border-[rgba(138,90,0,0.3)] bg-[rgba(138,90,0,0.06)]";
   return (
     <div
-      role="status"
-      className={`mb-5 rounded-[6px] border px-4 py-3 ${tone}`}
+      role={notice.tone === "bad" ? "alert" : "status"}
+      className={`mb-5 rounded-lg border px-4 py-3 ${tone}`}
     >
       <p className="text-[13px] font-medium text-ink">{notice.title}</p>
       <p className="mt-1 text-[12.5px] leading-5 text-muted">{notice.body}</p>
@@ -131,8 +131,12 @@ function ProviderCard({
               </p>
               <div
                 className="mt-2 h-1.5 w-full max-w-[420px] overflow-hidden rounded-full bg-[rgba(16,16,16,0.08)]"
-                role="img"
-                aria-label={`${usd(budget.spentUsd)} of ${usd(budget.capUsd)} spent`}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={Math.max(budget.capUsd, 0)}
+                aria-valuenow={Math.max(budget.spentUsd, 0)}
+                aria-valuetext={`${usd(budget.spentUsd)} of ${usd(budget.capUsd)} spent`}
+                aria-label="Spend against the monthly cap"
               >
                 <div
                   className="h-full rounded-full bg-ink"
@@ -186,7 +190,7 @@ function ProviderCard({
               }}
             >
               <div className="flex flex-wrap items-end gap-3">
-                <div className="min-w-[260px] flex-1">
+                <div className="w-full min-w-0 sm:max-w-[440px] sm:min-w-[260px] sm:flex-1">
                   <Field label={stored ? "Replace the key" : "Store a key"}>
                     <input
                       type="password"
@@ -260,7 +264,7 @@ function ProviderCard({
               }}
             >
               <div className="flex flex-wrap items-end gap-3">
-                <div className="w-[220px]">
+                <div className="w-full sm:w-[220px]">
                   <Field label="Monthly cap, USD" error={capError}>
                     <input
                       className={inputClass}
@@ -307,8 +311,8 @@ function ProviderCard({
                   <Td mono className="max-w-[24ch] truncate">
                     {stored.fingerprint}
                   </Td>
-                  <Td>{when(stored.createdAt)}</Td>
-                  <Td>{stored.rotatedAt ? when(stored.rotatedAt) : "never"}</Td>
+                  <Td label="Added">{when(stored.createdAt)}</Td>
+                  <Td label="Rotated">{stored.rotatedAt ? when(stored.rotatedAt) : "never"}</Td>
                 </tr>
               </tbody>
             </Table>
@@ -331,11 +335,11 @@ function Keys() {
       lede="Your own Anthropic and OpenAI keys, sealed at rest and capped per month. No route in this product returns a stored key, including this page."
     >
       <NoticeBar notice={notice} />
-      <Loaded state={state} skeleton={<TableSkeleton rows={4} cols={3} />}>
+      <Loaded state={state} framed skeleton={<CardSkeleton count={2} />}>
         {(data) => (
           <div className="space-y-6">
             {!data.sealing ? (
-              <div className="rounded-[6px] border border-[rgba(138,90,0,0.3)] bg-[rgba(138,90,0,0.06)] px-4 py-3">
+              <div className="rounded-lg border border-[rgba(138,90,0,0.3)] bg-[rgba(138,90,0,0.06)] px-4 py-3">
                 <p className="text-[13px] font-medium text-ink">
                   This installation cannot store a key
                 </p>

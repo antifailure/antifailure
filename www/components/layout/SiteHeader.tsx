@@ -282,7 +282,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                       <ul className="flex shrink-0 gap-x-16">
                         {sections.map((section) => (
                           <li key={section.title} className="w-[240px]">
-                            <span className="mb-6 block text-[11px] font-medium uppercase leading-none tracking-[0.1em] text-black/40">
+                            <span className="mb-6 block text-[11px] font-medium uppercase leading-none tracking-[0.1em] text-black/55">
                               {section.title}
                             </span>
                             <ul className="flex flex-col gap-y-6">
@@ -292,7 +292,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                                     <span className="block text-[16px] font-medium leading-none tracking-tight text-black transition-colors duration-200 group-hover:text-black/55">
                                       {item.title}
                                     </span>
-                                    <span className="mt-1.5 block text-[13.5px] leading-snug tracking-tight text-black/45">
+                                    <span className="mt-1.5 block text-[13.5px] leading-snug tracking-tight text-black/60">
                                       {item.description}
                                     </span>
                                   </HeaderLink>
@@ -316,7 +316,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                                   <span className="block text-[16px] font-medium leading-snug tracking-tight text-black">
                                     {card.title}
                                   </span>
-                                  <span className="mt-1.5 block text-[13.5px] leading-5 tracking-tight text-black/45">
+                                  <span className="mt-1.5 block text-[13.5px] leading-5 tracking-tight text-black/60">
                                     {card.description}
                                   </span>
                                 </span>
