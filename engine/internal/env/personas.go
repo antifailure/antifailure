@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/antifailure/antifailure/engine/internal/personas"
@@ -60,6 +61,16 @@ func (o *Orchestrator) provisionPersonas(
 
 	adapter, closeAdapter, err := o.personaAdapter(ctx, s)
 	if err != nil {
+		// Nowhere to write an account, and nothing that wanted one. Every
+		// persona here signs in with `none`, which means the runner goes
+		// straight to the workflow's start path and authenticates nothing, so
+		// the missing table is a fact about the application rather than a
+		// problem with it. Refusing here is what stopped examples/go-api, a
+		// JSON API with no sign in, from ever running its one workflow.
+		if errors.Is(err, personas.ErrNoUsersTable) && !personas.AnyNeedsAccount(list) {
+			o.progress("no persona signs in, so no accounts were created")
+			return nil, nil
+		}
 		return nil, err
 	}
 	defer closeAdapter()
@@ -181,8 +192,8 @@ func (o *Orchestrator) personaScheme(
 		}
 		if !found {
 			return personas.Scheme{}, fmt.Errorf(
-				"the direct adapter is selected and no users table could be found; " +
-					"describe it with auth.table")
+				"the direct adapter is selected and %w; describe it with auth.table",
+				personas.ErrNoUsersTable)
 		}
 		return withExtraSessions(scheme, auth), nil
 	}
@@ -202,8 +213,9 @@ func (o *Orchestrator) personaScheme(
 	}
 	if !found {
 		return personas.Scheme{}, fmt.Errorf(
-			"no users table could be found, so there is nowhere to create a persona; " +
-				"describe the table with auth.table, or use auth.adapter: seed")
+			"%w, so there is nowhere to create a persona; "+
+				"describe the table with auth.table, or use auth.adapter: seed",
+			personas.ErrNoUsersTable)
 	}
 	o.progress("personas will be created in " + scheme.Users.Name)
 	return withExtraSessions(scheme, auth), nil

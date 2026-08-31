@@ -38,6 +38,7 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -257,6 +258,35 @@ func (p PasswordPolicy) Validate(password string) error {
 		}
 	}
 	return nil
+}
+
+// ErrNoUsersTable reports that nothing in the branch looks like a table
+// accounts could be written to.
+//
+// A sentinel rather than a string, because whether it is fatal depends on the
+// manifest rather than on the database. A persona whose login is `none` never
+// signs in: the runner goes straight to the workflow's start path and no
+// account is ever authenticated. Demanding somewhere to write one is then a
+// requirement the application does not have, and examples/go-api is exactly
+// that shape, a JSON API with two tables named customers and orders and no
+// sign in anywhere. Every run of it stopped here, so its one workflow had
+// never executed.
+var ErrNoUsersTable = errors.New("no users table could be found")
+
+// NeedsAccount reports whether a persona has to exist before an agent can use
+// it.
+func NeedsAccount(p schema.Persona) bool {
+	return p.Login != schema.LoginNone
+}
+
+// AnyNeedsAccount reports whether provisioning has anything to create.
+func AnyNeedsAccount(list []schema.Persona) bool {
+	for _, p := range list {
+		if NeedsAccount(p) {
+			return true
+		}
+	}
+	return false
 }
 
 // Result is what a provisioning run produced.
