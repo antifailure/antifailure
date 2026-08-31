@@ -41,6 +41,12 @@ import (
 // sentence shown in a schema and in a report, and improving the wording in one
 // place should improve it in the other rather than let them drift. The failure
 // message says which file to change.
+//
+// When to delete this file rather than argue with it: if that coupling ever
+// blocks an edit somebody actually wanted to make, the count in constcheck is
+// doing the load bearing work and this can go. Not before. "constcheck landed"
+// is not the trigger, because the two cover different holes; "the wording had
+// to stay wrong to keep a test green" is.
 func TestSchemaDescribesEveryPlanChange(t *testing.T) {
 	t.Parallel()
 
