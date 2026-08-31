@@ -197,8 +197,27 @@ for (const file of pages) {
     // no twin, because nothing about it looks wrong.
     const pageH1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
     const twinH1 = readFileSync(twin, "utf8").match(/^# (.+)$/m)?.[1];
+    // The entity set here has to match decode() in markdown-twins.mjs, which is
+    // what wrote the twin. Decoding only &amp; was enough for as long as no h1
+    // held an apostrophe: React serializes one as &#x27; in the HTML while the
+    // twin carries the character itself, so the two sides of a comparison that
+    // are the same string stopped comparing equal the day a title said
+    // "production's". &amp; is decoded last so an escaped entity does not get
+    // unescaped twice.
     const flatten = (v) =>
-      v ? v.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim() : "";
+      v
+        ? v
+            .replace(/<[^>]*>/g, "")
+            .replace(/&nbsp;/g, " ")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d))
+            .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+            .replace(/&amp;/g, "&")
+            .replace(/\s+/g, " ")
+            .trim()
+        : "";
     if (pageH1 && flatten(pageH1) !== flatten(twinH1)) {
       missing.twinHeading.push(
         `${rel} (page "${flatten(pageH1).slice(0, 40)}" vs twin "${flatten(twinH1).slice(0, 40)}")`,
