@@ -130,10 +130,14 @@ runner/artifacts/
 /licensegen
 /manifestcheck
 /notices
+/npmaudit
 /prosecheck
 /proxysrc
 /readability
+/release
+/reltar
 /schemadoc
+/sbomcheck
 /scanrepo
 /site
 /vulncheck
