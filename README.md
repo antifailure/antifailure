@@ -14,12 +14,9 @@
 
 ---
 
-Staging drifts, seed data lies, and the bug you ship is the one no fixture
-predicted. Antifailure gives every branch its own environment built from the
-shape of production: the real schema and real data volume with every
-identifier masked and the masking proved, your services built and running in a
-sandbox that cannot reach the internet except where you say it can, and inbound
-webhooks simulated so flows actually finish.
+## What it is
+
+Every pull request gets its own environment built from the shape of production: the real schema and real data volume with every identifier masked and the masking proved, your services built and running in a sandbox that cannot reach the internet except where you say it can, and inbound webhooks simulated so flows actually finish.
 
 ```bash
 curl -fsSL https://antifailure.dev/install.sh | sh
@@ -31,66 +28,118 @@ af down          # every resource it created, gone
 
 ## What it does
 
-**Masked data, verified.** Masking is compiled to SQL and executed in
-resumable chunks, deterministic so the same customer maps to the same fake
-customer across every table and every refresh. Then a scanner reads back every
-column of every table looking for anything that still parses as an email, a
-card, a phone number, or a key, and signs an attestation. An unverified golden
-cannot be branched. That is enforced in code, not in a checklist.
+**Masked data, verified.** Masking is compiled to SQL and executed in resumable chunks, deterministic so the same customer maps to the same fake customer across every table and every refresh. Then a scanner reads back every column of every table looking for anything that still parses as an email, a card, a phone number, or a key, and signs an attestation. An unverified golden cannot be branched. That is enforced in code, not in a checklist.
 
-**A network you control.** Every environment gets a sidecar that owns its
-network namespace. Nothing leaves except through it. Each host gets a mode:
-`BLOCK` refuses with a decision you can read, `ALLOW` lets it through with a
-rate limit, `SANDBOX` swaps in test credentials and trips a wire if a live key
-ever appears, `CAPTURE` records the email or SMS into a searchable inbox your
-agents can read, and `MOCK` answers from a stateful offline pack. The Stripe
-pack is complete enough to run checkout, subscribe, renew, and cancel with
-signed webhooks and no network at all.
+**A network you control.** Every environment gets a sidecar that owns its network namespace. Nothing leaves except through it. Each host gets a mode: `BLOCK` refuses with a decision you can read, `ALLOW` lets it through with a rate limit, `SANDBOX` swaps in test credentials and trips a wire if a live key ever appears, `CAPTURE` records the email or SMS into a searchable inbox your agents can read, and `MOCK` answers from a stateful offline pack. The Stripe pack is complete enough to run checkout, subscribe, renew, and cancel with signed webhooks and no network at all.
 
-**Agents, not scripts.** Workflows are written as sentences. The runner drives
-a real browser through the accessibility tree, logs in the way a person does
-(password, magic link from the captured inbox, one-time code, TOTP), and
-returns `pass`, `fail`, `flaky`, `blocked`, or `unverified` with a video, a
-trace, and reproduction steps. A failure caused by the runner is classified as
-such and never counted against your application.
+**Agents, not scripts.** Workflows are written as sentences. The runner drives a real browser through the accessibility tree, logs in the way a person does (password, magic link from the captured inbox, one-time code, TOTP), and returns `pass`, `fail`, `flaky`, `blocked`, or `unverified` with a video, a trace, and reproduction steps. A failure caused by the runner is classified as such and never counted against your application.
 
-**Database review, automatically.** Pending migrations are rehearsed on a
-fresh branch with per-statement timing and the strongest lock held per table.
-`pg_stat_statements` is diffed between main and your branch to catch the N+1
-you just introduced. Query plans are compared to catch the index you stopped
-using.
+**Database review, automatically.** Pending migrations are rehearsed on a fresh branch with per-statement timing and the strongest lock held per table. `pg_stat_statements` is diffed between main and your branch to catch the N+1 you just introduced. Query plans are compared to catch the index you stopped using.
 
-**Nothing outlives its environment.** Every resource is journaled before it is
-created and compensated on teardown, so a crash at any instant is recoverable
-by replay. The leak detector inventories every provider and fails the build if
-anything untracked exists.
+**Nothing outlives its environment.** Every resource is journaled before it is created and compensated on teardown, so a crash at any instant is recoverable by replay. The leak detector inventories every provider and fails the build if anything untracked exists.
+
+## Installation
+
+```bash
+curl -fsSL https://antifailure.dev/install.sh | sh
+```
+
+The installer downloads the release for your platform, checks it against the published checksum, and puts `af` and its runner under `~/.antifailure`. It is POSIX sh rather than bash, so it works in an Alpine container as well as on a laptop.
+
+Check that your machine has what the engine needs:
+
+```bash
+af doctor
+```
+
+Read the [quickstart](/docs/src/content/docs/getting-started/quickstart.md) for a complete walkthrough from an empty machine to a working environment.
+
+## A manifest example
+
+The manifest describes what to build, where the database comes from, what the environment may reach on the network, who the agents log in as, and what they do. It is the whole configuration surface: nothing about an environment is configured anywhere else.
+
+```yaml
+version: 1
+name: next-orders
+
+services:
+  - name: web
+    kind: web
+    path: .
+    port: 3000
+    health_path: /api/health
+    migrate: "psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/0001_init.sql"
+    build:
+      strategy: dockerfile
+      dockerfile: Dockerfile
+    env:
+      - name: PORT
+        value: "3000"
+      - name: NODE_ENV
+        value: "production"
+
+database:
+  provider: docker
+  version: 17
+  masking_rules: masking.yaml
+  golden:
+    schedule: "0 3 * * *"
+    max_age: 168h
+    retain: 3
+
+egress:
+  default: block
+```
+
+See the [manifest reference](/docs/src/content/docs/reference/manifest.md) for every option.
 
 ## Where it runs
 
-Locally on Docker, in GitHub Actions, or on your own Kubernetes. The database
-comes from Docker, Neon, Supabase, or DBLab thin clones in front of any
-Postgres, including RDS, Cloud SQL, and Azure Database. Providers are an
-interface with a published conformance suite, so adding one is a package, not
-a fork.
+Locally on Docker, in GitHub Actions, or on your own Kubernetes. The database comes from Docker, Neon, Supabase, or DBLab thin clones in front of any Postgres, including RDS, Cloud SQL, and Azure Database. Providers are an interface with a published conformance suite, so adding one is a package, not a fork.
+
+## Self-hosting
+
+Antifailure works without a control plane. `af up` builds an environment on the machine it runs on, and nothing calls home.
+
+The hosted control plane at https://app.antifailure.dev holds organizations, policy, aggregated reports, and billing. It is optional. When you are ready to add it, you can run your own or use the hosted version. The control plane degrades gracefully: environments keep working if the control plane is unreachable, events are buffered and sent when it returns, and teardown still works because it reads the local journal instead.
+
+For self-hosting:
+
+```sh
+docker run --rm \
+  -e AF_MIGRATION_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
+  -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
+  ghcr.io/antifailure/control-plane:v0.1.1 node bootstrap.mjs
+
+docker run \
+  -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
+  -e AF_GITHUB_CLIENT_ID=... \
+  -e AF_GITHUB_CLIENT_SECRET=... \
+  -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
+  -p 8080:8080 ghcr.io/antifailure/control-plane:v0.1.1
+```
+
+On Kubernetes, use the chart in `deploy/helm/antifailure-control-plane`. The Helm chart is developed against kind and runs on any conformant cluster. See [self-hosting documentation](/docs/src/content/docs/self-hosting/) for configuration, operations, upgrades, and runbooks.
 
 ## Status
 
-Pre-1.0 and under construction. [docs/plan/STATUS.md](docs/plan/STATUS.md)
-tracks every component with one of three states: proven (it runs and its tests
-pass in CI), written (the code exists and its fakes pass, but it has not been
-exercised against the real service), and planned. That table is the honest
-answer to "does it do X yet", and it is updated in the same pull request as the
-code. Breaking changes are announced in the changelog.
+Pre-1.0 and under construction. [docs/plan/STATUS.md](docs/plan/STATUS.md) tracks every component with one of three states: proven (it runs and its tests pass in CI), written (the code exists and its fakes pass, but it has not been exercised against the real service), and planned. That table is the honest answer to "does it do X yet", and it is updated in the same pull request as the code. Breaking changes are announced in the changelog.
+
+## Contributing
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to build locally, run the gates, and structure commits.
+
+Before opening a pull request:
+
+1. Run `just gate` locally or the targeted gates for what you changed.
+2. Write a changelog fragment in `.changes/<slug>.md` with the first line being one of `# added`, `# fixed`, `# changed`, or `# security`.
+3. Update `docs/plan/STATUS.md` surgically: touch only the rows your work changes.
+4. Update published docs under `docs/src/content/docs/` if a user-visible behavior changes.
+
+Every commit is signed with `git commit -s` per the Developer Certificate of Origin.
 
 ## License
 
-This repository is MIT licensed, except for the `ee/` directory, which is
-licensed under the Antifailure Enterprise License (see
-[ee/LICENSE.md](ee/LICENSE.md)).
+This repository is MIT licensed, except for the `ee/` directory, which is licensed under the Antifailure Enterprise License (see [ee/LICENSE.md](ee/LICENSE.md)).
 
-The `ee/` directory is never compiled into the community binary, images, or
-Helm chart. Those are built from `antifailure/antifailure-foss`, a generated
-mirror of this repository with `ee/` deleted, so the boundary is proved by the
-community build passing green rather than asserted in a comment. A depguard
-rule, the `ee` build tag, and a symbol inspection of the shipped artifacts
-check it three more times.
+The `ee/` directory is never compiled into the community binary, images, or Helm chart. Those are built from `antifailure/antifailure-foss`, a generated mirror of this repository with `ee/` deleted, so the boundary is proved by the community build passing green rather than asserted in a comment.
