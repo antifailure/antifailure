@@ -26,8 +26,35 @@ func write(t *testing.T, root, rel, body string) {
 	}
 }
 
+// ciGates reads a workflow fragment the way main does: as steps of a file.
+func ciGates(t *testing.T, yaml string) map[string]*entry {
+	t.Helper()
+	return scan(workflowBlocks("test.yml", yaml))
+}
+
+// gateOf is the gate behind a key, and a readable failure when it is not
+// there. Reaching into the map directly makes a regression a nil dereference
+// in the test rather than a sentence about what stopped being found.
+func gateOf(t *testing.T, m map[string]*entry, key string) gate {
+	t.Helper()
+	e, ok := m[key]
+	if !ok {
+		t.Fatalf("%q was not found; the set is %v", key, keys(m))
+	}
+	return e.gate
+}
+
+// justGates reads a justfile fragment as recipes.
+func justGates(t *testing.T, just string) map[string]*entry {
+	t.Helper()
+	return scan(recipeBlocks(justRecipes(just)))
+}
+
 func TestFindsTheGatesInAWorkflow(t *testing.T) {
-	got := collect(`
+	got := ciGates(t, `
+jobs:
+  one:
+    steps:
       - name: Errors
         run: go run ./tools/errcheck .
       - name: Test
@@ -38,7 +65,9 @@ func TestFindsTheGatesInAWorkflow(t *testing.T) {
         run: |
           unformatted=$(gofmt -l engine tools)
 `)
-	for _, want := range []string{"tool errcheck", "gotest ./...", "govet ./...", "gofmt"} {
+	for _, want := range []string{
+		"tool errcheck", "gotest ./... in engine", "govet ./... in engine", "gofmt in .",
+	} {
 		if _, ok := got[want]; !ok {
 			t.Errorf("did not find %q in %v", want, keys(got))
 		}
@@ -48,7 +77,10 @@ func TestFindsTheGatesInAWorkflow(t *testing.T) {
 func TestIgnoresShellPlumbing(t *testing.T) {
 	// cd, echo and comments are not gates. Comparing them would make this
 	// noisy enough that somebody deletes it, which is worse than not having it.
-	got := collect(`
+	got := ciGates(t, `
+jobs:
+  one:
+    steps:
       - run: |
           cd engine
           echo "go test is not being run here"
@@ -60,11 +92,11 @@ func TestIgnoresShellPlumbing(t *testing.T) {
 }
 
 func TestATargetIsComparedThroughTheDirectoryItRanIn(t *testing.T) {
-	// CI does `cd engine && go test ./...`; a recipe does `go test ./...` from
-	// a line that already changed directory. Comparing the raw strings would
-	// report drift that is not drift.
-	ci := collect(`run: cd engine && go test ./... -race -timeout 30m`)
-	just := collect("test-engine:\n    cd engine && go test ./... -race -timeout 30m")
+	// CI does `cd engine && go test ./...`; a recipe does the same from a line
+	// that already changed directory. Comparing the raw strings would report
+	// drift that is not drift.
+	ci := ciGates(t, "jobs:\n  one:\n    steps:\n      - run: cd engine && go test ./... -race -timeout 30m\n")
+	just := justGates(t, "test-engine:\n    cd engine && go test ./... -race -timeout 30m\n")
 	for g := range ci {
 		if _, ok := just[g]; !ok {
 			t.Errorf("%q was reported as missing when both sides run it", g)
@@ -72,23 +104,325 @@ func TestATargetIsComparedThroughTheDirectoryItRanIn(t *testing.T) {
 	}
 }
 
+// The change this file exists to prove. Everything from here to
+// TestNoGateRecipeAtAllIsAFailure is about the directory being part of a gate.
+
+func TestTheSameCommandInTwoDirectoriesIsTwoGates(t *testing.T) {
+	// The whole point. `npm test` in web and `npm test` in ee/web are two
+	// different suites over two different trees, and a justfile that runs one
+	// of them covers one of them. Keyed on the command alone, covering web
+	// covered ee/web too, and the enterprise suite could stop running locally
+	// with nothing saying so.
+	ci := ciGates(t, `
+jobs:
+  one:
+    steps:
+      - name: Community
+        run: npm test
+        working-directory: web
+      - name: Enterprise
+        run: npm test
+        working-directory: ee/web
+`)
+	just := justGates(t, `
+gate:
+    just test-web
+
+test-web:
+    npm --prefix web test
+`)
+	reach := reachableFromGate(justRecipes(`
+gate:
+    just test-web
+
+test-web:
+    npm --prefix web test
+`))
+
+	if how, _ := pairedWith(gateOf(t, ci, "npm test in web"), just, reach); how != pairedExactly {
+		t.Errorf("the covered directory was reported as missing")
+	}
+	if how, _ := pairedWith(gateOf(t, ci, "npm test in ee/web"), just, reach); how != notPaired {
+		t.Errorf("the uncovered directory paired against a recipe that runs a different tree")
+	}
+	// And the failure has to say what is wrong, not just that something is.
+	g := gapFor(gateOf(t, ci, "npm test in ee/web"), "npm test in ee/web", just, reach)
+	if !strings.Contains(g.reason, "only in npm test in web") {
+		t.Errorf("the message does not name where the justfile does run it: %q", g.reason)
+	}
+}
+
+func TestNpmRunIsAGateFamilyAndTheDirectoryTellsThemApart(t *testing.T) {
+	// `npm run build` in www, in docs and in console is three gates, and it
+	// used to be none: the npm pattern wanted `test` or `tsc`, so every
+	// `npm run` in every workflow matched nothing at all. That is how
+	// `npm run check:seo` ran on every pull request with nothing in the
+	// justfile running it.
+	got := ciGates(t, `
+jobs:
+  www:
+    steps:
+      - name: Build the marketing site
+        run: npm run build
+        working-directory: www
+      - name: The crawl surfaces the site claims to have
+        run: npm run check:seo
+        working-directory: www
+      - name: Build the documentation site
+        run: npm run build
+        working-directory: docs
+      - name: Build the console
+        run: npm run build
+        working-directory: console
+`)
+	for _, want := range []string{
+		"npm run build in www", "npm run build in docs", "npm run build in console",
+		"npm run check:seo in www",
+	} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("did not find %q in %v", want, keys(got))
+		}
+	}
+	if len(got) != 4 {
+		t.Errorf("three builds in three directories and one check should be four gates, got %v", keys(got))
+	}
+}
+
+func TestNpmTestAndNpmRunTestAreOneGate(t *testing.T) {
+	// `npm test` IS `npm run test`. Two keys for one command would report a
+	// gap the day CI and the justfile happened to spell it differently, which
+	// is drift that is not drift.
+	long := ciGates(t, "jobs:\n  a:\n    steps:\n      - run: npm run test\n        working-directory: web\n")
+	short := justGates(t, "test-web:\n    npm --prefix web test\n")
+	if _, ok := long["npm test in web"]; !ok {
+		t.Fatalf("`npm run test` did not read as the same gate as `npm test`: %v", keys(long))
+	}
+	if _, ok := short["npm test in web"]; !ok {
+		t.Fatalf("`npm --prefix web test` changed shape: %v", keys(short))
+	}
+}
+
+func TestAScriptThatIsNotAGateIsExemptByNameRatherThanByPattern(t *testing.T) {
+	// The rule the pattern must NOT have. `npm run seed` writes fixture rows
+	// for a dogfood run and asserts nothing about the tree, so it does not
+	// belong in `just gate`; a pattern shaped to skip it would also skip the
+	// next `npm run` somebody adds to CI, silently. It is seen, and then
+	// exempt by name with the reason recorded.
+	got := ciGates(t, "jobs:\n  a:\n    steps:\n      - run: npm run seed --workspace @antifailure/db\n        working-directory: web\n")
+	if _, ok := got["npm run seed in web"]; !ok {
+		t.Fatalf("the pattern stopped seeing it, which is the failure mode: %v", keys(got))
+	}
+	reason, ok := exemptFromGate["npm run seed in web"]
+	if !ok {
+		t.Fatal("it is seen and not exempt, so `just gate` is being asked to seed a database")
+	}
+	// The reason has to say what the command is, not that it fails the check.
+	if !strings.Contains(reason, "dogfood") || !strings.Contains(reason, "asserts nothing about the tree") {
+		t.Errorf("the exemption does not say what the command is: %q", reason)
+	}
+}
+
+func TestAStepDirectoryOverridesTheJobDirectory(t *testing.T) {
+	got := ciGates(t, `
+jobs:
+  one:
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - name: Inherits the job
+        run: go vet ./...
+      - name: Names its own
+        run: go vet ./...
+        working-directory: tools
+`)
+	for _, want := range []string{"govet ./... in engine", "govet ./... in tools"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("did not find %q in %v", want, keys(got))
+		}
+	}
+}
+
+func TestADirectoryDoesNotLeakIntoTheNextStep(t *testing.T) {
+	// A step boundary ends the association. Without that the second step here
+	// would read as running in engine, and a gate would be paired against a
+	// directory it never ran in, which is worse than not pairing it at all.
+	got := ciGates(t, `
+jobs:
+  one:
+    steps:
+      - name: In engine
+        run: go vet ./...
+        working-directory: engine
+      - name: At the root
+        run: go vet ./...
+`)
+	if _, ok := got["govet ./... in ."]; !ok {
+		t.Errorf("the second step inherited the first step's directory: %v", keys(got))
+	}
+}
+
+func TestOneDirectoryCoversAWholeRunBlock(t *testing.T) {
+	// Several commands under one `working-directory:`, with the key after the
+	// `run:` it applies to. Reading forward only would give every one of them
+	// the repository root.
+	got := ciGates(t, `
+jobs:
+  one:
+    steps:
+      - name: Several
+        run: |
+          go vet ./...
+          go test ./internal/cli
+        working-directory: engine
+`)
+	for _, want := range []string{"govet ./... in engine", "gotest ./internal/cli in engine"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("did not find %q in %v", want, keys(got))
+		}
+	}
+}
+
+func TestABareCdCarriesAndASubshellDoesNot(t *testing.T) {
+	// `cd engine` on a line of its own moves the shell for good. The same cd
+	// inside `( ... )` moves nothing beyond its own line, and a `(` on a line
+	// of its own opens that scope across several. Both shapes are in ci.yml
+	// and in the justfile, and confusing them puts a gate in the wrong place.
+	got := ciGates(t, `
+jobs:
+  one:
+    steps:
+      - name: Mixed
+        run: |
+          (cd tools && go vet ./...)
+          cd engine
+          go test ./internal/cli
+          (
+            cd docs
+            echo building
+          )
+          go test ./internal/hud
+`)
+	for _, want := range []string{
+		"govet ./... in tools",
+		"gotest ./internal/cli in engine",
+		"gotest ./internal/hud in engine",
+	} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("did not find %q in %v", want, keys(got))
+		}
+	}
+}
+
+func TestAJustRecipeWithoutAShebangRunsEachLineInItsOwnShell(t *testing.T) {
+	// just's own semantics, and getting it wrong is not cosmetic: fuzz-engine
+	// starts both of its lines with `cd engine`, and carrying the first
+	// forward read the second as running in engine/engine.
+	got := justGates(t, `
+fuzz-engine:
+    cd engine && go test ./internal/manifest -run FuzzParse
+    cd engine && go test ./internal/detect -run FuzzAnalyzers
+`)
+	for _, want := range []string{
+		"gotest ./internal/manifest in engine", "gotest ./internal/detect in engine",
+	} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("did not find %q in %v", want, keys(got))
+		}
+	}
+}
+
+func TestAShebangRecipeIsOneShell(t *testing.T) {
+	got := justGates(t, `
+lint:
+    #!/usr/bin/env bash
+    cd engine
+    go vet ./...
+`)
+	if _, ok := got["govet ./... in engine"]; !ok {
+		t.Errorf("a cd in a shebang recipe did not carry to the next line: %v", keys(got))
+	}
+}
+
+func TestADirectoryComputedAtRunTimePairsLooselyAndSaysSo(t *testing.T) {
+	// `just typecheck` finds its tsconfig files in the tree rather than naming
+	// them, so the directory it runs npx in does not exist until the recipe
+	// runs. Refusing to pair that would report drift that is not there;
+	// pretending it names one directory would be a lie. It pairs, and the
+	// passing output says the directory was not compared.
+	ci := ciGates(t, `
+jobs:
+  one:
+    steps:
+      - name: Typecheck
+        run: npx tsc --noEmit
+        working-directory: runner
+`)
+	src := "gate:\n    just typecheck\n\ntypecheck:\n    #!/usr/bin/env bash\n    npx --prefix \"$root\" tsc --noEmit -p \"$cfg\"\n"
+	just := justGates(t, src)
+	reach := reachableFromGate(justRecipes(src))
+	how, where := pairedWith(gateOf(t, ci, "npm tsc in runner"), just, reach)
+	if how != pairedByRuntimeDir {
+		t.Fatalf("expected a loose pair, got %v (justfile has %v)", how, keys(just))
+	}
+	if !strings.Contains(where, "npm tsc in ?") {
+		t.Errorf("the loose pair does not say what it paired against: %q", where)
+	}
+}
+
+func TestAGateInARecipeTheGateNeverCallsIsNotCoverage(t *testing.T) {
+	// The overclaim the old passing sentence made. `coverage-profile` runs the
+	// engine suite and `just gate` does not call it, so a CI gate whose only
+	// counterpart is in there is not reachable from the one command, however
+	// present it looks in the file.
+	ci := ciGates(t, "jobs:\n  one:\n    steps:\n      - run: cd engine && go test ./...\n")
+	src := `
+gate:
+    just errcheck
+
+errcheck:
+    go run ./tools/errcheck .
+
+coverage-profile:
+    cd engine && go test ./... -coverprofile=out
+`
+	just := justGates(t, src)
+	reach := reachableFromGate(justRecipes(src))
+	if how, _ := pairedWith(gateOf(t, ci, "gotest ./... in engine"), just, reach); how != notPaired {
+		t.Fatal("a gate only a recipe outside `just gate` runs was counted as covered")
+	}
+	g := gapFor(gateOf(t, ci, "gotest ./... in engine"), "gotest ./... in engine", just, reach)
+	if !strings.Contains(g.reason, "never calls") || !strings.Contains(g.reason, "coverage-profile") {
+		t.Errorf("the message does not name the recipe holding it: %q", g.reason)
+	}
+}
+
 func TestANewToolInCIIsReportedAsMissing(t *testing.T) {
 	// The failure this exists for: somebody adds a check to the workflow and
 	// the justfile never learns about it, so a green local run quietly stops
 	// meaning what CONTRIBUTING says it means.
-	ci := collect(`run: go run ./tools/newcheck .`)
-	just := collect("errcheck:\n    go run ./tools/errcheck .")
+	ci := ciGates(t, "jobs:\n  one:\n    steps:\n      - run: go run ./tools/newcheck .\n")
+	src := "gate:\n    just errcheck\n\nerrcheck:\n    go run ./tools/errcheck .\n"
+	just := justGates(t, src)
+	reach := reachableFromGate(justRecipes(src))
 	if _, ok := just["tool newcheck"]; ok {
 		t.Fatal("the justfile appears to run a tool it does not")
 	}
 	if _, ok := ci["tool newcheck"]; !ok {
 		t.Fatal("the new tool was not recognised in CI")
 	}
+	if how, _ := pairedWith(gateOf(t, ci, "tool newcheck"), just, reach); how != notPaired {
+		t.Fatal("a tool nothing in the justfile runs was counted as covered")
+	}
+	g := gapFor(gateOf(t, ci, "tool newcheck"), "tool newcheck", just, reach)
+	if !strings.Contains(g.reason, "nothing in the justfile runs this") {
+		t.Errorf("the message does not say the justfile has no counterpart: %q", g.reason)
+	}
 }
 
 func TestARecipeTheGateNeverCallsIsReported(t *testing.T) {
 	// A gate the one command does not run is a gate nobody runs.
-	uncalled := uncalledByGate(`
+	uncalled := uncalled(`
 gate:
     run "errors" just errcheck
 
@@ -103,10 +437,52 @@ scanrepo:
 	}
 }
 
+func TestARecipeReachedThroughAnotherRecipeIsNotReported(t *testing.T) {
+	// `gate` names its dependency in the header rather than calling it, and
+	// `_generated` carries five gates. Reachability that only read `just X`
+	// calls out of the gate body would report the whole chain as uncalled.
+	uncalled := uncalled(`
+gate: prep
+    run "errors" just errcheck
+
+prep: schemas
+
+schemas:
+    go run ./tools/schemadoc .
+
+errcheck:
+    go run ./tools/errcheck .
+`)
+	if len(uncalled) != 0 {
+		t.Fatalf("recipes reached through another recipe were reported: %v", uncalled)
+	}
+}
+
+func TestAPrivateRecipeIsRead(t *testing.T) {
+	// `_generated` is a recipe, `just gate` calls it, and it carries five
+	// gates. A recipe parser anchored on [a-z] would skip it, and those five
+	// would be reported as things CI runs and the justfile does not, which is
+	// a red build for a gate that is running.
+	src := `
+gate:
+    just _generated
+
+_generated:
+    go run ./tools/errgen
+`
+	got := justGates(t, src)
+	if _, ok := got["tool errgen"]; !ok {
+		t.Fatalf("a recipe whose name starts with _ was not read: %v", keys(got))
+	}
+	if !reachableFromGate(justRecipes(src))["_generated"] {
+		t.Error("`just gate` calls it and it was not counted as reachable")
+	}
+}
+
 func TestAConvenienceRecipeIsNotReported(t *testing.T) {
 	// `just fmt` writes files and `just db` starts a container. Neither
 	// belongs in a gate, and reporting them would teach people to ignore this.
-	uncalled := uncalledByGate(`
+	uncalled := uncalled(`
 gate:
     run "errors" just errcheck
 
@@ -125,12 +501,39 @@ db:
 }
 
 func TestNoGateRecipeAtAllIsAFailure(t *testing.T) {
-	uncalled := uncalledByGate("errcheck:\n    go run ./tools/errcheck .\n")
-	if len(uncalled) == 0 {
+	u := uncalled("errcheck:\n    go run ./tools/errcheck .\n")
+	if len(u) == 0 {
 		t.Fatal("a justfile with no gate recipe passed")
 	}
-	if !strings.Contains(uncalled[0], "no `gate` recipe") {
-		t.Errorf("the message does not say what is wrong: %v", uncalled)
+	if !strings.Contains(u[0], "no `gate` recipe") {
+		t.Errorf("the message does not say what is wrong: %v", u)
+	}
+}
+
+// uncalled is uncalledByGate over a justfile's text, which is how every caller
+// of it outside main already thinks about it.
+func uncalled(just string) []string {
+	recipes := justRecipes(just)
+	return uncalledByGate(recipes, reachableFromGate(recipes))
+}
+
+func TestAWorkflowThisStopsReadingIsNotSilent(t *testing.T) {
+	// The failure mode a structured read introduces. Five other files carry
+	// the count, so a sixth going quiet leaves a healthy looking number and no
+	// gates from it at all. A file with `run:` steps that yields none of them
+	// is a parse failure, not an empty workflow.
+	const noJobsKey = "on:\n  pull_request:\nsteps:\n  - run: go run ./tools/errcheck .\n"
+	if !hasRunStep(noJobsKey) {
+		t.Fatal("a workflow with a run: step was not recognised as having one")
+	}
+	if got := workflowBlocks("broken.yml", noJobsKey); len(got) != 0 {
+		t.Fatalf("expected the malformed workflow to yield nothing, got %v", got)
+	}
+
+	// And the shape it does read, so the guard is not simply always true.
+	const real = "on:\n  pull_request:\njobs:\n  a:\n    steps:\n      - run: go run ./tools/errcheck .\n"
+	if got := workflowBlocks("ci.yml", real); len(got) != 1 {
+		t.Fatalf("a well formed workflow yielded %d blocks, want 1", len(got))
 	}
 }
 
@@ -147,36 +550,40 @@ func TestTheRealRepositoryAgrees(t *testing.T) {
 		t.Fatalf("CONTRIBUTING.md promises `just gate` and there is no justfile: %v", err)
 	}
 
-	ciGates := collect(workflows.text())
-	if len(ciGates) < 8 {
-		t.Fatalf("only %d gates found in CI; the patterns have probably stopped matching", len(ciGates))
+	ci := scan(workflows.blocks())
+	if len(ci) < 8 {
+		t.Fatalf("only %d gates found in CI; the patterns have probably stopped matching", len(ci))
 	}
-	justGates := collect(string(just))
-	for g := range ciGates {
-		if _, exempt := exemptFromGate[g]; exempt {
+	recipes := justRecipes(string(just))
+	reach := reachableFromGate(recipes)
+	jg := scan(recipeBlocks(recipes))
+	for key, e := range ci {
+		if _, exempt := exemptFromGate[key]; exempt {
 			continue
 		}
-		if _, ok := justGates[g]; !ok {
-			t.Errorf("CI runs %q and the justfile does not", g)
+		if how, _ := pairedWith(e.gate, jg, reach); how == notPaired {
+			t.Errorf("CI runs %q and `just gate` does not: %s", key,
+				gapFor(e.gate, key, jg, reach).reason)
 		}
 	}
 	// Every exemption must still name something a workflow runs.
 	for g := range exemptFromGate {
-		if _, ok := ciGates[g]; !ok {
+		if _, ok := ci[g]; !ok {
 			t.Errorf("%q is exempt from `just gate` but no pull request workflow runs it, "+
 				"so the exemption is describing a gate that is not there", g)
 		}
 	}
-	if u := uncalledByGate(string(just)); len(u) > 0 {
+	if u := uncalledByGate(recipes, reach); len(u) > 0 {
 		t.Errorf("these recipes are gates that `just gate` never calls: %v", u)
 	}
 }
 
-func keys(m map[string]struct{}) []string {
+func keys(m map[string]*entry) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -300,7 +707,7 @@ func TestAWorkflowThatRunsOnPullRequestsIsRead(t *testing.T) {
 	if len(set.paths) != 2 {
 		t.Fatalf("read %v, want both workflows", set.paths)
 	}
-	gates := collect(set.text())
+	gates := scan(set.blocks())
 	if _, ok := gates["tool vulncheck"]; !ok {
 		t.Errorf("a gate in the second workflow must be seen, got %v", keys(gates))
 	}
@@ -321,7 +728,7 @@ func TestAWorkflowThatDoesNotRunOnPullRequestsIsSkipped(t *testing.T) {
 	if len(set.paths) != 1 || set.paths[0] != "ci.yml" {
 		t.Fatalf("read %v, want only ci.yml", set.paths)
 	}
-	if _, ok := collect(set.text())["tool notagate"]; ok {
+	if _, ok := scan(set.blocks())["tool notagate"]; ok {
 		t.Error("a tag-triggered workflow must not contribute gates; it runs long after the gate had its say")
 	}
 }
