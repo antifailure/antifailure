@@ -92,7 +92,7 @@ arbitrarily.
 
 | Key | Notes |
 | --- | --- |
-| `strategy` | `auto` (default), `dockerfile`, or `buildpack`. |
+| `strategy` | `auto` (default), `dockerfile`, `buildpack`, or `image`. |
 | `dockerfile` | Path, when it is not `./Dockerfile`. |
 | `context` | Build context directory, relative to the repository root. Defaults to the root, so a service can copy from a shared package. |
 | `target` | A stage in a multi stage Dockerfile. |
@@ -125,7 +125,7 @@ exported on the laptop that started it.
 
 | Key | Notes |
 | --- | --- |
-| `provider` | `docker` (default) or `neon`. |
+| `provider` | `docker` (default), `neon`, `supabase`, or `dblab`. |
 | `version` | Postgres major, default 17. |
 | `url_env` | The variable services receive the connection string in. |
 | `source_url_env` | Names the variable holding production's read only URL. |
