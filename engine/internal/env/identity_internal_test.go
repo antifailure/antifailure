@@ -61,11 +61,29 @@ func TestTTLSeconds_TheManifestsSpellingsAndTheOnesThatMeanNoLifetime(t *testing
 		{"not a duration", &schema.Manifest{Runtime: &schema.Runtime{TTL: "soon"}}, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := ttlSeconds(tc.manifest)
+			o := &Orchestrator{opts: Options{Manifest: tc.manifest}}
+			got, ok := o.ttlSeconds()
 			require.Equal(t, tc.ok, ok)
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// The number the control plane fills expires_at from and the label the reaper
+// destroys on are the same duration, read once. Two parses of runtime.ttl
+// would agree until somebody changed one, and the disagreement would be a
+// console saying an environment lives until Friday and a reaper taking it on
+// Thursday.
+func TestTTLSeconds_IsTheSameLifetimeTheReaperEnforces(t *testing.T) {
+	o := &Orchestrator{opts: Options{
+		Manifest: &schema.Manifest{Runtime: &schema.Runtime{TTL: "36h"}},
+	}}
+
+	secs, ok := o.ttlSeconds()
+
+	require.True(t, ok)
+	require.Equal(t, o.ttl().Seconds(), secs)
+	require.Equal(t, float64(36*3600), secs)
 }
 
 func TestStartedField_IsTheInstantTheWorkBeganAndNotWhenTheEventFired(t *testing.T) {

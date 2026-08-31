@@ -31,8 +31,6 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/events"
-	"github.com/antifailure/antifailure/engine/internal/manifest"
-	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // startedAt reports the instant an environment began existing, for the events
@@ -77,36 +75,41 @@ func (o *Orchestrator) identity() []events.Field {
 	if o.opts.PullRequest > 0 {
 		fields = append(fields, events.F("pull_request", o.opts.PullRequest))
 	}
-	if secs, ok := ttlSeconds(o.opts.Manifest); ok {
+	if secs, ok := o.ttlSeconds(); ok {
 		fields = append(fields, events.F("ttl_seconds", secs))
 	}
 	return fields
 }
 
-// ttlSeconds is runtime.ttl as a number the control plane can add to a
-// timestamp.
+// ttlSeconds is the lifetime this orchestrator stamps on its resources, as a
+// number the control plane can add to a timestamp.
 //
-// Seconds rather than the manifest's own spelling, and that is the whole
-// point. "168h" and "7d" are the engine's vocabulary, ParseDuration is the
-// engine's parser, and shipping the string would mean a second parser in
-// TypeScript that has to agree with this one forever. The two have no way to
-// notice when they stop agreeing, which is the same shape as the event type
-// lookup table that mapped nine names the engine cannot emit. A number needs
-// no parser on the other side.
+// It reads Orchestrator.ttl rather than parsing runtime.ttl a second time, and
+// that is the point: the reaper destroys an environment when the expiry
+// LABEL says to, and the console shows the expiry this number produces. Two
+// parses of the same field would agree until somebody changed one of them,
+// and the disagreement would be a console that says an environment lives
+// until Friday and a reaper that took it on Thursday.
 //
-// The control plane adds it to the environment's creation time rather than to
-// the time of the event carrying it, so this stays correct on an event that
-// arrives late or out of order.
-func ttlSeconds(m *schema.Manifest) (float64, bool) {
-	if m == nil || m.Runtime == nil || m.Runtime.TTL == "" {
-		return 0, false
-	}
-	d, err := manifest.ParseDuration(m.Runtime.TTL)
-	if err != nil || d <= 0 {
-		// Unreachable through a loaded manifest, which is validated before it
-		// gets here. Reported as absent rather than as zero, because zero
-		// seconds is an environment that expired the instant it was created
-		// and a reaper that believes it would destroy live work.
+// Seconds rather than the manifest's own spelling, because "168h" and "7d" are
+// the engine's vocabulary and ParseDuration is the engine's parser. Shipping
+// the string would put a second duration parser in TypeScript that has to
+// agree with this one forever, with no way to notice when it stops, which is
+// the same shape as the event type lookup table that mapped nine names the
+// engine cannot emit. A number needs no parser on the other side.
+//
+// Not the absolute expiry the resources carry, deliberately. That is stamped
+// per resource as clock.Now()+ttl inside Runtime.managed, so one environment
+// carries several, which is why the reaper takes the latest within an
+// environment. There is no single absolute value to send. The control plane
+// adds this duration to the instant the environment came up, so the answer is
+// one number per environment and it survives an event arriving out of order.
+func (o *Orchestrator) ttlSeconds() (float64, bool) {
+	d := o.ttl()
+	if d <= 0 {
+		// Zero is reported as absent rather than as zero seconds, because an
+		// environment that expired the instant it was created is a reaper
+		// destroying live work.
 		return 0, false
 	}
 	return d.Seconds(), true
