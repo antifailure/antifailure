@@ -1117,9 +1117,10 @@ func TestUp_SurvivesAPortTakenBetweenTheReservationAndTheBind(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
+	reserved := map[string]int{"web": taken}
 	env, err := r.Up(ctx, provider.EnvSpec{
 		EnvID:       id,
-		PublicPorts: map[string]int{"web": taken},
+		PublicPorts: reserved,
 		Services: []provider.ServiceSpec{{
 			Name: "web", Image: img, Kind: "web", Port: 8080,
 		}},
@@ -1129,6 +1130,11 @@ func TestUp_SurvivesAPortTakenBetweenTheReservationAndTheBind(t *testing.T) {
 	require.NotContains(t, env.URL(), strconv.Itoa(taken),
 		"the environment must have moved off the port something else holds")
 	require.Equal(t, "survived the race", get(t, env.URL()))
+
+	// The reservation is corrected in place, which is how a service created
+	// after this one is told the address that was bound rather than the one
+	// that was asked for.
+	require.Equal(t, portOf(t, env.URL()), reserved["web"])
 }
 
 // TestUp_PublishesInsideTheRangeAFPortRangeStartNames traces the variable from
