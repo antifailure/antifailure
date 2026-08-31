@@ -103,10 +103,17 @@ errors:
   - code: AF-DET-005
     area: DET
     message: "Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}"
-    next_step: "This is a defect in Antifailure. Please report it with the detail above, then write the manifest by hand from the reference or re-run with --answer to override what detection guessed."
+    next_step: "Re-run with --answer to override what detection read, for example --answer service.<name>.port=<port>. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above."
     docs: concepts/detection
     retryable: false
     exit_code: 3
+  - code: AF-DET-006
+    area: DET
+    message: "--answer {id}=... does not name anything in this repository."
+    next_step: "Use one of: {known}"
+    docs: concepts/detection
+    retryable: false
+    exit_code: 2
   - code: AF-DET-010
     area: DET
     message: "The changed files between {base} and {head} could not be read: {detail}"

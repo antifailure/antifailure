@@ -527,13 +527,28 @@ Anything detection is not sure about becomes a question rather than a silent
 guess, because a manifest you have to audit is worth less than one you can
 read.
 
+A service is identified by the directory it is built and run from, not by its
+name, because every source spells the name differently: a Dockerfile and a
+language analyzer use the directory, a compose file uses its own key, a
+Procfile uses the process name, and a package manifest uses the package. One
+application described by several of those is one service, and the name it keeps
+comes from the source that identifies an application best, a package manifest
+ahead of a compose key ahead of a Procfile process ahead of the directory.
+Where one source declares two services in a directory, which is what a compose
+file with a web and an admin container on one build context is, they stay two.
+
+--answer settles a question, and also overrides a value detection read with
+confidence, which is how you separate two services a repository really does
+have on one port. An id naming nothing is refused with the ids that would have
+worked rather than dropped in silence.
+
 ```
 af init [flags]
 ```
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--answer` | - | Answer a question without a prompt, as id=value. Repeatable. |
+| `--answer` | - | Answer a question, or override a detected value, as id=value. Repeatable. |
 | `--force` | `false` | Overwrite an existing manifest instead of merging into it. |
 | `--non-interactive` | `false` | Do not ask questions; accept every default and report what was assumed. |
 

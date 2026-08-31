@@ -109,9 +109,15 @@ func parseDockerfile(body string) dockerfileInfo {
 	for _, raw := range logicalLines(body) {
 		if m := dockerFromRe.FindStringSubmatch(raw); m != nil {
 			info.finalBase = m[1]
+			// The canonical multi-stage build names its builder and leaves the
+			// runtime stage unnamed. Only assigning on a named stage therefore
+			// left finalStage pointing at the builder, and af init wrote
+			// 'target: build' into the manifest, so af up would have built the
+			// stage that compiles the application instead of the one that runs
+			// it. An unnamed FROM has to clear the name, not keep the last one.
+			info.finalStage = m[2]
 			if m[2] != "" {
 				info.stages = append(info.stages, m[2])
-				info.finalStage = m[2]
 			}
 			continue
 		}
