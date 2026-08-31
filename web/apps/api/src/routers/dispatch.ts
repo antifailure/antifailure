@@ -213,8 +213,18 @@ export const createEnvironment = orgProcedure('environments.create')
       workflow: workflowFile,
       /**
        * The lifetime the environment will be created with, in hours, when the
-       * caller knows it. af up reads runtime.ttl from the manifest and sends
-       * it; the console does not have the manifest and omits it.
+       * caller knows it.
+       *
+       * Nothing supplies it today, and the comment here used to claim af up
+       * did. It does not: af up talks to no tRPC route, and the only caller of
+       * this procedure is the console, which dispatches a workflow and has
+       * never read the repository's manifest. So every dispatched run reserves
+       * the plan's whole per-run allowance below. That is the conservative
+       * direction and it is why this is still worth accepting rather than
+       * deleting: the field is the seam a caller that DOES know the lifetime
+       * reserves honestly through, and reserving less for a run that did not
+       * say would let an unstated run slip past a cap that a stated one of the
+       * same size is refused for.
        *
        * Bounded here as well as by the cap, because it is a number from a
        * client and an unbounded one would be arithmetic on infinity in the

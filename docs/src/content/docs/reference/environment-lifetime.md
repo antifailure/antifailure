@@ -89,6 +89,14 @@ Asking for more than the maximum grants the maximum and tells you so, rather
 than refusing. Being given less time than you asked for without being told is
 how you come back to an environment that is gone.
 
+An extension is local to the machine holding the environment. The sweep that
+would have destroyed it runs there and reads the lease there, so the extension
+takes effect. What it does not yet do is tell the control plane: the expiry
+shown for an environment in the console is the one it was created with, and an
+extension does not move it. The environment lives, the console is behind. This
+is a known gap rather than a design decision, and it is recorded in
+`docs/plan/STATUS.md`.
+
 If an environment genuinely needs longer, raise `runtime.max_ttl` in the
 manifest. That is a deliberate, reviewable change to the repository, which is
 the right place for a decision about what this project's environments cost.
