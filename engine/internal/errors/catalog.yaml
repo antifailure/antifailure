@@ -824,7 +824,7 @@ errors:
     planned: true
     area: CP
     message: "The control plane rejected this engine's token."
-    next_step: "Create a new engine token in the control plane and set AF_CONTROL_PLANE_TOKEN to it. The old one was revoked, expired, or belongs to a different control plane."
+    next_step: "Run 'af token create ci' and set AF_CONTROL_PLANE_TOKEN to what it prints. The old one was revoked, expired, or belongs to a different control plane."
     docs: self-hosting/control-plane
     retryable: false
     exit_code: 4
@@ -923,7 +923,7 @@ errors:
   - code: AF-CPL-001
     area: CPL
     message: "No control plane token is configured."
-    next_step: "Create an engine token in the control plane, then set AF_CONTROL_PLANE_TOKEN. Everything except this command works without one."
+    next_step: "Run 'af login' then 'af token create ci', and set AF_CONTROL_PLANE_TOKEN to what it prints. Everything except this command works without one."
     docs: self-hosting/control-plane
     retryable: false
     exit_code: 3

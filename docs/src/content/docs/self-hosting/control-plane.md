@@ -32,8 +32,11 @@ teardown reads the local journal rather than the control plane.
 
 ## Running one
 
-Two steps, and the order is not optional. The first prepares the database; the
-second serves requests.
+Four steps, and the order is not optional. The first two stand the server up.
+The second two give it a tenant and an owner, and skipping them is the mistake
+that makes a fresh control plane look broken: a tenant normally begins when
+somebody installs the GitHub App, so before that every sign-in lands with no
+organization, no page in the console can be reached, and nothing explains why.
 
 ```sh
 # 1. Prepare the database. Applies the schema, creates the application role,
@@ -51,6 +54,55 @@ docker run \
   -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
   -p 8080:8080 ghcr.io/antifailure/control-plane:v0.1.1
 ```
+
+```sh
+# 3. Create the first organization. It creates no account and grants nobody
+#    anything, so it is not a way in on its own.
+node apps/api/src/backup-cli.ts create-org \
+  --url postgres://owner:...@db:5432/antifailure \
+  --org acme --name "Acme" --github-login acme
+
+# 4. Sign in at https://cp.example.com so your account exists, then make
+#    yourself the owner. It writes an audit entry saying a break-glass was used.
+node apps/api/src/backup-cli.ts break-glass \
+  --url postgres://owner:...@db:5432/antifailure \
+  --org acme --github-login you --role owner --reason "first owner"
+```
+
+Both run inside the image, from its working directory, so reach them with
+`docker exec` on the running container or `docker run --rm ... node
+apps/api/src/backup-cli.ts`. Installed on a host they are on the path as
+`af-control-plane-backup`, which is how the [operations
+page](/docs/self-hosting/operations/#nobody-can-sign-in) writes break-glass.
+
+Step 3 prints what it did:
+
+```
+organization  acme (8c785566-21c4-4f62-bf40-526c0d7b4c1d)
+name          Acme
+github        acme
+audit entry   136
+
+The organization exists and has no members, which grants nobody anything.
+Sign in through GitHub so your account exists, then:
+
+  af-control-plane-backup break-glass --url <admin> --org acme \
+    --github-login <your login> --role owner --reason "first owner"
+```
+
+Steps 3 and 4 take the connection string step 1 used, not the one step 2 serves
+with. The application role is subject to the row level policies and can neither
+create an organization nor read across tenants, which is the point of it.
+
+Step 3 is only for the case where no GitHub App is installed yet. Naming
+`--github-login` the account you will later install the App on makes that
+installation adopt this organization instead of creating a second one beside it,
+because the App derives an organization's slug from the account's login.
+
+`--dry-run` on either reports what would change and writes nothing. Both are
+idempotent: running `create-org` again reports the organization that is already
+there and leaves its name and GitHub login exactly as they are, in case an
+installation has adopted it since.
 
 Every variable it reads is in the [configuration
 reference](/docs/reference/control-plane/), including retention and the schema
@@ -121,12 +173,37 @@ that nobody classified.
 
 ## Connecting an engine
 
-An engine token is created in the control plane and read from the environment.
+An engine token is what a CI job and a self-hosted engine present. It belongs to
+the organization rather than to whoever made it, so it keeps working after they
+leave, and it carries no identity: it can send events and read an environment
+back, and it cannot reach a key, a member, or another token.
+
+Mint one from a terminal.
+
+```sh
+af login --control-plane https://cp.example.com --scope tokens.manage
+af token create ci
+```
+
+The scope has to be asked for by name because minting produces a credential, and
+the words appear on the screen where the login is approved. A token from a plain
+`af login` cannot mint one, so a terminal credential is not a credential factory,
+and neither is an engine token: only a person who is an owner or an admin right
+now can mint.
+
+`af token create` prints the token once and the export lines to put it in:
 
 ```sh
 export AF_CONTROL_PLANE_URL=https://cp.example.com
 export AF_CONTROL_PLANE_TOKEN=aft_...
 ```
+
+Only the hash is stored, so nothing can show it again. Losing it means minting
+another and revoking the old one with `af token rm <prefix>`, which takes effect
+on the next request rather than at the end of a cache window. `af token list`
+shows every token with when each was last used, revoked ones included, because
+the question it is usually asked is whether the token that stopped working is
+the one you revoked.
 
 ```
 AF-CPL-001 No control plane token is configured.
