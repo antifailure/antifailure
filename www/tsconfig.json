@@ -1,4 +1,16 @@
 {
+  // Formatted the way `next build` writes it, on purpose.
+  //
+  // Next rewrites this file on every build: it expands the arrays, sets
+  // "jsx" to "react-jsx", and adds the .next/dev/types include. When the
+  // committed file said something else, every www build left a dirty tree,
+  // and three separate agents reverted the same diff by hand in one day.
+  // The fourth would have committed it as their own change. Committing what
+  // the tool writes makes the build a no-op here instead, which is verified:
+  // two consecutive builds now leave the file byte identical.
+  //
+  // Comments do survive the rewrite, which is why this one can be here.
+
   "compilerOptions": {
     "target": "ES2017",
     "lib": [

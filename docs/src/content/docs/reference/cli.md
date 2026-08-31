@@ -45,6 +45,49 @@ treated the same way.
 
 ## Commands
 
+### `af change`
+
+Read the diff and say which checks will exercise what it touched.
+
+What this change touches, and which checks cover it.
+
+Every changed path is classified by a rule that names it, and every check is
+reported as selected or not, together with whether the manifest configures it
+at all. A check that is selected and unavailable is the line worth reading:
+something changed and nothing is going to look at it.
+
+Two things it will not do. It never says a change is safe or risky; it says
+which checks exercise which files, and what it cannot see. And a path no rule
+recognises selects every check rather than none, because the cost of the two
+mistakes is not the same.
+
+In a GitHub Actions job it writes one output per check, so a later step can
+skip work this change does not need.
+
+This is the one command that does not need antifailure.yaml. Without one it
+still says what the diff touches, and reports every check as unavailable
+because nothing is configured to run it.
+
+```
+af change [flags]
+```
+
+```
+# Against the base branch this job names.
+af change
+# Against a ref you choose, or a diff you already have.
+af change --base origin/main
+af change --diff pr.patch
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--base` | - | Ref to measure against, defaulting to this job's base branch. |
+| `--branch` | - | Branch to read the manifest for, defaulting to the checked out one. |
+| `--diff` | - | Read a unified diff from this file instead of asking git. |
+| `--head` | - | Ref to measure, defaulting to HEAD. |
+| `-w`, `--write` | - | Write the report section here as markdown. |
+
 ### `af ci`
 
 Bring an environment up, run everything, write a report, tear it down.
@@ -277,6 +320,45 @@ af explore --emit-workflow checkout.yaml
 | `--only` | - | Explore just these goals, by name. |
 | `--runner` | - | Path to the runner's entry point. |
 | `--seed` | - | Replay with this seed rather than the one the manifest declares. |
+
+### `af fidelity`
+
+What this environment reproduces, component by component, and what it does not.
+
+An inventory of the copy against the thing it is a copy of.
+
+Every line comes from something the engine already knew: the runtime says what
+is running, the database provider says which golden the branch came from and
+whether its attestation still checks out, the branch says how much it holds and
+whether the personas exist in it, and the manifest says which third party hosts
+the policy names and what answers for each.
+
+There is a headline number and it is defined on the page it prints: how many of
+the measured components are production's own thing rather than a substitution,
+a refusal or an absence. What could not be measured is excluded from it and
+named, never counted as either a pass or a failure, because a percentage that
+quietly absorbs an unknown is worth less than no percentage at all.
+
+The per dimension verdict is the part to read. A change to billing cares about
+the third party hosts and not about traffic; a migration cares about the data
+and about neither. One averaged number hides whichever of those is yours.
+
+Set fidelity.require in the manifest to fail this command when a dimension is
+not fully reproduced.
+
+```
+af fidelity [flags]
+```
+
+```
+# An inventory of the copy against the thing it is a copy of.
+af fidelity
+af fidelity -o json
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to inventory, defaulting to the checked out one. |
 
 ### `af golden`
 

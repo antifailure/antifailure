@@ -24,8 +24,10 @@ type Manifest struct {
 	Workflows  []Workflow  `json:"workflows,omitempty" yaml:"workflows,omitempty"`
 	Invariants []Invariant `json:"invariants,omitempty" yaml:"invariants,omitempty"`
 	Insights   *Insights   `json:"insights,omitempty" yaml:"insights,omitempty"`
+	Change     *Change     `json:"change,omitempty" yaml:"change,omitempty"`
 	Oracle     *Oracle     `json:"oracle,omitempty" yaml:"oracle,omitempty"`
 	Explore    *Explore    `json:"explore,omitempty" yaml:"explore,omitempty"`
+	Fidelity   *Fidelity   `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
 	Load       *Load       `json:"load,omitempty" yaml:"load,omitempty"`
 	Policy     *Policy     `json:"policy,omitempty" yaml:"policy,omitempty"`
 	Runtime    *Runtime    `json:"runtime,omitempty" yaml:"runtime,omitempty"`
@@ -475,6 +477,80 @@ type Goal struct {
 	// SlowMs is how long one step may take before it is reported as friction.
 	SlowMs int     `json:"slow_ms,omitempty" yaml:"slow_ms,omitempty"`
 	Budget *Budget `json:"budget,omitempty" yaml:"budget,omitempty"`
+}
+
+// FidelityDimension names one part of the environment the inventory measures.
+//
+// A closed vocabulary rather than free text, because the manifest names these
+// in fidelity.require and a typo there would silently require nothing.
+type FidelityDimension string
+
+const (
+	// FidelityServices is the services the manifest declares, against the
+	// containers that are running.
+	FidelityServices FidelityDimension = "services"
+	// FidelityDatabase is the branch: which golden it came from, whether that
+	// golden was verified, and whether its attestation still checks out.
+	FidelityDatabase FidelityDimension = "database"
+	// FidelityThirdParty is the hosts the egress policy covers, and what
+	// answers for each of them.
+	FidelityThirdParty FidelityDimension = "third_party"
+	// FidelityAuth is whether each persona can be created and signed in as.
+	FidelityAuth FidelityDimension = "auth"
+	// FidelityRuntime is where the environment runs.
+	FidelityRuntime FidelityDimension = "runtime"
+	// FidelityTraffic is where the endpoint mix comes from.
+	FidelityTraffic FidelityDimension = "traffic"
+)
+
+// AllFidelityDimensions returns every dimension, in the order the inventory
+// reports them.
+func AllFidelityDimensions() []FidelityDimension {
+	return []FidelityDimension{
+		FidelityServices, FidelityDatabase, FidelityThirdParty,
+		FidelityAuth, FidelityRuntime, FidelityTraffic,
+	}
+}
+
+// Fidelity configures the component inventory.
+//
+// There is no threshold here on purpose. A single percentage hides the one
+// dimension that matters to a particular change, so what can be required is a
+// dimension, by name, and the requirement is that every component of it was
+// reproduced.
+type Fidelity struct {
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// Require names the dimensions that must be fully reproduced. A dimension
+	// that could not be measured does not satisfy a requirement and does not
+	// break one either; it fails the command with a different code, because
+	// "not measured" counted as either answer is the mistake this whole
+	// feature exists to avoid.
+	Require []FidelityDimension `json:"require,omitempty" yaml:"require,omitempty"`
+}
+
+// Change configures how a pull request's diff is classified.
+//
+// Absent from most manifests, because the built in rules cover the layouts
+// most projects use. Present when a repository puts something somewhere the
+// conventions do not predict, which in a monorepo is normal rather than
+// exotic. It cannot turn a check off: a rule only says what a path IS, and
+// what that implies is decided by the engine.
+type Change struct {
+	Rules []ChangeRule `json:"rules,omitempty" yaml:"rules,omitempty"`
+}
+
+// ChangeRule assigns a surface to the paths a pattern matches.
+type ChangeRule struct {
+	// Path is a glob. A single star does not cross a slash and a double star
+	// does, so "packages/*/src/**" is a legal and useful thing to write.
+	Path string `json:"path" yaml:"path"`
+	// Surface is what the matched paths are. The engine refuses a surface it
+	// does not know rather than treating it as unclassified, because a typo
+	// that silently means "unknown" would look like the rule working.
+	Surface string `json:"surface" yaml:"surface"`
+	// Note replaces the sentence the report prints for this rule, for a
+	// project that wants to say why rather than restate the pattern.
+	Note string `json:"note,omitempty" yaml:"note,omitempty"`
 }
 
 // LoadSource names where the endpoint mix comes from.

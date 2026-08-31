@@ -36,6 +36,25 @@ rm -rf site && mkdir -p site
 # The marketing site at the root.
 cp -R www/out/. site/
 
+# Next emits the not-found route twice, and only one of them is wired.
+#
+# app/not-found.tsx builds to /404.html, which is what a mistyped URL actually
+# serves: responseOverrides below rewrites every 404 to it. The App Router also
+# writes the same render to /_not-found.html with its .txt payload, and nothing
+# routes there, nothing links there, and it is in no sitemap. What shipped was
+# an 84KB second copy of the 404 page answering 200 at an address only a
+# crawler guessing at framework internals would find.
+#
+# Removed here rather than in next.config, because the export has no option for
+# it, and before the merge below so no file-form redirect is generated for a
+# page that is no longer in the tree. Verified rather than assumed, because the
+# risk was that the client router fetches it: with these files gone, /404.html
+# renders and a client-side navigation off it into /product completes, with no
+# request for _not-found and no console error. The only two references to the
+# name anywhere in the build are a segment name inside 404.html's own inline
+# payload and a string constant in the router chunk, neither of which is a URL.
+rm -rf site/_not-found.html site/_not-found.txt site/_not-found
+
 # The documentation under /docs. astro.config.mjs sets base: "/docs", so dist
 # usually already contains docs/. Copy whichever shape it produced rather than
 # assuming one.
@@ -53,8 +72,8 @@ mkdir -p site/schemas && cp schemas/*.json site/schemas/
 #
 # Two things it fixes, both of which were live for as long as the site was.
 #
-# A 404 served Microsoft's page -- their logo, their wording, a Bootstrap CDN
-# stylesheet -- while www/app/not-found.tsx sat in the build at /404.html with
+# A 404 served Microsoft's page, their logo, their wording, a Bootstrap CDN
+# stylesheet, while www/app/not-found.tsx sat in the build at /404.html with
 # nothing pointing at it. A designed page nothing routes to is the same dead
 # capability as a function with no callers, and it looked like our site had
 # been abandoned to a hosting default.
@@ -81,7 +100,42 @@ mkdir -p site/schemas && cp schemas/*.json site/schemas/
 #
 # So the redirects below are appended to whatever that file declares, and the
 # assertions afterwards fail the build if the merge loses something.
-python3 - "$(pwd)/site" <<'MERGE'
+
+# The runtime the managed function starts on, in one place because it is read by
+# two separate python blocks below and a value that lives in five literals is a
+# value somebody will change in four of them. The post-publish assertion reads
+# this same variable, so it cannot end up guarding the version we stopped using.
+#
+# node:22 rather than node:20, measured rather than inferred: a staging
+# environment of af-site deployed on this value and process.version came back
+# v22.23.2. node:20 is what the documents agree on and it is also past upstream
+# end of life since April 2026, so it is not the safer choice it looks like. An
+# apiRuntime the platform does not recognise is a failed deploy rather than a
+# warning, which is why this was measured before it was pinned.
+#
+# One discrepancy, checked rather than waved at, because it would matter if it
+# were enforced. The schema www/public/staticwebapp.config.json names in its own
+# $schema, schemastore's, stops at node:20 and does not know node:22. Nothing in
+# this repository validates against it: the only two JSON Schema gates are
+# manifestcheck, over antifailure manifests, and sbomcheck, over SPDX, and this
+# file is only ever parsed for syntax. schemastore is a community-maintained
+# convenience for editors that lags Microsoft's own runtime table, which lists
+# node:22, and it is not what Azure enforces.
+#
+# It also cannot bite today, because the checked-in file has no platform key at
+# all: this script writes the runtime into site/staticwebapp.config.json, which
+# is generated and gitignored, so no file anybody opens in an editor contains
+# this value. It would bite the moment somebody takes the invitation below and
+# moves apiRuntime into www/public, and that is who this paragraph is for. Point
+# $schema at a version that knows node:22, or drop the pointer; do not lower the
+# runtime to satisfy an editor.
+#
+# The deploy log is the thing to believe either way: it prints
+# "Function Runtime Information ... node version" on every publish, so what
+# actually started is readable rather than assumed.
+api_runtime="node:22"
+
+API_RUNTIME="$api_runtime" python3 - "$(pwd)/site" <<'MERGE'
 import json, os, sys
 
 root = sys.argv[1]
@@ -125,22 +179,22 @@ base["routes"] = generated + base.get("routes", [])
 # both live in the repository's deploy files than when one lives in a deploy
 # file and the other in an asset folder.
 #
-# node:20 rather than node:22, which is also supported: 20 is the version every
-# current Static Web Apps document agrees on, and an apiRuntime the platform
-# does not recognise is a failed deploy rather than a warning.
+# The value comes from api_runtime in this script, above. See the reasoning
+# there, including why it was measured rather than read off a table.
 #
 # If somebody later declares one in www/public/staticwebapp.config.json, which
 # is where a reader would look for it, say so instead of quietly winning. A
 # value that is load-bearing and lives somewhere other than where it is looked
 # for is how the next person spends an afternoon.
+runtime = os.environ["API_RUNTIME"]
 declared = base.get("platform", {}).get("apiRuntime")
-if declared is not None and declared != "node:20":
+if declared is not None and declared != runtime:
     raise SystemExit(
         f"www/public/staticwebapp.config.json sets platform.apiRuntime to {declared!r} and "
-        "tools/site/assemble.sh sets it to 'node:20'. Pick one and delete the other; the "
+        f"tools/site/assemble.sh sets it to {runtime!r}. Pick one and delete the other; the "
         "runtime has to agree with api_location in .github/workflows/deploy.yml."
     )
-base.setdefault("platform", {})["apiRuntime"] = "node:20"
+base.setdefault("platform", {})["apiRuntime"] = runtime
 
 with open(config, "w", encoding="utf-8") as f:
     json.dump(base, f, indent=2)
@@ -156,8 +210,8 @@ python3 -c 'import json,sys; json.load(open("site/staticwebapp.config.json"))' |
 # than assumed, because the failure mode is silent: a config that is present,
 # valid, and missing half of what somebody wrote in it looks exactly like a
 # working one until you read a response header.
-python3 - <<'ASSERT' || exit 1
-import json, sys
+API_RUNTIME="$api_runtime" python3 - <<'ASSERT' || exit 1
+import json, os, sys
 
 with open("www/public/staticwebapp.config.json", encoding="utf-8") as f:
     source = json.load(f)
@@ -186,8 +240,9 @@ if lost:
 # address. A config that is valid JSON and missing any of them looks exactly
 # like a working one.
 missing = []
-if shipped.get("platform", {}).get("apiRuntime") != "node:20":
-    missing.append("platform.apiRuntime is not node:20, so the managed function will not start")
+runtime = os.environ["API_RUNTIME"]
+if shipped.get("platform", {}).get("apiRuntime") != runtime:
+    missing.append(f"platform.apiRuntime is not {runtime}, so the managed function will not start")
 if not any(r.get("route", "").endswith(".html") for r in shipped.get("routes", [])):
     missing.append("no page redirects its .html form to its clean form")
 if shipped.get("responseOverrides", {}).get("404", {}).get("rewrite") != "/404.html":
@@ -202,6 +257,80 @@ print(f"host config: {len(shipped['routes'])} routes, "
       f"{len(shipped.get('mimeTypes', {}))} mime types, "
       f"{len(shipped.get('globalHeaders', {}))} global headers")
 ASSERT
+
+# A page this build produced that nobody can open.
+#
+# The redirects live in one file and the pages whose addresses they claim are
+# built from another, so nothing ever compared the two. Six retired product
+# pages are shadowed that way today, deliberately: components/layout/MovedPage.tsx
+# still answers /product/fidelity and the five beside it, because `output:
+# "export"` has no server to evaluate a next.config redirect and a preview host
+# serves the files without this route table. Correct for those six. For a
+# seventh it would be a page that builds, deploys, passes every check on the
+# site and cannot be reached, and nothing anywhere would say so. That is the
+# same dead capability as a function with no callers, wearing a working page.
+#
+# Read from www/public/staticwebapp.config.json rather than from the merged
+# result, so the file-form redirects generated above are excluded structurally
+# instead of by pattern. Every one of those claims the address of a page it
+# built, which is the entire point of them, and a pattern loose enough to skip
+# them is a pattern loose enough to skip a real one.
+#
+# What separates a deliberate shadow from a broken page is that the page agrees
+# with the host: a MovedPage stub writes location.replace(<target>) naming the
+# same address the 301 names, and declares noindex so the two addresses are not
+# one page twice to a crawler. A real page carries neither, and a stub whose
+# target has drifted from the config's carries the wrong one.
+python3 - <<'SHADOW' || exit 1
+import json, os, sys
+
+with open("www/public/staticwebapp.config.json", encoding="utf-8") as f:
+    declared = json.load(f)["routes"]
+
+
+def built(route):
+    """The file the site would serve at this address, if it built one."""
+    for candidate in (f"site{route}.html", f"site{route}/index.html"):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+problems = []
+shadowed = 0
+for rule in declared:
+    route, target = rule.get("route", ""), rule.get("redirect")
+    # A wildcard cannot be resolved to one page, and a header-only rule serves
+    # the page rather than answering instead of it.
+    if not target or "*" in route:
+        continue
+    page = built(route)
+    if page is None:
+        continue
+    shadowed += 1
+    with open(page, encoding="utf-8") as f:
+        html = f.read()
+    if f'location.replace("{target}")' not in html:
+        problems.append(
+            f"{route} is built as {page}, and this config answers that address "
+            f"with a 301 to {target}, so nobody reaches the page. Either drop "
+            f"the redirect, or make the page a MovedPage stub naming {target}."
+        )
+    elif 'name="robots" content="noindex' not in html:
+        problems.append(
+            f"{page} answers an address that 301s to {target} and is still "
+            f"indexable, so a crawler has one page on two addresses. "
+            f"movedMetadata sets the noindex this needs."
+        )
+
+if problems:
+    print("a redirect claims the address of a page this build produced:")
+    for problem in problems:
+        print(f"  {problem}")
+    sys.exit(1)
+
+print(f"host config: {shadowed} redirects shadow a built page, every one a moved-page stub")
+SHADOW
 
 # Assert the promises, rather than trusting the copies above. Each of these is
 # an address something already shipped points at.

@@ -14,14 +14,19 @@ account, no control plane, and no server to host.
 
 There is a template in the repository at
 [`examples/github-workflow.yml`](https://github.com/antifailure/antifailure/blob/main/examples/github-workflow.yml).
-Copy it to `.github/workflows/antifailure.yml`. The whole of it is one command
+Copy it to `.github/workflows/antifailure.yml`. The whole of it is two commands
 and a step that leaves the report:
 
 ```yaml
 - name: Install Antifailure
   run: curl -fsSL https://antifailure.dev/install.sh | sh
 
+- name: Work out what this change touches
+  id: change
+  run: af change --write report.md
+
 - name: Run the check
+  if: steps.change.outputs.environment == 'true'
   run: af ci --output report.md
 ```
 
@@ -31,7 +36,17 @@ afterwards. Teardown happens whatever the outcome, including on a
 failed job and including on a cancelled one, because an environment that
 outlives its pull request is the leak this product exists to prevent.
 
-One command rather than five is deliberate. A workflow that threads five
+[`af change`](/docs/concepts/change-analysis/) is what keeps the second command
+off a change to a README. It reads the diff, says which checks exercise what it
+touched and which do not, and writes that as the comment when nothing else
+runs. A path it does not recognise selects every check rather than none, so the
+mistake it can make costs a run rather than hiding one.
+
+The workflow checks out with `fetch-depth: 0`, because the default one commit
+deep clone shares no history with the base branch and there is no merge base to
+diff against.
+
+Two commands rather than seven is deliberate. A workflow that threads seven
 commands together is a file every user edits slightly and gets subtly wrong.
 
 ## Turn the integration on

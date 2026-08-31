@@ -16,3 +16,4 @@ docs/src/content/docs/enterprise/policy.md	synth_requires_approval	the organizat
 docs/src/content/docs/concepts/load.md	scenario	a load scenario document, not a manifest. The manifest names it under load.scenarios[].path and the engine parses it with load.ParseScenario.
 docs/src/content/docs/concepts/load.md	ramp_ms	the same scenario document. The window sessions start inside, so fifty of them do not arrive on one millisecond.
 docs/src/content/docs/concepts/load.md	assertions	the same scenario document. What has to hold when the journey is over, judged by the load engine rather than by the manifest.
+docs/src/content/docs/guides/github.md	on	a GitHub Actions workflow, not a manifest. The page documents the trigger list the caller needs for `workflow_dispatch` to reach `af ci`, and `on` is the workflow key GitHub reads it from. `examples/github-workflow.yml` carries the same file whole.

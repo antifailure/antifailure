@@ -1,0 +1,15 @@
+diff --git a/api/handler.ts b/api/handler.ts
+index 1111111..2222222 100644
+--- a/api/handler.ts
++++ b/api/handler.ts
+@@ -8,2 +8,4 @@ export function list() {
+ const a = 1;
++const b = 2;
+ const c = 3;
++const d = 4;
+@@ -40,1 +42,3 @@ export function show() {
+ const e = 5;
++await fetch("https://api.twilio.com/2010-04-01/Messages.json");
++const f = 6;
+@@ -100,0 +104,1 @@ export function destroy() {
++const g = 7;

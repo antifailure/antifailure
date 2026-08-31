@@ -121,11 +121,37 @@ func Parse(body []byte) (Pack, error) {
 
 // Handles reports whether any pack answers for a host.
 func (e *Engine) Handles(host string) bool {
+	_, ok := e.PackFor(host)
+	return ok
+}
+
+// PackFor returns the pack that answers for a host.
+//
+// The first that matches, which is the same one Answer would consult, so a
+// report of which pack covers a host cannot disagree with which pack actually
+// answers it.
+func (e *Engine) PackFor(host string) (Pack, bool) {
 	for _, p := range e.packs {
 		for _, h := range p.Hosts {
 			if hostMatches(host, h) {
-				return true
+				return p, true
 			}
+		}
+	}
+	return Pack{}, false
+}
+
+// Stateful reports whether a pack remembers what was created.
+//
+// The distinction is the one the package header is about: a pack that stores a
+// created object and returns it on the next read is a mock of the provider,
+// and a pack that does not is a list of canned answers. An inventory that
+// called both "mocked" would be describing two different fidelities with one
+// word.
+func (p Pack) Stateful() bool {
+	for _, r := range p.Routes {
+		if r.Store != "" || r.Load != "" || r.List != "" {
+			return true
 		}
 	}
 	return false

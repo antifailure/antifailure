@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -39,7 +40,9 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.load(m)
 	v.policy(m)
 	v.insights(m)
+	v.fidelity(m)
 	v.runtime(m)
+	v.change(m)
 
 	if v.suppressed > 0 {
 		v.problems = append(v.problems, Problem{
@@ -924,6 +927,80 @@ func (v *validator) load(m *schema.Manifest) {
 	}
 }
 
+// changeSurfaces are the surfaces a project may assign by hand.
+//
+// It excludes the ones the engine derives from the manifest itself, a service
+// and the masking rules file, because those come from a declaration that is
+// already in this file and a second way to say them would be a second answer
+// to disagree with. It also excludes "unknown", which is not a classification
+// but the absence of one.
+var changeSurfaces = map[string]bool{
+	"schema": true, "code": true, "asset": true, "build": true,
+	"dependency": true, "config": true, "infrastructure": true,
+	"pipeline": true, "test": true, "docs": true,
+}
+
+// change checks the diff classification rules.
+//
+// The rule worth understanding here is the refusal of a catch all pattern. An
+// unrecognised path selects every check, which is the fail safe the whole
+// analysis rests on; a rule matching every path would classify everything and
+// that fail safe would never fire again. Somebody would write it to quiet the
+// report, and the report would go quiet for the right reason and the wrong
+// one at once.
+func (v *validator) change(m *schema.Manifest) {
+	c := m.Change
+	if c == nil {
+		return
+	}
+	seen := map[string]int{}
+	for i, r := range c.Rules {
+		base := fmt.Sprintf("change.rules[%d]", i)
+		switch {
+		case strings.TrimSpace(r.Path) == "":
+			v.add(base+".path", "A change rule has no path pattern.",
+				"Give it a glob such as packages/*/src/**.")
+		case isCatchAll(r.Path):
+			v.add(base+".path",
+				fmt.Sprintf("The change rule pattern %q matches every path.", r.Path),
+				"An unrecognised path is what makes the analysis select every check. A rule that claims everything removes that, so name the directories you mean instead.")
+		default:
+			for _, seg := range strings.Split(r.Path, "/") {
+				if seg == "**" {
+					continue
+				}
+				if _, err := path.Match(seg, "x"); err != nil {
+					v.add(base+".path",
+						fmt.Sprintf("The change rule pattern %q is not a valid glob: %v.", r.Path, err),
+						"A single star does not cross a slash and a double star does.")
+					break
+				}
+			}
+		}
+		if prev, dup := seen[r.Path]; dup {
+			v.add(base+".path",
+				fmt.Sprintf("The change rule pattern %q is already declared at change.rules[%d].", r.Path, prev),
+				"The longest match wins and ties are undecidable, so remove one.")
+		} else if r.Path != "" {
+			seen[r.Path] = i
+		}
+		if !changeSurfaces[r.Surface] {
+			v.add(base+".surface",
+				fmt.Sprintf("The surface %q is not one this engine knows.", r.Surface),
+				"Use one of: asset, build, code, config, dependency, docs, infrastructure, pipeline, schema, test.")
+		}
+	}
+}
+
+// isCatchAll reports whether a pattern matches every path there is.
+func isCatchAll(p string) bool {
+	switch strings.TrimSpace(p) {
+	case "*", "**", "**/*", "*/**", "**/**", "./**", "/**":
+		return true
+	}
+	return false
+}
+
 // policy checks the release gate.
 //
 // A level nobody recognises is the failure worth catching here. Falling back
@@ -1007,6 +1084,58 @@ func (v *validator) insights(m *schema.Manifest) {
 			fmt.Sprintf("The revision %q starts with a hyphen, which git would read as an option.", r.Against),
 			"Use merge-base, previous-commit, or a single revision such as a tag name.")
 	}
+}
+
+// fidelity checks what fidelity.require names.
+//
+// The dimension names are checked here and not only in the JSON Schema,
+// because the engine does not run the schema over a manifest it parses: the
+// schema is what an editor and the documentation gate read. A dimension
+// misspelled here would decode as a string nothing matches, and the
+// requirement would then be satisfied by nothing and enforced against nothing,
+// which is the exact shape of a gate everybody believes is running.
+func (v *validator) fidelity(m *schema.Manifest) {
+	f := m.Fidelity
+	if f == nil {
+		return
+	}
+	if len(f.Require) > 0 && f.Enabled != nil && !*f.Enabled {
+		// A requirement nothing evaluates is worse than no requirement: it
+		// reads in review as a gate that is enforced.
+		v.add("fidelity.require",
+			"The inventory is disabled and dimensions are still required.",
+			"Set fidelity.enabled to true, or remove fidelity.require. A requirement nothing measures is not a requirement.")
+	}
+	known := map[schema.FidelityDimension]bool{}
+	for _, d := range schema.AllFidelityDimensions() {
+		known[d] = true
+	}
+	seen := map[schema.FidelityDimension]bool{}
+	for _, d := range f.Require {
+		if !known[d] {
+			v.add("fidelity.require",
+				fmt.Sprintf("There is no fidelity dimension called %q.", d),
+				"The dimensions are "+strings.Join(dimensionNames(), ", ")+".")
+			continue
+		}
+		if seen[d] {
+			v.add("fidelity.require",
+				fmt.Sprintf("The dimension %q is required twice.", d),
+				"Remove the duplicate. Requiring a dimension twice is the same as requiring it once.")
+			continue
+		}
+		seen[d] = true
+	}
+}
+
+// dimensionNames renders the closed vocabulary for a hint.
+func dimensionNames() []string {
+	all := schema.AllFidelityDimensions()
+	out := make([]string, len(all))
+	for i, d := range all {
+		out[i] = string(d)
+	}
+	return out
 }
 
 func (v *validator) runtime(m *schema.Manifest) {

@@ -11,8 +11,17 @@
 //
 // So this compares the two. It is deliberately not a full YAML or justfile
 // parser: it looks for the commands that constitute a gate, on both sides, and
-// reports anything CI runs that the justfile does not. Being approximate is
+// reports anything CI runs that `just gate` does not. Being approximate is
 // fine; being silent is not.
+//
+// A gate is a command AND the directory it runs in. Keyed on the command
+// alone, `go test ./...` in engine and the same in tools are one gate, and
+// covering either covered both; so are `npm test` in web and in ee/web, and
+// `npm run build` in www, docs and console. The directory is in neither
+// command: CI carries it in `working-directory:` or a `cd` inside a `run:`
+// block, and the justfile in `cd`, `--prefix` or `-C`. Reading it means
+// reading each side in blocks rather than in lines, which is what blocks.go
+// and scan.go do.
 package main
 
 import (
@@ -36,6 +45,17 @@ import (
 // reporting drift that does not exist and gets deleted for being noisy.
 const cmd = "(?:^|[\\s;&|(])"
 
+// `npm run <script>` is a gate family, every script of it, with no rule shaped
+// around the one exception. Without this pattern `npm run build` in www, in
+// docs and in console matched nothing at all, which is worse than matching
+// coarsely: it is not one gate seen three times, it is three gates seen never.
+// It is also how `npm run check:seo` sat in ci.yml on every pull request, with
+// 32 assertions about the shipped marketing site, and nothing in the justfile
+// running it. A script that should not be in `just gate` is exempt by name
+// with its reason, the same as every other exemption here, because the next
+// `npm run` somebody adds to CI must be reported rather than skipped by a rule
+// written for `seed`.
+//
 // The npm class carries `"` and `$` because a quoted span is replaced with `""`
 // rather than dropped, and an argument can be a shell variable. Without them
 // `npx --prefix "$root" tsc` reads as no gate at all, and `just typecheck`
@@ -46,6 +66,7 @@ var gatePatterns = []*regexp.Regexp{
 	regexp.MustCompile(cmd + `go run \./tools/(\w+)`),
 	regexp.MustCompile(cmd + `go (test|vet|build) ([^\s|;&]+)`),
 	regexp.MustCompile(cmd + `(npm|npx) [\w\s./"$-]*?(test|tsc)\b`),
+	regexp.MustCompile(cmd + `(npm|npx) [\w\s./"$-]*?run ([\w:.-]+)`),
 	regexp.MustCompile(cmd + `gofmt -l`),
 	regexp.MustCompile(cmd + `node --test`),
 }
@@ -55,16 +76,38 @@ var gatePatterns = []*regexp.Regexp{
 var quoted = regexp.MustCompile(`"[^"]*"|'[^']*'`)
 
 // gate is one thing that must happen on both sides.
+//
+// dir is part of the identity because the directory is what tells two
+// otherwise identical gates apart, and it is in neither command: CI carries it
+// in `working-directory:` and the justfile in `cd` or `--prefix`. Without it
+// `go test ./...` in engine and `go test ./...` in tools are one gate, and
+// covering either covers both.
+//
+// The exception is `go run ./tools/X`, which carries no directory. Those tools
+// take the tree to scan as an argument, so `cd engine && go run ../tools/scanrepo ..`
+// and `go run ./tools/scanrepo .` scan the same thing from different places.
+// Keying them on the directory would report drift that is not drift, which is
+// how a check starts being ignored.
 type gate struct {
 	kind string // "tool", "gotest", "govet", "gobuild", "npm", "gofmt", "nodetest"
 	arg  string
+	dir  string // where it runs; empty for kinds the directory does not identify
 }
 
 func (g gate) String() string {
-	if g.arg == "" {
-		return g.kind
+	s := g.kind
+	if g.arg != "" {
+		s += " " + g.arg
 	}
-	return g.kind + " " + g.arg
+	if g.dir != "" {
+		s += " in " + g.dir
+	}
+	return s
+}
+
+// same reports whether two gates are the same command, ignoring where it ran.
+func (g gate) same(other gate) bool {
+	return g.kind == other.kind && g.arg == other.arg
 }
 
 func main() {
@@ -101,8 +144,25 @@ func main() {
 	}
 
 	ciPath := strings.Join(workflows.names(), ", ")
-	ciGates := collect(workflows.text())
-	justGates := collect(string(just))
+
+	// A workflow this stops reading is worse than one it never read: the gates
+	// go quiet and the count still looks healthy because five other files
+	// carry it. Nothing said so while the comparison was line based, because
+	// there was no structure to lose. There is now, so a file that has `run:`
+	// steps and yields none of them is a parse failure and says which file.
+	for i, source := range workflows.sources {
+		if hasRunStep(source) && len(workflowBlocks(workflows.paths[i], source)) == 0 {
+			fail("read no steps out of %s, which has `run:` steps in it. This check "+
+				"has stopped recognising the shape of that workflow, and every gate "+
+				"in it is now invisible rather than reported.", workflows.paths[i])
+		}
+	}
+
+	ciGates := scan(workflows.blocks())
+
+	recipes := justRecipes(string(just))
+	reachable := reachableFromGate(recipes)
+	justGates := scan(recipeBlocks(recipes))
 
 	if len(ciGates) == 0 {
 		fail("found no gates in %s. Either the workflow stopped running any, or "+
@@ -112,21 +172,27 @@ func main() {
 		fail("found no gates in %s, which cannot be right if `just gate` exists.", justPath)
 	}
 
-	var missing []string
+	var missing []gap
 	var stale []string
+	var loose []string
 	usedExemption := map[string]bool{}
-	for _, g := range sortedKeys(ciGates) {
+	for _, key := range sortedEntries(ciGates) {
 		// Exemption first. Whether the justfile happens to carry a recipe for
 		// an exempt gate is beside the point: the exemption records that `gate`
 		// does not run it, and `just vuln` existing is what makes that bearable
 		// rather than what makes the exemption unnecessary. Checking justGates
 		// first would leave the exemption looking unused and report it stale.
-		if _, ok := exemptFromGate[g]; ok {
-			usedExemption[g] = true
+		if _, ok := exemptFromGate[key]; ok {
+			usedExemption[key] = true
 			continue
 		}
-		if _, ok := justGates[g]; !ok {
-			missing = append(missing, g)
+		switch how, where := pairedWith(ciGates[key].gate, justGates, reachable); how {
+		case pairedExactly:
+			// Nothing to say. This is the ordinary case.
+		case pairedByRuntimeDir:
+			loose = append(loose, key+"  <-  "+where)
+		default:
+			missing = append(missing, gapFor(ciGates[key].gate, key, justGates, reachable))
 		}
 	}
 	// An exemption that no longer matches anything is dead code in a policy: it
@@ -141,19 +207,23 @@ func main() {
 
 	// The `gate` recipe has to actually invoke the individual recipes, or the
 	// justfile could define every gate and run none of them.
-	uncalled := uncalledByGate(string(just))
+	uncalled := uncalledByGate(recipes, reachable)
 
 	if len(missing) == 0 && len(uncalled) == 0 && len(stale) == 0 {
-		fmt.Printf("gatecheck: %d gates in CI, every one reachable from `just gate`\n", len(ciGates))
+		report(len(workflows.paths), ciGates, len(usedExemption), loose)
 		return
 	}
 
 	if len(missing) > 0 {
-		fmt.Fprintf(os.Stderr, "gatecheck: CI runs %d things the justfile does not:\n", len(missing))
+		fmt.Fprintf(os.Stderr, "gatecheck: CI runs %d %s `just gate` does not:\n",
+			len(missing), plural(len(missing), "thing", "things"))
 		for _, m := range missing {
-			fmt.Fprintf(os.Stderr, "  %s\n", m)
+			fmt.Fprintf(os.Stderr, "  %s\n", m.ci)
+			fmt.Fprintf(os.Stderr, "      %s\n", m.reason)
 		}
-		fmt.Fprintf(os.Stderr, "\nAdd a recipe for each, and call it from `gate`.\n")
+		fmt.Fprintf(os.Stderr, "\nA gate is the command AND the directory it runs in: `go test ./...`\n"+
+			"in engine and in tools are two gates, and so is `npm test` in web and in\n"+
+			"ee/web. Add a recipe that runs it where CI runs it, and call it from `gate`.\n")
 	}
 	if len(stale) > 0 {
 		fmt.Fprintf(os.Stderr, "\ngatecheck: these gates are exempt from `just gate` but no workflow runs them:\n")
@@ -175,23 +245,181 @@ func main() {
 	os.Exit(1)
 }
 
-// collect finds every gate in a file.
-func collect(text string) map[string]struct{} {
-	found := map[string]struct{}{}
-	for _, line := range strings.Split(text, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		trimmed = quoted.ReplaceAllString(trimmed, `""`)
-		for _, g := range gatesIn(trimmed) {
-			found[g.String()] = struct{}{}
+// runStep matches a step's `run:` key, which is the only thing in a workflow
+// that carries a gate.
+var runStep = regexp.MustCompile(`(?m)^\s+-?\s*run:`)
+
+func hasRunStep(source string) bool { return runStep.MatchString(source) }
+
+// report says what was checked, in the terms it was checked in.
+//
+// The sentence this replaced said "every one reachable from `just gate`" and
+// checked two weaker things: that the command appeared somewhere in the
+// justfile, and, separately, that every gate-shaped recipe was called. A
+// command sitting in a recipe `gate` never runs satisfied the first and was
+// never held to the second, so the line claimed a property it did not test.
+// This one names the number of workflows read, the fact that the directory is
+// part of the pairing, the gates that are exempt rather than paired, and the
+// gates whose directory could not be compared because the justfile works it
+// out at run time. A reader should not be able to come away believing anything
+// stronger than what ran.
+func report(workflows int, ciGates map[string]*entry, exempt int, loose []string) {
+	fmt.Printf("gatecheck: %d gates in %d pull request workflows.\n", len(ciGates), workflows)
+	fmt.Printf("  %d paired by command and directory to a recipe `just gate` calls.\n",
+		len(ciGates)-exempt-len(loose))
+	if len(loose) > 0 {
+		fmt.Printf("  %d paired by command only, against a justfile command whose directory\n"+
+			"    is computed at run time, so for these the directory was not compared:\n", len(loose))
+		for _, l := range loose {
+			fmt.Printf("      %s\n", l)
 		}
 	}
-	return found
+	fmt.Printf("  %d exempt by name in exemptFromGate, with the reason recorded there.\n", exempt)
 }
 
-func gatesIn(line string) []gate {
+// pairing is how a CI gate was matched on the justfile side.
+type pairing int
+
+const (
+	notPaired pairing = iota
+	pairedExactly
+	pairedByRuntimeDir
+)
+
+// pairedWith looks for the justfile command that covers a CI gate.
+//
+// Exactly first: the same command in the same directory, in a recipe `just
+// gate` reaches. Failing that, the same command in a directory the justfile
+// computes at run time, which is what `just typecheck` does when it finds its
+// tsconfig files in the tree rather than naming them. That match is real
+// coverage and refusing it would report drift that does not exist, but it is
+// weaker than the other, so it is counted and printed rather than folded in.
+func pairedWith(g gate, justGates map[string]*entry, reachable map[string]bool) (pairing, string) {
+	if e, ok := justGates[g.String()]; ok && anyReachable(e.blocks, reachable) {
+		return pairedExactly, ""
+	}
+	if g.dir == "" {
+		return notPaired, ""
+	}
+	for _, key := range sortedEntries(justGates) {
+		e := justGates[key]
+		if !e.gate.same(g) || !anyReachable(e.blocks, reachable) {
+			continue
+		}
+		// The justfile's directory is a run-time value, so it may or may not
+		// be this one, or CI's is and the justfile's is a literal. Either way
+		// there is nothing left to compare.
+		if e.gate.dir == unknownDir || g.dir == unknownDir {
+			return pairedByRuntimeDir, "justfile: " + key + ", in " + strings.Join(e.blocks, ", ")
+		}
+	}
+	return notPaired, ""
+}
+
+// gap describes one CI gate `just gate` does not cover, and says which of the
+// three ways it does not.
+type gap struct {
+	ci     string
+	reason string
+}
+
+func gapFor(g gate, key string, justGates map[string]*entry, reachable map[string]bool) gap {
+	var elsewhere []string   // the same command, run in another directory
+	var unreachable []string // the same gate, in a recipe `gate` never calls
+	for _, k := range sortedEntries(justGates) {
+		e := justGates[k]
+		if !e.gate.same(g) {
+			continue
+		}
+		if !anyReachable(e.blocks, reachable) {
+			unreachable = append(unreachable, k+" in "+strings.Join(e.blocks, ", "))
+			continue
+		}
+		elsewhere = append(elsewhere, k)
+	}
+	switch {
+	case len(elsewhere) > 0:
+		return gap{key, "the justfile runs this only in " + strings.Join(elsewhere, ", ")}
+	case len(unreachable) > 0:
+		return gap{key, "the justfile runs this in a recipe `just gate` never calls: " +
+			strings.Join(unreachable, ", ")}
+	default:
+		return gap{key, "nothing in the justfile runs this"}
+	}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+func anyReachable(blocks []string, reachable map[string]bool) bool {
+	for _, b := range blocks {
+		if reachable[b] {
+			return true
+		}
+	}
+	return false
+}
+
+// justCall matches one recipe calling another.
+var justCall = regexp.MustCompile(`just ([a-z_][\w-]*)`)
+
+// reachableFromGate returns the recipes `just gate` runs, directly or through
+// another recipe.
+//
+// Both routes count: a dependency in the header, and a `just <name>` in the
+// body, which is how the `gate` recipe itself calls everything so that it can
+// keep going after one of them fails.
+func reachableFromGate(recipes []recipe) map[string]bool {
+	byName := map[string]recipe{}
+	for _, r := range recipes {
+		byName[r.name] = r
+	}
+
+	reachable := map[string]bool{}
+	queue := []string{"gate"}
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		if reachable[name] {
+			continue
+		}
+		reachable[name] = true
+		r, ok := byName[name]
+		if !ok {
+			continue
+		}
+		queue = append(queue, r.deps...)
+		for _, line := range r.lines {
+			for _, m := range justCall.FindAllStringSubmatch(line, -1) {
+				queue = append(queue, m[1])
+			}
+		}
+	}
+	return reachable
+}
+
+// recipeBlocks is the recipes as plain blocks, for scanning.
+func recipeBlocks(recipes []recipe) []block {
+	out := make([]block, 0, len(recipes))
+	for _, r := range recipes {
+		out = append(out, r.block)
+	}
+	return out
+}
+
+// gatesIn finds every gate on one line, given the directory that line runs in.
+//
+// The line arrives raw. Quoted spans are removed before the patterns run, so a
+// command named inside a message is not read as a command being run, but the
+// raw text is what `--prefix` and `-C` have to be read from: after the
+// substitution `npx --prefix "$root"` is `npx --prefix ""`, which cannot be
+// told apart from a directory this simply failed to parse.
+func gatesIn(raw, dir string) []gate {
+	line := quoted.ReplaceAllString(raw, `""`)
 	var out []gate
 	for _, re := range gatePatterns {
 		for _, m := range re.FindAllStringSubmatch(line, -1) {
@@ -200,34 +428,75 @@ func gatesIn(line string) []gate {
 			whole := strings.TrimLeft(m[0], " \t;&|($")
 			switch {
 			case strings.HasPrefix(whole, "go run ./tools/"):
-				out = append(out, gate{"tool", m[1]})
+				out = append(out, gate{kind: "tool", arg: m[1]})
 			case strings.HasPrefix(whole, "go test"):
-				out = append(out, gate{"gotest", normalizeTarget(m[2])})
+				out = append(out, gate{"gotest", normalizeTarget(m[2]), goDir(raw, dir)})
 			case strings.HasPrefix(whole, "go vet"):
-				out = append(out, gate{"govet", normalizeTarget(m[2])})
+				out = append(out, gate{"govet", normalizeTarget(m[2]), goDir(raw, dir)})
 			case strings.HasPrefix(whole, "go build"):
 				// A build is covered by the tests that follow it, and the
 				// edition boundary builds with flags this cannot usefully
-				// compare. Recorded as one gate rather than per target.
-				out = append(out, gate{"gobuild", ""})
+				// compare. Recorded as one gate per directory rather than per
+				// target.
+				out = append(out, gate{"gobuild", "", goDir(raw, dir)})
 			case strings.HasPrefix(whole, "gofmt -l"):
-				out = append(out, gate{"gofmt", ""})
+				out = append(out, gate{"gofmt", "", dir})
+			case strings.Contains(whole, " run "):
+				// `npm test` IS `npm run test`, so both spellings are the one
+				// gate. Two keys for one command would report a gap the day CI
+				// and the justfile happened to spell it differently.
+				if m[2] == "test" {
+					out = append(out, gate{"npm", "test", npmDir(raw, dir)})
+					break
+				}
+				out = append(out, gate{"npm run", m[2], npmDir(raw, dir)})
 			case strings.HasPrefix(whole, "node --test"):
-				out = append(out, gate{"nodetest", ""})
+				out = append(out, gate{"nodetest", "", dir})
 			default:
-				out = append(out, gate{"npm", m[2]})
+				out = append(out, gate{"npm", m[2], npmDir(raw, dir)})
 			}
 		}
 	}
 	return out
 }
 
+// npmDir is where an npm command's package.json is: `--prefix X` if it names
+// one, and otherwise the directory the line runs in.
+func npmDir(raw, dir string) string {
+	if m := npmPrefix.FindStringSubmatch(raw); m != nil {
+		return joinDir(dir, normalizeDir(m[1]))
+	}
+	return dir
+}
+
+// goDir is the same for the go toolchain's `-C`.
+//
+// Read only from a line whose command is `go`, because `-C` means something
+// else nearly everywhere else: `grep -C 3` asks for context lines, and a
+// pattern that read it as a directory would move the shell somewhere the shell
+// never went.
+func goDir(raw, dir string) string {
+	trimmed := strings.TrimLeft(raw, " \t(")
+	if !strings.HasPrefix(trimmed, "go ") {
+		return dir
+	}
+	if m := goChdir.FindStringSubmatch(raw); m != nil {
+		return joinDir(dir, normalizeDir(m[1]))
+	}
+	return dir
+}
+
+var (
+	npmPrefix = regexp.MustCompile(`--prefix[=\s]+([^\s;&|]+)`)
+	goChdir   = regexp.MustCompile(`\s-C[=\s]+([^\s;&|]+)`)
+)
+
 // normalizeTarget reduces a Go package pattern to what is worth comparing.
 //
-// CI and a justfile reach the same packages by different routes: one does
-// `cd engine && go test ./...` and the other `go test ./...` from a recipe
-// that already set the directory. Comparing the raw strings would report
-// drift that is not drift.
+// The directory the command ran in is compared separately and exactly; this is
+// only about the pattern. `./internal/secrets/...` and `./...` reach different
+// sets of packages but both mean "everything under here", and CI spells the
+// same run both ways in two workflows.
 func normalizeTarget(target string) string {
 	target = strings.Trim(target, `"'`)
 	switch {
@@ -241,38 +510,17 @@ func normalizeTarget(target string) string {
 }
 
 // uncalledByGate reports recipes that define a gate and that `just gate` never
-// invokes. Read by looking at which `just <name>` calls appear inside the gate
-// recipe, against the recipes the file defines.
-func uncalledByGate(just string) []string {
-	lines := strings.Split(just, "\n")
-
-	// The body of the `gate` recipe: from its header to the next unindented
-	// line that is not blank or a comment.
-	var body []string
-	in := false
-	for _, line := range lines {
-		if strings.HasPrefix(line, "gate:") || strings.HasPrefix(line, "gate ") {
-			in = true
-			continue
-		}
-		if in {
-			if line != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") &&
-				!strings.HasPrefix(line, "#") {
-				break
-			}
-			body = append(body, line)
-		}
-	}
-	if len(body) == 0 {
+// invokes, directly or through another recipe.
+//
+// It takes the same reachability set the pairing uses, so the two cannot
+// disagree about what `just gate` runs. They did not have to agree before: a
+// gate could be counted as covered because the command appeared somewhere in
+// the justfile, while the recipe holding it was reported here as one nothing
+// calls, and the passing sentence would still have claimed everything was
+// reachable.
+func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
+	if !hasRecipe(recipes, "gate") {
 		return []string{"(no `gate` recipe at all)"}
-	}
-
-	called := map[string]bool{}
-	callRe := regexp.MustCompile(`just ([a-z][\w-]*)`)
-	for _, line := range body {
-		for _, m := range callRe.FindAllStringSubmatch(line, -1) {
-			called[m[1]] = true
-		}
 	}
 
 	// Recipes that `gate` does not call because the gate itself is exempt.
@@ -321,15 +569,10 @@ func uncalledByGate(just string) []string {
 		"hooks": true,
 	}
 
-	recipeRe := regexp.MustCompile(`^([a-z][\w-]*)(?: [\w"=]+)*:`)
 	var uncalled []string
-	for _, line := range lines {
-		m := recipeRe.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		name := m[1]
-		if strings.HasPrefix(name, "_") || convenience[name] || exemptRecipes[name] || called[name] {
+	for _, r := range recipes {
+		name := r.name
+		if strings.HasPrefix(name, "_") || convenience[name] || exemptRecipes[name] || reachable[name] {
 			continue
 		}
 		uncalled = append(uncalled, name)
@@ -338,7 +581,17 @@ func uncalledByGate(just string) []string {
 	return uncalled
 }
 
-func sortedKeys(m map[string]struct{}) []string {
+func hasRecipe(recipes []recipe, name string) bool {
+	for _, r := range recipes {
+		if r.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedEntries keeps every listing stable, so a failure reads the same twice.
+func sortedEntries(m map[string]*entry) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
@@ -421,6 +674,18 @@ var exemptFromGate = map[string]string{
 		"than passed, and a positive control asserts a good region IS allowed " +
 		"so that a guard which refuses everything cannot pass the suite. " +
 		"It runs in infra.yml's plan job, which has a credential.",
+	"npm run seed in web": "" +
+		"It is not a gate. `npm run seed --workspace @antifailure/db` writes the " +
+		"fixture rows a dogfood run then drives the product against, so it is " +
+		"setup for `tool dogfood` rather than a verdict on the diff: it asserts " +
+		"nothing about the tree and there is no version of it that can fail " +
+		"because a change was wrong. It runs in dogfood.yml, in the step before " +
+		"the one that starts the run, and `just gate` seeding a database on " +
+		"somebody's laptop would be a side effect rather than a check. " +
+		"What IS a function of the tree is the schema those rows are inserted " +
+		"against, and `just test-web` covers that inside `gate`: the migrations " +
+		"run and the suites read what they wrote.",
+
 	"tool cost": "" +
 		"Its input is not in the tree. tools/cost reads a Terraform plan, and a " +
 		"plan only exists after authenticating to Azure and resolving every " +
@@ -445,8 +710,8 @@ type workflowSet struct {
 
 func (w workflowSet) names() []string { return w.paths }
 
-// sortedExemptions keeps the failure output stable. sortedKeys works on the
-// gate sets, which are map[string]struct{}; this map carries reasons.
+// sortedExemptions keeps the failure output stable. sortedEntries works on the
+// gate sets, which carry a gate each; this map carries reasons.
 func sortedExemptions() []string {
 	out := make([]string, 0, len(exemptFromGate))
 	for k := range exemptFromGate {
@@ -456,7 +721,20 @@ func sortedExemptions() []string {
 	return out
 }
 
-func (w workflowSet) text() string { return strings.Join(w.sources, "\n") }
+// blocks is every step of every workflow, read one file at a time.
+//
+// One file at a time matters: the sources used to be joined into a single
+// string and scanned line by line, which is fine while a gate is only a
+// command, and wrong the moment a directory is attached to one. Concatenated,
+// the last step of ci.yml and the first step of dogfood.yml are adjacent lines,
+// and a `cd` in one would carry into the other.
+func (w workflowSet) blocks() []block {
+	var out []block
+	for i, source := range w.sources {
+		out = append(out, workflowBlocks(w.paths[i], source)...)
+	}
+	return out
+}
 
 // runsOnPullRequest matches a `pull_request` trigger at the top level of a
 // workflow's `on:` block.

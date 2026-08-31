@@ -501,7 +501,8 @@ func suggest(got string, siblings []string) string {
 // which keys are legal in which position.
 var knownKeys = []string{
 	"version", "name", "services", "database", "egress", "personas", "auth", "workflows",
-	"invariants", "insights", "explore", "load", "policy", "runtime", "github",
+	"invariants", "insights", "change", "explore", "fidelity",
+	"load", "policy", "runtime", "github",
 	"path", "kind", "build", "command", "port", "health_path", "health_timeout",
 	"env", "replicas", "resources", "schedule", "migrate", "depends_on",
 	"strategy", "dockerfile", "target", "context", "image", "args", "allow_hosts",
@@ -523,6 +524,7 @@ var knownKeys = []string{
 	"migration_lock", "warn_ms", "fail_ms", "migration_failed", "migration_rewrite",
 	"migration_lint", "plan_regression", "load_regression", "egress_surprise",
 	"masking", "cleanup",
+	"p95_increase", "error_rate", "query_count_increase", "require",
 	"ttl", "idle_sleep", "domain", "namespace_prefix", "kubeconfig_context",
 	"comment", "fork_policy", "teardown_on",
 	"adapter", "token_env", "url", "connection", "table", "sessions", "password",
@@ -531,6 +533,7 @@ var knownKeys = []string{
 	// so a typo of any of them got no suggestion. Found by the drift test,
 	// which is the point of having one.
 	"project", "api_key_env", "max_branches", "to",
+	"surface",
 	"oracle", "baseline", "base_ref", "fail_on", "probes", "method", "body",
 	"compare_timestamps", "compare_uuids", "ignore", "headers", "fields",
 	"tables", "exclude",

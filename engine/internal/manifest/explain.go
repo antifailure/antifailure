@@ -211,6 +211,15 @@ func Explain(m *schema.Manifest, width int) string {
 	fmt.Fprintf(&b, "  fails on     %s\n", value(failingPolicies(m.Policy), 15, width))
 	b.WriteString("\n")
 
+	b.WriteString("Fidelity\n")
+	fmt.Fprintf(&b, "  inventory    %s\n", value(enabledWord(deref(m.Fidelity.Enabled)), 15, width))
+	// The list of required dimensions grows with the schema and is the one
+	// value in this section nothing bounds, so it wraps under its own column
+	// like every other unbounded value on the page.
+	fmt.Fprintf(&b, "  required     %s\n",
+		value(orNone(joinDimensions(m.Fidelity.Require), "nothing"), 15, width))
+	b.WriteString("\n")
+
 	b.WriteString("Runtime\n")
 	fmt.Fprintf(&b, "  provider     %s\n", value(string(m.Runtime.Provider), 15, width))
 	fmt.Fprintf(&b, "  hostnames    *.%s\n", m.Runtime.Domain)
@@ -270,6 +279,16 @@ func Explain(m *schema.Manifest, width int) string {
 // value wraps an unbounded value under the column it starts in.
 func value(s string, indent, width int) string {
 	return textwrap.Wrap(s, indent, width)
+}
+
+// joinDimensions renders fidelity.require, which is a list of named
+// dimensions rather than the single threshold a percentage would invite.
+func joinDimensions(ds []schema.FidelityDimension) string {
+	out := make([]string, len(ds))
+	for i, d := range ds {
+		out[i] = string(d)
+	}
+	return strings.Join(out, ", ")
 }
 
 func orNone(s, fallback string) string {

@@ -14,9 +14,11 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `auth` | [auth](#auth) | no | How personas come to exist. |
+| `change` | [Change](#change) | no | How a pull request's diff is classified. |
 | `database` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | `egress` | [Egress](#egress) | no | What the environment may reach on the network. |
 | `explore` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
+| `fidelity` | [Fidelity](#fidelity) | no | The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all. |
 | `github` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
 | `insights` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
@@ -76,6 +78,24 @@ How to turn the service directory into an image. Omitted means detect: a Dockerf
 | `image` | string | no | A prebuilt image reference, used with the image strategy. Pinned by digest is strongly preferred. Max length 512. |
 | `strategy` | `auto`, `dockerfile`, `buildpack`, `image` | no | Defaults to `auto`. |
 | `target` | string | no | Stage to build in a multi stage Dockerfile. Max length 128. |
+
+## Change
+
+How a pull request's diff is classified. The built in rules cover the layouts most projects use; these are for the ones they do not. A rule says what a path is, never which checks to run: an unrecognised path always selects every check, and no rule here can take a check away.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `rules` | list of [Change rule](#change-rule) | no | Path patterns this repository wants classified its own way. The longest matching pattern wins, so order does not decide. Max items 100. |
+
+## Change rule
+
+One path pattern and what the paths it matches are. It says what a file IS, never which checks to run.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `note` | string | no | The sentence the report prints for this rule, replacing the default one that restates the pattern. Max length 200. |
+| `path` | string | **yes** | A glob against the repository relative path. A single star does not cross a slash and a double star does. A pattern that matches everything is refused, because it would defeat the rule that an unrecognised path selects every check. Min length 1, max length 256. |
+| `surface` | `schema`, `code`, `asset`, `build`, `dependency`, `config`, `infrastructure`, `pipeline`, `test`, `docs` | **yes** | What the matched paths are. Surfaces the engine assigns from the manifest itself, such as a service or the masking rules file, cannot be set here. |
 
 ## Database
 
@@ -141,6 +161,15 @@ Agents that pursue a goal with no declared workflow, discover the paths an appli
 | --- | --- | --- | --- |
 | `enabled` | boolean | no | Defaults to `false`. |
 | `goals` | list of [Goal](#goal) | no | One thing an exploratory agent tries to achieve. Max items 50. |
+
+## Fidelity
+
+The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | no | Defaults to `true`. |
+| `require` | list of string | no | Dimensions every component of which must be reproduced. A dimension that could not be measured neither satisfies a requirement nor breaks one. |
 
 ## GitHub
 

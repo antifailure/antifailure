@@ -27,6 +27,12 @@ import (
 // not a comment is what a usage error offers as the thing to try, so put the
 // plainest invocation first.
 var commandExamples = map[string]string{
+	"af change": "" +
+		"# Against the base branch this job names.\n" +
+		"af change\n" +
+		"# Against a ref you choose, or a diff you already have.\n" +
+		"af change --base origin/main\n" +
+		"af change --diff pr.patch",
 	"af ci": "" +
 		"# What CI runs: up, migrate, test, load, gate, report, down.\n" +
 		"af ci\n" +
@@ -47,6 +53,10 @@ var commandExamples = map[string]string{
 		"# Agents go at a goal with no workflow written for it.\n" +
 		"af explore\n" +
 		"af explore --emit-workflow checkout.yaml",
+	"af fidelity": "" +
+		"# An inventory of the copy against the thing it is a copy of.\n" +
+		"af fidelity\n" +
+		"af fidelity -o json",
 	"af golden": "af golden list",
 	"af golden gc": "" +
 		"af golden gc\n" +

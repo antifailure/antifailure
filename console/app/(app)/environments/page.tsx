@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ago, when } from "@/lib/format";
 import { mutate, query, useApi } from "@/lib/api";
+import { may } from "@/lib/roles";
 import { useSessionContext } from "@/components/session";
 import {
   Badge,
@@ -11,6 +12,7 @@ import {
   Card,
   CellLink,
   Empty,
+  Field,
   Loaded,
   Page,
   Row,
@@ -20,8 +22,28 @@ import {
   Td,
   Th,
   When,
+  inputClass,
   toneFor,
 } from "@/components/ui";
+
+interface Repository {
+  id: string;
+  full_name: string;
+  default_branch: string;
+}
+
+interface Runtime {
+  id: string | null;
+  name: string;
+  provider: string | null;
+  labels: string[] | null;
+  note: string | null;
+  created_at: string | null;
+  removed_at: string | null;
+  registered_by: string | null;
+  registered: boolean;
+  environments: string;
+}
 
 interface Environment {
   id: string;
@@ -38,7 +60,6 @@ interface Environment {
   repository: string;
 }
 
-const MAY_TEAR_DOWN = new Set(["owner", "admin", "member"]);
 
 function Detail({ envId, onClose }: { envId: string; onClose: () => void }) {
   const session = useSessionContext();
@@ -46,7 +67,6 @@ function Detail({ envId, onClose }: { envId: string; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const role = session.data?.role ?? "";
   const csrf = session.data?.csrfToken ?? "";
 
   return (
@@ -96,7 +116,7 @@ function Detail({ envId, onClose }: { envId: string; onClose: () => void }) {
               ) : null}
             </dl>
 
-            {env.state !== "torn_down" && MAY_TEAR_DOWN.has(role) ? (
+            {env.state !== "torn_down" && may(session.data?.role, "environments.teardown") ? (
               <div className="border-t border-rule px-4 py-3">
                 <p className="text-[12.5px] leading-5 text-muted">
                   Tearing down marks the environment. The engine holding the
@@ -137,7 +157,284 @@ function Detail({ envId, onClose }: { envId: string; onClose: () => void }) {
   );
 }
 
+
+/**
+ * Asking for an environment.
+ *
+ * The control plane does not bring one up. It dispatches a run of the
+ * repository's own workflow, in the repository, on the branch named here, and
+ * the engine does the work in the customer's CI where their database and their
+ * credentials already are. So the button says what actually happens rather than
+ * "Create": nothing appears in the table below until the engine reports it, and
+ * a screen that claimed otherwise would show an environment that does not exist.
+ */
+function Create({ onRequested }: { onRequested: () => void }) {
+  const session = useSessionContext();
+  const repositories = useApi<Repository[]>(
+    () => query("repositories.list", { includeArchived: false }),
+    [],
+  );
+  const [repository, setRepository] = useState("");
+  const [branch, setBranch] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [asked, setAsked] = useState<string | null>(null);
+  const csrf = session.data?.csrfToken ?? "";
+
+  return (
+    <Card
+      title="Ask for an environment"
+      note="Dispatches your workflow in your repository. Nothing runs on this control plane."
+    >
+      <Loaded state={repositories} skeleton={<TableSkeleton rows={1} cols={3} />}>
+        {(repos) =>
+          repos.length === 0 ? (
+            <Empty title="No repositories connected">
+              An environment belongs to a repository. One appears here when the
+              GitHub App reports an installation that includes it.
+            </Empty>
+          ) : (
+            <form
+              className="px-4 py-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const repo = repository || repos[0]!.full_name;
+                setBusy(true);
+                setError(null);
+                setAsked(null);
+                try {
+                  const answer = await mutate<{ ref: string }>(
+                    "environments.create",
+                    { repository: repo, ...(branch.trim() ? { branch: branch.trim() } : {}) },
+                    csrf,
+                  );
+                  setAsked(`Asked GitHub to run the workflow on ${answer.ref}.`);
+                  onRequested();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "That did not work.");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {/* The hint sits under the row, not in a Field: inside one it
+                  makes that cell taller and items-end lifts its input clear of
+                  the select beside it. */}
+              <div className="grid gap-3 sm:grid-cols-[2fr_2fr_auto] sm:items-end">
+                <Field label="Repository">
+                  <select
+                    className={inputClass}
+                    value={repository || repos[0]!.full_name}
+                    onChange={(e) => setRepository(e.target.value)}
+                  >
+                    {repos.map((r) => (
+                      <option key={r.id} value={r.full_name}>
+                        {r.full_name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Branch">
+                  <input
+                    className={inputClass}
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    placeholder="main"
+                  />
+                </Field>
+                <Button type="submit" variant="primary" busy={busy}>
+                  {busy ? "Asking" : "Ask for one"}
+                </Button>
+              </div>
+              {error ? (
+                <p role="alert" className="mt-2.5 text-[12px] leading-5 text-fail">
+                  {error}
+                </p>
+              ) : (
+                <p role={asked ? "status" : undefined} className="mt-2.5 text-[12px] leading-5 text-dim">
+                  {asked ?? "Empty uses the repository's default branch. The environment appears below when the engine reports it."}
+                </p>
+              )}
+            </form>
+          )
+        }
+      </Loaded>
+    </Card>
+  );
+}
+
+/**
+ * The runtime registry, against what is actually running.
+ *
+ * Two kinds of row, and the second is the reason this is a screen rather than a
+ * settings list: a runtime somebody registered, and a runtime an environment is
+ * reporting that nobody registered. The second is an environment running
+ * somewhere the organization never agreed to, which is worth seeing and is
+ * invisible in a table of what was registered.
+ *
+ * Registering a name changes nothing about where anything runs. The engine
+ * decides that from the manifest in the repository, and the control plane holds
+ * no credential for any runtime and never reaches one.
+ */
+function Runtimes() {
+  const session = useSessionContext();
+  const state = useApi<Runtime[]>(() => query("runtimes.list", { includeRemoved: false }), []);
+  const csrf = session.data?.csrfToken ?? "";
+  const mayManage = may(session.data?.role, "runtimes.manage");
+  const [name, setName] = useState("");
+  const [provider, setProvider] = useState("local");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function act(key: string, run: () => Promise<unknown>) {
+    setBusy(key);
+    setError(null);
+    try {
+      await run();
+      state.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That did not work.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Card
+      title="Runtimes"
+      note="Where this organization has agreed its environments run, beside where they are actually running."
+      actions={
+        error ? (
+          <span role="alert" className="min-w-0 max-w-[46ch] break-words text-left text-[12px] leading-4 text-fail sm:text-right">
+            {error}
+          </span>
+        ) : null
+      }
+    >
+      {mayManage ? (
+        <form
+          className="border-b border-rule px-4 py-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!name.trim()) return;
+            void act("register", async () => {
+              await mutate("runtimes.register", { name: name.trim(), provider, labels: [] }, csrf);
+              setName("");
+            });
+          }}
+        >
+          <div className="grid gap-3 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
+            <Field label="Name">
+              <input
+                className={inputClass}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="eu-cluster"
+                required
+              />
+            </Field>
+            <Field label="Provider">
+              <select
+                className={inputClass}
+                value={provider}
+                onChange={(e) => setProvider(e.target.value)}
+              >
+                <option value="local">local</option>
+                <option value="kubernetes">kubernetes</option>
+              </select>
+            </Field>
+            <Button type="submit" busy={busy === "register"}>
+              {busy === "register" ? "Registering" : "Register"}
+            </Button>
+          </div>
+          <p className="mt-2.5 text-[12px] leading-5 text-dim">
+            Lower case letters, digits and hyphens. Registering a name records
+            where environments are meant to run and changes nothing about where
+            they do: the manifest in the repository decides that.
+          </p>
+        </form>
+      ) : null}
+
+      <Loaded state={state} skeleton={<TableSkeleton rows={2} cols={4} />}>
+        {(rows) =>
+          rows.length === 0 ? (
+            <Empty title="No runtimes">
+              Nothing is registered and no environment has reported where it
+              ran. This fills itself the first time one does.
+            </Empty>
+          ) : (
+            <TableWrap>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Runtime</Th>
+                    <Th>Provider</Th>
+                    <Th>Labels</Th>
+                    <Th numeric>Environments</Th>
+                    <Th>State</Th>
+                    {mayManage ? <Th>Registration</Th> : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <Row key={`${r.name}-${r.registered}`}>
+                      <Td mono>{r.name}</Td>
+                      <Td>{r.provider ?? "not reported"}</Td>
+                      <Td>{r.labels?.length ? r.labels.join(", ") : "--"}</Td>
+                      <Td numeric>{Number(r.environments).toLocaleString()}</Td>
+                      <Td>
+                        {r.registered ? (
+                          <Badge tone="pass">registered</Badge>
+                        ) : (
+                          <Badge tone="warn">nobody registered this</Badge>
+                        )}
+                      </Td>
+                      {mayManage ? (
+                        <Td>
+                          {r.registered ? (
+                            <Button
+                              variant="danger"
+                              busy={busy === r.name}
+                              onClick={() =>
+                                void act(r.name, () =>
+                                  mutate("runtimes.remove", { name: r.name }, csrf),
+                                )
+                              }
+                            >
+                              Remove
+                            </Button>
+                          ) : (
+                            <Button
+                              busy={busy === r.name}
+                              onClick={() =>
+                                void act(r.name, () =>
+                                  mutate(
+                                    "runtimes.register",
+                                    { name: r.name, provider: "local", labels: [] },
+                                    csrf,
+                                  ),
+                                )
+                              }
+                            >
+                              Register
+                            </Button>
+                          )}
+                        </Td>
+                      ) : null}
+                    </Row>
+                  ))}
+                </tbody>
+              </Table>
+            </TableWrap>
+          )
+        }
+      </Loaded>
+    </Card>
+  );
+}
+
 function Environments() {
+  const session = useSessionContext();
   const params = useSearchParams();
   const router = useRouter();
   const selected = params.get("env");
@@ -154,6 +451,12 @@ function Environments() {
       {selected ? (
         <div className="mb-6">
           <Detail envId={selected} onClose={() => router.push("/environments")} />
+        </div>
+      ) : null}
+
+      {may(session.data?.role, "environments.create") ? (
+        <div className="mb-6">
+          <Create onRequested={state.reload} />
         </div>
       ) : null}
 
@@ -210,6 +513,10 @@ function Environments() {
           }
         </Loaded>
       </Card>
+
+      <div className="mt-6">
+        <Runtimes />
+      </div>
     </Page>
   );
 }
