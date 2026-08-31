@@ -138,6 +138,18 @@ for suffix, value in {".json": "application/json", ".sh": "text/plain"}.items():
 # node:20 rather than node:22, which is also supported: 20 is the version every
 # current Static Web Apps document agrees on, and an apiRuntime the platform
 # does not know is a failed deploy rather than a warning.
+#
+# If somebody later declares one in www/public/staticwebapp.config.json, which
+# is where a reader would look for it, say so instead of quietly winning. A
+# value that is load-bearing and lives somewhere other than where it is looked
+# for is how the next person spends an afternoon.
+declared = config.get("platform", {}).get("apiRuntime")
+if declared is not None and declared != "node:20":
+    raise SystemExit(
+        f"www/public/staticwebapp.config.json sets platform.apiRuntime to {declared!r} and "
+        "tools/site/assemble.sh sets it to 'node:20'. Pick one and delete the other; the "
+        "runtime has to agree with api_location in .github/workflows/deploy.yml."
+    )
 config.setdefault("platform", {})["apiRuntime"] = "node:20"
 
 config_path.write_text(json.dumps(config, indent=2) + "\n")

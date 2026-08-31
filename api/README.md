@@ -21,9 +21,20 @@ static web app rather than anything in this repository.
 Nothing in this repository reads the list back, and nothing should: an
 anonymous endpoint that can enumerate its own signups is how a waitlist becomes
 a leaked mailing list. Somebody who already has access to the subscription
-reads it with the Azure CLI.
+reads it with the Azure CLI, which confirms the table exists:
 
     az cosmosdb table list -a af-wl-cus -g af-web
+
+The rows themselves are data plane rather than control plane, so reading them
+needs the account key and a client that speaks the Table API. There is no
+tooling here for that on purpose. Whoever needs the list has the subscription,
+and a script in this repository that reads addresses is a script somebody runs
+by accident.
+
+One row in that table is not a person. `waitlist-probe@antifailure.dev` is
+written by `.github/workflows/waitlist.yml` every morning and left there,
+because that check is the only thing that can tell anybody a signup is reaching
+storage. Do not count it, and do not email it.
 
 ## Running it
 
