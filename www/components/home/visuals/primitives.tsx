@@ -39,7 +39,7 @@ export function Hairline({ className, vertical }: { className?: string; vertical
 }
 
 /**
- * The 10px mono label, in the two jobs it actually does.
+ * The 10px mono label, in the three jobs it actually does.
  *
  * The default grey draws. It is the type inside a mock terminal, a fake log
  * line, a simulated report frame: there the grey depicts a screen rather than
@@ -49,16 +49,24 @@ export function Hairline({ className, vertical }: { className?: string; vertical
  *
  * `tone="reader"` addresses. A kicker over a paragraph, a caption naming what
  * a panel is, a comparison column heading, the annotation a diagram turns on:
- * that text is read, not looked at, so it takes black/60. Measured against
- * every surface a MonoLabel sits on, black/60 is 5.74:1 on white, 5.61:1 on
- * the page ground #f7f7f5, 5.59:1 on a Panel #f4f7f5 and 5.51:1 on the sage
- * band #E4F1EB. black/45 is 3.26:1 to 3.36:1 on the same four, under the
+ * that text is read, not looked at, so it takes black/60. Composited against
+ * every surface a MonoLabel sits on, black/60 is 5.74:1 on white, 5.62:1 on
+ * the page ground #f7f7f5, 5.61:1 on a Panel #f4f7f5 and 5.49:1 on the sage
+ * band #E4F1EB. black/45 is 3.27:1 to 3.35:1 on the same four, under the
  * 4.5:1 floor.
  *
- * The prop exists because six call sites had already reached for a darker
- * grey by hand, in five different files, at three different values. Nothing
- * was shared, so each author patched their own site and the wall stayed up
- * for the next one.
+ * `tone="ok"` marks the side of a diagram that came out right, in the same
+ * green as a passing StatusPill.
+ *
+ * The reason this is a prop rather than a className at each call site is not
+ * tidiness. `cn` here is a plain join, not tailwind-merge, so an override does
+ * not replace the default: both classes land on the element and the cascade
+ * picks. Tailwind emits text-black/N in ascending opacity at equal
+ * specificity, so a darker override wins and a lighter one loses in silence,
+ * and an arbitrary colour like text-[#285D49] is emitted before every
+ * text-black/N and loses to all of them. Six overrides on this component were
+ * inert for exactly that reason. A prop selecting between mutually exclusive
+ * strings cannot lose that race, because only one string is ever emitted.
  */
 export function MonoLabel({
   children,
@@ -67,13 +75,15 @@ export function MonoLabel({
 }: {
   children: ReactNode;
   className?: string;
-  tone?: "art" | "reader";
+  tone?: "art" | "reader" | "ok";
 }) {
   return (
     <span
       className={cn(
         "font-mono text-[10px] tracking-extra-tight",
-        tone === "reader" ? "text-black/60" : "text-black/45",
+        tone === "reader" && "text-black/60",
+        tone === "ok" && "text-[#285D49]",
+        tone === "art" && "text-black/45",
         className,
       )}
     >
