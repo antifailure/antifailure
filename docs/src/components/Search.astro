@@ -197,11 +197,11 @@ const catalog = (await getCollection("docs")).map((page) => {
     gap: 0.5rem;
     width: 100%;
     max-width: 22rem;
-    height: 2.5rem;
+    height: 2.75rem;
     margin: 0;
     padding: 0 0.5rem 0 0.75rem;
     border: 1px solid var(--sl-color-gray-5);
-    border-radius: 3px;
+    border-radius: var(--af-radius-sm);
     background: var(--sl-color-black);
     color: var(--sl-color-gray-2);
     font: inherit;
@@ -220,7 +220,7 @@ const catalog = (await getCollection("docs")).map((page) => {
     display: flex;
     gap: 0.15rem;
     padding: 0.15rem 0.35rem;
-    border-radius: 3px;
+    border-radius: var(--af-radius-sm);
     background: var(--sl-color-gray-6);
     font-size: 0.7rem;
   }
@@ -233,7 +233,7 @@ const catalog = (await getCollection("docs")).map((page) => {
     margin: 12vh auto auto;
     padding: 0;
     border: 1px solid var(--sl-color-hairline);
-    border-radius: 3px;
+    border-radius: var(--af-radius-md);
     background: #fff;
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.12);
   }
@@ -251,52 +251,96 @@ const catalog = (await getCollection("docs")).map((page) => {
     height: 2.75rem;
     padding: 0 0.85rem;
     border: 1px solid var(--sl-color-hairline-light);
-    border-radius: 3px;
+    border-radius: var(--af-radius-sm);
     background: #fff;
     color: var(--sl-color-gray-1);
     font: inherit;
     font-size: 1rem;
   }
   [data-search-input]:focus {
-    outline: 2px solid var(--color-neon, #33bf00);
-    outline-offset: 1px;
+    outline: none;
+    border-color: var(--sl-color-gray-2);
+    box-shadow: 0 0 0 3px rgb(51 191 0 / 0.25);
+  }
+  /* Safari and Chrome paint their own clear affordance inside a type=search,
+     a blue glyph in neither the site's palette nor its icon set. */
+  [data-search-input]::-webkit-search-cancel-button,
+  [data-search-input]::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
   }
   .af-search-hint {
     margin: 0;
     color: var(--sl-color-gray-3);
     font-size: 0.875rem;
   }
+  /* On a phone the control kept its label and filled the bar. It used to
+     collapse to a lone 44px square sitting in an otherwise empty full-width
+     band, which reads as a row that failed to load rather than as a search
+     box, and spent a whole bar of a 812px screen saying nothing. */
+  @media (max-width: 50rem) {
+    .af-search-kbd {
+      display: none;
+    }
+    button[data-open-modal] {
+      max-width: none;
+    }
+  }
+</style>
+
+<!--
+  The results list is global, not scoped.
+
+  Astro compiles a scoped rule to `.af-search-results:where(.astro-ac66eqjo) a:where(.astro-ac66eqjo)`,
+  which requires the `a` to carry the component's class. Every row here is built
+  with document.createElement in the inline script above and carries no such
+  class, so the scoped rules matched nothing and the entire result list rendered
+  at browser defaults: the page title and its excerpt at the same size and
+  weight, no separation between results, and no hierarchy to scan. The styles
+  existed and simply never applied, which is why this looked untouched.
+-->
+<style is:global>
   .af-search-results {
     margin: 0;
     padding: 0;
     list-style: none;
     overflow: auto;
   }
+
+  .af-search-results li + li {
+    border-top: 1px solid var(--sl-color-hairline);
+  }
+
+  .af-search-results li {
+    padding-block: 0.15rem;
+  }
+
   .af-search-results a {
     display: block;
-    padding: 0.65rem 0.2rem;
-    color: var(--sl-color-gray-1);
+    padding: 0.6rem 0.2rem 0.15rem;
+    color: var(--sl-color-white);
+    font-size: 0.9375rem;
     font-weight: 500;
+    letter-spacing: -0.01em;
     text-decoration: none;
   }
+
   .af-search-results a:hover {
     color: var(--af-accent-ink, #16660a);
   }
+
   .af-search-results p {
-    margin: 0 0 0.4rem;
+    /* Two lines of context is enough to choose between results. Pagefind
+       returns a whole paragraph, which at full size turned a list of six pages
+       into a wall the length of the screen. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin: 0 0 0.6rem;
+    padding-inline: 0.2rem;
     color: var(--sl-color-gray-3);
     font-size: 0.8125rem;
-  }
-  @media (max-width: 50rem) {
-    .af-search-label,
-    .af-search-kbd {
-      display: none;
-    }
-    button[data-open-modal] {
-      width: 2.5rem;
-      max-width: 2.5rem;
-      padding: 0;
-      justify-content: center;
-    }
+    line-height: 1.45;
   }
 </style>

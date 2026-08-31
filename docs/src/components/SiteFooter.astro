@@ -7,10 +7,12 @@
 
 <footer class="af-site-footer border-t border-gray-new-90 bg-white">
   <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-5">
-    <p class="text-[13px] leading-normal tracking-extra-tight text-gray-new-50">
+    {/* gray-new-40, not gray-new-50: #797d86 on white measures 4.13:1, which
+        is under the 4.5:1 floor for text this size. #61646b measures 5.9:1. */}
+    <p class="text-[13px] leading-normal tracking-extra-tight text-gray-new-40">
       © Antifailure 2026
     </p>
-    <nav class="flex items-center gap-x-5 text-[13px] tracking-extra-tight text-gray-new-50" aria-label="Footer">
+    <nav class="flex items-center gap-x-5 text-[13px] tracking-extra-tight text-gray-new-40" aria-label="Footer">
       <a class="py-1 transition-colors duration-200 hover:text-black" href="/privacy">Privacy</a>
       <a class="py-1 transition-colors duration-200 hover:text-black" href="/terms">Terms</a>
     </nav>
