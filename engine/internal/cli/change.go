@@ -1,0 +1,137 @@
+package cli
+
+import (
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/antifailure/antifailure/engine/internal/change"
+	"github.com/antifailure/antifailure/engine/internal/env"
+	"github.com/antifailure/antifailure/engine/internal/report"
+)
+
+// af change is the sentence that makes the rest of this product's cost
+// defensible.
+//
+// Everything else here runs the same checks on every pull request, which is
+// safe and wasteful in the same breath: a change to a README does not need a
+// database, and a change that adds a column and edits the billing service
+// deserves more attention than the default. This command reads the diff and
+// says which checks will exercise what it touched, naming the file and the
+// rule behind every line of it.
+//
+// What it deliberately does not do is grade the change. There is no score and
+// no risk word anywhere in the output, because a tool that says a change is
+// safe is making a promise this product's own terms refuse to make, and it
+// would be making it from a file listing.
+
+func newChangeCommand(e *Env) *cobra.Command {
+	var branch, base, head, diff, output string
+	cmd := &cobra.Command{
+		Use:   "change",
+		Short: "Read the diff and say which checks will exercise what it touched",
+		Long: strings.TrimSpace(`
+What this change touches, and which checks cover it.
+
+Every changed path is classified by a rule that names it, and every check is
+reported as selected or not, together with whether the manifest configures it
+at all. A check that is selected and unavailable is the line worth reading:
+something changed and nothing is going to look at it.
+
+Two things it will not do. It never says a change is safe or risky; it says
+which checks exercise which files, and what it cannot see. And a path no rule
+recognises selects every check rather than none, because the cost of the two
+mistakes is not the same.
+
+  af change                          against the base branch this job names
+  af change --base origin/main       against a ref you choose
+  af change --diff pr.patch          against a diff you already have
+
+In a GitHub Actions job it writes one output per check, so a later step can
+skip work this change does not need.`),
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			o, err := orchestrator(e, branch, false)
+			if err != nil {
+				return err
+			}
+			profile, err := o.Change(cmd.Context(), env.ChangeOptions{
+				Base: base, Head: head, DiffPath: diff, Getenv: e.Getenv,
+			})
+			if err != nil {
+				return err
+			}
+
+			if output != "" {
+				// The same marker af ci's report carries, so a workflow that
+				// writes this one and then overwrites it with the full report
+				// updates one comment rather than leaving two.
+				body := report.Marker + "\n" + profile.Markdown()
+				if wErr := os.WriteFile(output, []byte(body), 0o644); wErr != nil {
+					e.Out.Printf("  could not write the section to %s: %v\n", output, wErr)
+				}
+			}
+			writeChangeOutputs(e, profile)
+
+			if e.Out.Format == FormatJSON {
+				return e.Out.JSON(profile)
+			}
+			e.Out.Section("What this change touches")
+			e.Out.Raw(profile.Explain())
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&base, "base", "", "Ref to measure against, defaulting to this job's base branch")
+	cmd.Flags().StringVar(&head, "head", "", "Ref to measure, defaulting to HEAD")
+	cmd.Flags().StringVar(&diff, "diff", "", "Read a unified diff from this file instead of asking git")
+	cmd.Flags().StringVarP(&output, "write", "w", "", "Write the report section here as markdown")
+	cmd.Flags().StringVar(&branch, "branch", "", "Branch to read the manifest for, defaulting to the checked out one")
+	return cmd
+}
+
+// writeChangeOutputs makes the plan actionable inside a GitHub Actions job.
+//
+// Printing a plan a workflow cannot read would leave this command as a comment
+// on the run rather than an input to it, and the whole argument for reading a
+// diff is that a step can then be skipped. One boolean per check, plus the
+// selected list, so a job writes `if: steps.change.outputs.environment ==
+// 'true'` and nothing has to parse prose.
+//
+// The value is selected AND available, because a step asking whether to do
+// work needs both: a check the change selects and the manifest has turned off
+// is a sentence for the report, not an instruction to a runner.
+//
+// The keys are the check names, which are stable, and every check is written
+// on every run including the ones that are false. A key that appears only when
+// it is true reads as an empty string in a workflow expression, and an empty
+// string is not false to somebody debugging at eleven at night.
+func writeChangeOutputs(e *Env, p *change.Profile) {
+	path := e.Getenv("GITHUB_OUTPUT")
+	if path == "" {
+		return
+	}
+	var b strings.Builder
+	var selected []string
+	for _, s := range p.Plan {
+		value := "false"
+		if s.Run() {
+			value = "true"
+			selected = append(selected, string(s.Check))
+		}
+		b.WriteString(string(s.Check) + "=" + value + "\n")
+	}
+	sort.Strings(selected)
+	b.WriteString("selected=" + strings.Join(selected, ",") + "\n")
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		e.Out.Printf("  could not write the plan to GITHUB_OUTPUT: %v\n", err)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.WriteString(b.String()); err != nil {
+		e.Out.Printf("  could not write the plan to GITHUB_OUTPUT: %v\n", err)
+	}
+}

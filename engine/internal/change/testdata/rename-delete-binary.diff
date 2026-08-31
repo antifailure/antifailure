@@ -1,0 +1,29 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..c87443c
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1 @@
++name: ci
+diff --git a/api/billing.ts b/api/payments.ts
+similarity index 100%
+rename from api/billing.ts
+rename to api/payments.ts
+diff --git a/assets/logo.png b/assets/logo.png
+new file mode 100644
+index 0000000..029ace0
+Binary files /dev/null and b/assets/logo.png differ
+diff --git a/docs/README.md b/docs/README.md
+deleted file mode 100644
+index 401287e..0000000
+--- a/docs/README.md
++++ /dev/null
+@@ -1 +0,0 @@
+-# billing
+diff --git a/infra/db.tf b/infra/db.tf
+new file mode 100644
+index 0000000..989c8be
+--- /dev/null
++++ b/infra/db.tf
+@@ -0,0 +1 @@
++resource "aws_db_instance" "main" {}

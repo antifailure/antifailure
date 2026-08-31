@@ -24,6 +24,7 @@ type Manifest struct {
 	Workflows  []Workflow  `json:"workflows,omitempty" yaml:"workflows,omitempty"`
 	Invariants []Invariant `json:"invariants,omitempty" yaml:"invariants,omitempty"`
 	Insights   *Insights   `json:"insights,omitempty" yaml:"insights,omitempty"`
+	Change     *Change     `json:"change,omitempty" yaml:"change,omitempty"`
 	Load       *Load       `json:"load,omitempty" yaml:"load,omitempty"`
 	Runtime    *Runtime    `json:"runtime,omitempty" yaml:"runtime,omitempty"`
 	GitHub     *GitHub     `json:"github,omitempty" yaml:"github,omitempty"`
@@ -359,6 +360,31 @@ type Insights struct {
 	RegressionFactor   float64 `json:"regression_factor,omitempty" yaml:"regression_factor,omitempty"`
 	RegressionMinMS    float64 `json:"regression_min_ms,omitempty" yaml:"regression_min_ms,omitempty"`
 	LargeTableRows     int     `json:"large_table_rows,omitempty" yaml:"large_table_rows,omitempty"`
+}
+
+// Change configures how a pull request's diff is classified.
+//
+// Absent from most manifests, because the built in rules cover the layouts
+// most projects use. Present when a repository puts something somewhere the
+// conventions do not predict, which in a monorepo is normal rather than
+// exotic. It cannot turn a check off: a rule only says what a path IS, and
+// what that implies is decided by the engine.
+type Change struct {
+	Rules []ChangeRule `json:"rules,omitempty" yaml:"rules,omitempty"`
+}
+
+// ChangeRule assigns a surface to the paths a pattern matches.
+type ChangeRule struct {
+	// Path is a glob. A single star does not cross a slash and a double star
+	// does, so "packages/*/src/**" is a legal and useful thing to write.
+	Path string `json:"path" yaml:"path"`
+	// Surface is what the matched paths are. The engine refuses a surface it
+	// does not know rather than treating it as unclassified, because a typo
+	// that silently means "unknown" would look like the rule working.
+	Surface string `json:"surface" yaml:"surface"`
+	// Note replaces the sentence the report prints for this rule, for a
+	// project that wants to say why rather than restate the pattern.
+	Note string `json:"note,omitempty" yaml:"note,omitempty"`
 }
 
 // LoadSource names where the endpoint mix comes from.

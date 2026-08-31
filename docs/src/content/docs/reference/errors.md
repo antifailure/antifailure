@@ -352,6 +352,30 @@ No application could be detected in {path}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/detection](/docs/concepts/detection/) |
 
+### AF-DET-010
+
+The changed files between {base} and {head} could not be read: {detail}
+
+**What to do.** Fetch the base branch before running 'af change'. A checkout cloned one commit deep shares no history with it, which is what 'fetch-depth: 0' fixes in a GitHub Actions job.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/change-analysis](/docs/concepts/change-analysis/) |
+
+### AF-DET-011
+
+The diff at {path} could not be read: {detail}
+
+**What to do.** Produce it with 'git diff --unified=0 base...head'; this reads git's own unified format and nothing else.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/change-analysis](/docs/concepts/change-analysis/) |
+
 ## Infrastructure
 
 ### AF-INF-002

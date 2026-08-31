@@ -1,0 +1,28 @@
+diff --git a/notes with space.md b/notes with space.md
+index e006841..705b850 100644
+--- a/notes with space.md	
++++ b/notes with space.md	
+@@ -1,3 +1,3 @@
+ alpha
+--- end
+ omega
++++ plus
+diff --git "a/src/caf\303\251 config.yaml" "b/src/caf\303\251 config.yaml"
+index 9c59e24..66a52ee 100644
+--- "a/src/caf\303\251 config.yaml"	
++++ "b/src/caf\303\251 config.yaml"	
+@@ -1 +1,2 @@
+ first
++second
+diff --git a/src/main.go b/src/main.go
+index 38dd16d..0f01f7c 100644
+--- a/src/main.go
++++ b/src/main.go
+@@ -1,3 +1,6 @@
+ package main
+ 
+-func main() {}
++func main() {
++	_ = "--- not a header"
++	get("https://api.example.dev/v1/ping")
++}

@@ -26,6 +26,7 @@ named. Everything else is refused with a decision you can read.
 | `workflows` | list | What the agents do. |
 | `invariants` | list | Statements about the data that must stay true. |
 | `insights` | block | The Postgres native checks. |
+| `change` | block | Path rules for [change analysis](/docs/concepts/change-analysis/), for a layout the built in rules do not predict. |
 | `load` | block | Production shaped traffic. |
 | `runtime` | block | Where and how long environments run. |
 | `github` | block | The pull request integration. |

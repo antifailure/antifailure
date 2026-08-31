@@ -501,7 +501,7 @@ func suggest(got string, siblings []string) string {
 // which keys are legal in which position.
 var knownKeys = []string{
 	"version", "name", "services", "database", "egress", "personas", "auth", "workflows",
-	"invariants", "insights", "load", "runtime", "github",
+	"invariants", "insights", "change", "load", "runtime", "github",
 	"path", "kind", "build", "command", "port", "health_path", "health_timeout",
 	"env", "replicas", "resources", "schedule", "migrate", "depends_on",
 	"strategy", "dockerfile", "target", "context", "image", "args", "allow_hosts",
@@ -526,6 +526,7 @@ var knownKeys = []string{
 	// so a typo of any of them got no suggestion. Found by the drift test,
 	// which is the point of having one.
 	"project", "api_key_env", "max_branches", "to",
+	"surface",
 }
 
 func editDistance(a, b string) int {

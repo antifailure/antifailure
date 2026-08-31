@@ -93,6 +93,20 @@ errors:
     docs: concepts/detection
     retryable: false
     exit_code: 3
+  - code: AF-DET-010
+    area: DET
+    message: "The changed files between {base} and {head} could not be read: {detail}"
+    next_step: "Fetch the base branch before running 'af change'. A checkout cloned one commit deep shares no history with it, which is what 'fetch-depth: 0' fixes in a GitHub Actions job."
+    docs: concepts/change-analysis
+    retryable: false
+    exit_code: 3
+  - code: AF-DET-011
+    area: DET
+    message: "The diff at {path} could not be read: {detail}"
+    next_step: "Produce it with 'git diff --unified=0 base...head'; this reads git's own unified format and nothing else."
+    docs: concepts/change-analysis
+    retryable: false
+    exit_code: 3
 
   # Secrets
   - code: AF-SEC-001

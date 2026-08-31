@@ -23,6 +23,41 @@ These work on every command.
 
 ## Commands
 
+### `af change`
+
+Read the diff and say which checks will exercise what it touched.
+
+What this change touches, and which checks cover it.
+
+Every changed path is classified by a rule that names it, and every check is
+reported as selected or not, together with whether the manifest configures it
+at all. A check that is selected and unavailable is the line worth reading:
+something changed and nothing is going to look at it.
+
+Two things it will not do. It never says a change is safe or risky; it says
+which checks exercise which files, and what it cannot see. And a path no rule
+recognises selects every check rather than none, because the cost of the two
+mistakes is not the same.
+
+  af change                          against the base branch this job names
+  af change --base origin/main       against a ref you choose
+  af change --diff pr.patch          against a diff you already have
+
+In a GitHub Actions job it writes one output per check, so a later step can
+skip work this change does not need.
+
+```
+af change [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--base` | - | Ref to measure against, defaulting to this job's base branch. |
+| `--branch` | - | Branch to read the manifest for, defaulting to the checked out one. |
+| `--diff` | - | Read a unified diff from this file instead of asking git. |
+| `--head` | - | Ref to measure, defaulting to HEAD. |
+| `-w`, `--write` | - | Write the report section here as markdown. |
+
 ### `af ci`
 
 Bring an environment up, run everything, write a report, tear it down.
