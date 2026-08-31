@@ -29,7 +29,14 @@ import (
 // keyring is last of the local sources because it is the long-lived default the
 // others exist to override, and anything an enterprise build registered comes
 // after all of them for the same reason.
-func LocalChain(root string, getenv func(string) string, reg *extension.Registry) *Chain {
+// The keyring is a parameter rather than resolved in here. It is the one
+// source that reaches outside the process, on macOS by running the security
+// command against the real login keychain, so a test that could not substitute
+// it would be a test that writes to the developer's keychain. Passing nil is a
+// machine with no credential store, which the chain reports and skips.
+func LocalChain(
+	root string, getenv func(string) string, reg *extension.Registry, ring Keyring,
+) *Chain {
 	local := []Source{
 		&EnvSource{
 			Label: "this shell's environment",
@@ -43,7 +50,7 @@ func LocalChain(root string, getenv func(string) string, reg *extension.Registry
 			filepath.Join(root, ".antifailure", "secrets.enc"),
 			StorePassphrase(getenv),
 		),
-		NewKeyringSource(NewSystemKeyring(), DefaultKeyringService),
+		NewKeyringSource(ring, DefaultKeyringService),
 	}
 	return NewChain(append(local, Registered(reg)...)...)
 }

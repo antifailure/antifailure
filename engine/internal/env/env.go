@@ -401,7 +401,7 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 	// One constructor, shared with af explain and with model key resolution, so
 	// that a command whose job is to say where a value will come from cannot
 	// describe a different chain than the one that resolves it.
-	return secrets.LocalChain(o.opts.Root, getenv, registry)
+	return secrets.LocalChain(o.opts.Root, getenv, registry, secrets.NewSystemKeyring())
 }
 
 // resolveSecrets looks up everything the manifest declares.

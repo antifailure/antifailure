@@ -117,7 +117,7 @@ func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string
 	// a question about a different lookup than the one that will actually
 	// happen, which is worse than not answering. Built by one constructor for
 	// exactly that reason.
-	chain := secrets.LocalChain(root, e.Getenv, extension.Default)
+	chain := secrets.LocalChain(root, e.Getenv, extension.Default, e.Keyring())
 
 	resolved, err := secrets.Resolve(ctx, chain, secrets.Request{
 		Declared: declared, Sandbox: sandbox, EnvID: "explain",

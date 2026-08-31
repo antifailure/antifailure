@@ -17,6 +17,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/redact"
+	"github.com/antifailure/antifailure/engine/internal/secrets"
 )
 
 // Version information, set by the linker at release time.
@@ -49,6 +50,19 @@ type Env struct {
 	// Credentials is where the personal token lives. Nil means this
 	// platform's own store; read through CredentialStore, never directly.
 	Credentials *auth.Store
+	// Ring is the OS credential store model keys are kept in. Nil means this
+	// platform's own; read through Keyring, never directly, for the same
+	// reason Credentials is: on macOS the real one is the login keychain and a
+	// test that could reach past this would write to the developer's.
+	Ring secrets.Keyring
+}
+
+// Keyring is the credential store a model key is written to and read from.
+func (e *Env) Keyring() secrets.Keyring {
+	if e.Ring != nil {
+		return e.Ring
+	}
+	return secrets.NewSystemKeyring()
 }
 
 // CredentialStore is where af login put the token.
@@ -91,6 +105,11 @@ type Options struct {
 	// WorkDir overrides the working directory. Tests set it; the binary does
 	// not, and reads the process directory instead.
 	WorkDir string
+	// Keyring overrides the OS credential store. Tests set it so that storing
+	// a model key cannot reach the developer's real keychain. A ring that
+	// reports secrets.ErrKeyringUnavailable is how a machine with no
+	// credential store at all is modelled.
+	Keyring secrets.Keyring
 	// Extra are commands contributed by a binary that embeds this one.
 	//
 	// It exists so that the enterprise binary's own commands appear in af
@@ -173,6 +192,7 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 		Stdin:       opts.Stdin,
 		WorkDir:     opts.WorkDir,
 		Credentials: opts.Credentials,
+		Ring:        opts.Keyring,
 	}
 	if env.WorkDir == "" {
 		wd, err := os.Getwd()

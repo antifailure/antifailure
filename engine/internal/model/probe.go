@@ -249,11 +249,13 @@ func classify(cfg Config, status int, payload []byte) Result {
 		}
 
 	case status == http.StatusNotFound, strings.Contains(lower, "model"):
-		// A 404 against a custom endpoint is much more often a gateway that
-		// does not serve this path than a model that does not exist, and
+		// A bare 404 against a custom endpoint is much more often a gateway
+		// that does not serve this path than a model that does not exist, and
 		// sending a self-hoster to check their model name would be the wrong
-		// half of the message.
-		if cfg.Custom() && status == http.StatusNotFound {
+		// half of the message. A gateway that answers with a message naming
+		// the model is believed, though: it has told us which of the two it
+		// is, and overriding that would be a guess beating an answer.
+		if cfg.Custom() && status == http.StatusNotFound && !strings.Contains(lower, "model") {
 			return Result{
 				Outcome: OutcomeUnknownModel,
 				Detail: orDefault(message, fmt.Sprintf(

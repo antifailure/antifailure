@@ -148,7 +148,7 @@ key is ever decrypted. This command is the one that needs nothing but a terminal
 // enterprise build registered comes last. A second ordering invented for model
 // keys would be a second thing to learn and a second thing to get wrong.
 func modelChain(e *Env) *secrets.Chain {
-	return secrets.LocalChain(e.WorkDir, e.Getenv, extension.Default)
+	return secrets.LocalChain(e.WorkDir, e.Getenv, extension.Default, e.Keyring())
 }
 
 // ---------------------------------------------------------------------------
@@ -467,7 +467,7 @@ removing it does not revoke one.`),
 				return err
 			}
 
-			where, err := model.Store(e.WorkDir, e.Getenv, provider, key)
+			where, err := model.Store(e.WorkDir, e.Getenv, e.Keyring(), provider, key)
 			if err != nil {
 				if errors.Is(err, model.ErrNoStore) {
 					return aferrors.Coded(aferrors.AFSEC004)
@@ -551,7 +551,7 @@ else.`),
 					args[0], strings.Join(model.Names(), ", "))
 			}
 
-			removed, err := model.Remove(e.WorkDir, e.Getenv, provider)
+			removed, err := model.Remove(e.WorkDir, e.Getenv, e.Keyring(), provider)
 			if err != nil {
 				return err
 			}

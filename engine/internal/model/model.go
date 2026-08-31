@@ -228,8 +228,10 @@ var ErrNoStore = errors.New("no keyring and no passphrase for the encrypted stor
 // It returns where the value went, because the user has to be told: those two
 // places have very different properties and a command that said "stored" for
 // either would be hiding the difference that matters.
-func Store(root string, getenv func(string) string, p Provider, key string) (string, error) {
-	if ring := secrets.NewSystemKeyring(); ring != nil {
+func Store(
+	root string, getenv func(string) string, ring secrets.Keyring, p Provider, key string,
+) (string, error) {
+	if ring != nil {
 		err := ring.Set(secrets.DefaultKeyringService, p.KeyVar, key)
 		if err == nil {
 			return "the system keyring", nil
@@ -256,9 +258,11 @@ func Store(root string, getenv func(string) string, p Provider, key string) (str
 // Removing something that is not there succeeds, for the same reason every
 // teardown does: the caller wanted it gone. It returns the places it actually
 // removed from, so the command can say whether anything was there.
-func Remove(root string, getenv func(string) string, p Provider) ([]string, error) {
+func Remove(
+	root string, getenv func(string) string, ring secrets.Keyring, p Provider,
+) ([]string, error) {
 	var removed []string
-	if ring := secrets.NewSystemKeyring(); ring != nil {
+	if ring != nil {
 		err := ring.Delete(secrets.DefaultKeyringService, p.KeyVar)
 		switch {
 		case err == nil:
