@@ -232,6 +232,61 @@ for (const file of pages) {
 // user reaches a link that goes nowhere. The assembled-site link check caught
 // it, which is the right outcome and the late one, so it is asserted here too
 // against every page rather than only the ones that end up in the site bundle.
+// The 404, which every mistyped URL on the live site reaches.
+//
+// It serves two robots tags: one from Next's own handling of this route and
+// one from not-found.tsx. They read `noindex` and `noindex, follow`, which
+// look like a disagreement about `follow` and are not one, because bare
+// `noindex` already implies it. Neither can be removed. Dropping the explicit
+// one does not leave the framework's behind on its own, it lets the root
+// layout's site-wide `index: true` through and ships `index, follow` on the
+// 404, which this check caught the moment it was tried.
+//
+// So the assertion is the property that matters rather than a tag count: no
+// robots tag on this page may permit indexing. That holds whether Next keeps
+// emitting its tag or stops, and it fails loudly if the layout's default ever
+// reaches this page again.
+//
+// The title is asserted here too. It carried the site name twice for as long
+// as the page has existed, which is invisible from source because the root
+// layout's template adds the duplication rather than anything written down.
+console.log("\nNot found");
+if (has("404.html")) {
+  const html = read("404.html");
+  const robots = [...html.matchAll(/<meta name="robots" content="([^"]*)"/gi)].map((m) => m[1]);
+  const permits = robots.filter((r) => !/noindex/i.test(r));
+  assert(
+    robots.length > 0 && permits.length === 0,
+    "no robots tag on the 404 permits indexing",
+    robots.length === 0
+      ? "the page carries no robots tag at all"
+      : `these permit it: ${permits.map((r) => JSON.stringify(r)).join(", ")}`,
+  );
+  // The strongest of the three claims this page was making. The root layout
+  // canonicalises the whole site to SITE_URL, so the 404 inherited it and told
+  // crawlers it WAS the home page. Google generally honours a rel=canonical
+  // over a noindex when the two conflict, and its canonicalization guidance
+  // separately says to check that a canonical target does not carry a noindex,
+  // so the pair invited consolidating the 404 into the home page and taking
+  // the noindex along.
+  //
+  // Asserted as a property rather than as an absence, so a later
+  // self-referential canonical still passes: the 404 may not point somewhere
+  // that is not itself.
+  const canonical = html.match(/<link rel="canonical" href="([^"]*)"/i)?.[1];
+  assert(
+    !canonical || /\/404(\.html)?$/.test(canonical),
+    "the 404 does not canonicalise to another page",
+    `it claims to be ${canonical}`,
+  );
+
+  const title = html.match(/<title>([^<]*)<\/title>/i)?.[1] ?? "";
+  const times = title.split("Antifailure").length - 1;
+  assert(times === 1, "the 404 title names the site once", `"${title}" names it ${times} times`);
+} else {
+  fail("the 404 page was built", "no 404.html in out/");
+}
+
 console.log("\nSkip link");
 const deadSkipLink = [];
 for (const file of pages) {
