@@ -397,29 +397,10 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 		registry = extension.Default
 	}
 
-	local := []secrets.Source{
-		&secrets.EnvSource{
-			Label: "this shell's environment",
-			Getenv: func(name string) (string, bool) {
-				v := getenv(name)
-				return v, v != ""
-			},
-		},
-		secrets.NewDotEnvSource(filepath.Join(o.opts.Root, ".env")),
-		secrets.NewFileStore(
-			filepath.Join(o.opts.Root, ".antifailure", "secrets.enc"),
-			secrets.StorePassphrase(getenv),
-		),
-		// Last of the local sources, and only where the platform has one. A
-		// keyring entry is the long lived default on a workstation; everything
-		// above it is a way to override that for one run.
-		secrets.NewKeyringSource(secrets.NewSystemKeyring(), secrets.DefaultKeyringService),
-	}
-	// Anything an enterprise build registered comes after every local source,
-	// for the same reason the keyring comes after .env: a company secret
-	// manager is the default the local ones exist to override. With nothing
-	// registered this appends nothing and the chain is unchanged.
-	return secrets.NewChain(append(local, secrets.Registered(registry)...)...)
+	// One constructor, shared with af explain and with model key resolution, so
+	// that a command whose job is to say where a value will come from cannot
+	// describe a different chain than the one that resolves it.
+	return secrets.LocalChain(o.opts.Root, getenv, registry)
 }
 
 // resolveSecrets looks up everything the manifest declares.
