@@ -18,6 +18,7 @@ import {
   Td,
   Th,
   inputClass,
+  selectClass,
 } from "@/components/ui";
 
 interface Rule {
@@ -162,7 +163,7 @@ function Explain({ repository }: { repository: string }) {
           />
         </Field>
         <Field label="Method">
-          <select className={inputClass} value={method} onChange={(e) => setMethod(e.target.value)}>
+          <select className={`mt-1.5 w-full ${selectClass}`} value={method} onChange={(e) => setMethod(e.target.value)}>
             {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
               <option key={m}>{m}</option>
             ))}
@@ -187,18 +188,23 @@ function Network({ repository }: { repository: string }) {
 
   return (
     <div className="space-y-6">
-      <Loaded state={effective} skeleton={<TableSkeleton rows={5} cols={4} />}>
-        {(policy) => (
-          <Card
-            title="Effective policy"
-            note={
-              <>
-                In evaluation order. Anything that matches no rule falls to the
-                default, which is <Badge tone={modeTone(policy.default)}>{policy.default}</Badge>
-              </>
-            }
-          >
-            {policy.rules.length === 0 ? (
+      <Card
+        title="Effective policy"
+        note={
+          effective.status === "ready" && effective.data ? (
+            <>
+              In evaluation order. Anything that matches no rule falls to the
+              default, which is{" "}
+              <Badge tone={modeTone(effective.data.default)}>{effective.data.default}</Badge>
+            </>
+          ) : (
+            "In evaluation order. Anything that matches no rule falls to the default."
+          )
+        }
+      >
+        <Loaded state={effective} skeleton={<TableSkeleton rows={5} cols={6} />}>
+          {(policy) =>
+            policy.rules.length === 0 ? (
               <Empty title="No rules">
                 Every destination falls to the default. That is a working
                 policy, not a missing one.
@@ -219,23 +225,23 @@ function Network({ repository }: { repository: string }) {
                   <tbody>
                     {policy.rules.map((r, i) => (
                       <Row key={`${r.host}-${i}`}>
-                        <Td numeric>{i + 1}</Td>
+                        <Td label="Order" numeric>{i + 1}</Td>
                         <Td mono>{r.host}</Td>
-                        <Td>
+                        <Td label="Mode">
                           <Badge tone={modeTone(r.mode)}>{r.mode}</Badge>
                         </Td>
-                        <Td mono>{r.paths?.length ? r.paths.join(", ") : "any"}</Td>
-                        <Td mono>{r.methods?.length ? r.methods.join(", ") : "any"}</Td>
-                        <Td className="max-w-[30ch]">{r.note ?? "--"}</Td>
+                        <Td label="Paths" mono>{r.paths?.length ? r.paths.join(", ") : "any"}</Td>
+                        <Td label="Methods" mono>{r.methods?.length ? r.methods.join(", ") : "any"}</Td>
+                        <Td label="Note" className="max-w-[30ch]">{r.note ?? "--"}</Td>
                       </Row>
                     ))}
                   </tbody>
                 </Table>
               </TableWrap>
-            )}
-          </Card>
-        )}
-      </Loaded>
+            )
+          }
+        </Loaded>
+      </Card>
 
       <Explain repository={repository} />
 
@@ -264,10 +270,10 @@ function Network({ repository }: { repository: string }) {
                     {rows.map((d, i) => (
                       <Row key={`${d.host}-${d.mode}-${i}`}>
                         <Td mono>{d.host ?? "unknown"}</Td>
-                        <Td>
+                        <Td label="Mode">
                           <Badge tone={modeTone(d.mode)}>{d.mode ?? "unknown"}</Badge>
                         </Td>
-                        <Td numeric>{Number(d.requests).toLocaleString()}</Td>
+                        <Td label="Requests" numeric>{Number(d.requests).toLocaleString()}</Td>
                       </Row>
                     ))}
                   </tbody>
@@ -283,7 +289,15 @@ function Network({ repository }: { repository: string }) {
 
 export default function NetworkPage() {
   return (
-    <Suspense fallback={<Page title="Network"><TableSkeleton /></Page>}>
+    <Suspense
+      fallback={
+        <Page title="Network">
+          <Card title="Effective policy">
+            <TableSkeleton rows={5} cols={6} />
+          </Card>
+        </Page>
+      }
+    >
       <Page
         title="Network"
         lede="The egress policy in the order it evaluates, a way to ask it about one request, and what the proxy has actually decided."
