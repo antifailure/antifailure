@@ -111,8 +111,6 @@ const (
 	AFDET001 Code = "AF-DET-001"
 	// Detection stopped after {budget} with partial results.
 	AFDET002 Code = "AF-DET-002"
-	// Services {first} and {second} both claim port {port}.
-	AFDET003 Code = "AF-DET-003"
 	// Detection could not decide {question}, and there is no default to
 	// fall back on.
 	AFDET004 Code = "AF-DET-004"
@@ -714,15 +712,6 @@ var catalog = map[Code]Entry{
 		NextStep:  "Add large directories to .gitignore or .dockerignore, or pass --detect-timeout to raise the budget.",
 		Docs:      "concepts/detection",
 		Retryable: true,
-		ExitCode:  ExitConfiguration,
-	},
-	AFDET003: {
-		Code:      AFDET003,
-		Area:      "DET",
-		Message:   "Services {first} and {second} both claim port {port}.",
-		NextStep:  "Give one of them a different port in antifailure.yaml.",
-		Docs:      "concepts/detection",
-		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
 	AFDET004: {
