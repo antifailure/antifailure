@@ -203,6 +203,80 @@ print(f"host config: {len(shipped['routes'])} routes, "
       f"{len(shipped.get('globalHeaders', {}))} global headers")
 ASSERT
 
+# A page this build produced that nobody can open.
+#
+# The redirects live in one file and the pages whose addresses they claim are
+# built from another, so nothing ever compared the two. Six retired product
+# pages are shadowed that way today, deliberately: components/layout/MovedPage.tsx
+# still answers /product/fidelity and the five beside it, because `output:
+# "export"` has no server to evaluate a next.config redirect and a preview host
+# serves the files without this route table. Correct for those six. For a
+# seventh it would be a page that builds, deploys, passes every check on the
+# site and cannot be reached, and nothing anywhere would say so. That is the
+# same dead capability as a function with no callers, wearing a working page.
+#
+# Read from www/public/staticwebapp.config.json rather than from the merged
+# result, so the file-form redirects generated above are excluded structurally
+# instead of by pattern. Every one of those claims the address of a page it
+# built, which is the entire point of them, and a pattern loose enough to skip
+# them is a pattern loose enough to skip a real one.
+#
+# What separates a deliberate shadow from a broken page is that the page agrees
+# with the host: a MovedPage stub writes location.replace(<target>) naming the
+# same address the 301 names, and declares noindex so the two addresses are not
+# one page twice to a crawler. A real page carries neither, and a stub whose
+# target has drifted from the config's carries the wrong one.
+python3 - <<'SHADOW' || exit 1
+import json, os, sys
+
+with open("www/public/staticwebapp.config.json", encoding="utf-8") as f:
+    declared = json.load(f)["routes"]
+
+
+def built(route):
+    """The file the site would serve at this address, if it built one."""
+    for candidate in (f"site{route}.html", f"site{route}/index.html"):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+problems = []
+shadowed = 0
+for rule in declared:
+    route, target = rule.get("route", ""), rule.get("redirect")
+    # A wildcard cannot be resolved to one page, and a header-only rule serves
+    # the page rather than answering instead of it.
+    if not target or "*" in route:
+        continue
+    page = built(route)
+    if page is None:
+        continue
+    shadowed += 1
+    with open(page, encoding="utf-8") as f:
+        html = f.read()
+    if f'location.replace("{target}")' not in html:
+        problems.append(
+            f"{route} is built as {page}, and this config answers that address "
+            f"with a 301 to {target}, so nobody reaches the page. Either drop "
+            f"the redirect, or make the page a MovedPage stub naming {target}."
+        )
+    elif 'name="robots" content="noindex' not in html:
+        problems.append(
+            f"{page} answers an address that 301s to {target} and is still "
+            f"indexable, so a crawler has one page on two addresses. "
+            f"movedMetadata sets the noindex this needs."
+        )
+
+if problems:
+    print("a redirect claims the address of a page this build produced:")
+    for problem in problems:
+        print(f"  {problem}")
+    sys.exit(1)
+
+print(f"host config: {shadowed} redirects shadow a built page, every one a moved-page stub")
+SHADOW
+
 # Assert the promises, rather than trusting the copies above. Each of these is
 # an address something already shipped points at.
 for required in \
