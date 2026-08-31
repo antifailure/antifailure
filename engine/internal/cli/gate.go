@@ -116,9 +116,9 @@ func migrationFindings(full insights.Full, p report.Policy) ([]report.Finding, *
 		for _, l := range r.Lint {
 			out = append(out, report.Finding{
 				// The lint rule's own name, not migration_lint. The policy key
-				// governs all six together and the finding says which one it
-				// was, because "migration_lint" in a comment tells nobody what
-				// to change.
+				// governs all seventeen together and the finding says which
+				// one it was, because "migration_lint" in a comment tells
+				// nobody what to change.
 				Rule: string(l.Rule), Level: p.MigrationLint, Where: l.Table,
 				Title:  sentence(l.Rule.Title()),
 				Detail: lintDetail(l),

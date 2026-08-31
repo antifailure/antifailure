@@ -112,6 +112,23 @@ func TestUnclaimedSubsetIsNotFlagged(t *testing.T) {
 	}
 }
 
+// A number joined to the token before it by a hyphen is part of that token.
+//
+// Found by declaring a set whose noun appears in markup, which none of the
+// earlier sets did: a class attribute puts several Tailwind classes within
+// three words of any noun that follows, and this exact string was read as a
+// claim that there are three verdicts.
+func TestHyphenatedNumberIsNotACount(t *testing.T) {
+	body := `<span className="gap-6 text-black/35"> lint rules</span>`
+	if f := found(t, body); len(f) != 0 {
+		t.Fatalf("a Tailwind class was read as a count: %s", f[0].why)
+	}
+	// The same number standing on its own is still a count.
+	if f := found(t, "There are 3 lint rules."); len(f) != 1 {
+		t.Fatalf("got %d findings, want 1: the hyphen guard swallowed a real count", len(f))
+	}
+}
+
 func TestCorrectCountIsSilent(t *testing.T) {
 	for _, text := range []string{
 		"Any of the seventeen migration lint rules.",

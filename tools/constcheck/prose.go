@@ -87,6 +87,17 @@ func checkCounts(name, body string, members map[string][]string) ([]finding, int
 		for _, m := range counted.FindAllStringSubmatchIndex(s.text, -1) {
 			word := strings.ToLower(s.text[m[2]:m[3]])
 			rest := s.text[m[1]:]
+			// A number joined to the token before it by a hyphen is part of
+			// that token, not a count. Tailwind writes leading-3, gap-4 and
+			// text-black/35, and a class attribute in TSX puts several of
+			// them within three words of any noun that happens to follow, so
+			// "leading-3 tracking-extra-tight text-black/35"> The verdict"
+			// was read as a claim that there are three verdicts. Found by
+			// declaring a set whose noun appears in markup, which none of the
+			// earlier sets did.
+			if m[2] > 0 && s.text[m[2]-1] == '-' {
+				continue
+			}
 			if h := hypothetical.FindStringIndex(s.text); h != nil && h[0] < m[0] {
 				continue
 			}

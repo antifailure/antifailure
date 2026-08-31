@@ -221,8 +221,12 @@ var unchecked = []struct{ name, why string }{
 		"no page counts or enumerates them, so there is no claim to check"},
 	{"change checks (7)",
 		`"checks" also names af doctor's ten and the three the manifest configures`},
-	{"rolling verdicts (5)",
-		`"verdicts" also names the run verdicts, a different set of a different size`},
+	{"verdicts, all three sets of them (5, 5 and 6)",
+		"five workflow verdicts, six run verdicts (warn is one) and five rolling " +
+			"verdicts share one noun. Declaring them was tried and produced two " +
+			"false alarms on correct prose and no true finding, because the only " +
+			"discriminators available are run, runner and workflow, and a sentence " +
+			"about workflow verdicts says \"a run that could not answer\""},
 	{"journal states, change statuses, doctor statuses, policy levels (3 to 4 each)",
 		"no prose counts them, and their nouns are among the most reused words in the tree"},
 }
