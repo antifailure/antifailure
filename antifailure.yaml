@@ -144,6 +144,13 @@ workflows:
   # Each string below was taken from the console's own source rather than
   # remembered, because the last set was written against a different
   # application and every workflow that used it came back unverified.
+  #
+  # Two rules that only a real run teaches, both of which were being broken
+  # here. An expectation describes the page the workflow ENDS on, so naming the
+  # signed out button beside a signed in one asks for a page that cannot exist.
+  # And it is checked against the page's visible text, which does not include a
+  # placeholder: `filter by action` is what that input says until somebody
+  # types in it, and it is not text on the page by any reading a browser gives.
   - name: sign-in-with-a-link
     description: >-
       As the owner, ask for a sign-in link with the email address, read the
@@ -154,8 +161,14 @@ workflows:
     # environment's front door rather than a route of its own.
     start_path: /environments
     expect:
-      - "Send a sign-in link"
+      # Where this ends, not where it starts. It said "Send a sign-in link"
+      # here, which is the button on the page the workflow leaves behind: once
+      # the link has been followed that string is gone, so the workflow could
+      # never pass however well it worked, and it never did.
       - "Sign out"
+      # Signed in as somebody in particular, which is the half of this that a
+      # session cookie alone would not prove.
+      - "Preview Owner"
     tags: [smoke, auth]
 
   - name: view-the-environment-matrix
@@ -201,9 +214,8 @@ workflows:
     persona: owner
     start_path: /audit
     expect:
-      - "Action"
+      - "Every action this organization has taken"
       - "Actor"
-      - "Filter by action"
     tags: [smoke, audit]
 
   - name: a-viewer-cannot-edit-policy

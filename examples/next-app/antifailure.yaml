@@ -52,3 +52,46 @@ egress:
   # payment through api.stripe.com, answered by the pack that ships with the
   # engine.
   default: block
+
+personas:
+  # One, and it never signs in. This application has no accounts and no sign in
+  # page: the orders page is public and that is the whole of its access model.
+  # `login: none` is how a manifest says so, and it is what sends the agent
+  # straight to the workflow's start path instead of hunting for a form that
+  # does not exist.
+  - name: visitor
+    email: visitor@example.test
+    role: customer
+    login: none
+
+# What the agent does here, and what it deliberately does not claim.
+#
+# The expectations name words that are on the page rather than sentences about
+# the product. Without a model key the runner reads the accessibility tree and
+# checks these strings against it, so "the totals are right" can be neither
+# confirmed nor contradicted by anything on screen: the run comes back
+# unverified, which is honest and useless. Naming the page's own headings and a
+# customer's own name makes the same check verifiable at no cost.
+#
+# What that cannot reach is the money column. The page formats it as $475.00
+# and the checker compares words, so the amount cannot be written as an
+# expectation without a model key. That is the boundary rather than a gap to
+# paper over: with a key the agent reads the page and can be asked about the
+# arithmetic, and without one this asserts that rows rendered from the branch
+# and stops there.
+workflows:
+  - name: read-the-spend-by-customer
+    description: >-
+      As the visitor, open the orders page and check that it shows the
+      customers the branch holds, each with how many orders they have placed
+      and what they have spent.
+    persona: visitor
+    start_path: /
+    expect:
+      # A row, so an empty table is not a pass. The empty state says "No
+      # customers yet" and shares only one of these words.
+      - "Katherine Johnson"
+      # The table's own column headings, so a page that rendered its empty
+      # state instead of its table is not one either.
+      - "Customer Email Orders Spent"
+    tags: [smoke]

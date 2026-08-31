@@ -51,3 +51,50 @@ egress:
   # ../go-api, which takes a payment through api.stripe.com answered by the
   # pack that ships with the engine.
   default: block
+
+personas:
+  # One, and it never signs in. Django's own admin is not installed here and
+  # this service has no sign in of its own: every route is public, which is the
+  # whole of its access model. `login: none` is how a manifest says so, and it
+  # is what sends the agent straight to the workflow's start path instead of
+  # hunting for a form that does not exist.
+  - name: analyst
+    email: analyst@example.test
+    role: customer
+    login: none
+
+# What the agent does here, and what a browser can honestly do to an API.
+#
+# This service answers JSON and serves no HTML, so there is no form to fill and
+# no button to press. The browser renders the response as text and the agent
+# reads it, which makes a workflow here a read and a judgement rather than a
+# drive. Writing one that claimed to place an order through a page that does
+# not exist would be a test of nothing: it would come back blocked forever
+# while looking like a feature.
+#
+# The expectations name words that are in the response rather than sentences
+# about the product. Without a model key the runner checks them against the
+# text on the page, and a sentence like "the totals are right" shares no word
+# with a JSON body, so it can be neither confirmed nor contradicted and the run
+# comes back unverified: honest, and useless.
+workflows:
+  - name: read-what-each-customer-has-spent
+    description: >-
+      As the analyst, open the customer list and check that it carries every
+      seeded customer along with the aggregate taken across the foreign key:
+      how many orders each has placed, and what those came to.
+    persona: analyst
+    start_path: /customers
+    expect:
+      # A customer with no orders at all, which is the row that exercises the
+      # branch where Sum returns null and the view has to answer 0 rather than
+      # nothing.
+      - "Alan Turing"
+      # Katherine's two orders come to 47500 cents, and that number appears
+      # only when the aggregate crossed customers.id to orders.customer_id.
+      # Masking rewrites both sides and `link: customer` in masking.yaml is
+      # what keeps them together; break that and every customer reports zero
+      # spent, the expectation stops matching, and the run stops passing. That
+      # is the failure this example exists to make visible.
+      - "spent 47500"
+    tags: [smoke]
