@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -174,14 +175,14 @@ type environment struct {
 	Running   int
 }
 
-func listEnvironments(cmd *cobra.Command, e *Env) ([]environment, error) {
+func listEnvironments(ctx context.Context, e *Env) ([]environment, error) {
 	rt, err := inventoryRuntime(e)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rt.Close() }()
 
-	items, err := rt.Inventory(cmd.Context())
+	items, err := rt.Inventory(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +229,7 @@ func newEnvListCommand(e *Env) *cobra.Command {
 		Short: "List the environments this machine is holding",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			envs, err := listEnvironments(cmd, e)
+			envs, err := listEnvironments(cmd.Context(), e)
 			if err != nil {
 				return err
 			}
@@ -282,7 +283,7 @@ before doing it, because removing somebody's environment while they are looking
 at it is the kind of help nobody wants.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			envs, err := listEnvironments(cmd, e)
+			envs, err := listEnvironments(cmd.Context(), e)
 			if err != nil {
 				return err
 			}
