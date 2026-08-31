@@ -228,15 +228,19 @@ describe('the environments projection', {
 
   it('ordering: torn down with nothing before it, because the run was torn down before the row existed', async () => {
     const id = envId('torn-down-first')
-    await send([event('environment.torn_down', id, 4)])
+    const at = new Date(h.clock.now().getTime() - 45 * 60 * 1000)
+    await send([event('environment.torn_down', id, 4, { occurredAt: at.toISOString() })])
 
     const row = await one(id)
     assert.equal(row.state, 'torn_down')
-    assert.notEqual(row.torn_down_at, null)
-    // The whole point of recording it rather than ignoring it: an environment
-    // that was held and then torn down is on the bill, and an environment the
-    // control plane never recorded is not.
-    assert.notEqual(row.created_at, null)
+    assert.equal(row.torn_down_at!.toISOString(), at.toISOString())
+    // Both ends of the interval land on the teardown, so this environment
+    // bills zero. That is the honest answer rather than a shortcoming: af down
+    // runs in a separate process that cannot know when the environment came
+    // up, and no event ever told this control plane. Recording the row at all
+    // is what matters, because a torn down environment that was never recorded
+    // is invisible to the console as well as to the bill.
+    assert.equal(row.created_at.toISOString(), at.toISOString())
   })
 
   it('ordering: the creating event was lost and the bill still starts at the build, not at the report', async () => {
