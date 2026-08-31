@@ -25,6 +25,21 @@ export default defineConfig({
       // One theme, not a light/dark pair. The site commits to a single light
       // appearance and the theme toggle is off, so a second code theme would
       // only ever be dead configuration.
+      //
+      // BEFORE YOU DEBUG A CODE BLOCK THAT RENDERS COMPLETELY UNSTYLED: it is
+      // almost certainly Astro's cache, not this config and not the CSS. Astro
+      // keeps a stale reference to the Expressive Code stylesheet across a
+      // change to this block, so the HTML links a hashed file the build no
+      // longer emits. The page 404s its own code CSS silently, the frame loses
+      // the overflow-x it gets from that stylesheet, and one wide line then
+      // pushes the whole page sideways on a phone. It looks exactly like a
+      // theme that was never applied, which is an hour spent re-theming code
+      // blocks that were already themed. Any change in here needs:
+      //
+      //     rm -rf dist .astro node_modules/.astro
+      //
+      // Confirm it by comparing the ec.<hash>.css the HTML asks for against
+      // what is really in dist/_astro.
       expressiveCode: {
         themes: [codeTheme],
         // One theme, so there is no media query to pick between two. Do not

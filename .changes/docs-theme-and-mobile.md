@@ -35,3 +35,24 @@ The rule above every `h2` was `display: inline` and therefore only as wide as
 its own text: 146px in a 343px column. It now spans the column, which is what it
 was for. The footer's copyright measured 4.13:1 and is now 5.9:1, the page
 carries two corner radii instead of six, and no page scrolls sideways at 375px.
+
+Two local traps cost time on this change and are recorded so they cost nobody
+else any. Both produce an error that points at the wrong file.
+
+An install that is stale against its own lockfile lies about the cause. `docs/`
+had Starlight 0.36.3 against a lockfile pinning 0.41.10, and the build failed
+with "Invalid config passed to starlight integration" naming every sidebar
+group. The config was correct and `npm ci` fixed it. `www/` had Next 15.5.23
+against a lockfile pinning 16.3.3, which is the more dangerous direction: a
+stale major masks a real break rather than causing one. Run `npm ci` in any
+workspace before concluding anything about its source.
+
+Astro keeps a stale reference to the Expressive Code stylesheet across a change
+to the `expressiveCode` config, so the HTML links a hashed CSS file the build no
+longer emits. The 404 is silent, and because the frame's own `overflow-x` lives
+in that stylesheet, code blocks render completely unstyled and one wide line
+pushes the whole page sideways on a phone. It is indistinguishable from a theme
+that was never applied. Any change there needs
+`rm -rf dist .astro node_modules/.astro`, and the way to confirm it is to
+compare the `ec.<hash>.css` the HTML asks for against what is in `dist/_astro`.
+There is a comment saying so above the config itself.
