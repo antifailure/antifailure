@@ -377,6 +377,11 @@ relnotes:
 # No version pin names a tag nobody has published. The Terraform image_tag
 # defaults are live, so bumping them with the tag rather than after it points
 # the next apply at an image that does not exist.
+#
+# It also holds the four version literals in the verification page to the
+# release being cut, and holds them strictly: naming an older tag that really
+# was published is the defect that shipped, since the page then tells a reader
+# to fetch a bundle that release does not carry.
 tagsync:
     go run ./tools/tagsync .
 

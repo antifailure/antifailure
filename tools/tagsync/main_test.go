@@ -180,3 +180,89 @@ func write(t *testing.T, dir, name, body string) {
 		t.Fatal(err)
 	}
 }
+
+// The four version literals in the verification page, read off the real file.
+// Each one is a separate pin because a bump that moves one and forgets another
+// leaves a page that verifies one release and rebuilds a different one, and
+// that reads as correct in a diff.
+func TestTheVerificationPagesVersionsAreAllRead(t *testing.T) {
+	const page = "docs/src/content/docs/security/releases.md"
+	var found []string
+	for _, p := range pins {
+		if p.file != page {
+			continue
+		}
+		value, err := read("../..", p)
+		if err != nil {
+			t.Errorf("%s: %v", p.what, err)
+			continue
+		}
+		if p.bare {
+			value = "v" + value
+		}
+		found = append(found, value)
+	}
+	if len(found) != 4 {
+		t.Fatalf("read %d version literals from %s, want 4", len(found), page)
+	}
+	for _, v := range found[1:] {
+		if v != found[0] {
+			t.Errorf("the page names %v, which is more than one release; a reader "+
+				"would verify one and rebuild another", found)
+			break
+		}
+	}
+}
+
+// The distinction that makes this check worth having, and it is not obvious.
+//
+// Under `released` a pin may name any published tag, which is right for a chart
+// installed from any of them. For a worked example it is wrong, and it is the
+// exact defect that shipped: the page said v0.1.0 while v0.1.1 was the newest
+// release, v0.1.0 was a real published tag, and so a check asking only "does
+// this tag exist" would have called it fine. The page's instructions did not
+// work against v0.1.0 at all.
+func TestAWorkedExampleMayNotNameAnOlderPublishedTag(t *testing.T) {
+	published := map[string]bool{"v0.1.0": true, "v0.1.1": true}
+	const pending = "v1.0.0"
+
+	// Named as `released`, an older published tag is acceptable.
+	if !(published["v0.1.0"] || "v0.1.0" == pending) {
+		t.Fatal("v0.1.0 should be acceptable to a released pin, and is not")
+	}
+
+	// Named as `current`, only the release being prepared is.
+	if "v0.1.0" == pending {
+		t.Fatal("the fixture is wrong: v0.1.0 must not equal the pending release")
+	}
+	for _, p := range pins {
+		if p.kind != current {
+			continue
+		}
+		if p.file != "docs/src/content/docs/security/releases.md" {
+			t.Errorf("%s is marked current but is not the verification page; "+
+				"current is strict and should be applied deliberately", p.file)
+		}
+	}
+}
+
+// Every pin the verification page contributes is `current`, not `released`.
+// Downgrading one to `released` would silently restore the original defect for
+// that literal while leaving the others strict, which is worse than either.
+func TestTheVerificationPagesPinsAreAllStrict(t *testing.T) {
+	const page = "docs/src/content/docs/security/releases.md"
+	n := 0
+	for _, p := range pins {
+		if p.file != page {
+			continue
+		}
+		n++
+		if p.kind != current {
+			t.Errorf("%s is %v, want current: a worked example has to name the "+
+				"release it ships in, not merely a tag that exists", p.what, p.kind)
+		}
+	}
+	if n == 0 {
+		t.Fatal("no pins for the verification page, so this proved nothing")
+	}
+}
