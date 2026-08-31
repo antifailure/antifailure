@@ -92,7 +92,7 @@ the checks behind this page still describe what is about to run. Ask, rather
 than assume:
 
 ```sh
-git diff --stat 9fc46b6..origin/main -- \
+git diff --stat 98ee158..origin/main -- \
   .github/workflows/release.yml .github/workflows/cd.yml \
   tools/release/ tools/sbomcheck/ tools/ldcheck/ deploy/cd/ install.sh \
   web/packages/db/migrations/
