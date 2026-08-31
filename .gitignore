@@ -143,11 +143,13 @@ runner/artifacts/
 /proxysrc
 /readability
 /release
+/relnotes
 /reltar
 /schemadoc
 /sbomcheck
 /scanrepo
 /site
+/tagsync
 /vulncheck
 /walkthrough
 engine/af-proxy
