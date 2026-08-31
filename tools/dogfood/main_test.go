@@ -319,3 +319,75 @@ func TestVerdicts_APassIsNotAFinding(t *testing.T) {
 		t.Errorf("verdicts %v, want one passed and five blocked", run.Verdicts)
 	}
 }
+
+// TestUnreadableStream_SaysWhichChecksDidNotRun is the second half of the
+// directory mismatch, and the half that was silent.
+//
+// readEvents said "No event log under ..." and stopped, which is honest about
+// the file and says nothing about the four assertions that live after the
+// early return. Two runs in CI printed that one line and the word green, and
+// what a reader took from it was that the log was missing. What was actually
+// true is that nothing had checked the budgets, the teardown, the leaked
+// resource count, or the leak sweep.
+func TestUnreadableStream_SaysWhichChecksDidNotRun(t *testing.T) {
+	run := &Run{Green: true}
+	r := &runner{root: t.TempDir()}
+	r.readEvents(run)
+
+	joined := strings.Join(run.Findings, "\n")
+	if !strings.Contains(joined, "No event log under") {
+		t.Errorf("nothing said the log was missing: %v", run.Findings)
+	}
+	for _, want := range []string{
+		"per phase budgets",
+		"torn down",
+		"leaking",
+		"leak sweep",
+		"They were not asked",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the findings do not mention %q, so a reader cannot tell a check "+
+				"that did not run from one that passed:\n%s", want, joined)
+		}
+	}
+	// Still green. The change under test did nothing wrong, and a job that
+	// fails for this is a job people learn to ignore. The findings are what
+	// keep the run out of the streak.
+	if !run.Green {
+		t.Error("an unreadable stream failed the job rather than reporting it")
+	}
+}
+
+// TestLeakCheck_NotSweptIsNotClean is the one that was genuinely silent.
+//
+// leaks() returns nil on its first line for an unnamed environment, and nil is
+// also what a clean sweep returns, so `"leaked": null` in the record meant
+// either. The environment identifier only ever comes from the event stream, so
+// with the stream unreadable every run in CI reported a clean teardown it had
+// never looked for, and printed nothing at all about it.
+func TestLeakCheck_NotSweptIsNotClean(t *testing.T) {
+	r := &runner{root: t.TempDir()}
+
+	unnamed := &Run{Green: true}
+	r.sweep(unnamed)
+	if unnamed.Swept {
+		t.Error("an unnamed environment was recorded as swept")
+	}
+	if len(unnamed.Findings) != 1 || !strings.Contains(unnamed.Findings[0], "did not run") {
+		t.Fatalf("findings %v, want one saying the sweep did not run", unnamed.Findings)
+	}
+
+	// A named environment with nothing left behind is the other value. Without
+	// this half, the check above passes against a sweep that never runs.
+	named := &Run{Green: true, Environment: "antifailure-nothing-here-000000"}
+	r.sweep(named)
+	if !named.Swept {
+		t.Error("a named environment was not recorded as swept")
+	}
+	if len(named.Findings) != 0 {
+		t.Errorf("findings %v, want none: the sweep ran and found nothing", named.Findings)
+	}
+	if len(named.Leaked) != 0 {
+		t.Errorf("leaked %v, want none", named.Leaked)
+	}
+}

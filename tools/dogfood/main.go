@@ -204,6 +204,10 @@ type Run struct {
 	Events map[string]int `json:"events,omitempty"`
 	// Leaked names resources still present after teardown. Any is a failure.
 	Leaked []string `json:"leaked,omitempty"`
+	// Swept says the leak check actually ran. Without it an empty Leaked is
+	// two different facts wearing one value: nothing was left behind, or
+	// nothing was looked for. The second was true of every run in CI.
+	Swept bool `json:"swept"`
 	// Verdicts counts what the workflows returned, by verdict. A run with
 	// nothing but `blocked` in here reached no verdict at all, which is the
 	// shape a streak must not be built out of.
@@ -262,15 +266,7 @@ func (r *runner) do() *Run {
 	}
 
 	if !r.keep {
-		run.Leaked = r.leaks(run.Environment)
-		if len(run.Leaked) > 0 {
-			run.Green = false
-			run.Findings = append(run.Findings, fmt.Sprintf(
-				"Teardown left %d resources behind: %s. An environment that outlives "+
-					"its run is the leak this product exists to prevent, so this is a "+
-					"product bug rather than a flake.",
-				len(run.Leaked), strings.Join(run.Leaked, ", ")))
-		}
+		r.sweep(run)
 	}
 
 	if interrupted {
@@ -403,6 +399,31 @@ func verdicts(report string) map[string]int {
 	return out
 }
 
+// unreadable names the checks that did not happen, rather than leaving them
+// looking like checks that passed.
+//
+// Every assertion in readEvents sits after the read, so an unreadable stream
+// skips all of them and the record comes back with nothing to say. The sharpest
+// one is the teardown assertion: `env.destroyed == 0` sets the run not green,
+// and it is downstream of the read, so a missing log disables the guard whose
+// entire job is to notice that nothing recorded the teardown. It cannot fire on
+// the condition it was written for.
+//
+// So the run says so, in the terms a person acts on. It is a finding rather
+// than a failure for the same reason blocked is: the change under test did
+// nothing wrong, and failing it would teach people to ignore this job. What the
+// finding buys is the streak, which is ten runs green with no findings, and a
+// run that measured nothing must not be one of them.
+func unreadable(run *Run, where string) {
+	run.Findings = append(run.Findings, fmt.Sprintf(
+		"Four checks did not run, because all four read the event stream and %s "+
+			"could not be read: the per phase budgets, the assertion that something "+
+			"recorded the environment being torn down, the count of resources the "+
+			"engine reported leaking, and the leak sweep, which is scoped to the "+
+			"environment the stream names. None of them passed. They were not asked.",
+		where))
+}
+
 // The timings come from typed events rather than from the prose af ci prints,
 // which matters for a reason beyond taste: the prose has no clock in it. A
 // section heading tells you a step was reached and nothing about what it cost,
@@ -418,16 +439,19 @@ func (r *runner) readEvents(run *Run) {
 		run.Findings = append(run.Findings, fmt.Sprintf(
 			"No event log under %s, so this run has no machine readable record of "+
 				"what it did and no per step timing.", dir))
+		unreadable(run, dir)
 		return
 	}
 	events, err := readLog(path, run.StartedAt)
 	if err != nil {
 		run.Findings = append(run.Findings, "The event log could not be read: "+err.Error())
+		unreadable(run, path)
 		return
 	}
 	if len(events) == 0 {
 		run.Findings = append(run.Findings, fmt.Sprintf(
 			"The event log at %s carries nothing from this run.", path))
+		unreadable(run, path)
 		return
 	}
 
@@ -594,6 +618,35 @@ func readLog(path string, since time.Time) ([]logEvent, error) {
 //
 // The environment identifier comes from the event stream, so a run that
 // produced no events reports nothing rather than reporting everything.
+// sweep asks whether teardown left anything behind, and records whether it was
+// able to ask at all.
+//
+// Not swept and swept clean were the same answer here for as long as this file
+// existed: leaks() returns nil on its first line for an unnamed environment,
+// and nil is also what a clean sweep returns, so `"leaked": null` in the record
+// meant either one and a reader had no way to tell them apart. The environment
+// identifier comes only from the event stream, so every run that could not read
+// the stream reported a clean teardown it had never looked for, and said
+// nothing while doing it.
+func (r *runner) sweep(run *Run) {
+	if run.Environment == "" {
+		run.Findings = append(run.Findings, "The leak check did not run. It is "+
+			"scoped to the environment the event stream names and this run named "+
+			"none, so nothing here says whether teardown left anything behind.")
+		return
+	}
+	run.Swept = true
+	run.Leaked = r.leaks(run.Environment)
+	if len(run.Leaked) > 0 {
+		run.Green = false
+		run.Findings = append(run.Findings, fmt.Sprintf(
+			"Teardown left %d resources behind: %s. An environment that outlives "+
+				"its run is the leak this product exists to prevent, so this is a "+
+				"product bug rather than a flake.",
+			len(run.Leaked), strings.Join(run.Leaked, ", ")))
+	}
+}
+
 func (r *runner) leaks(envID string) []string {
 	if envID == "" {
 		return nil
