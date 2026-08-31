@@ -138,24 +138,6 @@ func ManagedUntil(kind, envID string, now, expires time.Time) map[string]string 
 	return l
 }
 
-// ExpiresAt reads the expiry a label set carries.
-//
-// The second result is false when there is no expiry and when there is one
-// that does not parse. Both mean the same thing to a caller that is deciding
-// whether to destroy something: nothing here states a lifetime, so nothing
-// here may be destroyed on account of one.
-func ExpiresAt(labels map[string]string) (time.Time, bool) {
-	raw, ok := labels[LabelExpires]
-	if !ok || raw == "" {
-		return time.Time{}, false
-	}
-	secs, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return time.Unix(secs, 0).UTC(), true
-}
-
 // IsOurs reports whether a label set belongs to Antifailure.
 //
 // Every destructive operation goes through this. A resource that does not
