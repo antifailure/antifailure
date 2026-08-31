@@ -124,7 +124,8 @@ func TestModelSet_SaysWhenTheStoredKeyIsShadowed(t *testing.T) {
 	shown := runModelCLI(t, dir,
 		map[string]string{"ANTHROPIC_API_KEY": "sk-exported-long-ago"},
 		ring, "", "model", "show")
-	require.Contains(t, shown.stdout, "There is another ANTHROPIC_API_KEY in the system keyring")
+	require.Contains(t, shown.stdout,
+		"ANTHROPIC_API_KEY is also set in the system keyring")
 }
 
 func TestModelSet_StoresAndResolves(t *testing.T) {
@@ -202,8 +203,9 @@ func TestModelRemove_NamesWhatStillSuppliesAKey(t *testing.T) {
 		ring, "", "model", "rm", "anthropic")
 	require.Zero(t, res.code)
 	require.Contains(t, res.stdout, "Removed the anthropic key from the system keyring")
-	require.Contains(t, res.stdout, "still supplied by this shell's environment")
-	require.Contains(t, res.stdout, "cannot reach there")
+	require.Contains(t, res.stdout,
+		"ANTHROPIC_API_KEY is still set in this shell's environment")
+	require.Contains(t, res.stdout, "This command cannot reach there")
 	require.NotContains(t, res.stdout, "sk-still-exported")
 }
 

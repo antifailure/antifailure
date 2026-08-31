@@ -257,9 +257,9 @@ until they disagree, and then the only useful sentence is which one won.`),
 			// why the key they stored is not the one in use.
 			if shadow := shadowedBy(ctx, chain, cfg); shadow != "" {
 				e.Out.Println("")
-				e.Out.Printf("  %s also holds a %s, and it is asked first, so that is the one in use.\n",
-					strings.ToUpper(cfg.Source[:1])+cfg.Source[1:], cfg.Provider.KeyVar)
-				e.Out.Printf("  %s\n", shadow)
+				e.Out.Printf("  %s is also set in %s, which is asked after\n",
+					cfg.Provider.KeyVar, shadow)
+				e.Out.Printf("  %s. Unset the one here to use that one instead.\n", cfg.Source)
 			}
 			return nil
 		},
@@ -267,7 +267,7 @@ until they disagree, and then the only useful sentence is which one won.`),
 	return cmd
 }
 
-// shadowedBy reports whether a lower priority source also holds a key.
+// shadowedBy names a lower priority source that also holds a key, or nothing.
 //
 // It exists for one specific confusion, which is the most likely thing to
 // happen the first time somebody uses this: they have ANTHROPIC_API_KEY
@@ -288,9 +288,7 @@ func shadowedBy(ctx context.Context, chain *secrets.Chain, cfg *model.Config) st
 		// a real second copy rather than guessing that one might exist.
 		if value, _, ok, err := chain.LookupIn(ctx, source, cfg.Provider.KeyVar); err == nil && ok {
 			if strings.TrimSpace(value.Reveal()) != "" {
-				return fmt.Sprintf(
-					"There is another %s in %s. Remove the one in %s to use it.",
-					cfg.Provider.KeyVar, source, cfg.Source)
+				return source
 			}
 		}
 	}
@@ -391,7 +389,7 @@ says nothing about the new one.`),
 					result.Latency.Milliseconds(), cfg.Fingerprint)
 				return nil
 			}
-			return modelProbeError(cfg.Provider.Name, result)
+			return modelProbeError(cfg.Provider.Display, result)
 		},
 	}
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second,
@@ -499,9 +497,9 @@ removing it does not revoke one.`),
 			e.Out.Printf("  Stored the %s key in %s.\n", provider.Name, where)
 			if shadow != "" {
 				e.Out.Println("")
-				e.Out.Printf("  It is not the key runs will use: %s also holds a %s and is\n",
-					shadow, provider.KeyVar)
-				e.Out.Println("  asked first. Unset that one, or this has no effect.")
+				e.Out.Printf("  It is not the key runs will use. %s is also set\n", provider.KeyVar)
+				e.Out.Printf("  in %s, which is asked first.\n", shadow)
+				e.Out.Println("  Unset it there, or storing this one has no effect.")
 				return nil
 			}
 			e.Out.Println("")
@@ -586,9 +584,9 @@ else.`),
 			}
 			if remaining != "" {
 				e.Out.Println("")
-				e.Out.Printf("  A %s is still supplied by %s, so runs will keep using one.\n",
-					provider.KeyVar, remaining)
-				e.Out.Println("  This command cannot reach there; unset it yourself.")
+				e.Out.Printf("  %s is still set in %s, so runs\n", provider.KeyVar, remaining)
+				e.Out.Println("  will keep using a key. This command cannot reach there:")
+				e.Out.Println("  unset it yourself.")
 				return nil
 			}
 			if len(removed) > 0 {

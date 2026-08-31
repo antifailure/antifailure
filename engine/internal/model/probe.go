@@ -208,12 +208,12 @@ func classify(cfg Config, status int, payload []byte) Result {
 			return Result{
 				Outcome: OutcomeUnreadable,
 				Detail: fmt.Sprintf(
-					"%s answered %d with a body that is not a %s completion.",
-					hostOf(cfg.BaseURL), status, cfg.Provider.Name),
+					"%s answered %d, and the body is not what the %s API returns.",
+					hostOf(cfg.BaseURL), status, cfg.Provider.Display),
 				NextStep: fmt.Sprintf(
 					"Point %s at an endpoint that speaks the %s API. A gateway has to "+
 						"answer %s with the provider's own response shape.",
-					cfg.Provider.BaseURLVar, cfg.Provider.Name, cfg.Provider.Path),
+					cfg.Provider.BaseURLVar, cfg.Provider.Display, cfg.Provider.Path),
 			}
 		}
 		return Result{
@@ -244,8 +244,8 @@ func classify(cfg Config, status int, payload []byte) Result {
 			Outcome: OutcomeNoCredit,
 			Detail:  orDefault(message, "the account cannot pay for this call."),
 			NextStep: fmt.Sprintf(
-				"The key is valid and the account has nothing to spend. Add credit at %s. "+
-					"Retrying will not help.", cfg.Provider.Name),
+				"The key is valid and the account has nothing to spend. Add credit to your "+
+					"%s account. Retrying will not help.", cfg.Provider.Display),
 		}
 
 	case status == http.StatusNotFound, strings.Contains(lower, "model"):
@@ -296,8 +296,8 @@ func classify(cfg Config, status int, payload []byte) Result {
 		Outcome: OutcomeUnreadable,
 		Detail: orDefault(message, fmt.Sprintf(
 			"%s answered %d.", hostOf(cfg.BaseURL), status)),
-		NextStep: fmt.Sprintf("Check that %s is the base of a %s compatible API.",
-			cfg.BaseURL, cfg.Provider.Name),
+		NextStep: fmt.Sprintf("Check that %s is the base of an API compatible with %s.",
+			cfg.BaseURL, cfg.Provider.Display),
 	}
 }
 

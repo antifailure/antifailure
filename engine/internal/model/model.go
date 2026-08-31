@@ -41,6 +41,11 @@ import (
 type Provider struct {
 	// Name is what a user types: "anthropic".
 	Name string
+	// Display is the provider's own spelling of itself, for a sentence. Two
+	// names rather than a strings.Title call, because "OpenAI" is not what
+	// capitalising "openai" produces and a message that gets somebody's brand
+	// wrong reads as carelessness about everything else on the screen.
+	Display string
 	// KeyVar is the variable the key is looked up under, and the name it is
 	// stored under. It is the provider's own conventional name rather than
 	// something of ours, so that a machine already set up for the provider's
@@ -65,6 +70,7 @@ type Provider struct {
 var Providers = []Provider{
 	{
 		Name:           "anthropic",
+		Display:        "Anthropic",
 		KeyVar:         "ANTHROPIC_API_KEY",
 		BaseURLVar:     "ANTHROPIC_BASE_URL",
 		DefaultBaseURL: "https://api.anthropic.com",
@@ -73,6 +79,7 @@ var Providers = []Provider{
 	},
 	{
 		Name:           "openai",
+		Display:        "OpenAI",
 		KeyVar:         "OPENAI_API_KEY",
 		BaseURLVar:     "OPENAI_BASE_URL",
 		DefaultBaseURL: "https://api.openai.com",
