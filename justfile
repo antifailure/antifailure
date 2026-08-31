@@ -68,10 +68,12 @@ gate: _reports
     run "documented paths exist"         just claimcheck
     run "documented manifests are valid" just manifestcheck
     run "prose reads like a person"      just prosecheck
+    run "every figure has a source"      just figurecheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
     run "prose style"                    just vale
     run "every link resolves"            just links
+    run "the built docs carry their head" just docscheck
     run "prose stays readable"           just readability
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
@@ -85,6 +87,7 @@ gate: _reports
     run "this platform's keyring"        just keyring
     run "the other platforms lint"       just lint-platforms
     run "control plane"                  just test-web
+    run "the site API"                   just test-site-api
     run "runner"                         just test-runner
     run "edition boundary"               just edition
     run "enterprise"                     just test-ee
@@ -285,7 +288,7 @@ build-release version="dev":
 # ---------------------------------------------------------------------------
 
 # The unit and property tests, everywhere.
-test: test-engine test-tools test-web test-runner
+test: test-engine test-tools test-web test-runner test-site-api
 
 test-engine:
     cd engine && go test ./... -race -timeout 30m
@@ -314,6 +317,13 @@ test-web:
 
 test-runner:
     npm --prefix runner test
+
+# The marketing site's own backend: api/, one anonymous write endpoint and the
+# catch-all that answers everything else. Its own package rather than a
+# workspace, because Static Web Apps deploys that directory as it stands.
+test-site-api:
+    npm --prefix api ci --no-audit --no-fund
+    npm --prefix api test
 
 # Fanned out over ee/web's workspaces rather than naming each package, so an
 # enterprise package added later is covered without editing this or CI. Naming
@@ -366,6 +376,14 @@ docexamples:
 # The punctuation this project does not use.
 prosecheck:
     go run ./tools/prosecheck .
+
+# Every number on the site that reads as a measurement has a stated source.
+#
+# The site rendered an invented "fid 87%" fidelity score on two product pages.
+# It was drawn client side, so curl found no "87" in the HTML and every cheap
+# audit came back clean. This reads the source instead.
+figurecheck:
+    go run ./tools/figurecheck .
 
 # Spelling, with the project dictionary in tools/docs/dictionary.txt.
 spell:
@@ -550,6 +568,18 @@ forbidden:
 claimcheck:
     go run ./tools/claimcheck .
 
+# The built documentation carries its head, and its entity graph resolves.
+#
+# check-seo.mjs reads www/out and never opens docs/dist, so the documentation,
+# which is 76 of the site's roughly 90 pages, had no gate with an opinion about
+# what it renders. Six head entries went missing for every one of those pages
+# and every stage stayed green, because no stage was looking.
+#
+# Needs the docs built. It fails rather than skipping when docs/dist is absent,
+# because a gate that is green about nothing is the gap it closes.
+docscheck:
+    go run ./tools/docscheck .
+
 # Every manifest shown in the documentation is one the engine would accept.
 #
 # The gates already read style, spelling, links and repository paths, and none
@@ -569,10 +599,76 @@ gatecheck:
 typecheck:
     #!/usr/bin/env bash
     set -euo pipefail
-    for p in packages/db packages/policy apps/api; do
-      npx --prefix web tsc --noEmit -p "web/$p/tsconfig.json"
+
+    # Every TypeScript project in the tree, found rather than listed.
+    #
+    # This recipe named its projects by hand and the list was wrong twice, the
+    # second time expensively. console had to be added after a type error in it
+    # passed here and failed the www job twenty minutes later; that comment is
+    # kept below because it is the same story. www was never added at all, and
+    # a merge that left contentLastModified declared twice in www/lib/lastmod.ts
+    # passed this recipe and failed CI.
+    #
+    # `just gate` would have caught it, through `just links`, which builds www
+    # before it checks the links. That is not a defence. The briefing tells
+    # every agent not to run the full gate and to run the targeted gates for
+    # what they touched, so somebody who edits TypeScript runs THIS, gets green,
+    # and has checked nothing. A gate that takes an hour and is named after link
+    # resolution is not where anybody looks for a type error.
+    #
+    # So the projects come from the tree. One that is checked somewhere else is
+    # named with its reason; one that is neither checked here nor named fails
+    # this recipe rather than being skipped in silence. Forgetting a new
+    # TypeScript project is no longer possible, which is the property the hand
+    # written list did not have. Same shape as tools/docs/manifest-exemptions.tsv,
+    # and a reason that stops being true fails too.
+    checked_elsewhere() {
+      case "$1" in
+        console)           echo "next build, at the end of this recipe" ;;
+        docs)              echo "just links, which builds it; Astro, and tsc does not read .astro" ;;
+        ee/web/*)          echo "just test-ee, via npm --prefix ee/web run typecheck" ;;
+        examples/next-app) echo "just examples, which builds every example that has a package.json" ;;
+        *) return 1 ;;
+      esac
+    }
+
+    # The npm project a tsconfig belongs to is the nearest directory above it
+    # holding a lockfile. web/ has one lockfile and three tsconfigs under it,
+    # so the prefix cannot be derived from the tsconfig's own directory.
+    npm_root() {
+      d=$1
+      while [ "$d" != "." ] && [ "$d" != "/" ]; do
+        if [ -f "$d/package-lock.json" ]; then echo "$d"; return 0; fi
+        d=$(dirname "$d")
+      done
+      return 1
+    }
+
+    checked=0
+    excused=0
+    while IFS= read -r cfg; do
+      dir=${cfg#./}
+      dir=${dir%/tsconfig.json}
+      if reason=$(checked_elsewhere "$dir"); then
+        echo "  $dir: $reason"
+        excused=$((excused + 1))
+        continue
+      fi
+      root=$(npm_root "$dir") || { echo "  $dir: no lockfile above it, so there is no project to check it in"; exit 1; }
+      echo "  $dir"
+      [ -d "$root/node_modules" ] || npm --prefix "$root" ci --no-audit --no-fund --silent
+      npx --prefix "$root" tsc --noEmit -p "$cfg"
+      checked=$((checked + 1))
+    done < <(find . -name tsconfig.json \
+      -not -path '*/node_modules/*' -not -path '*/.next/*' -not -path '*/dist/*' | sort)
+
+    # A reason that has stopped being true. Without this the excuses rot: a
+    # project gets deleted or renamed and its entry sits here claiming another
+    # gate covers something that no longer exists.
+    for named in console docs ee/web/audit ee/web/rbac ee/web/scim ee/web/sso examples/next-app; do
+      [ -f "$named/tsconfig.json" ] || { echo "  $named is named as checked elsewhere and has no tsconfig.json; remove it"; exit 1; }
     done
-    npx --prefix runner tsc --noEmit -p runner/tsconfig.json
+
     # The console, which this file was not checking and ci.yml was.
     #
     # That gap is the interesting part rather than the console itself. The
@@ -587,6 +683,7 @@ typecheck:
     # and fails in webpack with "Module not found".
     [ -d console/node_modules ] || npm --prefix console ci --no-audit --no-fund
     NEXT_TELEMETRY_DISABLED=1 npm --prefix console run build
+    echo "typecheck: $checked projects typechecked, $excused checked by another gate"
 
 # G11. Two builds of one commit produce the same release artifact.
 #

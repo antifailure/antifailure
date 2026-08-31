@@ -180,10 +180,20 @@ func Explain(m *schema.Manifest) string {
 	fmt.Fprintf(&b, "  fails on     %s\n", failingPolicies(m.Policy))
 	b.WriteString("\n")
 
+	b.WriteString("Fidelity\n")
+	fmt.Fprintf(&b, "  inventory    %s\n", enabledWord(deref(m.Fidelity.Enabled)))
+	fmt.Fprintf(&b, "  required     %s\n", orNone(joinDimensions(m.Fidelity.Require), "nothing"))
+	b.WriteString("\n")
+
 	b.WriteString("Runtime\n")
 	fmt.Fprintf(&b, "  provider     %s\n", m.Runtime.Provider)
 	fmt.Fprintf(&b, "  hostnames    *.%s\n", m.Runtime.Domain)
 	fmt.Fprintf(&b, "  lifetime     %s, sleeping after %s idle\n", m.Runtime.TTL, m.Runtime.IdleSleep)
+	// The ceiling is printed next to the lifetime rather than left to the
+	// manifest reference, because the two numbers only mean anything together:
+	// the first is what an environment gets, the second is the most af env
+	// extend can ever give it.
+	fmt.Fprintf(&b, "  extend to    %s at the most, from when it was created\n", m.Runtime.MaxTTL)
 	b.WriteString("\n")
 
 	b.WriteString("GitHub\n")
@@ -231,6 +241,16 @@ func Explain(m *schema.Manifest) string {
 			m.Load.Source, m.Load.Scale*100, m.Load.Duration)
 	}
 	return b.String()
+}
+
+// joinDimensions renders fidelity.require, which is a list of named
+// dimensions rather than the single threshold a percentage would invite.
+func joinDimensions(ds []schema.FidelityDimension) string {
+	out := make([]string, len(ds))
+	for i, d := range ds {
+		out[i] = string(d)
+	}
+	return strings.Join(out, ", ")
 }
 
 func orNone(s, fallback string) string {

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { ago, when } from "@/lib/format";
 import { mutate, query, useApi } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
 import {
@@ -17,6 +16,8 @@ import {
   TableWrap,
   Td,
   Th,
+  When,
+  selectClass,
 } from "@/components/ui";
 
 interface Member {
@@ -68,7 +69,7 @@ function RolePicker({
             setBusy(false);
           }
         }}
-        className="h-8 rounded-[5px] border border-rule bg-card px-2 text-[12.5px] text-ink outline-none focus:border-rule-strong disabled:opacity-60"
+        className={selectClass}
       >
         {ROLES.map((r) => (
           <option key={r} value={r}>
@@ -212,16 +213,16 @@ function Members() {
                             </span>
                           </span>
                         </Td>
-                        <Td>
+                        <Td label="Role">
                           {mayManage ? (
                             <RolePicker member={m} csrf={csrf} onChanged={state.reload} />
                           ) : (
                             <Badge>{m.role}</Badge>
                           )}
                         </Td>
-                        <Td>{m.source}</Td>
-                        <Td>
-                          <span title={when(m.created_at)}>{ago(m.created_at)}</span>
+                        <Td label="Source">{m.source}</Td>
+                        <Td label="Joined">
+                          <When value={m.created_at} />
                         </Td>
                       </Row>
                     ))}

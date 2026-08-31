@@ -63,6 +63,12 @@ plan.json
 .terraform.lock.hcl.local
 crash.log
 
+# The Azure Functions host reads api/local.settings.json when somebody runs the
+# site's API locally, and the value it needs there is the real connection
+# string for the waitlist table. Ignored before anybody writes one, because a
+# credential is only committed once.
+local.settings.json
+
 # Node
 node_modules/
 .next/
@@ -122,18 +128,24 @@ runner/artifacts/
 /azguard
 /claimcheck
 /cost
+/docscheck
 /dogfood
 /errcheck
 /errgen
+/figurecheck
 /gatecheck
 /ldcheck
 /licensegen
 /manifestcheck
 /notices
+/npmaudit
 /prosecheck
 /proxysrc
 /readability
+/release
+/reltar
 /schemadoc
+/sbomcheck
 /scanrepo
 /site
 /vulncheck

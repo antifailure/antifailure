@@ -113,6 +113,11 @@ const (
 	AFDET002 Code = "AF-DET-002"
 	// Services {first} and {second} both claim port {port}.
 	AFDET003 Code = "AF-DET-003"
+	// The changed files between {base} and {head} could not be read:
+	// {detail}
+	AFDET010 Code = "AF-DET-010"
+	// The diff at {path} could not be read: {detail}
+	AFDET011 Code = "AF-DET-011"
 
 	// Enterprise
 	// The enterprise license could not be verified.
@@ -127,6 +132,14 @@ const (
 	AFEE004 Code = "AF-EE-004"
 	// Organization policy {policy} refuses this environment: {detail}
 	AFEE010 Code = "AF-EE-010"
+
+	// Fidelity
+	// The environment does not reproduce {dimension}, which the manifest
+	// requires: {detail}
+	AFFID001 Code = "AF-FID-001"
+	// {dimension} is required and could not be measured, so it is neither
+	// met nor broken: {detail}
+	AFFID002 Code = "AF-FID-002"
 
 	// GitHub
 	// The webhook signature did not verify.
@@ -151,6 +164,14 @@ const (
 	AFLOD010 Code = "AF-LOD-010"
 	// Load exceeded {count} thresholds the manifest sets.
 	AFLOD011 Code = "AF-LOD-011"
+	// There is no load source called {source}.
+	AFLOD012 Code = "AF-LOD-012"
+	// The scenario at {path} could not be read: {detail}
+	AFLOD013 Code = "AF-LOD-013"
+	// {count} scenario assertions did not hold.
+	AFLOD014 Code = "AF-LOD-014"
+	// The scenario {scenario} proved nothing: {detail}
+	AFLOD015 Code = "AF-LOD-015"
 
 	// Manifest
 	// No antifailure.yaml was found in {path} or any parent directory.
@@ -696,6 +717,24 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
+	AFDET010: {
+		Code:      AFDET010,
+		Area:      "DET",
+		Message:   "The changed files between {base} and {head} could not be read: {detail}",
+		NextStep:  "Fetch the base branch before running 'af change'. A checkout cloned one commit deep shares no history with it, which is what 'fetch-depth: 0' fixes in a GitHub Actions job.",
+		Docs:      "concepts/change-analysis",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDET011: {
+		Code:      AFDET011,
+		Area:      "DET",
+		Message:   "The diff at {path} could not be read: {detail}",
+		NextStep:  "Produce it with 'git diff --unified=0 base...head'; this reads git's own unified format and nothing else.",
+		Docs:      "concepts/change-analysis",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
 	AFEE001: {
 		Code:      AFEE001,
 		Area:      "EE",
@@ -740,6 +779,24 @@ var catalog = map[Code]Entry{
 		Docs:      "enterprise/policy",
 		Retryable: false,
 		ExitCode:  ExitPolicyDenied,
+	},
+	AFFID001: {
+		Code:      AFFID001,
+		Area:      "FID",
+		Message:   "The environment does not reproduce {dimension}, which the manifest requires: {detail}",
+		NextStep:  "Fix what the inventory names, or remove {dimension} from fidelity.require.",
+		Docs:      "concepts/inventory",
+		Retryable: false,
+		ExitCode:  ExitPolicyDenied,
+	},
+	AFFID002: {
+		Code:      AFFID002,
+		Area:      "FID",
+		Message:   "{dimension} is required and could not be measured, so it is neither met nor broken: {detail}",
+		NextStep:  "Run 'af fidelity' to see what could not be measured, and fix that before trusting the requirement.",
+		Docs:      "concepts/inventory",
+		Retryable: false,
+		ExitCode:  ExitFailure,
 	},
 	AFGH001: {
 		Code:      AFGH001,
@@ -812,6 +869,42 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/load",
 		Retryable: false,
 		ExitCode:  ExitTestFailure,
+	},
+	AFLOD012: {
+		Code:      AFLOD012,
+		Area:      "LOD",
+		Message:   "There is no load source called {source}.",
+		NextStep:  "Use otel for an OpenTelemetry trace export, access_log for a combined format log, or none. Both file sources read source_config.path.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFLOD013: {
+		Code:      AFLOD013,
+		Area:      "LOD",
+		Message:   "The scenario at {path} could not be read: {detail}",
+		NextStep:  "Fix the document, then run 'af doctor' to revalidate the manifest.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFLOD014: {
+		Code:      AFLOD014,
+		Area:      "LOD",
+		Message:   "{count} scenario assertions did not hold.",
+		NextStep:  "Each one is listed above with what it measured. Fix the regression, or change what the scenario asks for.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
+	},
+	AFLOD015: {
+		Code:      AFLOD015,
+		Area:      "LOD",
+		Message:   "The scenario {scenario} proved nothing: {detail}",
+		NextStep:  "A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFMAN001: {
 		Code:      AFMAN001,

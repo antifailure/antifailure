@@ -205,6 +205,31 @@ export async function callProcedure(
   type: 'query' | 'mutation',
   input: unknown,
 ): Promise<{ status: number; body: unknown }> {
+  // A hundred milliseconds of simulated time per call, because otherwise the
+  // suite makes every request it will ever make at the same instant.
+  //
+  // POST /trpc/* is 20 a second with a burst of 200, keyed on the organization,
+  // which falls back to the address for these tests, so every request in a file
+  // shares one bucket. The harness clock only moves when somebody moves it, so
+  // the bucket never refills and the two hundredth request in a file is refused
+  // no matter how long the file took to run. The permission matrix crossed that
+  // line the moment two branches each added a route, and the tests that failed
+  // were the last two in the file rather than anything to do with the routes:
+  // "a demoted member kept the old role" is what a 429 looks like when the
+  // assertion is reading an error code.
+  //
+  // Advancing here rather than in each test, because auth.test.ts and
+  // console.test.ts each discovered this separately and each fixed it in their
+  // own file, which leaves the next file to discover it again. A hundred
+  // milliseconds refills two tokens for the one this call spends, so no
+  // sequence of ordinary calls can starve, and it is far below anything any
+  // test asserts about expiry.
+  //
+  // This does not weaken the limiter or hide a regression in it. The tests that
+  // prove it refuses a burst, in extensions.test.ts, call app.request directly
+  // with their own address and never come through here.
+  h.clock.advance(100)
+
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (session) {
     headers.cookie = session.cookie

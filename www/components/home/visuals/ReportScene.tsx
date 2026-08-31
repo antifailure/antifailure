@@ -89,8 +89,8 @@ function InkCaret({ on }: { on: boolean }) {
   if (!on) return null;
   return (
     <span
+      // Static, for the reason in components/motion/Caret.tsx.
       className="ml-px inline-block h-[0.95em] w-[6px] translate-y-px bg-black align-middle"
-      style={{ animation: "wt-caret 1.05s steps(1) infinite" }}
       aria-hidden
     />
   );

@@ -94,8 +94,8 @@ export const runtimesRouter = router({
       return c.pool.withTenant(c.tenant, async (db) => {
         // Refused rather than upserted. An upsert here would silently move a
         // live runtime from local to kubernetes because somebody re-ran a
-        // setup script, and every environment created after that would be
-        // dispatched somewhere nobody chose.
+        // setup script, and the registry would then describe a place that does
+        // not exist while still counting real environments against it.
         const existing = await db.execute<{ id: string }>(sql`
           SELECT id FROM runtimes WHERE name = ${input.name} AND removed_at IS NULL`)
         if (existing.length > 0) {
@@ -146,13 +146,15 @@ export const runtimesRouter = router({
     }),
 
   /**
-   * Marks a runtime removed. It stops being offered and stays readable.
+   * Marks a runtime removed. It stays readable and stops being registered.
    *
    * Deleting the row instead would leave every environment that recorded this
    * name pointing at nothing, and those environments are the history somebody
    * reads during an incident. The count of live environments comes back in the
-   * answer so that the console can say what was still using it, which is the
-   * sentence a person wants after pressing this and not before.
+   * answer so that the console can say what is still on it, which is the
+   * sentence a person wants after pressing this and not before. Nothing is torn
+   * down: an environment on a runtime nobody has registered any more is exactly
+   * what the unregistered half of `list` is there to show.
    */
   remove: orgProcedure('runtimes.manage')
     .input(z.object({ name: runtimeName }))

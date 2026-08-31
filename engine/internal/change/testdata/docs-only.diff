@@ -1,0 +1,14 @@
+diff --git a/.changes/thing.md b/.changes/thing.md
+new file mode 100644
+index 0000000..21a4b59
+--- /dev/null
++++ b/.changes/thing.md
+@@ -0,0 +1 @@
++# added
+diff --git a/docs/README.md b/docs/README.md
+index 401287e..4a2fbd3 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -1,0 +2,2 @@
++
++A second line.

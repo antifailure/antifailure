@@ -119,7 +119,7 @@ function railLabel(name: LifecycleState): string[] {
 
 export function TwinsPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product/twins"
         eyebrow="Twin Orchestrator"

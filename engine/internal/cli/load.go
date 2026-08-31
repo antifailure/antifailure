@@ -14,15 +14,17 @@ import (
 
 // LoadJSON is the machine readable result of a load run.
 type LoadJSON struct {
-	Sent      int                `json:"sent"`
-	Rate      float64            `json:"rate"`
-	Duration  string             `json:"duration"`
-	ErrorRate float64            `json:"error_rate"`
-	Overall   load.Latency       `json:"overall"`
-	Routes    []load.RouteResult `json:"routes"`
-	Errors    map[string]int     `json:"errors,omitempty"`
-	Refused   []string           `json:"refused_as_unsafe,omitempty"`
-	Breaches  []load.Breach      `json:"breaches,omitempty"`
+	Source     string             `json:"source,omitempty"`
+	TargetRate float64            `json:"target_rate,omitempty"`
+	Sent       int                `json:"sent"`
+	Rate       float64            `json:"rate"`
+	Duration   string             `json:"duration"`
+	ErrorRate  float64            `json:"error_rate"`
+	Overall    load.Latency       `json:"overall"`
+	Routes     []load.RouteResult `json:"routes"`
+	Errors     map[string]int     `json:"errors,omitempty"`
+	Refused    []string           `json:"refused_as_unsafe,omitempty"`
+	Breaches   []load.Breach      `json:"breaches,omitempty"`
 }
 
 func newLoadCommand(e *Env) *cobra.Command {
@@ -41,6 +43,7 @@ is a generator that charges four hundred cards.`),
 	}
 	cmd.AddCommand(newLoadRunCommand(e, false))
 	cmd.AddCommand(newLoadRunCommand(e, true))
+	cmd.AddCommand(newLoadScenarioCommand(e))
 	return cmd
 }
 
@@ -85,6 +88,7 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 
 			if e.Out.Format == FormatJSON {
 				doc := LoadJSON{
+					Source: res.Source, TargetRate: res.TargetRate,
 					Sent: res.Sent, Rate: res.Rate,
 					Duration:  res.Duration.Round(time.Millisecond).String(),
 					ErrorRate: res.ErrorRate, Overall: res.Overall,
@@ -103,6 +107,13 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 			}
 
 			e.Out.Println("")
+			if res.Source != "" {
+				// Where the mix came from, and what rate it asked for against
+				// what it got. A run that says nothing about its source
+				// invites a default shape to be read as production's.
+				e.Out.Printf("  Shape from %s, %.1f requests a second asked for.\n",
+					res.Source, res.TargetRate)
+			}
 			e.Out.Printf("  %d requests in %s at %.0f a second, %.1f percent failed.\n",
 				res.Sent, res.Duration.Round(time.Second), res.Rate, res.ErrorRate*100)
 			e.Out.Printf("  Overall p50 %.0fms, p95 %.0fms, p99 %.0fms.\n\n",

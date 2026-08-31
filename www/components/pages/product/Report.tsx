@@ -139,7 +139,7 @@ function GateCard({ tone, pr, title, evidence, merge }: (typeof GATES)[number]) 
   return (
     <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between gap-3 px-4 py-2.5">
-        <span className="font-mono text-[11px] tracking-extra-tight text-black/45">{pr}</span>
+        <span className="font-mono text-[11px] tracking-extra-tight text-black/60">{pr}</span>
         <StatusPill tone={tone} />
       </div>
       <Hairline />
@@ -152,7 +152,7 @@ function GateCard({ tone, pr, title, evidence, merge }: (typeof GATES)[number]) 
         className={cn(
           "px-4 py-2.5 font-mono text-[10px] tracking-extra-tight",
           tone === "PASS" && "text-[#285D49]",
-          tone === "UNVERIFIED" && "text-black/45",
+          tone === "UNVERIFIED" && "text-black/60",
           tone === "FAIL" && "text-red-700",
         )}
       >
@@ -173,7 +173,7 @@ function PrCheckChrome() {
           <span className="truncate font-mono text-[13px] tracking-extra-tight text-black">add access_tier</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] tracking-extra-tight text-black/40">required · 1 of 4</span>
+          <span className="font-mono text-[10px] tracking-extra-tight text-black/55">required · 1 of 4</span>
           <StatusPill tone="FAIL">FAIL</StatusPill>
         </div>
       </div>
@@ -182,7 +182,7 @@ function PrCheckChrome() {
       <ul>
         {CI_CHECKS.map((check) => (
           <li key={check.name} className="flex items-center justify-between gap-3 px-4 py-2">
-            <div className="flex min-w-0 items-center gap-2 font-mono text-[12px] tracking-extra-tight text-black/40">
+            <div className="flex min-w-0 items-center gap-2 font-mono text-[12px] tracking-extra-tight text-black/55">
               <ToneDot tone="PASS" />
               <span className="truncate">{check.name}</span>
             </div>
@@ -204,7 +204,7 @@ function PrCheckChrome() {
               <div className="font-mono text-[12px] tracking-extra-tight text-black">
                 Antifailure / deployment safety
               </div>
-              <div className="mt-0.5 font-mono text-[10px] tracking-extra-tight text-black/40">
+              <div className="mt-0.5 font-mono text-[10px] tracking-extra-tight text-black/55">
                 env-08f2 · 4m 12s
               </div>
             </div>
@@ -222,7 +222,7 @@ function PrCheckChrome() {
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[380px] text-left font-mono text-[11px] tracking-extra-tight tabular-nums">
             <thead>
-              <tr className="text-black/40">
+              <tr className="text-black/55">
                 <th className="py-1 pr-6 font-normal">account_id</th>
                 <th className="py-1 pr-6 font-normal">active</th>
                 <th className="py-1 font-normal">latest</th>
@@ -244,7 +244,7 @@ function PrCheckChrome() {
           </table>
         </div>
         <div className="mt-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/35">
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/60">
             How to see it yourself
           </div>
           <p className="mt-1 font-mono text-[11px] leading-5 tracking-extra-tight text-black">
@@ -256,7 +256,7 @@ function PrCheckChrome() {
       <Hairline />
 
       <div className="px-4 py-2">
-        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/35">In the report</div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/60">In the report</div>
       </div>
       <Hairline />
       {CONTENTS.map((row, i) => (
@@ -265,7 +265,7 @@ function PrCheckChrome() {
           <div className="flex items-center justify-between gap-4 px-4 py-2.5">
             <div className="min-w-0">
               <div className="font-mono text-[12px] tracking-extra-tight text-black">{row.label}</div>
-              <div className="mt-0.5 font-mono text-[11px] tracking-extra-tight text-black/45">{row.value}</div>
+              <div className="mt-0.5 font-mono text-[11px] tracking-extra-tight text-black/60">{row.value}</div>
             </div>
             <StatusPill tone={row.tone}>{row.pill ?? row.tone}</StatusPill>
           </div>
@@ -290,7 +290,7 @@ function PrCheckChrome() {
 
 export function ReportPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product/report"
         eyebrow="Safety Report and Release Gate"
@@ -371,6 +371,29 @@ export function ReportPage() {
           baseline, and the report says "no baseline" rather than inventing one.
         </p>
         <div className="mt-12 max-w-[720px] border-t border-black/10 pt-8">
+          <MonoLabel className="uppercase tracking-[0.14em] text-black/60">How close the twin got</MonoLabel>
+          <p className="mt-5 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+            The report carries an inventory of what this environment reproduced and what it did
+            not, dimension by dimension: services, data, third-party hosts, personas, runtime and
+            traffic. Every input is something the run already measured. Nothing is estimated, and
+            nothing is averaged into a single grade, because an average is how a dimension that is
+            genuinely weak disappears behind five that are not.
+          </p>
+          <p className="mt-4 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+            A component nobody could measure is named and left out of the arithmetic. It is never
+            counted as a pass. That is also why the count travels with the percentage everywhere it
+            is printed: a score drawn from four measured components and a score drawn from forty
+            are not the same claim, and a bare percentage hides which one you are reading. When
+            nothing in an environment could be measured there is no score at all, and the report
+            says so rather than printing a zero that would read like a failing grade.
+          </p>
+          <p className="mt-4 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+            Third-party fidelity is the low one today, and the report says it rather than smoothing
+            it out. One offline pack ships, and it is Stripe.
+          </p>
+        </div>
+
+        <div className="mt-12 max-w-[720px] border-t border-black/10 pt-8">
           <MonoLabel className="uppercase tracking-[0.14em]">Thresholds that exist</MonoLabel>
           <ul className="mt-5 space-y-3 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
             <li>
@@ -394,8 +417,9 @@ export function ReportPage() {
           <StatusPill tone="UNVERIFIED" />
         </div>
         <p className="mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Every workflow and report answers whether this deployment is safe to ship under the
-          conditions that actually matter. If the product becomes a bundle of tools, it has failed.
+          Every workflow and report answers one question: whether this deployment is safe to ship
+          against real data, real concurrency, real workers, and the deploy itself. If the product
+          becomes a bundle of tools, it has failed.
         </p>
       </PageSection>
 

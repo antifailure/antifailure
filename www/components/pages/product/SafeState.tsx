@@ -1,3 +1,4 @@
+import { Illustrative } from "@/components/layout/Illustrative";
 import {
   Callout,
   FeatureGrid,
@@ -39,12 +40,12 @@ const RECORDS: {
 ];
 
 const SUBSET_ROWS: { table: string; row: string; parent: string; fate: SubsetFate; reason: string }[] = [
-  { table: "users", row: "u_8f2a", parent: "—", fate: "KEEP", reason: "long-tail past_due" },
-  { table: "users", row: "u_91c0", parent: "—", fate: "KEEP", reason: "malformed created_at" },
-  { table: "users", row: "u_bb12", parent: "—", fate: "DROP", reason: "sampled out" },
+  { table: "users", row: "u_8f2a", parent: "none", fate: "KEEP", reason: "long-tail past_due" },
+  { table: "users", row: "u_91c0", parent: "none", fate: "KEEP", reason: "malformed created_at" },
+  { table: "users", row: "u_bb12", parent: "none", fate: "DROP", reason: "sampled out" },
   { table: "orders", row: "o_441", parent: "u_8f2a", fate: "KEEP", reason: "parent kept" },
   { table: "orders", row: "o_902", parent: "u_bb12", fate: "DROP", reason: "parent dropped" },
-  { table: "sessions", row: "*", parent: "—", fate: "DELETE", reason: "secrets, not masked" },
+  { table: "sessions", row: "*", parent: "none", fate: "DELETE", reason: "secrets, not masked" },
 ];
 
 const LIFECYCLE = [
@@ -74,7 +75,7 @@ function RuleChip({ rule }: { rule: MaskRule | SubsetFate }) {
         rule === "MASK" && "text-[#285D49] ring-[#33bf00]/50",
         rule === "KEEP" && "text-[#285D49] ring-[#33bf00]/50",
         rule === "DELETE" && "text-red-700 ring-red-600/50",
-        rule === "DROP" && "text-black/40 ring-black/15",
+        rule === "DROP" && "text-black/55 ring-black/15",
       )}
     >
       {rule}
@@ -103,7 +104,7 @@ function MaskingPanel() {
             <div key={`prod-${record.id}`}>
               {i > 0 ? <Hairline /> : null}
               <div className="px-4 py-2.5">
-                <div className="font-mono text-[11px] tracking-extra-tight text-black/45">{record.id}</div>
+                <div className="font-mono text-[11px] tracking-extra-tight text-black/60">{record.id}</div>
                 <ul className="mt-1.5 space-y-1">
                   {record.fields.map((field) => (
                     <li key={field.key} className="flex items-baseline justify-between gap-3">
@@ -134,7 +135,7 @@ function MaskingPanel() {
             <div key={`twin-${record.id}`}>
               {i > 0 ? <Hairline /> : null}
               <div className="px-4 py-2.5">
-                <div className="font-mono text-[11px] tracking-extra-tight text-black/45">{record.id}</div>
+                <div className="font-mono text-[11px] tracking-extra-tight text-black/60">{record.id}</div>
                 <ul className="mt-1.5 space-y-1">
                   {record.fields.map((field) => (
                     <li key={field.key} className="flex items-baseline justify-between gap-3">
@@ -265,7 +266,7 @@ function SubsetPanel() {
           <thead>
             <tr className="border-b border-black/8">
               {["table", "row", "parent", "fate", "reason"].map((col) => (
-                <th key={col} className="px-4 py-2 font-mono text-[10px] font-normal tracking-extra-tight text-black/40">
+                <th key={col} className="px-4 py-2 font-mono text-[10px] font-normal tracking-extra-tight text-black/55">
                   {col}
                 </th>
               ))}
@@ -274,9 +275,9 @@ function SubsetPanel() {
           <tbody>
             {SUBSET_ROWS.map((row) => (
               <tr key={`${row.table}-${row.row}`} className="border-b border-black/6 last:border-0">
-                <td className="px-4 py-2 font-mono text-[11px] tracking-extra-tight text-black/45">{row.table}</td>
+                <td className="px-4 py-2 font-mono text-[11px] tracking-extra-tight text-black/60">{row.table}</td>
                 <td className="px-4 py-2 font-mono text-[11px] tracking-extra-tight text-black">{row.row}</td>
-                <td className="px-4 py-2 font-mono text-[11px] tracking-extra-tight text-black/45">{row.parent}</td>
+                <td className="px-4 py-2 font-mono text-[11px] tracking-extra-tight text-black/60">{row.parent}</td>
                 <td className="px-4 py-2">
                   <RuleChip rule={row.fate} />
                 </td>
@@ -337,7 +338,7 @@ function LifecyclePanel() {
 
 export function SafeStatePage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product/safe-state"
         eyebrow="Safe State Engine"
@@ -366,6 +367,11 @@ export function SafeStatePage() {
             billing states, and malformed history, the records that actually break migrations, while
             volume stays bounded.
           </p>
+          <Illustrative className="mt-6">
+            Six rows of a worked example, with the ratio chosen. What a real subset keeps depends on
+            the shape of your own data. What is fixed is the rule: a dropped parent takes its
+            children, and a rare row is kept on purpose rather than sampled away.
+          </Illustrative>
           <div className="mt-8">
             <Callout label="Unverified goldens" tone="block">
               An unverified golden cannot be branched. Sanitization evidence is required before a snapshot
@@ -380,7 +386,7 @@ export function SafeStatePage() {
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             The built-in engine covers common Postgres cases: restore, subset, mask, delete credentials,
             validate distribution, then destroy. Matching a dedicated test-data platform’s connector depth
-            is not the wedge. The product output is a deployment-safety decision, not a dataset.
+            is not the point. What this returns is a decision about a deployment, not a dataset.
           </p>
         </Split>
       </PageSection>

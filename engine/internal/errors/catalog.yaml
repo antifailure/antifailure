@@ -93,6 +93,20 @@ errors:
     docs: concepts/detection
     retryable: false
     exit_code: 3
+  - code: AF-DET-010
+    area: DET
+    message: "The changed files between {base} and {head} could not be read: {detail}"
+    next_step: "Fetch the base branch before running 'af change'. A checkout cloned one commit deep shares no history with it, which is what 'fetch-depth: 0' fixes in a GitHub Actions job."
+    docs: concepts/change-analysis
+    retryable: false
+    exit_code: 3
+  - code: AF-DET-011
+    area: DET
+    message: "The diff at {path} could not be read: {detail}"
+    next_step: "Produce it with 'git diff --unified=0 base...head'; this reads git's own unified format and nothing else."
+    docs: concepts/change-analysis
+    retryable: false
+    exit_code: 3
 
   # Secrets
   - code: AF-SEC-001
@@ -663,6 +677,34 @@ errors:
     docs: concepts/load
     retryable: false
     exit_code: 8
+  - code: AF-LOD-012
+    area: LOD
+    message: "There is no load source called {source}."
+    next_step: "Use otel for an OpenTelemetry trace export, access_log for a combined format log, or none. Both file sources read source_config.path."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
+  - code: AF-LOD-013
+    area: LOD
+    message: "The scenario at {path} could not be read: {detail}"
+    next_step: "Fix the document, then run 'af doctor' to revalidate the manifest."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
+  - code: AF-LOD-014
+    area: LOD
+    message: "{count} scenario assertions did not hold."
+    next_step: "Each one is listed above with what it measured. Fix the regression, or change what the scenario asks for."
+    docs: concepts/load
+    retryable: false
+    exit_code: 8
+  - code: AF-LOD-015
+    area: LOD
+    message: "The scenario {scenario} proved nothing: {detail}"
+    next_step: "A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
   - code: AF-LOD-001
     planned: true
     area: LOD
@@ -864,6 +906,21 @@ errors:
     exit_code: 5
 
   # Control plane
+  # Fidelity
+  - code: AF-FID-001
+    area: FID
+    message: "The environment does not reproduce {dimension}, which the manifest requires: {detail}"
+    next_step: "Fix what the inventory names, or remove {dimension} from fidelity.require."
+    docs: concepts/inventory
+    retryable: false
+    exit_code: 6
+  - code: AF-FID-002
+    area: FID
+    message: "{dimension} is required and could not be measured, so it is neither met nor broken: {detail}"
+    next_step: "Run 'af fidelity' to see what could not be measured, and fix that before trusting the requirement."
+    docs: concepts/inventory
+    retryable: false
+    exit_code: 1
   - code: AF-CPL-001
     area: CPL
     message: "No control plane token is configured."

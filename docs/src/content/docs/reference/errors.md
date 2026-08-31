@@ -460,6 +460,30 @@ No application could be detected in {path}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/detection](/docs/concepts/detection/) |
 
+### AF-DET-010
+
+The changed files between {base} and {head} could not be read: {detail}
+
+**What to do.** Fetch the base branch before running 'af change'. A checkout cloned one commit deep shares no history with it, which is what 'fetch-depth: 0' fixes in a GitHub Actions job.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/change-analysis](/docs/concepts/change-analysis/) |
+
+### AF-DET-011
+
+The diff at {path} could not be read: {detail}
+
+**What to do.** Produce it with 'git diff --unified=0 base...head'; this reads git's own unified format and nothing else.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/change-analysis](/docs/concepts/change-analysis/) |
+
 ## Enterprise
 
 ### AF-EE-004
@@ -485,6 +509,32 @@ Organization policy {policy} refuses this environment: {detail}
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [enterprise/policy](/docs/enterprise/policy/) |
+
+## Fidelity
+
+### AF-FID-001
+
+The environment does not reproduce {dimension}, which the manifest requires: {detail}
+
+**What to do.** Fix what the inventory names, or remove {dimension} from fidelity.require.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/inventory](/docs/concepts/inventory/) |
+
+### AF-FID-002
+
+{dimension} is required and could not be measured, so it is neither met nor broken: {detail}
+
+**What to do.** Run 'af fidelity' to see what could not be measured, and fix that before trusting the requirement.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/inventory](/docs/concepts/inventory/) |
 
 ## Infrastructure
 
@@ -523,6 +573,54 @@ Load exceeded {count} thresholds the manifest sets.
 | | |
 | --- | --- |
 | Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
+### AF-LOD-012
+
+There is no load source called {source}.
+
+**What to do.** Use otel for an OpenTelemetry trace export, access_log for a combined format log, or none. Both file sources read source_config.path.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
+### AF-LOD-013
+
+The scenario at {path} could not be read: {detail}
+
+**What to do.** Fix the document, then run 'af doctor' to revalidate the manifest.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
+### AF-LOD-014
+
+{count} scenario assertions did not hold.
+
+**What to do.** Each one is listed above with what it measured. Fix the regression, or change what the scenario asks for.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
+### AF-LOD-015
+
+The scenario {scenario} proved nothing: {detail}
+
+**What to do.** A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/load](/docs/concepts/load/) |
 

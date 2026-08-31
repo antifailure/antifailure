@@ -1,7 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { ApiError } from "@/lib/api";
+import { ago, when } from "@/lib/format";
+import { LogoMark } from "@/components/icons";
 
 /* -------------------------------------------------------------------------
  * Surfaces
@@ -30,15 +33,85 @@ export function Page({
           ) : null}
         </div>
         {actions ? (
-            // max-w-full, or an actions block wider than the card -- a long
-            // error message beside a button -- is clipped by the overflow-hidden
-            // on the section and simply disappears at a phone width. shrink-0
-            // still keeps a short one from being squeezed by the title.
+            // max-w-full, or an actions block wider than the card, such as a
+            // long error message beside a button, is clipped by the
+            // overflow-hidden on the section and simply disappears at a phone
+            // width. shrink-0 still keeps a short one from being squeezed by
+            // the title.
             <div className="flex min-w-0 max-w-full shrink-0 items-center gap-2">{actions}</div>
           ) : null}
       </div>
       <div className="mt-7">{children}</div>
     </div>
+  );
+}
+
+/**
+ * Every screen that is the whole window rather than a page inside the chrome:
+ * sign in, no organization, the control plane did not answer, not found, and
+ * the three states of device approval.
+ *
+ * There were six of these and they had four heading sizes (26, 28, 30) and
+ * four different primary buttons (h-9/h-10/h-11, two radii, three type sizes)
+ * between them, because each was written on its own. One component means the
+ * sign-in screen and the 404 are demonstrably the same product.
+ */
+export function Standalone({
+  title,
+  width = 420,
+  alert = false,
+  children,
+}: {
+  title: string;
+  width?: number;
+  alert?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <main className="grid min-h-dvh place-items-center px-5 py-10">
+      <div
+        className="w-full"
+        style={{ maxWidth: `${width}px` }}
+        role={alert ? "alert" : undefined}
+      >
+        <LogoMark className="h-9 w-9" />
+        <h1 className="mt-7 text-[28px] font-semibold leading-dense tracking-tighter text-ink">
+          {title}
+        </h1>
+        {children}
+      </div>
+    </main>
+  );
+}
+
+/** Body copy on a standalone screen. One size, one measure, everywhere. */
+export function Lede({ children }: { children: ReactNode }) {
+  return <p className="mt-3 max-w-[52ch] text-[13.5px] leading-6 text-muted">{children}</p>;
+}
+
+/**
+ * A link that is the primary action. The same box as `Button` variant
+ * "primary", because it does the same job and a person cannot see which of
+ * them is an anchor.
+ */
+export function LinkButton({
+  href,
+  children,
+  full = false,
+}: {
+  href: string;
+  children: ReactNode;
+  full?: boolean;
+}) {
+  return (
+    <a
+      href={href}
+      className={`inline-flex h-11 items-center justify-center gap-2.5 rounded-md bg-ink px-4 text-[14px] font-medium text-white transition-colors hover:bg-[#2b2b2b] ${
+        full ? "w-full" : ""
+      }`}
+    >
+      {children}
+    </a>
   );
 }
 
@@ -57,7 +130,7 @@ export function Card({
 }) {
   return (
     <section
-      className={`overflow-hidden rounded-[6px] border border-rule bg-card ${className}`}
+      className={`overflow-hidden rounded-lg border border-rule bg-card ${className}`}
     >
       {title ? (
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-rule px-4 py-3">
@@ -66,10 +139,11 @@ export function Card({
             {note ? <p className="mt-0.5 text-[12px] leading-5 text-dim">{note}</p> : null}
           </div>
           {actions ? (
-            // max-w-full, or an actions block wider than the card -- a long
-            // error message beside a button -- is clipped by the overflow-hidden
-            // on the section and simply disappears at a phone width. shrink-0
-            // still keeps a short one from being squeezed by the title.
+            // max-w-full, or an actions block wider than the card, such as a
+            // long error message beside a button, is clipped by the
+            // overflow-hidden on the section and simply disappears at a phone
+            // width. shrink-0 still keeps a short one from being squeezed by
+            // the title.
             <div className="flex min-w-0 max-w-full shrink-0 items-center gap-2">{actions}</div>
           ) : null}
         </header>
@@ -92,7 +166,11 @@ export function TableWrap({ children }: { children: ReactNode }) {
 }
 
 export function Table({ children }: { children: ReactNode }) {
-  return <table className="w-full min-w-[520px] border-collapse text-left text-[13px]">{children}</table>;
+  return (
+    <table className="af-table w-full border-collapse text-left text-[13px] sm:min-w-[520px]">
+      {children}
+    </table>
+  );
 }
 
 export function Th({
@@ -116,22 +194,32 @@ export function Th({
 
 export function Td({
   children,
+  label,
   numeric = false,
   mono = false,
   className = "",
 }: {
   children: ReactNode;
+  /** The column this cell is in, repeated beside it once the table stacks on a
+   *  phone. Give it the same string as the `Th`. Omit it on the cell that
+   *  names the row: that one leads the stacked record on its own. */
+  label?: string;
   numeric?: boolean;
   mono?: boolean;
   className?: string;
 }) {
   return (
     <td
+      data-label={label}
       className={`border-b border-rule px-4 py-2.5 align-middle text-ink ${
         numeric ? "tnum text-right" : ""
       } ${mono ? "font-mono text-[12px]" : ""} ${className}`}
     >
-      {children}
+      {/* One wrapper, so that when the table stacks on a phone the cell is a
+          two-item grid, heading then value, however many nodes the value
+          is made of. Without it a cell like "branch #1482" put the branch in
+          one grid slot and the number in the next row's heading slot. */}
+      <span className="af-cell">{children}</span>
     </td>
   );
 }
@@ -148,9 +236,49 @@ export function Row({ children, onClick }: { children: ReactNode; onClick?: () =
   );
 }
 
+/**
+ * The primary cell of a row that opens something.
+ *
+ * A `<tr onClick>` is invisible to a keyboard: it is not focusable, Enter does
+ * nothing, and a screen reader is never told the row goes anywhere. Both list
+ * screens shipped that way. Putting a real link in the first cell gives the
+ * row one focusable, announced, Enter-activated target, and the row-wide click
+ * stays as the mouse convenience it always was.
+ */
+export function CellLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="-mx-1 -my-2 inline-flex min-h-11 items-center px-1 py-2 underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
+    >
+      {children}
+    </Link>
+  );
+}
+
 /* -------------------------------------------------------------------------
  * Signals
  * ---------------------------------------------------------------------- */
+
+/**
+ * A moment in time, said twice.
+ *
+ * Four screens wrote `<span title={when(x)}>{ago(x)}</span>` by hand, which
+ * puts the only precise answer in a tooltip, a thing a phone cannot show and
+ * a screen reader announces inconsistently. This is a real `<time>`: the
+ * machine-readable instant is the attribute, the exact local time is in the
+ * accessible name, and "3h ago" is what the eye gets.
+ */
+export function When({ value }: { value: string | Date | null | undefined }) {
+  const exact = when(value);
+  if (exact === "--") return <span className="text-dim">--</span>;
+  const iso = (value instanceof Date ? value : new Date(value as string)).toISOString();
+  return (
+    <time dateTime={iso} title={exact} aria-label={exact} className="whitespace-nowrap">
+      {ago(value) || exact}
+    </time>
+  );
+}
 
 export type Tone = "pass" | "fail" | "warn" | "neutral";
 
@@ -168,7 +296,7 @@ export function Badge({ tone = "neutral", children }: { tone?: Tone; children: R
   };
   return (
     <span
-      className={`inline-flex items-center rounded-[4px] px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-[0.05em] ${styles[tone]}`}
+      className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-[0.05em] ${styles[tone]}`}
     >
       {children}
     </span>
@@ -183,7 +311,26 @@ export function toneFor(value: string | null | undefined): Tone {
   if (["fail", "failed", "block", "blocked", "denied", "deny", "error", "revoked"].includes(v)) {
     return "fail";
   }
-  if (["pending", "running", "waiting", "proposed", "expiring", "warn"].includes(v)) return "warn";
+  if (
+    [
+      "pending",
+      "running",
+      "waiting",
+      "proposed",
+      "expiring",
+      "warn",
+      // In progress. Left out, these fell through to "neutral" and an
+      // environment that was still being built looked exactly like one that
+      // had been torn down.
+      "provisioning",
+      "creating",
+      "starting",
+      "queued",
+      "building",
+    ].includes(v)
+  ) {
+    return "warn";
+  }
   return "neutral";
 }
 
@@ -207,7 +354,7 @@ export function Button({
   busy?: boolean;
 }) {
   const base =
-    "inline-flex h-9 items-center justify-center gap-2 rounded-[5px] px-3.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55";
+    "inline-flex h-9 items-center justify-center gap-2 rounded-md px-3.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55";
   const variants = {
     primary: "bg-ink text-white hover:bg-[#2b2b2b]",
     secondary: "border border-rule bg-card text-ink hover:border-rule-strong",
@@ -252,12 +399,35 @@ export function Field({
   );
 }
 
+/**
+ * A select, styled as the input it sits beside.
+ *
+ * There were three of these: one on the repository picker, one on the members
+ * table and one built out of `inputClass` on the network form, at two heights
+ * and two paddings. The native arrow is kept: a custom one is a chevron to
+ * maintain and a control that stops looking like the platform's.
+ */
+export const selectClass =
+  "h-9 rounded-md border border-rule bg-card px-2.5 text-[13px] text-ink outline-none focus:border-rule-strong disabled:cursor-not-allowed disabled:opacity-60";
+
 export const inputClass =
-  "mt-1.5 h-9 w-full rounded-[5px] border border-rule bg-card px-2.5 text-[13px] text-ink outline-none placeholder:text-dim focus:border-rule-strong";
+  "mt-1.5 h-9 w-full rounded-md border border-rule bg-card px-2.5 text-[13px] text-ink outline-none placeholder:text-dim focus:border-rule-strong";
 
 /* -------------------------------------------------------------------------
  * The three states a screen is usually missing
  * ---------------------------------------------------------------------- */
+
+/**
+ * A single placeholder bar, the shape of the thing that is coming.
+ *
+ * Static, deliberately. Two screens reached for `animate-pulse` and a
+ * skeleton that throbs is the loudest thing on a page that is, by definition,
+ * showing nothing yet. The shape and the position are the signal; the
+ * throbbing was decoration on top of a wait.
+ */
+export function Bar({ className = "h-3 w-full" }: { className?: string }) {
+  return <span className={`block rounded-sm bg-[rgba(16,16,16,0.07)] ${className}`} />;
+}
 
 /** A skeleton shaped like the table it stands in for, so the layout does not
  *  jump when the data lands. */
@@ -270,9 +440,8 @@ export function TableSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
             <tr key={r}>
               {Array.from({ length: cols }).map((_, c) => (
                 <Td key={c}>
-                  <span
-                    className="block h-3 rounded-[3px] bg-[rgba(16,16,16,0.07)]"
-                    style={{ width: c === 0 ? "58%" : c === cols - 1 ? "34%" : "46%" }}
+                  <Bar
+                    className={`h-3 ${c === 0 ? "w-[58%]" : c === cols - 1 ? "w-[34%]" : "w-[46%]"}`}
                   />
                 </Td>
               ))}
@@ -284,6 +453,28 @@ export function TableSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
         Loading
       </span>
     </TableWrap>
+  );
+}
+
+/** A card-shaped wait, for screens whose content is cards rather than rows. */
+export function CardSkeleton({ count = 2 }: { count?: number }) {
+  return (
+    <div className="space-y-6" role="status">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="rounded-lg border border-rule bg-card">
+          <div className="border-b border-rule px-4 py-3">
+            <Bar className="h-3.5 w-32" />
+            <Bar className="mt-2 h-2.5 w-56" />
+          </div>
+          <div className="space-y-3 px-4 py-4">
+            <Bar className="h-2.5 w-24" />
+            <Bar className="h-1.5 w-full max-w-[420px]" />
+            <Bar className="h-9 w-full max-w-[320px]" />
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">Loading</span>
+    </div>
   );
 }
 
@@ -335,6 +526,7 @@ export function ErrorState({ error, retry }: { error: ApiError; retry?: () => vo
 export function Loaded<T>({
   state,
   skeleton,
+  framed = false,
   children,
 }: {
   state: {
@@ -344,10 +536,20 @@ export function Loaded<T>({
     reload: () => void;
   };
   skeleton?: ReactNode;
+  /** Set on the screens whose loaded content is cards rather than rows, so the
+   *  wait and the failure get a surface too. Without it the provider keys page
+   *  put its "your role cannot see this" on the bare page background, which
+   *  read as a screen that had half rendered rather than as an answer. */
+  framed?: boolean;
   children: (data: T) => ReactNode;
 }) {
   if (state.status === "error" && state.error) {
-    return <ErrorState error={state.error} retry={state.reload} />;
+    const failed = <ErrorState error={state.error} retry={state.reload} />;
+    return framed ? (
+      <div className="rounded-lg border border-rule bg-card">{failed}</div>
+    ) : (
+      failed
+    );
   }
   // "ready with no data" is not a state a page should have to handle, and it
   // is reachable: a hook whose deps have changed still reports the previous

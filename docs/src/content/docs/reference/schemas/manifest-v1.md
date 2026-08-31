@@ -14,9 +14,11 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `auth` | [auth](#auth) | no | How personas come to exist. |
+| `change` | [Change](#change) | no | How a pull request's diff is classified. |
 | `database` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | `egress` | [Egress](#egress) | no | What the environment may reach on the network. |
 | `explore` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
+| `fidelity` | [Fidelity](#fidelity) | no | The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all. |
 | `github` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
 | `insights` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
@@ -76,6 +78,24 @@ How to turn the service directory into an image. Omitted means detect: a Dockerf
 | `image` | string | no | A prebuilt image reference, used with the image strategy. Pinned by digest is strongly preferred. Max length 512. |
 | `strategy` | `auto`, `dockerfile`, `buildpack`, `image` | no | Defaults to `auto`. |
 | `target` | string | no | Stage to build in a multi stage Dockerfile. Max length 128. |
+
+## Change
+
+How a pull request's diff is classified. The built in rules cover the layouts most projects use; these are for the ones they do not. A rule says what a path is, never which checks to run: an unrecognised path always selects every check, and no rule here can take a check away.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `rules` | list of [Change rule](#change-rule) | no | Path patterns this repository wants classified its own way. The longest matching pattern wins, so order does not decide. Max items 100. |
+
+## Change rule
+
+One path pattern and what the paths it matches are. It says what a file IS, never which checks to run.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `note` | string | no | The sentence the report prints for this rule, replacing the default one that restates the pattern. Max length 200. |
+| `path` | string | **yes** | A glob against the repository relative path. A single star does not cross a slash and a double star does. A pattern that matches everything is refused, because it would defeat the rule that an unrecognised path selects every check. Min length 1, max length 256. |
+| `surface` | `schema`, `code`, `asset`, `build`, `dependency`, `config`, `infrastructure`, `pipeline`, `test`, `docs` | **yes** | What the matched paths are. Surfaces the engine assigns from the manifest itself, such as a service or the masking rules file, cannot be set here. |
 
 ## Database
 
@@ -141,6 +161,15 @@ Agents that pursue a goal with no declared workflow, discover the paths an appli
 | --- | --- | --- | --- |
 | `enabled` | boolean | no | Defaults to `false`. |
 | `goals` | list of [Goal](#goal) | no | One thing an exploratory agent tries to achieve. Max items 50. |
+
+## Fidelity
+
+The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | no | Defaults to `true`. |
+| `require` | list of string | no | Dimensions every component of which must be reproduced. A dimension that could not be measured neither satisfies a requirement nor breaks one. |
 
 ## GitHub
 
@@ -214,10 +243,22 @@ Traffic shaped like production, compared between the base branch and this one. R
 | `enabled` | boolean | no | Defaults to `false`. |
 | `safe_routes` | list of string | no | Routes that may be called freely because they do not mutate state. Max items 500. |
 | `scale` | number | no | Fraction of production arrival rate to reproduce. Defaults to `0.05`. Minimum 0.001, maximum 1. |
-| `source` | `none`, `datadog`, `newrelic`, `otel`, `access_log` | no | Where the endpoint mix comes from. Defaults to `none`. |
-| `source_config` | object | no | Adapter specific settings, such as a service name or a log path. Credentials come from the secrets subsystem. Max properties 20. |
+| `scenarios` | list of [Load scenario](#load-scenario) | no | Declared journeys run against the environment beside the mix. Each entry names a scenario document in the repository. Max items 50. |
+| `source` | `none`, `otel`, `access_log` | no | Where the endpoint mix comes from. An OpenTelemetry trace export or a combined format access log, both read from a file named in source_config.path. Defaults to `none`. |
+| `source_config` | object | no | Adapter specific settings. Both sources take a path: the OTLP/JSON trace export, or the access log. Credentials come from the secrets subsystem. Max properties 20. |
 | `thresholds` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
 | `unsafe_routes` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
+
+## Load scenario
+
+One journey document and how hard to run it.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `iterations` | integer | no | How many times each session walks it. Defaults to `1`. Minimum 1, maximum 1000. |
+| `path` | string | **yes** | The scenario document, relative to the repository root. Max length 512. |
+| `sessions` | integer | no | How many sessions walk the journey at once. Defaults to `1`. Minimum 1, maximum 1000. |
+| `start_after` | string | no | Delay before this scenario starts, so one journey can burst while another is already running. Matches `^[0-9]+(ms\|s\|m)$`. |
 
 ## Oracle
 
@@ -335,9 +376,10 @@ Where and how long the environment runs. The provider decides the machinery; the
 | `domain` | string | no | Wildcard domain for environment hostnames. Defaults to localhost, which needs no DNS at all. Defaults to `localhost`. Max length 253. |
 | `idle_sleep` | string | no | How long an environment may sit idle before it is scaled to zero. It wakes on the next request. Defaults to `30m`. Matches `^[0-9]+(m\|h)$`. |
 | `kubeconfig_context` | string | no | Which kubeconfig context to use. Naming it prevents an environment landing on whatever cluster happened to be current. Max length 253. |
+| `max_ttl` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to `168h`. Matches `^[0-9]+(h\|d)$`. |
 | `namespace_prefix` | string | no | Prefix for Kubernetes namespaces. Defaults to `af`. Max length 40. |
 | `provider` | `local`, `kubernetes` | no | Defaults to `local`. |
-| `ttl` | string | no | How long an environment lives before automatic teardown. Defaults to `168h`. Matches `^[0-9]+(h\|d)$`. |
+| `ttl` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to `24h`. Matches `^[0-9]+(h\|d)$`. |
 
 ## Service
 

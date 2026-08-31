@@ -30,8 +30,47 @@ export const SITE_URL = (
 /** The product name, spelled and cased exactly one way, everywhere. */
 export const SITE_NAME = "Antifailure";
 
-/** What the site is called in a browser tab when a page has no title of its own. */
-export const SITE_TITLE = "Antifailure — Know what happens before you deploy";
+/**
+ * What joins a page's own name to the site's name in a <title>.
+ *
+ * It was an em dash, in every one of the twenty-three route titles, the
+ * layout's title template, the OpenGraph card, and five separate regular
+ * expressions that stripped it back off again. That is the character this project bans in prose everywhere else,
+ * and a title is not an exception to prose: it is the line a reader sees in the
+ * tab, in the search result and in a pasted link, before any sentence on the
+ * page itself. A middle dot separates without pretending to be punctuation.
+ *
+ * Everything that writes or reads a title goes through the two functions below,
+ * so this is the only place the character appears at all.
+ */
+export const TITLE_SEPARATOR = " · ";
+
+/** A page's <title>: its own name, then the site's. */
+export function pageTitle(name: string): string {
+  return `${name}${TITLE_SEPARATOR}${SITE_NAME}`;
+}
+
+/**
+ * A page's own name, with the site name taken back off.
+ *
+ * For a breadcrumb, a link list, or the heading of a page's markdown twin,
+ * where repeating the site name on every line reads like a stack of browser
+ * tabs. A title that does not end in the suffix, the home page's among them, is
+ * returned whole.
+ */
+export function titleName(title: string): string {
+  const suffix = `${TITLE_SEPARATOR}${SITE_NAME}`;
+  return title.endsWith(suffix) ? title.slice(0, -suffix.length) : title;
+}
+
+/**
+ * What the site is called in a browser tab when a page has no title of its own.
+ *
+ * The one title written the other way round, name first, because on the home
+ * page the name is the thing being introduced rather than the thing being told
+ * apart from other things with the same name.
+ */
+export const SITE_TITLE = "Antifailure: know what happens before you deploy";
 
 /**
  * The canonical one-line description. 152 characters, so it survives intact in
@@ -81,5 +120,5 @@ export const OG_IMAGE = {
   url: "/og.png",
   width: 1200,
   height: 630,
-  alt: "Antifailure — a disposable copy of your production stack for every pull request",
+  alt: "Antifailure: a disposable copy of your production stack for every pull request",
 } as const;

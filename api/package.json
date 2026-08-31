@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "The waitlist endpoint behind antifailure.dev, run as a Static Web Apps managed function.",
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "@azure/data-tables": "^13.3.0"
   }

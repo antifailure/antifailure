@@ -1,0 +1,115 @@
+---
+/**
+ * The bottom of Starlight's mobile menu.
+ *
+ * The site header's navigation is hidden below 50rem, and Starlight's mobile
+ * menu is the only surface a collapsed link can live on, so the site's own
+ * destinations are repeated here. Without this the documentation is a place a
+ * phone reader can arrive at and not leave: the sidebar covers the docs and
+ * nothing covers the rest of antifailure.dev.
+ *
+ * Starlight's default contents, the social icons, the theme select and the
+ * language select, are dropped. There is one locale, the theme toggle is off
+ * because the site commits to one light appearance, and GitHub is in the list
+ * below.
+ */
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const nav = [
+  { text: "Product", href: "/product" },
+  { text: "Solutions", href: "/solutions" },
+  { text: "Docs", href: `${base}/` },
+  { text: "Writing", href: "/blog" },
+  { text: "Pricing", href: "/pricing" },
+  { text: "GitHub", href: "https://github.com/antifailure/antifailure", external: true },
+];
+---
+
+<div class="af-menu-footer">
+  <p class="af-menu-label">Antifailure</p>
+  <ul class="af-menu-links">
+    {
+      nav.map((item) => (
+        <li>
+          <a
+            href={item.href}
+            target={item.external ? "_blank" : undefined}
+            rel={item.external ? "noopener noreferrer" : undefined}
+          >
+            {item.text}
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+  <div class="af-menu-actions">
+    <a class="af-menu-btn" href="/signin">Log in</a>
+    <a class="af-menu-btn af-menu-btn-primary" href="/signup">Sign up</a>
+  </div>
+</div>
+
+<style>
+  .af-menu-footer {
+    border-top: 1px solid var(--sl-color-hairline);
+    margin-top: 1rem;
+    padding-block: 1rem 1.5rem;
+  }
+
+  .af-menu-label {
+    margin: 0 0 0.25rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+  }
+
+  .af-menu-links {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .af-menu-links a {
+    display: flex;
+    align-items: center;
+    /* 44px, the same floor every other control on a phone is held to. */
+    min-height: 2.75rem;
+    color: var(--sl-color-gray-2);
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+  }
+
+  .af-menu-links a:hover {
+    color: var(--sl-color-white);
+  }
+
+  .af-menu-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+
+  .af-menu-btn {
+    display: inline-flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.75rem;
+    padding-inline: 1.125rem;
+    border: 1px solid rgb(0 0 0 / 0.4);
+    border-radius: 9999px;
+    background: rgb(0 0 0 / 0.02);
+    color: #000;
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    text-decoration: none;
+  }
+
+  .af-menu-btn-primary {
+    border-color: #000;
+    background: #000;
+    color: #fff;
+  }
+</style>

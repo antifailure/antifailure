@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { ago, when } from "@/lib/format";
 import { mutate, query, useApi } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
 import {
   Badge,
+  Bar,
   Button,
   Card,
   Empty,
@@ -17,6 +17,8 @@ import {
   TableWrap,
   Td,
   Th,
+  When,
+  inputClass,
 } from "@/components/ui";
 
 interface Entry {
@@ -49,7 +51,7 @@ const MAY_EXPORT = new Set(["owner", "admin"]);
 function Integrity() {
   const state = useApi<Chain>(() => query("audit.verify"), []);
   return (
-    <Loaded state={state} skeleton={<div className="h-9 w-56 animate-pulse rounded-[5px] bg-[rgba(16,16,16,0.07)]" />}>
+    <Loaded state={state} skeleton={<Bar className="h-5 w-56" />}>
       {(chain) => (
         <div className="flex flex-wrap items-center gap-3">
           <Badge tone={chain.ok ? "pass" : "fail"}>{chain.ok ? "chain intact" : "chain broken"}</Badge>
@@ -148,7 +150,7 @@ function Audit() {
             placeholder="filter by action"
             value={action}
             onChange={(e) => setAction(e.target.value.trim())}
-            className="h-8 w-[190px] rounded-[5px] border border-rule bg-card px-2.5 text-[12.5px] text-ink outline-none placeholder:text-dim focus:border-rule-strong"
+            className={`${inputClass} mt-0 w-full sm:w-[190px]`}
           />
         }
       >
@@ -176,20 +178,20 @@ function Audit() {
                   <tbody>
                     {rows.map((e) => (
                       <Row key={e.seq}>
-                        <Td numeric mono>{e.seq}</Td>
+                        <Td label="Seq" numeric mono>{e.seq}</Td>
                         <Td mono>{e.action}</Td>
-                        <Td>{e.actor_label}</Td>
-                        <Td className="max-w-[28ch] truncate">
+                        <Td label="Actor">{e.actor_label}</Td>
+                        <Td label="Target" className="max-w-[28ch] truncate">
                           {e.target_type}
                           {e.target_id ? (
                             <span className="text-dim"> {e.target_id}</span>
                           ) : null}
                         </Td>
-                        <Td>
+                        <Td label="Origin">
                           <Badge>{e.origin}</Badge>
                         </Td>
-                        <Td>
-                          <span title={when(e.occurred_at)}>{ago(e.occurred_at)}</span>
+                        <Td label="When">
+                          <When value={e.occurred_at} />
                         </Td>
                       </Row>
                     ))}

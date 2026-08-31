@@ -27,6 +27,50 @@ reading the results.
 
 **`off`** disables the integration. `af up` still works locally.
 
+## What the App must be granted
+
+[Standing up production](/docs/self-hosting/production/#8-create-the-production-github-app)
+carries the permission and event lists, with what each one is for and why the
+rest are refused. It is one list rather than two so that they cannot drift.
+
+The one worth knowing here: the console's controls need **Actions: write**, and
+GitHub answers a dispatch with 404 whether the App lacks that permission, the
+workflow file is missing, or the App was never installed on that repository. A
+missing permission looks exactly like a missing file.
+
+## Starting a run from the console
+
+The console's **Create environment**, **Run agents** and **Run load** controls
+do not run anything on the control plane. They dispatch a run of your own
+workflow, in your own repository, on the branch the environment is on. Your
+database, your secrets and your captured traffic stay where they already are.
+
+That needs two things. The App has Actions write, above. And the workflow
+accepts a dispatch:
+
+```yaml
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      command:     { type: choice, options: [up, agents, load], default: up }
+      workflows:   { required: false, default: '' }
+      duration:    { required: false, default: '' }
+      scale:       { required: false, default: '' }
+```
+
+`examples/github-workflow.yml` carries the whole file, including the step that
+turns each input into the flag it belongs to. Two things about this cost an
+afternoon if you meet them the hard way: GitHub reads the trigger list from the
+**default branch**, so adding `workflow_dispatch` on a feature branch alone
+changes nothing, and a dispatch to a workflow without it answers 404 rather
+than saying what is wrong.
+
+The control plane records nothing about the environment when it dispatches.
+The run appears in your Actions tab, and the environment appears in the console
+when the engine reports it, the same way it does for a run you started
+yourself.
+
 ## Comments
 
 `comment: true` posts one comment per pull request and edits it in place rather

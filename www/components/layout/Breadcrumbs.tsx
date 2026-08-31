@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { breadcrumbTrail } from "@/lib/routes";
+import { breadcrumbTrail, pageName } from "@/lib/routes";
 
 /**
  * The visible breadcrumb trail.
@@ -26,8 +26,7 @@ export function Breadcrumbs({ path }: { path: string }) {
       <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] tracking-extra-tight text-gray-new-50">
         {trail.map((route, i) => {
           const last = i === trail.length - 1;
-          const label =
-            route.path === "/" ? "Home" : route.title.replace(/\s+—\s+Antifailure$/, "");
+          const label = pageName(route, "label");
 
           return (
             <li key={route.path} className="flex items-center gap-x-2">

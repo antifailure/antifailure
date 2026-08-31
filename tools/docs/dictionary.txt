@@ -37,6 +37,7 @@ reprovision
 SCIM
 semgrep
 SIEM
+signups
 Sigstore
 starlight
 subsetted
@@ -53,3 +54,4 @@ unmasked
 vale
 versionless
 vhs
+waitlist

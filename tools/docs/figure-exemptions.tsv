@@ -1,0 +1,35 @@
+# Numbers on the marketing site that read as a measurement, and where each
+# one comes from.
+#
+# Three tab separated fields: the file, the figure exactly as figurecheck
+# reports it, and why it is allowed to be there. A reason is required, because
+# an exemption with no argument behind it is indistinguishable from somebody
+# silencing a finding they did not understand. An exemption that stops being
+# needed is reported, so this list cannot rot.
+#
+# The reason has to be true, and that is the whole mechanism. A figure from a
+# shaped example says so, and the page says so too. A figure computed at build
+# time says what computes it. A figure quoting somebody else names the source.
+# A number nobody can source cannot be given a truthful reason here, and the
+# answer is then to delete the number rather than to invent a reason for it.
+# The fabricated fidelity score this gate was written for would have needed a
+# row, and there was nothing true to write in it.
+#
+# Every row below is the same case: an example run drawn in a film or a panel,
+# captioned on the page as chosen rather than measured. None of them is a
+# claim about how well the product performs.
+
+www/components/home/visuals/FirewallScene.tsx	2%	a CPU reading on the mock service dashboard the firewall film draws. Set dressing inside an illustration, not a measurement of anything.
+www/components/home/visuals/MigrationBento.tsx	0 of 6	the lint result in the migration bento example. The six rules are real and this example migration trips none of them.
+www/components/home/visuals/ReportScene.tsx	129%	the latency line of the shaped run this film types out. The page captions it as one shaped run whose numbers were chosen, not measured.
+www/components/home/visuals/TwinLifecycleScene.tsx	14 of 14	the teardown count in the shaped lifecycle run. The journal and the reverse replay are real; the resource count is written.
+www/components/home/visuals/hero/WorkloadFilm.tsx	34%	a route share in the hero film's example access log, invented to make a production-shaped route mix concrete.
+www/components/home/visuals/hero/WorkloadFilm.tsx	27%	a route share in the hero film's example access log, invented to make a production-shaped route mix concrete.
+www/components/home/visuals/hero/WorkloadFilm.tsx	18%	a route share in the hero film's example access log, invented to make a production-shaped route mix concrete.
+www/components/home/visuals/hero/WorkloadFilm.tsx	129%	the regression the hero film reports against its own invented baseline. Not a measured result.
+www/components/pages/product/Load.tsx	18%	an example route share. The page captions this panel: the routes, latencies and shares are written.
+www/components/pages/product/Load.tsx	34%	an example route share. The page captions this panel: the routes, latencies and shares are written.
+www/components/pages/product/Load.tsx	27%	an example route share. The page captions this panel: the routes, latencies and shares are written.
+www/components/pages/product/Load.tsx	9%	an example route share. The page captions this panel: the routes, latencies and shares are written.
+www/components/pages/product/Report.tsx	1 of 4	the check count in the example GitHub check panel. The page captions it as one shaped run whose numbers were chosen.
+www/components/pages/product/SafeState.tsx	12%	the ratio of the six row worked example beside it, captioned on the page as chosen. What a real subset keeps depends on the customer's own data; the rule it demonstrates is the part that is fixed.

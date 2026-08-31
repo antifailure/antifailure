@@ -67,8 +67,29 @@ const shouldRenderSearch =
      the top of the viewport, which assumes the nav is a single bar. Ours is
      two, and --sl-nav-height covers both, so the button landed halfway down
      straddling the hairline between them. Centre it in the site header
-     instead, where the marketing site's own menu button sits. */
+     instead, where the marketing site's own menu button sits.
+
+     Starlight also paints it as a filled circle with a drop shadow, which on a
+     white header reads as a button floating above the page rather than a
+     control in the bar, and is the only shadow of its kind on the site. The
+     marketing site's menu button is a flat pair of rules with no background at
+     all; this is that button. */
   :global(starlight-menu-button button) {
-    top: calc((3.5rem - var(--sl-menu-button-size, 2rem)) / 2) !important;
+    top: calc((3.5rem - var(--sl-menu-button-size, 2.75rem)) / 2) !important;
+    inset-inline-end: 1.25rem;
+    background: transparent;
+    box-shadow: none;
+    border-radius: 4px;
+    color: #000;
+  }
+
+  :global(starlight-menu-button[aria-expanded="true"] button) {
+    background: transparent;
+    color: #000;
+  }
+
+  :global(starlight-menu-button button svg) {
+    width: 1.25rem;
+    height: 1.25rem;
   }
 </style>

@@ -576,7 +576,14 @@ func TestNormalize_AppliesEveryDefault(t *testing.T) {
 
 	require.Equal(t, schema.RuntimeLocal, m.Runtime.Provider)
 	require.Equal(t, "localhost", m.Runtime.Domain)
-	require.Equal(t, "168h", m.Runtime.TTL)
+	// A day, not the week this used to be. The week was chosen when nothing
+	// read runtime.ttl, so it cost nothing and expired nothing; now that the
+	// reaper enforces it, it is the difference between paying for an
+	// environment for a day and paying for it for a week.
+	require.Equal(t, "24h", m.Runtime.TTL)
+	// The old default is now the ceiling on af env extend, so the environment
+	// somebody genuinely needs for a week can still have one, by asking.
+	require.Equal(t, "168h", m.Runtime.MaxTTL)
 	require.Equal(t, schema.GitHubActions, m.GitHub.Mode)
 	require.Equal(t, schema.ForkLabel, m.GitHub.ForkPolicy,
 		"a fork must not run with this environment's credentials by default")
@@ -786,6 +793,8 @@ invariants:
 load:
   enabled: true
   source: access_log
+  source_config:
+    path: traffic/access.log
 `)
 	out := manifest.Explain(m)
 	for _, want := range []string{

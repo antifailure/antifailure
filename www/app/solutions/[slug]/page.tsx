@@ -2,12 +2,13 @@ import { SOLUTION_PAGE_SLUGS, SolutionVerticalPage } from "@/components/pages/so
 import type { Metadata } from "next";
 import { pageMetadata } from "@/lib/seo";
 import { notFound } from "next/navigation";
+import { pageTitle } from "@/lib/site";
 
 const META: Record<string, { title: string; description: string }> = {
-  saas: { title: "B2B SaaS — Antifailure", description: "Daily deploys, migration anxiety, tenant-shaped twins." },
-  fintech: { title: "Fintech — Antifailure", description: "Billing and ledger-safe production twins." },
-  marketplaces: { title: "Marketplaces — Antifailure", description: "Queues, workers, dual-writes." },
-  devtools: { title: "Developer tools — Antifailure", description: "Schema changes on large tables." },
+  saas: { title: pageTitle("B2B SaaS"), description: "Daily deploys, migration anxiety, tenant-shaped twins." },
+  fintech: { title: pageTitle("Fintech"), description: "Billing and ledger-safe production twins." },
+  marketplaces: { title: pageTitle("Marketplaces"), description: "Queues, workers, dual-writes." },
+  devtools: { title: pageTitle("Developer tools"), description: "Schema changes on large tables." },
 };
 
 export function generateStaticParams() {
@@ -20,7 +21,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  if (!META[slug]) return { title: "Solutions — Antifailure" };
+  if (!META[slug]) return { title: pageTitle("Solutions") };
   return pageMetadata(`/solutions/${slug}`);
 }
 

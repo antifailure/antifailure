@@ -285,7 +285,7 @@ function TokenView({
     <div className="flex min-h-[228px] font-mono text-[13px] leading-[22px] max-sm:min-h-[200px] max-sm:text-[11px] max-sm:leading-[19px]">
       {/* The gutter is dropped on a phone rather than shrunk. The code has to
           wrap at that width, and a wrapped line makes every number below it
-          point at the wrong row — a broken gutter is worse than none. */}
+          point at the wrong row, and a broken gutter is worse than none. */}
       <div className="select-none py-3.5 pl-3 pr-3 text-right text-[#565656] max-sm:hidden">
         {Array.from({ length: lines }, (_, i) => (
           <div key={i}>{i + 1}</div>
@@ -603,10 +603,10 @@ export function IdePlay() {
         ))}
         {spin ? (
           <span className="mt-1 inline-flex items-center gap-1.5 text-black/40">
-            <span
-              className="wt-spin inline-block h-2.5 w-2.5 rounded-full border border-black/30 border-t-black/80"
-              style={{ animation: "wt-spin 0.7s linear infinite" }}
-            />
+            {/* A square, not a spinner. The word "running" carries the state
+                already; the ring beside it added a permanent rotation to a
+                page nobody is interacting with. */}
+            <span className="inline-block h-2 w-2 rounded-[1px] bg-black/45" />
             running
           </span>
         ) : null}

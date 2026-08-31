@@ -20,7 +20,12 @@ import Link from "next/link";
  */
 export function movedMetadata(to: string, title: string): Metadata {
   return {
-    title,
+    // `absolute`, for the same reason pageMetadata uses it: the root layout
+    // appends the site name to any bare string, and these titles are built by
+    // pageTitle and already carry it. Without this the six moved paths shipped
+    // <title>Load · Antifailure · Antifailure</title>, which is what a
+    // 301 hop shows in a browser tab for the moment it is on screen.
+    title: { absolute: title },
     robots: { index: false, follow: true },
     alternates: { canonical: to },
   };

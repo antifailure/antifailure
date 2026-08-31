@@ -259,7 +259,7 @@ egress:
 	require.Contains(t, got.stdout, "api.stripe.com")
 	// The whole point: a default nobody set is shown with its resolved value.
 	require.Contains(t, got.stdout, "default      block")
-	require.Contains(t, got.stdout, "lifetime     168h")
+	require.Contains(t, got.stdout, "lifetime     24h")
 }
 
 func TestExplain_JSONFormIsTheNormalizedManifest(t *testing.T) {
@@ -625,4 +625,31 @@ func TestCI_DoesNotShadowTheGlobalOutputFlag(t *testing.T) {
 	require.True(t, found, "the help separates a command's flags from the global ones")
 	require.NotContains(t, own, "-o, --output",
 		"af ci defines its own -o again, which is the collision this guards")
+}
+
+// Turning the inventory off says so rather than reporting an empty one. An
+// inventory nobody took and an inventory that found nothing wrong read
+// identically on a terminal, and only one of them is a reason for confidence.
+func TestFidelity_DisabledSaysSoRatherThanReportingNothing(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeManifest(t, dir, "version: 1\nname: shop\nservices:\n  - name: web\n    port: 3000\n"+
+		"fidelity:\n  enabled: false\n")
+
+	got := runCLI(t, dir, nil, "fidelity")
+	require.Zero(t, got.code, got.stderr)
+	require.Contains(t, got.stdout, "turned off")
+	require.Contains(t, got.stdout, "not the same as everything having passed")
+}
+
+func TestExplain_ShowsTheResolvedFidelitySettings(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeManifest(t, dir, "version: 1\nname: shop\nservices:\n  - name: web\n    port: 3000\n"+
+		"fidelity:\n  require: [database]\n")
+
+	got := runCLI(t, dir, nil, "explain")
+	require.Zero(t, got.code, got.stderr)
+	require.Contains(t, got.stdout, "inventory    on")
+	require.Contains(t, got.stdout, "required     database")
 }

@@ -145,12 +145,12 @@ const PRODUCT_FAQ: FaqItem[] = [
 
 export function OverviewPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product"
         eyebrow="Product"
         title="A disposable production twin that proves whether a deployment is safe."
-        lead="Connect a repository and cloud environment. For every risky change, the platform creates an isolated production twin, fills it with safe production-shaped state, exercises it, and reports whether the deployment is safe to ship."
+        lead="Connect a repository and a cloud environment. For every risky change, Antifailure builds an isolated production twin, fills it with safe production-shaped state, exercises it, and says whether the deployment is safe to ship."
         visual={<TwinLifecycleScene />}
       />
 
@@ -197,7 +197,7 @@ export function OverviewPage() {
                 {FRAGMENTS.map((name) => (
                   <span
                     key={name}
-                    className="border border-black/[0.08] px-2 py-1 font-mono text-[10px] tracking-extra-tight text-black/45"
+                    className="border border-black/[0.08] px-2 py-1 font-mono text-[10px] tracking-extra-tight text-black/60"
                   >
                     {name}
                   </span>
@@ -215,7 +215,7 @@ export function OverviewPage() {
                   <ul className="mt-4 space-y-2.5">
                     {STAGING_ROWS.map((row) => (
                       <li key={row.miss}>
-                        <CheckRow ok={false} className="text-black/45">
+                        <CheckRow ok={false} className="text-black/60">
                           {row.miss}
                         </CheckRow>
                       </li>
@@ -251,11 +251,12 @@ export function OverviewPage() {
       </PageSection>
 
       <PageSection>
-        <PageHeading kicker="Wedge" title="<strong>Postgres migrations first.</strong> Not universal multicloud cloning." />
+        <PageHeading kicker="Scope" title="<strong>Postgres migrations first.</strong> Not universal multicloud cloning." />
         <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Exclusive locks, table rewrites, pool exhaustion, query-plan regressions, and old binaries that
-          cannot read candidate writes. Conventional tests miss them. The first complete wedge is
-          automated safety validation for risky Postgres-backed web deployments.
+          Exclusive locks, table rewrites, pool exhaustion, query-plan regressions, and old binaries
+          that cannot read candidate writes. Conventional tests miss all of them. So the first thing
+          built completely is the check for a risky Postgres-backed deployment, rather than a shallow
+          version of everything.
         </p>
 
         <div className="mt-14">
@@ -276,13 +277,13 @@ export function OverviewPage() {
             <Hairline />
             <div className="px-5 py-5">
               <h3 className="text-[18px] tracking-extra-tight text-black">Unsafe schema migration</h3>
-              <p className="mt-2 font-mono text-[12px] tracking-extra-tight text-black/45">
+              <p className="mt-2 font-mono text-[12px] tracking-extra-tight text-black/60">
                 20260824_add_billing_status
               </p>
               <dl className="mt-5 space-y-2.5">
                 {MIGRATION_FINDINGS.map((row) => (
                   <div key={row.k} className="flex items-baseline justify-between gap-4">
-                    <dt className="font-mono text-[11px] tracking-extra-tight text-black/40">{row.k}</dt>
+                    <dt className="font-mono text-[11px] tracking-extra-tight text-black/55">{row.k}</dt>
                     <dd
                       className={cn(
                         "font-mono text-[12px] tracking-extra-tight",
@@ -370,7 +371,7 @@ export function OverviewPage() {
       <RelatedGrid
         items={[
           { href: "/product/twins", title: "Isolated Twin", description: "How the orchestrator provisions and tears down." },
-          { href: "/product/migrations", title: "Migration Safety", description: "The first complete wedge." },
+          { href: "/product/migrations", title: "Migration Safety", description: "Locks, rewrites and plans, before it ships." },
           { href: "/docs", title: "Docs", description: "How a twin run works, end to end." },
         ]}
       />

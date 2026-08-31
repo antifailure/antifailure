@@ -1,10 +1,13 @@
 # Copy this to .github/workflows/antifailure.yml.
 #
-# One command rather than five, because a workflow file that threads five
-# commands together is a file every user edits slightly and gets subtly wrong.
-# af ci brings the environment up, runs the agents, writes the report, and
-# tears down whatever happens, including on a failure and including on a
-# cancelled job.
+# Two commands. af change reads the diff and says which checks will exercise
+# what it touched, and af ci does the rest: it brings the environment up, runs
+# the agents, writes the report, and tears down whatever happens, including on
+# a failure and including on a cancelled job.
+#
+# The first exists so the second does not run on a change to a README. It says
+# what it cannot see as well as what it can, and a path it does not recognise
+# selects every check rather than none.
 name: Antifailure
 
 on:
@@ -64,11 +67,30 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # af change diffs against the merge base, and the default one commit
+          # deep clone shares no history with the base branch, so there is no
+          # merge base to find. Without this the analysis fails with AF-DET-010.
+          fetch-depth: 0
 
       - name: Install Antifailure
         run: curl -fsSL https://antifailure.dev/install.sh | sh
 
+      # Written to report.md so that a change needing no environment still
+      # leaves a comment saying why. af ci overwrites the file when it runs.
+      - name: Work out what this change touches
+        id: change
+        run: af change --write report.md
+
       - name: Run the check
+        # A pull request that touches nothing any check exercises does not get
+        # an environment. The output is the check being both selected by the
+        # change and configured in the manifest.
+        #
+        # The condition is scoped to pull requests on purpose. A dispatch never
+        # ran the analysis, so its outputs are empty, and gating on them alone
+        # would silently skip the one job somebody pressed a button to get.
+        if: github.event_name != 'pull_request' || steps.change.outputs.environment == 'true'
         # A pull request runs the whole check. A dispatch runs the third of it
         # the console asked for, because `af ci` would bring up an environment,
         # run the agents and tear it down again, which is not what somebody

@@ -9,24 +9,33 @@ import { SectionLabel } from "@/components/layout/SectionLabel";
 import { Cta } from "@/components/home/Cta";
 import { cn } from "@/lib/cn";
 
-export function PageShell({
-  children,
-  inset = false,
-}: {
-  children: ReactNode;
-  inset?: boolean;
-}) {
+/**
+ * Every page that is not the homepage.
+ *
+ * This used to take an `inset` prop, and eight product pages passed it while
+ * the six legal pages, the four solutions pages and pricing did not. It put a
+ * 10% margin on the whole page and then reached inside the shared container
+ * with `!max-w-none !px-0` to strip the measure and the gutter it had just
+ * been given.
+ *
+ * That produced the defect somebody reported from the live site. A tinted
+ * section paints its own background edge to edge of whatever box it is in. Put
+ * that section inside a 10% margin and the tint stops 10% short of the page,
+ * which is the "green margin". Take the container's padding away and the
+ * text inside starts at exactly the tint's edge, touching it, while the other
+ * side is left with several hundred pixels of empty colour. On /product/fidelity
+ * at 1920 the band ran from 192 to 1728 and the heading, the verdict chips and
+ * the paragraph all began at 192 with nothing between them and the edge.
+ *
+ * The two measures were also the same number where it mattered: `mx-[10%]` of
+ * 1920 is 1536, and `max-w-[1600px] px-8` at 1920 is also 1536. The prop was
+ * buying nothing above 1600 and only narrowing the page below it. So there is
+ * one measure now, owned here, and no page overrides it.
+ */
+export function PageShell({ children }: { children: ReactNode }) {
   return (
     <SiteLayout overlay={false}>
-      <div
-        className={
-          inset
-            ? "mx-[10%] [&_.page-measure]:!max-w-none [&_.page-measure]:!px-0"
-            : undefined
-        }
-      >
-        {children}
-      </div>
+      {children}
       <Cta />
     </SiteLayout>
   );
@@ -68,7 +77,7 @@ export function PageHero({
 }) {
   return (
     <section className="pt-28 pb-16 safe-paddings max-lg:pt-16 max-md:pt-12 max-md:pb-10">
-      <Container size="1600" className="page-measure">
+      <Container size="1600">
         {path ? <PageJsonLd path={path} /> : null}
         {path ? <Breadcrumbs path={path} /> : null}
         <SectionLabel>{eyebrow}</SectionLabel>
@@ -130,12 +139,12 @@ export function PageSection({
       className={cn(
         "safe-paddings",
         tone === "plain" && "py-28 max-xl:py-20 max-md:py-14",
-        tone === "sage" && "bg-[#E4F1EB] py-32 max-xl:py-24 max-md:py-16",
+        tone === "sage" && "bg-sage py-32 max-xl:py-24 max-md:py-16",
         tone === "white" && "border-t border-black/12 py-28 max-xl:py-20 max-md:py-14",
         className,
       )}
     >
-      <Container size="1600" className="page-measure">
+      <Container size="1600">
         {children}
       </Container>
     </section>

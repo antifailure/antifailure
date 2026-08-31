@@ -23,6 +23,45 @@ These work on every command.
 
 ## Commands
 
+### `af change`
+
+Read the diff and say which checks will exercise what it touched.
+
+What this change touches, and which checks cover it.
+
+Every changed path is classified by a rule that names it, and every check is
+reported as selected or not, together with whether the manifest configures it
+at all. A check that is selected and unavailable is the line worth reading:
+something changed and nothing is going to look at it.
+
+Two things it will not do. It never says a change is safe or risky; it says
+which checks exercise which files, and what it cannot see. And a path no rule
+recognises selects every check rather than none, because the cost of the two
+mistakes is not the same.
+
+  af change                          against the base branch this job names
+  af change --base origin/main       against a ref you choose
+  af change --diff pr.patch          against a diff you already have
+
+In a GitHub Actions job it writes one output per check, so a later step can
+skip work this change does not need.
+
+This is the one command that does not need antifailure.yaml. Without one it
+still says what the diff touches, and reports every check as unavailable
+because nothing is configured to run it.
+
+```
+af change [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--base` | - | Ref to measure against, defaulting to this job's base branch. |
+| `--branch` | - | Branch to read the manifest for, defaulting to the checked out one. |
+| `--diff` | - | Read a unified diff from this file instead of asking git. |
+| `--head` | - | Ref to measure, defaulting to HEAD. |
+| `-w`, `--write` | - | Write the report section here as markdown. |
+
 ### `af ci`
 
 Bring an environment up, run everything, write a report, tear it down.
@@ -105,9 +144,34 @@ af env
 
 Subcommands:
 
+- [`af env extend`](#af-env-extend) Keep an environment past its lifetime, up to its maximum.
 - [`af env list`](#af-env-list) List the environments this machine is holding.
 - [`af env prune`](#af-env-prune) Remove environments older than a cutoff.
 - [`af env pull`](#af-env-pull) Read an environment's record from the control plane.
+- [`af env reap`](#af-env-reap) Remove the environments whose lifetime has ended.
+
+### `af env extend`
+
+Keep an environment past its lifetime, up to its maximum.
+
+Moves an environment's expiry, so a sweep does not take one you are still
+using.
+
+There is a bound, and it is the point. No extension may take an environment
+past runtime.max_ttl measured from when it was CREATED, not from now, so
+extending repeatedly cannot walk the limit forward. Asking for more than the
+maximum grants the maximum and says so rather than failing, because being given
+less time than you asked for silently is how you come back to an environment
+that is gone.
+
+```
+af env extend <environment> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--for` | `4h0m0s` | How long from now the environment should live. |
+| `--reason` | - | Why, recorded with the extension. |
 
 ### `af env list`
 
@@ -162,6 +226,35 @@ af env pull <environment> [flags]
 | --- | --- | --- |
 | `--control-plane` | - | The control plane to read from (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
 
+### `af env reap`
+
+Remove the environments whose lifetime has ended.
+
+Removes every environment on this machine that has passed the lifetime it was
+created with, and nothing else.
+
+The lifetime is read off each environment's own resources, stamped there when
+it was created from that repository's runtime.ttl. It is never taken from the
+manifest this command was run with, so a repository with a two hour lifetime
+cannot remove another project's week long environment on the same machine.
+
+Three things are never removed. An environment whose resources state no
+lifetime, which is everything created before this feature existed: use
+'af env prune --older-than' for those, where a person names the cutoff. An
+environment something is running against, which is deferred to the next sweep
+rather than pulled out from under a command. And anything that is not an
+environment, such as the shared sidecar image.
+
+An environment you are still using can be kept with 'af env extend'.
+
+```
+af env reap [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--dry-run` | `false` | Print what would be removed without removing it. |
+
 ### `af explain`
 
 Show the effective configuration, with every default filled in.
@@ -202,6 +295,39 @@ af explore [flags]
 | `--only` | - | Explore just these goals, by name. |
 | `--runner` | - | Path to the runner's entry point. |
 | `--seed` | - | Replay with this seed rather than the one the manifest declares. |
+
+### `af fidelity`
+
+What this environment reproduces, component by component, and what it does not.
+
+An inventory of the copy against the thing it is a copy of.
+
+Every line comes from something the engine already knew: the runtime says what
+is running, the database provider says which golden the branch came from and
+whether its attestation still checks out, the branch says how much it holds and
+whether the personas exist in it, and the manifest says which third party hosts
+the policy names and what answers for each.
+
+There is a headline number and it is defined on the page it prints: how many of
+the measured components are production's own thing rather than a substitution,
+a refusal or an absence. What could not be measured is excluded from it and
+named, never counted as either a pass or a failure, because a percentage that
+quietly absorbs an unknown is worth less than no percentage at all.
+
+The per dimension verdict is the part to read. A change to billing cares about
+the third party hosts and not about traffic; a migration cares about the data
+and about neither. One averaged number hides whichever of those is yours.
+
+Set fidelity.require in the manifest to fail this command when a dimension is
+not fully reproduced.
+
+```
+af fidelity [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to inventory, defaulting to the checked out one. |
 
 ### `af golden`
 
@@ -548,6 +674,7 @@ af load
 Subcommands:
 
 - [`af load run`](#af-load-run) Run the full load profile.
+- [`af load scenario`](#af-load-scenario) Run the declared journeys against the environment.
 - [`af load smoke`](#af-load-smoke) Send a short burst, to check the environment answers under any load at all.
 
 ### `af load run`
@@ -564,6 +691,32 @@ af load run [flags]
 | `--duration` | `1m0s` | How long to send for. |
 | `--scale` | `1` | Multiplier on production's rate. |
 | `--seed` | `1` | Makes two runs send the same sequence. |
+
+### `af load scenario`
+
+Run the declared journeys against the environment.
+
+A scenario is an ordered journey rather than a mix: open the billing page, ask
+for the subscription, submit, and submit again three hundred milliseconds later
+because the first one felt slow. Sessions walk it at once, and one scenario can
+start after another so a burst arrives while something else is already running.
+
+The requests are HTTP. Clicking a button is 'af test' and the browser agents;
+this is what the load generator can send, at the concurrency load runs at.
+
+Every step is checked against load.safe_routes before anything is sent, so a
+scenario that names an undeclared route is blocked rather than run.
+
+```
+af load scenario [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to send at, defaulting to the checked out one. |
+| `--concurrency` | `20` | Ceiling on requests in flight. |
+| `--only` | - | Run just these scenarios, by name. |
+| `--seed` | `1` | Makes two runs send the same schedule. |
 
 ### `af load smoke`
 

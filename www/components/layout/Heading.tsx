@@ -41,7 +41,7 @@ export function Heading({
               className={cn(
                 "hidden font-mono text-[11px] font-medium uppercase leading-none tracking-[0.14em]",
                 "max-xl:inline-block max-md:text-[10px]",
-                theme === "light" ? "text-black/45" : "text-black/50",
+                theme === "light" ? "text-black/60" : "text-black/50",
               )}
             >
               {label}

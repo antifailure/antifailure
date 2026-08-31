@@ -163,16 +163,28 @@ staging's.
 | Application name | `Antifailure` |
 | Homepage URL | `https://app.antifailure.dev` |
 | Authorization callback URL | `https://app.antifailure.dev/auth/github/callback` |
-| Enable Device Flow | unticked |
+| Enable Device Flow | **unticked** |
 | Allow wildcard matching | **unticked** |
 
 The callback has to match `github_redirect_uri` in `production.tfvars`
 character for character. A mismatch fails with an error GitHub shows the user
-and this application never sees.
+and this application never sees. The field takes more than one: GitHub's form
+says you may add up to ten redirect URIs, so a second environment does not need
+a second OAuth App.
 
 Leave wildcard matching off. The registered callback is exact and nothing needs
 it. While you are there, **untick it on the staging OAuth App too**: it is on,
 and nothing there needs it either.
+
+Leave Device Flow off, and it is worth knowing what it would be for so that the
+default does not survive by accident. GitHub's device flow is for a client with
+no browser to redirect: it shows a code, the user types it at
+`github.com/login/device`, and the client polls GitHub for a token. `af login`
+does look like that, and it is not that: it is this control plane's own device
+grant, in `web/apps/api/src/auth/device.ts`, minting `afu_` tokens against
+`/auth/device/code` on this server. Nothing here calls `github.com/login/device`
+at all. Ticking it adds a way to obtain a GitHub token in this application's
+name that nothing in the product would ever use.
 
 Generate a client secret and keep the page open. GitHub shows it once.
 
@@ -194,23 +206,49 @@ production's tenants. Installation ids also differ per App, and
 | Webhook secret | generate a long random string and keep it |
 | Where can this be installed | Any account |
 
-Repository permissions:
+Repository permissions, and what each one is actually for:
 
-| Permission | Access |
-| --- | --- |
-| Contents | Read-only |
-| Metadata | Read-only |
-| Pull requests | Read and write |
-| Checks | Read and write |
+| Permission | Access | What uses it |
+| --- | --- | --- |
+| Metadata | Read-only | Mandatory for every App. |
+| Contents | Read-only | Reading the manifest and the workflow file. |
+| Pull requests | Read and write | The report comment, and the pull request a masking rule change becomes. |
+| Actions | Read and write | The console's **Create environment**, **Run agents** and **Run load**. |
 
 Organization permissions:
 
-| Permission | Access |
-| --- | --- |
-| Members | Read-only |
+| Permission | Access | What uses it |
+| --- | --- | --- |
+| Members | Read-only | Membership sync, which is what stops everybody landing with no tenant. |
+
+**Grant Actions write at creation even if the console's controls are not in
+use yet.** It is the one on this list where waiting is worse than granting:
+widening an existing App's permissions makes GitHub ask every installation to
+accept the new grant, so adding it later interrupts every customer. Those three
+controls dispatch a `workflow_dispatch` run of the customer's own workflow
+through `dispatchWorkflow` in `web/apps/api/src/auth/github.ts`, and without the
+permission GitHub answers 404, which is the same answer it gives for a missing
+workflow file.
+
+**Checks is not on this list and should not be granted.** Nothing in this
+repository calls the Checks API. The only two files that speak to GitHub are
+`web/apps/api/src/auth/github.ts` and `web/apps/api/src/github/app.ts`, and
+neither creates a check run. A permission granted for a feature that does not
+exist is one nobody will remove later, because nobody will be able to tell
+whether something depends on it.
 
 Subscribe to events: **Installation**, **Installation repositories**,
-**Pull request**, **Push**, **Member**, **Membership**.
+**Repository**.
+
+That is the whole list `web/apps/api/src/github/webhook.ts` acts on. **Pull
+request** and **Push** are deliberately absent: nothing handles them, and an
+event nobody consumes is delivery-log noise that makes a real failed delivery
+harder to find. **Member** and **Membership** are absent for a sharper reason:
+the handler names them and answers `handled: false`, because membership is
+resolved at sign-in and reconciled by **Sync from GitHub** on the Members page.
+Subscribing to them looks like membership is event driven and it is not.
+Adding any of these later is an edit to the App's settings rather than a
+reinstall, so there is no cost to leaving them off now.
 
 Then, on the App's page, **Generate a private key**. GitHub downloads a `.pem`
 and never shows it again. Note the numeric **App ID** at the top of the page.

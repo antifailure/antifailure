@@ -1,0 +1,7 @@
+diff --git a/pipeline/model.qqq b/pipeline/model.qqq
+new file mode 100644
+index 0000000..dae996f
+--- /dev/null
++++ b/pipeline/model.qqq
+@@ -0,0 +1 @@
++model: v2

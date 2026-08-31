@@ -8,7 +8,7 @@ export function DevtoolsPage() {
         path="/solutions/devtools"
         eyebrow="Solutions · Developer tools"
         title="Schema changes on large tables."
-        lead="The flagship wedge, felt first by teams whose users notice p99 immediately. Measure the strongest lock held per table, how long it was held, what queued behind it, and how the query plans moved."
+        lead="These teams feel it first, because their users notice p99 the same day. Measure the strongest lock held per table, how long it was held, what queued behind it, and how the query plans moved."
         framed={false}
         visual={<MigrationHero tab={1} />}
       />

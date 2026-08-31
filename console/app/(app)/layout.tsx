@@ -9,8 +9,8 @@ import { SessionProvider } from "@/components/session";
  * It was inside each page first, and that was wrong in a way only a browser
  * shows: a layout is preserved across a client-side navigation and a page is
  * not, so every click on the sidebar unmounted the shell, refetched the
- * session, and blanked the whole window -- navigation rail included -- until
- * it came back. It looked like the application crashed on every navigation.
+ * session, and blanked the whole window, navigation rail included, until it
+ * came back. It looked like the application crashed on every navigation.
  *
  * /device is deliberately NOT in this group. It is reached from a terminal by
  * somebody who may not be signed in and may have no organization, and wrapping

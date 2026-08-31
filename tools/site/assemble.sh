@@ -117,6 +117,31 @@ for page in sorted(set(pages)):
 # nothing in the base file wants to answer for a .html address.
 base["routes"] = generated + base.get("routes", [])
 
+# apiRuntime is generated here rather than written in www/public because it is a
+# fact about this deploy rather than about the site. deploy.yml passes
+# api_location with skip_api_build, which makes the runtime required rather than
+# optional: the platform will not start a managed function it has not been told
+# how to run. The two settings have to agree, and they agree more reliably when
+# both live in the repository's deploy files than when one lives in a deploy
+# file and the other in an asset folder.
+#
+# node:20 rather than node:22, which is also supported: 20 is the version every
+# current Static Web Apps document agrees on, and an apiRuntime the platform
+# does not recognise is a failed deploy rather than a warning.
+#
+# If somebody later declares one in www/public/staticwebapp.config.json, which
+# is where a reader would look for it, say so instead of quietly winning. A
+# value that is load-bearing and lives somewhere other than where it is looked
+# for is how the next person spends an afternoon.
+declared = base.get("platform", {}).get("apiRuntime")
+if declared is not None and declared != "node:20":
+    raise SystemExit(
+        f"www/public/staticwebapp.config.json sets platform.apiRuntime to {declared!r} and "
+        "tools/site/assemble.sh sets it to 'node:20'. Pick one and delete the other; the "
+        "runtime has to agree with api_location in .github/workflows/deploy.yml."
+    )
+base.setdefault("platform", {})["apiRuntime"] = "node:20"
+
 with open(config, "w", encoding="utf-8") as f:
     json.dump(base, f, indent=2)
     f.write("\n")
@@ -152,6 +177,25 @@ lost += [route for route, _ in source_routes - shipped_routes]
 if lost:
     print("the assembled host config lost declarations from")
     print("www/public/staticwebapp.config.json: " + ", ".join(sorted(lost)))
+    sys.exit(1)
+
+# The generated half, asserted for the same reason as the copied half. Each of
+# these was live on antifailure.dev as a defect: the API answered 500 on every
+# path for two days because the platform was never told a runtime, a 404 served
+# Microsoft's page, and every page answered on both its clean and its .html
+# address. A config that is valid JSON and missing any of them looks exactly
+# like a working one.
+missing = []
+if shipped.get("platform", {}).get("apiRuntime") != "node:20":
+    missing.append("platform.apiRuntime is not node:20, so the managed function will not start")
+if not any(r.get("route", "").endswith(".html") for r in shipped.get("routes", [])):
+    missing.append("no page redirects its .html form to its clean form")
+if shipped.get("responseOverrides", {}).get("404", {}).get("rewrite") != "/404.html":
+    missing.append("a 404 would serve the platform's page instead of ours")
+
+if missing:
+    for problem in missing:
+        print(problem)
     sys.exit(1)
 
 print(f"host config: {len(shipped['routes'])} routes, "

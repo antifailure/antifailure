@@ -24,8 +24,10 @@ type Manifest struct {
 	Workflows  []Workflow  `json:"workflows,omitempty" yaml:"workflows,omitempty"`
 	Invariants []Invariant `json:"invariants,omitempty" yaml:"invariants,omitempty"`
 	Insights   *Insights   `json:"insights,omitempty" yaml:"insights,omitempty"`
+	Change     *Change     `json:"change,omitempty" yaml:"change,omitempty"`
 	Oracle     *Oracle     `json:"oracle,omitempty" yaml:"oracle,omitempty"`
 	Explore    *Explore    `json:"explore,omitempty" yaml:"explore,omitempty"`
+	Fidelity   *Fidelity   `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
 	Load       *Load       `json:"load,omitempty" yaml:"load,omitempty"`
 	Policy     *Policy     `json:"policy,omitempty" yaml:"policy,omitempty"`
 	Runtime    *Runtime    `json:"runtime,omitempty" yaml:"runtime,omitempty"`
@@ -477,13 +479,90 @@ type Goal struct {
 	Budget *Budget `json:"budget,omitempty" yaml:"budget,omitempty"`
 }
 
+// FidelityDimension names one part of the environment the inventory measures.
+//
+// A closed vocabulary rather than free text, because the manifest names these
+// in fidelity.require and a typo there would silently require nothing.
+type FidelityDimension string
+
+const (
+	// FidelityServices is the services the manifest declares, against the
+	// containers that are running.
+	FidelityServices FidelityDimension = "services"
+	// FidelityDatabase is the branch: which golden it came from, whether that
+	// golden was verified, and whether its attestation still checks out.
+	FidelityDatabase FidelityDimension = "database"
+	// FidelityThirdParty is the hosts the egress policy covers, and what
+	// answers for each of them.
+	FidelityThirdParty FidelityDimension = "third_party"
+	// FidelityAuth is whether each persona can be created and signed in as.
+	FidelityAuth FidelityDimension = "auth"
+	// FidelityRuntime is where the environment runs.
+	FidelityRuntime FidelityDimension = "runtime"
+	// FidelityTraffic is where the endpoint mix comes from.
+	FidelityTraffic FidelityDimension = "traffic"
+)
+
+// AllFidelityDimensions returns every dimension, in the order the inventory
+// reports them.
+func AllFidelityDimensions() []FidelityDimension {
+	return []FidelityDimension{
+		FidelityServices, FidelityDatabase, FidelityThirdParty,
+		FidelityAuth, FidelityRuntime, FidelityTraffic,
+	}
+}
+
+// Fidelity configures the component inventory.
+//
+// There is no threshold here on purpose. A single percentage hides the one
+// dimension that matters to a particular change, so what can be required is a
+// dimension, by name, and the requirement is that every component of it was
+// reproduced.
+type Fidelity struct {
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// Require names the dimensions that must be fully reproduced. A dimension
+	// that could not be measured does not satisfy a requirement and does not
+	// break one either; it fails the command with a different code, because
+	// "not measured" counted as either answer is the mistake this whole
+	// feature exists to avoid.
+	Require []FidelityDimension `json:"require,omitempty" yaml:"require,omitempty"`
+}
+
+// Change configures how a pull request's diff is classified.
+//
+// Absent from most manifests, because the built in rules cover the layouts
+// most projects use. Present when a repository puts something somewhere the
+// conventions do not predict, which in a monorepo is normal rather than
+// exotic. It cannot turn a check off: a rule only says what a path IS, and
+// what that implies is decided by the engine.
+type Change struct {
+	Rules []ChangeRule `json:"rules,omitempty" yaml:"rules,omitempty"`
+}
+
+// ChangeRule assigns a surface to the paths a pattern matches.
+type ChangeRule struct {
+	// Path is a glob. A single star does not cross a slash and a double star
+	// does, so "packages/*/src/**" is a legal and useful thing to write.
+	Path string `json:"path" yaml:"path"`
+	// Surface is what the matched paths are. The engine refuses a surface it
+	// does not know rather than treating it as unclassified, because a typo
+	// that silently means "unknown" would look like the rule working.
+	Surface string `json:"surface" yaml:"surface"`
+	// Note replaces the sentence the report prints for this rule, for a
+	// project that wants to say why rather than restate the pattern.
+	Note string `json:"note,omitempty" yaml:"note,omitempty"`
+}
+
 // LoadSource names where the endpoint mix comes from.
 type LoadSource string
 
+// Datadog and New Relic were here and are gone. Both were accepted by the
+// schema and refused by the runtime, which is worse than not offering them: a
+// key a person can set that cannot work reads as a broken product rather than
+// as an unfinished one. OpenTelemetry stayed because it is a published wire
+// format that can be read from a file, so it could be finished.
 const (
 	LoadNone      LoadSource = "none"
-	LoadDatadog   LoadSource = "datadog"
-	LoadNewRelic  LoadSource = "newrelic"
 	LoadOTel      LoadSource = "otel"
 	LoadAccessLog LoadSource = "access_log"
 )
@@ -497,7 +576,25 @@ type Load struct {
 	Duration     string            `json:"duration,omitempty" yaml:"duration,omitempty"`
 	SafeRoutes   []string          `json:"safe_routes,omitempty" yaml:"safe_routes,omitempty"`
 	UnsafeRoutes []string          `json:"unsafe_routes,omitempty" yaml:"unsafe_routes,omitempty"`
+	Scenarios    []LoadScenario    `json:"scenarios,omitempty" yaml:"scenarios,omitempty"`
 	Thresholds   *LoadThresholds   `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
+}
+
+// LoadScenario points at a journey document and says how hard to run it.
+//
+// The document lives in the repository rather than in the manifest because a
+// journey with parallel blocks and assertions in it is a page long, and a
+// manifest with three of them inline is a manifest nobody can read.
+type LoadScenario struct {
+	// Path is the scenario document, relative to the repository root.
+	Path string `json:"path,omitempty" yaml:"path,omitempty"`
+	// Sessions is how many run the journey at once.
+	Sessions int `json:"sessions,omitempty" yaml:"sessions,omitempty"`
+	// Iterations is how many times each session walks it.
+	Iterations int `json:"iterations,omitempty" yaml:"iterations,omitempty"`
+	// StartAfter delays this scenario, so one journey can burst while another
+	// is already running.
+	StartAfter string `json:"start_after,omitempty" yaml:"start_after,omitempty"`
 }
 
 // LoadThresholds are the deltas that fail a run.
@@ -595,12 +692,17 @@ const (
 
 // Runtime configures where and how long environments run.
 type Runtime struct {
-	Provider          RuntimeProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
-	TTL               string          `json:"ttl,omitempty" yaml:"ttl,omitempty"`
-	IdleSleep         string          `json:"idle_sleep,omitempty" yaml:"idle_sleep,omitempty"`
-	Domain            string          `json:"domain,omitempty" yaml:"domain,omitempty"`
-	NamespacePrefix   string          `json:"namespace_prefix,omitempty" yaml:"namespace_prefix,omitempty"`
-	KubeconfigContext string          `json:"kubeconfig_context,omitempty" yaml:"kubeconfig_context,omitempty"`
+	Provider RuntimeProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
+	TTL      string          `json:"ttl,omitempty" yaml:"ttl,omitempty"`
+	// MaxTTL is the furthest af env extend may push an environment's expiry,
+	// measured from when the environment was created. It is the answer to
+	// "a lifetime that can be extended forever is not a lifetime": TTL is what
+	// an environment gets without asking, MaxTTL is the most it can be given.
+	MaxTTL            string `json:"max_ttl,omitempty" yaml:"max_ttl,omitempty"`
+	IdleSleep         string `json:"idle_sleep,omitempty" yaml:"idle_sleep,omitempty"`
+	Domain            string `json:"domain,omitempty" yaml:"domain,omitempty"`
+	NamespacePrefix   string `json:"namespace_prefix,omitempty" yaml:"namespace_prefix,omitempty"`
+	KubeconfigContext string `json:"kubeconfig_context,omitempty" yaml:"kubeconfig_context,omitempty"`
 }
 
 // GitHubMode is how the GitHub integration runs.

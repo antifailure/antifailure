@@ -1,4 +1,4 @@
-import { INDEXABLE_ROUTES } from "@/lib/routes";
+import { INDEXABLE_ROUTES, pageName } from "@/lib/routes";
 import { SITE_DESCRIPTION_LONG, SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site";
 
 /**
@@ -18,7 +18,7 @@ export const dynamic = "force-static";
 export function GET() {
   const out: string[] = [];
 
-  out.push(`# ${SITE_NAME} — full text`);
+  out.push(`# ${SITE_NAME}: the full text of the site`);
   out.push("");
   out.push(SITE_DESCRIPTION_LONG);
   out.push("");
@@ -31,7 +31,7 @@ export function GET() {
   out.push("");
 
   for (const route of INDEXABLE_ROUTES) {
-    out.push(`## ${route.title.replace(/\s+—\s+Antifailure$/, "")}`);
+    out.push(`## ${pageName(route)}`);
     out.push("");
     out.push(`URL: ${absoluteUrl(route.path)}`);
     out.push("");

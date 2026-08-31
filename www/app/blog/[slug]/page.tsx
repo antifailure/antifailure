@@ -6,7 +6,7 @@ import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { PageShell } from "@/components/pages/kit";
 import { POSTS, POSTS_BY_DATE, formatDate, getPost, postModified } from "@/lib/blog";
 import { PageJsonLd, PostJsonLd } from "@/lib/jsonld";
-import { OG_IMAGE, SITE_NAME, absoluteUrl } from "@/lib/site";
+import { OG_IMAGE, SITE_NAME, absoluteUrl, pageTitle } from "@/lib/site";
 
 export function generateStaticParams() {
   return POSTS.map((post) => ({ slug: post.slug }));
@@ -24,7 +24,7 @@ export async function generateMetadata({
   const url = absoluteUrl(`/blog/${post.slug}`);
 
   return {
-    title: { absolute: `${post.title} — ${SITE_NAME}` },
+    title: { absolute: pageTitle(post.title) },
     description: post.dek,
     alternates: {
       canonical: url,

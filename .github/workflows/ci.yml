@@ -360,6 +360,7 @@ jobs:
           cache-dependency-path: |
             www/package-lock.json
             console/package-lock.json
+            api/package-lock.json
 
       - run: npm ci --no-audit --no-fund
         working-directory: www
@@ -380,6 +381,16 @@ jobs:
         # request that added it.
         run: npm run check:seo
         working-directory: www
+
+      - name: The site API
+        # api/ is the marketing site's own backend and had no tests at all,
+        # while the file it holds ended with a comment saying its exports were
+        # "for the unit tests". It is a public unauthenticated write endpoint,
+        # which makes the untested branches the interesting ones: what counts
+        # as an address, when the rate limiter trips, and what a storage
+        # failure answers.
+        run: npm ci --no-audit --no-fund && npm test
+        working-directory: api
 
       - run: npm ci --no-audit --no-fund
         working-directory: docs
@@ -407,7 +418,7 @@ jobs:
         # backs starts answering with the 404 page and nothing else notices.
         run: |
           missing=0
-          for route in index environments runs masking network audit members keys device 404; do
+          for route in index environments runs masking network audit members plan keys device 404; do
             if [ ! -f "console/out/$route.html" ]; then
               echo "::error::console/out/$route.html was not exported"
               missing=1
@@ -431,6 +442,17 @@ jobs:
             fi
           done
           exit $missing
+
+      - name: The built documentation carries its head and resolves its entity graph
+        # www's check:seo above reads www/out and never opens docs/dist, so the
+        # documentation, which is 76 of the site's roughly 90 pages, had no
+        # check with an opinion about what it renders. Six head entries went
+        # missing for every one of those pages when #47 ported only the
+        # marketing half, and every stage stayed green because no stage was
+        # looking. This also resolves the three @id values the docs JSON-LD
+        # references against the constants www/lib/jsonld.tsx declares, so the
+        # two halves of one entity graph fail loudly when they drift apart.
+        run: go run ./tools/docscheck .
 
       - name: Spelling
         # cspell owns spelling, with the project dictionary in
@@ -769,6 +791,15 @@ jobs:
         # a colon or a full stop. Code is exempt, because `--flag` is how an
         # option is spelled.
         run: go run ./tools/prosecheck .
+
+      - name: Every figure on the site says where it came from
+        # The site rendered an invented "fid 87%" fidelity score on two product
+        # pages. Nothing in the product computes it. It survived because it is
+        # drawn client side: curl on either page finds no "87" anywhere, so
+        # every audit over the built HTML came back clean. This reads the
+        # source, where the string is a literal, and demands a written source
+        # for any percentage or "N of M" a reader can see.
+        run: go run ./tools/figurecheck .
 
       - name: Nothing in the repository looks like a live credential
         # Uses the engine's own detector, so the check and the runtime refusal

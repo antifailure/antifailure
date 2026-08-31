@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Container } from "@/components/layout/Container";
 import { SiteLayout } from "@/components/layout/SiteLayout";
+import { pageTitle } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: "Not found — Antifailure",
+  title: pageTitle("Not found"),
   description: "That page is not here.",
   robots: { index: false, follow: true },
 };
