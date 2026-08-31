@@ -33,6 +33,7 @@ pgvector
 PKCE
 pooler
 postgres
+Procfile
 reprovision
 SCIM
 semgrep
