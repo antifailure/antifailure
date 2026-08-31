@@ -603,10 +603,10 @@ export function IdePlay() {
         ))}
         {spin ? (
           <span className="mt-1 inline-flex items-center gap-1.5 text-black/40">
-            <span
-              className="wt-spin inline-block h-2.5 w-2.5 rounded-full border border-black/30 border-t-black/80"
-              style={{ animation: "wt-spin 0.7s linear infinite" }}
-            />
+            {/* A square, not a spinner. The word "running" carries the state
+                already; the ring beside it added a permanent rotation to a
+                page nobody is interacting with. */}
+            <span className="inline-block h-2 w-2 rounded-[1px] bg-black/45" />
             running
           </span>
         ) : null}
