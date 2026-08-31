@@ -200,6 +200,14 @@ var sets = []decl{
 		context: regexp.MustCompile(`(?i)\bplan\b`),
 	},
 	{
+		name:    "database providers",
+		file:    "engine/pkg/schema/manifest.go",
+		kind:    constType,
+		symbol:  "DBProvider",
+		noun:    regexp.MustCompile(`(?i)\bproviders?\b`),
+		context: regexp.MustCompile(`(?i)\bdatabase\b`),
+	},
+	{
 		name:    "third parties detected",
 		file:    "engine/internal/detect/thirdparty.go",
 		kind:    sliceVar,
@@ -229,6 +237,18 @@ var unchecked = []struct{ name, why string }{
 		"no page counts or enumerates them, so there is no claim to check"},
 	{"change checks (7)",
 		`"checks" also names af doctor's ten and the three the manifest configures`},
+	{"the environment lifecycle events (7 declared, 5 emitted)",
+		"the set prose describes is the events the engine emits, and that is " +
+			"not the const block. EnvWaking has no call site anywhere and " +
+			"EnvSleeping's only one is a control plane mapping, so a correct " +
+			"sentence saying five would be flagged as wrong by two. Declaring " +
+			"it was tried and produced four findings, all false, one of them on " +
+			"a sentence somebody had just corrected"},
+	{"any count whose noun is elided",
+		`"governs all six together" names no noun, and the noun is the only ` +
+			"thing that says which set is meant. Tried with a proximity window " +
+			"and it read a corrected sentence as two other sets miscounted. " +
+			"Counted claims are NOT safe by construction; this shape needs a reader"},
 	{"verdicts, all three sets of them (5, 5 and 6)",
 		"five workflow verdicts, six run verdicts (warn is one) and five rolling " +
 			"verdicts share one noun. Declaring them was tried and produced two " +
