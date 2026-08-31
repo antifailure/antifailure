@@ -81,6 +81,19 @@ export default defineConfig({
       ],
       lastUpdated: true,
       pagination: true,
+      // The social card, and the documentation's place in the site's entity
+      // graph.
+      //
+      // PR #47 ported the marketing half of this work and left the docs half
+      // behind, so all 76 pages here shipped with two of these eight tags.
+      // Nothing noticed, because www/scripts/check-seo.mjs reads www/out and
+      // never looks at docs/dist: the documentation is two thirds of the site's
+      // pages and no gate has an opinion about its head.
+      //
+      // The dimensions and the alt text are not decoration. A scraper that
+      // cannot see the image still has to decide how to lay the card out, and
+      // og:image:alt is the only accessible description a link preview ever
+      // gets. Verified against www/public/og.png, which is really 1200x630.
       head: [
         {
           tag: "meta",
@@ -88,7 +101,57 @@ export default defineConfig({
         },
         {
           tag: "meta",
+          attrs: { property: "og:image:width", content: "1200" },
+        },
+        {
+          tag: "meta",
+          attrs: { property: "og:image:height", content: "630" },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image:alt",
+            content:
+              "Antifailure, a disposable copy of your production stack for every pull request",
+          },
+        },
+        {
+          tag: "meta",
           attrs: { name: "twitter:card", content: "summary_large_image" },
+        },
+        {
+          // Starlight emits twitter:card but no twitter:image. X falls back to
+          // og:image, but Slack, Discord and LinkedIn each read a different
+          // subset, so stating it costs one tag and removes the guesswork.
+          tag: "meta",
+          attrs: { name: "twitter:image", content: "https://antifailure.dev/og.png" },
+        },
+        {
+          // Let an engine show a full-size image and an untruncated snippet.
+          // Without this it is entitled to show a thumbnail and one grey line.
+          tag: "meta",
+          attrs: {
+            name: "robots",
+            content: "index, follow, max-image-preview:large, max-snippet:-1",
+          },
+        },
+        {
+          // Ties all 76 documentation pages to the same Organization the
+          // marketing site declares, so they resolve to one entity rather than
+          // to a separate thing that happens to share a domain. The three ids
+          // are not invented here: they are ORG_ID, SITE_ID and SOFTWARE_ID in
+          // www/lib/jsonld.tsx, built from SITE_URL, which has no trailing
+          // slash. A reference to an @id nothing declares is worth nothing.
+          tag: "script",
+          attrs: { type: "application/ld+json" },
+          content: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "TechArticle",
+            isPartOf: { "@id": "https://antifailure.dev/#website" },
+            publisher: { "@id": "https://antifailure.dev/#organization" },
+            about: { "@id": "https://antifailure.dev/#software" },
+            inLanguage: "en",
+          }),
         },
       ],
       // Groups are ordered the way somebody actually arrives: install it, learn
