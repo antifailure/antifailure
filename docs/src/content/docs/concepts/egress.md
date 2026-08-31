@@ -107,6 +107,30 @@ preview pollutes production reporting, and a build that fails because a
 telemetry call was refused is a build telling you something useful about your
 error handling.
 
+## The agents' own model call is not governed by this
+
+A model call is outbound HTTP, so it is reasonable to expect a `default: block`
+manifest to switch the agents' planner off. It does not, and you do not have to
+name Anthropic or OpenAI in your manifest.
+
+The policy governs traffic *through* the sidecar. Services sit on a network
+with no route out and every name they resolve points at the sidecar, so their
+packets have nowhere else to go. Neither model caller is on that network. The
+runner is a subprocess of `af` on your own machine, outside the environment
+entirely, and a [synth](/docs/guides/synth/) rule's model call originates in
+the sidecar itself, which is the container that has the route out.
+
+What this *does* govern is your **application** calling a model. If your own
+code calls `api.anthropic.com`, that is traffic through the sidecar like
+everything else, and under `default: block` it is refused until a rule names
+it. The same provider in the same run is reached from two places for two
+different reasons, so `af net log` is worth reading before concluding that the
+planner is broken. `af model test` answers the other half: it reports whether
+this machine can reach the endpoint at all, and says in as many words that the
+manifest is not what is stopping it.
+
+See [your own model key](/docs/guides/model-keys/).
+
 ## A live credential on the way out
 
 ```

@@ -74,11 +74,13 @@ AF-SEC-004 The encrypted local store has no passphrase: no system keyring
 answered and AF_SECRET_PASSPHRASE is not set.
 ```
 
-Set `AF_SECRET_PASSPHRASE`, which is what CI does. On macOS the passphrase can
-live in the keychain instead, so a workstation does not need it exported in
-every shell. Linux and Windows keyrings are not implemented yet, and the
-message says so by listing the sources it considered rather than pretending one
-was tried.
+Set `AF_SECRET_PASSPHRASE`, which is what CI does. On a workstation the
+passphrase can live in the system keyring instead, so it does not need to be
+exported in every shell: the macOS keychain, the freedesktop Secret Service on
+Linux, and the Credential Manager on Windows. A machine with no keyring, which
+is a Linux server without `libsecret` and most containers, has no other way to
+open the store, and the message says which sources it considered rather than
+pretending one was tried.
 
 There is deliberately no default passphrase. A store encrypted with a
 passphrase everybody knows only looks encrypted.

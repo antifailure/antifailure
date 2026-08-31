@@ -125,7 +125,19 @@ var commandExamples = map[string]string{
 		"af mask preview\n" +
 		"af mask preview --table users --rows 5",
 	"af mask verify": "af mask verify",
-	"af net":         "af net policy",
+	"af model":       "af model show",
+	"af model show":  "af model show\naf model show -o json",
+	"af model test": "" +
+		"# One cheap call, so a broken key is found here and not mid run.\n" +
+		"af model test\n" +
+		"af model test --timeout 10s",
+	"af model set": "" +
+		"# The key is read from the environment or from stdin, so it never\n" +
+		"# reaches the command line or the shell history.\n" +
+		"af model set anthropic --from-env ANTHROPIC_API_KEY\n" +
+		"af model set anthropic --stdin < key.txt",
+	"af model rm": "af model rm anthropic",
+	"af net":      "af net policy",
 	"af net explain": "" +
 		"af net explain GET https://api.stripe.com/v1/charges\n" +
 		"af net explain POST https://api.resend.com/emails",

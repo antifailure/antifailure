@@ -5,7 +5,19 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
+
+	"github.com/antifailure/antifailure/engine/internal/model"
 )
+
+// cliDefaults asks engine/internal/model what af model, af doctor and the
+// runner's environment will pick.
+func cliDefaults() map[string]string {
+	out := map[string]string{}
+	for _, p := range model.Providers {
+		out[p.Name] = p.DefaultModel
+	}
+	return out
+}
 
 // The proxy and the runner pick a model from the same two environment variables
 // in the same order and fall back to the same two names, in two languages, and
@@ -19,9 +31,13 @@ import (
 // every request through the proxy being refused, or as the proxy synthesising
 // with one model while the runner plans with another.
 //
-// synthFromEnvironment is called rather than read, so this exercises the real
-// selection instead of a copy of it. The TypeScript is read, because there is no
-// way to call it from here.
+// There are now three copies in Go and TypeScript, not two. af model resolves a
+// key for the CLI, af doctor and the runner's environment out of
+// engine/internal/model; the proxy keeps its own selection because it is
+// compiled standalone into the sidecar image and deliberately imports nothing
+// from internal. Both are called rather than read, so this exercises the real
+// selections instead of copies of them. The TypeScript is read, because there
+// is no way to call it from here.
 
 const (
 	runnerModelPath = "../../../runner/src/model.ts"
@@ -81,20 +97,25 @@ func runnerDefaults(t *testing.T) map[string]string {
 }
 
 func TestTheProxyAndTheRunnerDefaultToTheSameModels(t *testing.T) {
-	engine := engineDefaults(t)
-	runner := runnerDefaults(t)
-	for provider, model := range engine {
-		theirs, ok := runner[provider]
-		if !ok {
-			t.Errorf("the proxy selects %s and %s has no branch for it, so a machine with only "+
-				"that key drives the browser with a different provider from the one the proxy "+
-				"synthesises with", provider, runnerModelPath)
-			continue
-		}
-		if theirs != model {
-			t.Errorf("with only a %s key the proxy uses %q and the runner uses %q. One run, two "+
-				"models, and whichever of them is not in DEFAULT_PRICES is refused outright.",
-				provider, model, theirs)
+	proxy := engineDefaults(t)
+	others := map[string]map[string]string{
+		runnerModelPath:         runnerDefaults(t),
+		"engine/internal/model": cliDefaults(),
+	}
+	for name, theirs := range others {
+		for provider, chosen := range proxy {
+			got, ok := theirs[provider]
+			if !ok {
+				t.Errorf("the proxy selects %s and %s has no branch for it, so a machine with "+
+					"only that key drives the browser with a different provider from the one "+
+					"the proxy synthesises with", provider, name)
+				continue
+			}
+			if got != chosen {
+				t.Errorf("with only a %s key the proxy uses %q and %s uses %q. One run, two "+
+					"models, and whichever of them is not in DEFAULT_PRICES is refused "+
+					"outright.", provider, chosen, name, got)
+			}
 		}
 	}
 }
@@ -113,18 +134,25 @@ func TestEveryDefaultModelHasAPrice(t *testing.T) {
 			"below would be vacuous", pricingPath, len(priced))
 	}
 
-	for provider, model := range engineDefaults(t) {
-		if !priced[model] {
+	for provider, chosen := range engineDefaults(t) {
+		if !priced[chosen] {
 			t.Errorf("the proxy defaults to %q for %s and DEFAULT_PRICES has no entry for it. "+
 				"costOf throws for an unpriced model and the byok route refuses rather than "+
 				"spending unmetered, so every request through the proxy on a default "+
-				"configuration would be refused.", model, provider)
+				"configuration would be refused.", chosen, provider)
 		}
 	}
-	for provider, model := range runnerDefaults(t) {
-		if !priced[model] {
+	for provider, chosen := range runnerDefaults(t) {
+		if !priced[chosen] {
 			t.Errorf("the runner defaults to %q for %s and DEFAULT_PRICES has no entry for it, "+
-				"so every page it reads is refused before it is charged", model, provider)
+				"so every page it reads is refused before it is charged", chosen, provider)
+		}
+	}
+	for provider, chosen := range cliDefaults() {
+		if !priced[chosen] {
+			t.Errorf("af model reports %q for %s and DEFAULT_PRICES has no entry for it, so "+
+				"'af model test' would certify a key that the control plane refuses to spend",
+				chosen, provider)
 		}
 	}
 }

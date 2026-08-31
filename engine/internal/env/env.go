@@ -40,6 +40,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/lock"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
+	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/runtime/k8s"
@@ -431,29 +432,10 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 		registry = extension.Default
 	}
 
-	local := []secrets.Source{
-		&secrets.EnvSource{
-			Label: "this shell's environment",
-			Getenv: func(name string) (string, bool) {
-				v := getenv(name)
-				return v, v != ""
-			},
-		},
-		secrets.NewDotEnvSource(filepath.Join(o.opts.Root, ".env")),
-		secrets.NewFileStore(
-			filepath.Join(o.opts.Root, ".antifailure", "secrets.enc"),
-			secrets.StorePassphrase(getenv),
-		),
-		// Last of the local sources, and only where the platform has one. A
-		// keyring entry is the long lived default on a workstation; everything
-		// above it is a way to override that for one run.
-		secrets.NewKeyringSource(secrets.NewSystemKeyring(), secrets.DefaultKeyringService),
-	}
-	// Anything an enterprise build registered comes after every local source,
-	// for the same reason the keyring comes after .env: a company secret
-	// manager is the default the local ones exist to override. With nothing
-	// registered this appends nothing and the chain is unchanged.
-	return secrets.NewChain(append(local, secrets.Registered(registry)...)...)
+	// One constructor, shared with af explain and with model key resolution, so
+	// that a command whose job is to say where a value will come from cannot
+	// describe a different chain than the one that resolves it.
+	return secrets.LocalChain(o.opts.Root, getenv, registry, secrets.NewSystemKeyring())
 }
 
 // resolveSecrets looks up everything the manifest declares.
@@ -638,7 +620,7 @@ func (o *Orchestrator) mockPacks() ([]string, error) {
 // Only when a rule actually asks for one. An environment with no synth rule
 // gets no key, because handing a credential to a container that has no use for
 // it is a credential in one more place for no reason.
-func (o *Orchestrator) modelEnv() []string {
+func (o *Orchestrator) modelEnv(ctx context.Context) []string {
 	if o.opts.Manifest.Egress == nil {
 		return nil
 	}
@@ -653,23 +635,22 @@ func (o *Orchestrator) modelEnv() []string {
 		return nil
 	}
 
-	getenv := o.opts.Getenv
-	if getenv == nil {
-		getenv = os.Getenv
+	// Resolved through the chain rather than read straight out of the process
+	// environment. It read only the environment, which meant a key stored with
+	// 'af model set' was found by every other part of the engine and then not
+	// by the one place a synth rule actually spends it, and the symptom was a
+	// synth rule refusing with "set ANTHROPIC_API_KEY" to somebody who had.
+	cfg, err := model.Resolve(ctx, o.secretChain())
+	if err != nil || cfg == nil {
+		return nil
 	}
-	var out []string
-	for _, name := range []string{
-		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AF_MODEL",
-		"ANTHROPIC_BASE_URL", "OPENAI_BASE_URL",
-	} {
-		if v := getenv(name); v != "" {
-			out = append(out, name+"="+v)
-			if strings.HasSuffix(name, "_API_KEY") {
-				o.opts.Redactor.Register(v)
-			}
-		}
-	}
-	return out
+	// One provider's key rather than every key that happens to be set. The
+	// sidecar picks the first provider it has a key for, in this same order, so
+	// the second one could never have been used, and this function's own rule
+	// is that a credential handed to a container with no use for it is a
+	// credential in one more place for no reason.
+	o.opts.Redactor.Register(cfg.Key.Reveal())
+	return cfg.Environment()
 }
 
 // needsInspection reports whether any rule requires reading inside TLS.
@@ -1259,7 +1240,7 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		},
 	}
 	spec.SandboxCredentials = resolved.Sidecar
-	spec.ModelEnv = o.modelEnv()
+	spec.ModelEnv = o.modelEnv(ctx)
 
 	// The resolved values reach the services here rather than in the spec
 	// builder, because the lookup is per environment and the builder runs per

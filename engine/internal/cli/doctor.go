@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/state"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -243,6 +244,7 @@ func RunDoctor(ctx context.Context, env *Env, p Prober) DoctorReport {
 		checkKernelIsolation,
 		checkProxyEnvironment,
 		checkGit,
+		checkModelKey,
 	}
 	report := DoctorReport{
 		OK:       true,
@@ -487,6 +489,81 @@ func checkProxyEnvironment(_ context.Context, _ *Env, p Prober) CheckResult {
 	r.Status = CheckPass
 	r.Detail = strings.Join(set, ", ") + " are set and will be honoured for builds"
 	r.Remediation = "No action needed. The proxy is used for builds and image pulls. It is never used from inside an environment, whose only egress path is the sidecar."
+	return r
+}
+
+// checkModelKey reports what the agents will plan with.
+//
+// Doctor is what somebody runs first and it said nothing at all about the
+// model, which left the single most confusing thing about this product
+// undiscoverable: whether a run will read pages with a model or fall back to
+// the deterministic planner. Somebody with a typo in a variable name got a
+// green doctor and a run that quietly planned deterministically.
+//
+// No key is a PASS and not a warning. Running without one is a supported mode:
+// workflows still run, still drive a real browser and still produce a verdict.
+// A warning would say the opposite, and the whole reason this product works
+// with no credential at all is worth stating rather than flagging.
+//
+// It does not make a call. Doctor is run constantly, often on a laptop with no
+// network, and a check that spent money every time would be a check people
+// turn off. 'af model test' is the one that proves the key, and this names it.
+func checkModelKey(ctx context.Context, env *Env, _ Prober) CheckResult {
+	r := CheckResult{Name: "Model key"}
+
+	cfg, err := model.Resolve(ctx, modelChain(env))
+	if err != nil {
+		// A source that failed, which is almost always a locked keyring or a
+		// wrong passphrase. Reported rather than read as "no key", because
+		// those look identical from here and only one of them is a problem.
+		r.Status = CheckWarn
+		r.Detail = "a configured source could not be read: " + err.Error()
+		r.Remediation = "Run 'af model show' to see which source failed. Until it is fixed, a key stored there cannot be found and runs will use the deterministic planner."
+		return r
+	}
+
+	if cfg == nil {
+		r.Status = CheckPass
+		r.Detail = "none set, so agents use the deterministic planner"
+		r.Remediation = "No action needed. Running without a model key is supported: workflows still drive a real browser and still produce a verdict. To have agents read pages and decide what a person would do next, store your own key with 'af model set anthropic'."
+		return r
+	}
+
+	detail := fmt.Sprintf("%s/%s from %s", cfg.Provider.Name, cfg.Model, cfg.Source)
+	switch {
+	case cfg.ThroughControlPlane():
+		detail += ", through your control plane"
+	case cfg.Custom():
+		detail += ", at " + cfg.BaseURL
+	}
+	r.Detail = detail
+
+	// Said before anything about verification, because it is the more expensive
+	// mistake of the two. A key that is never tested costs a run; a cap somebody
+	// believes in and that is not applied costs whatever the month costs.
+	if origin := uncappedControlPlane(env, cfg); origin != "" {
+		r.Status = CheckWarn
+		r.Detail = detail + ", not capped"
+		r.Remediation = fmt.Sprintf(
+			"This key goes straight to the provider, so a monthly cap set with "+
+				"'af provider budget' on %s is not in force. Run 'af model show' for how to "+
+				"route through the control plane instead, or keep this key and know there is "+
+				"no ceiling on it.", origin)
+		return r
+	}
+
+	if rec := model.ReadRecord(env.WorkDir, cfg.Fingerprint); rec != nil {
+		r.Status = CheckPass
+		r.Detail = detail + ", verified " + rec.VerifiedAt.Format("2006-01-02")
+		r.Remediation = "No action needed. Run 'af model test' again to re-check the key."
+		return r
+	}
+	// Present and never proven. A warning rather than a pass, because a key
+	// that is set and revoked is indistinguishable from a working one here and
+	// the difference costs somebody a whole run to discover.
+	r.Status = CheckWarn
+	r.Detail = detail + ", never verified"
+	r.Remediation = "Run 'af model test'. It makes one cheap call and says exactly what is wrong when the key is revoked, out of credit, or pointed at a model the key cannot use."
 	return r
 }
 

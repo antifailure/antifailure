@@ -78,13 +78,25 @@ AF-AGT-003 The agent runner produced no readable output: exited with status 1.
 `af runner check` verifies it can start before you need it, and `af doctor`
 includes that check.
 
+## The model
+
+A model reads the page and decides what a person would do next. The key is
+yours and it stays on your machine. See
+[your own model key](/docs/guides/model-keys/) for storing one, proving it
+works, pointing it at a local model, and what does and does not leave the
+machine when it is used.
+
+With no key the deterministic planner runs instead, which is a supported mode
+rather than a broken one: workflows still drive a real browser and still
+produce a verdict.
+
 ## Recording what the model answered
 
-A model reads the page and decides what a person would do next. That is what
-makes a workflow written as a sentence work, and it is also the only part of a
-run that is not deterministic: the same page can produce a different plan
+Asking a model is the only part of a run that is not deterministic: the same page can produce a different plan
 twice, so a check that asks a model on every pull request is a check that can
-change its answer with nothing in the repository changing.
+change its answer with nothing in the repository changing. That is what makes a
+workflow written as a sentence work, and it is also what makes it worth
+pinning.
 
 Recording fixes both that and the bill. Point the runner at a directory and
 every prompt and answer is written to it, one readable JSON file per exchange.

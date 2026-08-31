@@ -112,29 +112,12 @@ func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string
 		return
 	}
 
-	local := []secrets.Source{
-		&secrets.EnvSource{
-			Label: "this shell's environment",
-			Getenv: func(name string) (string, bool) {
-				v := e.Getenv(name)
-				return v, v != ""
-			},
-		},
-		secrets.NewDotEnvSource(filepath.Join(root, ".env")),
-		secrets.NewFileStore(
-			filepath.Join(root, ".antifailure", "secrets.enc"),
-			secrets.StorePassphrase(e.Getenv),
-		),
-		// Last of the local sources, and only where the platform has one. A
-		// keyring entry is the long lived default on a workstation; everything
-		// above it is a way to override that for one run.
-		secrets.NewKeyringSource(secrets.NewSystemKeyring(), secrets.DefaultKeyringService),
-	}
 	// The same chain af up resolves against, including anything an enterprise
 	// build registered. Explain has to build the identical chain or it answers
 	// a question about a different lookup than the one that will actually
-	// happen, which is worse than not answering.
-	chain := secrets.NewChain(append(local, secrets.Registered(extension.Default)...)...)
+	// happen, which is worse than not answering. Built by one constructor for
+	// exactly that reason.
+	chain := secrets.LocalChain(root, e.Getenv, extension.Default, e.Keyring())
 
 	resolved, err := secrets.Resolve(ctx, chain, secrets.Request{
 		Declared: declared, Sandbox: sandbox, EnvID: "explain",

@@ -80,6 +80,30 @@ The agent runner could not be found: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/agents](/docs/concepts/agents/) |
 
+### AF-AGT-005
+
+The {provider} key was not accepted: {detail}
+
+**What to do.** {next_step}
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/model-keys](/docs/guides/model-keys/) |
+
+### AF-AGT-006
+
+The {provider} endpoint could not be reached: {detail}
+
+**What to do.** {next_step}
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/model-keys](/docs/guides/model-keys/) |
+
 ### AF-AGT-010
 
 Invariant {invariant} did not finish within {timeout}.

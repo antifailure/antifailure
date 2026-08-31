@@ -618,6 +618,20 @@ errors:
     docs: guides/workflows
     retryable: false
     exit_code: 8
+  - code: AF-AGT-005
+    area: AGT
+    message: "The {provider} key was not accepted: {detail}"
+    next_step: "{next_step}"
+    docs: guides/model-keys
+    retryable: false
+    exit_code: 4
+  - code: AF-AGT-006
+    area: AGT
+    message: "The {provider} endpoint could not be reached: {detail}"
+    next_step: "{next_step}"
+    docs: guides/model-keys
+    retryable: true
+    exit_code: 5
   - code: AF-NET-011
     area: NET
     message: "No message matching {match} arrived within {timeout}."

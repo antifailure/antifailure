@@ -157,6 +157,39 @@ func (c *Chain) Lookup(ctx context.Context, name string) (Value, Resolution, boo
 	return Value{}, Resolution{}, false, nil
 }
 
+// LookupIn asks one named source rather than the whole chain.
+//
+// It exists so that a command can report a value that is being shadowed. The
+// chain answers "which source won", which is the right question almost
+// everywhere; the one place it is not enough is telling somebody that the key
+// they just stored is not the key that will be used, and answering that needs
+// the sources the chain stopped before reaching.
+//
+// A name that matches no source returns not found rather than an error. The
+// caller got the name from Sources, so a miss means the source became
+// unavailable between the two calls, and that is a source with nothing in it.
+func (c *Chain) LookupIn(ctx context.Context, source, name string) (Value, Resolution, bool, error) {
+	for _, s := range c.sources {
+		if s.Name() != source {
+			continue
+		}
+		if ok, _ := s.Available(ctx); !ok {
+			return Value{}, Resolution{}, false, nil
+		}
+		value, found, err := s.Lookup(ctx, name)
+		if err != nil {
+			return Value{}, Resolution{}, false, fmt.Errorf("%s: %w", s.Name(), err)
+		}
+		if !found {
+			return Value{}, Resolution{}, false, nil
+		}
+		return value, Resolution{
+			Name: name, Source: s.Name(), Fingerprint: value.Fingerprint(),
+		}, true, nil
+	}
+	return Value{}, Resolution{}, false, nil
+}
+
 // ---------------------------------------------------------------------------
 // The process environment
 // ---------------------------------------------------------------------------
