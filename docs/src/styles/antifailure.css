@@ -519,6 +519,14 @@ starlight-theme-select select,
     background-clip: padding-box;
   }
 
+  /* The focus ring draws on the border box, so that transparent border would
+     leave it floating 6px off the control it is pointing at, wider here than
+     the same ring is one pixel above this breakpoint. Pull it back to the 2px
+     the rest of the site uses. */
+  .expressive-code .copy button:focus-visible {
+    outline-offset: -0.25rem;
+  }
+
   /* The two calls to action on the landing page measured 40px and 33px. They
      sit in Starlight's hero rather than in the markdown body, so they are not
      reachable through .sl-markdown-content. */
