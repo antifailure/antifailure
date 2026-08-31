@@ -245,14 +245,13 @@ var unchecked = []struct{ name, why string }{
 			"it was tried and produced four findings, all false, one of them on " +
 			"a sentence somebody had just corrected"},
 	{"whether a declared value is produced ANYWHERE (as opposed to by one named function)",
-		"a reference is not a production, and that is not a tuning problem. " +
-			"events.EnvSleeping has a reference, in the control plane type map, " +
-			"and no emitter, so a reference count calls the motivating example " +
-			"live. Measured on the event types: 21 of 52 have no qualified " +
-			"reference outside the package and 5 more are reached only by that " +
-			"map, and separating dead from reserved-for-unbuilt needs a hand kept " +
-			"exemption per value. reach.go does the half that is decidable from " +
-			"syntax: one block, one function, no call graph"},
+		"already gated, by go test ./internal/events -run Emit, which holds every " +
+			"catalog type to being emitted or exempt with a written reason. Do not " +
+			"rebuild it here. A reference is not a production and a reference count " +
+			"gets that backwards, calling events.EnvSleeping live because the control " +
+			"plane type map names it; that test narrows to the ARGUMENT POSITION of a " +
+			"call to a known emit function, which a map key cannot occupy. reach.go " +
+			"does the smaller syntactic case of one block against one function"},
 	{"any count whose noun is elided",
 		`"governs all six together" names no noun, and the noun is the only ` +
 			"thing that says which set is meant. Tried with a proximity window " +

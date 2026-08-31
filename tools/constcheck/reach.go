@@ -28,14 +28,20 @@ import (
 // from the syntax alone: the const block and the function body are both right
 // there, so there is no call graph to approximate and no judgement to make.
 //
-// WHAT IT DOES NOT CHECK, measured rather than assumed. See the note on
-// unreachable in main.go. A general "is this value produced anywhere" check
-// cannot separate a value nothing emits from a value something merely
-// translates, and the case that motivated all of this is exactly that
-// distinction: events.EnvSleeping HAS a reference, in the control plane's
-// type map, and is emitted by nothing. A reference count calls it live. So
-// the general form gives a false negative on its own motivating example,
-// which is why only this half is built.
+// WHAT IT DOES NOT CHECK, and where the general form already lives. Whether a
+// value is produced ANYWHERE is gated already, by
+// `go test ./internal/events -run Emit`, which holds every catalog type to
+// being emitted or exempt with a written reason. Do not rebuild that here.
+//
+// Worth reading before extending this file, because two of us reached the same
+// wrong stopping point independently: a reference is NOT a production, so a
+// reference count calls events.EnvSleeping live on the strength of the control
+// plane type map naming it, which is backwards on the very example that
+// motivates the check. The decidable narrowing is position rather than count:
+// a type is emitted if it appears as an ARGUMENT to a call to a known emit
+// function, and a map key cannot occupy that position. That test does it that
+// way. This file does the smaller case of one const block against one named
+// function, which needs no call graph at all.
 type reachRef struct {
 	// name is for the report.
 	name string
