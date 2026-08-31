@@ -86,9 +86,10 @@ errors:
     retryable: true
     exit_code: 3
   - code: AF-DET-003
+    planned: true
     area: DET
-    message: "Detection found {first} and {second} both listening on port {port}, so no manifest was written."
-    next_step: "Give one of them a different port where it is declared, in the compose file or Dockerfile detection read, then run 'af init' again. Writing antifailure.yaml by hand also works; the manifest reference lists the minimum fields."
+    message: "Services {first} and {second} both claim port {port}."
+    next_step: "Give one of them a different port in antifailure.yaml."
     docs: concepts/detection
     retryable: false
     exit_code: 3

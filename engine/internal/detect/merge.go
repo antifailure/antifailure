@@ -100,26 +100,6 @@ type candidate struct {
 	portConflicts map[int]string
 }
 
-// observePort records a port one analyzer proposed.
-//
-// The stronger evidence wins and the loser becomes a conflict, which is what
-// turns a disagreement into a question rather than a silent choice. It is a
-// method rather than inline code because foldDockerfileCandidates replays a
-// folded candidate's port through it, and a second copy of this rule would
-// drift from this one the first time either was touched.
-func (c *candidate) observePort(n int, conf Confidence, why string) {
-	if c.port == 0 || conf > c.portConf {
-		if c.port != 0 && c.port != n {
-			c.portConflicts[c.port] = c.portWhy
-		}
-		c.port, c.portConf, c.portWhy = n, conf, why
-		return
-	}
-	if n != c.port {
-		c.portConflicts[n] = why
-	}
-}
-
 func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 	byName := map[string]*candidate{}
 	order := []string{}
@@ -180,11 +160,19 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 			}
 
 		case KindPort:
+			c := get(f.Subject)
 			n, err := strconv.Atoi(f.Value)
 			if err != nil || n <= 0 || n >= 65536 {
 				continue
 			}
-			get(f.Subject).observePort(n, f.Confidence, f.Detail)
+			if c.port == 0 || f.Confidence > c.portConf {
+				if c.port != 0 && c.port != n {
+					c.portConflicts[c.port] = c.portWhy
+				}
+				c.port, c.portConf, c.portWhy = n, f.Confidence, f.Detail
+			} else if n != c.port {
+				c.portConflicts[n] = f.Detail
+			}
 
 		case KindCommand:
 			c := get(f.Subject)
@@ -226,10 +214,6 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 	// A migration command found for the repository as a whole belongs to the
 	// web service that will run it, not to a phantom service of its own.
 	reassignRepoWideMigration(byName, order)
-
-	// Same reasoning one level up: a Dockerfile describes how to build a
-	// service, not a second service beside it.
-	order = foldDockerfileCandidates(byName, order)
 
 	out := make([]schema.Service, 0, len(order))
 	for _, name := range order {
@@ -327,87 +311,6 @@ func reassignRepoWideMigration(byName map[string]*candidate, order []string) {
 		orphan.migrate = ""
 		return
 	}
-}
-
-// foldDockerfileCandidates merges a service that exists only because a
-// Dockerfile was found into the service that Dockerfile builds.
-//
-// The Dockerfile analyzer has no way to learn an application's name, so it
-// names the service after the directory. Every framework analyzer names it
-// after the package. In a repository cloned into a directory whose name is not
-// the package name, which is most of them, those two disagree and one
-// application arrives as two services on one port. The manifest that produces
-// is invalid, af init refuses to write it, and the user is told to fix a line
-// in a file that was never created.
-//
-// So the rule is that the directory is the identity and the package name is
-// the label. A candidate carrying a Dockerfile build, no framework of its own,
-// and the directory's name folds into the framework backed candidate for the
-// same directory and kind, and the folded candidate keeps its name.
-//
-// Deliberately narrow. It will not merge two services a compose file declared,
-// because neither of those carries a Dockerfile build, and it will not merge a
-// worker into a web service, because the kinds differ. Where more than one
-// framework candidate claims the directory there is nothing to prefer, so it
-// leaves the disagreement standing and lets the question be asked.
-func foldDockerfileCandidates(byName map[string]*candidate, order []string) []string {
-	folded := map[string]bool{}
-	for _, name := range order {
-		d := byName[name]
-		if d.build == nil || d.build.Strategy != schema.BuildDockerfile || d.framework != "" {
-			continue
-		}
-		var target *candidate
-		for _, other := range order {
-			f := byName[other]
-			if f == d || folded[other] || f.framework == "" || f.dir != d.dir || f.kind != d.kind {
-				continue
-			}
-			if target != nil {
-				target = nil
-				break
-			}
-			target = f
-		}
-		if target == nil {
-			continue
-		}
-		target.build = d.build
-		// Ties go to the Dockerfile, which is what already happens when the
-		// two names agree: the Docker analyzer runs before every framework
-		// analyzer and the KindCommand case keeps the first of equal
-		// confidence. Anything else would make the detected command depend on
-		// what the checkout directory happens to be called.
-		if d.command != "" && (target.command == "" || d.cmdConf >= target.cmdConf) {
-			target.command, target.cmdConf = d.command, d.cmdConf
-		}
-		if target.migrate == "" {
-			target.migrate = d.migrate
-		}
-		if d.port != 0 {
-			target.observePort(d.port, d.portConf, d.portWhy)
-		}
-		for port, why := range d.portConflicts {
-			target.observePort(port, Low, why)
-		}
-		for _, dep := range d.dependsOn {
-			target.dependsOn = appendUnique(target.dependsOn, dep)
-		}
-		for _, e := range d.evidence {
-			target.evidence = appendUnique(target.evidence, e)
-		}
-		folded[name] = true
-	}
-	if len(folded) == 0 {
-		return order
-	}
-	kept := make([]string, 0, len(order))
-	for _, name := range order {
-		if !folded[name] {
-			kept = append(kept, name)
-		}
-	}
-	return kept
 }
 
 func sortedValues(m map[int]string) []string {

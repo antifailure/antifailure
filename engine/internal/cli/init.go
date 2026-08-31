@@ -85,28 +85,6 @@ type InitReport struct {
 	Partial      bool              `json:"partial"`
 }
 
-// collidingPort reports the first pair of web services detection put on one
-// port, which is the one thing detection can produce that the manifest
-// validator refuses.
-//
-// Detection reports what it sees rather than silently renumbering, because a
-// repository that really does declare two services on one port has a mistake
-// in it that renaming would hide. What it must not do is fail with a message
-// about a file it never wrote.
-func collidingPort(services []schema.Service) (string, string, int) {
-	claimed := map[int]string{}
-	for _, s := range services {
-		if s.Kind != schema.ServiceWeb || s.Port == 0 {
-			continue
-		}
-		if prev, taken := claimed[s.Port]; taken {
-			return prev, s.Name, s.Port
-		}
-		claimed[s.Port] = s.Name
-	}
-	return "", "", 0
-}
-
 func runInit(ctx context.Context, env *Env, opts initOptions) error {
 	manifestPath := filepath.Join(env.WorkDir, manifest.FileName)
 
@@ -135,16 +113,6 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 		}
 	}
 
-	// A collision is answered before validation so that the user is told what
-	// detection saw and what to change. The validator's own message names a
-	// line in antifailure.yaml, and at this point there is no antifailure.yaml:
-	// nothing has been written and nothing will be, so "fix the reported line"
-	// sends somebody to a file that does not exist.
-	if first, second, port := collidingPort(res.Draft.Services); port != 0 {
-		return aferrors.Coded(aferrors.AFDET003,
-			"first", first, "second", second, "port", strconv.Itoa(port))
-	}
-
 	// The draft is normalized and validated before it is written, so af init
 	// can never produce a file that af up then refuses.
 	body, err := renderManifest(res.Draft)
@@ -152,13 +120,7 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 		return err
 	}
 	if _, err := manifest.Parse(body, manifestPath, env.WorkDir); err != nil {
-		// Deliberately not wrapped in the coded error it carries. The renderer
-		// finds the innermost coded error and prints that alone, so a sentence
-		// added around one is a sentence nobody ever reads, and the sentence
-		// this needs to carry is that the fault is not the user's.
-		return fmt.Errorf(
-			"init: detection produced a manifest that is not valid, which is a bug in Antifailure. "+
-				"Nothing was written. Please report it with this message: %s", err.Error())
+		return fmt.Errorf("init: the generated manifest is not valid, which is a bug in Antifailure: %w", err)
 	}
 
 	if err := writeAtomic(manifestPath, body, 0o644); err != nil {
