@@ -42,7 +42,15 @@ func repoRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	root := filepath.Dir(filepath.Dir(wd))
-	if _, err := os.Stat(filepath.Join(root, "install.sh")); err != nil {
+	// Read rather than stat, and read the whole thing.
+	//
+	// The script is run through `sh`, so nothing in this package opens it and
+	// go test's cache never learns it is an input. `just test-tools` runs
+	// `go test ./...` with no -count, and it reported ok on a deliberately
+	// broken install.sh from cache: the one gate protecting the installer went
+	// green without running. Reading the file here puts it in the cache key,
+	// so editing install.sh invalidates these tests.
+	if _, err := os.ReadFile(filepath.Join(root, "install.sh")); err != nil {
 		t.Fatalf("install.sh not found from %s: %v", wd, err)
 	}
 	return root

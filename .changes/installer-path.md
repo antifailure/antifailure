@@ -48,3 +48,10 @@ it cannot determine reports as not checked rather than as ok.
 In GitHub Actions the installer writes to `GITHUB_PATH` and touches no profile.
 The documented workflow needed that and did not have it: every step gets a fresh
 PATH, so `af ci` in the step after the install was never going to be found.
+
+The gate protecting all of this could go green without running. `just test-tools`
+is `go test ./...` with no `-count=1`, and go test caches on the files a test
+opens under its own module. `tools/installsh` runs `install.sh` through `sh`, so
+nothing in the package opens it and the cache never learned it was an input: a
+deliberately broken installer was reported `ok (cached)`. The recipe and the CI
+step now pass `-count=1`.
