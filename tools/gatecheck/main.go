@@ -45,6 +45,17 @@ import (
 // reporting drift that does not exist and gets deleted for being noisy.
 const cmd = "(?:^|[\\s;&|(])"
 
+// `npm run <script>` is a gate family, every script of it, with no rule shaped
+// around the one exception. Without this pattern `npm run build` in www, in
+// docs and in console matched nothing at all, which is worse than matching
+// coarsely: it is not one gate seen three times, it is three gates seen never.
+// It is also how `npm run check:seo` sat in ci.yml on every pull request, with
+// 32 assertions about the shipped marketing site, and nothing in the justfile
+// running it. A script that should not be in `just gate` is exempt by name
+// with its reason, the same as every other exemption here, because the next
+// `npm run` somebody adds to CI must be reported rather than skipped by a rule
+// written for `seed`.
+//
 // The npm class carries `"` and `$` because a quoted span is replaced with `""`
 // rather than dropped, and an argument can be a shell variable. Without them
 // `npx --prefix "$root" tsc` reads as no gate at all, and `just typecheck`
@@ -55,6 +66,7 @@ var gatePatterns = []*regexp.Regexp{
 	regexp.MustCompile(cmd + `go run \./tools/(\w+)`),
 	regexp.MustCompile(cmd + `go (test|vet|build) ([^\s|;&]+)`),
 	regexp.MustCompile(cmd + `(npm|npx) [\w\s./"$-]*?(test|tsc)\b`),
+	regexp.MustCompile(cmd + `(npm|npx) [\w\s./"$-]*?run ([\w:.-]+)`),
 	regexp.MustCompile(cmd + `gofmt -l`),
 	regexp.MustCompile(cmd + `node --test`),
 }
@@ -429,6 +441,15 @@ func gatesIn(raw, dir string) []gate {
 				out = append(out, gate{"gobuild", "", goDir(raw, dir)})
 			case strings.HasPrefix(whole, "gofmt -l"):
 				out = append(out, gate{"gofmt", "", dir})
+			case strings.Contains(whole, " run "):
+				// `npm test` IS `npm run test`, so both spellings are the one
+				// gate. Two keys for one command would report a gap the day CI
+				// and the justfile happened to spell it differently.
+				if m[2] == "test" {
+					out = append(out, gate{"npm", "test", npmDir(raw, dir)})
+					break
+				}
+				out = append(out, gate{"npm run", m[2], npmDir(raw, dir)})
 			case strings.HasPrefix(whole, "node --test"):
 				out = append(out, gate{"nodetest", "", dir})
 			default:
@@ -653,6 +674,18 @@ var exemptFromGate = map[string]string{
 		"than passed, and a positive control asserts a good region IS allowed " +
 		"so that a guard which refuses everything cannot pass the suite. " +
 		"It runs in infra.yml's plan job, which has a credential.",
+	"npm run seed in web": "" +
+		"It is not a gate. `npm run seed --workspace @antifailure/db` writes the " +
+		"fixture rows a dogfood run then drives the product against, so it is " +
+		"setup for `tool dogfood` rather than a verdict on the diff: it asserts " +
+		"nothing about the tree and there is no version of it that can fail " +
+		"because a change was wrong. It runs in dogfood.yml, in the step before " +
+		"the one that starts the run, and `just gate` seeding a database on " +
+		"somebody's laptop would be a side effect rather than a check. " +
+		"What IS a function of the tree is the schema those rows are inserted " +
+		"against, and `just test-web` covers that inside `gate`: the migrations " +
+		"run and the suites read what they wrote.",
+
 	"tool cost": "" +
 		"Its input is not in the tree. tools/cost reads a Terraform plan, and a " +
 		"plan only exists after authenticating to Azure and resolving every " +

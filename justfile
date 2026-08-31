@@ -74,6 +74,7 @@ gate: _reports
     run "prose style"                    just vale
     run "every link resolves"            just links
     run "the built docs carry their head" just docscheck
+    run "the site's own claims"          just seo
     run "prose stays readable"           just readability
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
@@ -411,6 +412,32 @@ links:
     cp -R www/out/. site/
     cp -R docs/dist site/docs
     lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
+
+# The assertions the marketing site makes about itself, against the built site.
+#
+# Sitemap, robots, canonicals, OpenGraph, structured data, the markdown twins
+# and the skip link. Every one of them was absent from production at the time
+# it was written and nothing said so, because a missing meta tag breaks no page
+# and fails no type check. ci.yml has run this on every pull request since; the
+# justfile never has, so `just gate` was green on a tree that CI refused, on the
+# one surface a customer sees first. gatecheck could not say so either, because
+# `npm run <script>` matched no pattern it had.
+#
+# Its own recipe rather than a line inside `links`, for the reason `typecheck`
+# learned the hard way: a gate that takes an hour and is named after link
+# resolution is not where anybody looks for a missing canonical tag.
+#
+# It builds rather than reusing whatever is in www/out, even though `links`
+# built the same thing a moment earlier in `gate`. A check that runs against
+# whatever happened to be on disk can pass against last week's site, which is
+# the same class of defect it exists to catch, and Next's cache makes the
+# second build the cheap part of an hour long gate.
+seo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -d www/node_modules ] || npm --prefix www ci --no-audit --no-fund --silent
+    (cd www && npm run build)
+    (cd www && npm run check:seo)
 
 # The getting started path, run in order and timed.
 #

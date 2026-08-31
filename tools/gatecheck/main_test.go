@@ -152,6 +152,76 @@ test-web:
 	}
 }
 
+func TestNpmRunIsAGateFamilyAndTheDirectoryTellsThemApart(t *testing.T) {
+	// `npm run build` in www, in docs and in console is three gates, and it
+	// used to be none: the npm pattern wanted `test` or `tsc`, so every
+	// `npm run` in every workflow matched nothing at all. That is how
+	// `npm run check:seo` ran on every pull request with nothing in the
+	// justfile running it.
+	got := ciGates(t, `
+jobs:
+  www:
+    steps:
+      - name: Build the marketing site
+        run: npm run build
+        working-directory: www
+      - name: The crawl surfaces the site claims to have
+        run: npm run check:seo
+        working-directory: www
+      - name: Build the documentation site
+        run: npm run build
+        working-directory: docs
+      - name: Build the console
+        run: npm run build
+        working-directory: console
+`)
+	for _, want := range []string{
+		"npm run build in www", "npm run build in docs", "npm run build in console",
+		"npm run check:seo in www",
+	} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("did not find %q in %v", want, keys(got))
+		}
+	}
+	if len(got) != 4 {
+		t.Errorf("three builds in three directories and one check should be four gates, got %v", keys(got))
+	}
+}
+
+func TestNpmTestAndNpmRunTestAreOneGate(t *testing.T) {
+	// `npm test` IS `npm run test`. Two keys for one command would report a
+	// gap the day CI and the justfile happened to spell it differently, which
+	// is drift that is not drift.
+	long := ciGates(t, "jobs:\n  a:\n    steps:\n      - run: npm run test\n        working-directory: web\n")
+	short := justGates(t, "test-web:\n    npm --prefix web test\n")
+	if _, ok := long["npm test in web"]; !ok {
+		t.Fatalf("`npm run test` did not read as the same gate as `npm test`: %v", keys(long))
+	}
+	if _, ok := short["npm test in web"]; !ok {
+		t.Fatalf("`npm --prefix web test` changed shape: %v", keys(short))
+	}
+}
+
+func TestAScriptThatIsNotAGateIsExemptByNameRatherThanByPattern(t *testing.T) {
+	// The rule the pattern must NOT have. `npm run seed` writes fixture rows
+	// for a dogfood run and asserts nothing about the tree, so it does not
+	// belong in `just gate`; a pattern shaped to skip it would also skip the
+	// next `npm run` somebody adds to CI, silently. It is seen, and then
+	// exempt by name with the reason recorded.
+	got := ciGates(t, "jobs:\n  a:\n    steps:\n      - run: npm run seed --workspace @antifailure/db\n        working-directory: web\n")
+	if _, ok := got["npm run seed in web"]; !ok {
+		t.Fatalf("the pattern stopped seeing it, which is the failure mode: %v", keys(got))
+	}
+	reason, ok := exemptFromGate["npm run seed in web"]
+	if !ok {
+		t.Fatal("it is seen and not exempt, so `just gate` is being asked to seed a database")
+	}
+	// The reason has to say what the command is, not that it fails the check.
+	if !strings.Contains(reason, "dogfood") || !strings.Contains(reason, "asserts nothing about the tree") {
+		t.Errorf("the exemption does not say what the command is: %q", reason)
+	}
+}
+
 func TestAStepDirectoryOverridesTheJobDirectory(t *testing.T) {
 	got := ciGates(t, `
 jobs:
