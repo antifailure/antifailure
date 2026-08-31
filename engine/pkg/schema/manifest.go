@@ -645,7 +645,7 @@ type Policy struct {
 	MigrationFailed PolicyLevel `json:"migration_failed,omitempty" yaml:"migration_failed,omitempty"`
 	// MigrationRewrite is a statement Postgres reported as rewriting a table.
 	MigrationRewrite PolicyLevel `json:"migration_rewrite,omitempty" yaml:"migration_rewrite,omitempty"`
-	// MigrationLint governs all six lint rules together. They are one setting
+	// MigrationLint governs all seventeen lint rules together. They are one setting
 	// because a project that wants the lint wants all of it: the rules are
 	// already scoped by table size, so the noisy case is handled by
 	// insights.large_table_rows rather than by turning a rule off.

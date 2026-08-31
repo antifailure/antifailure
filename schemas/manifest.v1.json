@@ -1357,7 +1357,7 @@
             "fail"
           ],
           "default": "warn",
-          "description": "Any of the six migration lint rules. They share one setting because the rules are already scoped by table size."
+          "description": "Any of the seventeen migration lint rules. They share one setting because the rules are already scoped by table size."
         },
         "plan_regression": {
           "type": "string",

@@ -175,7 +175,7 @@ refused at the line rather than treated as the weakest one.
 | `migration_lock.fail_ms` | `2000` | Fail on a lock held at least this long. Must not be below `warn_ms`. |
 | `migration_failed` | `fail` | The migrations did not apply to a branch of the golden. |
 | `migration_rewrite` | `warn` | Postgres rewrote a table. |
-| `migration_lint` | `warn` | Any of the six migration lint rules. |
+| `migration_lint` | `warn` | Any of the seventeen migration lint rules. |
 | `plan_regression` | `warn` | A query plan got worse. |
 | `query_regression` | `warn` | A statement runs more often or slower than the baseline. |
 | `load_regression` | `warn` | A threshold from the `load` block was exceeded. |

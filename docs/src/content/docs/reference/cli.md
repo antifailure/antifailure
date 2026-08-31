@@ -115,7 +115,7 @@ af doctor
 Remove the environment and everything it created.
 
 Replay the journal in reverse and delete every resource the environment
-created: database branches, containers, volumes, and networks.
+created, including database branches, containers, volumes and networks.
 
 Teardown never stops at the first failure. A provider that is unreachable must
 not strand the other resources, so each is attempted and anything that could
