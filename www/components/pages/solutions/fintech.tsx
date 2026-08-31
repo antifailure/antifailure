@@ -13,7 +13,7 @@ export function FintechPage() {
         paragraphs={[
           "The firewall simulates Stripe. Safe State masks account identifiers.",
           "The oracle compares ledger writes.",
-          "Duplicate events are incidents — they belong in a report, not in production.",
+          "Duplicate events are incidents. They belong in a report, not in production.",
         ]}
         visual={
           <Notebook

@@ -12,7 +12,7 @@ export function DevtoolsPage() {
         paragraphs={[
           "The flagship wedge, felt first by teams whose users notice p99 immediately.",
           "Measure lock duration, blocked statements, and whether old instances can still read the new schema.",
-          "Start with Postgres volume, plans, and pools — then expand.",
+          "Start with Postgres volume, plans, and pools, then expand.",
         ]}
         visual={
           <DashChart

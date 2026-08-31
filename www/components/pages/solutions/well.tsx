@@ -2,17 +2,9 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/layout/Button";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { Container } from "@/components/layout/Container";
+import { SectionLabel } from "@/components/layout/SectionLabel";
 import { PageJsonLd } from "@/lib/jsonld";
 import { cn } from "@/lib/cn";
-
-function Sparkle({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={cn("size-6 text-black", className)} fill="none" aria-hidden>
-      <path d="M12 2.5 13.2 8.2 18.5 9.5 13.2 10.8 12 16.5 10.8 10.8 5.5 9.5 10.8 8.2 12 2.5Z" fill="currentColor" />
-      <path d="M19 14.5 19.6 17.2 22 18 19.6 18.8 19 21.5 18.4 18.8 16 18 18.4 17.2 19 14.5Z" fill="currentColor" />
-    </svg>
-  );
-}
 
 export function SageWell({
   children,
@@ -24,12 +16,9 @@ export function SageWell({
   return (
     <div
       className={cn(
-        "relative min-h-[520px] overflow-hidden rounded-[32px] px-6 py-8 max-md:min-h-[360px] max-md:px-4 max-md:py-5 md:px-10 md:py-12",
+        "relative min-h-[520px] overflow-hidden rounded-[32px] bg-sage px-6 py-8 max-md:min-h-[360px] max-md:px-4 max-md:py-5 md:px-10 md:py-12",
         className,
       )}
-      style={{
-        background: "linear-gradient(145deg, #f7f7f5 0%, #E4F1EB 48%, #CAE6D9 100%)",
-      }}
     >
       {children}
     </div>
@@ -84,8 +73,8 @@ function FeatureCopy({
 }) {
   return (
     <>
-      <p className="text-[13px] font-medium tracking-tight text-[#33bf00]">{kicker}</p>
-      <h2 className="mt-3 max-w-[520px] text-[36px] font-medium leading-[1.15] tracking-tighter text-black max-md:text-[28px]">
+      <SectionLabel>{kicker}</SectionLabel>
+      <h2 className="mt-4 max-w-[520px] text-[36px] font-medium leading-[1.15] tracking-tighter text-black max-md:text-[28px]">
         {title}
       </h2>
       <ArrowList items={items} />
@@ -149,11 +138,8 @@ function HeroCopy({
 }) {
   return (
     <>
-      <Sparkle />
-      <p className="mt-5 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-black/45">
-        {eyebrow}
-      </p>
-      <h1 className="mt-4 max-w-[520px] text-[44px] font-medium leading-[1.15] tracking-tighter text-black max-lg:text-[32px]">
+      <SectionLabel>{eyebrow}</SectionLabel>
+      <h1 className="mt-5 max-w-[520px] text-[44px] font-medium leading-[1.15] tracking-tighter text-black max-lg:text-[32px]">
         {title}
       </h1>
       <div className="mt-8 max-w-[480px]">
@@ -245,7 +231,7 @@ function TonePill({
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap",
         tone === "PASS" && "bg-[#E4F1EB] text-[#285D49]",
-        tone === "WARN" && "bg-[#F4F1EA] text-black/70",
+        tone === "WARN" && "bg-[#f7f7f5] text-black/70",
         tone === "BLOCK" && "bg-black text-white",
       )}
     >
@@ -335,7 +321,7 @@ export function Notebook({
                         key={row.id}
                         className={cn(
                           "grid grid-cols-[16px_72px_1fr_auto_64px] items-center gap-2 px-3 py-2.5 max-sm:grid-cols-[16px_1fr_auto]",
-                          i % 2 === 0 ? "bg-[#F4F1EA]" : "bg-white",
+                          i % 2 === 0 ? "bg-[#f7f7f5]" : "bg-white",
                         )}
                       >
                         <span

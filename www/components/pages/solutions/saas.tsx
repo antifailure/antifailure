@@ -30,7 +30,7 @@ export function SaasPage() {
                 "Account identifiers replaced inside the customer boundary.",
                 "Referential subset of orgs, seats, subscriptions, invoices.",
                 "Long-tail and malformed historical seats kept when the parent is kept.",
-                "helix dropped — children follow parent.",
+                "helix dropped. Children follow parent.",
                 "Tokens and sessions deleted, not masked.",
               ],
             }}
@@ -87,7 +87,7 @@ export function SaasPage() {
 
       <FeatureRow
         kicker="The run"
-        title="Pass, warning, or block on the pull request — then destroy the twin."
+        title="Pass, warning, or block on the pull request, then destroy the twin."
         items={[
           { title: "Restore", body: "Referential subset of orgs, seats, subscriptions, invoices." },
           { title: "Mask", body: "Account identifiers replaced inside the customer boundary." },

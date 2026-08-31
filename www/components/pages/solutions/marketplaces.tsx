@@ -105,7 +105,7 @@ export function MarketplacesPage() {
             rows={[
               { task: "Restore both sides", status: "Completed", tone: "PASS", who: "R", date: "00:03" },
               { task: "Run matching.worker", status: "Running", tone: "PASS", who: "M", date: "00:09" },
-              { task: "Contain partners", status: "BLOCKED", tone: "BLOCK", who: "P", date: "—" },
+              { task: "Contain partners", status: "BLOCKED", tone: "BLOCK", who: "P", date: "n/a" },
               { task: "Compare in oracle", status: "In review", tone: "WARN", who: "O", date: "00:14" },
             ]}
           />
