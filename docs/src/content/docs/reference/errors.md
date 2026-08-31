@@ -986,7 +986,7 @@ Service {service} exited with code {code} during startup.
 
 No free port was found in the range {range} to publish the environment on.
 
-**What to do.** Free a port in that range, or set runtime.port_from in the manifest to a range that is clear.
+**What to do.** Free a port in that range, or set AF_PORT_RANGE_START to the first port of a range that is clear.
 
 | | |
 | --- | --- |
@@ -1101,6 +1101,18 @@ This runtime cannot do that: {detail}
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
+### AF-RUN-046
+
+{variable} is set to {value}, which is not a port number.
+
+**What to do.** Set {variable} to a number in {limit}, or unset it to use the default range.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/local-runtime](/docs/guides/local-runtime/) |
 
 ## Secrets
 

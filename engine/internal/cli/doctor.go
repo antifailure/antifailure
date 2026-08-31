@@ -15,6 +15,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/dockerutil"
+	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/state"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -382,25 +384,52 @@ func checkStateDirectory(_ context.Context, env *Env, p Prober) CheckResult {
 	return r
 }
 
-// portRangeStart is where the local runtime allocates published ports. It is
-// high enough to avoid the ephemeral range on every platform.
-const portRangeStart = 43000
+// portsProbedPerRange is how many ports of each range the check tries.
+//
+// Both ranges are probed, because they are different numbers and a machine can
+// be out of one and not the other. Checking only the base reported on the
+// databases and said nothing at all about the addresses `af up` publishes,
+// which are the ports a person actually notices are missing.
+const portsProbedPerRange = 20
 
 func checkPortRange(_ context.Context, _ *Env, p Prober) CheckResult {
 	r := CheckResult{Name: "Local ports"}
-	r.Remediation = fmt.Sprintf(
-		"Free some ports from %d upwards, or set AF_PORT_RANGE_START to a range that is free.", portRangeStart)
-	free := 0
-	for i := 0; i < 20; i++ {
-		if err := p.ListenTCP(portRangeStart + i); err == nil {
-			free++
-		}
-	}
-	r.Detail = fmt.Sprintf("%d of 20 checked ports are free from %d", free, portRangeStart)
-	switch {
-	case free == 0:
+	base, err := dockerutil.PortRangeFrom(p.Getenv)
+	if err != nil {
 		r.Status = CheckFail
-	case free < 5:
+		r.Detail = err.Error()
+		r.Remediation = fmt.Sprintf(
+			"Set %s to the first port of a free range, or unset it to use the default.",
+			dockerutil.PortRangeStartVar)
+		return r
+	}
+	published := base + local.PublishedPortOffset
+	r.Remediation = fmt.Sprintf(
+		"Free some ports from %d or %d upwards, or set %s to the first port of a range that is free.",
+		base, published, dockerutil.PortRangeStartVar)
+
+	free := func(from int) int {
+		n := 0
+		for i := 0; i < portsProbedPerRange; i++ {
+			if err := p.ListenTCP(from + i); err == nil {
+				n++
+			}
+		}
+		return n
+	}
+	freeBase, freePublished := free(base), free(published)
+	r.Detail = fmt.Sprintf(
+		"%d of %d checked ports are free from %d for databases, and %d of %d from %d for published services",
+		freeBase, portsProbedPerRange, base,
+		freePublished, portsProbedPerRange, published)
+	worst := freeBase
+	if freePublished < worst {
+		worst = freePublished
+	}
+	switch {
+	case worst == 0:
+		r.Status = CheckFail
+	case worst < 5:
 		r.Status = CheckWarn
 	default:
 		r.Status = CheckPass

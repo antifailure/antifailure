@@ -374,5 +374,5 @@ func inventoryRuntime(e *Env) (provider.Runtime, error) {
 	}
 	// Outside a repository there is no manifest to ask, and the only runtime
 	// that could be holding anything on this machine is the local one.
-	return local.New(local.Options{Clock: e.Clock})
+	return local.New(local.Options{Clock: e.Clock, Getenv: e.Getenv})
 }

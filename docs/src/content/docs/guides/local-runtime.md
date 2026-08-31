@@ -80,6 +80,25 @@ Usually environments that were never torn down. `af env list` shows them and
 `af env prune --older-than 24h` removes the old ones after printing what it
 would do.
 
+Databases are published from 43000 and services from 46000, twenty ports of each
+of which `af doctor` reports on. `AF_PORT_RANGE_START` moves both together: set
+it to the first port of a range that is free, and services are published 3000
+above it. It belongs in your shell or your runner's configuration rather than in
+the manifest, because a machine is what runs out of ports and two people sharing
+one repository need different answers.
+
+```
+AF_PORT_RANGE_START=51000 af up
+```
+
+A port that is free when Antifailure reserves it can be taken by something else
+before the daemon binds it. That is retried on a fresh port rather than
+reported, so the address `af up` prints is the one that was bound, which is not
+always the one a service was told at startup: an application that builds
+absolute URLs from `AF_PUBLIC_URL` or `AF_ENV_URL` may name the port it lost.
+Bringing the environment up again after freeing the port gives every container
+the same answer.
+
 ## Disk
 
 ```

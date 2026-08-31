@@ -94,8 +94,12 @@ type Provider struct {
 type Options struct {
 	// Version is the Postgres major version.
 	Version int
-	// PortFrom is where to start allocating published ports.
+	// PortFrom is where to start allocating published ports. Zero resolves
+	// AF_PORT_RANGE_START, and the default under that.
 	PortFrom int
+	// Getenv reads the environment, so that a test can move the port range
+	// without moving the process's. Nil reads the process environment.
+	Getenv func(string) string
 	// SeedSQL initialises a golden candidate when no source is configured.
 	SeedSQL string
 	// Clock is the time source.
@@ -112,7 +116,11 @@ func New(opts Options) (*Provider, error) {
 		opts.Version = 17
 	}
 	if opts.PortFrom == 0 {
-		opts.PortFrom = DefaultPortFrom
+		from, err := dockerutil.PortRangeFrom(opts.Getenv)
+		if err != nil {
+			return nil, err
+		}
+		opts.PortFrom = from
 	}
 	if opts.Clock == nil {
 		opts.Clock = clock.New()

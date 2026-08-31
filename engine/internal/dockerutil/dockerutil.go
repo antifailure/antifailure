@@ -237,7 +237,10 @@ func AwaitExit(ctx context.Context, cli *client.Client, id string) (int64, error
 // on the machine, and the window is small enough that it almost never fires in
 // testing and fires regularly in a build that starts six containers at once.
 // Remembering what this process handed out closes the half of the race we can
-// close; the other half is the caller retrying on a bind failure.
+// close; the other half is the caller retrying on a bind failure, which is
+// what IsPortTaken and PortRetries below are for. Both callers do it: the
+// database provider around its container start, and the local runtime around
+// the forwarder's.
 type PortAllocator struct {
 	mu    sync.Mutex
 	from  int
@@ -247,6 +250,65 @@ type PortAllocator struct {
 // DefaultPortFrom is above the ephemeral range on every platform, so an
 // allocation does not collide with an outbound connection somebody else made.
 const DefaultPortFrom = 43000
+
+// PortRangeStartVar names the environment variable that moves the range.
+//
+// A machine is what runs out of ports, not a repository, so this is a variable
+// rather than a manifest field: two people sharing one checkout need different
+// ranges, and a CI runner hosting four environments at once needs a different
+// range from either of them. A manifest field would commit every user of the
+// repository to one answer and would be wrong for all but one of them.
+const PortRangeStartVar = "AF_PORT_RANGE_START"
+
+// PortRangeFrom is where allocation starts, honouring PortRangeStartVar.
+//
+// A nil getenv reads the process environment. An unset variable is the default
+// and is not an error; a variable set to something that cannot be a port is,
+// because silently ignoring it would leave a user who set it staring at the
+// range they were trying to move away from.
+func PortRangeFrom(getenv func(string) string) (int, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	raw := strings.TrimSpace(getenv(PortRangeStartVar))
+	if raw == "" {
+		return DefaultPortFrom, nil
+	}
+	n, err := strconv.Atoi(raw)
+	// The ceiling leaves room for the whole span the allocator searches plus
+	// the offset the local runtime adds, so a value that parses cannot hand
+	// out a number that is not a port.
+	if err != nil || n < 1024 || n > maxPort-6000 {
+		return 0, aferrors.Coded(aferrors.AFRUN046,
+			"variable", PortRangeStartVar, "value", raw,
+			"limit", fmt.Sprintf("1024-%d", maxPort-6000))
+	}
+	return n, nil
+}
+
+// PortRetries bounds how many times a lost race is retried.
+//
+// Three, because each attempt takes a different port and the chance of losing
+// three races in a row is negligible unless something is wrong in a way more
+// attempts would not fix.
+const PortRetries = 3
+
+// IsPortTaken reports whether the daemon refused because the host port was
+// already bound.
+//
+// Matched on the message because the daemon does not give this a distinct
+// error type. The match is deliberately narrow: a broader one would swallow a
+// real networking failure and retry it three times before reporting it. The
+// daemon says one thing when another container holds the port and another when
+// a process on the host does, and both are the same situation.
+func IsPortTaken(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "port is already allocated") ||
+		strings.Contains(msg, "address already in use")
+}
 
 // maxPort is the last number that can be a TCP port.
 const maxPort = 65535
