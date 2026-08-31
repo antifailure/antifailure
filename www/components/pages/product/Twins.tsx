@@ -11,68 +11,72 @@ import { TwinLifecycleScene } from "@/components/home/visuals/TwinLifecycleScene
 import { Hairline, MonoLabel, Node, Panel, StatusPill } from "@/components/home/visuals/primitives";
 
 /**
- * The states an environment is recorded in.
+ * The lifecycle events one run emits, which is the only sequence a reader can
+ * check.
  *
- * This panel listed thirteen, REQUESTED through DESTROYED. Those names existed
- * in this file and in no other file in the repository: no state machine in the
- * engine, no column in the control plane, no string in any Go or SQL source.
- * A rail of invented state names is worse than no rail, because it reads like
- * an interface somebody could build against.
+ * This panel listed thirteen state names, REQUESTED through DESTROYED. They
+ * existed in this file and in no other file in the repository: no state
+ * machine in the engine, no column in the control plane, no string in any Go
+ * or SQL source. A rail of invented names is worse than no rail, because it is
+ * precise enough to be trusted and there is nothing behind it.
  *
- * These six are the `environment_state` enum in
- * `web/packages/db/migrations/0001_init.sql`, and the engine's own lifecycle
- * events are what advance the row through them. Two of the six are off the
- * straight line: an environment reaches `failed` from anywhere, and `sleeping`
- * is where a running one waits until something wakes it.
+ * The first correction here was the six values of the `environment_state` enum
+ * in `web/packages/db/migrations/0001_init.sql`, and that was still one level
+ * of the same mistake. Two of those six cannot be reached: `queued` has no
+ * mapping in the engine's own `controlplane.typeMap` at all, and `sleeping`
+ * has one for `events.EnvSleeping`, which is declared, described, and emitted
+ * by nothing. So the enum has six values and an environment can be observed in
+ * four of them.
+ *
+ * These five are the lifecycle events `internal/env/env.go` actually emits,
+ * named by the type strings that appear in the NDJSON log. Somebody can run
+ * `af up` and `af down` and watch each one arrive, which is what the thirteen
+ * names never offered.
  */
 const LIFECYCLE_STATES = [
-  "queued",
-  "creating",
-  "running",
-  "sleeping",
-  "torn_down",
-  "failed",
+  "env.creating",
+  "env.ready",
+  "env.destroying",
+  "env.destroyed",
+  "env.failed",
 ] as const;
 
 type LifecycleState = (typeof LIFECYCLE_STATES)[number];
 
 /**
- * The two states a run stops in, drawn apart from the line rather than on it.
+ * The two events a run stops on, drawn at the end rather than mid-rail.
  *
  * The rail is a progression, so anything sitting in the middle of it reads as
- * a step every run takes. `failed` is not: it is reached from any of the four
- * before it and it is where the run stops. Putting it last with `torn_down`
- * and giving both an end mark says that without a legend.
+ * a step every run takes. `env.failed` is not: it is emitted from any point
+ * before it, by the deferred handler that covers every return in `Up`.
  */
-const TERMINAL_STATES = new Set<LifecycleState>(["torn_down", "failed"]);
+const TERMINAL_STATES = new Set<LifecycleState>(["env.destroyed", "env.failed"]);
 
 /**
- * The four phases of one run, each named by an event the engine emits in it.
+ * The four phases of one run, and deliberately no identifier under each.
  *
  * The phases used to carry a from-state and a to-state drawn from the thirteen
- * invented names above. They now carry an event type from
- * `engine/internal/events/event.go`, which is the identifier that actually
- * appears in the NDJSON log, in the control plane and in a user's filter.
+ * invented names above. Replacing those with an event type per phase was the
+ * obvious fix and it was wrong: three of the four had an emitter and the Run
+ * phase's did not. `events.AgentStarted`, `AgentStep`, `AgentFinished` and
+ * `AgentVerdict` are declared in the catalog, described there, mapped into the
+ * control plane's vocabulary, and emitted by nothing, so labelling this phase
+ * `agent.verdict` would have put a fourth invented identifier on the page
+ * while removing thirteen.
+ *
+ * The phases are a true description of the work one run does, in order. That
+ * is what they say now, with nothing under them pretending to be a key
+ * somebody can filter on.
  */
 const PHASES = [
-  {
-    name: "Plan",
-    event: "env.creating",
-    note: "Read the manifest, take the environment lock, write the plan.",
-  },
+  { name: "Plan", note: "Read the manifest, take the environment lock, write the plan." },
   {
     name: "Provision",
-    event: "db.branched",
     note: "Build candidate, restore safe state, replace credentials, verify containment.",
   },
-  {
-    name: "Run",
-    event: "agent.verdict",
-    note: "Agents drive the declared workflows. Invariants are asked of the data.",
-  },
+  { name: "Run", note: "Agents drive the declared workflows. Invariants are asked of the data." },
   {
     name: "Close",
-    event: "env.destroyed",
     note: "Evidence attaches to the pull request. The journal is replayed in reverse.",
   },
 ] as const;
@@ -140,8 +144,8 @@ const JOURNAL = [
 ] as const;
 
 function railLabel(name: LifecycleState): string[] {
-  if (name === "torn_down") return ["TORN", "DOWN"];
-  return [name.toUpperCase()];
+  const [namespace, event] = name.split(".");
+  return [namespace + ".", event];
 }
 
 export function TwinsPage() {
@@ -162,10 +166,11 @@ export function TwinsPage() {
         />
         <LifecycleRail />
         <Illustrative>
-          The six states are the <code className="font-mono text-[12px] text-black/70">environment_state</code>{" "}
-          enum the control plane stores, and each phase is named by an event the engine emits. The
-          last two are where a run stops: it is torn down, or it failed, which is reachable from any
-          of the four before it. The run identifier is invented.
+          These are the lifecycle events one run emits, so a reader can run{" "}
+          <code className="font-mono text-[12px] text-black/70">af up</code> and{" "}
+          <code className="font-mono text-[12px] text-black/70">af down</code> and watch each of
+          them arrive in the log. The last two are where a run stops: it was torn down, or it
+          failed, which is emitted from any point before it. The run identifier is invented.
         </Illustrative>
       </PageSection>
 
@@ -302,9 +307,9 @@ function LifecycleRail() {
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
         <MonoLabel className="uppercase tracking-[0.14em]">environment lifecycle</MonoLabel>
         <div className="flex flex-wrap items-center gap-4">
-          <Node label="environment_state" lit />
+          <Node label="internal/env" lit />
           <Node label="idempotent" lit />
-          <StatusPill tone="PASS">TORN_DOWN</StatusPill>
+          <StatusPill tone="PASS">env.destroyed</StatusPill>
         </div>
       </div>
       <Hairline />
@@ -313,7 +318,8 @@ function LifecycleRail() {
         <ol className="flex min-w-[540px] px-3 pt-6 pb-4">
           {LIFECYCLE_STATES.map((name, i) => {
             const terminal = TERMINAL_STATES.has(name);
-            const bar = name === "torn_down" ? "#33bf00" : name === "failed" ? "#D94841" : "#CAE6D9";
+            const bar =
+              name === "env.destroyed" ? "#33bf00" : name === "env.failed" ? "#D94841" : "#CAE6D9";
             return (
               <li key={name} className="flex min-w-0 flex-1 flex-col px-0.5">
                 <div className="relative h-1 w-full bg-black/[0.08]">
@@ -349,10 +355,7 @@ function LifecycleRail() {
               <Hairline vertical className="absolute top-5 right-0 bottom-5 hidden h-auto xl:block" />
             ) : null}
             <MonoLabel className="uppercase tracking-[0.14em]">{phase.name}</MonoLabel>
-            <div className="mt-2 font-mono text-[11px] tracking-extra-tight text-black tabular-nums">
-              {phase.event}
-            </div>
-            <p className="mt-2 max-w-[280px] text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
+            <p className="mt-3 max-w-[280px] text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
               {phase.note}
             </p>
           </div>

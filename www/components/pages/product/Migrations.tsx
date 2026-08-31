@@ -154,7 +154,10 @@ lint        changing plan_id to bigint rewrites the whole table`}
             { title: "Rewrites", body: "Full table rewrites, reported by Postgres rather than guessed from the SQL." },
             { title: "Plans", body: "EXPLAIN before and against the migrated branch, on production's own shape." },
             { title: "Statements", body: "Per-statement duration, so the slow one in a batch is named." },
-            { title: "Lint", body: "Every rule carries the fix rather than only the complaint, because a lint that says unsafe and stops is one people disable." },
+            {
+              title: "Lint",
+              body: "Missing lock timeouts, constraints added without NOT VALID, index builds that are not concurrent, backfills sharing a transaction with the schema change, and the rewrites and offline table operations. Each finding reaches the pull request under its own rule name with the fix attached, because a finding called migration_lint tells nobody what to change.",
+            },
             { title: "Comparison", body: "A saved report from an earlier run, compared against this one." },
           ]}
         />
