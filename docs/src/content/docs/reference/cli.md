@@ -108,13 +108,20 @@ af doctor -o json
 
 Remove the environment and everything it created.
 
-Replay the journal in reverse and delete every resource the environment
-created: database branches, containers, volumes, and networks.
+Replay the journal in reverse and delete what this environment recorded
+creating. Every resource is journaled before it is made, so what teardown
+removes is what was actually created rather than what a list somebody
+maintained remembers to look for.
 
 Teardown never stops at the first failure. A provider that is unreachable must
-not strand the other resources, so each is attempted and anything that could
-not be removed stays recorded for the next run. Exit code 10 means resources
-are still pending.
+not strand the other resources, so each is attempted, and two things survive
+the run: anything that could not be removed, and anything this build has no way
+to delete, which is left recorded rather than forgotten. Both are named
+individually in the output, and exit code 10 means resources are still pending.
+
+So the answer to what this is about to remove is not a sentence here. It is
+'af status' for what is running and the pending list this prints for whatever
+it could not reach.
 
 ```
 af down [flags]
