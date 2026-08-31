@@ -252,6 +252,18 @@ The control plane has no environment called {env}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
 
+### AF-CPL-004
+
+This machine is not signed in to {origin}.
+
+**What to do.** Run '{command}' to sign in from this terminal. Nothing else in the engine needs a sign in; only the commands that read or write your own account do.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
+
 ## Database
 
 ### AF-DB-002

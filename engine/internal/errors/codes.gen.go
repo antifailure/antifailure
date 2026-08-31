@@ -57,6 +57,8 @@ const (
 	AFCPL002 Code = "AF-CPL-002"
 	// The control plane could not be reached: {detail}
 	AFCPL003 Code = "AF-CPL-003"
+	// This machine is not signed in to {origin}.
+	AFCPL004 Code = "AF-CPL-004"
 
 	// Database
 	// The database provider {provider} is not registered in this build.
@@ -505,6 +507,15 @@ var catalog = map[Code]Entry{
 		Docs:      "self-hosting/control-plane",
 		Retryable: true,
 		ExitCode:  ExitProvider,
+	},
+	AFCPL004: {
+		Code:      AFCPL004,
+		Area:      "CPL",
+		Message:   "This machine is not signed in to {origin}.",
+		NextStep:  "Run '{command}' to sign in from this terminal. Nothing else in the engine needs a sign in; only the commands that read or write your own account do.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: false,
+		ExitCode:  ExitAuth,
 	},
 	AFDB001: {
 		Code:      AFDB001,

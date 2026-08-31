@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/antifailure/antifailure/engine/internal/auth"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
 // knownProviders is checked here so a typo is caught before a key is read from
@@ -117,9 +118,12 @@ func providerSessionFor(e *Env, flag string) (providerSession, error) {
 	store := e.CredentialStore()
 	cred, err := store.Load(origin)
 	if errors.Is(err, auth.ErrNotSignedIn) {
-		return providerSession{}, fmt.Errorf(
-			"not signed in to %s. Run: af login --control-plane %s --scope providers.write",
-			origin, origin)
+		// The scope is named rather than left to the generic next step,
+		// because a sign in without providers.write succeeds and then fails
+		// here again on the next command, which reads as the fix not working.
+		return providerSession{}, aferrors.Coded(aferrors.AFCPL004,
+			"origin", origin,
+			"command", "af login --control-plane "+origin+" --scope providers.write")
 	}
 	if err != nil {
 		return providerSession{}, err
