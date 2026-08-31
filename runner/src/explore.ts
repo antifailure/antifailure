@@ -720,6 +720,10 @@ async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
     if (persona) {
       const login = await signIn(page, persona, {
         baseURL: job.baseURL,
+        // The same reasoning as execute.ts: the goal's own start path is the
+        // first candidate, because a protected route usually answers with the
+        // sign-in screen rather than with a redirect to /login.
+        ...(goal.startPath ? { signInPath: goal.startPath } : {}),
         ...(job.inbox ? { inbox: job.inbox } : {}),
       });
       signIns.push(`Sign in as ${persona.name}: ${login.detail}`);

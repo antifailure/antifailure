@@ -256,3 +256,132 @@ test('an exploration that cannot reach the application is blocked, not passed',
   assert.equal(results[0]!.missing.length, 1);
   assert.match(results[0]!.missing[0]!, /Nothing was explored/);
 });
+
+/** An application shaped like this repository's own control plane console.
+ *
+ * Every detail below is one that was live when six Dogfood workflows came back
+ * blocked, and each one on its own is enough to block all six:
+ *
+ *   - there is no /login. The console is a static export with a file per
+ *     route, and every unknown path answers with its 404 page.
+ *   - the email field's label carries its own hint text, so its accessible
+ *     name is not "Email address" but "Email address We send a link that signs
+ *     you in. No password."
+ *   - the button says "Send a sign-in link".
+ *
+ * A fixture with a tidy `<label for>` and a button reading "Send link" passes
+ * against a runner that cannot drive any real application, which is what the
+ * fixture above this one was doing.
+ */
+function protectedConsole(): { server: Server; url: Promise<string> } {
+  let linked = false;
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const html = (code: number, body: string) => {
+      res.writeHead(code, { 'content-type': 'text/html' });
+      res.end(`<html><body>${body}</body></html>`);
+    };
+    if (req.method === 'POST' && url.pathname === '/auth/email') {
+      return html(200, '<h1>Check your mail</h1><p>A sign-in link is on its way.</p>');
+    }
+    if (url.pathname === '/auth/link') {
+      linked = true;
+      return html(200, '<h1>Environments</h1><p>Repository</p><a href="/logout">Sign out</a>');
+    }
+    if (url.pathname !== '/environments') {
+      return html(404, '<h1>That page is not here</h1><p>The address does not match anything.</p>');
+    }
+    if (linked) {
+      return html(200, '<h1>Environments</h1><p>Repository</p><a href="/logout">Sign out</a>');
+    }
+    return html(200, `<h1>Sign in</h1>
+      <form method="POST" action="/auth/email">
+        <label><span>Email address</span>
+          <input name="email" type="email" required>
+          <span>We send a link that signs you in. No password.</span>
+        </label>
+        <button type="submit">Send a sign-in link</button>
+      </form>`);
+  });
+  const url = new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+  return { server, url };
+}
+
+test('it signs in where the form actually is, not where /login would be', { timeout: 120_000 }, async () => {
+  const { server, url } = protectedConsole();
+  const baseURL = await url;
+  const artifacts = mkdtempSync(join(tmpdir(), 'af-runner-'));
+  try {
+    const results = await run({
+      baseURL, artifacts, attempts: 1,
+      workflows: [{
+        name: 'sign-in-with-a-link',
+        description: 'Ask for a sign-in link, follow it, and land signed in.',
+        startPath: '/environments',
+        expect: ['Repository'],
+      }],
+      personas: [{ name: 'owner', email: 'owner@example.test', login: 'magic_link' }],
+      inbox: {
+        async list() {
+          return [{
+            seq: 1, at: new Date().toISOString(), provider: 'resend', kind: 'email',
+            to: ['owner@example.test'], subject: 'Your sign-in link',
+            text: `Sign in: ${baseURL}/auth/link`,
+            links: [`${baseURL}/auth/link`], link: `${baseURL}/auth/link`,
+          }];
+        },
+      },
+    });
+    const [result] = results;
+    assert.equal(result!.outcome.verdict, 'pass', JSON.stringify(result!.outcome, null, 2));
+    assert.ok(
+      result!.steps.some((s) => /Sign in as owner: Signed in/.test(s)),
+      result!.steps.join(' | '),
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test('no sign-in form anywhere is blocked, and says which paths it tried', { timeout: 120_000 }, async () => {
+  // Every path answers with the 404 page, which is what /login did. The point
+  // of the assertion is the message: `locator.fill: Timeout 10000ms exceeded`
+  // names the regex the runner used and nothing a reader can act on.
+  const server = createServer((_req, res) => {
+    res.writeHead(404, { 'content-type': 'text/html' });
+    res.end('<html><body><h1>That page is not here</h1></body></html>');
+  });
+  const baseURL = await new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+  const artifacts = mkdtempSync(join(tmpdir(), 'af-runner-'));
+  try {
+    const results = await run({
+      baseURL, artifacts, attempts: 1,
+      workflows: [{
+        name: 'sign-in-with-a-link',
+        description: 'Ask for a sign-in link.',
+        startPath: '/environments',
+        expect: ['Repository'],
+      }],
+      personas: [{ name: 'owner', email: 'owner@example.test', login: 'magic_link' }],
+      inbox: { async list() { return []; } },
+    });
+    const [result] = results;
+    assert.equal(result!.outcome.verdict, 'blocked', JSON.stringify(result!.outcome, null, 2));
+    const said = result!.steps.join(' | ');
+    assert.match(said, /No sign-in form was found for owner/);
+    assert.match(said, /\/environments/);
+    assert.match(said, /\/login/);
+  } finally {
+    server.close();
+  }
+});

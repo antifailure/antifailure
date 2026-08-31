@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { cloneElement, isValidElement, useId, type ReactNode } from "react";
 import Link from "next/link";
 import { ApiError } from "@/lib/api";
 import { ago, when } from "@/lib/format";
@@ -384,18 +384,35 @@ export function Field({
   error?: string | null;
   children: ReactNode;
 }) {
+  // The hint and the error sit outside the label, and that is load bearing
+  // rather than tidy. A wrapping label computes ONE accessible name out of
+  // everything inside it, so the sign-in field was named "Email address We
+  // send a link that signs you in. No password." to every screen reader, and
+  // to the agents that drive this console the same way. Six Dogfood workflows
+  // came back blocked on it. A hint describes a field; it is not its name.
+  const id = useId();
+  const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
+  const control =
+    describedBy && isValidElement<{ "aria-describedby"?: string }>(children)
+      ? cloneElement(children, { "aria-describedby": describedBy })
+      : children;
+
   return (
-    <label className="block">
-      <span className="block text-[12px] font-medium text-muted">{label}</span>
-      {children}
+    <div className="block">
+      <label className="block">
+        <span className="block text-[12px] font-medium text-muted">{label}</span>
+        {control}
+      </label>
       {error ? (
-        <span role="alert" className="mt-1.5 block text-[12px] text-fail">
+        <span id={`${id}-error`} role="alert" className="mt-1.5 block text-[12px] text-fail">
           {error}
         </span>
       ) : hint ? (
-        <span className="mt-1.5 block text-[12px] leading-5 text-dim">{hint}</span>
+        <span id={`${id}-hint`} className="mt-1.5 block text-[12px] leading-5 text-dim">
+          {hint}
+        </span>
       ) : null}
-    </label>
+    </div>
   );
 }
 

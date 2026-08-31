@@ -138,6 +138,11 @@ async function attemptOnce(
   if (persona) {
     const login = await signIn(page, persona, {
       baseURL: job.baseURL,
+      // Where this workflow was going anyway is the first place to look for
+      // the form. An application that answers every protected route with its
+      // sign-in screen, which is what this repository's own control plane
+      // does, is signed into without guessing at a path it does not have.
+      ...(workflow.startPath ? { signInPath: workflow.startPath } : {}),
       ...(job.inbox ? { inbox: job.inbox } : {}),
     });
     taken.push(`Sign in as ${persona.name}: ${login.detail}`);
