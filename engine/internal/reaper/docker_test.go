@@ -3,6 +3,7 @@ package reaper_test
 import (
 	"context"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -206,6 +207,21 @@ func TestReaper_DestroysAnExpiredEnvironmentOnARealDaemon(t *testing.T) {
 				"the sweep destroyed only %v", id, n, after[id], named)
 		}
 	}
+
+	// Named explicitly, because "it did not touch another tenant" is the claim
+	// that is hardest to read out of a pair of set differences. These are the
+	// environments on this daemon that belong to somebody else, and the sweep
+	// left every one of them where it was.
+	var foreign []string
+	for id := range before {
+		if !strings.HasPrefix(id, costctl) {
+			foreign = append(foreign, id)
+			require.Positive(t, after[id], "the sweep took another tenant's %s", id)
+		}
+	}
+	sort.Strings(foreign)
+	t.Logf("spared %d environments belonging to other tenants: %v", len(foreign), foreign)
+	t.Logf("spared %s, which is inside its lifetime with %d resources", live, after[live])
 
 	// The sweep's own record of what it destroyed, which is the authoritative
 	// one: it names exactly one environment, and it is ours.
