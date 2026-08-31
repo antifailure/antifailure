@@ -160,7 +160,7 @@ monthly_budget_usd = 450
 # can review.
 signin_allowlist = ["virsanghavi", "maksymrajszewski"]
 
-# EMPTY UNTIL THE PRODUCTION GITHUB APP EXISTS, AND SETTING IT EARLY FAILS.
+# SET ONLY AFTER THE PRODUCTION GITHUB APP EXISTS. SETTING IT EARLY FAILS.
 #
 # Production needs its OWN App, not staging's: the webhook secret and the
 # private key are the credentials that let a delivery write rows, so sharing
@@ -172,7 +172,13 @@ signin_allowlist = ["virsanghavi", "maksymrajszewski"]
 # recreate it. So setting this id before those secrets are in the production
 # vault fails at PLAN, which is the correct order and not a bug. The checklist
 # in the production guide has the steps in the order that works.
-github_app_id = ""
+#
+# App 4775259, slug `antifailure`, installed on the antifailure organization as
+# installation 157834739. The OAuth App that signs people in is a separate
+# registration and its client id and secret are the seeded vault entries, not
+# this value: an App id is not a credential and unlocks nothing, which is why it
+# sits here rather than arriving as a TF_VAR_.
+github_app_id = "4775259"
 
 # One identity applies this stack, and it is the same person as staging, so the
 # grant is pinned rather than following whoever is calling. See staging.tfvars

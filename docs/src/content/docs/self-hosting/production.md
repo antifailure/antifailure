@@ -321,6 +321,37 @@ On the App's page, **Install App**, and choose the account and repositories.
 Nothing has a tenant until an installation exists: this is why everybody who
 signed in during the first week landed with no organization.
 
+**Installing is not the same as being installed, and the difference is a webhook
+this control plane may have refused.** Installing sends one `installation`
+delivery, once. GitHub does not retry a webhook. So if the App was installed
+before step 11, which is the order the App's own setup page encourages, because
+Install App is on the page you are already looking at, then the delivery arrived
+at a control plane whose `AF_GITHUB_APP_WEBHOOK_SECRET` was unset, was answered
+**503**, and is gone. `github_installations` stays empty, every sign-in
+lands with no organization, and nothing anywhere says why.
+
+So check it. The App's **Advanced** tab lists every delivery with the status
+code this control plane returned, and each row has a **Redeliver** button. Use
+that tab: `gh api /app/hook/deliveries` does **not** work here, because the
+deliveries endpoint authenticates as the App and `gh` holds a user token. The
+API route needs a JWT signed with the App's private key, which is the same key
+you put in the vault in step 10.
+
+If the `installation` row is not 200, redeliver it. The response body is the
+check that matters, and a successful one names the installation:
+
+```
+{"event":"installation","action":"created","handled":true,
+ "detail":"installation 157834739 for antifailure, 1 repositories"}
+```
+
+One trap if you script this instead. Delivery ids are past the range a double
+holds exactly, 3839993231035072512 being a real one, so a JSON parser backed by
+doubles rounds the last digits and JavaScript's `JSON.parse` turns that id into
+...072500. A redelivery aimed at the rounded id is a 404 on a delivery
+that never existed, and it reads as "GitHub lost it" rather than as an
+arithmetic bug. Take the id out of the raw body as text.
+
 ### 13. Let continuous deployment reach production
 
 **The federated credential already exists. Do not create it.** Checked rather
