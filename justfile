@@ -62,6 +62,7 @@ gate: _reports
     echo "Gates"
     run "generated files are current" just _generated
     run "release stamps a real version"  just ldcheck
+    run "release notes exist for the tag" just relnotes
     run "error catalog and code agree"   just errcheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
@@ -362,9 +363,15 @@ fmt-check:
 errcheck:
     go run ./tools/errcheck .
 
-# The release stamps version variables that exist.
+# The release stamps version variables that exist, and stamps every one it
+# declares.
 ldcheck:
     go run ./tools/ldcheck .
+
+# Every changelog section has something under it, so no tag can publish a
+# release whose notes are a heading and nothing else.
+relnotes:
+    go run ./tools/relnotes .
 
 # Nothing in the tree looks like a live credential.
 scanrepo:

@@ -1,16 +1,71 @@
 # Changelog
 
-One section per released tag, assembled from the fragments in `.changes/` when
-the tag is cut. `tools/release/notes.sh` reads the section matching the tag and
-the release workflow publishes it, so a tag with no section here does not
-publish. Releases before v1.0.0 predate this file and their notes are on the
-GitHub releases page.
+One section per released tag. `tools/relnotes` reads the section matching the
+tag being published and the release workflow puts it in the release notes, so a
+tag with no section here, or with an empty one, does not publish at all.
+Releases before v1.0.0 predate this file and their notes are on the GitHub
+releases page.
 
 ## v1.0.0
 
-The first release since v0.1.1, and the first whose release workflow runs the
-software bill of materials and the cosign signing. Both were written after
-v0.1.1 was tagged, so no published artifact has carried them until now.
+The first stable release. 577 commits since v0.1.1, 197 of them landings on
+`main`, over the four days from 26 August 2026.
+
+### What 1.0 means, and what it does not
+
+A major version is a promise about what will keep working, so here is the
+promise, named surface by surface rather than as a blanket claim about an API.
+
+Stable, and breaking any of these costs a major version:
+
+- **The manifest.** A manifest declaring `version: 1` keeps working. New keys
+  may be added and existing ones may gain new accepted values; a key will not
+  be removed, renamed, or given a different meaning in version 1.
+  `schemas/manifest.v1.json` is the source of truth and a test walks it against
+  the Go types so the two cannot drift.
+- **The command line.** The commands, their flags, and their exit codes. A
+  command will not be removed or renamed, and a flag will not change what it
+  means. New commands and new flags are minor releases.
+- **`--output json`.** The documented fields of every command's JSON. Fields may
+  be added, so parse for the fields you want rather than refusing unknown ones.
+  A documented field will not be removed or change type.
+- **The error codes.** A code in the error reference keeps its meaning. Codes
+  are the stable identifier for a refusal; the sentence beside one is not.
+
+Explicitly not stable, and free to change in a minor release:
+
+- The Helm chart's values and the Terraform module's variables. The chart is
+  versioned separately and is at 0.1.1 for that reason.
+- The control plane's HTTP API, which the console and the engine speak to each
+  other and which is not a published integration surface.
+- Anything under `docs/plan/`, `tools/`, and every Go package in this
+  repository. `af` is the product; the source tree is not a library.
+- Lint rule names and their findings, which move as the rules improve. The
+  stable identifier for a finding is its rule name within a release.
+- The event stream's set of types. Types are added as features land.
+
+### What moves when this tag is pushed
+
+Pushing `v1.0.0` publishes the control plane image as
+`ghcr.io/antifailure/control-plane:v1.0.0` and **moves
+`ghcr.io/antifailure/control-plane:latest` onto it.** `latest` resolves to the
+v0.1.1 digest until then. If you self host and pull `latest`, this tag changes
+what your next pull gets, on your infrastructure, at a time we chose rather than
+one you did. Pin `v1.0.0`, or pin the digest that tag resolves to, if that
+matters to you. A tag can be moved and a digest cannot.
+
+Nothing else moves on its own. No deployment is triggered by this tag, and no
+existing environment is upgraded.
+
+### Supply chain
+
+This release is the first whose workflow runs the SPDX bill of materials and the
+cosign keyless signing. Both were written after v0.1.1 was tagged and no
+published artifact has ever carried them, so this run is the first execution of
+either and not a track record. You can settle for yourself whether they ran: a
+release that ran them carries `checksums.txt.sigstore.json` and
+`sbom.spdx.json`, and v0.1.0 and v0.1.1 carry neither. The verification commands
+are at the top of these notes.
 
 ### Installing
 

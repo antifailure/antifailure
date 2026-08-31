@@ -82,6 +82,13 @@ jobs:
         # caught it: each did exactly what it was asked.
         run: go run ./tools/ldcheck .
 
+      - name: The release notes for a tag exist and say something
+        # A changelog section that is a heading and nothing under it reads as
+        # finished in the diff and would publish a release that says nothing.
+        # Checked here rather than only at tag time, because at tag time the
+        # only remedy is to delete a tag people may already have fetched.
+        run: go run ./tools/relnotes .
+
       - name: The one command runs what this workflow runs
         # CONTRIBUTING.md promises that a green `just gate` means a green CI.
         # Nothing watched that, so a job added here would quietly stop being
