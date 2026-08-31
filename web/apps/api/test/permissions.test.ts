@@ -43,11 +43,6 @@ function inputsFor(org: Org): Record<string, unknown> {
     'environments.list': { limit: 10 },
     'environments.get': { envId: org.envId },
     'environments.teardown': { envId: org.envId },
-    // Named rather than left to its default, because a route with no entry here
-    // drops out of the matrix, which is the hole this file exists to close. The
-    // window is bounded at 720 hours by the schema; 24 is the default and the
-    // only value the console asks for.
-    'environments.costs': { hours: 24 },
     // The dispatch verbs. This fixture has no GitHub App installation, so a
     // role that holds the permission reaches the handler and gets
     // PRECONDITION_FAILED, which is what the matrix accepts and what proves the

@@ -767,10 +767,7 @@ func (o *Orchestrator) exportCommit(ref string) (string, func(), error) {
 			"usual reason; actions/checkout needs fetch-depth: 0 for this check: %w",
 			shortSHA(ref), err)
 	}
-	// Bound to this orchestrator's own environment: exportCommit checks out
-	// into af-previous-<envID> above, and the cleanup has to remove the same
-	// directory it made.
-	return filepath.Join(dir, inner), func() { o.pruneWorktree(o.envID) }, nil
+	return filepath.Join(dir, inner), o.pruneWorktree, nil
 }
 
 // git runs one git command in the repository and returns its trimmed output.
@@ -831,9 +828,9 @@ func rollingStatements(r *insights.Rehearsal) []insights.Statement {
 // identifiers and a teardown of the environment under test would not touch
 // them. An interrupted run is exactly when they exist, and an environment that
 // outlives its pull request is the leak this product exists to prevent.
-func (o *Orchestrator) rollingDown(ctx context.Context, s *session, parent string, td *Teardown) {
+func (o *Orchestrator) rollingDown(ctx context.Context, s *session, td *Teardown) {
 	for _, suffix := range []string{rollingSuffix, rollingControlSuffix} {
-		envID := parent + suffix
+		envID := o.envID + suffix
 		if rt, err := s.runtime.Down(ctx, envID); err == nil {
 			td.Removed += rt.Removed
 			td.Pending = append(td.Pending, rt.Pending...)
@@ -844,7 +841,7 @@ func (o *Orchestrator) rollingDown(ctx context.Context, s *session, parent strin
 			})
 		}
 	}
-	o.pruneWorktree(parent)
+	o.pruneWorktree()
 }
 
 // pruneWorktree removes the linked worktree the check checks the previous
@@ -859,8 +856,8 @@ func (o *Orchestrator) rollingDown(ctx context.Context, s *session, parent strin
 // and af down is called on every teardown of every environment, so a prune
 // that fires whether or not this check ever ran is a side effect on somebody
 // else's repository for nothing.
-func (o *Orchestrator) pruneWorktree(envID string) {
-	dir := filepath.Join(os.TempDir(), "af-previous-"+envID)
+func (o *Orchestrator) pruneWorktree() {
+	dir := filepath.Join(os.TempDir(), "af-previous-"+o.envID)
 	if _, err := os.Stat(dir); err == nil {
 		if _, err := o.git("worktree", "remove", "--force", dir); err != nil {
 			_ = os.RemoveAll(dir)

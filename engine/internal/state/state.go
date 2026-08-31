@@ -144,33 +144,6 @@ CREATE TABLE meta (
 ) STRICT;
 `,
 	},
-	{
-		Version: 2,
-		Name:    "env_leases",
-		SQL: `
--- An extension somebody asked for on one environment's lifetime.
---
--- Separate from the expiry stamped on the resources because a container's
--- labels cannot be changed after it is created. An environment's stated
--- lifetime is therefore whatever its resources say unless a row here says
--- otherwise, and the reaper consults both.
---
--- ceiling_at is what stops this from being a way to live forever. It is set
--- once, from the environment's creation time plus runtime.max_ttl, and every
--- later extension is clamped to it. Stored rather than recomputed so that the
--- bound is enforced by the reaper as well as by the command that takes the
--- lease: an environment cannot buy unbounded life by being extended through a
--- build whose manifest says something more generous, or by a hand-edited row.
-CREATE TABLE env_leases (
-    env        TEXT PRIMARY KEY,
-    expires_at INTEGER NOT NULL,
-    ceiling_at INTEGER NOT NULL,
-    reason     TEXT NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-) STRICT;
-`,
-	},
 }
 
 // SchemaVersion is the version a new database is created at.

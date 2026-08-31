@@ -100,12 +100,6 @@ type Runtime struct {
 	resolveProxy func(context.Context) (string, error)
 	proxyOnce    sync.Mutex
 	readyWait    time.Duration
-	// ttl is how long an environment this runtime creates may live. It is
-	// stamped on the namespace and nowhere else, because Down deletes the
-	// namespace and the cluster cascades everything inside it: an expiry on
-	// each deployment would be four more places to forget it and no more
-	// coverage.
-	ttl time.Duration
 	// skipContainmentCheck is never set by anything a user can reach.
 	//
 	// It exists for exactly one test, the one that proves the containment
@@ -142,10 +136,6 @@ type Options struct {
 	// Resolver is the ADDRESS of the cluster's DNS service, with no port.
 	// Empty discovers it from the kube-dns service.
 	Resolver string
-	// TTL is runtime.ttl from the manifest: how long an environment created
-	// by this runtime may live before the reaper removes it. Zero stamps no
-	// expiry, which is what a caller that only inventories a cluster gets.
-	TTL time.Duration
 	// ProxyImage is the sidecar image reference, when it is already known.
 	ProxyImage string
 	// ResolveProxyImage produces the sidecar image reference on demand, for
@@ -209,7 +199,6 @@ func New(opts Options) (*Runtime, error) {
 		images: opts.Images, proxyRef: opts.ProxyImage,
 		resolveProxy: opts.ResolveProxyImage,
 		readyWait:    opts.ReadyTimeout,
-		ttl:          opts.TTL,
 	}, nil
 }
 
