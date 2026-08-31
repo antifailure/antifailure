@@ -2,15 +2,17 @@
 //
 // The script had a defect that reading it would not obviously show and that no
 // test could have caught, because there was no test: it decided BIN_DIR was
-// missing from PATH, printed an export line, and then eight lines later printed
-// three bare `af` commands to run next. Every one of them answered "command not
-// found". `docs/plan/STATUS.md` called install.sh proven with "the failure path
-// is tested", and nothing anywhere ran it.
+// missing from PATH, printed an export line, and then printed three bare `af`
+// commands to run next. Every one of them answered "command not found".
+// `docs/plan/STATUS.md` called install.sh proven with "the failure path is
+// tested", and nothing anywhere ran it.
 //
-// So these run it, for real, in a throwaway HOME with a fake curl serving a
-// fixture release. That covers the parts a reader cannot check by eye: which
-// profile each shell gets, what a second run does to that profile, and whether
-// the commands the script prints actually work when pasted.
+// It now puts af on the PATH itself, which raises the stakes on all of this: it
+// writes to a real file in somebody's home directory by default. So these run
+// it, for real, in a throwaway HOME with a fake curl serving a fixture release.
+// They check the parts a reader cannot check by eye: which profile each shell
+// gets, that three runs leave one line, that a genuinely new terminal finds af,
+// and that no branch which failed to set PATH up prints a bare `af` anyway.
 package installsh
 
 import (
@@ -49,8 +51,8 @@ func repoRoot(t *testing.T) string {
 // fixture builds the release install.sh will "download": a tarball holding an
 // af that reports a version, a runner directory, and a checksums.txt that
 // matches. The checksum has to be real, because refusing a download that does
-// not match its checksum is behaviour worth keeping and a fixture that fails it
-// would be indistinguishable from a break.
+// not match its checksum is behaviour worth keeping and a fixture that failed
+// it would be indistinguishable from a break.
 func fixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -102,8 +104,7 @@ f="` + fixtures + `/${url##*/}"
 [ -f "$f" ] || exit 22
 if [ -n "$out" ]; then cp "$f" "$out"; else cat "$f"; fi
 `
-	p := filepath.Join(dir, "curl")
-	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "curl"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -111,22 +112,25 @@ if [ -n "$out" ]; then cp "$f" "$out"; else cat "$f"; fi
 
 // session is one install, in its own HOME, with its own PATH.
 type session struct {
-	t     *testing.T
-	home  string
-	path  string
-	env   map[string]string
-	stubs string
-	root  string
+	t        *testing.T
+	home     string
+	path     string
+	env      map[string]string
+	stubs    string
+	fixtures string
+	root     string
 }
 
 func newSession(t *testing.T) *session {
 	t.Helper()
+	fx := fixture(t)
 	s := &session{
-		t:     t,
-		home:  t.TempDir(),
-		stubs: stub(t, fixture(t)),
-		root:  repoRoot(t),
-		env:   map[string]string{"SHELL": "/bin/zsh"},
+		t:        t,
+		home:     t.TempDir(),
+		fixtures: fx,
+		stubs:    stub(t, fx),
+		root:     repoRoot(t),
+		env:      map[string]string{"SHELL": "/bin/zsh"},
 	}
 	s.path = s.stubs + ":/usr/bin:/bin:/usr/sbin:/sbin"
 	return s
@@ -138,6 +142,14 @@ func (s *session) binDir() string { return filepath.Join(s.home, ".antifailure",
 // script arrives on stdin and there is no stdin left to prompt on.
 func (s *session) install() string {
 	s.t.Helper()
+	out, err := s.run()
+	if err != nil {
+		s.t.Fatalf("install.sh failed: %v\n%s", err, out)
+	}
+	return out
+}
+
+func (s *session) run() (string, error) {
 	env := []string{
 		"HOME=" + s.home,
 		"PATH=" + s.path,
@@ -150,10 +162,7 @@ func (s *session) install() string {
 	cmd := exec.Command("/bin/sh", "-c", "cat "+filepath.Join(s.root, "install.sh")+" | sh")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		s.t.Fatalf("install.sh failed: %v\n%s", err, out)
-	}
-	return string(out)
+	return string(out), err
 }
 
 func (s *session) read(rel string) string {
@@ -163,6 +172,16 @@ func (s *session) read(rel string) string {
 		s.t.Fatalf("reading %s: %v", rel, err)
 	}
 	return string(b)
+}
+
+// newTerminal is the case the old script failed silently: a process that
+// inherits nothing from the install, reading the profile the way a terminal
+// emulator's interactive shell does.
+func (s *session) newTerminal(shell string, args ...string) (string, error) {
+	cmd := exec.Command(shell, args...)
+	cmd.Env = []string{"HOME=" + s.home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "TERM=dumb"}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 func contains(t *testing.T, out, want string) {
@@ -179,205 +198,157 @@ func absent(t *testing.T, out, unwanted string) {
 	}
 }
 
-// The defect this file exists for. Every `af` the script prints has to be
-// reachable, either because it is already on PATH or because the step that
-// puts it there comes first and is presented as a prerequisite rather than as
-// an aside.
-func TestNoBareAfIsPrintedBeforeThePathStep(t *testing.T) {
-	s := newSession(t)
-	out := s.install()
-
-	lines := strings.Split(out, "\n")
-	firstAf, firstFix := -1, -1
-	for i, l := range lines {
-		trimmed := strings.TrimSpace(l)
-		if firstAf < 0 && strings.HasPrefix(trimmed, "af ") {
-			firstAf = i
-		}
-		if firstFix < 0 && strings.Contains(l, "export PATH=") {
-			firstFix = i
-		}
-	}
-	if firstAf < 0 {
-		t.Fatalf("the installer printed no next steps at all\n%s", out)
-	}
-	if firstFix < 0 {
-		t.Fatalf("af is not on PATH and the installer printed no way to fix that\n%s", out)
-	}
-	if firstAf < firstFix {
-		t.Errorf("a bare af command is printed at line %d, before the PATH step at line %d\n%s", firstAf, firstFix, out)
-	}
-	contains(t, out, "2. Then:")
-	// The escape hatch, so a reader who does not want to touch their PATH is
-	// still given something that runs.
-	contains(t, out, s.binDir()+"/af")
-}
-
-// The printed instructions are run rather than pattern matched, because a
-// message that looks right and does not work is the failure being fixed.
-func TestThePrintedInstructionsActuallyWork(t *testing.T) {
-	s := newSession(t)
-	out := s.install()
-
+// printedCommands are the indented lines the reader is meant to paste. Prose
+// sits at column zero and every command is indented, which is what separates
+// "run af doctor" as an instruction from the word af inside a sentence.
+func printedCommands(out string) []string {
 	var cmds []string
 	for _, l := range strings.Split(out, "\n") {
-		t := strings.TrimSpace(l)
-		if strings.HasPrefix(t, "echo 'export PATH=") || strings.HasPrefix(t, "export PATH=") {
-			cmds = append(cmds, t)
+		if strings.HasPrefix(l, "  ") && strings.TrimSpace(l) != "" {
+			cmds = append(cmds, strings.TrimSpace(l))
 		}
 	}
-	if len(cmds) != 2 {
-		t.Fatalf("expected the two PATH commands, got %v\n%s", cmds, out)
-	}
-
-	// Run exactly what was printed, then start a genuinely new interactive
-	// shell that inherits none of it and ask it for af.
-	script := strings.Join(cmds, "\n") + "\ncommand -v af || exit 1\n"
-	first := exec.Command("/bin/zsh", "-c", script)
-	first.Env = []string{"HOME=" + s.home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "TERM=dumb"}
-	if o, err := first.CombinedOutput(); err != nil {
-		t.Fatalf("the printed commands did not put af on PATH: %v\n%s", err, o)
-	}
-
-	second := exec.Command("/bin/zsh", "-ic", "af")
-	second.Env = []string{"HOME=" + s.home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "TERM=dumb"}
-	o, err := second.CombinedOutput()
-	if err != nil {
-		t.Fatalf("a new terminal could not find af: %v\n%s", err, o)
-	}
-	if !strings.Contains(string(o), "antifailure 9.9.9") {
-		t.Errorf("a new terminal ran something, but not the installed af: %s", o)
-	}
+	return cmds
 }
 
-// The full path is printed for a reader who will not edit their PATH, so it
-// has to be a path that runs.
-func TestTheFullPathEscapeHatchRuns(t *testing.T) {
-	s := newSession(t)
-	out := s.install()
-	contains(t, out, s.binDir()+"/af")
-
-	cmd := exec.Command(filepath.Join(s.binDir(), "af"))
-	o, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("the full path the installer printed does not run: %v\n%s", err, o)
-	}
-	if !strings.Contains(string(o), "antifailure 9.9.9") {
-		t.Errorf("full path ran the wrong thing: %s", o)
-	}
-}
-
-func TestAlreadyOnPathSaysNothingAboutPath(t *testing.T) {
-	s := newSession(t)
-	// The directory does not exist yet, which is the honest shape of somebody
-	// who put it on PATH in their profile before ever installing.
-	s.path = s.binDir() + ":" + s.path
-	out := s.install()
-
-	contains(t, out, "Next:")
-	contains(t, out, "af doctor")
-	absent(t, out, "not on your PATH")
-	absent(t, out, "export PATH=")
-	absent(t, out, "AF_ADD_TO_PATH")
-}
-
-func TestEachShellIsToldAboutItsOwnProfile(t *testing.T) {
-	darwin := runtime.GOOS == "darwin"
-	bashProfile := "~/.bashrc"
-	if darwin {
-		bashProfile = "~/.bash_profile"
-	}
-	cases := []struct {
-		shell  string
-		want   []string
-		unwant []string
-	}{
-		{shell: "/bin/zsh", want: []string{">> ~/.zshrc", "export PATH="}, unwant: []string{"bashrc", "bash_profile", "fish"}},
-		{shell: "/bin/bash", want: []string{">> " + bashProfile, "export PATH="}, unwant: []string{"zshrc", "fish"}},
-		{shell: "/usr/local/bin/fish", want: []string{"fish_add_path", "config.fish"}, unwant: []string{"export PATH=", "zshrc", "bashrc"}},
-		{shell: "/bin/ksh", want: []string{"login shell is ksh", "~/.profile", "export PATH="}, unwant: []string{"zshrc", "bashrc", "fish"}},
-	}
-	for _, c := range cases {
-		t.Run(strings.TrimPrefix(filepath.Base(c.shell), ""), func(t *testing.T) {
-			s := newSession(t)
-			s.env["SHELL"] = c.shell
-			out := s.install()
-			for _, w := range c.want {
-				contains(t, out, w)
+// The defect this file exists for, as an invariant rather than a string match:
+// a bare `af` may only be printed once something earlier in the same output has
+// made af resolvable.
+func assertEveryPrintedAfIsReachable(t *testing.T, out string, alreadyOnPath bool) {
+	t.Helper()
+	reachable := alreadyOnPath
+	for _, c := range printedCommands(out) {
+		if strings.Contains(c, "export PATH=") || strings.HasPrefix(c, "fish_add_path") {
+			// Only the pasteable form makes af reachable in this terminal. A
+			// line the reader is told to add to a file does not.
+			if strings.Contains(c, "&& af ") {
+				reachable = true
 			}
-			for _, u := range c.unwant {
-				absent(t, out, u)
-			}
-		})
-	}
-}
-
-// An empty SHELL rather than an absent one, because bash in sh mode fills an
-// absent one in from the passwd entry, so the branch under test is only
-// reachable on macOS by leaving it set and empty. A getent that fails stands in
-// for a machine that does not have one, which is every macOS machine and is the
-// state this branch is actually for.
-func TestUnknownShellSaysSoRatherThanGuessing(t *testing.T) {
-	s := newSession(t)
-	s.env["SHELL"] = ""
-	if err := os.WriteFile(filepath.Join(s.stubs, "getent"), []byte("#!/bin/sh\nexit 2\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	out := s.install()
-	contains(t, out, "because SHELL is")
-	contains(t, out, "export PATH=")
-	absent(t, out, ">> ~/")
-	for _, f := range []string{".zshrc", ".bashrc", ".bash_profile", ".profile"} {
-		if _, err := os.Stat(filepath.Join(s.home, f)); err == nil {
-			t.Errorf("guessed at %s for an unknown shell", f)
+			continue
+		}
+		if strings.HasPrefix(c, "af ") && !reachable {
+			t.Errorf("printed %q while af is not reachable\n--- output ---\n%s", c, out)
 		}
 	}
 }
 
-func TestZdotdirIsRespected(t *testing.T) {
-	s := newSession(t)
-	zdot := filepath.Join(s.home, "cfg", "zsh")
-	if err := os.MkdirAll(zdot, 0o755); err != nil {
-		t.Fatal(err)
+// The full path branches print a path with ~ where one applies, because an
+// absolute temp path is unreadable and a real home makes it long. Rather than
+// match the string, expand it and run it: a printed path that does not execute
+// is the same defect as a printed name that does not resolve.
+func assertPrintedFullPathsRun(t *testing.T, s *session, out string) {
+	t.Helper()
+	found := 0
+	for _, c := range printedCommands(out) {
+		p := strings.Fields(c)[0]
+		// The export line names the bin directory too, and is not a command
+		// the reader is meant to run on its own.
+		if !strings.HasSuffix(p, "/af") {
+			continue
+		}
+		if strings.HasPrefix(p, "~/") {
+			p = filepath.Join(s.home, strings.TrimPrefix(p, "~/"))
+		}
+		got, err := exec.Command(p).CombinedOutput()
+		if err != nil {
+			t.Errorf("printed %q, which does not run: %v\n%s", c, err, got)
+			continue
+		}
+		if !strings.Contains(string(got), "antifailure 9.9.9") {
+			t.Errorf("printed %q, which ran the wrong thing: %s", c, got)
+		}
+		found++
 	}
-	s.env["ZDOTDIR"] = zdot
-	s.env["AF_ADD_TO_PATH"] = "1"
-	s.install()
-	if _, err := os.Stat(filepath.Join(zdot, ".zshrc")); err != nil {
-		t.Fatalf("ZDOTDIR was ignored: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(s.home, ".zshrc")); err == nil {
-		t.Error("wrote ~/.zshrc while ZDOTDIR named somewhere else")
+	if found != 3 {
+		t.Errorf("expected the three next steps as full paths, found %d\n--- output ---\n%s", found, out)
 	}
 }
 
-func TestNoProfileIsTouchedWithoutBeingAsked(t *testing.T) {
+// The whole point, end to end: install, then open a genuinely new terminal.
+func TestTheDefaultInstallMakesANewTerminalWork(t *testing.T) {
+	s := newSession(t)
+	out := s.install()
+
+	contains(t, out, "Added this to ~/.zshrc")
+	contains(t, out, "AF_NO_MODIFY_PATH=1")
+	assertEveryPrintedAfIsReachable(t, out, false)
+
+	rc := s.read(".zshrc")
+	want := `export PATH="$HOME/.antifailure/bin:$PATH"`
+	if !strings.Contains(rc, want) {
+		t.Fatalf("~/.zshrc does not export the bin dir:\n%s", rc)
+	}
+	// The line printed is the line written, or the reader cannot undo it.
+	contains(t, out, want)
+
+	got, err := s.newTerminal("/bin/zsh", "-ic", "af")
+	if err != nil {
+		t.Fatalf("a new terminal could not find af: %v\n%s", err, got)
+	}
+	if !strings.Contains(got, "antifailure 9.9.9") {
+		t.Errorf("a new terminal ran something, but not the installed af: %s", got)
+	}
+}
+
+// The line offered for the terminal the installer ran in is pasted and run
+// rather than pattern matched, because a message that looks right and does not
+// work is the failure being fixed.
+func TestThePastedLineFixesTheCurrentTerminal(t *testing.T) {
+	s := newSession(t)
+	out := s.install()
+
+	paste := ""
+	for _, c := range printedCommands(out) {
+		if strings.Contains(c, "&& af doctor") {
+			paste = c
+		}
+	}
+	if paste == "" {
+		t.Fatalf("no pasteable line for the current terminal\n%s", out)
+	}
+
+	// A shell with the installer's PATH and no profile sourced, which is what
+	// the terminal that ran curl | sh actually is.
+	cmd := exec.Command("/bin/zsh", "-c", strings.Replace(paste, "af doctor", "af", 1))
+	cmd.Env = []string{"HOME=" + s.home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "TERM=dumb"}
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the pasted line did not make af work here: %v\n%s", err, got)
+	}
+	if !strings.Contains(string(got), "antifailure 9.9.9") {
+		t.Errorf("the pasted line ran the wrong thing: %s", got)
+	}
+}
+
+// Idempotency is load bearing now that this writes by default. Three runs,
+// because two can hide an off by one that a third exposes.
+func TestThreeRunsLeaveExactlyOneLine(t *testing.T) {
 	s := newSession(t)
 	s.install()
-	for _, f := range []string{".zshrc", ".bashrc", ".bash_profile", ".profile", ".config/fish/config.fish"} {
-		if _, err := os.Stat(filepath.Join(s.home, f)); err == nil {
-			t.Errorf("the installer wrote %s without being asked", f)
-		}
-	}
-}
-
-func TestAddToPathWritesOnceHoweverOftenItRuns(t *testing.T) {
-	s := newSession(t)
-	s.env["AF_ADD_TO_PATH"] = "1"
-
-	first := s.install()
-	contains(t, first, "Added af to your PATH in ~/.zshrc")
 	after := s.read(".zshrc")
-	if !strings.Contains(after, `export PATH="$HOME/.antifailure/bin:$PATH"`) {
-		t.Fatalf("~/.zshrc does not export the bin dir:\n%s", after)
-	}
+	s.install()
+	s.install()
+	final := s.read(".zshrc")
 
-	second := s.install()
-	if s.read(".zshrc") != after {
-		t.Errorf("a second run changed ~/.zshrc\nbefore:\n%s\nafter:\n%s", after, s.read(".zshrc"))
+	if final != after {
+		t.Errorf("runs two and three changed ~/.zshrc\nafter one:\n%s\nafter three:\n%s", after, final)
 	}
-	// And it says why it did nothing rather than repeating the first message.
-	contains(t, second, "already puts af on the PATH")
+	if n := strings.Count(final, ".antifailure/bin"); n != 1 {
+		t.Errorf("~/.zshrc names the bin dir %d times after three installs, want 1:\n%s", n, final)
+	}
+}
+
+// A second install from a terminal that predates the profile line must not
+// repeat the "Added this" message, and must still hand back something that
+// works here and now.
+func TestASecondInstallSaysTheProfileAlreadyHasIt(t *testing.T) {
+	s := newSession(t)
+	s.install()
+	out := s.install()
+
+	contains(t, out, "already puts af on the PATH")
+	absent(t, out, "Added this to")
+	assertEveryPrintedAfIsReachable(t, out, false)
 }
 
 // Somebody who added the line by hand wrote the expanded path where the
@@ -389,17 +360,195 @@ func TestAHandWrittenLineCountsAsAlreadyThere(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(s.home, ".zshrc"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.env["AF_ADD_TO_PATH"] = "1"
 	s.install()
 	if got := s.read(".zshrc"); got != line {
 		t.Errorf("~/.zshrc was appended to when the line was already there:\n%s", got)
 	}
 }
 
+func TestAlreadyOnPathWritesNothingExtraAndSaysNothingAboutPath(t *testing.T) {
+	s := newSession(t)
+	s.install()
+	before := s.read(".zshrc")
+
+	// Second install from a terminal that already has it, which is the shape
+	// of every install after the first.
+	s.path = s.binDir() + ":" + s.path
+	out := s.install()
+
+	contains(t, out, "Next:")
+	contains(t, out, "af doctor")
+	absent(t, out, "start here")
+	assertEveryPrintedAfIsReachable(t, out, true)
+	if s.read(".zshrc") != before {
+		t.Error("a run with the bin dir already on PATH changed the profile")
+	}
+}
+
+func TestEachShellGetsItsOwnProfileFile(t *testing.T) {
+	darwin := runtime.GOOS == "darwin"
+	bashFile := ".bashrc"
+	if darwin {
+		bashFile = ".bash_profile"
+	}
+	cases := []struct {
+		shell string
+		file  string
+		line  string
+		other []string
+	}{
+		{
+			shell: "/bin/zsh", file: ".zshrc",
+			line:  `export PATH="$HOME/.antifailure/bin:$PATH"`,
+			other: []string{".bashrc", ".bash_profile", ".profile", ".config/fish/config.fish"},
+		},
+		{
+			shell: "/bin/bash", file: bashFile,
+			line:  `export PATH="$HOME/.antifailure/bin:$PATH"`,
+			other: []string{".zshrc", ".profile", ".config/fish/config.fish"},
+		},
+		{
+			shell: "/usr/local/bin/fish", file: ".config/fish/config.fish",
+			line:  `fish_add_path "$HOME/.antifailure/bin"`,
+			other: []string{".zshrc", ".bashrc", ".bash_profile", ".profile"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(filepath.Base(c.shell), func(t *testing.T) {
+			s := newSession(t)
+			s.env["SHELL"] = c.shell
+			out := s.install()
+
+			body, err := os.ReadFile(filepath.Join(s.home, c.file))
+			if err != nil {
+				t.Fatalf("%s was not written: %v\n%s", c.file, err, out)
+			}
+			if !strings.Contains(string(body), c.line) {
+				t.Errorf("%s does not contain %q:\n%s", c.file, c.line, body)
+			}
+			contains(t, out, c.line)
+			for _, o := range c.other {
+				if _, err := os.Stat(filepath.Join(s.home, o)); err == nil {
+					t.Errorf("%s was written for a %s user", o, filepath.Base(c.shell))
+				}
+			}
+			assertEveryPrintedAfIsReachable(t, out, false)
+		})
+	}
+}
+
+// A shell whose startup file this cannot name gets told so and gets commands
+// that run, rather than a guessed file and three names that will not resolve.
+func TestAnUnrecognisedShellGuessesAtNothing(t *testing.T) {
+	s := newSession(t)
+	s.env["SHELL"] = "/bin/ksh"
+	out := s.install()
+
+	contains(t, out, "login shell is ksh")
+	contains(t, out, "~/.profile")
+	assertEveryPrintedAfIsReachable(t, out, false)
+	assertPrintedFullPathsRun(t, s, out)
+
+	entries, err := os.ReadDir(s.home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != ".antifailure" {
+			t.Errorf("guessed at %s for an unknown shell", e.Name())
+		}
+	}
+}
+
+// An empty SHELL rather than an absent one, because bash in sh mode fills an
+// absent one in from the passwd entry, so this branch is only reachable on
+// macOS by leaving it set and empty. A getent that fails stands in for a
+// machine that does not have one, which is every macOS machine and is the state
+// this branch is actually for.
+func TestNoShellAtAllGuessesAtNothing(t *testing.T) {
+	s := newSession(t)
+	s.env["SHELL"] = ""
+	if err := os.WriteFile(filepath.Join(s.stubs, "getent"), []byte("#!/bin/sh\nexit 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := s.install()
+
+	contains(t, out, "because SHELL is not")
+	assertEveryPrintedAfIsReachable(t, out, false)
+	assertPrintedFullPathsRun(t, s, out)
+	for _, f := range []string{".zshrc", ".bashrc", ".bash_profile", ".profile"} {
+		if _, err := os.Stat(filepath.Join(s.home, f)); err == nil {
+			t.Errorf("guessed at %s with no shell to go on", f)
+		}
+	}
+}
+
+func TestAfNoModifyPathTouchesNothing(t *testing.T) {
+	s := newSession(t)
+	s.env["AF_NO_MODIFY_PATH"] = "1"
+	out := s.install()
+
+	contains(t, out, "AF_NO_MODIFY_PATH is set")
+	contains(t, out, "~/.zshrc was left alone")
+	assertEveryPrintedAfIsReachable(t, out, false)
+	assertPrintedFullPathsRun(t, s, out)
+
+	entries, err := os.ReadDir(s.home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != ".antifailure" {
+			t.Errorf("AF_NO_MODIFY_PATH was set and %s was written anyway", e.Name())
+		}
+	}
+}
+
+// A profile that cannot be appended to is not a reason to print three commands
+// that will not run.
+func TestAProfileItCannotWriteIsReportedRatherThanIgnored(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write a read only file, so this cannot be provoked here")
+	}
+	s := newSession(t)
+	rc := filepath.Join(s.home, ".zshrc")
+	if err := os.WriteFile(rc, []byte("# mine\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	out := s.install()
+
+	contains(t, out, "could not be written")
+	if strings.Contains(out, "Permission denied") {
+		t.Errorf("a raw shell error leaked above the message written to explain it:\n%s", out)
+	}
+	assertEveryPrintedAfIsReachable(t, out, false)
+	assertPrintedFullPathsRun(t, s, out)
+	if got := s.read(".zshrc"); got != "# mine\n" {
+		t.Errorf("a read only profile was modified:\n%s", got)
+	}
+}
+
+func TestZdotdirIsRespected(t *testing.T) {
+	s := newSession(t)
+	zdot := filepath.Join(s.home, "cfg", "zsh")
+	if err := os.MkdirAll(zdot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.env["ZDOTDIR"] = zdot
+	s.install()
+
+	if _, err := os.Stat(filepath.Join(zdot, ".zshrc")); err != nil {
+		t.Fatalf("ZDOTDIR was ignored: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.home, ".zshrc")); err == nil {
+		t.Error("wrote ~/.zshrc while ZDOTDIR named somewhere else")
+	}
+}
+
 // GitHub Actions gives every step a fresh PATH, so a workflow that installs in
 // one step and runs af in the next needs GITHUB_PATH written. The documented
 // workflow does exactly that and did not work.
-func TestGithubActionsGetsPathForLaterSteps(t *testing.T) {
+func TestGithubActionsGetsPathForLaterStepsAndKeepsItsProfile(t *testing.T) {
 	s := newSession(t)
 	gp := filepath.Join(t.TempDir(), "github_path")
 	if err := os.WriteFile(gp, nil, 0o644); err != nil {
@@ -409,7 +558,7 @@ func TestGithubActionsGetsPathForLaterSteps(t *testing.T) {
 
 	out := s.install()
 	contains(t, out, "for the rest of this job")
-	contains(t, out, "af doctor")
+	assertEveryPrintedAfIsReachable(t, out, true)
 	absent(t, out, "export PATH=")
 
 	body, err := os.ReadFile(gp)
@@ -428,7 +577,8 @@ func TestGithubActionsGetsPathForLaterSteps(t *testing.T) {
 	if got := strings.Count(string(body), s.binDir()); got != 1 {
 		t.Errorf("GITHUB_PATH names the bin dir %d times after two installs, want 1:\n%s", got, body)
 	}
-	// A CI job must not have its profile edited either.
+	// GITHUB_PATH is the mechanism a job has; a runner's profile is not the
+	// installer's to edit.
 	if _, err := os.Stat(filepath.Join(s.home, ".zshrc")); err == nil {
 		t.Error("the installer wrote ~/.zshrc in a CI job")
 	}
@@ -439,21 +589,21 @@ func TestGithubActionsGetsPathForLaterSteps(t *testing.T) {
 func TestNoHomeStillInstalls(t *testing.T) {
 	s := newSession(t)
 	prefix := filepath.Join(t.TempDir(), "opt", "af")
-	env := []string{
+	cmd := exec.Command("/bin/sh", "-c", "cat "+filepath.Join(s.root, "install.sh")+" | sh")
+	cmd.Env = []string{
 		"PATH=" + s.path,
 		"AF_VERSION=" + version,
 		"AF_PREFIX=" + prefix,
-		"AF_ADD_TO_PATH=1",
 		"TERM=dumb",
 	}
-	cmd := exec.Command("/bin/sh", "-c", "cat "+filepath.Join(s.root, "install.sh")+" | sh")
-	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("install.sh failed with no HOME: %v\n%s", err, out)
 	}
 	contains(t, string(out), "HOME is not set")
-	contains(t, string(out), filepath.Join(prefix, "bin")+"/af")
+	contains(t, string(out), filepath.Join(prefix, "bin")+"/af doctor")
+	assertEveryPrintedAfIsReachable(t, string(out), false)
+	assertPrintedFullPathsRun(t, s, string(out))
 	if _, err := os.Stat(filepath.Join(prefix, "bin", "af")); err != nil {
 		t.Fatalf("af was not installed: %v", err)
 	}
@@ -465,8 +615,8 @@ func TestAPrefixOutsideHomeIsWrittenAbsolute(t *testing.T) {
 	s := newSession(t)
 	prefix := filepath.Join(t.TempDir(), "opt", "af")
 	s.env["AF_PREFIX"] = prefix
-	s.env["AF_ADD_TO_PATH"] = "1"
 	s.install()
+
 	got := s.read(".zshrc")
 	want := fmt.Sprintf("export PATH=\"%s/bin:$PATH\"", prefix)
 	if !strings.Contains(got, want) {
@@ -477,41 +627,41 @@ func TestAPrefixOutsideHomeIsWrittenAbsolute(t *testing.T) {
 	}
 }
 
+// A directory outside HOME that the reader has already put on their PATH is
+// one they manage. Writing a profile line for something that already works is
+// the unrequested change worth not making.
+func TestADirectoryOutsideHomeAlreadyOnPathIsLeftAlone(t *testing.T) {
+	s := newSession(t)
+	prefix := filepath.Join(t.TempDir(), "opt", "af")
+	s.env["AF_PREFIX"] = prefix
+	s.path = filepath.Join(prefix, "bin") + ":" + s.path
+	out := s.install()
+
+	contains(t, out, "Next:")
+	assertEveryPrintedAfIsReachable(t, out, true)
+	if _, err := os.Stat(filepath.Join(s.home, ".zshrc")); err == nil {
+		t.Error("wrote a profile line for a directory already on PATH outside HOME")
+	}
+}
+
 // The checksum refusal is the one failure path STATUS already claimed was
 // tested. It was not.
 func TestABadChecksumRefusesToInstall(t *testing.T) {
 	s := newSession(t)
-	// Rewrite the fixture's checksums.txt to something that cannot match.
-	fx := filepath.Join(s.stubs, "..")
-	_ = fx
-	// The stub reads from the fixture dir baked into it, so find it back out
-	// of the script rather than threading it through.
-	script, err := os.ReadFile(filepath.Join(s.stubs, "curl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := ""
-	for _, l := range strings.Split(string(script), "\n") {
-		if strings.HasPrefix(l, `f="`) {
-			dir = strings.TrimPrefix(strings.SplitN(l, "/${url##*/}", 2)[0], `f="`)
-		}
-	}
-	if dir == "" {
-		t.Fatal("could not find the fixture directory in the curl stub")
-	}
 	bad := fmt.Sprintf("%s  %s.tar.gz\n", strings.Repeat("0", 64), name())
-	if err := os.WriteFile(filepath.Join(dir, "checksums.txt"), []byte(bad), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(s.fixtures, "checksums.txt"), []byte(bad), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("/bin/sh", "-c", "cat "+filepath.Join(s.root, "install.sh")+" | sh")
-	cmd.Env = []string{"HOME=" + s.home, "PATH=" + s.path, "AF_VERSION=" + version, "SHELL=/bin/zsh", "TERM=dumb"}
-	out, err := cmd.CombinedOutput()
+	out, err := s.run()
 	if err == nil {
 		t.Fatalf("a mismatched checksum installed anyway:\n%s", out)
 	}
-	contains(t, string(out), "does not match its published checksum")
+	contains(t, out, "does not match its published checksum")
 	if _, err := os.Stat(filepath.Join(s.binDir(), "af")); err == nil {
 		t.Error("af was installed despite the checksum mismatch")
+	}
+	if _, err := os.Stat(filepath.Join(s.home, ".zshrc")); err == nil {
+		t.Error("a refused install still edited the profile")
 	}
 }
