@@ -462,6 +462,8 @@ later inside af test as a node error about a module it could not resolve.`),
 				}
 			}
 			if !ready {
+				e.Out.Println("")
+				e.Out.Hint("Install it with", "af runner install")
 				return &silentError{code: aferrors.ExitConfiguration}
 			}
 			return nil

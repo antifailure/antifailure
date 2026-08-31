@@ -98,6 +98,20 @@ func orchestratorWithManifest(env2 *Env, branch string) (*env.Orchestrator, *sch
 	return orchestratorWithManifest2(env2, lifecycleOptions{branch: branch})
 }
 
+// progressFor returns the status line a run reports through, remembering it on
+// the Env so that the command can close it when the run ends.
+//
+// On the Env rather than returned alongside the orchestrator, because every
+// one of the eleven commands that builds an orchestrator would otherwise have
+// to thread a second value through, and the one that forgot would leave a
+// goroutine rewriting a line under whatever the command printed next.
+func progressFor(e *Env) *Progress {
+	if e.Progress == nil {
+		e.Progress = NewProgress(e.Out, e.Clock)
+	}
+	return e.Progress
+}
+
 func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestrator, *schema.Manifest, error) {
 	branch, rebuild := opts.branch, opts.rebuild
 	path, err := manifest.Find(env2.WorkDir)
@@ -125,7 +139,7 @@ func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestra
 			if opts.silent {
 				return
 			}
-			env2.Out.Printf("  %s\n", r.String(line))
+			progressFor(env2).Step(r.String(line))
 		},
 	})
 	if err != nil {
@@ -333,7 +347,7 @@ interrupt at any point leaves something af down can clean up.`),
 			if live {
 				view = attachDashboard(e, o)
 			} else {
-				e.Out.Section("Bringing up " + o.EnvID())
+				e.Out.Subject("Bringing up "+o.EnvID(), "branch "+o.Branch())
 			}
 
 			var res *env.Result
@@ -401,15 +415,15 @@ func renderServices(e *Env, services []provider.RunningService) {
 		return
 	}
 	for _, s := range services {
-		symbol, style := SymbolFail, StyleBad
+		symbol := SymbolFail
 		if s.Ready {
-			symbol, style = SymbolOK, StyleGood
+			symbol = SymbolOK
 		}
 		detail := s.URL
 		if detail == "" {
 			detail = s.State
 		}
-		e.Out.Status(e.Out.S(style, symbol), s.Name, detail)
+		e.Out.Status(symbol, s.Name, detail)
 		if !s.Ready && s.Detail != "" {
 			for _, line := range lastLines(s.Detail, 12) {
 				e.Out.Printf("      %s\n", e.Out.S(StyleDim, line))
@@ -446,20 +460,27 @@ func newDownCommand(e *Env) *cobra.Command {
 		Use:   "down",
 		Short: "Remove the environment and everything it created",
 		Long: strings.TrimSpace(`
-Replay the journal in reverse and delete every resource the environment
-created, including database branches, containers, volumes and networks.
+Replay the journal in reverse and delete what this environment recorded
+creating. Every resource is journaled before it is made, so what teardown
+removes is what was actually created rather than what a list somebody
+maintained remembers to look for.
 
 Teardown never stops at the first failure. A provider that is unreachable must
-not strand the other resources, so each is attempted and anything that could
-not be removed stays recorded for the next run. Exit code 10 means resources
-are still pending.`),
+not strand the other resources, so each is attempted, and two things survive
+the run: anything that could not be removed, and anything this build has no way
+to delete, which is left recorded rather than forgotten. Both are named
+individually in the output, and exit code 10 means resources are still pending.
+
+So the answer to what this is about to remove is not a sentence here. It is
+'af status' for what is running and the pending list this prints for whatever
+it could not reach.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			o, err := orchestrator(e, branch, false)
 			if err != nil {
 				return err
 			}
-			e.Out.Section("Tearing down " + o.EnvID())
+			e.Out.Subject("Tearing down "+o.EnvID(), "branch "+o.Branch())
 			td, downErr := o.Down(cmd.Context())
 			if downErr != nil {
 				return downErr
@@ -478,9 +499,14 @@ are still pending.`),
 			} else {
 				e.Out.Println("")
 				e.Out.Printf("  %d resources removed.\n", td.Removed)
+				// The reason is wrapped because it carries a provider's own
+				// error text, which is the longest string on this page and the
+				// only one a person has to read carefully: this is the list of
+				// what teardown could not remove.
 				for _, p := range td.Pending {
-					e.Out.Printf("  %s %s/%s: %s\n",
-						e.Out.S(StyleBad, SymbolFail), p.Kind, p.ID, p.Reason)
+					head := fmt.Sprintf("  %s %s/%s: ",
+						e.Out.S(StyleBad, SymbolFail), p.Kind, p.ID)
+					e.Out.Printf("%s%s\n", head, e.Out.Wrap(p.Reason, cells(head)))
 				}
 			}
 			if len(td.Pending) > 0 {
@@ -515,9 +541,16 @@ func newStatusCommand(e *Env) *cobra.Command {
 					Proxied: res.Proxied, Services: servicesJSON(res.Services),
 				})
 			}
-			e.Out.Section(res.EnvID)
+			// The branch, not only the environment identifier. The identifier
+			// is the branch with the punctuation taken out and a hash on the
+			// end, which nobody can check against the branch they think they
+			// are on, and running on the wrong branch is the most common way
+			// to be confused by this tool. The directory is deliberately not
+			// here: it is in the reader's own shell prompt, and an absolute
+			// path is a single unbreakable word that no wrapping can rescue.
+			e.Out.Subject(res.EnvID, "branch "+o.Branch())
 			if len(res.Services) == 0 {
-				e.Out.Println("Nothing is running for this branch. Bring it up with 'af up'.")
+				e.Out.Empty("Nothing is running for this branch.", "Bring it up with", "af up")
 				return nil
 			}
 			renderServices(e, res.Services)

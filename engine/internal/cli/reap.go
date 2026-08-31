@@ -145,7 +145,9 @@ func reportReap(e *Env, result *env.ReapResult, dryRun bool) error {
 			fmt.Sprint(d.Removed), d.Outcome, note,
 		})
 	}
-	e.Out.Table([]string{"ENVIRONMENT", "OVERDUE", "REMOVED", "OUTCOME", "NOTE"}, rows)
+	e.Out.Table([]Column{
+		Col("ENVIRONMENT"), Num("OVERDUE"), Num("REMOVED"), Col("OUTCOME"), Flex("NOTE"),
+	}, rows)
 	e.Out.Println("")
 	if dryRun {
 		e.Out.Printf("  %d environments would be removed. Run without --dry-run to do it.\n",

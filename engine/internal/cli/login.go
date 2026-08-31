@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/antifailure/antifailure/engine/internal/auth"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
 // af login, af logout, af whoami.
@@ -364,7 +365,7 @@ and reporting it would tell somebody they have access they do not have.
 
 			cred, err := store.Load(origin)
 			if errors.Is(err, auth.ErrNotSignedIn) {
-				return fmt.Errorf("not signed in to %s. Run: af login", origin)
+				return aferrors.Coded(aferrors.AFCPL004, "origin", origin, "command", "af login")
 			}
 			if err != nil {
 				return err

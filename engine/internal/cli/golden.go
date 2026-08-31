@@ -115,12 +115,12 @@ func newGoldenRefreshCommand(env *Env) *cobra.Command {
 			}
 
 			env.Out.Println("")
-			env.Out.Status(env.Out.S(StyleGood, SymbolOK), res.Version,
+			env.Out.Status(SymbolOK, res.Version,
 				fmt.Sprintf("%d rows across %d tables masked in %s",
 					res.Rows, res.Tables, res.Duration.Round(time.Second)))
 			env.Out.Printf("  Verified %d columns across %d tables, %d rows sampled.\n",
 				res.Report.Columns, res.Report.Tables, res.Report.RowsSampled)
-			env.Out.Println("  Bring an environment up from it with: af up")
+			env.Out.Hint("Bring an environment up from it with", "af up")
 			return nil
 		},
 	}
@@ -155,7 +155,8 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 				return env.Out.JSON(docs)
 			}
 			if len(goldens) == 0 {
-				env.Out.Println("No goldens yet. Make one with 'af golden refresh'.")
+				env.Out.Empty("No goldens yet. A golden is the masked copy every branch is made from.",
+					"Make one with", "af golden refresh")
 				return nil
 			}
 			rows := make([][]string, 0, len(goldens))
@@ -164,12 +165,23 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 				if g.Verified {
 					state = env.Out.S(StyleGood, "verified")
 				}
+				// An empty rules hash is said rather than left blank. A blank
+				// cell under a heading reads as zero or as none, and this is
+				// neither: it is a golden made before the hash was recorded,
+				// so what is not known is whether the rules have changed since.
+				// That is the one thing somebody scans this column to find out.
+				rules := g.RulesHash
+				if rules == "" {
+					rules = "not recorded"
+				}
 				rows = append(rows, []string{
 					g.ID, state, g.CreatedAt.Local().Format("2006-01-02 15:04"),
-					humanBytes(uint64(g.SizeBytes)), g.RulesHash,
+					humanBytes(uint64(g.SizeBytes)), rules,
 				})
 			}
-			env.Out.Table([]string{"VERSION", "STATE", "CREATED", "SIZE", "RULES"}, rows)
+			env.Out.Table([]Column{
+				Col("VERSION"), Col("STATE"), Col("CREATED"), Num("SIZE"), Flex("RULES"),
+			}, rows)
 
 			// What this project publishes, and when it refreshes next. Both
 			// are configuration that used to be invisible: a store nobody can
@@ -189,16 +201,16 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 						v.Modified.Local().Format("2006-01-02 15:04"),
 						humanBytes(uint64(v.Size)))
 				}
-				env.Out.Println("  Bring one onto this machine with: af golden pull")
+				env.Out.Hint("Bring one onto this machine with", "af golden pull")
 			}
 
 			policy, policyErr := o.GoldenPolicy()
 			if policyErr == nil && !policy.Schedule.Zero() && len(goldens) > 0 {
 				next := policy.Schedule.Next(goldens[0].CreatedAt)
 				if !next.IsZero() {
-					env.Out.Printf("\nNext scheduled refresh: %s (%s)\n",
+					env.Out.Note(StyleDim, fmt.Sprintf("Next scheduled refresh: %s (%s)",
 						next.In(policy.Schedule.Location()).Format("2006-01-02 15:04 MST"),
-						policy.Schedule)
+						policy.Schedule))
 				}
 			}
 			return nil

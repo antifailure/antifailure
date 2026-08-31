@@ -334,7 +334,7 @@ What each class of finding does to the pull request check. A finding at 'fail' f
 | `migration_lint` | `ignore`, `warn`, `fail` | no | Any of the seventeen migration lint rules. They share one setting because the rules are already scoped by table size. Defaults to `warn`. |
 | `migration_lock` | object | no | How long a migration may hold a lock on a table. Both figures are compared against a sampled lower bound, so a breach really did hold the lock at least that long. |
 | `migration_rewrite` | `ignore`, `warn`, `fail` | no | A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through. Defaults to `warn`. |
-| `plan_regression` | `ignore`, `warn`, `fail` | no | A query plan that got worse: a table now read end to end, or an index no longer used. Defaults to `warn`. |
+| `plan_regression` | `ignore`, `warn`, `fail` | no | A query plan that got worse in one of three plan regressions: a table is now read end to end, an index is no longer used, or the planner's estimate grew. Defaults to `warn`. |
 | `query_regression` | `ignore`, `warn`, `fail` | no | A statement that runs more often, or slower, than the saved baseline did. Needs a baseline to compare against. Defaults to `warn`. |
 
 ## Probe

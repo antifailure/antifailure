@@ -43,8 +43,8 @@ one line answer.`),
 			if env.Out.Format == FormatJSON {
 				return env.Out.JSON(m)
 			}
-			env.Out.Raw(manifest.Explain(m))
-			env.Out.Raw(explainSecrets(cmd.Context(), env, m, filepath.Dir(path)))
+			env.Out.Raw(manifest.Explain(m, env.Out.Width))
+			explainSecrets(cmd.Context(), env, m, filepath.Dir(path))
 			return nil
 		},
 	}
@@ -105,11 +105,11 @@ var _ = aferrors.ExitSuccess
 // terminal somebody may be sharing and goes into support bundles, and a
 // fingerprint is enough to answer the other common question, which is whether
 // two machines have the same value without either person reading theirs out.
-func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string) string {
+func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string) {
 	declared := secrets.DeclaredVars(m)
 	sandbox := secrets.SandboxNames(m)
 	if len(declared) == 0 && len(sandbox) == 0 {
-		return ""
+		return
 	}
 
 	local := []secrets.Source{
@@ -143,37 +143,43 @@ func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string
 		// A live credential in a sandbox slot stops af up, and explain is
 		// exactly where somebody would look to find out why, so it is reported
 		// here rather than swallowed.
-		return fmt.Sprintf("\nSecrets\n  %v\n", err)
+		e.Out.Section("Secrets")
+		e.Out.Note(StyleWarn, err.Error())
+		return
 	}
 
-	var b strings.Builder
-	b.WriteString("\nSecrets\n")
+	e.Out.Section("Secrets")
 
 	isSandbox := map[string]bool{}
 	for _, name := range sandbox {
 		isSandbox[name] = true
 	}
 
+	// A key value block rather than a fixed twenty eight column pad, so the
+	// column is as wide as the longest variable name here and no wider, and so
+	// a source that does not fit wraps under itself rather than off the right
+	// of the terminal.
+	block := e.Out.Block()
 	for _, r := range resolved.Resolutions {
-		note := ""
+		source := r.Source
 		if isSandbox[strings.Fields(r.Name)[0]] {
 			// Worth saying every time. The value going to the sidecar and a
 			// marker going to the service is the single most surprising thing
 			// about how this works, and somebody who does not know it will
 			// spend an hour wondering why their application sees a placeholder.
-			note = "  (to the proxy; the service gets a marker)"
+			source += "  (to the proxy; the service gets a marker)"
 		}
-		fmt.Fprintf(&b, "  %-28s %s%s\n", r.Name, r.Source, note)
+		block.Add(r.Name, source)
 	}
 	for _, mi := range resolved.Optional {
-		fmt.Fprintf(&b, "  %-28s not set, and not required\n", mi.Name)
+		block.Add(mi.Name, "not set, and not required")
 	}
 	for _, mi := range resolved.Missing {
-		fmt.Fprintf(&b, "  %-28s not found\n", mi.Name)
+		block.Add(mi.Name, "not found")
 	}
+	block.Flush()
 
 	if len(resolved.Missing) > 0 {
-		fmt.Fprintf(&b, "\n  Looked in: %s\n", strings.Join(chain.Considered(ctx), ", "))
+		e.Out.Note(StyleDim, "Looked in: "+strings.Join(chain.Considered(ctx), ", "))
 	}
-	return b.String()
 }

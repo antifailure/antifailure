@@ -796,9 +796,14 @@ load:
   source_config:
     path: traffic/access.log
 `)
-	out := manifest.Explain(m)
+	// Compared with the line breaks collapsed, because what is being asserted
+	// is what the page SAYS, not where the renderer happened to wrap it. A
+	// phrase split across a wrap is the same phrase to a reader and a
+	// different string to strings.Contains, and a test that cannot tell those
+	// apart fails every time the wrapping improves.
+	out := strings.Join(strings.Fields(manifest.Explain(m, 0)), " ")
 	for _, want := range []string{
-		"Application  shop", "web", "worker", "nightly", "0 3 * * *",
+		"Application shop", "web", "worker", "nightly", "0 3 * * *",
 		"npx prisma migrate deploy", "STRIPE_KEY (sandbox)",
 		"PROD_DATABASE_URL", "never stored",
 		"api.stripe.com", "sandbox", "Billing runs against the Stripe sandbox.",
@@ -812,7 +817,7 @@ load:
 
 func TestExplain_SaysWhenThereAreNoRules(t *testing.T) {
 	t.Parallel()
-	out := manifest.Explain(mustParse(t, minimal))
+	out := manifest.Explain(mustParse(t, minimal), 0)
 	require.Contains(t, out, "no rules, so every outbound request is refused")
 	require.Contains(t, out, "subset       off")
 }

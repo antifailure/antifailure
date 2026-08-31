@@ -1367,7 +1367,7 @@
             "fail"
           ],
           "default": "warn",
-          "description": "A query plan that got worse: a table now read end to end, or an index no longer used."
+          "description": "A query plan that got worse in one of three plan regressions: a table is now read end to end, an index is no longer used, or the planner's estimate grew."
         },
         "query_regression": {
           "type": "string",

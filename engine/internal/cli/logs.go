@@ -47,7 +47,7 @@ this is the command people paste into issues.`),
 				return env.Out.JSON(docs)
 			}
 			if len(lines) == 0 {
-				env.Out.Println("Nothing has been written yet. Bring the environment up with 'af up'.")
+				env.Out.Empty("Nothing has been written yet.", "Bring the environment up with", "af up")
 				return nil
 			}
 

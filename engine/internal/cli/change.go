@@ -48,10 +48,6 @@ which checks exercise which files, and what it cannot see. And a path no rule
 recognises selects every check rather than none, because the cost of the two
 mistakes is not the same.
 
-  af change                          against the base branch this job names
-  af change --base origin/main       against a ref you choose
-  af change --diff pr.patch          against a diff you already have
-
 In a GitHub Actions job it writes one output per check, so a later step can
 skip work this change does not need.
 

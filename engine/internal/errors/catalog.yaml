@@ -956,3 +956,10 @@ errors:
     docs: self-hosting/control-plane
     retryable: true
     exit_code: 5
+  - code: AF-CPL-004
+    area: CPL
+    message: "This machine is not signed in to {origin}."
+    next_step: "Run '{command}' to sign in from this terminal. Nothing else in the engine needs a sign in; only the commands that read or write your own account do."
+    docs: self-hosting/control-plane
+    retryable: false
+    exit_code: 4

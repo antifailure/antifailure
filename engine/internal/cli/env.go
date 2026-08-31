@@ -240,7 +240,7 @@ func newEnvListCommand(e *Env) *cobra.Command {
 				return e.Out.JSON(docs)
 			}
 			if len(envs) == 0 {
-				e.Out.Println("Nothing is running. Bring one up with 'af up'.")
+				e.Out.Empty("Nothing is running on this machine.", "Bring one up with", "af up")
 				return nil
 			}
 			rows := make([][]string, 0, len(envs))
@@ -251,10 +251,12 @@ func newEnvListCommand(e *Env) *cobra.Command {
 					humanAge(age), strings.Join(env.Services, ", "),
 				})
 			}
-			e.Out.Table([]string{"ENVIRONMENT", "RESOURCES", "RUNNING", "AGE", "SERVICES"}, rows)
+			e.Out.Table([]Column{
+				Col("ENVIRONMENT"), Num("RESOURCES"), Num("RUNNING"), Num("AGE"), Flex("SERVICES"),
+			}, rows)
 			e.Out.Println("")
-			e.Out.Println("  Remove one with: af down --branch <branch>")
-			e.Out.Println("  Remove everything older than a day with: af env prune")
+			e.Out.Hint("Remove one with", "af down --branch <branch>")
+			e.Out.Hint("Remove everything older than a day with", "af env prune")
 			return nil
 		},
 	}
