@@ -224,11 +224,12 @@ Organization permissions:
 **Grant Actions write at creation even if the console's controls are not in
 use yet.** It is the one on this list where waiting is worse than granting:
 widening an existing App's permissions makes GitHub ask every installation to
-accept the new grant, so adding it later interrupts every customer. Those three
-controls dispatch a `workflow_dispatch` run of the customer's own workflow
-through `dispatchWorkflow` in `web/apps/api/src/auth/github.ts`, and without the
-permission GitHub answers 404, which is the same answer it gives for a missing
-workflow file.
+accept the new grant, so adding it later interrupts every customer, and until
+somebody accepts, the App declares a permission that no installation holds.
+Those three controls dispatch a `workflow_dispatch` run of the customer's own
+workflow through `dispatchWorkflow` in `web/apps/api/src/auth/github.ts`, and
+without the permission GitHub refuses with
+`403 Resource not accessible by integration`.
 
 **Checks is not on this list and should not be granted.** Nothing in this
 repository calls the Checks API. The only two files that speak to GitHub are
