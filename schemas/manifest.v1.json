@@ -67,6 +67,9 @@
     "insights": {
       "$ref": "#/$defs/insights"
     },
+    "change": {
+      "$ref": "#/$defs/change"
+    },
     "oracle": {
       "$ref": "#/$defs/oracle"
     },
@@ -1115,6 +1118,61 @@
           },
           "uniqueItems": true,
           "description": "Dimensions every component of which must be reproduced. A dimension that could not be measured neither satisfies a requirement nor breaks one."
+        }
+      }
+    },
+    "change": {
+      "title": "Change",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How a pull request's diff is classified. The built in rules cover the layouts most projects use; these are for the ones they do not. A rule says what a path is, never which checks to run: an unrecognised path always selects every check, and no rule here can take a check away.",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/changeRule"
+          },
+          "description": "Path patterns this repository wants classified its own way. The longest matching pattern wins, so order does not decide."
+        }
+      }
+    },
+    "changeRule": {
+      "title": "Change rule",
+      "description": "One path pattern and what the paths it matches are. It says what a file IS, never which checks to run.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "surface"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "A glob against the repository relative path. A single star does not cross a slash and a double star does. A pattern that matches everything is refused, because it would defeat the rule that an unrecognised path selects every check."
+        },
+        "surface": {
+          "type": "string",
+          "enum": [
+            "schema",
+            "code",
+            "asset",
+            "build",
+            "dependency",
+            "config",
+            "infrastructure",
+            "pipeline",
+            "test",
+            "docs"
+          ],
+          "description": "What the matched paths are. Surfaces the engine assigns from the manifest itself, such as a service or the masking rules file, cannot be set here."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "The sentence the report prints for this rule, replacing the default one that restates the pattern."
         }
       }
     },

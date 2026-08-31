@@ -113,6 +113,11 @@ const (
 	AFDET002 Code = "AF-DET-002"
 	// Services {first} and {second} both claim port {port}.
 	AFDET003 Code = "AF-DET-003"
+	// The changed files between {base} and {head} could not be read:
+	// {detail}
+	AFDET010 Code = "AF-DET-010"
+	// The diff at {path} could not be read: {detail}
+	AFDET011 Code = "AF-DET-011"
 
 	// Enterprise
 	// The enterprise license could not be verified.
@@ -709,6 +714,24 @@ var catalog = map[Code]Entry{
 		Message:   "Services {first} and {second} both claim port {port}.",
 		NextStep:  "Give one of them a different port in antifailure.yaml.",
 		Docs:      "concepts/detection",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDET010: {
+		Code:      AFDET010,
+		Area:      "DET",
+		Message:   "The changed files between {base} and {head} could not be read: {detail}",
+		NextStep:  "Fetch the base branch before running 'af change'. A checkout cloned one commit deep shares no history with it, which is what 'fetch-depth: 0' fixes in a GitHub Actions job.",
+		Docs:      "concepts/change-analysis",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDET011: {
+		Code:      AFDET011,
+		Area:      "DET",
+		Message:   "The diff at {path} could not be read: {detail}",
+		NextStep:  "Produce it with 'git diff --unified=0 base...head'; this reads git's own unified format and nothing else.",
+		Docs:      "concepts/change-analysis",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
