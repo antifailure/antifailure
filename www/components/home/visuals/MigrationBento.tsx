@@ -83,7 +83,7 @@ export function MigrationBento() {
                 lineHeight: 1.15,
               }}
             >
-              add_billing_status
+              widen_plan_id
             </h2>
             <p
               style={{
@@ -95,7 +95,7 @@ export function MigrationBento() {
                 color: "#3F3F3A",
               }}
             >
-              Add a nullable column on <Code>subscriptions</Code> and measure the exclusive lock, what queues behind it, and whether the table is rewritten before the change ships.
+              Widen <Code>plan_id</Code> on <Code>subscriptions</Code> and measure the exclusive lock, whether another session is left waiting on it, and whether the table is rewritten before the change ships.
             </p>
 
             <p
@@ -253,12 +253,12 @@ function IssueTop() {
     <div className="flex min-w-0 items-center" style={{ height: u(28), gap: u(8) }}>
       <GoldMark />
       <span className="shrink-0" style={{ fontSize: u(12.5), color: MUTED, letterSpacing: "-0.015em" }}>MIG-1204</span>
-      <span className="min-w-0 truncate" style={{ fontSize: u(12.5), color: INK, fontWeight: 500, letterSpacing: "-0.02em" }}>add_billing_status</span>
+      <span className="min-w-0 truncate" style={{ fontSize: u(12.5), color: INK, fontWeight: 500, letterSpacing: "-0.02em" }}>widen_plan_id</span>
       <span className="ml-auto flex shrink-0 items-center" style={{ gap: u(10), color: MUTED }}>
         <span style={{ width: u(13), height: u(13) }}>
           <IconLink />
         </span>
-        <span style={{ fontSize: u(12), letterSpacing: "-0.01em" }}>1 / 84</span>
+        <span style={{ fontSize: u(12), letterSpacing: "-0.01em" }}>1 / 12</span>
         <span className="flex" style={{ gap: u(4) }}>
           <span style={{ width: u(12), height: u(12) }}>
             <IconUp />
@@ -335,7 +335,7 @@ function activityFor(plan: Plan): Activity[] {
     who: "maya",
     avatar: "/home/avatar-maya.jpg",
     time: "4min ago",
-    body: "ACCESS EXCLUSIVE held 27.4s. 84 statements queued behind it, including POST /v1/checkout.",
+    body: "ACCESS EXCLUSIVE held 27.4s, and another session was seen waiting on it even on the branch.",
   },
   {
     kind: "comment",
@@ -362,7 +362,7 @@ function activityFor(plan: Plan): Activity[] {
     time: "just now",
     body: safer ? (
       <>
-        Changed 3 files · nullable add, batched backfill, NOT NULL after ·{" "}
+        Changed 3 files · nullable add, batched backfill, old column dropped after ·{" "}
         <span style={{ color: DIM }}>just now</span>
       </>
     ) : (
@@ -576,7 +576,7 @@ function AgentWindow({
                 letterSpacing: "-0.018em",
               }}
             >
-              Prove <span className="font-mono">add_billing_status</span> is safe on production-shaped Postgres. Fail closed.
+              Prove <span className="font-mono">widen_plan_id</span> is safe on production-shaped Postgres. Fail closed.
             </div>
 
             <p className="flex items-center" style={{ marginTop: u(8), gap: u(6), fontSize: u(11.5), color: MUTED }}>
@@ -795,8 +795,15 @@ type Finding = {
 // Two of these used to be a connection pool and a rollback replay. Neither is
 // something af insights measures: it samples locks, times statements, asks
 // Postgres about rewrites, runs EXPLAIN before and after, diffs
-// pg_stat_statements and applies six lint rules. That is the whole list, and
+// pg_stat_statements and applies the lint rules. That is the whole list, and
 // these five now come from it.
+//
+// The locks row then carried a count, "84 statements queued". LockHold records
+// one boolean, Blocking, whether another session was ever seen waiting: there
+// is no count and no list of waiters in the engine. The rewrite and lint rows
+// asserted that a constant default rewrites the table, which Postgres stopped
+// doing in version 11 and the engine correctly reports as no rewrite. Both are
+// now the measurement rather than the story somebody wanted it to tell.
 const FINDINGS: Record<Plan, Finding[]> = {
   "as-written": [
     {
@@ -804,8 +811,8 @@ const FINDINGS: Record<Plan, Finding[]> = {
       label: "Locks",
       mark: "FOUND",
       tone: "block",
-      detail: "ACCESS EXCLUSIVE on subscriptions, held for 27.4s while 84 statements queued.",
-      evidence: "strongest mode ACCESS EXCLUSIVE · longest hold 27.4s · 84 waiters",
+      detail: "ACCESS EXCLUSIVE on subscriptions, held for 27.4s, and another session waited on it.",
+      evidence: "strongest mode ACCESS EXCLUSIVE · longest hold 27.4s · blocked another session",
     },
     {
       id: "plans",
@@ -820,7 +827,7 @@ const FINDINGS: Record<Plan, Finding[]> = {
       label: "Rewrite",
       mark: "FOUND",
       tone: "block",
-      detail: "The default rewrites every row of subscriptions. Postgres reports it, we do not guess.",
+      detail: "int to bigint rewrites every row of subscriptions. Postgres reports it, we do not guess.",
       evidence: "subscriptions rewritten · 12,403,881 rows",
     },
     {
@@ -828,8 +835,8 @@ const FINDINGS: Record<Plan, Finding[]> = {
       label: "Lint",
       mark: "FOUND",
       tone: "block",
-      detail: "Adding a column with a default rewrites the table. The rule carries the fix.",
-      evidence: "add the column nullable, backfill in batches, constrain later",
+      detail: "Changing a column to bigint rewrites the whole table under ACCESS EXCLUSIVE. The rule carries the fix.",
+      evidence: "add a second column of the new type, backfill it, switch reads, drop the old one",
     },
     {
       id: "cleanup",
@@ -846,8 +853,8 @@ const FINDINGS: Record<Plan, Finding[]> = {
       label: "Locks",
       mark: "OK",
       tone: "ok",
-      detail: "Nullable add takes no rewrite. Longest hold 0.04s, and nothing queued.",
-      evidence: "strongest mode ACCESS EXCLUSIVE · longest hold 0.04s · 0 waiters",
+      detail: "A nullable add takes no rewrite. Longest hold 0.04s, and nothing waited on it.",
+      evidence: "strongest mode ACCESS EXCLUSIVE · longest hold 0.04s · nothing blocked",
     },
     {
       id: "plans",
@@ -862,7 +869,7 @@ const FINDINGS: Record<Plan, Finding[]> = {
       label: "Rewrite",
       mark: "OK",
       tone: "ok",
-      detail: "No table rewrite. The column is added without a default and backfilled in batches.",
+      detail: "No table rewrite. The new column is added nullable and backfilled in batches.",
       evidence: "subscriptions not rewritten · 5,000 rows a batch",
     },
     {
@@ -870,8 +877,8 @@ const FINDINGS: Record<Plan, Finding[]> = {
       label: "Lint",
       mark: "OK",
       tone: "ok",
-      detail: "Six rules, none of them fired against this plan.",
-      evidence: "0 of 6 rules fired",
+      detail: "Not one lint rule fired against this plan.",
+      evidence: "no rule fired",
     },
     {
       id: "cleanup",
@@ -888,14 +895,14 @@ const VERDICT: Record<Plan, { mark: string; tone: "block" | "ok"; title: string;
   "as-written": {
     mark: "FINDING",
     tone: "block",
-    title: "Do not ship add_billing_status as written",
-    note: "Safer path: nullable add, no table rewrite, backfill in small batches",
+    title: "Do not ship widen_plan_id as written",
+    note: "Safer path: a second column of the new type, no table rewrite, backfill in small batches",
   },
   safer: {
     mark: "READY",
     tone: "ok",
-    title: "Safe to ship add_billing_status in three steps",
-    note: "Nullable add now · backfill 5k a batch · set NOT NULL once the backfill lands",
+    title: "Safe to ship widen_plan_id in three steps",
+    note: "Nullable add now · backfill 5k a batch · drop the old column once reads have moved",
   },
 };
 
@@ -985,7 +992,7 @@ const WORKSPACE = [
 ];
 
 const FAVORITES = [
-  { label: "add_billing_status", active: true, tone: GOLD, icon: <GoldMark /> },
+  { label: "widen_plan_id", active: true, tone: GOLD, icon: <GoldMark /> },
   { label: "checkout replay", active: false, tone: MUTED, icon: <IconDot /> },
   { label: "table rewrite", active: false, tone: "#5B8DEF", icon: <IconBars /> },
   { label: "lint rules", active: false, tone: DEL, icon: <IconX /> },

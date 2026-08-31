@@ -35,7 +35,7 @@ const CONTROL_PLANE: PlaneItem[] = [
   { label: "GitHub and CI", detail: "Integrations that plan the run and attach the gate." },
   { label: "Run planning", detail: "Organization policy and which repositories may run." },
   { label: "Reports", detail: "Aggregated evidence and historical comparisons." },
-  { label: "Billing", detail: "Plans and usage. Not deployed yet; the engine runs in your CI today." },
+  { label: "Billing", detail: "Plans and the quotas they carry. It takes no money: there is no payment integration behind it." },
 ];
 
 const DATA_PLANE: PlaneItem[] = [
@@ -73,7 +73,7 @@ const ISOLATION_PLANNED = [
 
 /** What keeps a run cheap today, and what does not exist yet. */
 const COST_ROWS: [string, string][] = [
-  ["Subset", "A referential subset instead of a full copy, by default. Built."],
+  ["Subset", "A referential subset instead of a full copy. Built, and off until you name a seed table."],
   ["Cache", "Goldens are branched rather than restored per run. Built."],
   ["BYOC", "The engine runs in your own CI on your own compute. Built."],
   ["Sweep", "af env prune removes environments past a cutoff you pass. Built."],
@@ -211,7 +211,8 @@ export function ArchitecturePage() {
         <Illustrative>
           The split is architectural and enforced today: masking and verification run in your data
           plane, and the control plane's ingest takes events rather than records. The control plane
-          itself is not deployed yet, so this boundary has not been exercised in production.
+          is deployed at app.antifailure.dev and is invitation only, so the boundary now has a live
+          consumer on the far side of it rather than a planned one.
         </Illustrative>
       </PageSection>
 

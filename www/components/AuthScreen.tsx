@@ -3,16 +3,8 @@
 import { useEffect, useState } from "react";
 import { useChrome } from "./Chrome";
 import { LogoMark } from "./icons";
+import { CONTROL_PLANE_URL } from "@/lib/site";
 import { joinWaitlist, rememberedEmail } from "@/lib/waitlist";
-
-/**
- * Where the hosted control plane is.
- *
- * A constant rather than a build-time variable, because this is a static export
- * and an unset NEXT_PUBLIC_ variable would silently produce a link to
- * "undefined/auth/github" in the published site.
- */
-const CONTROL_PLANE = "https://app.dev.antifailure.dev";
 
 function GitHubMark({ className }: { className?: string }) {
   return (
@@ -135,7 +127,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
               </p>
 
               <a
-                href={CONTROL_PLANE + "/auth/github"}
+                href={CONTROL_PLANE_URL + "/auth/github"}
                 className="mt-6 flex h-12 w-full items-center justify-center gap-2.5 rounded-full bg-black text-[15px] font-medium text-white hover:bg-[#292929]"
               >
                 <GitHubMark className="h-[18px] w-[18px]" />

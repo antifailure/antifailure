@@ -154,9 +154,10 @@ export function PricingPage() {
       />
       <PageSection className="pt-0">
         <p className="mb-14 max-w-[720px] border-l border-black/15 pl-6 text-[16px] leading-7 tracking-extra-tight text-gray-new-40 max-md:mb-10 max-md:pl-4">
-          The hosted control plane is in development. Today the engine runs in your own continuous
-          integration, on your own compute, and every button on this page leads to a waitlist. Team
-          and Enterprise are open for design partners.
+          The hosted control plane is deployed and invitation only while it is in development.
+          Today the engine runs in your own continuous integration, on your own compute, and every
+          button on this page leads to a waitlist unless you have been invited. Team and Enterprise
+          are open for design partners.
         </p>
         <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
           {PLANS.map((plan) => (

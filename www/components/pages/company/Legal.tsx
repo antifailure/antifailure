@@ -627,7 +627,7 @@ export function ServiceLevelsPage() {
         path="/sla"
         eyebrow="Service levels"
         title="There is no service level agreement."
-        lead="There is no generally available control plane to make one about. Rather than leave a security review to discover that, this page says what is not committed, what holds anyway, and what would have to be true before a number here meant anything."
+        lead="A control plane is deployed and it is invitation only, so there is nothing generally available to make an agreement about. Rather than leave a security review to discover that, this page says what is not committed, what holds anyway, and what would have to be true before a number here meant anything."
         actions={
           <>
             <Button href="/terms" theme="outlined">
@@ -682,30 +682,30 @@ export function ServiceLevelsPage() {
       <PageSection tone="white">
         <PageHeading
           kicker="What is deployed"
-          title="<strong>One staging environment</strong>, and it is configured like one."
+          title="<strong>A production control plane and a staging one</strong>, and only two people can sign in to either."
         />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
             rows={[
               [
                 "Environment",
-                "A single staging control plane, behind a sign-in allowlist. The production deploy path is wired end to end and its final job deliberately fails, because there is no production environment to deploy into.",
+                "Two: production at app.antifailure.dev and staging at app.dev.antifailure.dev, in separate resource groups, with separate databases and separate GitHub OAuth applications. Both are behind a sign-in allowlist naming the same two accounts. Production is reached only by promoting the exact image digest staging tested, behind an approval on a GitHub environment.",
               ],
               [
                 "Redundancy",
-                "One replica of the application and no database high availability. A restart is a visible interruption, which is the correct trade for staging and the wrong one for a paid service.",
+                "Production is configured for two application replicas and a zone-redundant database standby. Staging runs one replica and no high availability, deliberately, because a post-deploy health probe measuring a cold start measures nothing. The figures on this row are the ones the production stack declares, in infra/terraform/stacks/control-plane/production.tfvars.",
               ],
               [
                 "Backups",
-                "Fourteen days of point-in-time recovery, in one region. Geo-redundant backup is off.",
+                "Production is configured for thirty-five days of point-in-time recovery with geo-redundant backup storage, so a region losing its storage does not take the backups with it. Staging keeps fourteen days in one region with geo-redundancy off. A standby is not a backup: a bad migration reaches it instantly.",
               ],
               [
                 "Monitoring",
-                "Alert rules with burn-rate windows and a runbook each are written and version controlled. Nothing loads them. There is no metric alert and no action group in the infrastructure, so no alert reaches anybody.",
+                "Metric alert rules and an action group are in the infrastructure and are enabled on production and off on staging, on purpose, because staging is meant to break several times a week and a page for that is a page somebody learns to ignore. Each rule's description carries the URL of its own runbook. Nobody is on call, so an alert reaches a mailbox rather than a person who is awake.",
               ],
               [
                 "Recovery time",
-                "A restore drill exists and has been run against a real Postgres, reporting under two seconds on a continuous integration runner and up to 160 seconds on a loaded laptop. It is not scheduled, so there is no evidence that today's backup restores, and those numbers are not a recovery time objective.",
+                "The restore drill now runs weekly against a real Postgres. It has reported under two seconds on a continuous integration runner and up to 160 seconds on a loaded laptop, and neither number is a recovery time objective: the only one that would mean anything is measured on the hardware you would actually recover onto.",
               ],
             ]}
           />
@@ -715,12 +715,12 @@ export function ServiceLevelsPage() {
         <PageHeading title="<strong>What has to be true before there is an SLA.</strong>" />
         <Ledger
           items={[
-            "A production environment, separate from staging, with its own credentials and its own sign-in application.",
-            "High availability on the database and more than one application replica.",
-            "Geo-redundant backup, and a restore drill that runs on a schedule and fails loudly.",
-            "Alerting that reaches a person, and a runbook per alert that the alert actually points at.",
-            "On-call, even if it is one person with a phone.",
-            "A status page, and enough measured history behind it for a number to mean something.",
+            "A production environment, separate from staging, with its own credentials and its own sign-in application. In place.",
+            "High availability on the database and more than one application replica. Configured on production.",
+            "Geo-redundant backup, and a restore drill that runs on a schedule and fails loudly. Configured, and the drill runs weekly.",
+            "Alerting that reaches a person, and a runbook per alert that the alert actually points at. The rules and the runbooks exist; who they reach is a mailbox, not a rotation.",
+            "On-call, even if it is one person with a phone. Not yet.",
+            "A status page, and enough measured history behind it for a number to mean something. Not yet: the probe runs, and its output is not published anywhere.",
           ]}
         />
         <div className="mt-14 max-md:mt-10">

@@ -8,7 +8,7 @@ export function DevtoolsPage() {
         path="/solutions/devtools"
         eyebrow="Solutions · Developer tools"
         title="Schema changes on large tables."
-        lead="These teams feel it first, because their users notice p99 the same day. Measure the strongest lock held per table, how long it was held, what queued behind it, and how the query plans moved."
+        lead="These teams feel it first, because their users notice p99 the same day. Measure the strongest lock held per table, how long it was held, whether another session was left waiting on it, and how the query plans moved."
         framed={false}
         visual={<MigrationHero tab={1} />}
       />
@@ -21,7 +21,7 @@ after    Seq Scan    events                  410ms
 
 rows      12,403,881
 lock      ACCESS EXCLUSIVE  events  4.2s
-blocked   84 statements queued behind it
+blocked   another session was seen waiting on it
 rewrite   events rewritten in full`}
             </CodePanel>
           }

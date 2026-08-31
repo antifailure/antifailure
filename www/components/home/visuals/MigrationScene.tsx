@@ -41,13 +41,22 @@ const LOCK_LIMIT = 2;
 const TABS = ["Catch exclusive locks", "Safer expand-and-contract"] as const;
 const TABS_SHORT = ["Exclusive lock", "Expand-and-contract"] as const;
 
-const SQL_RISKY =
-  "ALTER TABLE subscriptions ADD COLUMN access_tier text NOT NULL DEFAULT 'free';";
-const SQL_EXPAND = "ALTER TABLE subscriptions ADD COLUMN access_tier text;";
+/**
+ * The risky statement is a type widening, not an ADD COLUMN with a default.
+ *
+ * It was `ADD COLUMN access_tier text NOT NULL DEFAULT 'free'`, under a film
+ * whose beats are lock, queue, rewrite, plan, lint. Postgres stopped rewriting
+ * for a constant default in version 11, and `af init` writes Postgres 17, so
+ * the engine correctly reports no rewrite and no lint finding for that
+ * statement: the film asserted an outcome the product measures as false. A
+ * type change is the case the engine's own lint names, "int to bigint most
+ * notably", and every beat of the film is true of it.
+ */
+const SQL_RISKY = "ALTER TABLE subscriptions ALTER COLUMN plan_id TYPE bigint;";
+const SQL_EXPAND = "ALTER TABLE subscriptions ADD COLUMN plan_id_new bigint;";
 const SQL_BACKFILL =
-  "UPDATE subscriptions SET access_tier = 'free' WHERE access_tier IS NULL LIMIT 2000;";
-const SQL_CONTRACT =
-  "ALTER TABLE subscriptions ALTER COLUMN access_tier SET NOT NULL;";
+  "UPDATE subscriptions SET plan_id_new = plan_id WHERE plan_id_new IS NULL LIMIT 2000;";
+const SQL_CONTRACT = "ALTER TABLE subscriptions DROP COLUMN plan_id;";
 
 const OPS_A: Op[] = [
   { id: "submit", at: 0, label: "Apply", title: "Apply migration" },
@@ -73,12 +82,12 @@ const STAMP_B = OPS_B[4].at;
 const SHORT_LOCK_END = 0.72;
 
 const ROWS = [
-  { id: "10041", customer: "acme", status: "active" },
-  { id: "10042", customer: "north", status: "trial" },
-  { id: "10043", customer: "helix", status: "active" },
-  { id: "10044", customer: "lumen", status: "past_due" },
-  { id: "10045", customer: "orbit", status: "active" },
-  { id: "10046", customer: "pivot", status: "active" },
+  { id: "10041", customer: "acme", status: "active", plan: "31" },
+  { id: "10042", customer: "north", status: "trial", plan: "12" },
+  { id: "10043", customer: "helix", status: "active", plan: "31" },
+  { id: "10044", customer: "lumen", status: "past_due", plan: "7" },
+  { id: "10045", customer: "orbit", status: "active", plan: "12" },
+  { id: "10046", customer: "pivot", status: "active", plan: "31" },
 ] as const;
 
 const TRAFFIC = [
@@ -112,16 +121,17 @@ function lockHold(t: number) {
 }
 
 /**
- * Statements queued behind the lock.
+ * Whether another session was seen waiting on the lock.
  *
- * This used to be a checkout p99 climbing from 820ms to 6.9s and an upgrade
- * timeout rate. Neither is something this engine can produce: nothing sends
- * traffic at a migration while it applies. Blocked waiters are real, and they
- * come from the same pg_locks sample as the hold time.
+ * This was a checkout p99 climbing from 820ms to 6.9s, then a count of blocked
+ * statements climbing to 84. Neither is something this engine can produce.
+ * insights.LockHold carries one boolean, Blocking, "whether another session
+ * was ever seen waiting on it": no count of waiters, no list of what they were
+ * running. A number here reads as a measurement and there is nothing behind
+ * it, so this is the boolean the sampler actually records.
  */
-function blockedWaiters(t: number, locked: boolean) {
-  if (!locked) return 0;
-  return Math.round(lerp(0, 84, clamp((t - LOCK_AT) / 7.4)));
+function blockedAnother(t: number, locked: boolean) {
+  return locked && t >= LOCK_AT + 1.2;
 }
 
 function useFilmClock(playing: boolean, reduced: boolean, stillT: number) {
@@ -182,11 +192,16 @@ function TablePane({
   fillThrough,
   windowRow,
   shortLock,
+  // The risky plan changes plan_id in place; the safer one fills a second
+  // column beside it. Naming both plan_id_new would say the risky migration
+  // adds a column, which is the plan it is being contrasted with.
+  column,
 }: {
   locked: boolean;
   fillThrough: number;
   windowRow: number;
   shortLock: boolean;
+  column: string;
 }) {
   return (
     <div className="border-t border-black/[0.08] bg-white">
@@ -216,7 +231,7 @@ function TablePane({
               <th className="px-3 py-1.5 font-medium">id</th>
               <th className="px-3 py-1.5 font-medium">customer</th>
               <th className="px-3 py-1.5 font-medium">status</th>
-              <th className="px-3 py-1.5 font-medium">access_tier</th>
+              <th className="px-3 py-1.5 font-medium">{column}</th>
             </tr>
           </thead>
           <tbody>
@@ -247,7 +262,7 @@ function TablePane({
                       locked ? "text-[#C43D3D]" : filled ? "text-[#3C3F44]" : "text-[#C0C3C8]",
                     )}
                   >
-                    {locked ? "rewrite" : filled ? "free" : "null"}
+                    {locked ? "rewrite" : filled ? row.plan : "null"}
                   </td>
                 </tr>
               );
@@ -321,11 +336,11 @@ function Film({
         : viewT >= SHORT_LOCK_END
           ? 0.4
           : 0;
-  const waiters = tab === 0 ? blockedWaiters(viewT, locked) : 0;
+  const blockedSession = tab === 0 && blockedAnother(viewT, locked);
   const stamped = viewT >= stamp;
   const lintHot = tab === 0 ? viewT >= OPS_A[5].at : viewT >= OPS_B[2].at;
   const lockHot = lockS > LOCK_LIMIT;
-  const waitersHot = waiters > 0;
+
 
   const phase: 0 | 1 | 2 | 3 =
     tab === 1
@@ -355,8 +370,8 @@ function Film({
 
   const evidence =
     tab === 0
-      ? `ACCESS EXCLUSIVE ${lockS.toFixed(1)}s · ${waiters} statements queued · table rewritten · plan regressed`
-      : `expand → backfill → contract · lock ${lockS.toFixed(1)}s · 0 queued · no rewrite`;
+      ? `ACCESS EXCLUSIVE ${lockS.toFixed(1)}s · another session blocked · table rewritten · plan regressed`
+      : `expand → backfill → contract · lock ${lockS.toFixed(1)}s · nothing blocked · no rewrite`;
 
   const moon = stamped ? (tab === 0 ? "block" : "ok") : locked ? "progress" : "progress";
   const action = stamped ? (tab === 0 ? "FINDING" : "CLEAN") : "Measuring";
@@ -370,12 +385,15 @@ function Film({
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="text-[#6B6F76]">PR 184</span>
             <span className="text-[#C0C3C8]">/</span>
-            <span className="truncate">{tab === 0 ? "add_billing_status" : "expand-and-contract"}</span>
+            <span className="truncate">{tab === 0 ? "widen_plan_id" : "expand-and-contract"}</span>
           </span>
         }
         metrics={[
           { value: lockValue, tone: lockHot ? "block" : "ok" },
-          { value: `${waiters} queued`, tone: waitersHot ? "block" : "ok" },
+          {
+            value: blockedSession ? "blocked a session" : "nothing blocked",
+            tone: blockedSession ? "block" : "ok",
+          },
         ]}
       />
       <InnerPills
@@ -406,7 +424,7 @@ function Film({
               body={
                 tab === 0
                   ? "An exclusive lock on subscriptions holds while everything else queues. The rehearsal reports it before it ships."
-                  : "Expand-and-contract holds the lock for 0.4s, and nothing queues behind it."
+                  : "Expand-and-contract holds the lock for 0.4s, and leaves nothing waiting on it."
               }
             />
             <div className="mt-4 flex flex-col gap-1.5">
@@ -417,10 +435,10 @@ function Film({
                 tone={lockHot ? "block" : "ok"}
               />
               <EvidenceRow
-                moon={waitersHot ? "block" : "ok"}
-                label="Blocked statements"
-                value={String(waiters)}
-                tone={waitersHot ? "block" : "ok"}
+                moon={blockedSession ? "block" : "ok"}
+                label="Blocked another session"
+                value={blockedSession ? "yes" : "no"}
+                tone={blockedSession ? "block" : "ok"}
               />
               <EvidenceRow
                 moon={tab === 0 ? (lintHot ? "block" : "todo") : "ok"}
@@ -449,6 +467,7 @@ function Film({
                 fillThrough={fillThrough}
                 windowRow={windowRow}
                 shortLock={shortLock}
+                column={tab === 0 ? "plan_id" : "plan_id_new"}
               />
             </div>
             <TrafficList t={viewT} locked={locked} flowing />

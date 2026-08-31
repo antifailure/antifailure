@@ -20,7 +20,7 @@ import { cn } from "@/lib/cn";
 
 const CAPTIONS = [
   "An exclusive lock on subscriptions holds for 27 seconds. The rehearsal reports it before it ships.",
-  "Expand-and-contract holds the same lock for 0.4s, and nothing queues behind it.",
+  "Expand-and-contract holds the same lock for 0.4s, and no other session is left waiting on it.",
 ] as const;
 
 /**
@@ -31,10 +31,18 @@ const CAPTIONS = [
  * nothing sends traffic at a migration while it applies, and there is no
  * old-binary coexistence check in the product under any name. What is here is
  * what internal/insights returns.
+ *
+ * The second row was then a count, "84 blocked statements", which is the same
+ * mistake one level down. insights.LockHold carries a single boolean,
+ * Blocking, "whether another session was ever seen waiting on it". There is no
+ * count of waiters and no list of their statements anywhere in the engine, and
+ * a rehearsal branch has no application traffic on it, so the honest reading
+ * of a yes here is that something was blocked even on a branch nothing else
+ * was using.
  */
 const FINDINGS = [
   { value: "27.4s", label: "ACCESS EXCLUSIVE", hint: "the strongest mode held on subscriptions, sampled every 250ms", danger: true },
-  { value: "84", label: "Blocked statements", hint: "queued behind the lock while it was held", danger: true },
+  { value: "Yes", label: "Blocked another session", hint: "a second session was seen waiting on the lock while it was held", danger: true },
   { value: "Yes", label: "Table rewrite", hint: "reported by Postgres, not inferred from the statement", danger: true },
   { value: "Seq Scan", label: "Plan change", hint: "EXPLAIN before and after, on production's own shape", danger: true },
 ] as const;
@@ -66,7 +74,7 @@ export function MigrationsPage() {
         path="/product/migrations"
         eyebrow="Migration Safety Engine"
         title="Catch exclusive locks before they take checkout down."
-        lead="The flagship module. A fresh branch carrying production's shape applies the pending migrations while a second connection samples what is locked, then reports the strongest mode held per table, how long it was held, what queued behind it, which tables were rewritten, and how the query plans moved."
+        lead="The flagship module. A fresh branch carrying production's shape applies the pending migrations while a second connection samples what is locked, then reports the strongest mode held per table, how long it was held, whether another session was left waiting on it, which tables were rewritten, and how the query plans moved."
         framed={false}
         visual={<MigrationStudio />}
       />
@@ -112,13 +120,13 @@ export function MigrationsPage() {
       <PageSection tone="white">
         <Split
           visual={
-            <CodePanel label="af insights">{`20260824_add_billing_status
+            <CodePanel label="af insights">{`20260824_widen_plan_id
 
 lock        ACCESS EXCLUSIVE  subscriptions  27.4s
-blocked     84 statements queued behind it
+blocked     another session was seen waiting on it
 rewrite     subscriptions rewritten in full
 plan        events: Index Scan -> Seq Scan  12ms -> 410ms
-lint        adding a column with a default rewrites the table`}
+lint        changing plan_id to bigint rewrites the whole table`}
             </CodePanel>
           }
         >
@@ -131,8 +139,8 @@ lint        adding a column with a default rewrites the table`}
           </p>
           <div className="mt-8">
             <Callout label="Suggested remediation">
-              Add the nullable column without a default, backfill in batches, deploy dual-read
-              compatibility, then enforce the constraint in a later migration.
+              Add a second column of the new type, backfill it in batches, deploy code that reads
+              both, then drop the old column in a later migration.
             </Callout>
           </div>
         </Split>
@@ -142,11 +150,14 @@ lint        adding a column with a default rewrites the table`}
         <PageHeading title="<strong>Failures conventional tests miss.</strong> The engine measures what staging cannot." />
         <FeatureGrid
           items={[
-            { title: "Locks", body: "The strongest mode held per table, how long, and what queued behind it." },
+            { title: "Locks", body: "The strongest mode held per table, how long, and whether another session was left waiting on it." },
             { title: "Rewrites", body: "Full table rewrites, reported by Postgres rather than guessed from the SQL." },
             { title: "Plans", body: "EXPLAIN before and against the migrated branch, on production's own shape." },
             { title: "Statements", body: "Per-statement duration, so the slow one in a batch is named." },
-            { title: "Lint", body: "Six rules, each carrying the fix rather than only the complaint." },
+            {
+              title: "Lint",
+              body: "Missing lock timeouts, constraints added without NOT VALID, index builds that are not concurrent, backfills sharing a transaction with the schema change, and the rewrites and offline table operations. Each finding reaches the pull request under its own rule name with the fix attached, because a finding called migration_lint tells nobody what to change.",
+            },
             { title: "Comparison", body: "A saved report from an earlier run, compared against this one." },
           ]}
         />
@@ -163,13 +174,14 @@ lint        adding a column with a default rewrites the table`}
         >
           <PageHeading title="<strong>Safer pattern: expand-and-contract.</strong> The lint rule carries the fix, not only the complaint." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Switch the film to expand-and-contract. The strongest lock drops to 0.4s, no statement
-            queues behind it, and the table is not rewritten.
+            Switch the film to expand-and-contract. The strongest lock drops to 0.4s, nothing is
+            left waiting on it, and the table is not rewritten.
           </p>
           <div className="mt-8">
             <Callout label="What the lint rule says">
-              Adding a column with a default rewrites the table. Add it nullable with no default,
-              backfill in batches, then enforce the constraint in a later migration.
+              Changing a column to bigint rewrites the whole table under an ACCESS EXCLUSIVE lock,
+              so nothing can read it either. Add a new column of the new type, backfill it, switch
+              reads and writes over, then drop the old one.
             </Callout>
           </div>
         </Split>
@@ -178,11 +190,11 @@ lint        adding a column with a default rewrites the table`}
             items={[
               {
                 title: "Expand",
-                body: "Add a nullable column with no default. Old rows stay readable by both binaries.",
+                body: "Add a second column of the new type, nullable. Old rows stay readable by both binaries.",
               },
               {
                 title: "Backfill",
-                body: "Fill values in batches so checkout never waits on ACCESS EXCLUSIVE.",
+                body: "Copy values across in batches so checkout never waits on ACCESS EXCLUSIVE.",
               },
               {
                 title: "Dual-read",
@@ -190,7 +202,7 @@ lint        adding a column with a default rewrites the table`}
               },
               {
                 title: "Contract",
-                body: "Enforce the constraint in a later migration, when every row already satisfies it.",
+                body: "Drop the old column in a later migration, once nothing reads it any more.",
               },
             ]}
           />
