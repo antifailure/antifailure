@@ -44,6 +44,7 @@ subsetted
 subsetter
 subsetting
 supabase
+syft
 testcontainers
 TOTP
 tripwire
