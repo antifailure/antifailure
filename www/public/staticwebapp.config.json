@@ -53,36 +53,31 @@
     {
       "route": "/robots.txt",
       "headers": {
-        "cache-control": "public, max-age=3600",
-        "content-type": "text/plain; charset=utf-8"
+        "cache-control": "public, max-age=3600"
       }
     },
     {
       "route": "/sitemap.xml",
       "headers": {
-        "cache-control": "public, max-age=3600",
-        "content-type": "application/xml; charset=utf-8"
+        "cache-control": "public, max-age=3600"
       }
     },
     {
       "route": "/llms.txt",
       "headers": {
-        "cache-control": "public, max-age=3600",
-        "content-type": "text/plain; charset=utf-8"
+        "cache-control": "public, max-age=3600"
       }
     },
     {
       "route": "/llms-full.txt",
       "headers": {
-        "cache-control": "public, max-age=3600",
-        "content-type": "text/plain; charset=utf-8"
+        "cache-control": "public, max-age=3600"
       }
     },
     {
       "route": "/*.md",
       "headers": {
-        "cache-control": "public, max-age=3600",
-        "content-type": "text/markdown; charset=utf-8"
+        "cache-control": "public, max-age=3600"
       }
     }
   ],
@@ -101,6 +96,8 @@
   },
   "mimeTypes": {
     ".md": "text/markdown; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".xml": "application/xml; charset=utf-8",
     ".avif": "image/avif",
     ".webp": "image/webp",
     ".webmanifest": "application/manifest+json"
