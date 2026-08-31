@@ -370,10 +370,32 @@ schema moved forward, which is recoverable by re running the deploy.
 
 The one path to 600 seconds is not work, it is waiting. `0018` takes an ACCESS
 EXCLUSIVE lock on `network_rules` and a SHARE ROW EXCLUSIVE lock on `users` for
-its foreign keys, and nothing in the migration path sets `lock_timeout`, so it
-waits for as long as another transaction holds what it needs. The old revision
-is still serving while this happens, so a long transaction over `users` is what
-would do it.
+its foreign keys, and **nothing sets `lock_timeout` anywhere on this path**, so
+it waits for as long as another transaction holds what it needs. The old
+revision is still serving while this happens, so a long transaction over
+`users` is what would do it.
+
+That is checked against the running server rather than inferred from the
+repository. `az postgres flexible-server parameter show -g af-cp-prod-centralus
+-s afcpprod-pg -n lock_timeout` returns `0` from `system-default`, and nothing
+in the migration path sets one per session either.
+
+This product's own migration linter agrees, and says it better than this page
+can. Run against `0018` on a database at `0017`, its `no_lock_timeout` rule
+fires and names the mechanism exactly: *"A lock request that is not granted
+immediately queues, and every query that arrives after it queues behind the
+request rather than behind the table, so a statement that would have taken
+milliseconds stops all traffic on `network_rules` for as long as whatever it is
+waiting for runs."*
+
+It has never seen these migrations, because `insights.Discover` looks for a SQL
+migration directory at the repository root and the control plane's live at
+`web/packages/db/migrations`. That is a dogfooding gap rather than a broken
+check, and it does not change the risk here: the fix the rule asks for cannot
+go into `0018` or `0019` now, because staging has already applied both and
+`migrate` refuses a file whose digest has changed. If a `lock_timeout` is
+wanted, it belongs on the migration role or in `bootstrap.mjs` before
+`migrate()` runs, which covers every migration without editing any of them.
 
 Even then nothing half applies. Each migration file is one transaction and is
 recorded in the same transaction that ran it, so a terminated replica drops the
