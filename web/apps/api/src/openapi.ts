@@ -60,7 +60,23 @@ export function openApiDocument(): Record<string, unknown> {
                         envId: { type: 'string' },
                         sequence: { type: 'integer', minimum: 0 },
                         occurredAt: { type: 'string', format: 'date-time' },
-                        payload: { type: 'object', additionalProperties: true },
+                        payload: {
+                          type: 'object',
+                          additionalProperties: true,
+                          description:
+                            'Type specific. An environment.* event should carry repository ' +
+                            '(owner/name) and branch on EVERY event and not only the first, ' +
+                            'because the environment row is created from whichever event ' +
+                            'arrives first and an event that cannot name its repository ' +
+                            'cannot create one. ttl_seconds is the declared lifetime, added ' +
+                            'to the earliest occurred_at seen to give the expiry.',
+                          properties: {
+                            repository: { type: 'string', description: 'owner/name.' },
+                            branch: { type: 'string' },
+                            pull_request: { type: 'integer', minimum: 1 },
+                            ttl_seconds: { type: 'number', minimum: 1 },
+                          },
+                        },
                       },
                     },
                   },
@@ -70,7 +86,12 @@ export function openApiDocument(): Record<string, unknown> {
           },
         },
         responses: {
-          '202': { description: 'Every event was accepted or was a duplicate.' },
+          '202': {
+            description:
+              'Every event was accepted or was a duplicate. An accepted event that changed no ' +
+              'environment row carries a note saying why, and is counted in unprojected; it is ' +
+              'stored either way.',
+          },
           '207': { description: 'Some events were rejected. The outcomes array says which and why.' },
           '401': { description: 'The token is not valid.' },
           '413': { description: 'The batch is larger than the limit.' },

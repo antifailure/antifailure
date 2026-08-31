@@ -50,10 +50,11 @@ import (
 // deadOrLivePlane is a control plane that can be taken away and brought back
 // while the engine is running against it.
 type deadOrLivePlane struct {
-	mu   sync.Mutex
-	up   bool
-	seen []string
-	byID map[string]bool
+	mu     sync.Mutex
+	up     bool
+	seen   []string
+	events []controlplane.Event
+	byID   map[string]bool
 }
 
 func newDeadOrLivePlane(up bool) *deadOrLivePlane {
@@ -70,6 +71,21 @@ func (p *deadOrLivePlane) types() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]string(nil), p.seen...)
+}
+
+// first returns the first event of a type the plane received, or false. The
+// payload is what this scenario is about: the type arriving proves the sink is
+// attached, and only the payload proves the control plane was told enough to
+// record the environment at all.
+func (p *deadOrLivePlane) first(kind string) (controlplane.Event, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, e := range p.events {
+		if e.Type == kind {
+			return e, true
+		}
+	}
+	return controlplane.Event{}, false
 }
 
 func (p *deadOrLivePlane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +110,7 @@ func (p *deadOrLivePlane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		p.byID[e.ID] = true
 		p.seen = append(p.seen, e.Type)
+		p.events = append(p.events, e)
 	}
 	p.mu.Unlock()
 	w.WriteHeader(http.StatusAccepted)
@@ -115,7 +132,10 @@ func newReportingEnvironment(t *testing.T, dir, url, branch string) *env.Orchest
 	}
 	o, err := env.New(env.Options{
 		Root: dir, Manifest: m, Branch: branch,
-		Clock: clock.New(), Redactor: redact.New(),
+		// Set here rather than resolved from git, because a t.TempDir has no
+		// remote and the point of the scenario is what reaches the wire.
+		Repository: "antifailure/chaostest",
+		Clock:      clock.New(), Redactor: redact.New(),
 		Progress: func(string) {},
 		Getenv:   func(k string) string { return vars[k] },
 	})
@@ -194,4 +214,50 @@ func TestEventsFromACommandRunWhileTheControlPlaneWasDownArriveWithTheNextOne(t 
 	require.Contains(t, plane.types(), "environment.torn_down",
 		"the earlier command's events never arrived, so buffered means lost")
 	require.Empty(t, spoolFiles(t, dir), "and the debt is cleared rather than resent forever")
+}
+
+// Scenario 4: the control plane is told which repository and branch an
+// environment belongs to, by a real command.
+//
+// Its environments table joins repositories on a NOT NULL column and carries a
+// NOT NULL branch, so an event that does not name both cannot create a row.
+// Until this scenario, no event named either except env.creating, which named
+// only the branch, and the control plane's projection was consequently an
+// UPDATE that matched nothing for the life of the product.
+//
+// Proved here rather than only in a unit test of the field builder for the
+// same reason scenario 1 exists: a field set nothing attaches to an event is
+// the same defect as a sink nothing attaches to a bus. This runs a real
+// command, through the real orchestrator and the real sink, and reads what
+// came off the wire.
+//
+// af down rather than af up, because Down is the command that can run on its
+// own in a scratch repository, and because torn_down is the harder case: it is
+// the event most likely to be the FIRST one a control plane ever hears about
+// an environment, when the run that created it never reached the network.
+func TestTheControlPlaneIsToldWhichRepositoryAnEnvironmentBelongsTo(t *testing.T) {
+	scenario(t)
+	requireDocker(t)
+	plane := newDeadOrLivePlane(true)
+	srv := httptest.NewServer(plane)
+	t.Cleanup(srv.Close)
+
+	dir := chaosRepo(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	o := newReportingEnvironment(t, dir, srv.URL, "chaos/identity")
+	_, err := o.Down(ctx)
+	require.NoError(t, err)
+
+	got, ok := plane.first("environment.torn_down")
+	require.True(t, ok, "the command ran and the control plane heard nothing")
+
+	require.Equal(t, "antifailure/chaostest", got.Payload["repository"],
+		"without this the control plane cannot create the environments row at all")
+	require.Equal(t, "chaos/identity", got.Payload["branch"])
+	// 168h is the manifest default, applied by normalization, so an
+	// environment that says nothing about its lifetime still has one and the
+	// console still shows an expiry rather than an empty field.
+	require.Equal(t, float64(168*3600), got.Payload["ttl_seconds"])
 }
