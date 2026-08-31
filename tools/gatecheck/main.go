@@ -132,6 +132,20 @@ func main() {
 	}
 
 	ciPath := strings.Join(workflows.names(), ", ")
+
+	// A workflow this stops reading is worse than one it never read: the gates
+	// go quiet and the count still looks healthy because five other files
+	// carry it. Nothing said so while the comparison was line based, because
+	// there was no structure to lose. There is now, so a file that has `run:`
+	// steps and yields none of them is a parse failure and says which file.
+	for i, source := range workflows.sources {
+		if hasRunStep(source) && len(workflowBlocks(workflows.paths[i], source)) == 0 {
+			fail("read no steps out of %s, which has `run:` steps in it. This check "+
+				"has stopped recognising the shape of that workflow, and every gate "+
+				"in it is now invisible rather than reported.", workflows.paths[i])
+		}
+	}
+
 	ciGates := scan(workflows.blocks())
 
 	recipes := justRecipes(string(just))
@@ -218,6 +232,12 @@ func main() {
 		"That is only true while these agree.\n")
 	os.Exit(1)
 }
+
+// runStep matches a step's `run:` key, which is the only thing in a workflow
+// that carries a gate.
+var runStep = regexp.MustCompile(`(?m)^\s+-?\s*run:`)
+
+func hasRunStep(source string) bool { return runStep.MatchString(source) }
 
 // report says what was checked, in the terms it was checked in.
 //

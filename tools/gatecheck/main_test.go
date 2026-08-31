@@ -447,6 +447,26 @@ func uncalled(just string) []string {
 	return uncalledByGate(recipes, reachableFromGate(recipes))
 }
 
+func TestAWorkflowThisStopsReadingIsNotSilent(t *testing.T) {
+	// The failure mode a structured read introduces. Five other files carry
+	// the count, so a sixth going quiet leaves a healthy looking number and no
+	// gates from it at all. A file with `run:` steps that yields none of them
+	// is a parse failure, not an empty workflow.
+	const noJobsKey = "on:\n  pull_request:\nsteps:\n  - run: go run ./tools/errcheck .\n"
+	if !hasRunStep(noJobsKey) {
+		t.Fatal("a workflow with a run: step was not recognised as having one")
+	}
+	if got := workflowBlocks("broken.yml", noJobsKey); len(got) != 0 {
+		t.Fatalf("expected the malformed workflow to yield nothing, got %v", got)
+	}
+
+	// And the shape it does read, so the guard is not simply always true.
+	const real = "on:\n  pull_request:\njobs:\n  a:\n    steps:\n      - run: go run ./tools/errcheck .\n"
+	if got := workflowBlocks("ci.yml", real); len(got) != 1 {
+		t.Fatalf("a well formed workflow yielded %d blocks, want 1", len(got))
+	}
+}
+
 func TestTheRealRepositoryAgrees(t *testing.T) {
 	// The one that matters. Reads the actual files rather than a fixture, so
 	// this fails the moment the workflow and the justfile drift.
