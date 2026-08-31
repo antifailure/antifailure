@@ -292,7 +292,7 @@ build-release version="dev":
 test: test-engine test-tools test-web test-runner test-site-api
 
 test-engine:
-    cd engine && go test ./... -race -timeout 30m
+    cd engine && go test ./... -race -count=1 -timeout 30m
 
 # G4. The coverage thresholds in the build plan's C.5, per package.
 #
@@ -305,13 +305,13 @@ test-engine:
 # counts only what its OWN tests reached, so a package exercised end to end by
 # the conformance suite reads as untested. C.5 says the integration tests count.
 coverage-profile:
-    cd engine && go test ./... -coverpkg=./... -coverprofile=../{{reports}}/coverage.out -timeout 60m
+    cd engine && go test ./... -count=1 -coverpkg=./... -coverprofile=../{{reports}}/coverage.out -timeout 60m
 
 coverage:
     go run ./tools/coverage -profile {{reports}}/coverage.out
 
 test-tools:
-    cd tools && go test ./... -timeout 5m
+    cd tools && go test ./... -count=1 -timeout 5m
 
 test-web:
     npm --prefix web test --workspaces --if-present
@@ -330,13 +330,13 @@ test-site-api:
 # enterprise package added later is covered without editing this or CI. Naming
 # them by hand is how two of them ended up untested.
 test-ee:
-    cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./... -race -timeout 15m
+    cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./... -race -count=1 -timeout 15m
     npm --prefix ee/web run typecheck
     npm --prefix ee/web test
 
 # The fast ones, for a tight loop.
 test-short:
-    cd engine && go test ./... -short -timeout 10m
+    cd engine && go test ./... -short -count=1 -timeout 10m
 
 # ---------------------------------------------------------------------------
 # The individual gates
