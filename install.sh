@@ -297,8 +297,8 @@ else
       say "   HOME is not set, so this installer cannot tell where your shell reads"
       say "   its startup file from. Add the same line to it to make this permanent."
     elif [ -n "$shell_name" ]; then
-      say "   Your login shell is $shell_name, which this installer does not know how"
-      say "   to make that permanent for. Add the same line to the file it reads at"
+      say "   Your login shell is $shell_name, which this installer does not know how to"
+      say "   make that permanent for. Add the same line to the file it reads at"
       say "   startup. For a POSIX shell that is usually ~/.profile."
     else
       say "   This installer could not tell which shell you use, because SHELL is"
