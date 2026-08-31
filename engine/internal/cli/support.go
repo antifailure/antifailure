@@ -100,7 +100,12 @@ is a bug nobody fixes.`),
 					return err
 				}
 			}
-			if body := manifest.Explain(m); body != "" {
+			// The bundle is read in a text editor and attached to an issue, not
+			// on the terminal that produced it, so it is rendered at the
+			// default width rather than at whatever this terminal happens to
+			// be. A support bundle whose line lengths depend on the sender's
+			// window is a support bundle that diffs against itself.
+			if body := manifest.Explain(m, 0); body != "" {
 				if err := add("explain.txt", "every default resolved", body); err != nil {
 					return err
 				}

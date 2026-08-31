@@ -18,6 +18,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 
+	"github.com/antifailure/antifailure/engine/internal/textwrap"
+
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
@@ -103,8 +105,8 @@ func (o *Output) WriteErr() error { return o.writeErr }
 // status lines keep using the whole width, since a column of aligned values is
 // scanned rather than read.
 const (
-	defaultWidth = 80
-	minWidth     = 40
+	defaultWidth = textwrap.DefaultWidth
+	minWidth     = textwrap.MinWidth
 	maxWidth     = 200
 	proseWidth   = 88
 )
@@ -173,15 +175,7 @@ func clampWidth(n int) int {
 	}
 }
 
-// cells is the display width of a string, ignoring the escape sequences that
-// colour it.
-//
-// Measuring with len would be wrong twice over. A styled cell carries nine
-// bytes of escape sequence that occupy no columns, which is why a coloured
-// table used to print its headers nine columns to the right of the values
-// under them; and a multi byte character occupies one byte per byte and one or
-// two columns, which is a different wrong answer in the other direction.
-func cells(s string) int { return ansi.StringWidth(s) }
+func cells(s string) int { return textwrap.Cells(s) }
 
 // Printf writes to the output stream in text mode, and nothing in JSON mode.
 //
@@ -679,46 +673,6 @@ func DetectColor(w io.Writer, env func(string) string) bool {
 	return info.Mode()&os.ModeCharDevice != 0
 }
 
-// wrapTokens splits text into the units a line break may fall between.
-//
-// Words, except that a single quoted run is one unit. Wrap already refuses to
-// break a word, because a URL or a host name with a newline in it is not ugly,
-// it is wrong once somebody copies it. A quoted command is wrong in exactly
-// the same way and for exactly the same reason: every next step in the error
-// catalogue says what to run as 'af something', and a reader who copies
-// "af net explain GET" off the first line and pastes it gets a usage error
-// out of the message that was supposed to rescue them.
-//
-// A run starts at a token whose first byte is a quote, which is what keeps an
-// apostrophe inside a word from opening one, and it is abandoned if nothing
-// closes it within a few tokens, which is what keeps an unbalanced quote from
-// gluing the rest of a paragraph into one unbreakable line.
-func wrapTokens(s string) []string {
-	const maxQuotedRun = 12
-	fields := strings.Fields(s)
-	out := make([]string, 0, len(fields))
-	for i := 0; i < len(fields); i++ {
-		if !strings.HasPrefix(fields[i], "'") {
-			out = append(out, fields[i])
-			continue
-		}
-		end := -1
-		for j := i; j < len(fields) && j < i+maxQuotedRun; j++ {
-			if j > i && strings.Contains(fields[j], "'") {
-				end = j
-				break
-			}
-		}
-		if end < 0 {
-			out = append(out, fields[i])
-			continue
-		}
-		out = append(out, strings.Join(fields[i:end+1], " "))
-		i = end
-	}
-	return out
-}
-
 // SortedKeys returns a map's keys in order, so that rendering never depends on
 // map iteration order. A snapshot test of command output would otherwise flake.
 func SortedKeys[V any](m map[string]V) []string {
@@ -751,36 +705,5 @@ func (o *Output) Wrap(s string, indent int) string {
 // WrapTo wraps to an explicit width, for the callers that want the whole
 // terminal rather than the prose measure.
 func (o *Output) WrapTo(s string, indent, width int) string {
-	if width < minWidth {
-		width = minWidth
-	}
-	avail := width - indent
-	if avail < 20 {
-		avail = 20
-	}
-	words := wrapTokens(s)
-	if len(words) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	pad := strings.Repeat(" ", indent)
-	line := 0
-	for i, w := range words {
-		n := cells(w)
-		switch {
-		case i == 0:
-			b.WriteString(w)
-			line = n
-		case line+1+n <= avail:
-			b.WriteByte(' ')
-			b.WriteString(w)
-			line += 1 + n
-		default:
-			b.WriteByte('\n')
-			b.WriteString(pad)
-			b.WriteString(w)
-			line = n
-		}
-	}
-	return b.String()
+	return textwrap.Wrap(s, indent, width)
 }

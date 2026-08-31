@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/antifailure/antifailure/engine/internal/textwrap"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -14,7 +15,21 @@ import (
 // It exists because the most common configuration bug is a default the user
 // did not know about. Printing the resolved value beside the one they wrote
 // turns "why is it blocking that host" into a one line answer.
-func Explain(m *schema.Manifest) string {
+//
+// width is how many columns the reader has. Most of what this prints is
+// bounded by the schema, a provider name or a duration, and fits anywhere. A
+// handful of values are not bounded by anything: a migrate command, a seed
+// command, a list of environment variables, a rule's note, an invariant's
+// description. Those are wrapped under their own column, because the one in
+// examples/next-app is already ninety six characters and a reader on an eighty
+// column terminal was getting it hard wrapped mid word by the terminal.
+func Explain(m *schema.Manifest, width int) string {
+	// Zero means the caller has no terminal to measure, as the support bundle
+	// does not: it is read in an editor somewhere else, and a bundle whose
+	// line lengths depend on the sender's window diffs against itself.
+	if width <= 0 {
+		width = textwrap.DefaultWidth
+	}
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Application  %s\n", m.Name)
@@ -25,6 +40,15 @@ func Explain(m *schema.Manifest) string {
 	if len(m.Services) == 0 {
 		b.WriteString("  none\n")
 	}
+	// A service's facts hang under a gutter as wide as the longest name it
+	// leaves room for, which reads well at eighty columns and leaves nothing
+	// at forty: twenty three columns of gutter against a forty column terminal
+	// is a margin with a fragment in it. Narrow it rather than letting every
+	// line overflow.
+	gut := 20
+	if width < 60 {
+		gut = 2
+	}
 	for _, s := range m.Services {
 		port := "no port"
 		if s.Port != 0 {
@@ -34,20 +58,20 @@ func Explain(m *schema.Manifest) string {
 		if where == "" {
 			where = "."
 		}
-		fmt.Fprintf(&b, "  %-20s %-7s %-12s %s\n", s.Name, s.Kind, port, where)
-		fmt.Fprintf(&b, "  %-20s build %s", "", s.Build.Strategy)
+		fmt.Fprintf(&b, "  %-*s %-7s %-12s %s\n", gut, s.Name, s.Kind, port, where)
+		fmt.Fprintf(&b, "  %-*s build %s", gut, "", s.Build.Strategy)
 		if s.Build.Dockerfile != "" {
 			fmt.Fprintf(&b, " (%s)", s.Build.Dockerfile)
 		}
 		b.WriteString("\n")
 		if s.Kind == schema.ServiceWeb {
-			fmt.Fprintf(&b, "  %-20s health %s within %s\n", "", s.HealthPath, s.HealthTimeout)
+			fmt.Fprintf(&b, "  %-*s health %s within %s\n", gut, "", s.HealthPath, s.HealthTimeout)
 		}
 		if s.Schedule != "" {
-			fmt.Fprintf(&b, "  %-20s schedule %s\n", "", s.Schedule)
+			fmt.Fprintf(&b, "  %-*s schedule %s\n", gut, "", s.Schedule)
 		}
 		if s.Migrate != "" {
-			fmt.Fprintf(&b, "  %-20s migrate %s\n", "", s.Migrate)
+			fmt.Fprintf(&b, "  %-*s migrate %s\n", gut, "", value(s.Migrate, gut+11, width))
 		}
 		if len(s.Env) > 0 {
 			names := make([]string, 0, len(s.Env))
@@ -61,10 +85,11 @@ func Explain(m *schema.Manifest) string {
 				}
 				names = append(names, n)
 			}
-			fmt.Fprintf(&b, "  %-20s env %s\n", "", strings.Join(names, ", "))
+			fmt.Fprintf(&b, "  %-*s env %s\n", gut, "", value(strings.Join(names, ", "), gut+7, width))
 		}
 		if len(s.DependsOn) > 0 {
-			fmt.Fprintf(&b, "  %-20s after %s\n", "", strings.Join(s.DependsOn, ", "))
+			fmt.Fprintf(&b, "  %-*s after %s\n", gut, "",
+				value(strings.Join(s.DependsOn, ", "), gut+9, width))
 		}
 	}
 	b.WriteString("\n")
@@ -72,30 +97,35 @@ func Explain(m *schema.Manifest) string {
 	d := m.Database
 	b.WriteString("Database\n")
 	fmt.Fprintf(&b, "  provider     %s, Postgres %d\n", d.Provider, d.Version)
-	fmt.Fprintf(&b, "  injected as  %s\n", d.URLEnv)
+	fmt.Fprintf(&b, "  injected as  %s\n", value(d.URLEnv, 15, width))
 	if d.SourceURLEnv != "" {
-		fmt.Fprintf(&b, "  source from  %s (read once during a golden refresh, never stored)\n", d.SourceURLEnv)
+		fmt.Fprintf(&b, "  source from  %s\n", value(
+			d.SourceURLEnv+" (read once during a golden refresh, never stored)", 15, width))
 	} else if d.Seed != "" {
-		fmt.Fprintf(&b, "  seeded by    %s\n", d.Seed)
+		fmt.Fprintf(&b, "  seeded by    %s\n", value(d.Seed, 15, width))
 	} else {
-		b.WriteString("  source       none declared, so branches start from an empty database\n")
+		fmt.Fprintf(&b, "  source       %s\n",
+			value("none declared, so branches start from an empty database", 15, width))
 	}
-	fmt.Fprintf(&b, "  masking      %s\n", d.MaskingRules)
-	fmt.Fprintf(&b, "  golden       refresh %s, keep %d, storage %s\n",
-		orNone(d.Golden.Schedule, "on demand"), d.Golden.Retain, d.Golden.Storage)
+	fmt.Fprintf(&b, "  masking      %s\n", value(d.MaskingRules, 15, width))
+	fmt.Fprintf(&b, "  golden       %s\n", value(fmt.Sprintf("refresh %s, keep %d, storage %s",
+		orNone(d.Golden.Schedule, "on demand"), d.Golden.Retain, d.Golden.Storage), 15, width))
 	if d.Subset.Enabled {
-		fmt.Fprintf(&b, "  subset       from %s, up to %d rows per table, %d level(s) of dependents\n",
-			d.Subset.SeedTable, d.Subset.MaxRows, *d.Subset.FollowDependents)
+		fmt.Fprintf(&b, "  subset       %s\n", value(fmt.Sprintf(
+			"from %s, up to %d rows per table, %d level(s) of dependents",
+			d.Subset.SeedTable, d.Subset.MaxRows, *d.Subset.FollowDependents), 15, width))
 	} else {
-		b.WriteString("  subset       off, the whole database is masked\n")
+		fmt.Fprintf(&b, "  subset       %s\n",
+			value("off, the whole database is masked", 15, width))
 	}
 	b.WriteString("\n")
 
 	b.WriteString("Egress\n")
-	fmt.Fprintf(&b, "  default      %s\n", m.Egress.Default)
-	fmt.Fprintf(&b, "  IPv6         %s\n", enabledWord(m.Egress.AllowIPv6))
+	fmt.Fprintf(&b, "  default      %s\n", value(string(m.Egress.Default), 15, width))
+	fmt.Fprintf(&b, "  IPv6         %s\n", value(enabledWord(m.Egress.AllowIPv6), 15, width))
 	if len(m.Egress.Rules) == 0 {
-		b.WriteString("  no rules, so every outbound request is refused\n")
+		fmt.Fprintf(&b, "  %s\n",
+			value("no rules, so every outbound request is refused", 2, width))
 	}
 	for _, r := range m.Egress.Rules {
 		detail := ""
@@ -110,7 +140,7 @@ func Explain(m *schema.Manifest) string {
 		}
 		fmt.Fprintf(&b, "  %-30s %-8s%s\n", r.Host, r.Mode, detail)
 		if r.Note != "" {
-			fmt.Fprintf(&b, "  %-30s %s\n", "", r.Note)
+			fmt.Fprintf(&b, "  %-30s %s\n", "", value(r.Note, 33, width))
 		}
 	}
 	b.WriteString("\n")
@@ -122,19 +152,19 @@ func Explain(m *schema.Manifest) string {
 			if p.MFA {
 				mfa = " with MFA"
 			}
-			fmt.Fprintf(&b, "  %-20s %-28s %s%s\n", p.Name, p.Email, p.Login, mfa)
+			fmt.Fprintf(&b, "  %-*s %-28s %s%s\n", gut, p.Name, p.Email, p.Login, mfa)
 		}
 		if m.Auth != nil && m.Auth.Adapter != "" {
 			how := string(m.Auth.Adapter)
 			if m.Auth.Adapter == schema.AuthAuto {
 				how = "auto (chosen from the dependencies and the schema)"
 			}
-			fmt.Fprintf(&b, "  %-20s %s\n", "created by", how)
+			fmt.Fprintf(&b, "  %-*s %s\n", gut, "created by", how)
 			if m.Auth.Adapter == schema.AuthSeed && m.Auth.Seed != "" {
-				fmt.Fprintf(&b, "  %-20s %s\n", "", m.Auth.Seed)
+				fmt.Fprintf(&b, "  %-*s %s\n", gut, "", value(m.Auth.Seed, gut+3, width))
 			}
 			if m.Auth.Sandbox {
-				fmt.Fprintf(&b, "  %-20s %s\n", "", "in a sandbox tenant")
+				fmt.Fprintf(&b, "  %-*s %s\n", gut, "", "in a sandbox tenant")
 			}
 		}
 		b.WriteString("\n")
@@ -156,16 +186,17 @@ func Explain(m *schema.Manifest) string {
 	if len(m.Invariants) > 0 {
 		b.WriteString("Invariants\n")
 		for _, inv := range m.Invariants {
-			fmt.Fprintf(&b, "  %-24s %s\n", inv.Name, orNone(inv.Description, "no description"))
+			fmt.Fprintf(&b, "  %-24s %s\n", inv.Name,
+				value(orNone(inv.Description, "no description"), 27, width))
 		}
 		b.WriteString("\n")
 	}
 
 	b.WriteString("Insights\n")
-	fmt.Fprintf(&b, "  rehearsal    %s\n", enabledWord(deref(m.Insights.MigrationRehearsal)))
+	fmt.Fprintf(&b, "  rehearsal    %s\n", value(enabledWord(deref(m.Insights.MigrationRehearsal)), 15, width))
 	fmt.Fprintf(&b, "  regression   %s, above %.1fx and %.0f ms\n",
 		enabledWord(deref(m.Insights.QueryRegression)), m.Insights.RegressionFactor, m.Insights.RegressionMinMS)
-	fmt.Fprintf(&b, "  plan diff    %s\n", enabledWord(deref(m.Insights.PlanDiff)))
+	fmt.Fprintf(&b, "  plan diff    %s\n", value(enabledWord(deref(m.Insights.PlanDiff)), 15, width))
 	if r := m.Insights.RollingCompatibility; r != nil {
 		fmt.Fprintf(&b, "  rolling      %s, against %s\n", r.When, r.Against)
 	}
@@ -175,22 +206,23 @@ func Explain(m *schema.Manifest) string {
 	// block is ten lines of "warn" and this section exists so that somebody
 	// can see what will block them without reading the schema.
 	b.WriteString("Policy\n")
-	fmt.Fprintf(&b, "  locks        warn at %.0f ms, fail at %.0f ms\n",
-		m.Policy.MigrationLock.WarnMS, m.Policy.MigrationLock.FailMS)
-	fmt.Fprintf(&b, "  fails on     %s\n", failingPolicies(m.Policy))
+	fmt.Fprintf(&b, "  locks        %s\n", value(fmt.Sprintf("warn at %.0f ms, fail at %.0f ms",
+		m.Policy.MigrationLock.WarnMS, m.Policy.MigrationLock.FailMS), 15, width))
+	fmt.Fprintf(&b, "  fails on     %s\n", value(failingPolicies(m.Policy), 15, width))
 	b.WriteString("\n")
 
 	b.WriteString("Runtime\n")
-	fmt.Fprintf(&b, "  provider     %s\n", m.Runtime.Provider)
+	fmt.Fprintf(&b, "  provider     %s\n", value(string(m.Runtime.Provider), 15, width))
 	fmt.Fprintf(&b, "  hostnames    *.%s\n", m.Runtime.Domain)
-	fmt.Fprintf(&b, "  lifetime     %s, sleeping after %s idle\n", m.Runtime.TTL, m.Runtime.IdleSleep)
+	fmt.Fprintf(&b, "  lifetime     %s\n", value(fmt.Sprintf("%s, sleeping after %s idle",
+		m.Runtime.TTL, m.Runtime.IdleSleep), 15, width))
 	b.WriteString("\n")
 
 	b.WriteString("GitHub\n")
-	fmt.Fprintf(&b, "  mode         %s\n", m.GitHub.Mode)
-	fmt.Fprintf(&b, "  comment      %s\n", enabledWord(deref(m.GitHub.Comment)))
-	fmt.Fprintf(&b, "  forks        %s\n", forkWord(m.GitHub.ForkPolicy))
-	fmt.Fprintf(&b, "  teardown on  %s\n", strings.Join(m.GitHub.TeardownOn, ", "))
+	fmt.Fprintf(&b, "  mode         %s\n", value(string(m.GitHub.Mode), 15, width))
+	fmt.Fprintf(&b, "  comment      %s\n", value(enabledWord(deref(m.GitHub.Comment)), 15, width))
+	fmt.Fprintf(&b, "  forks        %s\n", value(forkWord(m.GitHub.ForkPolicy), 15, width))
+	fmt.Fprintf(&b, "  teardown on  %s\n", value(strings.Join(m.GitHub.TeardownOn, ", "), 15, width))
 
 	// Printed only when the block is there, because the oracle is the one
 	// subsystem that does not run unless a manifest asks for it. A section
@@ -198,22 +230,24 @@ func Explain(m *schema.Manifest) string {
 	// command whose job is to show what is actually in force.
 	if o := m.Oracle; o != nil {
 		b.WriteString("\nOracle\n")
-		fmt.Fprintf(&b, "  comparison   %s\n", enabledWord(deref(o.Enabled)))
-		fmt.Fprintf(&b, "  baseline     %s\n", baselineWord(o))
-		fmt.Fprintf(&b, "  fails on     %s\n", o.FailOn)
+		fmt.Fprintf(&b, "  comparison   %s\n", value(enabledWord(deref(o.Enabled)), 15, width))
+		fmt.Fprintf(&b, "  baseline     %s\n", value(baselineWord(o), 15, width))
+		fmt.Fprintf(&b, "  fails on     %s\n", value(string(o.FailOn), 15, width))
 		fmt.Fprintf(&b, "  requests     %d %s\n", len(o.Probes), plural("probe", len(o.Probes)))
 		for _, p := range o.Probes {
 			fmt.Fprintf(&b, "    %-20s %s %s\n", p.Name, p.Method, p.Path)
 		}
 		fmt.Fprintf(&b, "  database     %s, up to %d rows a table\n",
 			enabledWord(deref(o.Database.Enabled)), o.Database.MaxRows)
-		fmt.Fprintf(&b, "  timestamps   %s\n", normalisedWord(o.CompareTimestamps))
-		fmt.Fprintf(&b, "  identifiers  %s\n", normalisedWord(o.CompareUUIDs))
+		fmt.Fprintf(&b, "  timestamps   %s\n", value(normalisedWord(o.CompareTimestamps), 15, width))
+		fmt.Fprintf(&b, "  identifiers  %s\n", value(normalisedWord(o.CompareUUIDs), 15, width))
 		if len(o.Ignore.Headers) > 0 {
-			fmt.Fprintf(&b, "  also ignores %s\n", strings.Join(o.Ignore.Headers, ", "))
+			fmt.Fprintf(&b, "  also ignores %s\n",
+				value(strings.Join(o.Ignore.Headers, ", "), 15, width))
 		}
 		if len(o.Ignore.Fields) > 0 {
-			fmt.Fprintf(&b, "  ignores      %s\n", strings.Join(o.Ignore.Fields, ", "))
+			fmt.Fprintf(&b, "  ignores      %s\n",
+				value(strings.Join(o.Ignore.Fields, ", "), 15, width))
 		}
 	}
 
@@ -231,6 +265,11 @@ func Explain(m *schema.Manifest) string {
 			m.Load.Source, m.Load.Scale*100, m.Load.Duration)
 	}
 	return b.String()
+}
+
+// value wraps an unbounded value under the column it starts in.
+func value(s string, indent, width int) string {
+	return textwrap.Wrap(s, indent, width)
 }
 
 func orNone(s, fallback string) string {
