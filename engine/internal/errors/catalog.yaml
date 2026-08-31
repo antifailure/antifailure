@@ -892,6 +892,21 @@ errors:
     exit_code: 5
 
   # Control plane
+  # Fidelity
+  - code: AF-FID-001
+    area: FID
+    message: "The environment does not reproduce {dimension}, which the manifest requires: {detail}"
+    next_step: "Fix what the inventory names, or remove {dimension} from fidelity.require."
+    docs: concepts/inventory
+    retryable: false
+    exit_code: 6
+  - code: AF-FID-002
+    area: FID
+    message: "{dimension} is required and could not be measured, so it is neither met nor broken: {detail}"
+    next_step: "Run 'af fidelity' to see what could not be measured, and fix that before trusting the requirement."
+    docs: concepts/inventory
+    retryable: false
+    exit_code: 1
   - code: AF-CPL-001
     area: CPL
     message: "No control plane token is configured."

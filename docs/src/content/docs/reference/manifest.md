@@ -26,6 +26,7 @@ named. Everything else is refused with a decision you can read.
 | `workflows` | list | What the agents do. |
 | `invariants` | list | Statements about the data that must stay true. |
 | `insights` | block | The Postgres native checks. |
+| `fidelity` | block | The component inventory of what this environment reproduces. |
 | `load` | block | Production shaped traffic. |
 | `policy` | block | What each class of finding does to the check. |
 | `runtime` | block | Where and how long environments run. |
@@ -183,6 +184,16 @@ refused at the line rather than treated as the weakest one.
 
 See [verdicts](/docs/concepts/verdicts/) for what each level does to the run
 and to the exit code.
+## `fidelity`
+
+| Key | Notes |
+| --- | --- |
+| `enabled` | On by default. Turning it off means the inventory is not taken, which is not the same as everything having passed. |
+| `require` | Dimensions every component of which must be reproduced: `services`, `database`, `third_party`, `auth`, `runtime`, `traffic`. See [inventory](/docs/concepts/inventory/). |
+
+There is no threshold here. A single percentage hides the one dimension that
+matters to a particular change, so what a manifest requires is a dimension by
+name.
 
 ## `runtime`
 

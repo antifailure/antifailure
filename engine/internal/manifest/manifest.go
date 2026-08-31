@@ -502,6 +502,7 @@ func suggest(got string, siblings []string) string {
 var knownKeys = []string{
 	"version", "name", "services", "database", "egress", "personas", "auth", "workflows",
 	"invariants", "insights", "explore", "load", "policy", "runtime", "github",
+	"invariants", "insights", "fidelity", "load", "runtime", "github",
 	"path", "kind", "build", "command", "port", "health_path", "health_timeout",
 	"env", "replicas", "resources", "schedule", "migrate", "depends_on",
 	"strategy", "dockerfile", "target", "context", "image", "args", "allow_hosts",
@@ -523,6 +524,7 @@ var knownKeys = []string{
 	"migration_lock", "warn_ms", "fail_ms", "migration_failed", "migration_rewrite",
 	"migration_lint", "plan_regression", "load_regression", "egress_surprise",
 	"masking", "cleanup",
+	"p95_increase", "error_rate", "query_count_increase", "require",
 	"ttl", "idle_sleep", "domain", "namespace_prefix", "kubeconfig_context",
 	"comment", "fork_policy", "teardown_on",
 	"adapter", "token_env", "url", "connection", "table", "sessions", "password",

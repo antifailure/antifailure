@@ -66,6 +66,10 @@ af insights    what the database noticed: the N+1, the index that stopped
 af oracle      run this change beside the version it replaces, on the same
                data, and report what the two did differently
 
+af fidelity    what this environment reproduces and what it does not, one
+               component at a time, with what could not be measured named
+               rather than counted either way
+
 af env pull    what the control plane recorded for one environment
 
 af license     what this installation is licensed for, in both editions

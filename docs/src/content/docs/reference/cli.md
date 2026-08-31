@@ -203,6 +203,39 @@ af explore [flags]
 | `--runner` | - | Path to the runner's entry point. |
 | `--seed` | - | Replay with this seed rather than the one the manifest declares. |
 
+### `af fidelity`
+
+What this environment reproduces, component by component, and what it does not.
+
+An inventory of the copy against the thing it is a copy of.
+
+Every line comes from something the engine already knew: the runtime says what
+is running, the database provider says which golden the branch came from and
+whether its attestation still checks out, the branch says how much it holds and
+whether the personas exist in it, and the manifest says which third party hosts
+the policy names and what answers for each.
+
+There is a headline number and it is defined on the page it prints: how many of
+the measured components are production's own thing rather than a substitution,
+a refusal or an absence. What could not be measured is excluded from it and
+named, never counted as either a pass or a failure, because a percentage that
+quietly absorbs an unknown is worth less than no percentage at all.
+
+The per dimension verdict is the part to read. A change to billing cares about
+the third party hosts and not about traffic; a migration cares about the data
+and about neither. One averaged number hides whichever of those is yours.
+
+Set fidelity.require in the manifest to fail this command when a dimension is
+not fully reproduced.
+
+```
+af fidelity [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to inventory, defaulting to the checked out one. |
+
 ### `af golden`
 
 Manage the masked copies branches are made from.

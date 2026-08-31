@@ -39,6 +39,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.load(m)
 	v.policy(m)
 	v.insights(m)
+	v.fidelity(m)
 	v.runtime(m)
 
 	if v.suppressed > 0 {
@@ -1007,6 +1008,58 @@ func (v *validator) insights(m *schema.Manifest) {
 			fmt.Sprintf("The revision %q starts with a hyphen, which git would read as an option.", r.Against),
 			"Use merge-base, previous-commit, or a single revision such as a tag name.")
 	}
+}
+
+// fidelity checks what fidelity.require names.
+//
+// The dimension names are checked here and not only in the JSON Schema,
+// because the engine does not run the schema over a manifest it parses: the
+// schema is what an editor and the documentation gate read. A dimension
+// misspelled here would decode as a string nothing matches, and the
+// requirement would then be satisfied by nothing and enforced against nothing,
+// which is the exact shape of a gate everybody believes is running.
+func (v *validator) fidelity(m *schema.Manifest) {
+	f := m.Fidelity
+	if f == nil {
+		return
+	}
+	if len(f.Require) > 0 && f.Enabled != nil && !*f.Enabled {
+		// A requirement nothing evaluates is worse than no requirement: it
+		// reads in review as a gate that is enforced.
+		v.add("fidelity.require",
+			"The inventory is disabled and dimensions are still required.",
+			"Set fidelity.enabled to true, or remove fidelity.require. A requirement nothing measures is not a requirement.")
+	}
+	known := map[schema.FidelityDimension]bool{}
+	for _, d := range schema.AllFidelityDimensions() {
+		known[d] = true
+	}
+	seen := map[schema.FidelityDimension]bool{}
+	for _, d := range f.Require {
+		if !known[d] {
+			v.add("fidelity.require",
+				fmt.Sprintf("There is no fidelity dimension called %q.", d),
+				"The dimensions are "+strings.Join(dimensionNames(), ", ")+".")
+			continue
+		}
+		if seen[d] {
+			v.add("fidelity.require",
+				fmt.Sprintf("The dimension %q is required twice.", d),
+				"Remove the duplicate. Requiring a dimension twice is the same as requiring it once.")
+			continue
+		}
+		seen[d] = true
+	}
+}
+
+// dimensionNames renders the closed vocabulary for a hint.
+func dimensionNames() []string {
+	all := schema.AllFidelityDimensions()
+	out := make([]string, len(all))
+	for i, d := range all {
+		out[i] = string(d)
+	}
+	return out
 }
 
 func (v *validator) runtime(m *schema.Manifest) {

@@ -73,6 +73,9 @@
     "explore": {
       "$ref": "#/$defs/explore"
     },
+    "fidelity": {
+      "$ref": "#/$defs/fidelity"
+    },
     "load": {
       "$ref": "#/$defs/load"
     },
@@ -1084,6 +1087,34 @@
               "default": "10m"
             }
           }
+        }
+      }
+    },
+    "fidelity": {
+      "title": "Fidelity",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "require": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "services",
+              "database",
+              "third_party",
+              "auth",
+              "runtime",
+              "traffic"
+            ]
+          },
+          "uniqueItems": true,
+          "description": "Dimensions every component of which must be reproduced. A dimension that could not be measured neither satisfies a requirement nor breaks one."
         }
       }
     },
