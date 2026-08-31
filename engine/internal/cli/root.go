@@ -164,6 +164,11 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 
 	out := NewOutput(opts.Stdout, opts.Stderr)
 	out.Color = DetectColor(opts.Stdout, opts.Getenv)
+	// Decided here, once, for the same reason colour is: every command asks
+	// the Output how wide a line may be, and a command that measured the
+	// terminal for itself would be a command that disagrees with its sibling
+	// about where the right margin is.
+	out.Width = DetectWidth(opts.Stdout, opts.Getenv)
 
 	env := &Env{
 		Out:         out,

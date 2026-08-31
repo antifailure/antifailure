@@ -169,7 +169,9 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 					humanBytes(uint64(g.SizeBytes)), g.RulesHash,
 				})
 			}
-			env.Out.Table([]string{"VERSION", "STATE", "CREATED", "SIZE", "RULES"}, rows)
+			env.Out.Table([]Column{
+				Col("VERSION"), Col("STATE"), Col("CREATED"), Num("SIZE"), Flex("RULES"),
+			}, rows)
 
 			// What this project publishes, and when it refreshes next. Both
 			// are configuration that used to be invisible: a store nobody can

@@ -133,7 +133,9 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 					change, fmt.Sprint(r.Errors),
 				})
 			}
-			e.Out.Table([]string{"ROUTE", "SENT", "P95", "VS BASELINE", "ERRORS"}, rows)
+			e.Out.Table([]Column{
+				Flex("ROUTE"), Num("SENT"), Num("P95"), Num("VS BASELINE"), Num("ERRORS"),
+			}, rows)
 
 			if len(refused) > 0 {
 				e.Out.Println("")

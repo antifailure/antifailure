@@ -31,6 +31,13 @@ type result struct {
 // runCLI executes the command line with substituted streams, which is what
 // makes every command testable without a process and without touching the
 // real filesystem outside a temporary directory.
+// prose collapses the line breaks the renderer inserted, so that a test
+// asserting what a message SAYS is not also asserting where the terminal
+// happened to be eighty columns wide. A phrase split across a wrap is the same
+// phrase to a reader and a different string to strings.Contains, and a test
+// that cannot tell those apart fails every time the wrapping improves.
+func prose(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 func runCLI(t *testing.T, workDir string, env map[string]string, args ...string) result {
 	t.Helper()
 	var out, errW bytes.Buffer
@@ -198,7 +205,7 @@ func TestEnvPull_SaysWhatIsMissingRatherThanFailingToConnect(t *testing.T) {
 	require.Contains(t, got.stderr, "AF_CONTROL_PLANE_TOKEN")
 	// And it has to say that this is the only thing that needs one, so nobody
 	// concludes the product requires a hosted service.
-	require.Contains(t, strings.ToLower(got.stderr), "without one")
+	require.Contains(t, prose(strings.ToLower(got.stderr)), "without one")
 }
 
 // A token must never be sent to a plain HTTP host that is not this machine.

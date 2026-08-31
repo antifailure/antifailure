@@ -223,20 +223,26 @@ whether the key here is the one you think it is.`),
 
 				stored := "not set"
 				if key != nil {
-					stored = "••••••••" + key.Last4
+					// Asterisks rather than bullet characters, for the reason
+					// the status symbols are ASCII: this is read in CI logs and
+					// pasted into pull request comments as often as it is read
+					// on a terminal, and a bullet is not guaranteed in either.
+					stored = "********" + key.Last4
 				}
 				// A provider with no budget row cannot spend anything. Said as
 				// "none, so nothing may be spent" rather than as a dash,
 				// because a dash reads as "unlimited" and it is the opposite.
 				cap := "none, so nothing may be spent"
-				spent := "—"
+				spent := "not tracked"
 				if budget != nil {
 					cap = fmt.Sprintf("%.2f USD", budget.CapUSD)
 					spent = fmt.Sprintf("%.2f USD", budget.SpentUSD)
 				}
 				rows = append(rows, []string{p, stored, cap, spent})
 			}
-			e.Out.Table([]string{"Provider", "Key", "Monthly cap", "Spent"}, rows)
+			e.Out.Table([]Column{
+				Col("PROVIDER"), Flex("KEY"), Num("MONTHLY CAP"), Num("SPENT"),
+			}, rows)
 			return nil
 		},
 	}

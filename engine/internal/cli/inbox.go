@@ -97,7 +97,9 @@ func newInboxListCommand(env *Env) *cobra.Command {
 					m.Recipient(), truncate(m.Subject, 40), summarize(m),
 				})
 			}
-			env.Out.Table([]string{"#", "TIME", "VIA", "TO", "SUBJECT", "CONTAINS"}, rows)
+			env.Out.Table([]Column{
+				Num("#"), Col("TIME"), Col("VIA"), Col("TO"), Flex("SUBJECT"), Flex("CONTAINS"),
+			}, rows)
 			env.Out.Println("")
 			env.Out.Printf("Read one in full with: af inbox get %d\n", msgs[len(msgs)-1].Seq)
 			return nil

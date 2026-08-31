@@ -467,7 +467,9 @@ question somebody asks after an incident.`),
 					shortTime(d.AtRaw), mark, decisionRequest(d), rule, outcomeOf(d),
 				})
 			}
-			env.Out.Table([]string{"TIME", "MODE", "REQUEST", "RULE", "OUTCOME"}, rows)
+			env.Out.Table([]Column{
+				Col("TIME"), Col("MODE"), Flex("REQUEST"), Col("RULE"), Col("OUTCOME"),
+			}, rows)
 			return nil
 		},
 	}

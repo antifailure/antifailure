@@ -249,7 +249,9 @@ func newEnvListCommand(e *Env) *cobra.Command {
 					humanAge(age), strings.Join(env.Services, ", "),
 				})
 			}
-			e.Out.Table([]string{"ENVIRONMENT", "RESOURCES", "RUNNING", "AGE", "SERVICES"}, rows)
+			e.Out.Table([]Column{
+				Col("ENVIRONMENT"), Num("RESOURCES"), Num("RUNNING"), Num("AGE"), Flex("SERVICES"),
+			}, rows)
 			e.Out.Println("")
 			e.Out.Println("  Remove one with: af down --branch <branch>")
 			e.Out.Println("  Remove everything older than a day with: af env prune")
