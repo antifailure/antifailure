@@ -408,9 +408,24 @@ links:
     set -euo pipefail
     (cd www && npm run build)
     (cd docs && npm run build)
-    rm -rf site && mkdir -p site
-    cp -R www/out/. site/
-    cp -R docs/dist site/docs
+    # tools/site/assemble.sh, rather than a third hand-rolled copy of it.
+    #
+    # This recipe assembled the tree itself, which is the mistake assemble.sh
+    # was written to end: that script exists because CI and deploy had each
+    # grown their own copy and the two drifted, one learning to handle both
+    # shapes of the Astro output while the other never did. A third copy was
+    # free to drift the same way, and had: it copied www/out and docs/dist and
+    # nothing else, so install.sh and schemas/ were absent from the tree this
+    # checked while CI published them, and it skipped the host config merge
+    # entirely, so every assertion that merge makes could not fail here and
+    # first spoke up in CI twenty minutes later. The shadowed-page check is one
+    # of those, and it is the one a developer most wants before pushing,
+    # because the page it fails on is a page they just wrote.
+    #
+    # The link count does not move: the files this now adds are not HTML, and
+    # the absolute addresses that point at them are external links, which an
+    # offline run does not resolve either way.
+    tools/site/assemble.sh
     lychee --config lychee.toml --no-progress --offline --root-dir site 'site/**/*.html'
 
 # The assertions the marketing site makes about itself, against the built site.
