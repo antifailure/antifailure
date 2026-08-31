@@ -1521,13 +1521,19 @@ function looksLikeAddress(value: string): boolean {
  */
 function countIngestion(
   metrics: ControlPlaneMetrics,
-  result: { accepted: number; duplicates: number; rejected: number },
+  result: { accepted: number; duplicates: number; rejected: number; unprojected: number },
   events: IncomingEvent[],
 ) {
   metrics.ingestBatches.inc({ outcome: result.rejected > 0 ? 'partial' : 'accepted' })
   metrics.ingestEvents.inc({ outcome: 'accepted' }, result.accepted)
   metrics.ingestEvents.inc({ outcome: 'duplicate' }, result.duplicates)
   metrics.ingestEvents.inc({ outcome: 'rejected' }, result.rejected)
+  // A fourth label value rather than a fourth metric, so that the sum over
+  // outcomes stays the number of events the batch carried. These are a subset
+  // of the accepted ones: stored, and applied to no environment row because
+  // the sender did not say which repository the environment belongs to. The
+  // loss objective is measured on rejected and is deliberately not affected.
+  metrics.ingestEvents.inc({ outcome: 'unprojected' }, result.unprojected)
 
   for (const event of events) {
     switch (event.type) {

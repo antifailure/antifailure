@@ -103,7 +103,7 @@ func (r *Runtime) ensureOneNetwork(
 	res, err := r.cli.NetworkCreate(ctx, name, network.CreateOptions{
 		Driver:   "bridge",
 		Internal: internal,
-		Labels:   dockerutil.Managed(dockerutil.KindNetwork, envID, r.clock.Now()),
+		Labels:   r.managed(dockerutil.KindNetwork, envID),
 	})
 	if err != nil {
 		// Two Up calls racing produce this, and the loser should use the
@@ -153,7 +153,7 @@ func (r *Runtime) ensureIngressImage(ctx context.Context) error {
 	resp, err := r.cli.ImageBuild(ctx, bytes.NewReader(buf.Bytes()), dockerbuild.ImageBuildOptions{
 		Tags:   []string{ingressImage},
 		Remove: true,
-		Labels: dockerutil.Managed(dockerutil.KindSidecar, "", r.clock.Now()),
+		Labels: r.managed(dockerutil.KindSidecar, ""),
 	})
 	if err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,

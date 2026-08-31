@@ -46,6 +46,7 @@ var roster = []string{
 	"TestEventsFromACommandRunWhileTheControlPlaneWasDownArriveWithTheNextOne",
 	"TestReconcilingAResourceThatIsAlreadyGoneSucceeds",
 	"TestReconcilingTwiceIsNotAnError",
+	"TestTheControlPlaneIsToldWhichRepositoryAnEnvironmentBelongsTo",
 }
 
 var (

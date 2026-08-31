@@ -45,7 +45,7 @@ import (
 // after a crash between the intent and the commit; the replay finds resources
 // the sweep cannot see. Running both and merging what each leaves behind is the
 // only combination where neither gap is silent.
-func (o *Orchestrator) reconcile(ctx context.Context, s *session, td *Teardown) {
+func (o *Orchestrator) reconcile(ctx context.Context, s *session, envID string, td *Teardown) {
 	cli, err := dockerutil.Client()
 	if err == nil {
 		defer func() { _ = cli.Close() }()
@@ -56,16 +56,16 @@ func (o *Orchestrator) reconcile(ctx context.Context, s *session, td *Teardown) 
 		// registry means nothing can be compensated, and reporting a clean
 		// teardown in that state is the lie this whole file exists to stop.
 		td.Pending = append(td.Pending, provider.PendingResource{
-			Kind: "journal", ID: o.envID,
+			Kind: "journal", ID: envID,
 			Reason: fmt.Sprintf("the journal could not be replayed: %v", err),
 		})
 		return
 	}
 
-	result, err := s.journal.Replay(ctx, o.envID, registry)
+	result, err := s.journal.Replay(ctx, envID, registry)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		td.Pending = append(td.Pending, provider.PendingResource{
-			Kind: "journal", ID: o.envID, Reason: err.Error(),
+			Kind: "journal", ID: envID, Reason: err.Error(),
 		})
 	}
 	td.Removed += result.Compensated
@@ -80,7 +80,7 @@ func (o *Orchestrator) reconcile(ctx context.Context, s *session, td *Teardown) 
 	// tells them where to look.
 	for _, e := range result.Errors {
 		td.Pending = append(td.Pending, provider.PendingResource{
-			Kind: "journal", ID: o.envID, Reason: e.Error(),
+			Kind: "journal", ID: envID, Reason: e.Error(),
 		})
 	}
 	for _, rec := range result.Skipped {
