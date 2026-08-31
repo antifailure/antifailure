@@ -239,6 +239,72 @@ describe('the environments projection', {
     assert.notEqual(row.created_at, null)
   })
 
+  it('ordering: the creating event was lost and the bill still starts at the build, not at the report', async () => {
+    // The number this pins is the one that would be wrong without anybody
+    // seeing it. Usage is created_at to torn_down_at, so if created_at is
+    // taken from whichever event happened to arrive first, an environment
+    // whose creating event was dropped from the spool bills from AFTER its
+    // build, and a cold build is the expensive part of a run. The result is a
+    // bill that is quietly too low forever and looks exactly like a correct
+    // one.
+    //
+    // So ready carries started_at, and here ready is the only event that ever
+    // names the beginning: creating is never sent at all.
+    const id = envId('lost-creating')
+    const cameUp = new Date(h.clock.now().getTime() - 3 * 60 * 60 * 1000)
+    const ready = new Date(cameUp.getTime() + 20 * 60 * 1000)
+    const removed = new Date(cameUp.getTime() + 2 * 60 * 60 * 1000)
+
+    await send([event('environment.ready', id, 2, {
+      occurredAt: ready.toISOString(),
+      payload: { started_at: cameUp.toISOString(), seconds: 1200 },
+    })])
+    await send([event('environment.torn_down', id, 3, { occurredAt: removed.toISOString() })])
+
+    const row = await one(id)
+    assert.equal(
+      row.created_at.toISOString(), cameUp.toISOString(),
+      'the bill starts when the control plane heard, so the twenty minute build is free',
+    )
+    const held = (row.torn_down_at!.getTime() - row.created_at.getTime()) / 3_600_000
+    assert.equal(held, 2, `the environment was held for two hours and the row says ${held}`)
+    // And the expiry is measured from the same instant, so an environment
+    // whose creating event was lost is not given extra life.
+    assert.equal(
+      row.expires_at!.toISOString(),
+      new Date(cameUp.getTime() + TTL_SECONDS * 1000).toISOString(),
+    )
+  })
+
+  it('ordering: a started_at from a sender that is lying about it cannot inflate a bill', async () => {
+    // started_at comes from a machine this service does not trust, and it is
+    // the left end of every usage sum. A value before the epoch, or after the
+    // event that carries it, is clamped to the event's own timestamp rather
+    // than believed.
+    const id = envId('lying-start')
+    const at = h.clock.now()
+
+    await send([event('environment.ready', id, 1, {
+      occurredAt: at.toISOString(),
+      payload: { started_at: '1999-01-01T00:00:00.000Z' },
+    })])
+    assert.equal((await one(id)).created_at.toISOString(), at.toISOString())
+
+    const future = envId('future-start')
+    await send([event('environment.ready', future, 1, {
+      occurredAt: at.toISOString(),
+      payload: { started_at: new Date(at.getTime() + 60 * 60 * 1000).toISOString() },
+    })])
+    assert.equal((await one(future)).created_at.toISOString(), at.toISOString())
+
+    const nonsense = envId('nonsense-start')
+    await send([event('environment.ready', nonsense, 1, {
+      occurredAt: at.toISOString(),
+      payload: { started_at: 'the day before yesterday' },
+    })])
+    assert.equal((await one(nonsense)).created_at.toISOString(), at.toISOString())
+  })
+
   it('ordering: a teardown that spent a day in the spool is not a day on the bill', async () => {
     // The engine buffers to disk when the control plane is unreachable and
     // sends on the next command, which can be the next day. The interval a

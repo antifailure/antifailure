@@ -1027,7 +1027,8 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// Emitted through the bus rather than written anywhere directly, because
 	// the bus is where redaction happens and a second path is a second thing to
 	// remember to redact.
-	o.event(s, events.EnvCreating, "creating "+o.envID, o.identity()...)
+	o.event(s, events.EnvCreating, "creating "+o.envID,
+		append(o.identity(), startedField(started))...)
 	// Registered after s.close, so it runs before it: defers unwind last in
 	// first out and the bus has to still be open for the last event to reach a
 	// sink. Reading the named results is what makes this cover every return in
@@ -1038,11 +1039,12 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 			// and the pull request comment can say why without parsing a
 			// sentence written for a terminal.
 			o.eventErr(s, events.EnvFailed, rerr.Error(),
-				append(o.identity(), events.F("code", string(codeOf(rerr))))...)
+				append(o.identity(),
+					startedField(started), events.F("code", string(codeOf(rerr))))...)
 			return
 		}
 		o.event(s, events.EnvReady, o.envID+" is ready",
-			append(o.identity(),
+			append(append(o.identity(), startedField(started)),
 				readyFields(result, "local", o.opts.Clock.Since(started).Seconds())...)...)
 	}()
 

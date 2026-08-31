@@ -2,6 +2,7 @@ package env
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -65,4 +66,17 @@ func TestTTLSeconds_TheManifestsSpellingsAndTheOnesThatMeanNoLifetime(t *testing
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestStartedField_IsTheInstantTheWorkBeganAndNotWhenTheEventFired(t *testing.T) {
+	// The two are separated by the whole build on the ready event, and the
+	// control plane bills from this one. RFC3339 with nanoseconds and in UTC,
+	// because the receiver puts it straight into a timestamptz and a local
+	// offset there is an hour of somebody's bill.
+	at := time.Date(2026, 3, 4, 5, 6, 7, 891011121, time.FixedZone("somewhere", 5*3600))
+
+	f := startedField(at)
+
+	require.Equal(t, "started_at", f.Key)
+	require.Equal(t, "2026-03-04T00:06:07.891011121Z", f.Value)
 }

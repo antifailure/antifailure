@@ -362,6 +362,9 @@ async function applyToProjection(
   const repository = repositoryName(payload.repository)
   const pullRequest = wholeNumber(payload.pull_request)
   const ttl = lifetimeSeconds(payload.ttl_seconds)
+  // When the environment began existing, which is not the same instant as
+  // when this event fired, and the difference is money. See cameUpAt.
+  const cameUp = cameUpAt(payload.started_at, event.occurredAt)
   const now = clock.now().toISOString()
   // The engine's own timestamp, not this clock's. Both ends of the interval a
   // bill is computed from have to come from the same clock or the number is
@@ -373,7 +376,7 @@ async function applyToProjection(
 
   if (repository === null || branch === null) {
     return advanceExisting(db, orgId, event.envId, {
-      state, sequence, previewUrl, runtime, golden, ttl, tornDownAt, now,
+      state, sequence, previewUrl, runtime, golden, ttl, tornDownAt, cameUp, now,
     })
   }
 
@@ -387,9 +390,9 @@ async function applyToProjection(
       ${orgId}, ${repositoryId}, ${event.envId}, ${branch}, ${pullRequest},
       ${state}::environment_state, ${sequence},
       ${previewUrl}, ${runtime}, ${golden},
-      ${event.occurredAt}::timestamptz, ${now}::timestamptz,
+      ${cameUp}::timestamptz, ${now}::timestamptz,
       CASE WHEN ${ttl}::double precision IS NULL THEN NULL
-           ELSE ${event.occurredAt}::timestamptz
+           ELSE ${cameUp}::timestamptz
                 + make_interval(secs => ${ttl}::double precision) END,
       ${tornDownAt}::timestamptz)
     -- The engine's own identifier for the environment, scoped to the
@@ -445,6 +448,8 @@ interface Advance {
   ttl: number | null
   /** The engine's timestamp for the teardown, or null when this is not one. */
   tornDownAt: string | null
+  /** When the environment began existing, per the sender. */
+  cameUp: string
   now: string
 }
 
@@ -474,8 +479,10 @@ async function advanceExisting(
       preview_url = COALESCE(${a.previewUrl}, preview_url),
       runtime = COALESCE(${a.runtime}, runtime),
       golden_version = COALESCE(${a.golden}, golden_version),
+      created_at = LEAST(created_at, ${a.cameUp}::timestamptz),
       expires_at = CASE WHEN ${a.ttl}::double precision IS NULL THEN expires_at
-                        ELSE created_at + make_interval(secs => ${a.ttl}::double precision) END,
+                        ELSE LEAST(created_at, ${a.cameUp}::timestamptz)
+                             + make_interval(secs => ${a.ttl}::double precision) END,
       torn_down_at = CASE WHEN ${a.tornDownAt}::timestamptz IS NOT NULL
                           THEN GREATEST(${a.tornDownAt}::timestamptz, created_at)
                           ELSE torn_down_at END,
@@ -569,6 +576,34 @@ function wholeNumber(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isInteger(value)) return null
   if (value <= 0 || value > 2_147_483_647) return null
   return value
+}
+
+/**
+ * When the environment began existing, as a timestamp the statement can use.
+ *
+ * The event's own occurred_at is when the event fired; started_at is when the
+ * work began, and for env.ready those are separated by the whole build. The
+ * control plane bills created_at to torn_down_at, so taking the event's
+ * timestamp would drop the build from every environment whose creating event
+ * never arrived, and a cold build is the expensive part of a run.
+ *
+ * Never later than the event that carries it, because an environment cannot
+ * have begun after something it did was reported, and never more than a year
+ * earlier, which is the same bound validate() puts on occurred_at. Both are
+ * clamps rather than rejections: the field comes from a sender this service
+ * does not trust, and the failure mode being defended against is a bill, so a
+ * value outside the possible range falls back to the event's own timestamp
+ * rather than refusing an event that is otherwise fine.
+ */
+function cameUpAt(value: unknown, occurredAt: string): string {
+  if (typeof value !== 'string') return occurredAt
+  const at = new Date(value)
+  if (Number.isNaN(at.getTime())) return occurredAt
+  const fired = new Date(occurredAt).getTime()
+  if (Number.isNaN(fired)) return occurredAt
+  if (at.getTime() > fired) return occurredAt
+  if (fired - at.getTime() > 365 * 24 * 60 * 60 * 1000) return occurredAt
+  return at.toISOString()
 }
 
 /**

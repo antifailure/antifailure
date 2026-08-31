@@ -28,10 +28,37 @@ package env
 // nothing here approaches it.
 
 import (
+	"time"
+
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
+
+// startedAt reports the instant an environment began existing, for the events
+// emitted by the command that is bringing it up.
+//
+// This is the field the bill is computed from, and it is separate from the
+// event's own timestamp because those two are not the same instant and the
+// difference is money. The control plane measures usage as created_at to
+// torn_down_at, and it takes created_at from the earliest thing it is told.
+// If the only event it ever receives for an environment is env.ready, and
+// ready carries just its own timestamp, then created_at lands AFTER the build
+// and the customer is not charged for the build. A cold build is the
+// expensive part of a run, so the number would be quietly too low forever and
+// would look exactly like a correct number.
+//
+// That is not a hypothetical ordering. The sink drops the OLDEST events when
+// a failed batch overflows its spool, and env.creating is the oldest event of
+// a run, so the case where ready is the first thing the control plane hears
+// is the ordinary consequence of one outage.
+//
+// Only the commands that know the instant send it. af down runs in a separate
+// process and has no way to know when the environment came up, so its event
+// carries none and the control plane keeps whatever it already had.
+func startedField(at time.Time) events.Field {
+	return events.F("started_at", at.UTC().Format(time.RFC3339Nano))
+}
 
 // identity is the field set every environment lifecycle event carries.
 //
