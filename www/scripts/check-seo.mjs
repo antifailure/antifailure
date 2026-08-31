@@ -320,6 +320,56 @@ console.log("\nReachability");
   );
 }
 
+// Navigation that belongs to no landmark.
+//
+// The product flyout is a sibling of the header bar rather than a child, so
+// its nineteen links sat outside header, main and footer alike. Somebody
+// navigating by landmark met the banner and then the page, and never the
+// navigation. Every other nav on the site was already inside one, which is
+// what made this invisible: the markup looked consistent everywhere you
+// checked.
+//
+// Counting <a> elements rather than <nav>, because the defect was a block of
+// links with no nav around it either. An anchor that is inside no landmark at
+// all is the thing to catch, whatever element it sits in.
+console.log("\nLandmarks");
+{
+  const stray = [];
+  for (const file of pages) {
+    const html = readFileSync(file, "utf8");
+    if (/<meta name="robots" content="[^"]*noindex/i.test(html)) continue;
+
+    // Walk the tags, tracking landmark depth. A link seen at depth zero is in
+    // no landmark. Regex rather than a parser because the built output is
+    // machine generated and well formed, and this file has no dependencies.
+    let depth = 0;
+    let loose = 0;
+    for (const m of html.matchAll(/<(\/?)(header|main|footer|nav|aside|a)\b[^>]*>/gi)) {
+      const [tagText, closing, tag] = m;
+      const name = tag.toLowerCase();
+      if (name === "a") {
+        // Opening tags only. Counting </a> too reported every link twice, which
+        // is how this check first "found" two loose links on every page.
+        if (closing) continue;
+        // The skip link is the one anchor that has to be outside everything: it
+        // is the first thing in the body precisely so it comes before the
+        // banner a keyboard user is trying to skip.
+        if (/class="[^"]*skip-to-content/.test(tagText)) continue;
+        if (depth === 0) loose++;
+        continue;
+      }
+      if (closing) depth = Math.max(0, depth - 1);
+      else depth++;
+    }
+    if (loose > 0) stray.push(`${path.relative(OUT, file)} (${loose})`);
+  }
+  assert(
+    stray.length === 0,
+    "every link on every page is inside a landmark",
+    stray.length > 0 ? `links outside header, main, footer, nav and aside: ${stray.slice(0, 5).join(", ")}` : "",
+  );
+}
+
 // A single duplicated title across pages is a cannibalisation bug that no
 // other check catches.
 const titles = new Map();
