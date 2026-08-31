@@ -387,6 +387,15 @@ jobs:
         # the built HTML, so it runs here, after the build above.
         run: go run ./tools/classcheck .
 
+      - name: No animation that never stops
+        # If a piece of UI animates on an infinite loop while the user does
+        # nothing, it is wrong. Reads the built stylesheet and HTML rather than
+        # the source, because a rule existing is not an element carrying it:
+        # `.hero-scan` was read in the source twice and called harmless, and
+        # was scanning behind the front page headline the whole time. Runs
+        # here, after the build above.
+        run: go run ./tools/motioncheck .
+
       - name: The crawl surfaces the site claims to have
         # Sitemap, robots, canonicals, OpenGraph, structured data, the markdown
         # twins and the skip link. None of these break a build when they go
