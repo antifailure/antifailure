@@ -97,7 +97,7 @@ func (r *Runtime) startProxy(
 		}
 	}
 
-	labels := dockerutil.Managed(dockerutil.KindSidecar, envID, r.clock.Now())
+	labels := r.managed(dockerutil.KindSidecar, envID)
 	labels[dockerutil.LabelService] = ProxyAlias
 
 	resp, err := r.cli.ContainerCreate(ctx,
@@ -301,7 +301,7 @@ func (r *Runtime) ensureProxyImage(ctx context.Context, progress func(string)) e
 	resp, err := r.cli.ImageBuild(ctx, proxyimage.BuildContext(), dockerbuild.ImageBuildOptions{
 		Tags:   []string{tag},
 		Remove: true,
-		Labels: dockerutil.Managed(dockerutil.KindSidecar, "", r.clock.Now()),
+		Labels: r.managed(dockerutil.KindSidecar, ""),
 	})
 	if err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,

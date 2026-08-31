@@ -72,6 +72,19 @@ const (
 	// LabelCreated is RFC 3339, used to age out orphans whose creating
 	// process died before it could clean up.
 	LabelCreated = "dev.antifailure.created"
+	// LabelExpires is when the environment's lifetime ends, in Unix seconds.
+	//
+	// Unix seconds and not RFC 3339, unlike LabelCreated, because a Kubernetes
+	// label value may not contain a colon and every RFC 3339 timestamp does.
+	// The reaper reads this label on both runtimes, so the encoding has to be
+	// one that both accept, and a decimal integer is the only timestamp format
+	// that is.
+	//
+	// Absent means no stated lifetime, which the reaper treats as "leave it
+	// alone" rather than "expired". A resource created by an older release
+	// carries no expiry, and destroying those on sight would make an upgrade
+	// delete everything a machine was holding.
+	LabelExpires = "dev.antifailure.expires"
 )
 
 // ManagedValue is what LabelManaged is stamped with.
@@ -103,6 +116,24 @@ func Managed(kind, envID string, now time.Time) map[string]string {
 	}
 	if envID != "" {
 		l[LabelEnv] = envID
+	}
+	return l
+}
+
+// ManagedUntil returns the label set for a resource with a stated lifetime.
+//
+// One function rather than a caller that adds the label itself, because the
+// reaper's whole predicate is this label: a create site that stamps the rest
+// of the set and forgets this one produces a resource nothing will ever
+// collect, and that is the leak the reaper exists to close.
+//
+// A zero expiry returns the ordinary set. That is the honest answer for a
+// resource belonging to the machine rather than to an environment, such as
+// the sidecar image, which no environment's lifetime governs.
+func ManagedUntil(kind, envID string, now, expires time.Time) map[string]string {
+	l := Managed(kind, envID, now)
+	if !expires.IsZero() {
+		l[LabelExpires] = strconv.FormatInt(expires.UTC().Unix(), 10)
 	}
 	return l
 }

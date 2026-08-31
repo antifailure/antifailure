@@ -692,12 +692,17 @@ const (
 
 // Runtime configures where and how long environments run.
 type Runtime struct {
-	Provider          RuntimeProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
-	TTL               string          `json:"ttl,omitempty" yaml:"ttl,omitempty"`
-	IdleSleep         string          `json:"idle_sleep,omitempty" yaml:"idle_sleep,omitempty"`
-	Domain            string          `json:"domain,omitempty" yaml:"domain,omitempty"`
-	NamespacePrefix   string          `json:"namespace_prefix,omitempty" yaml:"namespace_prefix,omitempty"`
-	KubeconfigContext string          `json:"kubeconfig_context,omitempty" yaml:"kubeconfig_context,omitempty"`
+	Provider RuntimeProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
+	TTL      string          `json:"ttl,omitempty" yaml:"ttl,omitempty"`
+	// MaxTTL is the furthest af env extend may push an environment's expiry,
+	// measured from when the environment was created. It is the answer to
+	// "a lifetime that can be extended forever is not a lifetime": TTL is what
+	// an environment gets without asking, MaxTTL is the most it can be given.
+	MaxTTL            string `json:"max_ttl,omitempty" yaml:"max_ttl,omitempty"`
+	IdleSleep         string `json:"idle_sleep,omitempty" yaml:"idle_sleep,omitempty"`
+	Domain            string `json:"domain,omitempty" yaml:"domain,omitempty"`
+	NamespacePrefix   string `json:"namespace_prefix,omitempty" yaml:"namespace_prefix,omitempty"`
+	KubeconfigContext string `json:"kubeconfig_context,omitempty" yaml:"kubeconfig_context,omitempty"`
 }
 
 // GitHubMode is how the GitHub integration runs.
