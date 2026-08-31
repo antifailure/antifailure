@@ -45,13 +45,23 @@ func (p *Profile) Headline() string {
 	// The count is of checks that will actually run, not of checks selected.
 	// Those differ whenever the manifest has one turned off, and a headline
 	// that counted selections would promise work nothing is going to do.
-	tail := "No check will run."
-	if runs > 0 {
+	// "and N more" only reads correctly after a count it is more than. With
+	// nothing running there is nothing to be more than, and the sentence has
+	// to say the whole of the bad news on its own.
+	var tail string
+	switch {
+	case runs == 0 && gaps == 0:
+		tail = "No check will run."
+	case runs == 0:
+		tail = "No check will run: " +
+			plural(gaps, "check is selected and not configured",
+				"checks are selected and not configured") + "."
+	case gaps == 0:
 		tail = plural(runs, "check will run", "checks will run") + "."
-	}
-	if gaps > 0 {
-		tail = strings.TrimSuffix(tail, ".") + ", and " +
-			plural(gaps, "more is selected and not configured", "more are selected and not configured") + "."
+	default:
+		tail = plural(runs, "check will run", "checks will run") + ", and " +
+			plural(gaps, "more is selected and not configured",
+				"more are selected and not configured") + "."
 	}
 	return fmt.Sprintf("%s changed%s. %s", plural(p.Files, "file", "files"), touching, tail)
 }

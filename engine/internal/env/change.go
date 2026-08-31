@@ -1,12 +1,9 @@
 package env
 
 import (
-	"bytes"
 	"context"
-	"os"
 
 	"github.com/antifailure/antifailure/engine/internal/change"
-	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
 // ChangeOptions are the parts of a change analysis the caller decides.
@@ -29,57 +26,19 @@ type ChangeOptions struct {
 // one thing the product can say about a pull request before anything is built,
 // and making it depend on an environment being up would put it after the
 // expense it exists to justify.
+//
+// The reading and the classifying both live in internal/change, so that the
+// same code answers here and in the command's own path for a repository that
+// has no manifest to build an orchestrator from. Two implementations of this
+// would eventually disagree about what a diff touched, and the one nobody ran
+// in anger would be the one that was wrong.
 func (o *Orchestrator) Change(ctx context.Context, opts ChangeOptions) (*change.Profile, error) {
-	getenv := opts.Getenv
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-
-	var (
-		files     []change.File
-		truncated bool
-		err       error
-		base      = opts.Base
-		head      = opts.Head
-	)
-	if head == "" {
-		head = "HEAD"
-	}
-
-	switch {
-	case opts.DiffPath != "":
-		body, rErr := os.ReadFile(opts.DiffPath)
-		if rErr != nil {
-			return nil, aferrors.Coded(aferrors.AFDET011,
-				"path", opts.DiffPath, "detail", rErr.Error())
-		}
-		files, truncated, err = change.ParseUnifiedDiff(bytes.NewReader(body))
-		if err != nil {
-			return nil, aferrors.Coded(aferrors.AFDET011,
-				"path", opts.DiffPath, "detail", err.Error())
-		}
-		base, head = opts.Base, opts.Head
-	default:
-		if base == "" {
-			base, err = change.ResolveBase(ctx, o.opts.Root, getenv)
-			if err != nil {
-				return nil, err
-			}
-		}
-		o.progress("reading the diff between " + base + " and " + head)
-		files, truncated, err = change.FromGit(ctx, change.GitOptions{
-			Dir: o.opts.Root, Base: base, Head: head,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return change.Analyze(change.Options{
-		Manifest:  o.opts.Manifest,
-		Base:      base,
-		Head:      head,
-		Files:     files,
-		Truncated: truncated,
-	}), nil
+	return change.ForRepo(ctx, o.opts.Manifest, change.Source{
+		Root:     o.opts.Root,
+		Base:     opts.Base,
+		Head:     opts.Head,
+		DiffPath: opts.DiffPath,
+		Getenv:   opts.Getenv,
+		Progress: o.progress,
+	})
 }

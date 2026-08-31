@@ -70,6 +70,42 @@ func surfaces(facts []change.Fact) []string {
 	return out
 }
 
+// The headline counts two different things and has to keep them apart in
+// English as well as in arithmetic. Checks that will run is the promise;
+// checks selected but not configured is the warning. "and N more" is only a
+// sentence when there is something for them to be more than, so the case
+// where nothing runs at all needs its own wording rather than the general
+// one with a zero in it.
+func TestHeadline_CountsWhatWillRunSeparatelyFromWhatIsNotConfigured(t *testing.T) {
+	code := []change.File{{Path: "api/billing.ts", Status: change.StatusModified}}
+
+	// Nothing configured at all: every selected check is a gap, and the
+	// sentence must not claim anything is "more" than the nothing that runs.
+	none := change.Analyze(change.Options{Files: code})
+	assert.Contains(t, none.Headline(), "No check will run:")
+	assert.NotContains(t, none.Headline(), "more",
+		"nothing runs, so there is nothing for the unconfigured checks to be more than")
+
+	// Fully configured: checks run and nothing is left unconfigured.
+	full := billingManifest()
+	full.Load = &schema.Load{Enabled: true}
+	ok := change.Analyze(change.Options{Manifest: full, Files: code})
+	assert.Contains(t, ok.Headline(), "checks will run.")
+	assert.NotContains(t, ok.Headline(), "not configured")
+
+	// The mixed case, which is the only one "more" belongs in: this manifest
+	// runs the environment and the workflows, and has load turned off.
+	mixed := change.Analyze(change.Options{Manifest: billingManifest(), Files: code})
+	assert.Contains(t, mixed.Headline(), "checks will run, and 1 more is selected and not configured.")
+
+	// And the headline never grades any of it.
+	for _, h := range []string{none.Headline(), ok.Headline(), mixed.Headline()} {
+		for _, word := range []string{"risk", "risky", "safe", "unsafe", "dangerous"} {
+			assert.NotContains(t, strings.ToLower(h), word)
+		}
+	}
+}
+
 // rules returns the rule that produced each fact, sorted and deduplicated.
 // Asserting on these rather than only on surfaces is what makes a
 // classification auditable: two rules can assign the same surface, and a test

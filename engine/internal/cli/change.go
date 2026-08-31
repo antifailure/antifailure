@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 
@@ -9,6 +11,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/change"
 	"github.com/antifailure/antifailure/engine/internal/env"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/report"
 )
 
@@ -53,13 +56,8 @@ In a GitHub Actions job it writes one output per check, so a later step can
 skip work this change does not need.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			o, err := orchestrator(e, branch, false)
-			if err != nil {
-				return err
-			}
-			profile, err := o.Change(cmd.Context(), env.ChangeOptions{
-				Base: base, Head: head, DiffPath: diff, Getenv: e.Getenv,
-			})
+			profile, err := changeProfile(cmd.Context(), e, branch,
+				env.ChangeOptions{Base: base, Head: head, DiffPath: diff, Getenv: e.Getenv})
 			if err != nil {
 				return err
 			}
@@ -89,6 +87,59 @@ skip work this change does not need.`),
 	cmd.Flags().StringVarP(&output, "write", "w", "", "Write the report section here as markdown")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to read the manifest for, defaulting to the checked out one")
 	return cmd
+}
+
+// changeProfile reads and classifies the diff, with or without a manifest.
+//
+// Every other command in this product needs antifailure.yaml, because every
+// other command builds something out of it. This one does not: the diff is in
+// git, and what it touches is a fact about the repository rather than about
+// the configuration. So a missing manifest is not an error here, it is the
+// answer to a different question, and the report already has a sentence for
+// it against every check: nothing is configured, so nothing will look.
+//
+// That matters most in the place somebody meets this product first. Running af
+// change in an unconfigured repository and being shown what the tool can see,
+// next to seven checks that all say no manifest was loaded, is a better
+// argument for writing one than AF-MAN-001 is.
+//
+// Any other failure loading the manifest is still an error. A manifest that
+// exists and does not parse must not quietly downgrade to none, because the
+// output would then say no checks are configured to somebody who configured
+// them and has a typo.
+func changeProfile(ctx context.Context, e *Env, branch string, opts env.ChangeOptions) (*change.Profile, error) {
+	o, err := orchestrator(e, branch, false)
+	if err == nil {
+		return o.Change(ctx, opts)
+	}
+
+	var coded *aferrors.Error
+	if !aferrors.As(err, &coded) || coded.Entry.Code != aferrors.AFMAN001 {
+		return nil, err
+	}
+	return change.ForRepo(ctx, nil, change.Source{
+		Root:     gitRoot(e.WorkDir),
+		Base:     opts.Base,
+		Head:     opts.Head,
+		DiffPath: opts.DiffPath,
+		Getenv:   opts.Getenv,
+	})
+}
+
+// gitRoot asks git where the repository starts, since without a manifest
+// there is no other landmark to measure paths from. It falls back to the
+// working directory, which is right for a diff handed in with --diff and
+// wrong in a way that shows up immediately for one read out of git.
+func gitRoot(dir string) string {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
+	out, err := cmd.Output()
+	if err != nil {
+		return dir
+	}
+	if root := strings.TrimSpace(string(out)); root != "" {
+		return root
+	}
+	return dir
 }
 
 // writeChangeOutputs makes the plan actionable inside a GitHub Actions job.

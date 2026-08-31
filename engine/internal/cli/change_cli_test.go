@@ -144,6 +144,53 @@ func TestChange_RendersJSONForAScript(t *testing.T) {
 	}
 }
 
+// Every other command needs antifailure.yaml. This one does not, and that is
+// deliberate rather than lenient: what a diff touches is a fact about the
+// repository, and the checks are then all reported unavailable for the one
+// honest reason. It is also the first thing somebody can run here, so it has
+// to work before they have written anything.
+func TestChange_WorksInARepositoryWithNoManifest(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pr.diff")
+	require.NoError(t, os.WriteFile(path, []byte(codeDiff), 0o600))
+	outputs := filepath.Join(dir, "outputs.txt")
+
+	res := runCLI(t, dir, map[string]string{"GITHUB_OUTPUT": outputs},
+		"change", "--diff", path)
+	require.Zero(t, res.code, res.stderr)
+	assert.NotContains(t, res.stderr, "AF-MAN-001")
+
+	// The facts about the file are still produced, because they do not come
+	// from the manifest.
+	assert.Contains(t, res.stdout, "api/handler.go")
+	assert.Contains(t, res.stdout, "path.code")
+
+	// And every check says the same true thing rather than claiming to run.
+	assert.Contains(t, res.stdout, "no manifest was loaded")
+	written, err := os.ReadFile(outputs)
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "environment=false",
+		"nothing is configured, so no step may be told to do work")
+	assert.Contains(t, string(written), "selected=\n")
+}
+
+// A manifest that exists and is broken must not be downgraded to no manifest.
+// Reporting "nothing is configured" to somebody who configured it and made a
+// typo would turn their mistake into our silence.
+func TestChange_ABrokenManifestIsStillAnError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"),
+		[]byte("version: 1\nname: shop\nservices: [[[\n"), 0o600))
+	path := filepath.Join(dir, "pr.diff")
+	require.NoError(t, os.WriteFile(path, []byte(codeDiff), 0o600))
+
+	res := runCLI(t, dir, nil, "change", "--diff", path)
+	require.NotZero(t, res.code, "a manifest that does not parse is an error, not an absence")
+	assert.NotContains(t, res.stdout, "no manifest was loaded")
+}
+
 // A diff file that is not a diff is a user error with a code, not a panic and
 // not an empty profile that looks like a change touching nothing.
 func TestChange_ReportsAMissingDiffFile(t *testing.T) {
