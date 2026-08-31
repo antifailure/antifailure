@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/antifailure/antifailure/engine/internal/auth"
+	"github.com/antifailure/antifailure/engine/internal/controlplane"
 )
 
 // af login, af logout, af whoami.
@@ -39,7 +40,14 @@ import (
 // secret and retrieving one are different capabilities.
 
 // defaultControlPlane is the hosted instance, used when nothing else says.
-const defaultControlPlane = "https://app.dev.antifailure.dev"
+//
+// Taken from the control plane package rather than written out again. It was
+// written out again, and it drifted: this said app.dev.antifailure.dev, which
+// is the STAGING instance, while everything that sends events went to
+// app.antifailure.dev. So a plain af login signed a terminal in to staging, and
+// the credential it stored was for an origin nothing else in the engine ever
+// talks to. Two spellings of "the hosted instance" is one too many.
+const defaultControlPlane = controlplane.DefaultBaseURL
 
 // LoginJSON is the machine readable result of a login.
 type LoginJSON struct {

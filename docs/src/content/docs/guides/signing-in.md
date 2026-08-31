@@ -14,7 +14,7 @@ $ af login
 
   Your code is  BCDF-GHJK
 
-  Approve it at https://app.dev.antifailure.dev/device
+  Approve it at https://app.antifailure.dev/device
 
   Waiting for approval...
 
@@ -28,7 +28,7 @@ Then:
 $ af whoami
   somebody in antifailure
   role           admin
-  control plane  https://app.dev.antifailure.dev
+  control plane  https://app.antifailure.dev
   scopes         environments.view, runs.view, events.write
   expires        2026-11-26T04:12:09Z
   credential     the operating system keyring, under "antifailure"
@@ -115,7 +115,7 @@ grant needs a person, by design.
 
 ```
 $ af logout
-  Removed the credential for https://app.dev.antifailure.dev.
+  Removed the credential for https://app.antifailure.dev.
   The token is revoked, so a copy of it is no longer valid anywhere.
 ```
 
@@ -140,7 +140,7 @@ The short code is the point. Run `af login --no-browser`, read the code off
 this terminal, and approve it in a browser anywhere else, including a phone.
 
 ```
-af login --no-browser --control-plane https://app.dev.antifailure.dev
+af login --no-browser
 ```
 
 The code contains no character that is easy to misread: no `O` or `0`, no `I`,

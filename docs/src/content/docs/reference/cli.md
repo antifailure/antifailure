@@ -1293,6 +1293,89 @@ af test [flags]
 | `--only` | - | Run just these workflows, by name. |
 | `--runner` | - | Path to the runner's entry point. |
 
+### `af token`
+
+Engine tokens, which is what CI and a self-hosted engine present.
+
+An engine token is what goes in AF_CONTROL_PLANE_TOKEN. It belongs to the
+organization rather than to you, so it keeps working after you leave, and it
+carries no identity: it can send events and read an environment back, and it
+cannot reach a key, a member, or another token.
+
+These commands need a token that asked for the capability:
+
+  af login --scope tokens.manage
+
+A token from a plain af login cannot mint one, which is deliberate. A credential
+that can make more credentials is a credential worth stealing twice.
+
+```
+af token
+```
+
+Subcommands:
+
+- [`af token create`](#af-token-create) Mint an engine token and show it once.
+- [`af token list`](#af-token-list) What engine tokens exist, and when each was last used.
+- [`af token rm`](#af-token-rm) Revoke an engine token.
+
+### `af token create`
+
+Mint an engine token and show it once.
+
+Mints a token and prints it. Only its hash is stored, so this is the one and
+only time it can be read: there is no command and no screen that will show it
+again. If you lose it, mint another and revoke this one.
+
+The name is a label you will read in a list months from now, so name it after
+where it is going rather than after today.
+
+```
+af token create <name> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af token list`
+
+What engine tokens exist, and when each was last used.
+
+Shows every engine token, revoked ones included. A revoked one is shown rather
+than hidden, because the question this is usually asked is whether the token
+that stopped working is the one you revoked.
+
+It does not show a token and there is no flag that would. The prefix is what
+tells two of them apart, and it is what af token rm accepts.
+
+```
+af token list [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af token rm`
+
+Revoke an engine token.
+
+Revokes a token immediately. Anything presenting it stops being accepted on the
+next request rather than at the end of a cache window.
+
+Takes the prefix af token list shows, or the full id. Running it twice is not an
+error: the second run says it was already revoked, because during an incident
+the same command gets run twice and the second must not read as a new problem.
+
+```
+af token rm <id or prefix> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
 ### `af up`
 
 Create an environment for the current branch.
