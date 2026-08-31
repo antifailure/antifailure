@@ -138,7 +138,7 @@ function PlaneDiagram() {
               <Receipt className="flex items-center justify-between gap-3">
                 <span>
                   rpt_08f2 · sha256:7c1a…
-                  <span className="mt-0.5 block text-black/45">evidence, not records</span>
+                  <span className="mt-0.5 block text-black/60">evidence, not records</span>
                 </span>
                 <StatusPill tone="FAIL" />
               </Receipt>
@@ -163,7 +163,7 @@ function PlaneDiagram() {
                   <MonoLabel>UP / OUT</MonoLabel>
                   <QueueChip>mTLS</QueueChip>
                 </div>
-                <div className="mt-1.5 text-black/45">short-lived credentials · no inbound hole</div>
+                <div className="mt-1.5 text-black/60">short-lived credentials · no inbound hole</div>
               </Receipt>
             }
           />
@@ -232,7 +232,7 @@ export function ArchitecturePage() {
               <ul className="mt-5 grid grid-cols-1 gap-3">
                 {ISOLATION_PLANNED.map((item) => (
                   <li key={item}>
-                    <CheckRow ok={false} className="text-black/45">
+                    <CheckRow ok={false} className="text-black/60">
                       {item}
                     </CheckRow>
                   </li>

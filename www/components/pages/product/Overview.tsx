@@ -197,7 +197,7 @@ export function OverviewPage() {
                 {FRAGMENTS.map((name) => (
                   <span
                     key={name}
-                    className="border border-black/[0.08] px-2 py-1 font-mono text-[10px] tracking-extra-tight text-black/45"
+                    className="border border-black/[0.08] px-2 py-1 font-mono text-[10px] tracking-extra-tight text-black/60"
                   >
                     {name}
                   </span>
@@ -215,7 +215,7 @@ export function OverviewPage() {
                   <ul className="mt-4 space-y-2.5">
                     {STAGING_ROWS.map((row) => (
                       <li key={row.miss}>
-                        <CheckRow ok={false} className="text-black/45">
+                        <CheckRow ok={false} className="text-black/60">
                           {row.miss}
                         </CheckRow>
                       </li>
@@ -276,13 +276,13 @@ export function OverviewPage() {
             <Hairline />
             <div className="px-5 py-5">
               <h3 className="text-[18px] tracking-extra-tight text-black">Unsafe schema migration</h3>
-              <p className="mt-2 font-mono text-[12px] tracking-extra-tight text-black/45">
+              <p className="mt-2 font-mono text-[12px] tracking-extra-tight text-black/60">
                 20260824_add_billing_status
               </p>
               <dl className="mt-5 space-y-2.5">
                 {MIGRATION_FINDINGS.map((row) => (
                   <div key={row.k} className="flex items-baseline justify-between gap-4">
-                    <dt className="font-mono text-[11px] tracking-extra-tight text-black/40">{row.k}</dt>
+                    <dt className="font-mono text-[11px] tracking-extra-tight text-black/55">{row.k}</dt>
                     <dd
                       className={cn(
                         "font-mono text-[12px] tracking-extra-tight",

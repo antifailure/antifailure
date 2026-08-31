@@ -113,7 +113,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
       <div className="relative flex flex-col bg-[#f7f7f5] px-6 py-8 sm:px-8 lg:px-16 max-sm:pb-[max(2rem,env(safe-area-inset-bottom))]">
         <a
           href="/"
-          className="inline-flex w-fit shrink-0 items-center gap-2 text-[13px] text-black/45 hover:text-black"
+          className="inline-flex w-fit shrink-0 items-center gap-2 text-[13px] text-black/60 hover:text-black"
         >
           <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden>
             <path d="M10 3 5 8l5 5" stroke="currentColor" strokeWidth="1.4" />
@@ -144,7 +144,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
 
               <div className="mt-7 flex items-center gap-4" aria-hidden>
                 <span className="h-px flex-1 bg-black/10" />
-                <span className="text-[12px] text-black/40">
+                <span className="text-[12px] text-black/55">
                   {done ? "already on the list" : "not invited yet"}
                 </span>
                 <span className="h-px flex-1 bg-black/10" />
@@ -224,7 +224,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
                   {busy ? "Adding you" : "Join the waitlist"}
                 </button>
 
-                <p className="mt-5 text-[12px] leading-5 text-black/45">
+                <p className="mt-5 text-[12px] leading-5 text-black/60">
                   We store the address and nothing else. It is used to tell you
                   when the hosted product exists. See the{" "}
                   <button

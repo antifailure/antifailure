@@ -194,7 +194,7 @@ export function FirewallPage() {
                 key={row.receipt}
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-black/[0.08] px-5 py-3 last:border-b-0"
               >
-                <span className="w-10 shrink-0 font-mono text-[10px] tracking-extra-tight text-black/40">
+                <span className="w-10 shrink-0 font-mono text-[10px] tracking-extra-tight text-black/55">
                   {row.method}
                 </span>
                 <span className="min-w-0 flex-1 font-mono text-[12px] tracking-extra-tight text-black">
@@ -202,7 +202,7 @@ export function FirewallPage() {
                 </span>
                 <QueueChip blocked={row.bypass}>{row.action}</QueueChip>
                 <StatusPill tone={row.tone}>{row.tone}</StatusPill>
-                <span className="w-[88px] shrink-0 text-right font-mono text-[10px] tracking-extra-tight text-black/45">
+                <span className="w-[88px] shrink-0 text-right font-mono text-[10px] tracking-extra-tight text-black/60">
                   {row.receipt}
                 </span>
               </li>

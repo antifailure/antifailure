@@ -179,7 +179,7 @@ export function PricingPage() {
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-6 py-5 text-[18px] tracking-extra-tight text-black [&::-webkit-details-marker]:hidden">
                 {title}
-                <Chevron className="h-2.5 w-2.5 shrink-0 text-black/40 transition-transform duration-200 group-open:rotate-180" />
+                <Chevron className="h-2.5 w-2.5 shrink-0 text-black/55 transition-transform duration-200 group-open:rotate-180" />
               </summary>
               <p className="pb-5 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
                 {body}

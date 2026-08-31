@@ -139,7 +139,7 @@ function GateCard({ tone, pr, title, evidence, merge }: (typeof GATES)[number]) 
   return (
     <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between gap-3 px-4 py-2.5">
-        <span className="font-mono text-[11px] tracking-extra-tight text-black/45">{pr}</span>
+        <span className="font-mono text-[11px] tracking-extra-tight text-black/60">{pr}</span>
         <StatusPill tone={tone} />
       </div>
       <Hairline />
@@ -152,7 +152,7 @@ function GateCard({ tone, pr, title, evidence, merge }: (typeof GATES)[number]) 
         className={cn(
           "px-4 py-2.5 font-mono text-[10px] tracking-extra-tight",
           tone === "PASS" && "text-[#285D49]",
-          tone === "UNVERIFIED" && "text-black/45",
+          tone === "UNVERIFIED" && "text-black/60",
           tone === "FAIL" && "text-red-700",
         )}
       >
@@ -173,7 +173,7 @@ function PrCheckChrome() {
           <span className="truncate font-mono text-[13px] tracking-extra-tight text-black">add access_tier</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] tracking-extra-tight text-black/40">required · 1 of 4</span>
+          <span className="font-mono text-[10px] tracking-extra-tight text-black/55">required · 1 of 4</span>
           <StatusPill tone="FAIL">FAIL</StatusPill>
         </div>
       </div>
@@ -182,7 +182,7 @@ function PrCheckChrome() {
       <ul>
         {CI_CHECKS.map((check) => (
           <li key={check.name} className="flex items-center justify-between gap-3 px-4 py-2">
-            <div className="flex min-w-0 items-center gap-2 font-mono text-[12px] tracking-extra-tight text-black/40">
+            <div className="flex min-w-0 items-center gap-2 font-mono text-[12px] tracking-extra-tight text-black/55">
               <ToneDot tone="PASS" />
               <span className="truncate">{check.name}</span>
             </div>
@@ -204,7 +204,7 @@ function PrCheckChrome() {
               <div className="font-mono text-[12px] tracking-extra-tight text-black">
                 Antifailure / deployment safety
               </div>
-              <div className="mt-0.5 font-mono text-[10px] tracking-extra-tight text-black/40">
+              <div className="mt-0.5 font-mono text-[10px] tracking-extra-tight text-black/55">
                 env-08f2 · 4m 12s
               </div>
             </div>
@@ -222,7 +222,7 @@ function PrCheckChrome() {
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[380px] text-left font-mono text-[11px] tracking-extra-tight tabular-nums">
             <thead>
-              <tr className="text-black/40">
+              <tr className="text-black/55">
                 <th className="py-1 pr-6 font-normal">account_id</th>
                 <th className="py-1 pr-6 font-normal">active</th>
                 <th className="py-1 font-normal">latest</th>
@@ -265,7 +265,7 @@ function PrCheckChrome() {
           <div className="flex items-center justify-between gap-4 px-4 py-2.5">
             <div className="min-w-0">
               <div className="font-mono text-[12px] tracking-extra-tight text-black">{row.label}</div>
-              <div className="mt-0.5 font-mono text-[11px] tracking-extra-tight text-black/45">{row.value}</div>
+              <div className="mt-0.5 font-mono text-[11px] tracking-extra-tight text-black/60">{row.value}</div>
             </div>
             <StatusPill tone={row.tone}>{row.pill ?? row.tone}</StatusPill>
           </div>

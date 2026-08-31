@@ -177,7 +177,7 @@ function SectionRail({ activeIndex, progress }: { activeIndex: number; progress:
               className={cn(
                 "shrink-0 whitespace-nowrap border-b-[1.5px] py-3 pr-4 text-[13px] tracking-extra-tight transition-colors duration-200",
                 "first:pl-0",
-                isActive ? "border-black text-black" : "border-transparent text-black/40",
+                isActive ? "border-black text-black" : "border-transparent text-black/55",
               )}
             >
               <span className="mr-1.5 font-mono text-[10px] tabular-nums text-black/30">
