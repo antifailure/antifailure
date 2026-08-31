@@ -290,9 +290,12 @@ until they disagree, and then the only useful sentence is which one won.`),
 				e.Out.Println("  there with 'af provider' has a monthly cap. This key is not that")
 				e.Out.Println("  one: it goes straight to the provider and no cap applies.")
 				e.Out.Println("")
-				e.Out.Printf("  To use the capped key instead, point %s at\n", cfg.Provider.BaseURLVar)
-				e.Out.Printf("  %s/byok/%s and use an Antifailure token as the key.\n",
-					uncapped, cfg.Provider.Name)
+				e.Out.Println("  To use the capped key instead, put an Antifailure token where the")
+				e.Out.Printf("  provider key goes, and point %s at:\n", cfg.Provider.BaseURLVar)
+				// The URL alone on its line. Prose wrapped around it would run
+				// past eighty columns for any control plane with a real domain,
+				// and this is a line people copy.
+				e.Out.Printf("    %s/byok/%s\n", uncapped, cfg.Provider.Name)
 			}
 			return nil
 		},

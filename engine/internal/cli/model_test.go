@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -152,6 +153,27 @@ func TestModel_WarnsWhenAControlPlaneCapIsNotInForce(t *testing.T) {
 			"", "model", "show")
 		require.NotContains(t, res.stdout, "no cap applies")
 		require.NotContains(t, res.stdout, "control plane")
+	})
+
+	t.Run("an expired session says nothing", func(t *testing.T) {
+		t.Parallel()
+		// The cap still exists on the control plane, but nothing can reach it
+		// through a lapsed session, and the warning's own first sentence says
+		// "you are signed in", which would be false. Telling somebody to route
+		// through a gateway their token cannot open is worse than silence.
+		store := &auth.Store{Ring: newMemoryRing(), Dir: t.TempDir()}
+		require.NoError(t, store.Save(auth.Credential{
+			ControlPlane: auth.Normalise(origin),
+			Token:        "afu_" + strings.Repeat("t", 43),
+			Login:        "somebody",
+			ExpiresAt:    epoch.Add(-time.Hour),
+		}))
+
+		res := runModelCLIAs(t, t.TempDir(), map[string]string{
+			"ANTHROPIC_API_KEY":    "sk-local",
+			"AF_CONTROL_PLANE_URL": origin,
+		}, newMemoryRing(), store, "", "model", "show")
+		require.NotContains(t, res.stdout, "no cap applies")
 	})
 
 	t.Run("a self-hosted control plane on its own domain is recognised", func(t *testing.T) {
