@@ -23,6 +23,15 @@ output "action_group_id" {
 # The value the asuid TXT record has to carry. Terraform writes that record
 # itself when the zone is in Azure DNS; this is for an installation whose DNS is
 # at a registrar, where binding the name is a person's job.
+# sensitive because the provider marks the attribute sensitive, and a root
+# module output carrying one has to say so or terraform refuses the plan. The
+# value itself is not a secret: it ends up in public DNS as a TXT record. The
+# marking only keeps it out of the plan summary, which is world readable on a
+# public repository, and this file already declines to output the paging
+# addresses for that same reason. Read it with
+# `terraform output -raw custom_domain_verification_id`, which is what the
+# instruction above wants anyway, since the record takes the bare value.
 output "custom_domain_verification_id" {
-  value = module.control_plane.custom_domain_verification_id
+  value     = module.control_plane.custom_domain_verification_id
+  sensitive = true
 }
