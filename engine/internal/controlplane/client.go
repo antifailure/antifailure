@@ -316,9 +316,12 @@ func (c *Client) statusError(res *http.Response) error {
 
 	switch res.StatusCode {
 	case http.StatusUnauthorized:
+		// The command that fixes it, not the place it used to say to go. There
+		// was no screen in the control plane that created an engine token when
+		// this sentence was written, so it sent a reader looking for one.
 		return fmt.Errorf(
-			"controlplane: the token was refused. Create a new one in the control plane " +
-				"and set AF_CONTROL_PLANE_TOKEN, or run 'af login' again")
+			"controlplane: the token was refused. Run 'af token create ci' and set " +
+				"AF_CONTROL_PLANE_TOKEN to what it prints, or run 'af login' again")
 	case http.StatusForbidden:
 		return fmt.Errorf("controlplane: this token does not have permission to do that")
 	}
