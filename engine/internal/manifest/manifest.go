@@ -522,7 +522,7 @@ var knownKeys = []string{
 	"migration_lock", "warn_ms", "fail_ms", "migration_failed", "migration_rewrite",
 	"migration_lint", "plan_regression", "load_regression", "egress_surprise",
 	"masking", "cleanup",
-	"ttl", "idle_sleep", "domain", "namespace_prefix", "kubeconfig_context",
+	"ttl", "max_ttl", "idle_sleep", "domain", "namespace_prefix", "kubeconfig_context",
 	"comment", "fork_policy", "teardown_on",
 	"adapter", "token_env", "url", "connection", "table", "sessions", "password",
 	"schema", "id", "json", "timestamps", "min_length", "symbols", "forbid",

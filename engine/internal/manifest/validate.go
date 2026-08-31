@@ -976,10 +976,25 @@ func (v *validator) runtime(m *schema.Manifest) {
 	if r == nil {
 		return
 	}
-	for field, val := range map[string]string{"ttl": r.TTL, "idle_sleep": r.IdleSleep} {
+	for field, val := range map[string]string{
+		"ttl": r.TTL, "max_ttl": r.MaxTTL, "idle_sleep": r.IdleSleep,
+	} {
 		if _, err := ParseDuration(val); err != nil {
 			v.add("runtime."+field, fmt.Sprintf("The value %q is not a duration.", val), "")
 		}
+	}
+	// A maximum below the default lifetime would mean every environment was
+	// born already past the furthest point it could ever be extended to, so
+	// af env extend could only ever refuse. Caught here rather than clamped,
+	// because the manifest says two things that cannot both be true and the
+	// author is the only one who knows which they meant.
+	ttl, ttlErr := ParseDuration(r.TTL)
+	maxTTL, maxErr := ParseDuration(r.MaxTTL)
+	if ttlErr == nil && maxErr == nil && maxTTL < ttl {
+		v.add("runtime.max_ttl",
+			fmt.Sprintf("The maximum lifetime %q is shorter than the lifetime %q.", r.MaxTTL, r.TTL),
+			"Set max_ttl to at least ttl. It is the furthest af env extend may push an "+
+				"environment's expiry, so a value below ttl leaves nothing to extend.")
 	}
 	if r.Provider == schema.RuntimeKubernetes && r.Domain == DefaultDomain {
 		v.add("runtime.domain",

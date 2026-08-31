@@ -1308,8 +1308,14 @@
         "ttl": {
           "type": "string",
           "pattern": "^[0-9]+(h|d)$",
+          "default": "24h",
+          "description": "How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl."
+        },
+        "max_ttl": {
+          "type": "string",
+          "pattern": "^[0-9]+(h|d)$",
           "default": "168h",
-          "description": "How long an environment lives before automatic teardown."
+          "description": "The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound."
         },
         "idle_sleep": {
           "type": "string",
