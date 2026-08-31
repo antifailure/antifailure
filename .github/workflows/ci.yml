@@ -362,6 +362,12 @@ jobs:
             console/package-lock.json
             api/package-lock.json
 
+      # For classcheck below, which reads the built HTML this job produces.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
       - run: npm ci --no-audit --no-fund
         working-directory: www
 
@@ -371,6 +377,15 @@ jobs:
         # proof is the production export itself.
         run: npm run build
         working-directory: www
+
+      - name: No class that never applies
+        # `cn` is a plain join rather than tailwind-merge, so a className passed
+        # to a component lands beside the component's own class and the cascade
+        # picks whichever Tailwind emitted last. The site header marked the
+        # current page with text-black over a text-black/70 default, lost, and
+        # marked nothing at all for as long as the header has existed. It reads
+        # the built HTML, so it runs here, after the build above.
+        run: go run ./tools/classcheck .
 
       - name: The crawl surfaces the site claims to have
         # Sitemap, robots, canonicals, OpenGraph, structured data, the markdown
