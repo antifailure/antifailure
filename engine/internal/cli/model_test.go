@@ -126,6 +126,17 @@ func TestModelSet_SaysWhenTheStoredKeyIsShadowed(t *testing.T) {
 		ring, "", "model", "show")
 	require.Contains(t, shown.stdout,
 		"ANTHROPIC_API_KEY is also set in the system keyring")
+
+	// And in JSON, because a warning that reaches a terminal and not a script
+	// is how a dashboard says everything is fine while the person beside it is
+	// being told otherwise.
+	js := runModelCLI(t, dir,
+		map[string]string{"ANTHROPIC_API_KEY": "sk-exported-long-ago"},
+		ring, "", "model", "show", "-o", "json")
+	var got cli.ModelShowJSON
+	require.NoError(t, json.Unmarshal([]byte(js.stdout), &got))
+	require.Equal(t, "the system keyring", got.Shadowing)
+	require.Equal(t, "this shell's environment", got.Source)
 }
 
 func TestModelSet_StoresAndResolves(t *testing.T) {

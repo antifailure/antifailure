@@ -65,6 +65,11 @@ type ModelShowJSON struct {
 	// Planner is what a run will actually use, which is the question somebody
 	// is really asking.
 	Planner string `json:"planner"`
+	// Shadowing names a lower priority source that also holds a key, so a
+	// script sees what the terminal warns about. Reported in one place and not
+	// the other is how a dashboard ends up saying everything is fine while the
+	// person beside it is being told otherwise.
+	Shadowing string `json:"also_set_in,omitempty"`
 	// Searched names every source that was asked, so a "not configured" answer
 	// says where a key could go rather than only that there is not one.
 	Searched []string `json:"searched"`
@@ -211,6 +216,8 @@ until they disagree, and then the only useful sentence is which one won.`),
 				verified = record.VerifiedAt.Format(time.RFC3339)
 			}
 
+			shadow := shadowedBy(ctx, chain, cfg)
+
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(ModelShowJSON{
 					Configured:  true,
@@ -222,6 +229,7 @@ until they disagree, and then the only useful sentence is which one won.`),
 					Fingerprint: cfg.Fingerprint,
 					VerifiedAt:  verified,
 					Planner:     "model",
+					Shadowing:   shadow,
 					Searched:    searched,
 				})
 			}
@@ -255,7 +263,7 @@ until they disagree, and then the only useful sentence is which one won.`),
 			// is looking at a key from somewhere else needs this said out loud,
 			// because everything above it is correct and none of it explains
 			// why the key they stored is not the one in use.
-			if shadow := shadowedBy(ctx, chain, cfg); shadow != "" {
+			if shadow != "" {
 				e.Out.Println("")
 				e.Out.Printf("  %s is also set in %s, which is asked after\n",
 					cfg.Provider.KeyVar, shadow)
