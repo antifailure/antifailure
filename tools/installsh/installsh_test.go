@@ -57,7 +57,13 @@ func fixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	stage := filepath.Join(dir, name())
-	if err := os.MkdirAll(filepath.Join(stage, "runner"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(stage, "runner", "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// src/main.ts is the file the engine stats to decide a directory is a
+	// runner, so the fixture has to carry it for a placement test to mean
+	// anything.
+	if err := os.WriteFile(filepath.Join(stage, "runner", "src", "main.ts"), []byte("// fixture\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	af := "#!/bin/sh\necho \"antifailure 9.9.9 (fixture)\"\n"
@@ -664,4 +670,98 @@ func TestABadChecksumRefusesToInstall(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.home, ".zshrc")); err == nil {
 		t.Error("a refused install still edited the profile")
 	}
+}
+
+// The second command the installer prints has to be one that can succeed.
+//
+// It could not: install.sh put the runner source at $PREFIX/runner, which is
+// where af looks for an INSTALLED runner, and `af runner install` searches
+// $PREFIX/bin/runner and $PREFIX/share/antifailure/runner for a SOURCE. So on
+// every machine installed with curl | sh it answered AF-AGT-004 and advised
+// running itself. Reproduced against the released v0.1.1 binary.
+func TestTheRunnerSourceLandsWhereRunnerInstallLooks(t *testing.T) {
+	s := newSession(t)
+	s.install()
+
+	prefix := filepath.Join(s.home, ".antifailure")
+	// The path runnerSource builds from the binary's own directory:
+	// dir(af)/../share/antifailure/runner.
+	want := filepath.Join(prefix, "share", "antifailure", "runner", "src", "main.ts")
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("no runner source where af runner install looks: %v", err)
+	}
+	// And not at the installed location, which is af runner install's output
+	// rather than its input. A source there is a runner with no node_modules
+	// that af test finds first and fails on inside node.
+	if _, err := os.Stat(filepath.Join(prefix, "runner")); err == nil {
+		t.Error("the runner source was left where an installed runner belongs")
+	}
+}
+
+func TestAHalfInstalledRunnerFromAnOlderInstallerIsCleanedUp(t *testing.T) {
+	s := newSession(t)
+	stale := filepath.Join(s.home, ".antifailure", "runner", "src")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "main.ts"), []byte("// stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.install()
+	if _, err := os.Stat(filepath.Join(s.home, ".antifailure", "runner")); err == nil {
+		t.Error("a runner with no node_modules survived, so af test still finds it first")
+	}
+}
+
+func TestARealInstalledRunnerIsNotDeleted(t *testing.T) {
+	s := newSession(t)
+	installed := filepath.Join(s.home, ".antifailure", "runner")
+	if err := os.MkdirAll(filepath.Join(installed, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(installed, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed, "src", "main.ts"), []byte("// mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.install()
+	if _, err := os.Stat(filepath.Join(installed, "node_modules")); err != nil {
+		t.Errorf("an installed runner with dependencies was deleted: %v", err)
+	}
+}
+
+// A dependency named at the end of a successful install costs a minute. The
+// same one discovered three commands later is a bug report.
+func TestMissingNodeIsNamedWhileTheReaderIsStillLooking(t *testing.T) {
+	s := newSession(t)
+	if _, err := exec.LookPath("node"); err == nil {
+		// The session PATH is deliberately narrow, but say so rather than
+		// silently testing nothing if that ever changes.
+		if strings.Contains(s.path, filepath.Dir(mustLookPath(t, "node"))) {
+			t.Skip("node is on the session PATH, so its absence cannot be provoked")
+		}
+	}
+	out := s.install()
+	contains(t, out, "node was not found")
+	contains(t, out, "22.6")
+	contains(t, out, "https://nodejs.org")
+}
+
+func TestNodePresentSaysNothingAboutNode(t *testing.T) {
+	s := newSession(t)
+	if err := os.WriteFile(filepath.Join(s.stubs, "node"), []byte("#!/bin/sh\necho v24.0.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := s.install()
+	absent(t, out, "node was not found")
+}
+
+func mustLookPath(t *testing.T, name string) string {
+	t.Helper()
+	p, err := exec.LookPath(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

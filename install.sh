@@ -93,9 +93,36 @@ mkdir -p "$BIN_DIR" "$PREFIX"
 install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null \
   || { cp "$tmp/$name/af" "$BIN_DIR/af" && chmod 0755 "$BIN_DIR/af"; }
 
-# The runner travels with the binary, so af test finds it without a flag.
-rm -rf "$PREFIX/runner"
-cp -R "$tmp/$name/runner" "$PREFIX/runner"
+# The runner source travels with the binary rather than being fetched later,
+# and it lands where `af runner install` looks for it.
+#
+# It used to land at $PREFIX/runner, which is where af LOOKS FOR AN INSTALLED
+# runner, not where it looks for a source to install from. The two effects,
+# both reproduced on a clean machine against v0.1.1:
+#
+#   af runner install  AF-AGT-004, no runner source was found, having searched
+#                      $PREFIX/bin/runner and $PREFIX/share/antifailure/runner
+#                      and neither of the two checkout paths. Its remediation
+#                      is "install it with af runner install", so the second
+#                      command the installer prints was a dead end that told
+#                      you to run itself.
+#   af runner check    "ok runner", because it stats src/main.ts, on a tree
+#                      with no node_modules. So the breakage surfaced later,
+#                      inside af test, as a node error.
+#
+# $PREFIX/share/antifailure/runner is one of the paths runnerSource already
+# checks, resolved from the binary's own directory. Nothing in the engine
+# changes; the file just goes where the engine was already looking.
+rm -rf "$PREFIX/share/antifailure/runner"
+mkdir -p "$PREFIX/share/antifailure"
+cp -R "$tmp/$name/runner" "$PREFIX/share/antifailure/runner"
+
+# A tree left at the old location by an earlier installer is a source with no
+# dependencies, and af test finds it before it finds anything else. Removing it
+# turns a mysterious node failure into AF-AGT-004, whose remediation now works.
+if [ -d "$PREFIX/runner" ] && [ ! -d "$PREFIX/runner/node_modules" ]; then
+  rm -rf "$PREFIX/runner"
+fi
 
 say ""
 say "Installed $VERSION to $BIN_DIR/af"
@@ -243,6 +270,21 @@ next_steps_full() {
   say "  $1/af init"
 }
 
+# Said by the installer rather than left for af runner install to discover,
+# because the installer knows now and the reader is reading now. A missing
+# dependency named at the end of a successful install is a minute of somebody's
+# time; the same one discovered three commands later is a bug report.
+node_note() {
+  command -v node >/dev/null 2>&1 && return 0
+  say ""
+  say "node was not found, and af runner install needs node 22.6 or newer."
+  if [ "$os" = "darwin" ]; then
+    say "Get it from https://nodejs.org, or with: brew install node"
+  else
+    say "Get it from https://nodejs.org, or from your distribution's packages."
+  fi
+}
+
 wrote=""
 reason=""
 if [ -n "${GITHUB_PATH:-}" ]; then
@@ -362,3 +404,4 @@ else
   say ""
   next_steps_full "$(display_path "$BIN_DIR")"
 fi
+node_note
