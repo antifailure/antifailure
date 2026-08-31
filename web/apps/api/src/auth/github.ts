@@ -241,6 +241,14 @@ export interface GitHubConfig {
      * on. Both were checked against the real API before this was written.
      */
     onRepository(repository: string): Promise<InstalledOn | null>
+    /**
+     * Drops the cached token, so the next call mints a new one.
+     *
+     * On the port rather than an implementation detail because the client is
+     * the only thing that learns a token has stopped working: the cache cannot
+     * know, and GitHub does not tell it until somebody uses it.
+     */
+    forget(installationId: number): void
   }
 }
 
@@ -483,21 +491,13 @@ export class RealGitHubClient implements GitHubClient {
     if (!tokens) {
       throw new GitHubError(blockerFor('no-app-configured', { repository, workflow }).message)
     }
-    const token = await tokens.for(installationId)
-    const base = this.config.apiBase ?? 'https://api.github.com'
     const path =
       `/repos/${encodePath(repository)}` +
       `/actions/workflows/${encodeURIComponent(workflow)}/dispatches`
 
-    const res = await fetch(new URL(path, base), {
+    const res = await this.authed(installationId, path, {
       method: 'POST',
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: 'application/vnd.github+json',
-        'content-type': 'application/json',
-        'x-github-api-version': '2022-11-28',
-        'user-agent': 'antifailure',
-      },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ref, inputs }),
     })
     // 204 and nothing else. GitHub returns no body and no run id, so there is
@@ -545,7 +545,6 @@ export class RealGitHubClient implements GitHubClient {
     if (!tokens) return blockerFor('no-app-configured', subject)
 
     const installed = await tokens.onRepository(repository)
-    const token = await tokens.for(installationId)
     if (!installed) {
       // Not installed, or not a repository GitHub will show this App at all.
       // One more call separates them, because "add the repository to the
@@ -553,7 +552,7 @@ export class RealGitHubClient implements GitHubClient {
       // A public repository answers 200 here whether or not the App holds it,
       // which is precisely why this is the second question and not the first.
       return blockerFor(
-        (await this.reachable(token, `/repos/${encodePath(repository)}`))
+        (await this.reachable(installationId, `/repos/${encodePath(repository)}`))
           ? 'app-not-installed'
           : 'repository-not-visible',
         subject,
@@ -564,11 +563,14 @@ export class RealGitHubClient implements GitHubClient {
     if (installed.permissions.actions !== 'write') {
       return blockerFor('permission-missing', subject)
     }
-    if (!(await this.reachable(token, `/repos/${encodePath(repository)}/actions/workflows/${encodeURIComponent(workflow)}`))) {
+    const workflowPath =
+      `/repos/${encodePath(repository)}/actions/workflows/${encodeURIComponent(workflow)}`
+    if (!(await this.reachable(installationId, workflowPath))) {
       return blockerFor('workflow-missing', subject)
     }
     if (ref !== undefined && ref !== '') {
-      if (!(await this.reachable(token, `/repos/${encodePath(repository)}/branches/${encodeURIComponent(ref)}`))) {
+      const branchPath = `/repos/${encodePath(repository)}/branches/${encodeURIComponent(ref)}`
+      if (!(await this.reachable(installationId, branchPath))) {
         return blockerFor('branch-missing', subject)
       }
     }
@@ -576,7 +578,56 @@ export class RealGitHubClient implements GitHubClient {
   }
 
   /**
-   * Does GitHub serve this path to this token?
+   * One request as the installation, retried once on a 401 with a fresh token.
+   *
+   * The retry is the whole reason this exists, and it is not defensive
+   * programming. An installation token is cached for its full hour, and GitHub
+   * invalidates the outstanding ones the moment somebody changes what the
+   * installation is granted. Accepting a permission is exactly that, and it is
+   * the last thing a person does before coming back here to press the button
+   * again, so the ordinary path through this product ends with a cached token
+   * that GitHub stopped honouring seconds ago and will keep refusing for up to
+   * an hour.
+   *
+   * Worse, without the retry the diagnosis lies. A 401 makes every lookup in
+   * `dispatchBlocker` answer "not 404", so it finds nothing wrong and the
+   * caller is told the App is installed with Actions write and the workflow
+   * file is there. All three sentences are true, and the button still does not
+   * work, which is the failure this whole change exists to stop.
+   *
+   * `forget` had no callers anywhere in the tree until this. It was written for
+   * this case and never wired to it.
+   */
+  private async authed(
+    installationId: number,
+    path: string,
+    init: RequestInit = {},
+  ): Promise<Response> {
+    const tokens = this.config.installationTokens!
+    const base = this.config.apiBase ?? 'https://api.github.com'
+    const send = async (token: string): Promise<Response> =>
+      fetch(new URL(path, base), {
+        ...init,
+        headers: {
+          ...(init.headers as Record<string, string> | undefined),
+          authorization: `Bearer ${token}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'user-agent': 'antifailure',
+        },
+      })
+
+    const res = await send(await tokens.for(installationId))
+    if (res.status !== 401) return res
+    // Once, and only once. A second 401 is a credential this process cannot
+    // fix by asking again, and a loop would turn a bad private key into a
+    // request storm against GitHub.
+    tokens.forget(installationId)
+    return send(await tokens.for(installationId))
+  }
+
+  /**
+   * Does GitHub serve this path to this installation?
    *
    * Only 404 counts as absent. Anything else that is not ok is left as present
    * on purpose: a rate limit is a 403 and a bad gateway is a 502, and reading
@@ -584,16 +635,8 @@ export class RealGitHubClient implements GitHubClient {
    * commit a file that is already committed. A gate whose findings are
    * sometimes invented is worse than one that occasionally says nothing.
    */
-  private async reachable(token: string, path: string): Promise<boolean> {
-    const base = this.config.apiBase ?? 'https://api.github.com'
-    const res = await fetch(new URL(path, base), {
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: 'application/vnd.github+json',
-        'x-github-api-version': '2022-11-28',
-        'user-agent': 'antifailure',
-      },
-    })
+  private async reachable(installationId: number, path: string): Promise<boolean> {
+    const res = await this.authed(installationId, path)
     return res.status !== 404
   }
 

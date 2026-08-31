@@ -165,12 +165,14 @@ describe('dispatching a workflow against GitHub', () => {
       for: async () => 'ghs_installation_token',
       onRepository: async () =>
         w.installation === null ? null : { id: 4242, permissions: w.installation.permissions },
+      forget: () => {},
     }
   }
 
   function realClient(installationTokens?: {
     for(id: number): Promise<string>
     onRepository(repository: string): Promise<{ id: number; permissions: Record<string, string> } | null>
+    forget(id: number): void
   }): RealGitHubClient {
     return new RealGitHubClient({
       clientId: 'id',
@@ -344,6 +346,7 @@ describe('dispatching a workflow against GitHub', () => {
         onRepository: async () => {
           throw new Error('the App JWT was refused')
         },
+        forget: () => {},
       })
       await assert.rejects(
         () => client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {}),
@@ -403,6 +406,81 @@ describe('dispatching a workflow against GitHub', () => {
         const blocker = await client.dispatchBlocker(99, 'acme/storefront', 'antifailure.yml', 'wip')
         assert.equal(blocker?.cause, cause, `expected ${cause} for ${JSON.stringify(over)}`)
       })
+    }
+  })
+
+  /**
+   * The state a person is in the instant after they fix the permission.
+   *
+   * They accept the Actions write grant on GitHub, which invalidates every
+   * outstanding installation token, and then they come straight back and press
+   * the button again. The cached token has up to an hour left on its clock and
+   * GitHub stopped honouring it seconds ago.
+   *
+   * Without the retry this is not merely a failure, it is a confident wrong
+   * answer: a 401 makes every lookup in the diagnosis answer "not 404", so it
+   * finds nothing wrong and tells the person the App is installed with Actions
+   * write and the workflow file is there. Which is true, and the button still
+   * does not work.
+   */
+  it('a token GitHub stopped honouring is forgotten and the call retried once', async () => {
+    let minted = 0
+    let forgotten: number[] = []
+    const calls: { token: string }[] = []
+    const original = globalThis.fetch
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const token = (init?.headers as Record<string, string>).authorization ?? ''
+      calls.push({ token })
+      // The first token is the stale cached one and the second is fresh, which
+      // is exactly what GitHub does after a permission is accepted.
+      return new Response(
+        token.endsWith('stale') ? '{"message":"Bad credentials"}' : null,
+        { status: token.endsWith('stale') ? 401 : 204 },
+      )
+    }) as typeof fetch
+    try {
+      const client = realClient({
+        for: async () => (minted++ === 0 ? 'ghs_stale' : 'ghs_fresh'),
+        onRepository: async () => ({ id: 4242, permissions: { actions: 'write' } }),
+        forget: (id) => forgotten.push(id),
+      })
+      await client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {})
+      assert.deepEqual(forgotten, [99], 'the stale token was not dropped from the cache')
+      assert.equal(calls.length, 2, 'the call was not retried')
+      assert.equal(calls[1]!.token, 'Bearer ghs_fresh')
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  it('a second 401 is not retried again, so a bad key is not a request storm', async () => {
+    let forgotten = 0
+    let calls = 0
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => {
+      calls++
+      return new Response('{"message":"Bad credentials"}', { status: 401 })
+    }) as typeof fetch
+    try {
+      const client = realClient({
+        for: async () => 'ghs_never_works',
+        onRepository: async () => ({ id: 4242, permissions: { actions: 'write' } }),
+        forget: () => forgotten++,
+      })
+      await assert.rejects(
+        () => client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {}),
+        (err: unknown) => {
+          assert.ok(err instanceof GitHubError)
+          assert.match(err.message, /Bad credentials/)
+          return true
+        },
+      )
+      // Two for the dispatch, then the diagnosis makes its own, each of which
+      // retries once. What must not happen is a loop.
+      assert.ok(calls < 12, `retried ${calls} times, which is a storm`)
+      assert.ok(forgotten > 0, 'the token was never dropped')
+    } finally {
+      globalThis.fetch = original
     }
   })
 
