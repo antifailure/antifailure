@@ -79,7 +79,8 @@ useful than a promise that quietly bends.
 - **Every Go package except the two named above.** `engine/pkg/afcli`,
   `engine/pkg/edition` and `engine/pkg/extension` are the sockets the enterprise
   binary plugs into and are deliberately narrow rather than a general embedding
-  API. Everything under `engine/internal` is unimportable on purpose.
+  API. Nothing outside this module can import `engine/internal` at all, which
+  is deliberate.
 - **Lint rule names and their findings.** Rules are added and sharpened, and a
   release may find something in a migration an earlier one passed. That is the
   product working. Within a release the rule name identifies the finding.
