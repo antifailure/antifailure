@@ -154,10 +154,24 @@ assert_connection_budget() {
   # counted, because this is the number that was wrong: one serving revision
   # does not mean one process, and a revision at zero traffic still runs
   # min_replicas of them.
-  replicas="$(az containerapp revision list -n "$APP" -g "$RG" \
-    --query "[?properties.active].properties.replicas" -o tsv 2>/dev/null |
-    awk 'BEGIN { n = 0 } /^[0-9]+$/ { n += $1 } END { print n }')"
-  [ -z "$replicas" ] && replicas=0
+  #
+  # Read into a variable and summed separately rather than piped straight into
+  # awk. Under `set -o pipefail` a pipeline takes the worst status in it, and a
+  # failing `az` inside a command substitution then kills this script through
+  # `set -e` with no message at all and the deploy's exit code, which is how a
+  # transient API error would turn into an unexplained red release.
+  local listing
+  listing="$(az containerapp revision list -n "$APP" -g "$RG" \
+    --query "[?properties.active].properties.replicas" -o tsv 2>/dev/null || true)"
+  if [ -z "$listing" ]; then
+    say "could not list $APP's revisions: the connection budget is unchecked"
+    return 0
+  fi
+  replicas="$(printf '%s\n' "$listing" | awk 'BEGIN { n = 0 } /^[0-9]+$/ { n += $1 } END { print n }')"
+  if [ -z "$replicas" ] || [ "$replicas" -eq 0 ]; then
+    say "no running replicas reported for $APP: the connection budget is unchecked"
+    return 0
+  fi
 
   used=$((replicas * pool_max))
   say "connection budget: $replicas running replica(s) x $pool_max pooled = $used against $budget usable ($max_conn max_connections, less ${reserved:-0} reserved, ${su_reserved:-0} superuser reserved, $TOOL_CONNECTIONS for tools)"
