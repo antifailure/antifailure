@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { mkdtempSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run } from '../src/execute.ts';
@@ -255,4 +256,23 @@ test('an exploration that cannot reach the application is blocked, not passed',
   assert.equal(results[0]!.findings.length, 0);
   assert.equal(results[0]!.missing.length, 1);
   assert.match(results[0]!.missing[0]!, /Nothing was explored/);
+});
+
+test('the snapshot reads rendered text, never markup', async () => {
+  // The documented promise is that the model sees the accessibility snapshot
+  // and never the page's raw HTML, and it is a promise people decide to trust
+  // this product on. The prompt is checked in model.test.ts; this checks the
+  // one line upstream of it, because a snapshot that captured markup would
+  // keep every assertion there passing and break the claim anyway.
+  //
+  // Structural rather than behavioural, deliberately. What is being guarded is
+  // that a specific call is not reached for, and there is no page that could
+  // demonstrate its absence.
+  const source = await readFile(new URL('../src/browser.ts', import.meta.url), 'utf8');
+  assert.match(source, /locator\('body'\)\.innerText\(\)/,
+    'the snapshot no longer reads rendered text');
+  for (const forbidden of ['innerHTML', 'outerHTML', '.content()', 'documentElement.outerHTML']) {
+    assert.ok(!source.includes(forbidden),
+      `browser.ts reads ${forbidden}, so the page's markup can reach the model`);
+  }
 });

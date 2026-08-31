@@ -845,6 +845,146 @@ af mask verify [flags]
 | --- | --- | --- |
 | `--branch` | - | Branch to check, defaulting to the checked out one. |
 
+### `af model`
+
+The model key the agents use on this machine.
+
+The agents can read a page and decide what a person would do next, which takes a
+model. The key is yours: it is stored on this machine, the call goes straight to
+the provider, and nothing hosted is involved.
+
+With no key the deterministic planner runs instead. That is a supported mode,
+not a broken one: workflows still run, still drive a real browser and still
+produce a verdict. The model is what turns a workflow written as a sentence into
+one the runner follows without being told every field.
+
+  af model show     what is configured, and what a run will use
+  af model test     prove the key works, with one cheap call
+  af model set      store a key, without it touching the command line
+  af model rm       remove a stored key
+
+If you have a control plane, 'af provider' is the better place for a key: it
+seals it, caps what may be spent on it per month, and checks that cap before the
+key is ever decrypted. This command is the one that needs nothing but a terminal.
+
+```
+af model
+```
+
+Subcommands:
+
+- [`af model rm`](#af-model-rm) Remove a stored key.
+- [`af model set`](#af-model-set) Store a key, without it touching the command line.
+- [`af model show`](#af-model-show) What is configured, and what a run will use.
+- [`af model test`](#af-model-test) Prove the key works, with one cheap call.
+
+### `af model rm`
+
+Remove a stored key.
+
+Removes the key from every place this command can write it, not from the first
+one that answers. A key left in the encrypted store after the keyring entry was
+removed is a key the next run silently uses, which is the exact failure somebody
+is trying to prevent when they type this.
+
+It cannot remove a key from a shell you exported it in or from a .env file, and
+it says so when one is still there rather than reporting a removal that changed
+nothing.
+
+Removing a key that is not there is not an error. This is a command people run
+in a hurry, and a retry after a timeout must not report failure for reaching the
+state you asked for.
+
+This does not reach the provider. If the key leaked, revoke it at Anthropic or
+OpenAI as well: removing it here stops this machine using it and stops nobody
+else.
+
+```
+af model rm <provider>
+```
+
+### `af model set`
+
+Store a key, without it touching the command line.
+
+Stores a key in the system keyring where this platform has one, and in the
+encrypted local store where it does not.
+
+The key is never an argument. There is no --key flag, deliberately: a secret on
+a command line is written to your shell's history file, is visible in ps to
+every other user on the machine, and is captured by any recording of the
+terminal. So there are three ways to give it, and none of them put it in the
+argument vector:
+
+  af model set anthropic                      asks, without echoing
+  af model set anthropic --stdin < key.txt    reads one line
+  af model set anthropic --from-env NAME      reads that environment variable
+
+Where it lands is reported rather than assumed, because the two places are not
+equivalent. macOS gates the keychain on the login keychain, Linux on the session
+keyring daemon, and Windows on the user's credentials. The encrypted local store
+is a file, and it is only as strong as the passphrase protecting it.
+
+This does not reach the provider. Storing a key here does not create one and
+removing it does not revoke one.
+
+```
+af model set <provider> [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--from-env` | - | Read the key from this environment variable instead of asking. |
+| `--stdin` | `false` | Read the key from standard input, one line. |
+
+### `af model show`
+
+What is configured, and what a run will use.
+
+Reports the provider, the model, the endpoint, where the key was found and when
+it was last proven to work.
+
+It does not show the key and there is no flag that would. The fingerprint
+answers the question this is usually asked to answer, which is whether the key
+here is the one you think it is, and it answers it without either person having
+to read a secret out loud.
+
+"Where it came from" is worth as much as the rest together. A key exported in
+one shell and a key in the keyring look identical from a run's point of view
+until they disagree, and then the only useful sentence is which one won.
+
+```
+af model show
+```
+
+### `af model test`
+
+Prove the key works, with one cheap call.
+
+Sends one completion of a single token and reports what came back.
+
+A real call rather than a check of the key's shape, because a well formed key
+that was revoked this morning passes every shape check there is. It costs a
+fraction of a cent, which is the point: this is meant to be run whenever you are
+unsure, and a check people avoid because of the price is a check nobody runs.
+
+What it can tell apart matters more than that it runs. A revoked key, an empty
+balance, a model name that does not exist, a throttle, a provider outage and an
+endpoint nothing answers on all fail, they all have different fixes, and being
+told only that the call failed sends you to the wrong one first.
+
+On success it writes down that this exact key worked, and 'af model show'
+reports it. Rotating the key discards that, because a previous key's success
+says nothing about the new one.
+
+```
+af model test [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--timeout` | `30s` | How long to wait for the endpoint, which a local model may need more of. |
+
 ### `af net`
 
 Inspect and explain the environment's network policy.
