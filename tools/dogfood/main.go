@@ -351,10 +351,11 @@ func (r *runner) step(run *Run, name string, argv ...string) Step {
 // and failing it would teach people to ignore this job.
 //
 // Read from the report rather than from the event stream, which is where the
-// timings come from, because the engine emits no agent.* event at all: all
-// four types are declared, documented, and mapped to a control plane name, and
-// none of them has an emitter. Until one does, the report is the only place a
-// verdict exists.
+// timings come from, because the engine emits no agent.* event at all. That is
+// known and written down: engine/internal/events/emitters_test.go lists all
+// four as unemitted, with the reason, which is that the runner reports over
+// its own JSON boundary and nothing bridges it to the bus. Until something
+// does, the report is the only place a verdict exists.
 func (r *runner) readVerdicts(run *Run) {
 	if r.reportPath == "" {
 		return
@@ -481,6 +482,15 @@ type phase struct {
 // The intervals a budget is set against. Each is bounded by two events the
 // engine already emits, so nothing here depends on a message somebody may
 // reword.
+// Two of these six cannot fire, and it is worth knowing which before reading a
+// run that shows four steps and wondering where the other two went. The engine
+// emits no agent.* and no load.* event: both sets are listed as unemitted in
+// engine/internal/events/emitters_test.go, with the reason, because the runner
+// and the load generator both return their results to the caller rather than
+// putting them on the bus. So `test` and `load` are budgets against intervals
+// nothing bounds. They are left here rather than deleted for the same reason
+// that list keeps the types: the budget is the measurement somebody wants, and
+// removing it would hide the gap instead of recording it.
 var phases = []phase{
 	{"golden refresh", "golden.refreshing", "golden.ready"},
 	{"database branch", "db.branching", "db.branched"},
