@@ -44,7 +44,7 @@ const PLANS: Plan[] = [
   {
     name: "Team",
     badge: "Illustrative",
-    price: "$500–$2,000",
+    price: "$500 to $2,000",
     period: "per month · one application",
     tagline: "Hosted control plane, included run credits, usage beyond the floor.",
     featured: true,
@@ -60,11 +60,11 @@ const PLANS: Plan[] = [
   {
     name: "Growth + Enterprise",
     badge: "Illustrative",
-    price: "$2,000–$8,000",
+    price: "$2,000 to $8,000",
     period: "per month · Growth band",
     secondary: {
       label: "Enterprise",
-      value: "$30,000–$250,000+",
+      value: "$30,000 to $250,000+",
       hint: "annually · scale, governance, residency, fleet",
     },
     tagline: "More repositories, organization policy, and the controls enterprises buy.",

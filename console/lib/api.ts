@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * fetch and would not ride a cross-site one.
  *
  * The variable exists for `next dev`, where the console runs on :3100 and the
- * control plane on :8080. Unset -- which is every production build -- it is the
+ * control plane on :8080. Unset, which is every production build, it is the
  * empty string and every request is relative.
  */
 const BASE = process.env.NEXT_PUBLIC_AF_API ?? "";

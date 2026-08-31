@@ -226,7 +226,7 @@ export function TwinLifecycleScene() {
                       key={slot.id}
                       moon={slotMoon(fill, reportOn)}
                       label={slot.label}
-                      value={fill < 0.08 ? (reportOn ? "gone" : "—") : `${Math.round(fill * 100)}%`}
+                      value={fill < 0.08 ? (reportOn ? "gone" : "waiting") : `${Math.round(fill * 100)}%`}
                       tone={fill < 0.08 ? (reportOn ? "ok" : "muted") : "ok"}
                     />
                   );

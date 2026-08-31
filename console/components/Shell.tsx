@@ -179,8 +179,8 @@ function NoOrganization({ session }: { session: Session }) {
         </h1>
         <p className="mt-3 text-[13.5px] leading-6 text-muted">
           You are signed in as {session.label}. Your account is not a member of
-          an organization on this control plane, so there is nothing to show
-          you yet -- not an empty dashboard, nothing.
+          an organization on this control plane, so there is nothing to show you
+          yet. Not an empty dashboard. Nothing.
         </p>
         <p className="mt-3 text-[13.5px] leading-6 text-muted">
           Membership follows a GitHub App installation. Once the app is
