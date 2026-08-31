@@ -231,6 +231,33 @@ CMD ["node", "server.js"]
 	require.Equal(t, "node server.js", svc.Command)
 }
 
+// The other multi stage shape, and by far the more common one: the builder is
+// named and the stage that ships is not. finalStage only ever assigned on a
+// named FROM, so it kept the builder's name, and af init wrote 'target: build'
+// into the manifest. af up would then have built the stage that compiles the
+// application rather than the one that runs it, which fails at the point
+// furthest from the cause.
+func TestRun_AnUnnamedFinalStageTargetsNothing(t *testing.T) {
+	t.Parallel()
+	res := run(t, "app", map[string]string{
+		"package.json": `{"name":"app","scripts":{"start":"next start"},"dependencies":{"next":"15.0.0"}}`,
+		"Dockerfile": `FROM node:22-alpine AS build
+WORKDIR /app
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+COPY --from=build /app ./
+EXPOSE 3000
+CMD ["node", "server.js"]
+`,
+	})
+	svc := serviceNamed(t, res.Draft, "app")
+	require.Equal(t, schema.BuildDockerfile, svc.Build.Strategy)
+	require.Empty(t, svc.Build.Target,
+		"the stage that ships has no name, so there is no target to name")
+}
+
 // The median containerised Node repository, and the shape af init failed on:
 // the package is not named after the directory somebody cloned it into.
 //

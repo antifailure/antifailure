@@ -38,7 +38,22 @@ file it came from, so you can check the reasoning rather than trust it.
 
 Anything detection is not sure about becomes a question rather than a silent
 guess, because a manifest you have to audit is worth less than one you can
-read.`),
+read.
+
+A service is identified by the directory it is built and run from, not by its
+name, because every source spells the name differently: a Dockerfile and a
+language analyzer use the directory, a compose file uses its own key, a
+Procfile uses the process name, and a package manifest uses the package. One
+application described by several of those is one service, and the name it keeps
+comes from the source that identifies an application best, a package manifest
+ahead of a compose key ahead of a Procfile process ahead of the directory.
+Where one source declares two services in a directory, which is what a compose
+file with a web and an admin container on one build context is, they stay two.
+
+--answer settles a question, and also overrides a value detection read with
+confidence, which is how you separate two services a repository really does
+have on one port. An id naming nothing is refused with the ids that would have
+worked rather than dropped in silence.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runInit(cmd.Context(), env, initOptions{
@@ -53,7 +68,7 @@ read.`),
 	cmd.Flags().BoolVar(&force, "force", false,
 		"Overwrite an existing manifest instead of merging into it")
 	cmd.Flags().StringArrayVar(&answers, "answer", nil,
-		"Answer a question without a prompt, as id=value. Repeatable.")
+		"Answer a question, or override a detected value, as id=value. Repeatable.")
 	return cmd
 }
 
@@ -111,6 +126,9 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 		if err := resolveQuestions(env, res, opts, assumed); err != nil {
 			return err
 		}
+	}
+	if err := applyRemainingAnswers(res, opts); err != nil {
+		return err
 	}
 
 	// The draft is normalized and validated before it is written, so af init
@@ -213,7 +231,40 @@ func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed ma
 				"question", q.Prompt,
 				"id", q.ID)
 		}
-		applyAnswer(res.Draft, q.ID, answer)
+		_ = applyAnswer(res.Draft, q.ID, answer)
+	}
+	return nil
+}
+
+// applyRemainingAnswers applies every --answer detection did not turn into a
+// question, and refuses one that reaches nothing.
+//
+// Detection only asks about what it is unsure of, so a value it read with
+// confidence has no question and used to be unreachable from the command line.
+// That made AF-DET-005 a dead end of the same shape as the ones this change
+// exists to close: two Dockerfiles in different directories both exposing 3000
+// is a real repository, the draft is correctly refused, and the remedy the
+// refusal named did nothing at all because there was no question to answer.
+func applyRemainingAnswers(res *detect.Result, opts initOptions) error {
+	answered := map[string]bool{}
+	for _, q := range res.Questions {
+		answered[q.ID] = true
+	}
+	ids := make([]string, 0, len(opts.answers))
+	for id := range opts.answers {
+		if !answered[id] {
+			ids = append(ids, id)
+		}
+	}
+	// The map iterates in a random order and this can refuse, so sort it or
+	// which id a repository with two bad answers is told about is a coin flip.
+	sort.Strings(ids)
+	for _, id := range ids {
+		if !applyAnswer(res.Draft, id, opts.answers[id]) {
+			return aferrors.Coded(aferrors.AFDET006,
+				"id", id,
+				"known", strings.Join(answerIDs(res.Draft), ", "))
+		}
 	}
 	return nil
 }
@@ -248,34 +299,56 @@ func ask(env *Env, q detect.Question) (string, error) {
 }
 
 // applyAnswer writes one answer into the draft.
-func applyAnswer(m *schema.Manifest, id, answer string) {
+// It reports whether the answer reached anything. A caller that passed an id
+// naming no service has to hear about it: an --answer silently discarded is
+// the same dead end as an error naming a remedy that does nothing, one layer
+// further in, and AF-DET-005 tells people to reach for this flag.
+func applyAnswer(m *schema.Manifest, id, answer string) bool {
 	if answer == "" {
-		return
+		return false
 	}
 	switch {
 	case strings.HasPrefix(id, "service.") && strings.HasSuffix(id, ".port"):
 		name := strings.TrimSuffix(strings.TrimPrefix(id, "service."), ".port")
 		port, err := strconv.Atoi(answer)
 		if err != nil || port <= 0 || port > 65535 {
-			return
+			return false
 		}
+		applied := false
 		for i := range m.Services {
 			if m.Services[i].Name == name {
 				m.Services[i].Port = port
+				applied = true
 			}
 		}
+		return applied
 	case strings.HasPrefix(id, "service.") && strings.HasSuffix(id, ".command"):
 		name := strings.TrimSuffix(strings.TrimPrefix(id, "service."), ".command")
+		applied := false
 		for i := range m.Services {
 			if m.Services[i].Name == name {
 				m.Services[i].Command = answer
+				applied = true
 			}
 		}
+		return applied
 	case id == "database.present":
 		if strings.EqualFold(answer, "no") {
 			m.Database = &schema.Database{Provider: schema.DBDocker, Version: 17}
 		}
+		return true
 	}
+	return false
+}
+
+// answerIDs lists every id --answer accepts for this repository, so a refusal
+// can name them rather than referring the reader to the manual.
+func answerIDs(m *schema.Manifest) []string {
+	ids := []string{"database.present"}
+	for _, s := range m.Services {
+		ids = append(ids, "service."+s.Name+".port", "service."+s.Name+".command")
+	}
+	return ids
 }
 
 func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, path string) {

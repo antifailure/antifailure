@@ -119,6 +119,8 @@ const (
 	// Detection produced a draft that is not a valid manifest, so nothing
 	// was written and {path} does not exist: {detail}
 	AFDET005 Code = "AF-DET-005"
+	// --answer {id}=... does not name anything in this repository.
+	AFDET006 Code = "AF-DET-006"
 	// The changed files between {base} and {head} could not be read:
 	// {detail}
 	AFDET010 Code = "AF-DET-010"
@@ -736,10 +738,19 @@ var catalog = map[Code]Entry{
 		Code:      AFDET005,
 		Area:      "DET",
 		Message:   "Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}",
-		NextStep:  "This is a defect in Antifailure. Please report it with the detail above, then write the manifest by hand from the reference or re-run with --answer to override what detection guessed.",
+		NextStep:  "Re-run with --answer to override what detection read, for example --answer service.<name>.port=<port>. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above.",
 		Docs:      "concepts/detection",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFDET006: {
+		Code:      AFDET006,
+		Area:      "DET",
+		Message:   "--answer {id}=... does not name anything in this repository.",
+		NextStep:  "Use one of: {known}",
+		Docs:      "concepts/detection",
+		Retryable: false,
+		ExitCode:  ExitUsage,
 	},
 	AFDET010: {
 		Code:      AFDET010,

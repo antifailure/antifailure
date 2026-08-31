@@ -476,11 +476,23 @@ Detection could not decide {question}, and there is no default to fall back on.
 
 Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}
 
-**What to do.** This is a defect in Antifailure. Please report it with the detail above, then write the manifest by hand from the reference or re-run with --answer to override what detection guessed.
+**What to do.** Re-run with --answer to override what detection read, for example --answer service.<name>.port=<port>. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above.
 
 | | |
 | --- | --- |
 | Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/detection](/docs/concepts/detection/) |
+
+### AF-DET-006
+
+--answer {id}=... does not name anything in this repository.
+
+**What to do.** Use one of: {known}
+
+| | |
+| --- | --- |
+| Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/detection](/docs/concepts/detection/) |
 

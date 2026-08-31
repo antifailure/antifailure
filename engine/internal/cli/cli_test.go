@@ -519,6 +519,54 @@ func TestInit_DevNullIsNotATerminal(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
 }
 
+// Two Dockerfiles in different directories both exposing 3000 is a real
+// repository, not a detection mistake, so the draft is correctly refused. What
+// made the refusal a dead end was that the flag it named reached nothing:
+// detection only raises a question about what it is unsure of, and a port read
+// straight out of an EXPOSE line has no question, so --answer had nothing to
+// bind to and was silently discarded.
+func TestInit_TheRemedyForAnInvalidDraftActuallyChangesTheDraft(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for name, port := range map[string]string{"a": "3000", "b": "3000"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, name), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name, "Dockerfile"),
+			[]byte("FROM alpine\nEXPOSE "+port+"\nCMD [\"/bin/"+name+"\"]\n"), 0o600))
+	}
+
+	refused := runCLI(t, dir, nil, "init", "--non-interactive")
+	require.NotZero(t, refused.code)
+	require.Contains(t, refused.stderr, "AF-DET-005")
+	require.Contains(t, refused.stderr, "nothing was written")
+	require.Contains(t, refused.stderr, "--answer service.<name>.port=<port>")
+	require.NotContains(t, refused.stderr, "Fix the reported line",
+		"there is no file to fix a line in")
+	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
+
+	// The whole point of naming a remedy is that following it works.
+	fixed := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.b.port=3001")
+	require.Zero(t, fixed.code, fixed.stderr)
+	body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+	require.NoError(t, err)
+	require.Contains(t, string(body), "port: 3001")
+}
+
+// An --answer that binds to nothing used to be dropped in silence, which turns
+// a typo into a repeat of the original refusal with no clue what changed.
+func TestInit_AnAnswerThatNamesNothingIsRefusedWithTheOnesThatDo(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "package.json"),
+		[]byte(`{"name":"acme-web","scripts":{"start":"next start"},"dependencies":{"next":"15.0.0"}}`), 0o600))
+
+	got := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.typo.port=3001")
+	require.NotZero(t, got.code)
+	require.Contains(t, got.stderr, "AF-DET-006")
+	require.Contains(t, got.stderr, "service.acme-web.port",
+		"the refusal has to name the id that would have worked")
+	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
+}
+
 func TestInit_AnswerFlagAvoidsAPrompt(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
