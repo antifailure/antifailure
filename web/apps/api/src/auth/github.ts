@@ -603,7 +603,14 @@ export class RealGitHubClient implements GitHubClient {
     path: string,
     init: RequestInit = {},
   ): Promise<Response> {
-    const tokens = this.config.installationTokens!
+    const tokens = this.config.installationTokens
+    // Checked rather than asserted. Both callers guard already, and a third
+    // one that forgot would otherwise be a TypeError reading `for` of
+    // undefined, which names nothing a reader can act on.
+    // The subject is empty because `no-app-configured` is the one message that
+    // names neither a repository nor a workflow: there is no App, so there is
+    // nothing to say about which repository it could not reach.
+    if (!tokens) throw refusal('no-app-configured', { repository: '', workflow: '' })
     const base = this.config.apiBase ?? 'https://api.github.com'
     const send = async (token: string): Promise<Response> =>
       fetch(new URL(path, base), {
