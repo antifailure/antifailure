@@ -247,8 +247,16 @@ type PortAllocator struct {
 	taken map[int]bool
 }
 
-// DefaultPortFrom is above the ephemeral range on every platform, so an
-// allocation does not collide with an outbound connection somebody else made.
+// DefaultPortFrom is where allocation starts when nothing moves it.
+//
+// It is above the ephemeral range on macOS and Windows, which both hand out
+// 49152 upwards, so an allocation there cannot collide with an outbound
+// connection somebody else made. It is INSIDE Linux's, which is 32768 to 60999
+// by default and has no gap above it wide enough to sit in, so on Linux, which
+// is what CI runs, a collision with an outbound connection is possible and the
+// retry below is what covers it. Moving the default under 32768 would put it
+// among the ports real services listen on, which trades a rare retry for a
+// regular one.
 const DefaultPortFrom = 43000
 
 // PortRangeStartVar names the environment variable that moves the range.

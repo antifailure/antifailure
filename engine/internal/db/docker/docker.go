@@ -106,8 +106,8 @@ type Options struct {
 	Clock clock.Clock
 }
 
-// DefaultPortFrom is high enough to sit above the ephemeral range on every
-// platform, so an allocation does not collide with an outbound connection.
+// DefaultPortFrom is where this provider starts allocating when nothing moves
+// it. The reasoning about the ephemeral range is on the constant it takes.
 const DefaultPortFrom = dockerutil.DefaultPortFrom
 
 // New returns a provider talking to the local Docker daemon.
