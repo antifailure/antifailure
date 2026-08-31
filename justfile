@@ -85,6 +85,7 @@ gate: _reports
     run "this platform's keyring"        just keyring
     run "the other platforms lint"       just lint-platforms
     run "control plane"                  just test-web
+    run "the site API"                   just test-site-api
     run "runner"                         just test-runner
     run "edition boundary"               just edition
     run "enterprise"                     just test-ee
@@ -285,7 +286,7 @@ build-release version="dev":
 # ---------------------------------------------------------------------------
 
 # The unit and property tests, everywhere.
-test: test-engine test-tools test-web test-runner
+test: test-engine test-tools test-web test-runner test-site-api
 
 test-engine:
     cd engine && go test ./... -race -timeout 30m
@@ -314,6 +315,13 @@ test-web:
 
 test-runner:
     npm --prefix runner test
+
+# The marketing site's own backend: api/, one anonymous write endpoint and the
+# catch-all that answers everything else. Its own package rather than a
+# workspace, because Static Web Apps deploys that directory as it stands.
+test-site-api:
+    npm --prefix api ci --no-audit --no-fund
+    npm --prefix api test
 
 # Fanned out over ee/web's workspaces rather than naming each package, so an
 # enterprise package added later is covered without editing this or CI. Naming
