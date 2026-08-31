@@ -3,7 +3,7 @@ import { SectionLabel } from "@/components/layout/SectionLabel";
 import { AFTER_HEADING, DirectoryList, Metrics, SectionHeading } from "./visuals";
 
 const ICP = [
-  { value: "20–300", label: "engineers. Fast-growing SaaS and internet companies, not a first sale into regulated enterprise." },
+  { value: "20 to 300", label: "engineers, at fast-growing SaaS and internet companies rather than at regulated enterprises." },
   { value: "Postgres", label: "backed applications with enough production data that toy fixtures are misleading." },
   { value: "Daily / weekly", label: "production deploys, a real CI/CD process, and a platform engineer who owns reliability." },
 ] as const;
@@ -46,7 +46,7 @@ export function SolutionsHubPage() {
       />
 
       <PageSection>
-        <SectionLabel>Ideal customer</SectionLabel>
+        <SectionLabel>Who this fits</SectionLabel>
         <div className={AFTER_HEADING}>
           <Metrics items={[...ICP]} />
         </div>
