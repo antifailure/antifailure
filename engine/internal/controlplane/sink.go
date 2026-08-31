@@ -499,7 +499,30 @@ var typeMap = map[string]string{
 // locally and simply never put on the bus.
 //
 // TestEveryMappedTypeHasSomethingInTheEngineThatEmitsIt is the gate for that
-// second question, and it names all five with the reason each one is unbuilt.
+// second question, and it names all five. They are not all the same kind of
+// gap, and a reader needs to know which kind, because "reserved" and
+// "abandoned" call for opposite decisions:
+//
+// env.sleeping is reserved for something never built. There is nothing to
+// abandon: no code sleeps an environment, and runtime.idle_sleep is inert.
+//
+// egress.decision is not reserved and not abandoned, it is disconnected. The
+// decisions are made, recorded, returned by Orchestrator.Decisions and rendered
+// by af net and af ci, and a consumer exists here too: internal/hud classifies
+// egress.decision as a noisy type to suppress, with a comment about an egress
+// denial being the line somebody will grep for. So the producer and the
+// consumer were both built and the wire between them was not. That is the most
+// finishable of the five and it is the one to do first if anybody does one.
+//
+// The three agent types, agent.started, agent.finished and agent.verdict, are
+// the one set where honestly nobody can tell from the code which it is. Agent
+// runs happen, and nothing anywhere consumes these types either, so there is no
+// half-built wire to point at as evidence of intent. Whether they were reserved
+// for a reporting path or drafted and dropped is not recoverable from what is
+// committed, and it is better to say so here than to pick and be wrong. The
+// next person to touch the agent runner should settle it.
+//
+// None of the five is emitted today, and the gate holds that line either way.
 func KnownTypes() []string {
 	out := make([]string, 0, len(typeMap))
 	for k := range typeMap {

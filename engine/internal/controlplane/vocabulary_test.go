@@ -205,7 +205,33 @@ const engineRoot = "../.."
 const eventDefs = "../events/event.go"
 
 var typeConst = regexp.MustCompile(`(?m)^\s*([A-Za-z][A-Za-z0-9]*)\s+Type\s*=\s*"([^"]+)"`)
-var eventsRef = regexp.MustCompile(`\bevents\.([A-Z][A-Za-z0-9]*)\b`)
+
+// emitCall matches a type constant handed to something that puts it on the bus,
+// rather than any mention of it at all.
+//
+// The distinction is the whole test. A reference is not a production:
+// env.sleeping has a reference, in the type map this file checks, and no
+// emitter, and it is the case that motivated writing this. hud.Model.Count and
+// hud.Plain.Suppressed both take an events.Type and are consumers, so a
+// reference count would call a type live because something displays it.
+//
+// The four names are the complete set of ways a constant reaches the bus:
+// Orchestrator.emit, event and eventErr in internal/env, and Bus.Emit under
+// them. emitHelpers below fails if that stops being true, because a fifth one
+// added without updating this pattern would make every type it emits look
+// unemitted, which is a loud failure rather than a silent one.
+var emitCall = regexp.MustCompile(`\b(?:emit|event|eventErr|Emit)\(\s*[^)\n]*?\bevents\.([A-Z][A-Za-z0-9]*)`)
+
+// emitHelpers matches any orchestrator method that takes an event type at all,
+// which is the only shape a new way to reach the bus can have.
+//
+// Matching the three known names instead would count removals and renames and
+// miss the case that matters, an ADDED helper, because the count of the three
+// stays three. That was the first version of this and it went green against a
+// deliberately added fourth.
+var emitHelpers = regexp.MustCompile(`(?m)^func \(o \*Orchestrator\) (\w+)\([^\n]*events\.Type`)
+
+const orchestrator = "../env/env.go"
 
 // emittedTypes reports which engine event types something in the engine
 // actually names outside the two files that only describe them.
@@ -233,6 +259,24 @@ func emittedTypes(t *testing.T) map[string]bool {
 			"fix the test rather than deleting it, because the gap it guards is real", eventDefs)
 	}
 
+	// The pattern below knows the names of the emit helpers. If a fifth way to
+	// reach the bus appears, every type it emits would look unemitted, so this
+	// says so rather than letting the gate quietly weaken.
+	orch, err := os.ReadFile(filepath.Clean(orchestrator))
+	if err != nil {
+		t.Fatalf("read the orchestrator: %v", err)
+	}
+	var helpers []string
+	for _, m := range emitHelpers.FindAllSubmatch(orch, -1) {
+		helpers = append(helpers, string(m[1]))
+	}
+	slices.Sort(helpers)
+	if known := []string{"emit", "event", "eventErr"}; !slices.Equal(helpers, known) {
+		t.Fatalf("%s declares %v as the methods taking an event type and this test's "+
+			"pattern knows %v; add the new one to emitCall, because a type only it emits "+
+			"would otherwise read as emitted by nothing", orchestrator, helpers, known)
+	}
+
 	emitted := map[string]bool{}
 	err = filepath.WalkDir(engineRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -252,7 +296,7 @@ func emittedTypes(t *testing.T) map[string]bool {
 		if err != nil {
 			return err
 		}
-		for _, m := range eventsRef.FindAllSubmatch(b, -1) {
+		for _, m := range emitCall.FindAllSubmatch(b, -1) {
 			if v, ok := valueOf[string(m[1])]; ok {
 				emitted[v] = true
 			}
@@ -299,12 +343,17 @@ func TestEveryMappedTypeHasSomethingInTheEngineThatEmitsIt(t *testing.T) {
 	// nobody. The same gap is visible from the other end: no INSERT into the
 	// runs table exists on the ingestion path either.
 	//
-	// egress.decision is the one where the data exists and the wire does not.
-	// Orchestrator.Decisions returns the decisions and af net and af ci render
-	// them, so a person at a terminal sees them; they are never put on the bus,
-	// so the control plane's network.decision is fed by nobody.
+	// egress.decision is disconnected rather than unbuilt. The decisions are
+	// made, Orchestrator.Decisions returns them, af net and af ci render them,
+	// and internal/hud already classifies egress.decision as a type to suppress
+	// as noisy. Producer and consumer both exist and the wire between them does
+	// not, which makes it the most finishable of the five.
 	//
 	// env.sleeping is reserved for idle sleep, which is not built at all.
+	//
+	// The three agent types are the set where the code does not say which it
+	// is. Nothing consumes them either, so there is no half-built wire to read
+	// intent from, and saying so is more useful than guessing.
 	expected := []string{
 		"agent.finished", "agent.started", "agent.verdict",
 		"egress.decision", "env.sleeping",

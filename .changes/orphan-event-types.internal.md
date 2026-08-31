@@ -21,5 +21,14 @@ five with the reason each capability is unbuilt. It fails in three directions:
 a type gaining an emitter without leaving the list, a type losing its emitter,
 and an exemption left behind for a type that no longer exists.
 
+The five are not the same kind of gap and the comment now says which is which,
+because reserved and abandoned call for opposite decisions. `env.sleeping` is
+reserved for something never built. `egress.decision` is disconnected rather
+than unbuilt: the decisions are made, `Orchestrator.Decisions` returns them,
+`af net` and `af ci` render them, and the dashboard already classifies the
+event as noisy to suppress, so producer and consumer both exist and only the
+wire between them is missing. The three agent types are the set where the code
+does not say which, and the comment says that rather than guessing.
+
 No behaviour changes. Nothing was emitted before and nothing is emitted now;
 what changes is that the codebase says so instead of implying otherwise.
