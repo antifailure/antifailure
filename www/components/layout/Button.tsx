@@ -10,7 +10,15 @@ const sizes = {
   // site's primary action was under 44px. The narrower horizontal padding
   // below `lg` stays, because that is what keeps two buttons on one line.
   new: "h-11 px-7 tracking-extra-tight max-lg:px-[18px]",
-  xxs: "h-8 px-4 text-sm tracking-extra-tight font-medium",
+  // `h-9 px-[18px]` rather than `h-8 px-4`, because 36px and 18px is what this
+  // size has always rendered as. Both of its call sites passed
+  // `className="h-9 px-[18px]"`, and `cn` is a plain join with no
+  // tailwind-merge, so the element carried h-8 and h-9 together and rendered at
+  // 36px only because Tailwind emits height utilities in ascending order and
+  // the later one won. It produced the right answer for the wrong reason: the
+  // same override written to make a button SHORTER would have been emitted
+  // first, lost silently, and read in the diff exactly as though it worked.
+  xxs: "h-9 px-[18px] text-sm tracking-extra-tight font-medium",
 } as const;
 
 /**
