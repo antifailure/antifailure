@@ -468,3 +468,106 @@ func TestDeclaredReachabilityResolves(t *testing.T) {
 		}
 	}
 }
+
+// A markdown table row carries the same number of cells as its header, and a
+// row that does not is two rows welded onto one line.
+//
+// This is not hypothetical and it is not cosmetic. Merging w-monolabel joined
+// the "8.9 Design system" and "8.10 Deployment" rows of STATUS.md into a single
+// line. The table then read 8.8, 8.9, 8.11 and the Deployment row did not exist
+// as a row at all. Nothing noticed, because the file still parsed as a table
+// and the defect is invisible in a diff of two lines that are each several
+// thousand characters long.
+//
+// What makes it worth a gate rather than a rule people follow during a merge:
+// the arithmetic that identified it was 1885 + 4799 = 6684 against a single
+// line of 6685, which proves the file lost exactly one newline and no content.
+// A resolution that drops a clause is at least legible in review. A resolution
+// that drops a line break is not, and no amount of care during a merge finds
+// it. Counting cells does, every time, in a few lines.
+func TestEveryPlanTableRowHasItsHeadersCellCount(t *testing.T) {
+	root := filepath.Join("..", "..")
+	docs, err := filepath.Glob(filepath.Join(root, "docs", "plan", "*.md"))
+	if err != nil || len(docs) == 0 {
+		t.Fatalf("no plan documents found to check: %v", err)
+	}
+	more, _ := filepath.Glob(filepath.Join(root, "docs", "plan", "notes", "*.md"))
+	docs = append(docs, more...)
+
+	checked := 0
+	for _, path := range docs {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		for _, bad := range weldedRows(string(body)) {
+			t.Errorf("%s:%d has %d cells where its header has %d. "+
+				"A row with too many cells is usually two rows joined by a lost "+
+				"newline during a merge, which still parses as a table. The row "+
+				"starts: %s",
+				filepath.Base(path), bad.line, bad.cells, bad.want, bad.excerpt)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("checked no documents, so this proved nothing")
+	}
+}
+
+type weldedRow struct {
+	line    int
+	cells   int
+	want    int
+	excerpt string
+}
+
+// weldedRows returns every row whose cell count differs from the header of the
+// table it is in. A table is a run of consecutive lines starting with "|"; the
+// header is its first line and the delimiter row beneath it is skipped.
+func weldedRows(md string) []weldedRow {
+	var out []weldedRow
+	lines := strings.Split(md, "\n")
+	want, row := 0, 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "|") {
+			want, row = 0, 0
+			continue
+		}
+		n := strings.Count(trimmed, "|")
+		row++
+		if row == 1 {
+			want = n
+			continue
+		}
+		if row == 2 && strings.Trim(trimmed, "| -:") == "" {
+			continue // the delimiter row
+		}
+		if n != want {
+			excerpt := trimmed
+			if len(excerpt) > 60 {
+				excerpt = excerpt[:60] + "..."
+			}
+			out = append(out, weldedRow{line: i + 1, cells: n, want: want, excerpt: excerpt})
+		}
+	}
+	return out
+}
+
+// The gate has to be able to fail, so this is the exact shape of the defect:
+// two well formed rows with the newline between them removed.
+func TestAWeldedRowIsCaught(t *testing.T) {
+	good := "| a | b |\n| --- | --- |\n| 8.9 Design | built |\n| 8.10 Deploy | written |\n"
+	if bad := weldedRows(good); len(bad) != 0 {
+		t.Fatalf("a well formed table was reported: %+v", bad)
+	}
+
+	welded := "| a | b |\n| --- | --- |\n| 8.9 Design | built || 8.10 Deploy | written |\n"
+	bad := weldedRows(welded)
+	if len(bad) != 1 {
+		t.Fatalf("the welded row was not caught, got %+v", bad)
+	}
+	if bad[0].cells <= bad[0].want {
+		t.Errorf("expected more cells than the header, got %d against %d", bad[0].cells, bad[0].want)
+	}
+}
