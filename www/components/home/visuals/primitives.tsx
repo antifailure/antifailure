@@ -30,15 +30,45 @@ export function Hairline({ className, vertical }: { className?: string; vertical
   );
 }
 
+/**
+ * The 10px mono label, in the two jobs it actually does.
+ *
+ * The default grey draws. It is the type inside a mock terminal, a fake log
+ * line, a simulated report frame: there the grey depicts a screen rather than
+ * addressing a reader, and darkening it flattens the drawing into something
+ * that reads as real interface chrome. So the default stays where it was, at
+ * black/45, whatever a contrast script says about it.
+ *
+ * `tone="reader"` addresses. A kicker over a paragraph, a caption naming what
+ * a panel is, a comparison column heading, the annotation a diagram turns on:
+ * that text is read, not looked at, so it takes black/60. Measured against
+ * every surface a MonoLabel sits on, black/60 is 5.74:1 on white, 5.61:1 on
+ * the page ground #f7f7f5, 5.59:1 on a Panel #f4f7f5 and 5.51:1 on the sage
+ * band #E4F1EB. black/45 is 3.26:1 to 3.36:1 on the same four, under the
+ * 4.5:1 floor.
+ *
+ * The prop exists because six call sites had already reached for a darker
+ * grey by hand, in five different files, at three different values. Nothing
+ * was shared, so each author patched their own site and the wall stayed up
+ * for the next one.
+ */
 export function MonoLabel({
   children,
   className,
+  tone = "art",
 }: {
   children: ReactNode;
   className?: string;
+  tone?: "art" | "reader";
 }) {
   return (
-    <span className={cn("font-mono text-[10px] tracking-extra-tight text-black/45", className)}>
+    <span
+      className={cn(
+        "font-mono text-[10px] tracking-extra-tight",
+        tone === "reader" ? "text-black/60" : "text-black/45",
+        className,
+      )}
+    >
       {children}
     </span>
   );

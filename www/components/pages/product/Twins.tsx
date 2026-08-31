@@ -240,13 +240,13 @@ export function TwinsPage() {
           </Illustrative>
           <div className="mt-8 grid grid-cols-2 gap-x-8 gap-y-5 max-xl:grid-cols-1">
             <div>
-              <MonoLabel className="uppercase tracking-[0.14em]">sweep</MonoLabel>
+              <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">sweep</MonoLabel>
               <p className="mt-1.5 text-[15px] leading-6 tracking-extra-tight text-black">
                 af env prune removes environments older than a cutoff you pass.
               </p>
             </div>
             <div>
-              <MonoLabel className="uppercase tracking-[0.14em]">limit</MonoLabel>
+              <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">limit</MonoLabel>
               <p className="mt-1.5 text-[15px] leading-6 tracking-extra-tight text-black">
                 There is no automatic time-to-live and no independent reaper yet. The sweep is a
                 command a person or a schedule runs.
@@ -321,7 +321,7 @@ function LifecycleRail() {
             {i < PHASES.length - 1 ? (
               <Hairline vertical className="absolute top-5 right-0 bottom-5 hidden h-auto xl:block" />
             ) : null}
-            <MonoLabel className="uppercase tracking-[0.14em]">{phase.name}</MonoLabel>
+            <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">{phase.name}</MonoLabel>
             <div className="mt-2 font-mono text-[11px] tracking-extra-tight text-black tabular-nums">
               {phase.from}
               <span className="text-black/30"> → </span>
@@ -362,7 +362,7 @@ function IsolationSpec() {
               {!lastInRowXl ? (
                 <Hairline vertical className="absolute top-5 right-0 bottom-5 hidden h-auto xl:block" />
               ) : null}
-              <MonoLabel className="uppercase tracking-[0.14em]">{item.kicker}</MonoLabel>
+              <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">{item.kicker}</MonoLabel>
               <h3 className="mt-3 text-[16px] leading-snug tracking-extra-tight text-black">{item.title}</h3>
               <p className="mt-2 max-w-[240px] text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
                 {item.body}

@@ -155,7 +155,7 @@ export function FirewallPage() {
             <li key={item.provider}>
               <Panel className="flex h-full flex-col rounded-[12px] bg-white p-5">
                 <div className="flex items-center justify-between gap-3">
-                  <MonoLabel>{item.provider}</MonoLabel>
+                  <MonoLabel tone="reader">{item.provider}</MonoLabel>
                   <StatusPill tone={item.tone}>{item.tone}</StatusPill>
                 </div>
                 <div className="mt-4 font-mono text-[13px] tracking-extra-tight text-black">{item.op}</div>

@@ -69,7 +69,7 @@ function TrafficResult() {
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <MonoLabel className="uppercase tracking-[0.14em]">af load</MonoLabel>
-          <MonoLabel className="text-black/60">source access_log</MonoLabel>
+          <MonoLabel tone="reader">source access_log</MonoLabel>
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] tracking-extra-tight text-black/55">
           <span>
