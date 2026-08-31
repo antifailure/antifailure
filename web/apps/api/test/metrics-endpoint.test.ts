@@ -160,6 +160,37 @@ describe('metrics', { skip: hasDatabase ? false : 'no Docker daemon to stand a d
     )
   })
 
+  it('counts an event it stored and could not project, separately from a rejection', async () => {
+    // An engine too old to say which repository it is running against. The
+    // event is stored, so it is not ingestion loss and must not touch the
+    // objective measured on outcome="rejected"; it changed no environment row,
+    // so counting it as an ordinary acceptance would hide a fleet of engines
+    // whose environments never appear in anybody's console.
+    const res = await h.fetch('/v1/events', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        events: [{
+          id: randomUUID(),
+          type: 'environment.ready',
+          envId: `env-nobody-has-heard-of-${randomUUID().slice(0, 8)}`,
+          sequence: 1,
+          occurredAt: h.clock.now().toISOString(),
+          payload: {},
+        }],
+      }),
+    })
+    assert.equal(res.status, 202)
+
+    const body = await scrape()
+    assert.match(body, /af_ingest_events_total\{outcome="unprojected"\} [1-9]/)
+    assert.match(
+      body,
+      /af_ingest_events_total\{outcome="rejected"\} 0/,
+      'an event that was stored must not count against the ingestion loss objective',
+    )
+  })
+
   it('measures time to preview from the number the engine reported', async () => {
     await h.fetch('/v1/events', {
       method: 'POST',
