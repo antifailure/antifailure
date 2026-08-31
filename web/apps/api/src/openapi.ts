@@ -68,12 +68,16 @@ export function openApiDocument(): Record<string, unknown> {
                             '(owner/name) and branch on EVERY event and not only the first, ' +
                             'because the environment row is created from whichever event ' +
                             'arrives first and an event that cannot name its repository ' +
-                            'cannot create one. ttl_seconds is the declared lifetime, added ' +
-                            'to the earliest occurred_at seen to give the expiry.',
+                            'cannot create one. started_at is when the environment began ' +
+                            'existing, which is not when the event fired: usage and the expiry ' +
+                            'are measured from it, so an environment reported ready after its ' +
+                            'build is still billed for the build. ttl_seconds is the declared ' +
+                            'lifetime, added to that instant to give the expiry.',
                           properties: {
                             repository: { type: 'string', description: 'owner/name.' },
                             branch: { type: 'string' },
                             pull_request: { type: 'integer', minimum: 1 },
+                            started_at: { type: 'string', format: 'date-time' },
                             ttl_seconds: { type: 'number', minimum: 1 },
                           },
                         },

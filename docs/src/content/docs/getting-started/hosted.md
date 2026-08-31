@@ -106,6 +106,11 @@ repository as `owner/name`, the branch, the pull request number when there is
 one, and the lifetime `runtime.ttl` declares, and the control plane creates the
 environment from whichever of those events reaches it first.
 
+Each of those events also carries the instant the environment began existing,
+which is not the instant the event fired: an environment is reported ready
+after its build, and the build is the expensive part of a cold run. Usage and
+the expiry are both measured from the earlier instant.
+
 The repository name comes from `GITHUB_REPOSITORY` when the run is in GitHub
 Actions, and otherwise from the `origin` remote of the checkout. A checkout
 with neither, which is a directory somebody is trying the tool in, reports no

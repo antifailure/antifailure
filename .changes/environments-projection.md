@@ -15,6 +15,11 @@ repository, the branch, the pull request number when there is one, and the
 lifetime the manifest declared in `runtime.ttl`, so the console shows a real
 expiry and a real pull request link rather than empty fields.
 
+Usage is measured from when the environment came up rather than from when the
+control plane heard about it. Every event that a run emits carries the instant
+the work began, so an environment whose creating event was lost still bills
+from before its build rather than after it.
+
 An engine older than this release can still advance an environment but cannot
 create one, because it does not say which repository it is running against.
 Rather than dropping such an event, the control plane stores it, counts it as
