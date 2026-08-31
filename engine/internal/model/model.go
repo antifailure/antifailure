@@ -263,14 +263,24 @@ func Remove(
 ) ([]string, error) {
 	var removed []string
 	if ring != nil {
-		err := ring.Delete(secrets.DefaultKeyringService, p.KeyVar)
+		// Asked before it is deleted, rather than reading the answer out of
+		// Delete. Every implementation here treats deleting something that is
+		// not there as success, because the caller wanted it gone, so Delete
+		// returning nil is not evidence that anything was removed. Reporting a
+		// removal that did not happen is worse than saying nothing: it is read
+		// as "the leaked key is out of the keyring" by somebody whose keyring
+		// never had it and whose shell still does.
+		_, err := ring.Get(secrets.DefaultKeyringService, p.KeyVar)
 		switch {
 		case err == nil:
+			if delErr := ring.Delete(secrets.DefaultKeyringService, p.KeyVar); delErr != nil {
+				return removed, fmt.Errorf("removing from the system keyring: %w", delErr)
+			}
 			removed = append(removed, "the system keyring")
 		case errors.Is(err, secrets.ErrNotFound), errors.Is(err, secrets.ErrKeyringUnavailable):
 			// Nothing there, or nowhere to look. Neither is a failure.
 		default:
-			return removed, fmt.Errorf("removing from the system keyring: %w", err)
+			return removed, fmt.Errorf("reading the system keyring: %w", err)
 		}
 	}
 	if secrets.StorePassphrase(getenv) != "" {

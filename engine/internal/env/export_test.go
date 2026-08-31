@@ -67,3 +67,35 @@ func RunSeedForTest(ctx context.Context, o *Orchestrator, seed, candidateURL str
 
 // SeedRulesHashForTest exposes seedRulesHash.
 func SeedRulesHashForTest(seed string) string { return seedRulesHash(seed) }
+
+// RunnerEnvironmentForTest exposes runnerEnvironment to the package's external
+// tests.
+//
+// It is the whole answer to whether 'af model set' does anything. A key that
+// resolves everywhere the engine looks and never reaches the one subprocess
+// that spends it is a command that stores a key and changes nothing about a
+// run, which is the dead-code shape this repository has shipped before.
+func (o *Orchestrator) RunnerEnvironmentForTest(ctx context.Context) []string {
+	return o.runnerEnvironment(ctx)
+}
+
+// ModelEnvForTest exposes modelEnv to the package's external tests.
+//
+// It decides what the egress sidecar receives for a synth rule, which is the
+// second place a model key is actually spent.
+func (o *Orchestrator) ModelEnvForTest(ctx context.Context) []string {
+	return o.modelEnv(ctx)
+}
+
+// InvokeRunnerForTest exposes invokeRunner to the package's external tests.
+//
+// Exported because testing runnerEnvironment alone proves nothing: a function
+// that assembles the right environment and a subprocess that receives it are
+// different claims, and deleting the line that connects them left every test of
+// the first one green. Reaching the real subprocess is the only way to assert
+// the second.
+func (o *Orchestrator) InvokeRunnerForTest(
+	ctx context.Context, runnerPath, artifacts string,
+) ([]byte, error) {
+	return o.invokeRunner(ctx, runnerPath, jobDocument{Artifacts: artifacts})
+}
