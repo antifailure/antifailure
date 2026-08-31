@@ -37,7 +37,7 @@ no migration credential at all.
 docker run --rm \
   -e AF_MIGRATION_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
-  ghcr.io/antifailure/control-plane:v0.1.1 node bootstrap.mjs
+  ghcr.io/antifailure/control-plane:latest node bootstrap.mjs
 
 # 2. Serve.
 docker run \
@@ -45,8 +45,13 @@ docker run \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
   -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
-  -p 8080:8080 ghcr.io/antifailure/control-plane:v0.1.1
+  -p 8080:8080 ghcr.io/antifailure/control-plane:latest
 ```
+
+`latest` names the newest released version. It is moved by the push of a `v*`
+tag and by a maintainer republishing one, and never by a build off `main`. Pin
+a digest for an install you have to be able to reproduce: a tag can be moved
+and a digest cannot.
 
 On Kubernetes, the chart in `deploy/helm/antifailure-control-plane` runs step 1
 as a Job before the Deployment rolls.

@@ -187,11 +187,15 @@ what is actually linked, not maintained by hand.
 Two things people reasonably expect, said plainly rather than left to be
 discovered.
 
-The SPDX bill of materials and the cosign signing above have never run against a
-real release. The only two tags in this repository, v0.1.0 and v0.1.1, were both
-built before those steps existed. The pipeline is held up by its own tests and
-by the release workflow refusing a tampered `checksums.txt`, and not yet by a
-published artifact you can download and check for yourself.
+Whether the SPDX bill of materials and the cosign signing above have run against
+a real release is a question you can settle yourself rather than take on trust: a
+release that carries `checksums.txt.sigstore.json` and `sbom.spdx.json` ran them,
+and a release that carries neither did not. v0.1.0 and v0.1.1 were both built
+before those steps existed and carry neither. v1.0.0 is the first tag whose
+release workflow runs them. Until a release carries those two files, the pipeline
+is held up by its own tests and by the release workflow refusing a tampered
+`checksums.txt`, and not by a published artifact you can download and check for
+yourself.
 
 There is no adversarial test suite attempting sandbox escape and proxy bypass.
 For a product whose central promise is containment, this is the most important

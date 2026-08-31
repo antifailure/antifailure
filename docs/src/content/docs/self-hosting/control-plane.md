@@ -41,7 +41,7 @@ second serves requests.
 docker run --rm \
   -e AF_MIGRATION_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
-  ghcr.io/antifailure/control-plane:v0.1.1 node bootstrap.mjs
+  ghcr.io/antifailure/control-plane:latest node bootstrap.mjs
 
 # 2. Serve. Note what is absent: no migration credential, and no AF_MIGRATE.
 docker run \
@@ -49,8 +49,13 @@ docker run \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
   -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
-  -p 8080:8080 ghcr.io/antifailure/control-plane:v0.1.1
+  -p 8080:8080 ghcr.io/antifailure/control-plane:latest
 ```
+
+`latest` names the newest released version. It is moved by the push of a `v*`
+tag and by a maintainer republishing one, and never by a build off `main`. Pin
+a digest for an install you have to be able to reproduce: a tag can be moved
+and a digest cannot.
 
 Every variable it reads is in the [configuration
 reference](/docs/reference/control-plane/), including retention and the schema
