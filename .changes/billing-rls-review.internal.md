@@ -50,3 +50,17 @@ routes, and the narrowest grant that keeps every path working is green and still
 admits the kill switch. A privilege is granted to a role and a policy admits a
 row, and there is no way to say "this column, but only on the path that policy
 admitted". The reasoning sits beside the test so the next reader has it.
+
+A fourth test turns that recorded convention into an enforced one. It reads
+every TypeScript source under `web`, `console` and `ee`, finds every UPDATE on
+`organizations` including the upsert whose table name sits beside INSERT rather
+than beside UPDATE, blanks each interpolation so a written column and an
+assembled clause stop looking alike, and refuses any statement whose SET clause
+names nothing. It refuses the query builder outright, because what `set()`
+writes is an object decided at run time. It runs with no database, deliberately,
+since a skip reads as a pass. What it cannot see is written beside the
+assertion, including the sharpest limit: it enforces that columns are named and
+not which columns, so a delivery path statement naming `suspended_at` still
+passes. Its first run refused a sentence in its own comment that quoted the
+statement shape to explain it, which is the false positive direction it was
+built to prefer, and the comment was reworded rather than the file excluded.

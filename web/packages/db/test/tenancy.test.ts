@@ -11,7 +11,9 @@
 // would pass just as well with the policies removed.
 
 import { after, before, describe, it } from 'node:test'
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { sql } from 'drizzle-orm'
 import { createPool } from '../src/client.ts'
@@ -567,5 +569,193 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     assert.equal(resolved[0]!.user_id, alice.userId)
 
     await h.admin`DELETE FROM sessions WHERE token_hash = ${token}`
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// The convention that stands in for a privilege we cannot express
+// ---------------------------------------------------------------------------
+//
+// Deliberately outside the describe above, and with no database skip. This one
+// reads source text rather than rows, so a machine with no Postgres must still
+// run it. A suite that skips reads as a suite that passed.
+
+/** Where the reader looks. A statement outside these trees is invisible to it. */
+const SOURCE_ROOTS = ['web', 'console', 'ee']
+const SOURCE_SKIP = new Set(['node_modules', '.next', 'dist', '.git', 'coverage', '.astro'])
+
+async function typescriptFiles(dir: string): Promise<string[]> {
+  const found: string[] = []
+  let entries
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return found
+  }
+  for (const entry of entries) {
+    if (SOURCE_SKIP.has(entry.name)) continue
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) found.push(...(await typescriptFiles(full)))
+    else if (/\.tsx?$/.test(entry.name)) found.push(full)
+  }
+  return found
+}
+
+/**
+ * Replaces every `${...}` with one placeholder, counting braces so an object
+ * literal inside an interpolation does not end it early.
+ *
+ * This is what separates the two cases. `SET plan = ${input.plan}` becomes
+ * `SET plan = @`, which still names its column. `SET ${assignments}` becomes
+ * `SET @`, which names nothing, and that is the shape being refused.
+ */
+function withoutInterpolations(text: string): string {
+  let out = ''
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '$' && text[i + 1] === '{') {
+      let depth = 1
+      let j = i + 2
+      while (j < text.length && depth > 0) {
+        if (text[j] === '{') depth += 1
+        else if (text[j] === '}') depth -= 1
+        j += 1
+      }
+      out += '@'
+      i = j - 1
+    } else {
+      out += text[i]
+    }
+  }
+  return out
+}
+
+// An UPDATE naming the table directly, with an optional alias. The alias group
+// refuses to match the SET keyword itself, or a statement with no alias would be
+// read as one aliased to that keyword and its clause would be missed.
+//
+// This comment is worded around the statement shape rather than quoting it, and
+// that is the gate working rather than a workaround. The first run of this test
+// refused the sentence that used to sit here, which quoted the shape to explain
+// it. Rewording costs one sentence; excluding this file would have cost the
+// ability to catch a test that writes the table unqualified.
+const PLAIN_UPDATE = /\bUPDATE\s+(?:ONLY\s+)?organizations\b(?:\s+(?!SET\b)(?:AS\s+)?[a-z_]\w*)?\s+SET\b/gi
+// The upsert, which is an UPDATE on this table whose name sits next to INSERT
+// rather than next to UPDATE. Missing this shape would miss the GitHub
+// installation path, which is one of the five.
+const UPSERT_UPDATE =
+  /\bINSERT\s+INTO\s+organizations\b[\s\S]{0,600}?\bON\s+CONFLICT\b[\s\S]{0,200}?\bDO\s+UPDATE\s+SET\b/gi
+// The query builder takes an object, so what it writes is decided at run time
+// and cannot be read here at all. There are none today. One appearing is the
+// thing this test exists to notice, so it is refused rather than parsed.
+const BUILDER_UPDATE = /\.update\(\s*organizations\b/g
+
+interface OrgUpdate {
+  where: string
+  columns: string[]
+  clause: string
+}
+
+describe('every UPDATE on organizations names its columns', () => {
+  it('refuses a statement whose SET clause is assembled rather than written', async () => {
+    // WHY THIS IS A GATE AND NOT A COMMENT. Row-level security admits a whole
+    // ROW, so inside a withStripeCustomer transaction the application role may
+    // write every column of the organization a delivery names, `suspended_at`
+    // included, which is the kill switch from 0010. See the comment beside the
+    // SELECT policy test above for why a column privilege cannot express that
+    // and what actually would. Until one of those lands, the only thing
+    // standing between a payment provider's callback and the kill switch is
+    // that every statement writing this table names the columns it writes.
+    // That was a convention holding by care, and the next statement somebody
+    // writes does not inherit care.
+    //
+    // WHAT THIS CANNOT SEE, because a gate that certifies less than its name
+    // suggests is worse than none:
+    //
+    //   - It enforces that columns are NAMED, not WHICH columns. A statement on
+    //     the delivery path naming `suspended_at` passes this and still clears
+    //     the kill switch. Only the role split or the trigger closes that.
+    //   - It reads source text, not the SQL Postgres runs. A statement built at
+    //     run time out of strings, or reaching the database by some route other
+    //     than a tagged template or the query builder, is invisible to it.
+    //   - A statement whose TABLE name is interpolated, the shape
+    //     `sql.identifier(table)` used elsewhere in this suite, is invisible for
+    //     the same reason.
+    //   - It covers `organizations` alone. That is deliberate: this table is
+    //     where the row the policy admits carries the kill switch. Every other
+    //     table is a larger conversation and a larger false positive surface.
+    //   - It cannot tell code from a comment, so prose containing this exact
+    //     statement shape would be refused. That direction is chosen: a false
+    //     positive costs somebody a rewording, and a false negative costs the
+    //     thing the test is for.
+    const root = fileURLToPath(new URL('../../../../', import.meta.url))
+
+    const updates: OrgUpdate[] = []
+    let sawPlain = false
+    let sawUpsert = false
+
+    for (const dir of SOURCE_ROOTS) {
+      for (const file of await typescriptFiles(join(root, dir))) {
+        const text = await readFile(file, 'utf8')
+        const where = (index: number) =>
+          `${relative(root, file)}:${text.slice(0, index).split('\n').length}`
+
+        for (const pattern of [PLAIN_UPDATE, UPSERT_UPDATE]) {
+          pattern.lastIndex = 0
+          let match: RegExpExecArray | null
+          while ((match = pattern.exec(text)) !== null) {
+            if (pattern === PLAIN_UPDATE) sawPlain = true
+            else sawUpsert = true
+            const after = text.slice(match.index + match[0].length)
+            // The clause ends at the next keyword that cannot be part of it, or
+            // at the end of the template literal.
+            const end = after.search(/\b(WHERE|RETURNING|FROM)\b|`|;/i)
+            const clause = withoutInterpolations(after.slice(0, end < 0 ? 200 : end))
+            const columns: string[] = []
+            let named = true
+            for (const assignment of clause.split(',')) {
+              const trimmed = assignment.trim()
+              if (!trimmed) continue
+              const column = /^"?([a-z_][a-z0-9_]*)"?\s*=/i.exec(trimmed)
+              if (column) columns.push(column[1]!)
+              else named = false
+            }
+            if (columns.length === 0) named = false
+            if (!named) {
+              updates.push({
+                where: where(match.index),
+                columns,
+                clause: clause.trim().replace(/\s+/g, ' ').slice(0, 80),
+              })
+            }
+          }
+        }
+
+        BUILDER_UPDATE.lastIndex = 0
+        let builder: RegExpExecArray | null
+        while ((builder = BUILDER_UPDATE.exec(text)) !== null) {
+          updates.push({
+            where: where(builder.index),
+            columns: [],
+            clause: 'the query builder, whose set() takes an object decided at run time',
+          })
+        }
+      }
+    }
+
+    // Both readers still match something. Without this the test passes when a
+    // regex stops matching, a walker root is renamed, or the extension filter
+    // changes, which is a green over a subject it never examined. Asserted as
+    // "each shape occurs" rather than as a count, so adding a sixth legitimate
+    // statement does not go red.
+    assert.ok(sawPlain, 'found no UPDATE on organizations at all; this reader has stopped reading')
+    assert.ok(sawUpsert, 'found no upsert on organizations; the ON CONFLICT reader has stopped reading')
+
+    assert.deepEqual(
+      updates.map((u) => `${u.where}  ${u.clause}`),
+      [],
+      'these statements write organizations without naming their columns, so what they write ' +
+        'is decided at run time and the kill switch is reachable from any path that reaches them',
+    )
   })
 })
