@@ -134,6 +134,7 @@ runner/artifacts/
 /errgen
 /figurecheck
 /gatecheck
+/installcheck
 /ldcheck
 /licensegen
 /manifestcheck
