@@ -451,7 +451,7 @@ says nothing about the new one.`),
 				if result.OK() {
 					return nil
 				}
-				return silent(modelProbeError(cfg.Provider.Name, result))
+				return silent(modelProbeError(cfg.Provider.Display, result))
 			}
 
 			if result.OK() {
