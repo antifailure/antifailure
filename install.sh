@@ -233,6 +233,10 @@ case "${home:+$shell_name}" in
     session_line="$export_line && af doctor"
     ;;
   fish)
+    # fish_add_path rather than a set -gx line, because it both persists and
+    # applies to the shell it runs in, so fish is the one shell where the
+    # profile line and the line that fixes this terminal are the same command.
+    # It also refuses to add a path twice by itself.
     profile="$home/.config/fish/config.fish"
     profile_line=$fish_line
     session_line="$fish_line && af doctor"
@@ -253,11 +257,14 @@ in_profile() {
 # so a list printed after that line starts at the second.
 next_steps() {
   say "  af doctor          check this machine"
-  next_steps_rest
+  next_steps_rest ""
 }
+# ${1:-} rather than $1, because set -u turns a call that forgets the argument
+# into "unbound variable" printed where the next steps belong, which is how the
+# numbering change first ran.
 next_steps_rest() {
-  say "  af runner install  finish the agent runner, which needs node"
-  say "  af init            read your repository and write a manifest"
+  say "  ${1:-}af runner install  finish the agent runner, which needs node"
+  say "  ${1:-}af init            read your repository and write a manifest"
 }
 
 # The same three for a branch that could not put af on the PATH, so the reader
@@ -265,9 +272,9 @@ next_steps_rest() {
 # gloss column here: a full path plus a description does not fit in eighty
 # columns, and a wrapped command is a command somebody pastes wrong.
 next_steps_full() {
-  say "  $1/af doctor"
-  say "  $1/af runner install"
-  say "  $1/af init"
+  say "     $1/af doctor"
+  say "     $1/af runner install"
+  say "     $1/af init"
 }
 
 # Said by the installer rather than left for af runner install to discover,
@@ -339,13 +346,13 @@ elif [ -n "$wrote" ]; then
     next_steps
   else
     say ""
-    say "This terminal started before that line existed, so start here:"
+    say "1. This terminal started before that line existed. Start here:"
     say ""
-    say "  $session_line"
+    say "     $session_line"
     say ""
-    say "Then:"
+    say "2. Then:"
     say ""
-    next_steps_rest
+    next_steps_rest "   "
   fi
 elif [ "$reason" = already ] || [ "$reason" = managed ]; then
   if on_path; then
@@ -353,54 +360,70 @@ elif [ "$reason" = already ] || [ "$reason" = managed ]; then
     next_steps
   else
     say "$(display_path "$profile") already puts af on the PATH. This terminal started"
-    say "before that line existed, so start here:"
+    say "before that line existed."
     say ""
-    say "  $session_line"
+    say "1. Start here:"
     say ""
-    say "Then:"
+    say "     $session_line"
     say ""
-    next_steps_rest
+    say "2. Then:"
+    say ""
+    next_steps_rest "   "
   fi
 else
   # PATH was not set up and will not be, so nothing below may print a bare af.
+  # Numbered anyway, because step 2 depends on step 1 in exactly the way the
+  # original defect denied: the full paths work today, the bare names only
+  # after the line above is in a file.
   case "$reason" in
     declined)
       if [ -n "$profile" ]; then
         say "AF_NO_MODIFY_PATH is set, so $(display_path "$profile") was left alone and af is"
-        say "not on your PATH. Add this line to it to put it there:"
+        say "not on your PATH."
+        say ""
+        say "1. Add this line to it to put it there:"
       else
         say "AF_NO_MODIFY_PATH is set, so no profile was touched and af is not on your"
-        say "PATH. Add this to the file your shell reads at startup:"
+        say "PATH."
+        say ""
+        say "1. Add this line to the file your shell reads at startup:"
       fi
       ;;
     write_failed)
       say "$(display_path "$profile") could not be written, so af is not on your PATH."
-      say "Add this to it, or to any file your shell reads at startup:"
+      say ""
+      say "1. Add this line to it, or to any file your shell reads at startup:"
       ;;
     *)
       if [ -z "$home" ]; then
         say "HOME is not set, so this installer cannot tell which file your shell reads"
-        say "at startup and did not guess at one. Add this to it:"
+        say "at startup, and it did not guess at one."
+        say ""
+        say "1. Add this line to that file:"
       elif [ -n "$shell_name" ]; then
         say "Your login shell is $shell_name, and this installer does not know how to make"
-        say "that permanent for it, so it did not guess at a file. Add this line to the"
-        say "one your shell reads at startup, which is usually ~/.profile:"
+        say "that permanent for it, so it did not guess at a file."
+        say ""
+        say "1. Add this line to the file your shell reads at startup, which for a"
+        say "   POSIX shell is usually ~/.profile:"
       else
         say "This installer could not tell which shell you use, because SHELL is not"
-        say "set, so it did not guess at a file. Add this to the one your shell reads"
-        say "at startup, usually ~/.profile:"
+        say "set, so it did not guess at a file."
+        say ""
+        say "1. Add this line to the one your shell reads at startup, which is"
+        say "   usually ~/.profile:"
       fi
       ;;
   esac
   say ""
   if [ "$shell_name" = "fish" ]; then
-    say "  $fish_line"
+    say "     $fish_line"
   else
-    say "  $export_line"
+    say "     $export_line"
   fi
   say ""
-  say "Until then af answers to its full path. Check the machine, finish the runner,"
-  say "which needs node, then read your repository into a manifest:"
+  say "2. Until then af answers to its full path. Check the machine, finish the"
+  say "   runner, which needs node, then read your repository into a manifest:"
   say ""
   next_steps_full "$(display_path "$BIN_DIR")"
 fi

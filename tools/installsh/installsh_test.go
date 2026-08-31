@@ -152,6 +152,18 @@ func (s *session) install() string {
 	if err != nil {
 		s.t.Fatalf("install.sh failed: %v\n%s", err, out)
 	}
+	// Twice now a change has put a raw shell error where a message belongs: an
+	// append to a read only profile reporting "Permission denied" before the
+	// explanation, and a helper called without its argument reporting "unbound
+	// variable" where the next steps go. Both left a zero exit in some branches
+	// and both looked fine in the branch under test, so this is checked on
+	// every install rather than in one test.
+	for _, leak := range []string{"unbound variable", "sh: line", "Permission denied", "command not found"} {
+		if strings.Contains(out, leak) {
+			s.t.Errorf("a raw shell error leaked into the output: %q\n--- output ---\n%s", leak, out)
+		}
+	}
+	assertNumberedStepsAreIndented(s.t, out)
 	return out
 }
 
@@ -267,6 +279,33 @@ func assertPrintedFullPathsRun(t *testing.T, s *session, out string) {
 	}
 	if found != 3 {
 		t.Errorf("expected the three next steps as full paths, found %d\n--- output ---\n%s", found, out)
+	}
+}
+
+// A numbered step's commands have to sit under the number that owns them. This
+// is not fussiness: next_steps_rest takes its indent as a positional argument,
+// and the call site that forgot it printed the two commands flush against the
+// left margin under "2. Then:", which reads as a separate list rather than as
+// the contents of step 2. The first version of that omission was worse, an
+// "unbound variable" from set -u printed where the steps belong.
+func assertNumberedStepsAreIndented(t *testing.T, out string) {
+	t.Helper()
+	lines := strings.Split(out, "\n")
+	for i, l := range lines {
+		if !strings.HasPrefix(l, "2. ") {
+			continue
+		}
+		for _, rest := range lines[i+1:] {
+			if strings.TrimSpace(rest) == "" || strings.HasPrefix(rest, "   ") {
+				continue
+			}
+			if strings.HasPrefix(strings.TrimSpace(rest), "af ") ||
+				strings.Contains(rest, "/af ") {
+				t.Errorf("a command under %q is indented %d spaces, so it reads as its own list\n--- output ---\n%s",
+					l, len(rest)-len(strings.TrimLeft(rest, " ")), out)
+			}
+			break
+		}
 	}
 }
 
