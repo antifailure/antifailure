@@ -89,15 +89,25 @@ type candidate struct {
 	portWhy   string
 	command   string
 	cmdConf   Confidence
-	migrate   string
-	build     *schema.Build
-	schedule  string
-	cronPath  string
-	dependsOn []string
-	evidence  []string
+	// cmdEvidence is the file the command came from. It breaks a tie between
+	// two commands of equal confidence in favour of the one the image runs.
+	cmdEvidence string
+	migrate     string
+	build       *schema.Build
+	schedule    string
+	cronPath    string
+	dependsOn   []string
+	evidence    []string
 	// portConflicts records ports other analyzers proposed, which is what
 	// turns a disagreement into a question rather than a silent choice.
 	portConflicts map[int]string
+	// declaredBy is the set of analyzers that declared this candidate a
+	// service. It is what tells one source describing two services apart from
+	// two sources describing one, which coalesce turns on.
+	declaredBy map[string]bool
+	// nameRank is how much the name is worth as an identity, from the source
+	// that produced it. See nameRankOf.
+	nameRank int
 }
 
 func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
@@ -108,16 +118,31 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 		if c, ok := byName[name]; ok {
 			return c
 		}
-		c := &candidate{name: name, kind: schema.ServiceWeb, portConflicts: map[int]string{}}
+		c := &candidate{
+			name:          name,
+			kind:          schema.ServiceWeb,
+			portConflicts: map[int]string{},
+			declaredBy:    map[string]bool{},
+		}
 		byName[name] = c
 		order = append(order, name)
 		return c
+	}
+
+	// declare records that an analyzer says this candidate is a service, and
+	// where the name it used came from.
+	declare := func(c *candidate, f Finding) {
+		c.declaredBy[f.Analyzer] = true
+		if r := nameRankOf(f.Extra["name_from"]); r > c.nameRank {
+			c.nameRank = r
+		}
 	}
 
 	for _, f := range findings {
 		switch f.Kind {
 		case KindService:
 			c := get(f.Subject)
+			declare(c, f)
 			switch f.Value {
 			case "worker":
 				c.kind = schema.ServiceWorker
@@ -134,9 +159,10 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 
 		case KindWorker:
 			c := get(f.Subject)
+			declare(c, f)
 			c.kind = schema.ServiceWorker
 			if f.Value != "" && c.command == "" {
-				c.command, c.cmdConf = f.Value, f.Confidence
+				c.command, c.cmdConf, c.cmdEvidence = f.Value, f.Confidence, f.Evidence
 			}
 			if d := f.Extra["dir"]; d != "" && c.dir == "" {
 				c.dir = d
@@ -145,6 +171,7 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 
 		case KindCron:
 			c := get(f.Subject)
+			declare(c, f)
 			c.kind = schema.ServiceCron
 			c.schedule = f.Value
 			c.cronPath = f.Extra["path"]
@@ -165,19 +192,12 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 			if err != nil || n <= 0 || n >= 65536 {
 				continue
 			}
-			if c.port == 0 || f.Confidence > c.portConf {
-				if c.port != 0 && c.port != n {
-					c.portConflicts[c.port] = c.portWhy
-				}
-				c.port, c.portConf, c.portWhy = n, f.Confidence, f.Detail
-			} else if n != c.port {
-				c.portConflicts[n] = f.Detail
-			}
+			c.absorbPort(n, f.Confidence, f.Detail)
 
 		case KindCommand:
 			c := get(f.Subject)
 			if c.command == "" || f.Confidence > c.cmdConf {
-				c.command, c.cmdConf = f.Value, f.Confidence
+				c.command, c.cmdConf, c.cmdEvidence = f.Value, f.Confidence, f.Evidence
 			}
 
 		case KindMigration:
@@ -210,6 +230,9 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 			}
 		}
 	}
+
+	// Two sources describing one service are still one service.
+	order = coalesceServices(byName, order)
 
 	// A migration command found for the repository as a whole belongs to the
 	// web service that will run it, not to a phantom service of its own.
@@ -286,6 +309,222 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 		}
 	}
 	return out
+}
+
+// absorbPort records a port proposal, keeping the best evidence and turning a
+// disagreement into a conflict the caller can ask about.
+func (c *candidate) absorbPort(n int, conf Confidence, why string) {
+	if n <= 0 || n >= 65536 {
+		return
+	}
+	if c.port == 0 || conf > c.portConf {
+		if c.port != 0 && c.port != n {
+			c.portConflicts[c.port] = c.portWhy
+		}
+		c.port, c.portConf, c.portWhy = n, conf, why
+		delete(c.portConflicts, n)
+		return
+	}
+	if n != c.port {
+		c.portConflicts[n] = why
+	}
+}
+
+// Where a service name came from, ranked by how much it identifies the
+// application rather than the place it happens to sit. A package manifest
+// carries the name the authors chose. A compose key or a Procfile process name
+// is usually a role word such as "web". A directory name is the checkout path,
+// which is whatever the developer cloned into.
+const (
+	nameFromDir      = 1
+	nameFromProcfile = 2
+	nameFromCompose  = 3
+	nameFromPackage  = 4
+)
+
+func nameRankOf(source string) int {
+	switch source {
+	case "package":
+		return nameFromPackage
+	case "compose":
+		return nameFromCompose
+	case "procfile":
+		return nameFromProcfile
+	default:
+		return nameFromDir
+	}
+}
+
+// coalesceServices folds candidates that are one service described by several
+// sources into one, and returns the surviving order.
+//
+// The failure it exists to stop: a repository with a Dockerfile and a
+// package.json whose name is not the directory name produced two services,
+// because the merge key was the service name and every source spells the name
+// differently. Docker and the language analyzers name a service after its
+// directory, compose after the key in the file, Procfile after the process,
+// and Node after the package. A name is a label. The identity of a service in
+// a repository is where it is built and run from, plus its role, so that is
+// what candidates are grouped on here.
+//
+// The guard that keeps this from eating real services: one source declaring
+// two services in a directory means two services, and a compose file with a
+// web and an admin container on the same build context is exactly that. So a
+// group is only folded when every source in it contributed exactly one
+// candidate, which is the shape of one thing seen several times.
+//
+// The alternative that lost was renumbering the duplicate's port. That would
+// have written a second service that does not exist into a file people commit,
+// and it would have passed validation, which is worse than the refusal.
+func coalesceServices(byName map[string]*candidate, order []string) []string {
+	groups := map[string][]string{}
+	var groupOrder []string
+	for _, name := range order {
+		c := byName[name]
+		// A candidate nothing declared is not a service yet. The repository
+		// wide migration is the case, and reassignRepoWideMigration owns it.
+		if len(c.declaredBy) == 0 {
+			continue
+		}
+		key := normalizeDir(c.dir) + "\x00" + string(c.kind)
+		if _, seen := groups[key]; !seen {
+			groupOrder = append(groupOrder, key)
+		}
+		groups[key] = append(groups[key], name)
+	}
+
+	renamed := map[string]string{}
+	for _, key := range groupOrder {
+		members := groups[key]
+		if len(members) < 2 || !oneCandidatePerSource(byName, members) {
+			continue
+		}
+		target := byName[pickName(byName, members)]
+		target.dir = normalizeDir(target.dir)
+		for _, name := range members {
+			if name == target.name {
+				continue
+			}
+			target.absorb(byName[name])
+			renamed[name] = target.name
+			delete(byName, name)
+		}
+	}
+	if len(renamed) == 0 {
+		return order
+	}
+
+	// A compose service that depended on a name this pass folded away has to
+	// follow it, or the manifest names a service that is not declared and the
+	// validator rejects the file af init just wrote.
+	for _, c := range byName {
+		var deps []string
+		for _, d := range c.dependsOn {
+			if to, ok := renamed[d]; ok {
+				d = to
+			}
+			if d != c.name {
+				deps = appendUnique(deps, d)
+			}
+		}
+		c.dependsOn = deps
+	}
+
+	out := make([]string, 0, len(order))
+	for _, name := range order {
+		if _, gone := renamed[name]; !gone {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// oneCandidatePerSource reports whether every analyzer in the group declared
+// exactly one of its members.
+func oneCandidatePerSource(byName map[string]*candidate, members []string) bool {
+	count := map[string]int{}
+	for _, name := range members {
+		for analyzer := range byName[name].declaredBy {
+			count[analyzer]++
+			if count[analyzer] > 1 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// pickName chooses which member's name the folded service keeps: the one from
+// the source that identifies the application best, and on a tie the one that
+// was found first, so that two runs over the same tree agree.
+func pickName(byName map[string]*candidate, members []string) string {
+	best := members[0]
+	for _, name := range members[1:] {
+		if byName[name].nameRank > byName[best].nameRank {
+			best = name
+		}
+	}
+	return best
+}
+
+// absorb folds another candidate's evidence into this one. Stronger evidence
+// wins field by field, which is the same rule the finding loop applies, so a
+// Dockerfile's EXPOSE still outranks a framework's default port after folding.
+func (c *candidate) absorb(o *candidate) {
+	if o.port != 0 {
+		c.absorbPort(o.port, o.portConf, o.portWhy)
+	}
+	for p, why := range o.portConflicts {
+		if p != c.port {
+			c.portConflicts[p] = why
+		}
+	}
+	if c.build == nil {
+		c.build = o.build
+	}
+	// The command the image runs beats a package script of equal confidence.
+	// A Dockerfile that ships a standalone server declares CMD ["node",
+	// "server.js"], and "npm run start" would run the framework's dev server
+	// against a toolchain the final stage does not contain.
+	fromImage := c.build != nil && c.build.Dockerfile != "" && o.cmdEvidence == c.build.Dockerfile
+	if o.command != "" && (c.command == "" || o.cmdConf > c.cmdConf || (o.cmdConf == c.cmdConf && fromImage)) {
+		c.command, c.cmdConf, c.cmdEvidence = o.command, o.cmdConf, o.cmdEvidence
+	}
+	if c.framework == "" {
+		c.framework = o.framework
+	}
+	if c.migrate == "" {
+		c.migrate = o.migrate
+	}
+	if c.schedule == "" {
+		c.schedule = o.schedule
+	}
+	if c.cronPath == "" {
+		c.cronPath = o.cronPath
+	}
+	for _, d := range o.dependsOn {
+		c.dependsOn = appendUnique(c.dependsOn, d)
+	}
+	for _, e := range o.evidence {
+		c.evidence = appendUnique(c.evidence, e)
+	}
+	for a := range o.declaredBy {
+		c.declaredBy[a] = true
+	}
+}
+
+// normalizeDir puts every spelling of "the repository root" into one. Compose
+// writes a build context of ".", dirOf writes "", and grouping has to see
+// those as the same place.
+func normalizeDir(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	cleaned := path.Clean(dir)
+	if cleaned == "." || cleaned == "/" {
+		return ""
+	}
+	return strings.TrimPrefix(cleaned, "./")
 }
 
 // reassignRepoWideMigration moves a migration command that was attributed to

@@ -113,6 +113,12 @@ const (
 	AFDET002 Code = "AF-DET-002"
 	// Services {first} and {second} both claim port {port}.
 	AFDET003 Code = "AF-DET-003"
+	// Detection could not decide {question}, and there is no default to
+	// fall back on.
+	AFDET004 Code = "AF-DET-004"
+	// Detection produced a draft that is not a valid manifest, so nothing
+	// was written and {path} does not exist: {detail}
+	AFDET005 Code = "AF-DET-005"
 	// The changed files between {base} and {head} could not be read:
 	// {detail}
 	AFDET010 Code = "AF-DET-010"
@@ -181,8 +187,8 @@ const (
 	// The manifest at {path} declares schema version {found}, which this
 	// build does not understand.
 	AFMAN003 Code = "AF-MAN-003"
-	// 'af init' needs a terminal to ask questions, and this session has
-	// none.
+	// 'af init' has questions to ask and this session has no terminal to
+	// ask them on.
 	AFMAN004 Code = "AF-MAN-004"
 	// The manifest at {path} is larger than the {limit} limit.
 	AFMAN005 Code = "AF-MAN-005"
@@ -717,6 +723,24 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
+	AFDET004: {
+		Code:      AFDET004,
+		Area:      "DET",
+		Message:   "Detection could not decide {question}, and there is no default to fall back on.",
+		NextStep:  "Answer it with --answer {id}=<value>, or run 'af init' from a terminal so it can ask.",
+		Docs:      "concepts/detection",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDET005: {
+		Code:      AFDET005,
+		Area:      "DET",
+		Message:   "Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}",
+		NextStep:  "This is a defect in Antifailure. Please report it with the detail above, then write the manifest by hand from the reference or re-run with --answer to override what detection guessed.",
+		Docs:      "concepts/detection",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
 	AFDET010: {
 		Code:      AFDET010,
 		Area:      "DET",
@@ -936,8 +960,8 @@ var catalog = map[Code]Entry{
 	AFMAN004: {
 		Code:      AFMAN004,
 		Area:      "MAN",
-		Message:   "'af init' needs a terminal to ask questions, and this session has none.",
-		NextStep:  "Pass --non-interactive together with the flags listed by 'af init --help'.",
+		Message:   "'af init' has questions to ask and this session has no terminal to ask them on.",
+		NextStep:  "Pass --non-interactive to accept every default, and --answer id=value for anything that has no default.",
 		Docs:      "reference/cli#af-init",
 		Retryable: false,
 		ExitCode:  ExitUsage,

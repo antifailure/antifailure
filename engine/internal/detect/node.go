@@ -241,7 +241,7 @@ func (a *NodeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error) {
 			continue
 		}
 
-		name := serviceNameFor(pkg.Name, dir, r)
+		name, nameFrom := serviceNameFor(pkg.Name, dir, r)
 		matched := false
 		for _, fw := range nodeFrameworks {
 			if _, has := deps[fw.dep]; !has {
@@ -257,7 +257,7 @@ func (a *NodeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error) {
 			out = append(out, Finding{
 				Kind: KindService, Subject: name, Value: fw.kind,
 				Confidence: High, Evidence: p,
-				Extra: map[string]string{"dir": dir, "framework": fw.name},
+				Extra: map[string]string{"dir": dir, "framework": fw.name, "name_from": nameFrom},
 			})
 			port, portConf, portWhy := nodePort(pkg, fw)
 			out = append(out, Finding{
@@ -288,7 +288,7 @@ func (a *NodeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error) {
 				Kind: KindWorker, Subject: workerName, Value: cmd,
 				Confidence: confidenceIf(cmd != "", High, Low), Evidence: p,
 				Detail: fmt.Sprintf("%s depends on %s.", p, w.label),
-				Extra:  map[string]string{"dir": dir, "queue": w.label},
+				Extra:  map[string]string{"dir": dir, "queue": w.label, "name_from": nameFrom},
 			})
 			matched = true
 			break
@@ -307,7 +307,7 @@ func (a *NodeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error) {
 				Finding{Kind: KindService, Subject: name, Value: "web",
 					Confidence: Low, Evidence: p,
 					Detail: "The package has a start script but no framework was recognised.",
-					Extra:  map[string]string{"dir": dir}},
+					Extra:  map[string]string{"dir": dir, "name_from": nameFrom}},
 				Finding{Kind: KindCommand, Subject: name, Value: startCommandPrefix(r) + " start",
 					Confidence: Medium, Evidence: p},
 			)
@@ -407,17 +407,24 @@ func findWorkerScript(pkg packageJSON) string {
 	return ""
 }
 
-// serviceNameFor derives a service name from the package name or its directory.
+// serviceNameFor derives a service name from the package name or its
+// directory, and reports which of the two it used.
 //
 // The package name wins when it is meaningful. A scoped name such as @acme/web
 // becomes web, because the scope is the same for every package in the monorepo
 // and adds nothing to a hostname.
-func serviceNameFor(pkgName, dir string, r *Repo) string {
+//
+// The second return value is what lets the merger tell a name the authors
+// chose from the directory somebody happened to clone into, which is how it
+// decides which name survives when two sources describe one service.
+func serviceNameFor(pkgName, dir string, r *Repo) (string, string) {
 	candidate := pkgName
 	if i := strings.LastIndexByte(candidate, '/'); i >= 0 {
 		candidate = candidate[i+1:]
 	}
+	source := "package"
 	if candidate == "" || candidate == "root" || candidate == "monorepo" {
+		source = "dir"
 		if dir != "" {
 			candidate = path.Base(dir)
 		} else {
@@ -428,10 +435,10 @@ func serviceNameFor(pkgName, dir string, r *Repo) string {
 		// A directory named src tells the reader nothing. Its parent usually
 		// does.
 		if parent := path.Base(path.Dir(dir)); parent != "." && parent != "" {
-			candidate = parent
+			candidate, source = parent, "dir"
 		}
 	}
-	return sanitizeServiceName(candidate)
+	return sanitizeServiceName(candidate), source
 }
 
 func sanitizeServiceName(s string) string {

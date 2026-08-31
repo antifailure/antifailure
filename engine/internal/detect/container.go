@@ -60,7 +60,9 @@ func (a *DockerAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error) 
 		out = append(out, Finding{
 			Kind: KindService, Subject: name, Value: "web",
 			Confidence: Medium, Evidence: p,
-			Extra: map[string]string{"dir": dir},
+			// A Dockerfile carries no name of its own, so this one is the
+			// directory, which the merger treats as the weakest identity.
+			Extra: map[string]string{"dir": dir, "name_from": "dir"},
 		})
 		if len(df.stages) > 1 {
 			out = append(out, Finding{
@@ -250,7 +252,7 @@ func (a *ComposeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error)
 			out = append(out, Finding{
 				Kind: KindService, Subject: name, Value: "web",
 				Confidence: conf, Evidence: p, Detail: detail,
-				Extra: map[string]string{"dir": svc.buildContext},
+				Extra: map[string]string{"dir": svc.buildContext, "name_from": "compose"},
 			})
 			if svc.port != 0 {
 				out = append(out, Finding{
@@ -525,7 +527,7 @@ func (a *ProcfileAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error
 				Finding{Kind: KindService, Subject: name, Value: kind,
 					Confidence: High, Evidence: p,
 					Detail: fmt.Sprintf("%s declares the process %s.", p, procName),
-					Extra:  map[string]string{"dir": dir}},
+					Extra:  map[string]string{"dir": dir, "name_from": "procfile"}},
 				Finding{Kind: KindCommand, Subject: name, Value: command,
 					Confidence: High, Evidence: p},
 			)
