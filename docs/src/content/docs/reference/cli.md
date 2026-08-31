@@ -1091,6 +1091,17 @@ Subcommands:
 
 Say whether the runner can run.
 
+Reports each thing af test needs from the runner separately: the source, the
+dependencies it declares, a node new enough to run it, and the browser.
+
+It does not claim the runner executes. Knowing that means starting node and
+launching a browser, which is what af test is. Anything this cannot determine
+is reported as not checked rather than as ok, because a check that answers ok
+about something it never examined is worse than one that admits the gap: this
+command used to report "ok runner" whenever src/main.ts existed, which was true
+of an install with no dependencies at all, and the real failure surfaced much
+later inside af test as a node error about a module it could not resolve.
+
 ```
 af runner check
 ```

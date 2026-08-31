@@ -36,6 +36,15 @@ already looking, and a half installed tree left by an earlier installer is
 cleaned up. The installer also names node and the version it needs when node is
 missing, rather than leaving that for `af runner install` to discover.
 
+`af runner check` reported `ok runner` on that tree, because it stat'd
+`src/main.ts` and stopped there. It now reads the runner's own `package.json`
+and reports the source, every declared dependency against `node_modules`, the
+node version against the `engines.node` range, and the browser, each with a
+remedy that fits it rather than one "run af runner install" printed under every
+failure including a missing node. It still does not claim the runner executes,
+because knowing that means starting node and launching a browser, and anything
+it cannot determine reports as not checked rather than as ok.
+
 In GitHub Actions the installer writes to `GITHUB_PATH` and touches no profile.
 The documented workflow needed that and did not have it: every step gets a fresh
 PATH, so `af ci` in the step after the install was never going to be found.
