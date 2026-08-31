@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/antifailure/antifailure/engine/internal/auth"
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -483,6 +484,60 @@ recoverable by replay.`),
 		newVersionCommand(env),
 	)
 	attachExamples(root)
+	// Help text is wrapped at render time rather than in the source.
+	//
+	// Cobra prints Long verbatim, so every Long in this tree was hand wrapped
+	// at eighty columns by whoever wrote it, which is a guess that is wrong in
+	// both directions: at forty columns every help page in the tool overflows
+	// and the terminal breaks it mid word, and at two hundred it is a ribbon
+	// down the left of an empty screen.
+	//
+	// A template function rather than rewriting Long, because the generated
+	// command reference reads Long directly and must keep the paragraphs the
+	// author wrote rather than one terminal's idea of where they end.
+	cobra.AddTemplateFunc("wrapped", func(s string) string {
+		var out []string
+		// Paragraph by paragraph, and a line that is indented is left alone:
+		// those are the command tours and worked fragments, where the
+		// alignment is the meaning.
+		for _, para := range strings.Split(strings.TrimSpace(s), "\n\n") {
+			if strings.HasPrefix(para, " ") || strings.Contains(para, "\n ") {
+				out = append(out, para)
+				continue
+			}
+			out = append(out, env.Out.Wrap(para, 0))
+		}
+		return strings.Join(out, "\n\n")
+	})
+	// Cobra pads its flag table and its command list and never wraps either,
+	// so at forty columns every help page in the tool spills its descriptions
+	// past the right margin. pflag has the wrapped form and cobra's template
+	// simply does not call it; the command list has no wrapped form at all and
+	// gets one here.
+	cobra.AddTemplateFunc("flags", func(set *pflag.FlagSet) string {
+		// Trailing spaces trimmed per line: pflag pads the name column to a
+		// fixed width and, when it wraps, leaves that padding on a line with
+		// nothing after it. Invisible on a screen and a diff full of
+		// whitespace anywhere the help text is captured.
+		lines := strings.Split(set.FlagUsagesWrapped(env.Out.Width), "\n")
+		for i := range lines {
+			lines[i] = strings.TrimRight(lines[i], " ")
+		}
+		return strings.TrimRight(strings.Join(lines, "\n"), "\n")
+	})
+	cobra.AddTemplateFunc("commands", func(c *cobra.Command) string {
+		var b strings.Builder
+		for _, sub := range c.Commands() {
+			if !sub.IsAvailableCommand() && sub.Name() != "help" {
+				continue
+			}
+			label := "  " + sub.Name() + strings.Repeat(" ", max(1, sub.NamePadding()-len(sub.Name())+1))
+			b.WriteString(label)
+			b.WriteString(env.Out.Wrap(sub.Short, len(label)))
+			b.WriteByte('\n')
+		}
+		return strings.TrimRight(b.String(), "\n")
+	})
 	root.SetHelpTemplate(helpTemplate)
 	root.SetUsageTemplate(usageTemplate)
 	// A flag that does not parse is a usage error, not a failure of the
@@ -529,7 +584,7 @@ func WithSignals(ctx context.Context) (context.Context, func() bool, func()) {
 	return ctx, second, stop
 }
 
-const helpTemplate = `{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
+const helpTemplate = `{{with (or .Long .Short)}}{{. | wrapped | trimTrailingWhitespaces}}
 
 {{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`
 
@@ -543,16 +598,16 @@ Aliases:
 Examples:
 {{.Example}}{{end}}{{if .HasAvailableSubCommands}}
 
-Commands:{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+Commands:
+{{commands .}}{{end}}{{if .HasAvailableLocalFlags}}
 
 Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+{{flags .LocalFlags}}{{end}}{{if .HasAvailableInheritedFlags}}
 
 Global flags:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableSubCommands}}
+{{flags .InheritedFlags}}{{end}}{{if .HasAvailableSubCommands}}
 
-Run "{{.CommandPath}} [command] --help" for more about a command.{{end}}
+{{wrapped (printf "Run '%s [command] --help' for more about a command." .CommandPath)}}{{end}}
 `
 
 // RootForDocs builds the command tree for the reference generator.

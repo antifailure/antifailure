@@ -277,7 +277,7 @@ interrupt at any point leaves something af down can clean up.`),
 			if live {
 				view = attachDashboard(e, o)
 			} else {
-				e.Out.Section("Bringing up " + o.EnvID())
+				e.Out.Subject("Bringing up "+o.EnvID(), "branch "+o.Branch())
 			}
 
 			var res *env.Result
@@ -391,7 +391,7 @@ are still pending.`),
 			if err != nil {
 				return err
 			}
-			e.Out.Section("Tearing down " + o.EnvID())
+			e.Out.Subject("Tearing down "+o.EnvID(), "branch "+o.Branch())
 			td, downErr := o.Down(cmd.Context())
 			if downErr != nil {
 				return downErr
@@ -447,9 +447,16 @@ func newStatusCommand(e *Env) *cobra.Command {
 					Proxied: res.Proxied, Services: servicesJSON(res.Services),
 				})
 			}
-			e.Out.Section(res.EnvID)
+			// The branch, not only the environment identifier. The identifier
+			// is the branch with the punctuation taken out and a hash on the
+			// end, which nobody can check against the branch they think they
+			// are on, and running on the wrong branch is the most common way
+			// to be confused by this tool. The directory is deliberately not
+			// here: it is in the reader's own shell prompt, and an absolute
+			// path is a single unbreakable word that no wrapping can rescue.
+			e.Out.Subject(res.EnvID, "branch "+o.Branch())
 			if len(res.Services) == 0 {
-				e.Out.Println("Nothing is running for this branch. Bring it up with 'af up'.")
+				e.Out.Empty("Nothing is running for this branch.", "Bring it up with", "af up")
 				return nil
 			}
 			renderServices(e, res.Services)

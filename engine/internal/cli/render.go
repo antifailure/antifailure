@@ -90,10 +90,11 @@ func (b *Block) Flush() {
 // Subject names what the command is acting on and where, under its heading.
 //
 // The context line is the terminal's version of knowing where you are. A
-// command that prints an environment identifier and nothing else leaves the
-// reader to work out which branch and which checkout produced it, and the two
-// most common ways to be confused by this tool are running it on the wrong
-// branch and running it in the wrong repository.
+// command that prints an environment identifier alone leaves the reader to
+// work out which branch produced it, and the identifier is that branch with
+// the punctuation taken out and a hash on the end, which is not something
+// anybody can check against the branch they think they are on. Running on the
+// wrong branch is one of the two most common ways to be confused by this tool.
 //
 // Both halves are inputs rather than observations, so this stays byte stable.
 func (o *Output) Subject(title, context string) {
@@ -122,8 +123,21 @@ func (o *Output) Hint(text, command string) {
 		o.note(fmt.Fprintf(o.Out, "%s%s\n", blockIndent, o.Wrap(text, len(blockIndent))))
 		return
 	}
-	o.note(fmt.Fprintf(o.Out, "%s%s %s\n",
-		blockIndent, o.Wrap(text+":", len(blockIndent)), o.S(StyleBold, command)))
+	// The command is placed rather than wrapped into the prose, because Wrap
+	// breaks on spaces and would put "af webhook list" on one line and
+	// "stripe" on the next, which is a command a reader copies and gets a
+	// usage error from. It goes on the same line when it fits and on its own
+	// line indented under the prose when it does not, and it is never broken.
+	line := blockIndent + o.Wrap(text+":", len(blockIndent))
+	last := line
+	if i := strings.LastIndexByte(line, '\n'); i >= 0 {
+		last = line[i+1:]
+	}
+	if cells(last)+1+cells(command) <= o.Width {
+		o.note(fmt.Fprintf(o.Out, "%s %s\n", line, o.S(StyleBold, command)))
+		return
+	}
+	o.note(fmt.Fprintf(o.Out, "%s\n%s  %s\n", line, blockIndent, o.S(StyleBold, command)))
 }
 
 // Empty says there is nothing to show, and what would put something there.

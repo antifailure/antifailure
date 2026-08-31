@@ -185,6 +185,14 @@ func trimForName(s string, max int) string {
 // EnvID reports the identifier this orchestrator works on.
 func (o *Orchestrator) EnvID() string { return o.envID }
 
+// Branch reports the branch the environment is keyed on.
+//
+// Exported so that a command can say where it is, rather than printing the
+// identifier alone: the identifier is the branch with the punctuation taken
+// out and a hash on the end, which is not something a reader can check against
+// the branch they think they are on.
+func (o *Orchestrator) Branch() string { return o.opts.Branch }
+
 // buildRoot is the tree images are built from.
 func (o *Orchestrator) buildRoot() string {
 	if o.opts.BuildRoot != "" {

@@ -199,9 +199,9 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 			if policyErr == nil && !policy.Schedule.Zero() && len(goldens) > 0 {
 				next := policy.Schedule.Next(goldens[0].CreatedAt)
 				if !next.IsZero() {
-					env.Out.Printf("\nNext scheduled refresh: %s (%s)\n",
+					env.Out.Note(StyleDim, fmt.Sprintf("Next scheduled refresh: %s (%s)",
 						next.In(policy.Schedule.Location()).Format("2006-01-02 15:04 MST"),
-						policy.Schedule)
+						policy.Schedule))
 				}
 			}
 			return nil

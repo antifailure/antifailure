@@ -448,7 +448,9 @@ question somebody asks after an incident.`),
 			}
 
 			if len(decisions) == 0 {
-				env.Out.Println("Nothing has been decided yet. Bring the environment up with 'af up' and use it.")
+				env.Out.Empty("Nothing has been decided yet. The log records every request the "+
+					"environment tried to make and what the policy did with it.",
+					"Bring the environment up with", "af up")
 				return nil
 			}
 			rows := make([][]string, 0, len(decisions))

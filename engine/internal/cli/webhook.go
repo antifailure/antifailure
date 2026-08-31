@@ -79,10 +79,12 @@ func newWebhookListCommand(env *Env) *cobra.Command {
 				return env.Out.JSON(all)
 			}
 			env.Out.Section("Webhook providers")
+			block := env.Out.Block()
 			for _, p := range webhook.Names() {
-				env.Out.Printf("  %-8s %d events, signed with %s\n",
-					p, len(webhook.EventNames(p)), webhook.Providers[p].SecretEnv)
+				block.Addf(p, "%d events, signed with %s",
+					len(webhook.EventNames(p)), webhook.Providers[p].SecretEnv)
 			}
+			block.Flush()
 			env.Out.Println("")
 			env.Out.Hint("See one provider's events with", "af webhook list stripe")
 			return nil
