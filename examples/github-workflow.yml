@@ -74,6 +74,10 @@ jobs:
           fetch-depth: 0
 
       - name: Install Antifailure
+        # Every step gets a fresh process and a fresh PATH, so the step that
+        # runs af is not the one that installed it. The installer writes its
+        # bin directory to GITHUB_PATH, which is the mechanism the runner reads
+        # between steps, so `af` below resolves without a path or a flag.
         run: curl -fsSL https://antifailure.dev/install.sh | sh
 
       # Written to report.md so that a change needing no environment still

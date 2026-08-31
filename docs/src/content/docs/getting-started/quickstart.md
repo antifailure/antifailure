@@ -22,6 +22,33 @@ POSIX `sh` rather than bash, so it works in an Alpine container as well as on a
 laptop. If you would rather read it before running it, it is the same file
 served at that URL, and the [source is in the repository](https://github.com/antifailure/antifailure/blob/main/install.sh).
 
+### Put `af` on your PATH
+
+`~/.antifailure/bin` is not on anybody's PATH by default, so the installer
+finishes by printing the two commands that put it there. They look like this
+for zsh, and it names the right file for bash and fish too:
+
+```bash
+echo 'export PATH="$HOME/.antifailure/bin:$PATH"' >> ~/.zshrc
+export PATH="$HOME/.antifailure/bin:$PATH"
+```
+
+The first is the one that survives closing the terminal. The second makes `af`
+work in the terminal you are in now. Run both and every command below works by
+name; run neither and `af` still answers to `~/.antifailure/bin/af`.
+
+The installer never writes to a shell profile on its own, because a script you
+piped into `sh` has no way to ask you first. If you would rather it did the
+writing, say so in advance:
+
+```bash
+curl -fsSL https://antifailure.dev/install.sh | AF_ADD_TO_PATH=1 sh
+```
+
+That appends the line once, however many times you run it, and tells you which
+file it went into. In GitHub Actions no flag is needed: the installer writes to
+`GITHUB_PATH`, so `af` is on the PATH of every later step in the job.
+
 Check the machine has what the engine needs:
 
 ```bash

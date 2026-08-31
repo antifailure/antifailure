@@ -32,6 +32,10 @@ af test          # agents run your workflows and return verdicts with evidence
 af down          # every resource it created, gone
 ```
 
+The installer puts `af` under `~/.antifailure` and prints the one line that
+puts that on your PATH, which you need before the four commands after it.
+[Quickstart](/docs/getting-started/quickstart) has the detail.
+
 ## Where to start
 
 If you have not run it yet, read [Quickstart](/docs/getting-started/quickstart).

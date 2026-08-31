@@ -243,8 +243,7 @@ elif on_path; then
 else
   say ""
   if [ -n "$wrote_profile" ]; then
-    say "Added af to your PATH in $(display_path "$wrote_profile"), so new terminals"
-    say "will find it."
+    say "Added af to your PATH in $(display_path "$wrote_profile"). New terminals will find it."
     say ""
     say "1. This terminal started before that line existed. To use af here too:"
     say ""

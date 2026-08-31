@@ -30,6 +30,10 @@ and a step that leaves the report:
   run: af ci --output report.md
 ```
 
+Two steps rather than one because the installer writes its bin directory to
+`GITHUB_PATH`, which is how a step extends the PATH of the steps after it. That
+is the only reason the second step finds `af` without naming a path.
+
 `af ci` brings the environment up, reads the branch back, runs the agents, asks
 the invariants, rehearses the migrations, writes the report, and tears down
 afterwards. Teardown happens whatever the outcome, including on a

@@ -379,7 +379,7 @@ output it never received is complete.
 | Component | State | Notes |
 | --- | --- | --- |
 | `.github/workflows/release.yml` | written | four platforms, static, the runner travels with the binary |
-| `install.sh` | proven | POSIX sh, checksum verified, fails readably; the failure path is tested |
+| `install.sh` | proven | POSIX sh, checksum verified, fails readably. It used to decide `af` was not on PATH and then print three bare `af` commands anyway, so a new install's first three commands all answered `command not found`, and the export it offered was session only. Every command it prints is now reachable, the profile it names comes from the login shell (zsh, bash, fish, and an unrecognised shell told so), it writes to a profile only under `AF_ADD_TO_PATH=1`, and it writes `GITHUB_PATH` in Actions, which the documented workflow needed. `tools/installsh` runs the script against a fixture release served by a fake curl and pastes the commands it prints into a real zsh: 14 tests, ten of them red against the version that shipped. The checksum refusal this row already claimed was tested is now one of them. |
 | `tools/notices` | proven | generated from what is actually linked, so it cannot go stale |
 | `af runner install` | proven | af ci now needs no flags at all |
 
