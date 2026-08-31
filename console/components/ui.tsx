@@ -216,7 +216,7 @@ export function Td({
       } ${mono ? "font-mono text-[12px]" : ""} ${className}`}
     >
       {/* One wrapper, so that when the table stacks on a phone the cell is a
-          two-item grid -- heading, then value -- however many nodes the value
+          two-item grid, heading then value, however many nodes the value
           is made of. Without it a cell like "branch #1482" put the branch in
           one grid slot and the number in the next row's heading slot. */}
       <span className="af-cell">{children}</span>
@@ -264,7 +264,7 @@ export function CellLink({ href, children }: { href: string; children: ReactNode
  * A moment in time, said twice.
  *
  * Four screens wrote `<span title={when(x)}>{ago(x)}</span>` by hand, which
- * puts the only precise answer in a tooltip -- a thing a phone cannot show and
+ * puts the only precise answer in a tooltip, a thing a phone cannot show and
  * a screen reader announces inconsistently. This is a real `<time>`: the
  * machine-readable instant is the attribute, the exact local time is in the
  * accessible name, and "3h ago" is what the eye gets.
@@ -404,7 +404,7 @@ export function Field({
  *
  * There were three of these: one on the repository picker, one on the members
  * table and one built out of `inputClass` on the network form, at two heights
- * and two paddings. The native arrow is kept -- a custom one is a chevron to
+ * and two paddings. The native arrow is kept: a custom one is a chevron to
  * maintain and a control that stops looking like the platform's.
  */
 export const selectClass =

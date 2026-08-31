@@ -21,7 +21,7 @@ import { cn } from "@/lib/cn";
  * That produced the defect somebody reported from the live site. A tinted
  * section paints its own background edge to edge of whatever box it is in. Put
  * that section inside a 10% margin and the tint stops 10% short of the page,
- * which is the "green margin" -- and take the container's padding away and the
+ * which is the "green margin". Take the container's padding away and the
  * text inside starts at exactly the tint's edge, touching it, while the other
  * side is left with several hundred pixels of empty colour. On /product/fidelity
  * at 1920 the band ran from 192 to 1728 and the heading, the verdict chips and
