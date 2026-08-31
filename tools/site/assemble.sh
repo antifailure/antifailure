@@ -36,6 +36,25 @@ rm -rf site && mkdir -p site
 # The marketing site at the root.
 cp -R www/out/. site/
 
+# Next emits the not-found route twice, and only one of them is wired.
+#
+# app/not-found.tsx builds to /404.html, which is what a mistyped URL actually
+# serves: responseOverrides below rewrites every 404 to it. The App Router also
+# writes the same render to /_not-found.html with its .txt payload, and nothing
+# routes there, nothing links there, and it is in no sitemap. What shipped was
+# an 84KB second copy of the 404 page answering 200 at an address only a
+# crawler guessing at framework internals would find.
+#
+# Removed here rather than in next.config, because the export has no option for
+# it, and before the merge below so no file-form redirect is generated for a
+# page that is no longer in the tree. Verified rather than assumed, because the
+# risk was that the client router fetches it: with these files gone, /404.html
+# renders and a client-side navigation off it into /product completes, with no
+# request for _not-found and no console error. The only two references to the
+# name anywhere in the build are a segment name inside 404.html's own inline
+# payload and a string constant in the router chunk, neither of which is a URL.
+rm -rf site/_not-found.html site/_not-found.txt site/_not-found
+
 # The documentation under /docs. astro.config.mjs sets base: "/docs", so dist
 # usually already contains docs/. Copy whichever shape it produced rather than
 # assuming one.
