@@ -135,7 +135,7 @@ const CONTROLS = [
 
 export function FirewallPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product/firewall"
         eyebrow="Side-Effect Firewall"

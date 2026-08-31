@@ -151,7 +151,7 @@ function TrafficResult() {
 
 export function LoadPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product/load"
         eyebrow="Load"

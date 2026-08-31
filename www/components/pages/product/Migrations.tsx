@@ -61,7 +61,7 @@ function MigrationStudio() {
 
 export function MigrationsPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product/migrations"
         eyebrow="Migration Safety Engine"

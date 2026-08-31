@@ -337,7 +337,7 @@ function LifecyclePanel() {
 
 export function SafeStatePage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product/safe-state"
         eyebrow="Safe State Engine"

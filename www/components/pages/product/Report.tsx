@@ -290,7 +290,7 @@ function PrCheckChrome() {
 
 export function ReportPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product/report"
         eyebrow="Safety Report and Release Gate"

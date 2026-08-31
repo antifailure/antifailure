@@ -192,7 +192,7 @@ function PlaneDiagram() {
 
 export function ArchitecturePage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product/architecture"
         eyebrow="Architecture"

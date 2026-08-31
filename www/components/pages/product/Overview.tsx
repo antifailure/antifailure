@@ -145,7 +145,7 @@ const PRODUCT_FAQ: FaqItem[] = [
 
 export function OverviewPage() {
   return (
-    <PageShell inset>
+    <PageShell>
       <PageHero
         path="/product"
         eyebrow="Product"
