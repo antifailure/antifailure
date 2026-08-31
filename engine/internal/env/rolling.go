@@ -441,7 +441,7 @@ func (o *Orchestrator) previousSpec(
 		}
 	}
 	spec.SandboxCredentials = resolved.Sidecar
-	spec.ModelEnv = o.modelEnv()
+	spec.ModelEnv = o.modelEnv(ctx)
 
 	packs, err := prev.mockPacks()
 	if err != nil {

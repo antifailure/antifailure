@@ -14,6 +14,10 @@ const (
 	AFAGT003 Code = "AF-AGT-003"
 	// The agent runner could not be found: {detail}
 	AFAGT004 Code = "AF-AGT-004"
+	// The {provider} key was not accepted: {detail}
+	AFAGT005 Code = "AF-AGT-005"
+	// The {provider} endpoint could not be reached: {detail}
+	AFAGT006 Code = "AF-AGT-006"
 	// Invariant {invariant} did not finish within {timeout}.
 	AFAGT010 Code = "AF-AGT-010"
 	// Invariant {invariant} is not read only.
@@ -365,6 +369,24 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/agents",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFAGT005: {
+		Code:      AFAGT005,
+		Area:      "AGT",
+		Message:   "The {provider} key was not accepted: {detail}",
+		NextStep:  "{next_step}",
+		Docs:      "guides/model-keys",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFAGT006: {
+		Code:      AFAGT006,
+		Area:      "AGT",
+		Message:   "The {provider} endpoint could not be reached: {detail}",
+		NextStep:  "{next_step}",
+		Docs:      "guides/model-keys",
+		Retryable: true,
+		ExitCode:  ExitProvider,
 	},
 	AFAGT010: {
 		Code:      AFAGT010,
