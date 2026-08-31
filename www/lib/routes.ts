@@ -1,4 +1,5 @@
 import { POSTS_BY_DATE } from "./blog";
+import { SITE_TITLE, pageTitle, titleName } from "./site";
 
 /**
  * Every page this site publishes, declared once.
@@ -10,10 +11,12 @@ import { POSTS_BY_DATE } from "./blog";
  * anything. Adding a route here is what makes it discoverable; a route that is
  * reachable in the app but missing from this list fails `npm run check:seo`.
  *
- * `title` is the full <title>. It does not get the site name appended, because
- * several of these already end in "— Antifailure" and a template would double
- * it. `summary` is a machine-facing one-liner: it is what an assistant reads in
- * llms.txt, so it says what the page answers rather than selling it.
+ * `title` is the full <title>, site name and all, so the layout's template must
+ * not append it a second time. `pageTitle` writes one and `pageName` takes the
+ * suffix back off, which is the whole of what a caller needs to know about how
+ * the two halves are joined. `summary` is a machine-facing one-liner: it is
+ * what an assistant reads in llms.txt, so it says what the page answers rather
+ * than selling it.
  */
 
 export type RouteSection = "root" | "product" | "solutions" | "company" | "writing" | "legal" | "utility";
@@ -37,7 +40,7 @@ export type Route = {
 export const ROUTES: readonly Route[] = [
   {
     path: "/",
-    title: "Antifailure — Know what happens before you deploy",
+    title: SITE_TITLE,
     description:
       "A disposable copy of your production stack for every pull request: masked Postgres, contained third-party APIs, and agents that use your app like people.",
     summary:
@@ -50,7 +53,7 @@ export const ROUTES: readonly Route[] = [
   // Product
   {
     path: "/product",
-    title: "Product — Antifailure",
+    title: pageTitle("Product"),
     description:
       "The twin, the state inside it, the containment around it, and the judgment it returns on a pull request.",
     summary: "The four parts of a run: twin, state, containment, judgment. Start here.",
@@ -61,7 +64,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/product/twins",
-    title: "Isolated Twin — Antifailure",
+    title: pageTitle("Isolated Twin"),
     description:
       "A temporary copy of the application stack for every risky change, created per pull request and destroyed with it.",
     summary: "How a per-pull-request copy of the stack is created, isolated and torn down.",
@@ -72,7 +75,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/product/safe-state",
-    title: "Safe State — Antifailure",
+    title: pageTitle("Safe State"),
     description:
       "Sanitized, referentially consistent, production-shaped Postgres. Masking is compiled to SQL, read back by a scanner, and signed before it can be branched.",
     summary:
@@ -84,7 +87,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/product/firewall",
-    title: "Side-Effect Firewall — Antifailure",
+    title: pageTitle("Side-Effect Firewall"),
     description:
       "Fail-closed egress with a per-host decision: block, allow, sandbox, capture, or answer from an offline mock.",
     summary:
@@ -96,7 +99,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/product/load",
-    title: "Load — Antifailure",
+    title: pageTitle("Load"),
     description:
       "Traffic shaped like production's own access log, sent at the twin, and compared against the p95 production serves each route in.",
     summary:
@@ -108,7 +111,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/product/migrations",
-    title: "Migration Safety — Antifailure",
+    title: pageTitle("Migration Safety"),
     description:
       "Pending migrations rehearsed on a branch with production's shape: per-statement timing, the strongest lock held per table, table rewrites, and query plans before and after.",
     summary:
@@ -120,7 +123,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/product/report",
-    title: "Safety Report — Antifailure",
+    title: pageTitle("Safety Report"),
     description:
       "Pass or fail on the pull request, with the video, trace and reproduction steps behind the decision.",
     summary: "What lands on the pull request, the five verdicts a workflow can return, and the evidence behind each.",
@@ -131,7 +134,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/product/architecture",
-    title: "Architecture — Antifailure",
+    title: pageTitle("Architecture"),
     description:
       "The trust boundary between control plane and customer data plane, the environment lifecycle, and the Postgres branching strategy.",
     summary:
@@ -145,7 +148,7 @@ export const ROUTES: readonly Route[] = [
   // Solutions
   {
     path: "/solutions",
-    title: "Solutions — Antifailure",
+    title: pageTitle("Solutions"),
     description:
       "Pre-production deployment safety for SaaS, fintech, commerce, marketplaces, and developer tools.",
     summary: "Index of the vertical and role pages.",
@@ -156,7 +159,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/solutions/saas",
-    title: "B2B SaaS — Antifailure",
+    title: pageTitle("B2B SaaS"),
     description:
       "Daily deploys against tenant-shaped data, and the migration anxiety that comes with a shared schema.",
     summary: "What a twin looks like for multi-tenant B2B SaaS.",
@@ -167,7 +170,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/solutions/fintech",
-    title: "Fintech — Antifailure",
+    title: pageTitle("Fintech"),
     description: "Billing and ledger-safe production twins, with no live money movement.",
     summary: "How ledger and billing flows are exercised without touching a real payment network.",
     section: "solutions",
@@ -177,7 +180,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/solutions/marketplaces",
-    title: "Marketplaces — Antifailure",
+    title: pageTitle("Marketplaces"),
     description: "Queues, workers and dual-writes, exercised where the ordering actually varies.",
     summary: "Testing the orderings a marketplace hits: queues, workers, dual-writes.",
     section: "solutions",
@@ -187,7 +190,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/solutions/devtools",
-    title: "Developer tools — Antifailure",
+    title: pageTitle("Developer tools"),
     description: "Schema changes on large tables, rehearsed at production row counts rather than fixture counts.",
     summary: "Why a migration that is instant on a fixture is not instant on a real table.",
     section: "solutions",
@@ -199,7 +202,7 @@ export const ROUTES: readonly Route[] = [
   // Company
   {
     path: "/pricing",
-    title: "Pricing — Antifailure",
+    title: pageTitle("Pricing"),
     description: "Community, team, and enterprise pricing for pre-production deployment safety.",
     summary: "What each tier includes and what it costs.",
     section: "company",
@@ -211,7 +214,7 @@ export const ROUTES: readonly Route[] = [
   // Writing
   {
     path: "/blog",
-    title: "Writing — Antifailure",
+    title: pageTitle("Writing"),
     description:
       "Notes on shipping schema changes without taking production down: what staging cannot measure, and what a test environment should do with an outbound call.",
     summary: "Index of the writing.",
@@ -224,7 +227,7 @@ export const ROUTES: readonly Route[] = [
   // Legal
   {
     path: "/privacy",
-    title: "Privacy Notice — Antifailure",
+    title: pageTitle("Privacy Notice"),
     description: "What is collected, what is never taken, and why production data stays in the customer boundary.",
     summary: "The privacy notice.",
     section: "legal",
@@ -234,7 +237,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/terms",
-    title: "Terms of Use — Antifailure",
+    title: pageTitle("Terms of Use"),
     description: "A proving ground, not a guarantee. The promise is evidence, not zero failure.",
     summary: "The terms of use.",
     section: "legal",
@@ -244,7 +247,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/dpa",
-    title: "Data Processing Agreement — Antifailure",
+    title: pageTitle("Data Processing Agreement"),
     description:
       "A draft DPA written from the code: the roles, the security measures that exist, and the ones that do not yet.",
     summary: "The data processing agreement, and which of its measures are real today.",
@@ -255,7 +258,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/subprocessors",
-    title: "Subprocessors — Antifailure",
+    title: pageTitle("Subprocessors"),
     description:
       "Everyone who receives data, everyone who deliberately does not, and how the list changes.",
     summary: "The subprocessor list and the notice period for changing it.",
@@ -266,7 +269,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/data-retention",
-    title: "Retention and deletion — Antifailure",
+    title: pageTitle("Retention and deletion"),
     description:
       "How long each thing is kept, how it goes away, and where the period is not exact.",
     summary: "Retention periods per data class, and where the boundary is approximate.",
@@ -277,7 +280,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/sla",
-    title: "Service levels — Antifailure",
+    title: pageTitle("Service levels"),
     description:
       "There is no service level agreement. What is not committed, what holds anyway, and what would have to change.",
     summary: "What is and is not promised about availability, stated as a limit.",
@@ -292,7 +295,7 @@ export const ROUTES: readonly Route[] = [
   // belongs to the product pages.
   {
     path: "/signin",
-    title: "Join the waitlist — Antifailure",
+    title: pageTitle("Join the waitlist"),
     description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
     summary: "Waitlist form.",
     section: "utility",
@@ -302,7 +305,7 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/signup",
-    title: "Join the waitlist — Antifailure",
+    title: pageTitle("Join the waitlist"),
     description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
     summary: "Waitlist form.",
     section: "utility",
@@ -322,7 +325,7 @@ export const ROUTES: readonly Route[] = [
  */
 const POST_ROUTES: Route[] = POSTS_BY_DATE.map((post) => ({
   path: `/blog/${post.slug}`,
-  title: `${post.title} — Antifailure`,
+  title: pageTitle(post.title),
   description: post.dek,
   summary: post.summary,
   section: "writing" as const,
@@ -340,6 +343,25 @@ const BY_PATH = new Map(ALL_ROUTES.map((r) => [r.path, r]));
 
 export function getRoute(path: string): Route | undefined {
   return BY_PATH.get(path);
+}
+
+/**
+ * What to call a route in a list of routes: a breadcrumb, a JSON-LD trail, a
+ * line in llms.txt.
+ *
+ * The breadcrumb trail, the structured data, llms.txt and llms-full.txt each
+ * carried their own regular expression that cut the site name off a title. Four
+ * copies of one rule is four places to edit when the separator changes and four
+ * chances to miss one, and missing one leaves a page called "Pricing" sitting
+ * beside a page called "Pricing · Antifailure".
+ *
+ * `home` is what the root gets called. A breadcrumb wants "Home"; a heading in
+ * llms.txt wants the real title, because there the line is the page rather than
+ * a step on the way to one.
+ */
+export function pageName(route: Route, home: "label" | "title" = "title"): string {
+  if (route.path === "/" && home === "label") return "Home";
+  return titleName(route.title);
 }
 
 /**

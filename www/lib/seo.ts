@@ -31,10 +31,10 @@ export function pageMetadata(path: string, overrides: Metadata = {}): Metadata {
 
   return {
     // `absolute` rather than a bare string, because the root layout defines a
-    // `%s — Antifailure` template and every title in the registry already ends
-    // that way. A plain string gets the template applied on top and ships as
-    // "Pricing — Antifailure — Antifailure", which is what this did before the
-    // built output was actually read.
+    // title template and every title in the registry has already been through
+    // it. A plain string gets the template applied a second time and ships with
+    // the site name twice, which is what this did before anybody read the
+    // built output.
     title: { absolute: route.title },
     description: route.description,
     alternates: {

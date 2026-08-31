@@ -1,4 +1,4 @@
-import { INDEXABLE_ROUTES, type RouteSection } from "@/lib/routes";
+import { INDEXABLE_ROUTES, pageName, type RouteSection } from "@/lib/routes";
 import {
   DOCS_URL,
   REPO_URL,
@@ -99,7 +99,7 @@ export function GET() {
     lines.push(`## ${SECTION_TITLES[section]}`);
     lines.push("");
     for (const route of routes) {
-      lines.push(`- [${route.title.replace(/\s+—\s+Antifailure$/, "")}](${absoluteUrl(route.path)}): ${route.summary}`);
+      lines.push(`- [${pageName(route)}](${absoluteUrl(route.path)}): ${route.summary}`);
     }
     lines.push("");
   }

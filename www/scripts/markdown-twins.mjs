@@ -187,9 +187,15 @@ for (const file of htmlFiles(OUT)) {
     // h1 at all. The site name comes off, because the twin already states its
     // canonical URL and a heading that ends in the site's name reads as a
     // browser tab rather than as the title of the thing.
+    //
+    // The separator is spelled out here rather than imported, because this is a
+    // build script reading built HTML and there is no TypeScript in scope. It
+    // has to match lib/site.ts TITLE_SEPARATOR, and check-seo.mjs asserts the
+    // twin's first heading is the page's real h1, which is what catches it if
+    // the two ever drift apart.
     ...(blocks[0]?.startsWith("# ")
       ? []
-      : [`# ${title.replace(/\s+\u2014\s+Antifailure$/, "")}`, ""]),
+      : [`# ${title.replace(/\s+\u00b7\s+Antifailure$/, "")}`, ""]),
     blocks.join("\n\n"),
     "",
   ].join("\n");
