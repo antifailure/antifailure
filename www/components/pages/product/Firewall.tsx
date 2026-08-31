@@ -148,7 +148,7 @@ export function FirewallPage() {
       <PageSection>
         <PageHeading
           kicker="Attempted-effect ledger"
-          title="<strong>Every outbound attempt is recorded, including the denials.</strong> Simulate, capture, mock, or deny. Never a live processor."
+          title="<strong>Every outbound attempt is recorded, including the denials.</strong> Six per-host modes, from refusing outright to answering from an offline pack. Never a live processor."
         />
         <ul className="mt-14 grid grid-cols-3 gap-5 max-xl:grid-cols-1">
           {FEATURED.map((item) => (
@@ -215,8 +215,9 @@ export function FirewallPage() {
           </div>
         </Panel>
         <Illustrative>
-          Six rows chosen to show the five decisions. The hosts, the modes and the decision log are
-          real: <code className="font-mono text-[12px] text-black/70">af net log</code> prints every
+          Six rows chosen to show mocked calls, captured messages and denials. The hosts, the modes
+          and the decision log are real:{" "}
+          <code className="font-mono text-[12px] text-black/70">af net log</code> prints every
           attempt, and <code className="font-mono text-[12px] text-black/70">af ci</code> summarises
           them on the pull request. A denied destination is denied inside the twin; it does not on
           its own fail the check.

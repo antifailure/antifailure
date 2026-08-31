@@ -2,17 +2,22 @@ import type { Post } from "@/lib/blog";
 
 /**
  * Grounded in the README's "A network you control" section: a sidecar owning
- * the network namespace, the five per-host modes with exactly these
- * behaviours, the tripwire on a live key under SANDBOX, the searchable inbox
- * under CAPTURE, and the Stripe pack being complete enough to run checkout,
- * subscribe, renew and cancel with signed webhooks and no network.
+ * the network namespace, the per-host modes with exactly these behaviours, the
+ * tripwire on a live key under SANDBOX, the searchable inbox under CAPTURE,
+ * and the Stripe pack being complete enough to run checkout, subscribe, renew
+ * and cancel with signed webhooks and no network.
+ *
+ * The post covers five of the six modes the manifest accepts. synth, which
+ * asks a model to invent a response and marks the result unverified, is not
+ * one of the answers argued for here and is deliberately out of scope. Nothing
+ * in this file may say there are five modes, because there are six.
  */
 export const EGRESS_MODES: Post = {
   slug: "five-answers-to-an-outbound-call",
   title: "There are five useful answers to an outbound HTTP call in a test environment",
   dek: "Most environments have two: let it through, or break. Neither is right for a payment processor, and the gap is where test runs charge real cards.",
   summary:
-    "The five per-host egress modes for a pre-production environment, what each is for, and why the default must be to refuse.",
+    "Five of the six per-host egress modes for a pre-production environment, what each is for, and why the default must be to refuse.",
   published: "2026-08-27",
   tags: ["Testing", "Networking", "Third-party APIs"],
   body: (

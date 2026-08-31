@@ -159,7 +159,7 @@ subset silently breaks.
 
 | Key | Notes |
 | --- | --- |
-| `default` | `block` (default) or `allow`. |
+| `default` | Any mode: `block` (default), `allow`, `capture`, `mock`, `sandbox` or `synth`. |
 | `allow_ipv6` | Off by default. |
 | `rules` | See [egress](/docs/concepts/egress/). |
 

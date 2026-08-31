@@ -89,9 +89,9 @@ export const ROUTES: readonly Route[] = [
     path: "/product/firewall",
     title: pageTitle("Side-Effect Firewall"),
     description:
-      "Fail-closed egress with a per-host decision: block, allow, sandbox, capture, or answer from an offline mock.",
+      "Fail-closed egress with a per-host decision: block, allow, sandbox, capture, mock, or synth.",
     summary:
-      "The five per-host egress modes, and what happens to a request that matches none of them.",
+      "The six per-host egress modes, and what happens to a request that matches none of them.",
     section: "product",
     indexable: true,
     priority: 0.8,
