@@ -20,6 +20,10 @@ control plane heard about it. Every event that a run emits carries the instant
 the work began, so an environment whose creating event was lost still bills
 from before its build rather than after it.
 
+The per-day spend cap and the cost attribution read these rows, so both
+answered zero for every customer and a cap that computes zero can never trip.
+They now compute over real environments.
+
 An engine older than this release can still advance an environment but cannot
 create one, because it does not say which repository it is running against.
 Rather than dropping such an event, the control plane stores it, counts it as
