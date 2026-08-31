@@ -115,19 +115,46 @@ the only one in the repository that holds `contents: write`.
 | The signature verifies, and a changed byte does not | `Verified OK` twice, then `a tampered checksums.txt was rejected, as it must be` | Either half failing stops the release. The second half failing means cosign accepted a file that does not match its signature, and every verification instruction the project publishes is worthless until that is understood |
 | Release | The tag appears under Releases with nine assets | The publish itself failed. Nothing was signed with a key, so there is nothing to revoke |
 
-Nine assets: four archives, `checksums.txt` and its bundle, `sbom.spdx.json`
-and its bundle, and `THIRD_PARTY_NOTICES.md`.
+### The two stages nobody has watched, and the two checks only a person can do
+
+**The signing and the bill of materials have never run in a real release.**
+v0.1.1 predates both, and its assets are four archives, `checksums.txt` and
+`THIRD_PARTY_NOTICES.md` and nothing else. So the first real run of both is the
+release you are cutting. That is correct-looking code that has never executed,
+which is the category this project keeps getting caught by, and the answer is
+that somebody watches it rather than assuming it.
+
+Every step of both has been rehearsed locally against the real artifacts: four
+platforms built, unpacked, catalogued by the exact syft version
+`anchore/sbom-action` pins rather than whatever was on the machine, and
+`tools/sbomcheck` watched passing on the good document and failing on the old
+broken shape. `cosign sign-blob --bundle` and `verify-blob` were exercised the
+same way, including the one byte change being rejected, with a local key pair.
+
+Two things that rehearsal could not reach, so they are checked by hand, on the
+run, and neither has a tick that means anything on its own.
+
+**Did the release itself publish what it should have?** Nine assets, not eight
+and not four:
 
 ```sh
 gh release view v0.1.2 --json assets --jq '[.assets[].name]'
 ```
 
-**The signing and the bill of materials have never run in a real release.**
-v0.1.1 predates both, and its assets are four archives, `checksums.txt` and
-`THIRD_PARTY_NOTICES.md` and nothing else. Every step of both has been
-rehearsed locally against real artifacts, with the same syft the workflow pins,
-and the keyless certificate is the one part that cannot be exercised outside
-GitHub. Read that stage's log rather than its tick.
+Four archives, `checksums.txt` and its bundle, `sbom.spdx.json` and its bundle,
+and `THIRD_PARTY_NOTICES.md`. Four assets is the shape of a release that
+published before the signing stage existed. Anything short of nine means a file
+the release notes tell people to fetch is not there.
+
+**Did the Fulcio identity binding work?** Open the log of the stage named *The
+signature verifies, and a changed byte does not*. It runs `cosign verify-blob`
+with `--certificate-identity` bound to this workflow, in this repository, at
+this tag. That is the only thing in the pipeline that proves the certificate
+says who signed rather than merely that somebody did, and it cannot be
+exercised anywhere but on GitHub, because the certificate is issued against the
+job's own OIDC token. It must print `Verified OK` twice and then
+`a tampered checksums.txt was rejected, as it must be`. A green tick on that
+stage without those three lines in its log is not the same thing.
 
 ## Watching cd.yml
 
@@ -186,27 +213,78 @@ What has no prior run behind it:
   closed, and it has only ever been pointed at staging's group.
 * The approval itself.
 
-Two things that are fine and are worth knowing anyway. The app is in `Multiple`
-revision mode with one revision at 100 percent, so there is a revision to roll
-back onto; the case where there is not is the one `deploy.sh` reports plainly
-rather than pretending a rollback happened. And production is at migration
-`0017`, so a tag from here applies `0018` and `0019`, both of which are
-additive: `0018` adds three nullable columns to `network_rules` and backfills
-`approved_at` from `created_at` so no live egress rule stops enforcing, and
-`0019` creates `runtimes` with row level security enabled and forced.
+The app is in `Multiple` revision mode with one revision at 100 percent, so
+there is a revision to roll back onto. The case where there is not is the one
+`deploy.sh` reports plainly rather than pretending a rollback happened.
+
+### This is an unusually large deploy, and its two migrations are verified
+
+Production is serving `f66d6af`. Ask how far ahead the tag is rather than
+carrying a number that goes stale between two merges:
+
+```sh
+curl -sS https://app.antifailure.dev/readyz
+git rev-list --count f66d6af..origin/main
+```
+
+At the time of writing that was 178, so the first tag is not a normal
+increment. It is every change since, arriving at once, and the bootstrap job
+applies two migrations production has never seen.
+
+Those two have been checked, and the check is recorded here so nobody repeats
+it nervously at tag time. `0001` through `0017` were applied to a real
+PostgreSQL 17, seeded with two organizations and three `network_rules` rows,
+and then `0018` and `0019` were applied on top.
+
+* **`0018`** adds three nullable columns to `network_rules` and backfills
+  `approved_at` from `created_at`. After it ran, zero rules were left pending
+  and every existing one carried `approved_at = created_at` with no approver,
+  which is the true statement: nobody approved them because there was nothing
+  to approve with. **No live egress rule stops enforcing.**
+* **`0019`** creates `runtimes`. Row level security is enabled and forced,
+  proved not by reading the catalog but by connecting as a real unprivileged
+  role that is a member of `antifailure_app`: the other tenant's runtime is
+  invisible, a query with no organization set returns zero rows, and an insert
+  aimed at another tenant is refused by the policy.
+
+Both are additive, which is what makes a rollback safe: `deploy.sh` can put
+traffic back on the old revision and cannot un-apply a schema change, so the
+old code has to tolerate the new schema, and it does.
 
 ## After it is green
 
-Prove the thing a stranger gets, from outside, with nothing of yours in the
-path.
+### There is no window between publishing and shipping
+
+The installer resolves `latest` from the GitHub releases API. That is good news
+with a sharp edge: a new tag is picked up with no further step and nothing to
+publish by hand, and it is picked up **the moment the release is created**. The
+next person to run the install command gets it, whether or not anybody has
+looked at it yet.
+
+So the checks below are not a gate. By the time you run them the download is
+already live, and what they decide is whether to announce it and whether to cut
+the next patch immediately. If you want a version people cannot reach yet, the
+release has to be a GitHub prerelease, which `releases/latest` skips by
+definition, and `release.yml` does not currently create one.
+
+One more property of that API worth knowing before you need it. GitHub decides
+which release is latest by *"the most recent non-prerelease, non-draft release,
+sorted by the `created_at` attribute"*, where `created_at` *"is the date of the
+commit used for the release, and not the date when the release was drafted or
+published"*. So the installer follows the newest tagged **commit**, not the
+newest publish. Superseding a bad release therefore has to be a tag on a newer
+commit, which a patch off `main` always is. Tagging an older commit afterwards
+would publish a release that `latest` never moves to.
+
+### Prove the thing a stranger gets
+
+From outside, with nothing of yours in the path.
 
 ```sh
 curl -fsSL https://antifailure.dev/install.sh | AF_PREFIX=$(mktemp -d) sh
 ```
 
-The installer resolves `latest` from the GitHub releases API, so a new tag is
-picked up with no further step and nothing to publish by hand. Then check that
-the binary knows what it is:
+Then check that the binary knows what it is:
 
 ```sh
 af version
