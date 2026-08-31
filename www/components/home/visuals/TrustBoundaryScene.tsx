@@ -128,8 +128,16 @@ function filmVisual(t: number, loop: number, elapsed: number, hover: boolean): V
   const tokenU = t >= 3.6 && t < 7.2 ? eased(t, 3.6, 5.2) : 0;
   const tokenOp = t >= 3.55 && t < 7.2 ? eased(t, 3.55, 3.85) * tokenFade : 0;
   const pathOp = t >= 3.5 && t < 7.2 ? eased(t, 3.5, 4.1) * tokenFade : 0;
+  // No fidelity score in this film. ReportScene dropped the same invented 87%
+  // and said so in its own comment; this scene kept it, and renders on both
+  // /product/architecture and /product/safe-state, so the number a visitor
+  // actually saw was one nothing measures. There is a real inventory now, and
+  // it is deliberately not a fixed number: it names its own denominator and
+  // refuses to exist when nothing could be measured. Neither of those survives
+  // being burned into an animation, so the claim is made in words on
+  // /product/report instead.
   const reportPrint =
-    t >= 5.15 && t < 10.7 ? typeLine("rpt_08f2  sha256:7c1a  BLOCK  fid 87%", span(t, 5.15, 6.4)) : "";
+    t >= 5.15 && t < 10.7 ? typeLine("rpt_08f2  sha256:7c1a  BLOCK", span(t, 5.15, 6.4)) : "";
 
   const agentOp = wallsLocked || t >= 5.95 ? 0.9 * holdFade : t >= 5.5 ? eased(t, 5.5, 5.95) : 0;
   const reach = wallsLocked || t >= 7.05 ? 1 : t >= 6.0 ? eased(t, 6.0, 7.05) : 0;
@@ -698,10 +706,7 @@ export function TrustBoundaryScene() {
           >
             <MonoLabel className="text-[9px] text-black/70">rpt_08f2</MonoLabel>
             <MonoLabel className="text-[9px] text-black/45">sha256:7c1a…</MonoLabel>
-            <div className="flex items-center gap-1">
-              <StatusPill tone="FAIL" />
-              <MonoLabel className="text-[9px]">fid 87%</MonoLabel>
-            </div>
+            <StatusPill tone="FAIL" />
           </div>
         ) : null}
 
