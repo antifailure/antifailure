@@ -108,6 +108,7 @@ module "control_plane" {
 
   min_replicas = var.min_replicas
   max_replicas = var.max_replicas
+  pool_max     = var.pool_max
   app_base_url = var.app_base_url
 
   event_retention_months = var.event_retention_months
@@ -162,6 +163,9 @@ module "alerting" {
   # application doing anything wrong.
   probe_url = "${var.app_base_url}/readyz"
 
-  database_sku = var.database_sku
-  min_replicas = var.min_replicas
+  # Not the SKU. The number the SKU implies, computed once in the module that
+  # owns the server, so this alert's threshold and the application's own
+  # connection ceiling cannot drift apart.
+  usable_connections = module.control_plane.usable_connections
+  min_replicas       = var.min_replicas
 }

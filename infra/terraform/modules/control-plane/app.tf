@@ -430,6 +430,27 @@ resource "azurerm_container_app" "this" {
       # this resource reads it back. Older provider versions made it
       # configurable, which is why every example on the internet ignores it.
     ]
+
+    # THE CONNECTION ARITHMETIC, CHECKED AT PLAN TIME.
+    #
+    # Three numbers in this file multiply into a fourth that nothing used to
+    # compute: replicas times pool_max is a demand on the database, and
+    # database.tf knows the supply. Staging ran for weeks with a shape that
+    # only fit because the app never scaled, and the first thing that pushed
+    # it over was not traffic at all.
+    #
+    # This fails the PLAN, which is the point: a number that cannot fit should
+    # be a review comment on a pull request, not a 503 at the next peak.
+    # deploy/cd/deploy.sh checks the measured version of the same arithmetic
+    # after every deploy, because a plan cannot see how many revisions the
+    # platform is actually running.
+    precondition {
+      condition = (
+        local.usable_connections == 0 ||
+        local.peak_app_connections + local.tool_connections <= local.usable_connections
+      )
+      error_message = "This app can open ${local.peak_app_connections} connections (max_replicas ${var.max_replicas} plus one rollback revision at min_replicas ${var.min_replicas}, each holding a pool of ${var.pool_max}) and ${var.database_sku} hands an ordinary role only ${local.usable_connections}, with ${local.tool_connections} of those spoken for by the bootstrap job, the maintenance job, break-glass and backup. Lower pool_max, lower max_replicas, or move to a SKU with more max_connections."
+    }
   }
 
   # The application must not start before its database is usable. Without this

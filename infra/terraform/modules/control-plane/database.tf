@@ -37,6 +37,74 @@ locals {
   # Burstable SKUs cannot do zone-redundant high availability. Caught here as a
   # precondition rather than discovered as a failed apply twenty minutes in.
   sku_is_burstable = startswith(var.database_sku, "B_")
+
+  # HOW MANY CONNECTIONS THE APPLICATION ACTUALLY GETS.
+  #
+  # This lives here, next to the server, because this module is the only one
+  # that owns database_sku. The alerting module reads it through an output
+  # rather than keeping a second copy: two tables of the same numbers is how
+  # one of them silently goes stale, and the alert's threshold and the app's
+  # ceiling have to be derived from the SAME number or the alert is measuring
+  # a fraction of something the application is not limited by.
+  #
+  # max_connections is a server parameter Azure derives from the SKU's memory.
+  # Read from the running servers rather than remembered:
+  #
+  #   az postgres flexible-server parameter show -g <group> -s <server> \
+  #     -n max_connections
+  #
+  # B1ms answered 50 on afcp-pg and D2ds_v4 answered 859 on afcpprod-pg; B2s is
+  # 429 from the same documented series, which the two measured values agree
+  # with. CONFIRM A NEW ONE with that command before adding it here.
+  max_connections_by_sku = {
+    B_Standard_B1ms     = 50
+    B_Standard_B2s      = 429
+    GP_Standard_D2ds_v4 = 859
+  }
+
+  # THE SUBTRACTION THAT WAS MISSING, and it is the whole reason staging fell
+  # over rather than a rounding detail.
+  #
+  # Postgres refuses an ordinary role once the free slots drop to
+  # reserved_connections + superuser_reserved_connections, not at
+  # max_connections. On a B1ms those are 5 and 10, so the application gets 35 of
+  # the 50, and a ceiling computed as a fraction of 50 can sit ABOVE the level
+  # at which the server has already started refusing it. That is exactly what
+  # the connection alert did: eighty percent of 50 is 40, and 40 > 35, so the
+  # rule could not fire before the outage it exists to predict.
+  #
+  # Both defaults are readOnly on a flexible server and Azure reports them as 5
+  # and 10 on every SKU in the allowlist, which is why they are constants here
+  # rather than variables somebody has to set.
+  reserved_connections           = 5
+  superuser_reserved_connections = 10
+
+  # Zero for a SKU that is not in the table above, and zero is load-bearing: it
+  # is what the alerting module's precondition tests, so an unknown SKU fails a
+  # plan with a message naming the fix rather than quietly setting a threshold
+  # of nothing.
+  sku_max_connections = lookup(local.max_connections_by_sku, var.database_sku, 0)
+  usable_connections = (
+    local.sku_max_connections == 0
+    ? 0
+    : local.sku_max_connections - (local.reserved_connections + local.superuser_reserved_connections)
+  )
+
+  # What is not the application: the bootstrap job's migration connection, the
+  # maintenance job's, a break-glass session and a backup or restore run. Each
+  # opens with max: 1 and all four can overlap during a release. The same
+  # allowance is spelled out in deploy/cd/deploy.sh, which checks the measured
+  # version of this arithmetic after every deploy.
+  tool_connections = 4
+
+  # THE ARITHMETIC, WRITTEN DOWN.
+  #
+  # The serving revision can scale to max_replicas. One superseded revision is
+  # kept active as the rollback target and sits at min_replicas. Every one of
+  # those replicas is a process holding a pool of pool_max. Nothing anywhere
+  # else in this stack multiplies these three numbers together, which is how
+  # forty six of them accumulated on staging without anybody noticing.
+  peak_app_connections = (var.max_replicas + var.min_replicas) * var.pool_max
 }
 
 resource "azurerm_postgresql_flexible_server" "this" {
