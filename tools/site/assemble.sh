@@ -93,13 +93,26 @@ mkdir -p site/schemas && cp schemas/*.json site/schemas/
 # apiRuntime the platform does not recognise is a failed deploy rather than a
 # warning, which is why this was measured before it was pinned.
 #
-# One known and harmless discrepancy: the schema www/public/staticwebapp.config.json
-# names in its own $schema stops at node:20, so an editor validating the shipped
-# file will flag this value. That schema is a community-maintained convenience
-# that lags Microsoft's own runtime table, which lists node:22 as supported, and
-# it is not what Azure enforces. The deploy log is the thing to believe: it
-# prints "Function Runtime Information ... node version" on every publish, so
-# what actually started is readable rather than assumed.
+# One discrepancy, checked rather than waved at, because it would matter if it
+# were enforced. The schema www/public/staticwebapp.config.json names in its own
+# $schema, schemastore's, stops at node:20 and does not know node:22. Nothing in
+# this repository validates against it: the only two JSON Schema gates are
+# manifestcheck, over antifailure manifests, and sbomcheck, over SPDX, and this
+# file is only ever parsed for syntax. schemastore is a community-maintained
+# convenience for editors that lags Microsoft's own runtime table, which lists
+# node:22, and it is not what Azure enforces.
+#
+# It also cannot bite today, because the checked-in file has no platform key at
+# all: this script writes the runtime into site/staticwebapp.config.json, which
+# is generated and gitignored, so no file anybody opens in an editor contains
+# this value. It would bite the moment somebody takes the invitation below and
+# moves apiRuntime into www/public, and that is who this paragraph is for. Point
+# $schema at a version that knows node:22, or drop the pointer; do not lower the
+# runtime to satisfy an editor.
+#
+# The deploy log is the thing to believe either way: it prints
+# "Function Runtime Information ... node version" on every publish, so what
+# actually started is readable rather than assumed.
 api_runtime="node:22"
 
 API_RUNTIME="$api_runtime" python3 - "$(pwd)/site" <<'MERGE'
