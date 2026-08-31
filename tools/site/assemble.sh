@@ -81,7 +81,28 @@ mkdir -p site/schemas && cp schemas/*.json site/schemas/
 #
 # So the redirects below are appended to whatever that file declares, and the
 # assertions afterwards fail the build if the merge loses something.
-python3 - "$(pwd)/site" <<'MERGE'
+# The runtime the managed function starts on, in one place because it is read by
+# two separate python blocks below and a value that lives in five literals is a
+# value somebody will change in four of them. The post-publish assertion reads
+# this same variable, so it cannot end up guarding the version we stopped using.
+#
+# node:22 rather than node:20, measured rather than inferred: a staging
+# environment of af-site deployed on this value and process.version came back
+# v22.23.2. node:20 is what the documents agree on and it is also past upstream
+# end of life since April 2026, so it is not the safer choice it looks like. An
+# apiRuntime the platform does not recognise is a failed deploy rather than a
+# warning, which is why this was measured before it was pinned.
+#
+# One known and harmless discrepancy: the schema www/public/staticwebapp.config.json
+# names in its own $schema stops at node:20, so an editor validating the shipped
+# file will flag this value. That schema is a community-maintained convenience
+# that lags Microsoft's own runtime table, which lists node:22 as supported, and
+# it is not what Azure enforces. The deploy log is the thing to believe: it
+# prints "Function Runtime Information ... node version" on every publish, so
+# what actually started is readable rather than assumed.
+api_runtime="node:22"
+
+API_RUNTIME="$api_runtime" python3 - "$(pwd)/site" <<'MERGE'
 import json, os, sys
 
 root = sys.argv[1]
@@ -125,22 +146,22 @@ base["routes"] = generated + base.get("routes", [])
 # both live in the repository's deploy files than when one lives in a deploy
 # file and the other in an asset folder.
 #
-# node:20 rather than node:22, which is also supported: 20 is the version every
-# current Static Web Apps document agrees on, and an apiRuntime the platform
-# does not recognise is a failed deploy rather than a warning.
+# The value comes from api_runtime in this script, above. See the reasoning
+# there, including why it was measured rather than read off a table.
 #
 # If somebody later declares one in www/public/staticwebapp.config.json, which
 # is where a reader would look for it, say so instead of quietly winning. A
 # value that is load-bearing and lives somewhere other than where it is looked
 # for is how the next person spends an afternoon.
+runtime = os.environ["API_RUNTIME"]
 declared = base.get("platform", {}).get("apiRuntime")
-if declared is not None and declared != "node:20":
+if declared is not None and declared != runtime:
     raise SystemExit(
         f"www/public/staticwebapp.config.json sets platform.apiRuntime to {declared!r} and "
-        "tools/site/assemble.sh sets it to 'node:20'. Pick one and delete the other; the "
+        f"tools/site/assemble.sh sets it to {runtime!r}. Pick one and delete the other; the "
         "runtime has to agree with api_location in .github/workflows/deploy.yml."
     )
-base.setdefault("platform", {})["apiRuntime"] = "node:20"
+base.setdefault("platform", {})["apiRuntime"] = runtime
 
 with open(config, "w", encoding="utf-8") as f:
     json.dump(base, f, indent=2)
@@ -156,8 +177,8 @@ python3 -c 'import json,sys; json.load(open("site/staticwebapp.config.json"))' |
 # than assumed, because the failure mode is silent: a config that is present,
 # valid, and missing half of what somebody wrote in it looks exactly like a
 # working one until you read a response header.
-python3 - <<'ASSERT' || exit 1
-import json, sys
+API_RUNTIME="$api_runtime" python3 - <<'ASSERT' || exit 1
+import json, os, sys
 
 with open("www/public/staticwebapp.config.json", encoding="utf-8") as f:
     source = json.load(f)
@@ -186,8 +207,9 @@ if lost:
 # address. A config that is valid JSON and missing any of them looks exactly
 # like a working one.
 missing = []
-if shipped.get("platform", {}).get("apiRuntime") != "node:20":
-    missing.append("platform.apiRuntime is not node:20, so the managed function will not start")
+runtime = os.environ["API_RUNTIME"]
+if shipped.get("platform", {}).get("apiRuntime") != runtime:
+    missing.append(f"platform.apiRuntime is not {runtime}, so the managed function will not start")
 if not any(r.get("route", "").endswith(".html") for r in shipped.get("routes", [])):
     missing.append("no page redirects its .html form to its clean form")
 if shipped.get("responseOverrides", {}).get("404", {}).get("rewrite") != "/404.html":
