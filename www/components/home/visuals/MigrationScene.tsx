@@ -192,11 +192,16 @@ function TablePane({
   fillThrough,
   windowRow,
   shortLock,
+  // The risky plan changes plan_id in place; the safer one fills a second
+  // column beside it. Naming both plan_id_new would say the risky migration
+  // adds a column, which is the plan it is being contrasted with.
+  column,
 }: {
   locked: boolean;
   fillThrough: number;
   windowRow: number;
   shortLock: boolean;
+  column: string;
 }) {
   return (
     <div className="border-t border-black/[0.08] bg-white">
@@ -226,7 +231,7 @@ function TablePane({
               <th className="px-3 py-1.5 font-medium">id</th>
               <th className="px-3 py-1.5 font-medium">customer</th>
               <th className="px-3 py-1.5 font-medium">status</th>
-              <th className="px-3 py-1.5 font-medium">plan_id_new</th>
+              <th className="px-3 py-1.5 font-medium">{column}</th>
             </tr>
           </thead>
           <tbody>
@@ -331,11 +336,11 @@ function Film({
         : viewT >= SHORT_LOCK_END
           ? 0.4
           : 0;
-  const waiters = tab === 0 && blockedAnother(viewT, locked);
+  const blockedSession = tab === 0 && blockedAnother(viewT, locked);
   const stamped = viewT >= stamp;
   const lintHot = tab === 0 ? viewT >= OPS_A[5].at : viewT >= OPS_B[2].at;
   const lockHot = lockS > LOCK_LIMIT;
-  const waitersHot = waiters;
+
 
   const phase: 0 | 1 | 2 | 3 =
     tab === 1
@@ -385,7 +390,10 @@ function Film({
         }
         metrics={[
           { value: lockValue, tone: lockHot ? "block" : "ok" },
-          { value: waiters ? "blocked a session" : "nothing blocked", tone: waitersHot ? "block" : "ok" },
+          {
+            value: blockedSession ? "blocked a session" : "nothing blocked",
+            tone: blockedSession ? "block" : "ok",
+          },
         ]}
       />
       <InnerPills
@@ -427,10 +435,10 @@ function Film({
                 tone={lockHot ? "block" : "ok"}
               />
               <EvidenceRow
-                moon={waitersHot ? "block" : "ok"}
+                moon={blockedSession ? "block" : "ok"}
                 label="Blocked another session"
-                value={waiters ? "yes" : "no"}
-                tone={waitersHot ? "block" : "ok"}
+                value={blockedSession ? "yes" : "no"}
+                tone={blockedSession ? "block" : "ok"}
               />
               <EvidenceRow
                 moon={tab === 0 ? (lintHot ? "block" : "todo") : "ok"}
@@ -459,6 +467,7 @@ function Film({
                 fillThrough={fillThrough}
                 windowRow={windowRow}
                 shortLock={shortLock}
+                column={tab === 0 ? "plan_id" : "plan_id_new"}
               />
             </div>
             <TrafficList t={viewT} locked={locked} flowing />

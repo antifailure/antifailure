@@ -30,11 +30,21 @@ const LIFECYCLE_STATES = [
   "creating",
   "running",
   "sleeping",
-  "failed",
   "torn_down",
+  "failed",
 ] as const;
 
 type LifecycleState = (typeof LIFECYCLE_STATES)[number];
+
+/**
+ * The two states a run stops in, drawn apart from the line rather than on it.
+ *
+ * The rail is a progression, so anything sitting in the middle of it reads as
+ * a step every run takes. `failed` is not: it is reached from any of the four
+ * before it and it is where the run stops. Putting it last with `torn_down`
+ * and giving both an end mark says that without a legend.
+ */
+const TERMINAL_STATES = new Set<LifecycleState>(["torn_down", "failed"]);
 
 /**
  * The four phases of one run, each named by an event the engine emits in it.
@@ -154,7 +164,8 @@ export function TwinsPage() {
         <Illustrative>
           The six states are the <code className="font-mono text-[12px] text-black/70">environment_state</code>{" "}
           enum the control plane stores, and each phase is named by an event the engine emits. The
-          run identifier is invented.
+          last two are where a run stops: it is torn down, or it failed, which is reachable from any
+          of the four before it. The run identifier is invented.
         </Illustrative>
       </PageSection>
 
@@ -301,14 +312,12 @@ function LifecycleRail() {
         <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white xl:hidden" />
         <ol className="flex min-w-[540px] px-3 pt-6 pb-4">
           {LIFECYCLE_STATES.map((name, i) => {
-            const terminal = name === "torn_down";
+            const terminal = TERMINAL_STATES.has(name);
+            const bar = name === "torn_down" ? "#33bf00" : name === "failed" ? "#D94841" : "#CAE6D9";
             return (
               <li key={name} className="flex min-w-0 flex-1 flex-col px-0.5">
                 <div className="relative h-1 w-full bg-black/[0.08]">
-                  <div
-                    className="absolute inset-y-0 left-0 w-full"
-                    style={{ background: terminal ? "#33bf00" : "#CAE6D9" }}
-                  />
+                  <div className="absolute inset-y-0 left-0 w-full" style={{ background: bar }} />
                 </div>
                 <div
                   className={`mt-2 text-center font-mono text-[11px] leading-[14px] tracking-extra-tight uppercase ${
@@ -319,12 +328,12 @@ function LifecycleRail() {
                     <div key={line}>{line}</div>
                   ))}
                 </div>
-                {terminal ? (
-                  <div className="mx-auto mt-1.5 size-1.5 rounded-full bg-[#33bf00]" />
-                ) : (
-                  <div className="mx-auto mt-1.5 size-1 rounded-full bg-black/20" />
-                )}
+                <div
+                  className={`mx-auto mt-1.5 rounded-full ${terminal ? "size-1.5" : "size-1 bg-black/20"}`}
+                  style={terminal ? { background: bar } : undefined}
+                />
                 <span className="sr-only">
+                  {terminal ? "a run stops here. " : ""}
                   {i + 1} of {LIFECYCLE_STATES.length}
                 </span>
               </li>

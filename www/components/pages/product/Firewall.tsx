@@ -200,10 +200,18 @@ export function FirewallPage() {
                 key={row.receipt}
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-black/[0.08] px-5 py-3 last:border-b-0"
               >
-                <span className="w-10 shrink-0 font-mono text-[10px] tracking-extra-tight text-black/55">
+                {/* w-16 rather than w-10, because CONNECT is seven characters
+                    and overflowed a forty pixel column into the destination
+                    beside it. */}
+                <span className="w-16 shrink-0 font-mono text-[10px] tracking-extra-tight text-black/55">
                   {row.method}
                 </span>
-                <span className="min-w-0 flex-1 font-mono text-[12px] tracking-extra-tight text-black">
+                {/* basis-[180px] so the destination takes a line of its own
+                    rather than being squeezed to nothing between the fixed
+                    columns, which is what it did on a phone: the row wraps
+                    instead. truncate is the backstop for a destination longer
+                    than a narrow line. */}
+                <span className="min-w-0 flex-1 basis-[180px] truncate font-mono text-[12px] tracking-extra-tight text-black">
                   {row.dest}
                 </span>
                 <QueueChip blocked={row.bypass}>{row.action}</QueueChip>
@@ -269,7 +277,7 @@ export function FirewallPage() {
             </Panel>
           }
         >
-          <PageHeading title="<strong>Bypass detection is not optional.</strong> Direct-IP attempts are caught and blocked." />
+          <PageHeading title="<strong>Containment is not a rule you can edit.</strong> A direct-IP attempt does not get out." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Clone-local DNS is not enough if the twin dials an address. The gateway matches domain, IP,
             protocol, method, and operation. Unknown destinations, unresolved secrets, or missing isolation
