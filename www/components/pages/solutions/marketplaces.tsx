@@ -70,7 +70,7 @@ export function MarketplacesPage() {
         kicker="Restore both sides"
         title="Buyers, sellers, listings, and in-flight orders as a referential subset."
         items={[
-          { title: "Restore both sides", body: "Buyers, sellers, listings, and in-flight orders as a referential subset." },
+          { title: "Both sides of the market", body: "Buyers and sellers restored together, so a match has something to match against." },
           { title: "Run the workers", body: "Matching, notify, and settle against clone-local queues." },
           { title: "Contain partners", body: "Outbound webhooks store a preview. Production hostnames never resolve." },
         ]}
@@ -96,7 +96,7 @@ export function MarketplacesPage() {
         items={[
           { title: "Rolling deploys", body: "Old and new schema coexistence is exactly what a disposable twin is for." },
           { title: "Duplicate events", body: "Visible when workers actually run." },
-          { title: "Compare", body: "Duplicate events, missed matches, and irreversible writes in the oracle." },
+          { title: "Compare", body: "The oracle diffs the twin's writes against the baseline run." },
         ]}
         visual={
           <TaskTable

@@ -6,7 +6,7 @@ import { SectionLabel } from "@/components/layout/SectionLabel";
 import { PageJsonLd } from "@/lib/jsonld";
 import { cn } from "@/lib/cn";
 
-export function SageWell({
+function SageWell({
   children,
   className,
 }: {
@@ -38,7 +38,7 @@ function FloatWindow({ children, className }: { children: ReactNode; className?:
   );
 }
 
-export function ArrowList({ items }: { items: { title: string; body?: string }[] }) {
+function ArrowList({ items }: { items: { title: string; body?: string }[] }) {
   return (
     <ul className="mt-8 space-y-3.5">
       {items.map((item) => (
