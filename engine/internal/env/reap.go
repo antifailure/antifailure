@@ -157,7 +157,7 @@ func (w *sweeper) Destroy(ctx context.Context, envID string) (int, error) {
 			d.Holder, d.PID = holder.Command, holder.PID
 		}
 		w.result.Deferred = append(w.result.Deferred, d)
-		return 0, fmt.Errorf("%w: %v", ErrInUse, err)
+		return 0, fmt.Errorf("%w: %w", ErrInUse, err)
 	}
 	defer func() { _ = l.Release() }()
 

@@ -428,6 +428,18 @@ func lastLines(s string, n int) []string {
 	return lines
 }
 
+// newDownCommand builds `af down`.
+//
+// The Long text says "including" rather than opening a colon. It used to read
+// "every resource the environment created:" and then name four things, and the
+// journal records fourteen kinds. A colon after "every resource" promises the
+// whole list, so a reader could reasonably conclude the other ten kinds are
+// left behind: golden versions, images, ZFS datasets, Kubernetes namespaces
+// and deployments, DNS records, storage objects, webhook registrations,
+// sandbox objects and runner processes. All of them are torn down, because
+// teardown replays whatever the journal holds rather than a list written here.
+// This text is generated into the command reference, so the false promise
+// reached the documentation too.
 func newDownCommand(e *Env) *cobra.Command {
 	var branch string
 	cmd := &cobra.Command{
@@ -435,7 +447,7 @@ func newDownCommand(e *Env) *cobra.Command {
 		Short: "Remove the environment and everything it created",
 		Long: strings.TrimSpace(`
 Replay the journal in reverse and delete every resource the environment
-created: database branches, containers, volumes, and networks.
+created, including database branches, containers, volumes and networks.
 
 Teardown never stops at the first failure. A provider that is unreachable must
 not strand the other resources, so each is attempted and anything that could

@@ -66,8 +66,14 @@ const LEDGER: LedgerEntry[] = [
     tone: "FAIL",
   },
   {
-    method: "TCP",
-    dest: "18.4.2.9:443",
+    // Was `TCP 18.4.2.9:443 DENY deny_02`, a direct-IP attempt drawn as a row
+    // in the decision log. A direct-IP connection never reaches the gateway:
+    // the twin has no route to a public address, so the packet fails at the
+    // network and there is nothing to write a row about. It is blocked harder
+    // than a ledger row implies and it is not logged. A CONNECT to an unlisted
+    // name does reach the gateway, is refused there, and is what this row is.
+    method: "CONNECT",
+    dest: "example.com:443",
     action: "DENY",
     receipt: "deny_02",
     tone: "FAIL",
@@ -109,16 +115,16 @@ const FEATURED = [
     ),
   },
   {
-    provider: "Unknown TCP",
-    op: "18.4.2.9:443",
-    body: "Unknown destination. Deny by default.",
+    provider: "Unknown host",
+    op: "CONNECT example.com:443",
+    body: "No rule names it, and the default is block. Refused at the gateway with a row in the log.",
     tone: "FAIL" as const,
     chip: "DENY",
     receipt: (
       <>
         deny_02
         <br />
-        direct-IP · ip-bypass
+        no rule matches · default block
         <br />
         fail closed
       </>
@@ -148,7 +154,7 @@ export function FirewallPage() {
       <PageSection>
         <PageHeading
           kicker="Attempted-effect ledger"
-          title="<strong>Every outbound attempt is recorded, including the denials.</strong> Simulate, capture, mock, or deny. Never a live processor."
+          title="<strong>Every outbound attempt is recorded, including the denials.</strong> Six per-host modes, from refusing outright to answering from an offline pack. Never a live processor."
         />
         <ul className="mt-14 grid grid-cols-3 gap-5 max-xl:grid-cols-1">
           {FEATURED.map((item) => (
@@ -194,10 +200,18 @@ export function FirewallPage() {
                 key={row.receipt}
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-black/[0.08] px-5 py-3 last:border-b-0"
               >
-                <span className="w-10 shrink-0 font-mono text-[10px] tracking-extra-tight text-black/55">
+                {/* w-16 rather than w-10, because CONNECT is seven characters
+                    and overflowed a forty pixel column into the destination
+                    beside it. */}
+                <span className="w-16 shrink-0 font-mono text-[10px] tracking-extra-tight text-black/55">
                   {row.method}
                 </span>
-                <span className="min-w-0 flex-1 font-mono text-[12px] tracking-extra-tight text-black">
+                {/* basis-[180px] so the destination takes a line of its own
+                    rather than being squeezed to nothing between the fixed
+                    columns, which is what it did on a phone: the row wraps
+                    instead. truncate is the backstop for a destination longer
+                    than a narrow line. */}
+                <span className="min-w-0 flex-1 basis-[180px] truncate font-mono text-[12px] tracking-extra-tight text-black">
                   {row.dest}
                 </span>
                 <QueueChip blocked={row.bypass}>{row.action}</QueueChip>
@@ -215,11 +229,15 @@ export function FirewallPage() {
           </div>
         </Panel>
         <Illustrative>
-          Six rows chosen to show the five decisions. The hosts, the modes and the decision log are
-          real: <code className="font-mono text-[12px] text-black/70">af net log</code> prints every
-          attempt, and <code className="font-mono text-[12px] text-black/70">af ci</code> summarises
-          them on the pull request. A denied destination is denied inside the twin; it does not on
-          its own fail the check.
+          Six rows chosen to show mocked calls, captured messages and denials. The hosts, the modes
+          and the decision log are real:{" "}
+          <code className="font-mono text-[12px] text-black/70">af net log</code> prints every
+          request the gateway decided, allowed as well as refused, and{" "}
+          <code className="font-mono text-[12px] text-black/70">af ci</code> summarises them on the
+          pull request. A packet that never reaches the gateway, such as a connection straight to a
+          public address, leaves no row: it fails at the network instead, which is stronger and is
+          the section below. A denied destination is denied inside the twin; it does not on its own
+          fail the check.
         </Illustrative>
       </PageSection>
 
@@ -228,34 +246,39 @@ export function FirewallPage() {
           visual={
             <Panel className="flex flex-col rounded-[12px] bg-white">
               <div className="flex items-center justify-between gap-3 px-5 py-3">
-                <MonoLabel>BYPASS DETECTED</MonoLabel>
+                <MonoLabel>BYPASS BLOCKED</MonoLabel>
                 <StatusPill tone="FAIL">DENY</StatusPill>
               </div>
               <Hairline />
               <div className="px-5 py-5">
                 <div className="font-mono text-[13px] tracking-extra-tight text-black">TCP 18.4.2.9:443</div>
                 <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">
-                  Direct-IP skip of clone-local DNS. Caught at the mandatory egress gateway. Denied. Logged.
+                  Direct-IP skip of clone-local DNS. There is no route out of the twin to a public
+                  address, so the connection does not fail a rule, it fails at the network.
                 </p>
                 <div className="mt-5 flex flex-wrap gap-2">
                   <QueueChip blocked>ip-bypass</QueueChip>
                   <QueueChip blocked>unknown TCP</QueueChip>
                   <QueueChip>no default public egress</QueueChip>
                 </div>
+                {/* Not a ledger row. The decision log records what the
+                    gateway decided, and this connection never got to it. What
+                    the caller sees is the syscall failing, and what proves it
+                    is the conformance behaviour rather than a receipt. */}
                 <Receipt className="mt-5 bg-white">
-                  deny_02
-                  <br />
-                  source: twin egress slot
+                  connect ENETUNREACH
                   <br />
                   dest: 18.4.2.9:443
                   <br />
-                  reason: unresolved · fail closed
+                  no route · not a rule that can be edited
+                  <br />
+                  Egress_CannotBeBypassedByAddress
                 </Receipt>
               </div>
             </Panel>
           }
         >
-          <PageHeading title="<strong>Bypass detection is not optional.</strong> Direct-IP attempts are caught and blocked." />
+          <PageHeading title="<strong>Containment is not a rule you can edit.</strong> A direct-IP attempt does not get out." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Clone-local DNS is not enough if the twin dials an address. The gateway matches domain, IP,
             protocol, method, and operation. Unknown destinations, unresolved secrets, or missing isolation

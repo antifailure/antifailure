@@ -331,7 +331,7 @@ What each class of finding does to the pull request check. A finding at 'fail' f
 | `load_regression` | `ignore`, `warn`, `fail` | no | A load threshold from the load block being exceeded. Defaults to `warn`. |
 | `masking` | `ignore`, `warn`, `fail` | no | The environment's own branch read back with something in it that still parses as real data. Defaults to `fail`. |
 | `migration_failed` | `ignore`, `warn`, `fail` | no | A migration that did not apply to a branch with production's shape in it. A migration that fails here is one that would have failed in production. Defaults to `fail`. |
-| `migration_lint` | `ignore`, `warn`, `fail` | no | Any of the six migration lint rules. They share one setting because the rules are already scoped by table size. Defaults to `warn`. |
+| `migration_lint` | `ignore`, `warn`, `fail` | no | Any of the seventeen migration lint rules. They share one setting because the rules are already scoped by table size. Defaults to `warn`. |
 | `migration_lock` | object | no | How long a migration may hold a lock on a table. Both figures are compared against a sampled lower bound, so a breach really did hold the lock at least that long. |
 | `migration_rewrite` | `ignore`, `warn`, `fail` | no | A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through. Defaults to `warn`. |
 | `plan_regression` | `ignore`, `warn`, `fail` | no | A query plan that got worse: a table now read end to end, or an index no longer used. Defaults to `warn`. |

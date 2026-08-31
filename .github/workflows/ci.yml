@@ -798,6 +798,19 @@ jobs:
         # site and every documentation gate was green.
         run: go run ./tools/manifestcheck .
 
+      - name: A count of a closed set is its real size
+        # None of the gates above knows how many of anything there are. The
+        # schema, the error catalogue, the transform registry and the command
+        # tree each have one because each is declared in a machine readable
+        # file. The sets declared as Go constants had none, and that is where
+        # the worst instance was living: seventeen DDL lint rules, every one of
+        # which becomes a pull request finding, described in eight places as
+        # six. Fourteen wrong counts and not one overstatement, which is the
+        # signature of a sentence written accurately at one version and never
+        # revisited. It stays invisible because an understatement produces a
+        # happy user who never learns the feature exists.
+        run: go run ./tools/constcheck .
+
       - name: The prose reads like a person wrote it
         # The build plan asks for vale with "a custom rule that flags em dashes
         # and double hyphens in prose". This is that rule. Em dashes are the
@@ -815,6 +828,18 @@ jobs:
         # source, where the string is a literal, and demands a written source
         # for any percentage or "N of M" a reader can see.
         run: go run ./tools/figurecheck .
+
+      - name: The mode lists on the site are the modes the engine has
+        # The firewall product page's own section title read "Simulate,
+        # capture, mock, or deny". Two of those four words are not modes and
+        # four real ones were missing, on a page in the sitemap that returns
+        # 200 to anybody. Separately, synth reached the schema and the proxy
+        # and nothing that describes them, so the README, llms.txt, the
+        # product FAQ, the route metadata behind the JSON-LD and a published
+        # blog post had all settled on five. The complete list is declared in
+        # schemas/manifest.v1.json, so this is a claim a machine can check
+        # rather than one a reviewer has to notice.
+        run: go run ./tools/modecheck .
 
       - name: Nothing in the repository looks like a live credential
         # Uses the engine's own detector, so the check and the runtime refusal

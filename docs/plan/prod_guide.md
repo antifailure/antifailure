@@ -81,7 +81,7 @@ would have been worse.
 | Per statement timing | `rehearsal.go`, `capture.go` | SQL migrations are applied statement by statement from Go. Opaque tools (Rails, Django, Alembic, Knex) run inside the service's own image, and timing comes from `ddl_command_start` and `ddl_command_end` event triggers, because only the tool knows what SQL its migrations become. |
 | Table rewrites | `capture.go` | A `table_rewrite` event trigger reports rewrites, with `pg_event_trigger_table_rewrite_reason`. Reported by the database rather than inferred from the SQL, which is the difference between a fact and a guess. |
 | Lock analysis | `locks.go` | `pg_locks` and `pg_stat_activity` sampled every 250ms from a second connection. Reports the strongest mode per table, how long it was held, whether anything was ever seen waiting on it, and the statement that held it. |
-| DDL lint | `lint.go` | Six rules, each carrying the lock mode, the live row count for that table, why it hurts, and the fix. |
+| DDL lint | `lint.go` | Every rule in `insights.AllRules()`, each carrying the lock mode, the live row count for that table, why it hurts, and the fix. `lint_test.go` requires each one to fire on its own fixture and to carry a detail, a fix and a title, so that list is the live set rather than a declaration. |
 | Plan diff | `plan.go` | `EXPLAIN (GENERIC_PLAN)` compared between base and branch, with a fallback when the server does not support it. |
 | Query regression | `insights.go` | `pg_stat_statements` matched on `queryid`, with a `regression_min_ms` floor so 0.1ms to 0.3ms is not reported as a threefold regression. |
 
@@ -102,11 +102,34 @@ not say "avoid this". It says which lock is taken, how many rows that table
 actually holds, what breaks, and the four-deploy sequence that avoids it. That
 is the difference between a linter and a colleague.
 
-### What is missing from it
+### What was missing from it, and has since been built
 
-The six rules are the right six to build first. These are the ones a customer
-running a real Postgres will hit that are not covered. I checked each against
-`lint.go` by reading the rule set, not by grep alone.
+**This section is history.** It was written when the lint had six rules, and it
+names eleven more to add. Every one of those eleven now exists. The current list
+is `insights.AllRules()`, and running it is how to see what the lint holds
+today; this document should not be asked.
+
+The argument for each rule is kept below rather than deleted. It is why the rule
+is worded the way it is, and a rule whose reason has been thrown away is one
+somebody removes later for looking fussy.
+
+The mapping, so a reader can check this rather than believe it:
+
+| Named below | Rule identifier |
+| --- | --- |
+| no `lock_timeout` | `no_lock_timeout` |
+| `SET NOT NULL` on an existing column | `set_not_null_existing_column` |
+| `CHECK` without `NOT VALID` | `check_constraint_not_valid` |
+| `ADD CONSTRAINT ... UNIQUE` | `unique_constraint_builds_index` |
+| Backfill in the same transaction as DDL | `backfill_in_ddl_transaction` |
+| `DROP INDEX` without `CONCURRENTLY` | `drop_index_not_concurrent` |
+| `REINDEX` without `CONCURRENTLY` | `reindex_not_concurrent` |
+| `VACUUM FULL` | `vacuum_full` |
+| `CLUSTER` | `cluster` |
+| `DROP TABLE` | `drop_table` |
+| `TRUNCATE` | `truncate` |
+
+What follows is the original text, in the tense it was written in.
 
 **Highest value, and not covered at all: no `lock_timeout`.** This is the one
 that takes sites down. A migration that waits for a lock does not merely wait;
@@ -188,6 +211,12 @@ relies on it.
 **Add the inverse assertion to `permissions.test.ts` before anything else.** It
 is four lines, it turns this whole class of gap into a failing test, and every
 one of the six above becomes a tracked item instead of a discovery.
+
+**Done, and the diagnosis above is kept for its shape rather than its state.**
+`permissions.test.ts` carries that assertion now, named `every permission in the
+catalog guards at least one route`, with no exception list on purpose. It
+passes, and all six permissions above are referenced by the router. So the
+number this part called the sharpest gap is zero.
 
 ---
 

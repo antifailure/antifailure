@@ -92,7 +92,7 @@ arbitrarily.
 
 | Key | Notes |
 | --- | --- |
-| `strategy` | `auto` (default), `dockerfile`, or `buildpack`. |
+| `strategy` | `auto` (default), `dockerfile`, `buildpack`, or `image`. |
 | `dockerfile` | Path, when it is not `./Dockerfile`. |
 | `context` | Build context directory, relative to the repository root. Defaults to the root, so a service can copy from a shared package. |
 | `target` | A stage in a multi stage Dockerfile. |
@@ -125,7 +125,7 @@ exported on the laptop that started it.
 
 | Key | Notes |
 | --- | --- |
-| `provider` | `docker` (default) or `neon`. |
+| `provider` | `docker` (default), `neon`, `supabase`, or `dblab`. |
 | `version` | Postgres major, default 17. |
 | `url_env` | The variable services receive the connection string in. |
 | `source_url_env` | Names the variable holding production's read only URL. |
@@ -159,7 +159,7 @@ subset silently breaks.
 
 | Key | Notes |
 | --- | --- |
-| `default` | `block` (default) or `allow`. |
+| `default` | Any mode: `block` (default), `allow`, `capture`, `mock`, `sandbox` or `synth`. |
 | `allow_ipv6` | Off by default. |
 | `rules` | See [egress](/docs/concepts/egress/). |
 
@@ -175,7 +175,7 @@ refused at the line rather than treated as the weakest one.
 | `migration_lock.fail_ms` | `2000` | Fail on a lock held at least this long. Must not be below `warn_ms`. |
 | `migration_failed` | `fail` | The migrations did not apply to a branch of the golden. |
 | `migration_rewrite` | `warn` | Postgres rewrote a table. |
-| `migration_lint` | `warn` | Any of the six migration lint rules. |
+| `migration_lint` | `warn` | Any of the seventeen migration lint rules. |
 | `plan_regression` | `warn` | A query plan got worse. |
 | `query_regression` | `warn` | A statement runs more often or slower than the baseline. |
 | `load_regression` | `warn` | A threshold from the `load` block was exceeded. |

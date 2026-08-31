@@ -34,7 +34,7 @@ const RULES = [
   { at: 0.88, key: "sendgrid", label: "sendgrid:capture" },
   { at: 1.04, key: "slack", label: "slack:capture" },
   { at: 1.2, key: "sandbox", label: "auth0:sandbox" },
-  { at: 1.36, key: "deny", label: "*:deny" },
+  { at: 1.36, key: "deny", label: "*:block" },
 ] as const;
 
 type HitKind = "bend" | "stamp" | "fragment" | "rewrite";
@@ -162,10 +162,15 @@ const PACKETS: PacketDef[] = [
     rest: { x: GW_X, y: 128 },
   },
   {
+    // A CONNECT to an unlisted name, not a raw address. A direct-IP connection
+    // never arrives at the gateway: the twin has no route to a public address,
+    // so the packet fails at the network and there is no decision to draw. It
+    // is blocked more strongly than this scene can show, and it produces no
+    // decision-log line, which is what the scene was drawing.
     id: "tcp",
-    method: "TCP",
+    method: "CONNECT",
     path: ":443",
-    host: "18.4.2.9",
+    host: "example.com",
     suffix: "tcp9",
     t0: 10.85,
     travel: 0.42,
@@ -249,7 +254,7 @@ const LEDGER: LedgerRow[] = [
   {
     id: "tcp",
     typeStart: 11.38,
-    body: "TCP 18.4.2.9:443  DENY  ip-bypass",
+    body: "CONNECT example.com:443  DENY  default",
     receipt: "deny_02",
     tone: "block",
     critical: true,
@@ -966,7 +971,7 @@ export function FirewallScene() {
               fontSize="9"
               fontFamily="var(--font-mono), ui-monospace, monospace"
             >
-              18.4.2.9:443
+              example.com:443
             </text>
             <text
               x="544"

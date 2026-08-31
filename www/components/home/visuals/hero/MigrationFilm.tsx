@@ -40,7 +40,7 @@ export function MigrationFilm({ active }: FilmProps) {
           <Hairline className="my-2" />
           <div className="flex items-center gap-2">
             <Meta className="w-8 shrink-0">Then</Meta>
-            <Pill tone={blocked ? "block" : "neutral"}>{blocked ? "84 queued" : "watching"}</Pill>
+            <Pill tone={blocked ? "block" : "neutral"}>{blocked ? "blocked a session" : "watching"}</Pill>
           </div>
         </div>
       </div>
@@ -72,7 +72,7 @@ export function MigrationFilm({ active }: FilmProps) {
           <Hairline className="my-2" />
           <div className="flex items-center gap-1.5" style={moveStyle({ opacity: found, y: (1 - found) * 5 })}>
             <Pill tone="block">FINDING</Pill>
-            <Meta className="tabular-nums">27.4s · 84 queued</Meta>
+            <Meta className="tabular-nums">27.4s · blocked a session</Meta>
           </div>
         </div>
       </div>

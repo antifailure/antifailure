@@ -19,7 +19,7 @@ import (
 // decision lives here with the I/O left in ci.go.
 //
 // Rule names are the stable identifiers and they carry no error code. A
-// finding is evidence rather than an error, and the six migration lint rules
+// finding is evidence rather than an error, and the seventeen migration lint rules
 // already established that the thing somebody greps for six months later is
 // the rule name. Every rule below is also a key in the manifest's policy
 // block, so the answer to "why did this fail" is always a key a person can go
@@ -116,9 +116,9 @@ func migrationFindings(full insights.Full, p report.Policy) ([]report.Finding, *
 		for _, l := range r.Lint {
 			out = append(out, report.Finding{
 				// The lint rule's own name, not migration_lint. The policy key
-				// governs all six together and the finding says which one it
-				// was, because "migration_lint" in a comment tells nobody what
-				// to change.
+				// governs all seventeen together and the finding says which
+				// one it was, because "migration_lint" in a comment tells
+				// nobody what to change.
 				Rule: string(l.Rule), Level: p.MigrationLint, Where: l.Table,
 				Title:  sentence(l.Rule.Title()),
 				Detail: lintDetail(l),
@@ -302,7 +302,7 @@ func gateError(f report.Finding) error {
 	case ruleLoadRegression:
 		return aferrors.Coded(aferrors.AFLOD011, "count", strconv.Itoa(f.Count))
 	default:
-		// Every migration finding, including the six lint rules, which have
+		// Every migration finding, including the seventeen lint rules, which have
 		// rule names of their own.
 		return aferrors.Coded(aferrors.AFDB031, "rule", f.Rule, "detail", f.Title)
 	}

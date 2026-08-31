@@ -128,6 +128,7 @@ runner/artifacts/
 /azguard
 /claimcheck
 /classcheck
+/constcheck
 /cost
 /docscheck
 /dogfood
@@ -138,6 +139,7 @@ runner/artifacts/
 /ldcheck
 /licensegen
 /manifestcheck
+/modecheck
 /notices
 /npmaudit
 /prosecheck

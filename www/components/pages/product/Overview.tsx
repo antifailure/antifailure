@@ -85,17 +85,22 @@ const VERDICTS: { tone: "PASS" | "FAIL" | "UNVERIFIED"; title: string; body: str
  * rollback verdict. Only the lock was something this engine can measure:
  * nothing runs traffic against a migration while it applies, and there is no
  * old-binary coexistence check anywhere in the product.
+ *
+ * The second row was then "84 statements queued behind it", which the engine
+ * cannot produce either. insights.LockHold records one boolean, Blocking,
+ * whether another session was ever seen waiting. There is no count of waiters
+ * and no list of their statements.
  */
 const MIGRATION_FINDINGS: { k: string; v: string }[] = [
   { k: "strongest lock", v: "ACCESS EXCLUSIVE 27.4s on subscriptions" },
-  { k: "blocked waiters", v: "84 statements queued behind it" },
+  { k: "blocked another", v: "yes, a session was seen waiting" },
   { k: "table rewrite", v: "yes, reported by Postgres" },
   { k: "plan change", v: "Index Scan to Seq Scan on events" },
 ];
 
 /**
  * Every answer here is a claim this repository already makes somewhere else:
- * the trust boundary from the privacy notice, the five egress modes and the
+ * the trust boundary from the privacy notice, the six egress modes and the
  * five verdicts from the README, the provider list from "Where it runs", and
  * the licence split from the licence section. Nothing is invented for the
  * page, because an answer engine quoting a page is quoting it as fact.
@@ -114,7 +119,7 @@ const PRODUCT_FAQ: FaqItem[] = [
   {
     question: "What stops a test run from emailing real customers or charging a real card?",
     answer:
-      "Every environment gets a sidecar that owns its network namespace, and nothing leaves except through it. Each host gets a mode: BLOCK, ALLOW, SANDBOX with test credentials and a tripwire if a live key appears, CAPTURE into a searchable inbox, or MOCK from a stateful offline pack. An unlisted host fails closed.",
+      "Every environment gets a sidecar that owns its network namespace, and nothing leaves except through it. Each host gets one of six modes: BLOCK, ALLOW, SANDBOX with test credentials and a tripwire if a live key appears, CAPTURE into a searchable inbox, MOCK from a stateful offline pack, or SYNTH, which asks a model to invent a response and marks the result unverified. An unlisted host fails closed.",
   },
   {
     question: "Can a run complete with no network access at all?",
@@ -265,7 +270,8 @@ export function OverviewPage() {
         <Illustrative label="Example finding">
           One migration rehearsed, with the numbers chosen. The measurements are the ones{" "}
           <code className="font-mono text-[15px] text-black">af insights</code> takes: the strongest
-          lock mode and its hold time, what queued behind it, rewrites, and plans before and after.
+          lock mode and its hold time, whether another session was left waiting on it, rewrites, and
+          plans before and after.
         </Illustrative>
 
         <div className="mt-8 grid grid-cols-2 gap-5 max-xl:grid-cols-1">
@@ -278,7 +284,7 @@ export function OverviewPage() {
             <div className="px-5 py-5">
               <h3 className="text-[18px] tracking-extra-tight text-black">Unsafe schema migration</h3>
               <p className="mt-2 font-mono text-[12px] tracking-extra-tight text-black/60">
-                20260824_add_billing_status
+                20260824_widen_plan_id
               </p>
               <dl className="mt-5 space-y-2.5">
                 {MIGRATION_FINDINGS.map((row) => (
@@ -297,7 +303,7 @@ export function OverviewPage() {
               </dl>
             </div>
             <div className="border-t border-black/[0.08] px-5 py-3 font-mono text-[11px] leading-5 tracking-extra-tight text-[#285D49]">
-              lint · add the column without a default, then backfill in batches
+              lint · add a second column of the new type, backfill it, then drop the old one
             </div>
           </Panel>
 
@@ -308,7 +314,7 @@ export function OverviewPage() {
             <p className="mt-5 max-w-[440px] text-[16px] leading-7 tracking-extra-tight text-gray-new-40">
               The rehearsal runs the pending migrations against a branch with production's shape and
               samples what is locked every 250 milliseconds. It reports the strongest mode held per
-              table, how long it was held, and which statements queued behind it.
+              table, how long it was held, and whether another session was left waiting on it.
             </p>
           </div>
         </div>
@@ -318,7 +324,7 @@ export function OverviewPage() {
           <div className="mt-8">
             <Steps
               items={[
-                { title: "Read the repository", body: "Twelve analyzers write a manifest and say what they assumed." },
+                { title: "Read the repository", body: "Detection writes a manifest, names the file every answer came from, and says what it assumed." },
                 { title: "Reproduce safely", body: "Isolated twin, sanitized state, fail-closed egress." },
                 { title: "Exercise", body: "Declared workflows, invariants asked of the data, production's route mix." },
                 { title: "Decide", body: "Pass or fail on the pull request, then destroy the environment." },
