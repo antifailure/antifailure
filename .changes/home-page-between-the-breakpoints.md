@@ -42,5 +42,15 @@ The logo was the last control on a phone under 44px, at 32px beside a menu
 button already at 44px. Its contents are centred, so the rendered header is
 byte-identical at 375px, 1100px and 1440px and only the hit area moved.
 
+Two more controls were smaller on a phone than on a desktop, which is the wrong
+way round. The primary button carried `max-lg:h-9 max-lg:text-sm`, so below
+1024px the site's main call to action shrank from 44px to 36px and its label
+from 16px to 14px: Get started, Read the docs, Join the waitlist and every other
+one, on every page, only ever under 44px on the viewport where a thumb has to
+hit it. The height and the type are the same at every width now and the narrower
+horizontal padding below `lg` stays, because that is what keeps two buttons on
+one line. Measured 44px tall with 16px type at 320, 375, 414, 640, 768, 900,
+1023, 1024, 1100, 1280 and 1440.
+
 No page on the site scrolls horizontally at any width: 23 routes times ten
 widths, checked against the static export with the check proved able to fail.
