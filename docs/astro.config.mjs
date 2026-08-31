@@ -81,6 +81,7 @@ export default defineConfig({
         },
       },
       components: {
+        Head: "./src/components/Head.astro",
         Header: "./src/components/Header.astro",
         Footer: "./src/components/Footer.astro",
         Pagination: "./src/components/Pagination.astro",
@@ -149,24 +150,6 @@ export default defineConfig({
             name: "robots",
             content: "index, follow, max-image-preview:large, max-snippet:-1",
           },
-        },
-        {
-          // Ties all 76 documentation pages to the same Organization the
-          // marketing site declares, so they resolve to one entity rather than
-          // to a separate thing that happens to share a domain. The three ids
-          // are not invented here: they are ORG_ID, SITE_ID and SOFTWARE_ID in
-          // www/lib/jsonld.tsx, built from SITE_URL, which has no trailing
-          // slash. A reference to an @id nothing declares is worth nothing.
-          tag: "script",
-          attrs: { type: "application/ld+json" },
-          content: JSON.stringify({
-            "@context": "https://schema.org",
-            "@type": "TechArticle",
-            isPartOf: { "@id": "https://antifailure.dev/#website" },
-            publisher: { "@id": "https://antifailure.dev/#organization" },
-            about: { "@id": "https://antifailure.dev/#software" },
-            inLanguage: "en",
-          }),
         },
       ],
       // Groups are ordered the way somebody actually arrives: install it, learn
