@@ -224,6 +224,14 @@ deployment, it produces a failed apply on the stack that runs the product.
 `tools/tagsync` is that ordering as a gate, so the mistake is a red check rather
 than a bad afternoon.
 
+Step 6 is a person's job on purpose, and it is not an oversight waiting to be
+automated. A release job that opened the bump as a pull request would need
+`contents: write` and `pull-requests: write` on a workflow whose stated rule is
+that only the publishing job gets write at all, and widening that surface is a
+change that deserves its own review rather than riding along with a release.
+The risk worth removing was the silent one, doing the bump too early, and
+`tagsync` removes it. Doing it late costs a stale default and nothing else.
+
 Pushing the tag also publishes `ghcr.io/antifailure/control-plane:<tag>` and
 **moves `:latest` onto it**, which changes what anybody self hosting off
 `latest` gets on their next pull. Say so in the release notes.
