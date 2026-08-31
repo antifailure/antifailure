@@ -8,31 +8,26 @@
 # is_db_alive are all real and all reported by this SKU.
 
 locals {
-  # max_connections is a SERVER PARAMETER derived from the SKU's memory, and
-  # Azure does not expose a "percent of connections used" metric. A metric alert
-  # cannot divide active_connections by max_connections either, because each
-  # criteria block reads exactly one series. So the eighty percent is computed
-  # here and the denominator has to be known at plan time.
+  # Azure does not expose a "percent of connections used" metric, and a metric
+  # alert cannot divide active_connections by anything, because each criteria
+  # block reads exactly one series. So the eighty percent is computed here and
+  # the denominator has to be known at plan time.
   #
-  # 50 for B1ms is not from a table, it was read from the running staging server:
+  # THE DENOMINATOR IS NOT max_connections, and it used to be. Postgres refuses
+  # an ordinary role once the free slots fall to reserved_connections plus
+  # superuser_reserved_connections. On a B1ms that is 5 and 10 against a
+  # max_connections of 50, so the application gets 35, and this rule's old
+  # ceiling of eighty percent of 50 was 40. Forty is ABOVE thirty five: the
+  # alert could not fire until after the server had already started answering
+  # /readyz with "remaining connection slots are reserved for roles with
+  # privileges of the pg_use_reserved_connections role". A guard whose
+  # threshold sits past the failure it guards is not a guard.
   #
-  #   az postgres flexible-server parameter show -g <group> -s <server> \
-  #     -n max_connections
-  #   {"allowed": "25-5000", "default": "50", "value": "50"}
-  #
-  # 429 and 859 come from the same documented series (4 GiB and 8 GiB), and the
-  # B1ms figure agreeing exactly with it is the reason to trust them. CONFIRM
-  # THE PRODUCTION ONE with that command after the first apply: if the number is
-  # wrong, this alert is quietly measuring the wrong fraction and nothing else
-  # will ever say so.
-  max_connections_by_sku = {
-    B_Standard_B1ms     = 50
-    B_Standard_B2s      = 429
-    GP_Standard_D2ds_v4 = 859
-  }
-
-  max_connections    = lookup(local.max_connections_by_sku, var.database_sku, 0)
-  connection_ceiling = floor(local.max_connections * var.connection_percent / 100)
+  # The number comes from the control-plane module now rather than a second
+  # table here, so the alert's threshold and the application's own ceiling are
+  # derived from the same value. See modules/control-plane/database.tf for the
+  # measurements and the az command that produced them.
+  connection_ceiling = floor(var.usable_connections * var.connection_percent / 100)
 }
 
 resource "azurerm_monitor_metric_alert" "database_storage" {
@@ -66,13 +61,29 @@ resource "azurerm_monitor_metric_alert" "database_storage" {
 # Severity 2 rather than 1 because a pool at eighty percent is a warning with
 # hours in it, not an outage. What it usually means is a replica count that grew
 # without pool_max shrinking, and the arithmetic is in the runbook.
+#
+# MAXIMUM, NOT AVERAGE, and that is the second half of the fix.
+#
+# Connection exhaustion here is a burst, not a plateau. Staging's own numbers
+# over the hour it was refusing connections:
+#
+#   active_connections, PT1M, Maximum:  6..11 for four minutes, then 33..39
+#   active_connections, PT5M, Average:  12
+#
+# Every replica runs the same five minute housekeeping sweep, so they all reach
+# for the pool at once and let go again. An Average aggregation reports 12
+# against a ceiling of 28 and stays green through every one of those spikes,
+# which is to say it reports the four minutes when nothing was wrong. The
+# number that takes the service down is the peak, so the peak is what this
+# reads. A fifteen minute window still keeps a single unlucky minute from
+# paging anybody, because the criterion is the maximum WITHIN the window.
 resource "azurerm_monitor_metric_alert" "database_connections" {
   name                = "${var.name}-database-connections"
   resource_group_name = var.resource_group_name
   scopes              = [var.postgres_server_id]
   severity            = 2
 
-  description = "More than ${local.connection_ceiling} active connections, which is ${var.connection_percent} percent of the ${local.max_connections} this SKU allows. Runbook: ${local.runbooks}/database-connections/"
+  description = "Peaked above ${local.connection_ceiling} active connections, which is ${var.connection_percent} percent of the ${var.usable_connections} this server will hand an ordinary role. Runbook: ${local.runbooks}/database-connections/"
 
   window_size = "PT15M"
   frequency   = "PT5M"
@@ -80,7 +91,7 @@ resource "azurerm_monitor_metric_alert" "database_connections" {
   criteria {
     metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
     metric_name      = "active_connections"
-    aggregation      = "Average"
+    aggregation      = "Maximum"
     operator         = "GreaterThan"
     threshold        = local.connection_ceiling
   }
@@ -93,8 +104,8 @@ resource "azurerm_monitor_metric_alert" "database_connections" {
 
   lifecycle {
     precondition {
-      condition     = local.max_connections > 0
-      error_message = "No max_connections is recorded for ${var.database_sku}, so this alert would compare active connections against a threshold of zero and fire forever. Read the real number with `az postgres flexible-server parameter show -n max_connections` and add it to max_connections_by_sku in modules/alerting/database.tf."
+      condition     = var.usable_connections > 0
+      error_message = "usable_connections is zero, so this alert would compare active connections against a threshold of zero and fire forever. That means the database SKU is not in max_connections_by_sku in modules/control-plane/database.tf. Read the real number with `az postgres flexible-server parameter show -n max_connections` and add it there."
     }
   }
 }

@@ -133,6 +133,22 @@ backup_retention_days = 35
 min_replicas = 2
 max_replicas = 6
 
+# Ten, stated rather than inherited, because the number only means anything
+# next to the server it runs against.
+#
+#   D2ds_v4 answers max_connections = 859, less 5 reserved and 10 superuser
+#   reserved, so an ordinary role gets 844.
+#   (max_replicas 6 + one rollback revision at min_replicas 2) x 10 = 80,
+#   plus 4 for the jobs and break-glass = 84 against 844.
+#
+# Staging runs 5 against the same pipeline because its B1ms hands out 35. The
+# defect that took staging down is present here too and has simply not been
+# reached: deploy/cd/deploy.sh used to leave every superseded revision active,
+# and each one keeps min_replicas running. At two replicas a deploy, this
+# server absorbs roughly forty deploys' worth of abandoned revisions before it
+# runs out. deploy.sh now reaps them and checks the measured arithmetic.
+pool_max = 10
+
 # Two years of events rather than one. The events table is partitioned by month
 # and dropping a partition is not reversible, so this is the number that decides
 # how far back an incident review or a customer's question can reach. A year is

@@ -25,6 +25,29 @@ github_redirect_uri = "https://app.dev.antifailure.dev/auth/github/callback"
 min_replicas = 1
 max_replicas = 3
 
+# FIVE, NOT THE TEN THIS STACK USED TO INHERIT, AND THE ARITHMETIC IS THE
+# REASON RATHER THAN THRIFT.
+#
+# B1ms answers max_connections = 50, and Postgres holds back
+# reserved_connections (5) and superuser_reserved_connections (10) for roles
+# this application is deliberately not a member of. So it gets 35, not 50.
+#
+#   (max_replicas 3 + one rollback revision at min_replicas 1) x 10 = 40
+#   plus 4 for the bootstrap job, the maintenance job, break-glass and backup
+#   = 44 against 35. It did not fit and nothing computed it.
+#
+# At 5 the same sum is 24, which fits with room. Five connections per replica
+# is ample for a control plane whose sign-in allowlist has two people on it;
+# production keeps 10 because its server hands out 844.
+#
+# What this number cost when nobody owned it: deploy/cd/deploy.sh left every
+# superseded revision active on the theory that a revision at zero traffic is
+# free. It is not, it keeps min_replicas running, and forty six deploys meant
+# forty six control plane processes holding forty six pools against those
+# thirty five slots. /readyz answered "remaining connection slots are reserved
+# for roles with privileges of the pg_use_reserved_connections role".
+pool_max = 5
+
 # Events are kept for a year on staging. Null would keep them forever, which on
 # a partitioned table means a partition per month and no reason to ever drop
 # one.

@@ -50,3 +50,16 @@ output "custom_domain_verification_id" {
   value       = azurerm_container_app.this.custom_domain_verification_id
   description = "The value the asuid TXT record carries. Output so that binding a name in a zone this stack does not own is a copy rather than a portal visit."
 }
+
+# What the application actually gets from the database, for the alerting module.
+#
+# An output rather than a second copy of the SKU table in modules/alerting: the
+# alert's threshold and the app's own ceiling have to come from the SAME number.
+# When they did not, the connection alert on a B1ms was set at eighty percent of
+# max_connections, which is 40, and the server had already started refusing the
+# application at 35. The rule could not fire before the outage it exists to
+# predict. See the derivation and the measurements in database.tf.
+output "usable_connections" {
+  value       = local.usable_connections
+  description = "max_connections for this SKU less reserved_connections and superuser_reserved_connections: what a role without pg_use_reserved_connections may actually open. Zero means the SKU is not in the table in database.tf."
+}
