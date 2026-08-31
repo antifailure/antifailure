@@ -23,10 +23,17 @@ import (
 // compares case sensitively, so these run against a server or they do not run.
 //
 // AF_TEST_FIDELITY_DATABASE_URL overrides the address, and the default is the
-// scratch server this package's tests expect. A machine without one skips,
-// which is why AF_REQUIRE_DATABASE exists: a skip prints nothing and the
-// package reports ok having examined nothing.
-const fidelityTestDatabaseURL = "postgres://postgres:test@127.0.0.1:55511/antifailure"
+// scratch server every other Postgres suite in this repository uses: the one
+// `just db` starts and the one CI starts, on 55432. This said 55511, which is
+// nothing's port. Locally that reads as "no Postgres" and skips, so it was
+// invisible; in CI, where AF_REQUIRE_DATABASE turns the skip into a failure
+// precisely so that a suite cannot report ok having examined nothing, all four
+// of these failed with connection refused.
+//
+// A machine without a server still skips, which is why AF_REQUIRE_DATABASE
+// exists: a skip prints nothing and the package reports ok having examined
+// nothing.
+const fidelityTestDatabaseURL = "postgres://postgres:test@127.0.0.1:55432/antifailure"
 
 func fidelityConn(t *testing.T) *pgx.Conn {
 	t.Helper()

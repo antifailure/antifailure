@@ -23,8 +23,8 @@ can run is worse than a short one.
 | CI identity, federated, no secret | **applied**, `af-infra-ci` |
 | Control plane on Kubernetes instead | **works**, the Helm chart, installed on a real cluster in CI |
 | Goldens storage | **off by default**, see below |
-| Alerting, an action group and eleven rules | **applied** in production, `infra/terraform/modules/alerting`, off unless `alerting_enabled`. Staging runs without it on purpose |
-| Production, `app.antifailure.dev` | **applied**, `af-cp-prod-centralus`, serving on a managed certificate. [Standing up production](/docs/self-hosting/production/) |
+| Alerting, an action group and eleven rules | **written**, `infra/terraform/modules/alerting`, off unless `alerting_enabled` |
+| Production, `app.antifailure.dev` | **written**, `production.tfvars`, not applied. [Standing up production](/docs/self-hosting/production/) |
 | Environment pool on AKS | **does not exist** |
 
 The goldens storage account is `goldens_enabled = false` on purpose. Nothing in

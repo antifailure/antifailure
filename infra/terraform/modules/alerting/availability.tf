@@ -139,21 +139,6 @@ resource "azurerm_application_insights_standard_web_test" "certificate" {
   timeout       = 30
   retry_enabled = false
 
-  # NOT A DEFAULT, AND LEAVING IT OUT IS WHY THIS TEST RAN ZERO TIMES.
-  #
-  # azurerm defaults `enabled` on a standard web test to FALSE. The readyz test
-  # above says `enabled = true` and this one said nothing, so the apply created
-  # it, reported success, and produced a test that never ran. The
-  # certificate-expiring rule was created enabled, wired to the action group,
-  # and reported healthy the whole time, because a rule over a test with no
-  # results has nothing to be unhealthy about. Checked in the portal rather than
-  # inferred: `Enabled: False` on afcpprod-certificate against `Enabled: True`
-  # on afcpprod-readyz, from the same apply.
-  #
-  # This is the alert that guards the one failure that is otherwise silent, a
-  # managed certificate that stops renewing itself.
-  enabled = true
-
   description = "Fails when the certificate on ${var.probe_url} has fewer than ${var.certificate_warning_days} days left."
 
   request {

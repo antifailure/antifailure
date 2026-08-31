@@ -78,20 +78,7 @@ resource "azurerm_postgresql_flexible_server" "this" {
     }
     # The password is generated and stored in Key Vault. Changing it here would
     # silently break the running application, which reads the old one.
-    #
-    # The two zones are ignored for the same reason as each other: Azure picks
-    # them and this configuration deliberately does not. `zone` was already here
-    # for the primary. standby_availability_zone is the same value for the HA
-    # replica, and without it every plan after the first apply reads
-    #
-    #   high_availability[0].standby_availability_zone: "2" -> null
-    #
-    # forever, because Azure assigned 2 and nothing here ever will. It is one
-    # in-place change on a plan that should be empty, and a plan that is never
-    # empty is one people stop reading, which is how a real change gets waved
-    # through. Pinning a zone instead would be worse: it would tie the standby
-    # to a zone that may not be the one Azure can actually place it in.
-    ignore_changes = [administrator_password, zone, high_availability[0].standby_availability_zone]
+    ignore_changes = [administrator_password, zone]
   }
 
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]

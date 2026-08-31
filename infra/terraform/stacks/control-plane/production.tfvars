@@ -160,7 +160,7 @@ monthly_budget_usd = 450
 # can review.
 signin_allowlist = ["virsanghavi", "maksymrajszewski"]
 
-# SET ONLY AFTER THE PRODUCTION GITHUB APP EXISTS. SETTING IT EARLY FAILS.
+# EMPTY UNTIL THE PRODUCTION GITHUB APP EXISTS, AND SETTING IT EARLY FAILS.
 #
 # Production needs its OWN App, not staging's: the webhook secret and the
 # private key are the credentials that let a delivery write rows, so sharing
@@ -172,36 +172,13 @@ signin_allowlist = ["virsanghavi", "maksymrajszewski"]
 # recreate it. So setting this id before those secrets are in the production
 # vault fails at PLAN, which is the correct order and not a bug. The checklist
 # in the production guide has the steps in the order that works.
-#
-# App 4775259, slug `antifailure`, installed on the antifailure organization as
-# installation 157834739. The OAuth App that signs people in is a separate
-# registration and its client id and secret are the seeded vault entries, not
-# this value: an App id is not a credential and unlocks nothing, which is why it
-# sits here rather than arriving as a TF_VAR_.
-github_app_id = "4775259"
+github_app_id = ""
 
 # One identity applies this stack, and it is the same person as staging, so the
 # grant is pinned rather than following whoever is calling. See staging.tfvars
 # for why the module defaults this off.
 assign_deployer_secret_officer = true
 deployer_principal_id          = "3537595b-8059-4839-9cd8-04325c824291"
-
-# WITHOUT THIS, CONTINUOUS DEPLOYMENT CANNOT REACH PRODUCTION AT ALL.
-#
-# The object id of af-infra-ci, the Entra application GitHub Actions federates
-# into. cd.yml's production job updates the container app's image, starts the
-# bootstrap job and shifts ingress traffic; every one of those is a write and
-# the identity holds nothing on this group until this line grants it.
-#
-# An object id is not a secret. It identifies a principal and unlocks nothing,
-# which is why it sits here beside deployer_principal_id rather than arriving as
-# an environment variable. That placement is deliberate and is the difference
-# between this grant and staging's: a value passed as TF_VAR_ by the plan job
-# and NOT by the person who runs apply produces a plan that says "1 to add" on
-# every pull request forever, for a resource nobody ever creates. That is
-# exactly what ci_principal_id does today, and a plan that is never empty is one
-# people stop reading.
-cd_principal_id = "f99916dc-1e11-4305-8e03-1e116a1e93e1"
 
 # ---------------------------------------------------------------------------
 # Alerting.
