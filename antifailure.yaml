@@ -287,7 +287,10 @@ load:
     - POST /auth/email
     - POST /trpc/*
   thresholds:
-    p95_increase: 0.5
+    # No p95_increase, because the source is none. A default shape carries no
+    # production baseline, so the threshold would have been listed in the
+    # report and evaluated against nothing. It was set to 0.5 here and had
+    # never once been able to fire.
     error_rate: 0.02
 
 runtime:
