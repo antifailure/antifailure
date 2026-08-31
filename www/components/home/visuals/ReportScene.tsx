@@ -202,7 +202,7 @@ function Drawer({
   return (
     <div className="overflow-hidden" style={{ height: u * height, opacity: 0.2 + u * 0.8 }}>
       <div className="border-t border-black/10 px-2.5 py-1.5" style={{ height }}>
-        <MonoLabel className="text-[9px] uppercase text-black/40">{title}</MonoLabel>
+        <MonoLabel className="text-[9px] uppercase">{title}</MonoLabel>
         <div className="mt-1">{children}</div>
       </div>
     </div>
@@ -361,7 +361,7 @@ function EvidenceColumn({ t }: { t: number }) {
             <StatusPill tone="FAIL">FAILED</StatusPill>
           </span>
         ) : (
-          <MonoLabel className="text-black/25">empty</MonoLabel>
+          <MonoLabel>empty</MonoLabel>
         )}
       </div>
       <Hairline />
