@@ -15,13 +15,12 @@ const JOURNEYS = [
 /** Nothing named these safe, so nothing sent them. */
 const STEPS = ["POST /billing/upgrade", "POST /api/payments", "DELETE /api/seats"] as const;
 
-export function WorkloadFilm({ active, hovered }: FilmProps) {
+export function WorkloadFilm({ active }: FilmProps) {
   const { ref, t } = useHeroFilmClock({
     loop: LOOP,
     active,
-    hovered,
     stillT: 0,
-    reducedT: 0,
+    reducedT: LOOP - 0.001,
   });
 
   const fill = smooth(span(t, 0.45, 1.85));
