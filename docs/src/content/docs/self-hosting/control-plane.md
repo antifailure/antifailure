@@ -81,7 +81,7 @@ Step 3 prints what it did:
 organization  acme (its new uuid)
 name          Acme
 github        acme
-audit entry   136
+audit entry   1
 
 The organization exists and has no members, which grants nobody anything.
 Sign in through GitHub so your account exists, then:
