@@ -184,15 +184,36 @@ func TestReaper_DestroysAnExpiredEnvironmentOnARealDaemon(t *testing.T) {
 	require.Positive(t, after[live], "the sweep destroyed an environment inside its lifetime")
 	t.Logf("daemon holds %d environments after the sweep: %v", len(after), keys(after))
 
-	// Nothing else went. Comparing the whole set rather than just our two
-	// catches a sweep that took a bystander.
+	// Nothing else went. Checked over the whole daemon rather than over the
+	// two environments this test made, because a sweep that took a bystander
+	// is the failure that matters and our own two cannot show it.
+	//
+	// Presence and not resource count. This daemon is shared and busy: another
+	// agent starting or stopping a container of their own between the two
+	// inventories changes their count for reasons that have nothing to do with
+	// this sweep, and asserting the counts equal makes the test fail on
+	// somebody else's unrelated work. Disappearing entirely is the thing a
+	// sweep does and the thing this asserts against.
 	for id, n := range before {
 		if id == expired {
 			continue
 		}
-		require.Equal(t, n, after[id],
-			"the sweep changed %s, which it was never asked to touch", id)
+		require.Positive(t, after[id],
+			"the sweep removed %s, which it was never asked to touch", id)
+		if after[id] != n {
+			t.Logf("bystander %s went from %d to %d resources while the sweep ran, "+
+				"which is another agent's work on this shared daemon and not this sweep: "+
+				"the sweep destroyed only %v", id, n, after[id], named)
+		}
 	}
+
+	// The sweep's own record of what it destroyed, which is the authoritative
+	// one: it names exactly one environment, and it is ours.
+	var destroyed []string
+	for _, out := range result.Outcomes {
+		destroyed = append(destroyed, out.EnvID)
+	}
+	require.Equal(t, []string{expired}, destroyed)
 }
 
 func TestReaper_LeavesAnEnvironmentThatStatesNoLifetime(t *testing.T) {
