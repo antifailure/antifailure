@@ -62,6 +62,76 @@ func TestParseUnifiedDiff_ContentThatLooksLikeAFileHeaderIsNotOne(t *testing.T) 
 	assert.Equal(t, 1, main.Removed)
 }
 
+// A file is usually changed in more than one place, and every hunk after the
+// first carries its own starting line. A parser that read the first hunk
+// header and then counted upward would put every later line at the wrong
+// number, which is worse than having no number at all: the report would point
+// a reviewer confidently at a line that says something else.
+func TestParseUnifiedDiff_EveryHunkAfterTheFirstResetsTheLineNumber(t *testing.T) {
+	f := byPath(load(t, "multi-hunk.diff"))["api/handler.ts"]
+	require.Len(t, f.AddedLines, 5)
+
+	// Hunk one starts at 8, and the two added lines sit either side of a
+	// context line, so the second is not simply the first plus one.
+	assert.Equal(t, 9, f.AddedLines[0].N, "first added line of the first hunk")
+	assert.Equal(t, 11, f.AddedLines[1].N, "a context line sits between them")
+
+	// Hunk two starts at 42, a long way from where hunk one left off. This is
+	// the assertion that fails if later hunk headers are ignored.
+	assert.Equal(t, 43, f.AddedLines[2].N, "first added line of the second hunk")
+	assert.Equal(t, 44, f.AddedLines[3].N)
+
+	// Hunk three, to catch a parser that handles exactly two.
+	assert.Equal(t, 104, f.AddedLines[4].N, "first added line of the third hunk")
+
+	// And the line number reaches the fact, because a number the report does
+	// not carry is a number nobody benefits from.
+	p := change.Analyze(change.Options{
+		Manifest: billingManifest(), Files: load(t, "multi-hunk.diff"),
+	})
+	var host change.Fact
+	for _, fact := range p.Facts {
+		if fact.Subject == "api.twilio.com" {
+			host = fact
+		}
+	}
+	require.NotEmpty(t, host.Rule, "the outbound host in the second hunk was not found")
+	assert.Equal(t, 43, host.Line, "the fact points at the line the host is actually on")
+}
+
+// A patch that did not come from git has no "diff --git" line at all: plain
+// diff -u writes only the --- and +++ pair. Since --diff takes a file from
+// whoever produced it, this input arrives eventually.
+//
+// Two things have to be true about it, and the second is the point. Nothing
+// may be read as a file, because the header this parser trusts is not there
+// and guessing from the body is what this parser exists not to do. And the
+// result must be the safe answer rather than the quiet one: zero files is
+// indistinguishable here from a change that touched nothing, so the fail safe
+// fires and every check is selected. A parser that instead read those two
+// lines as file metadata would be dereferencing a file it never opened.
+func TestParseUnifiedDiff_APatchThatDidNotComeFromGitReadsAsNothingAndSelectsEverything(t *testing.T) {
+	body := strings.Join([]string{
+		"--- old/config.yaml\t2026-01-01 10:00:00",
+		"+++ new/config.yaml\t2026-01-01 10:01:00",
+		"@@ -1,2 +1,2 @@",
+		"-timeout: 30",
+		"+timeout: 1",
+		"",
+	}, "\n")
+
+	files, truncated, err := change.ParseUnifiedDiff(strings.NewReader(body))
+	require.NoError(t, err, "an unrecognised patch is not a parse error; it is a patch with no headers this trusts")
+	assert.False(t, truncated)
+	assert.Empty(t, files, "nothing here came from a header git wrote, so nothing is claimed as a file")
+
+	p := change.Analyze(change.Options{Manifest: billingManifest(), Files: files})
+	assert.True(t, p.Everything,
+		"reading no files must select everything: it is not distinguishable from a change that touched nothing")
+	assert.Equal(t, change.Checks(), p.Selected())
+	assert.Contains(t, strings.Join(p.Blind, "\n"), "does not run the program")
+}
+
 // Git quotes a path with unusual bytes in it, using the same escapes a C or Go
 // string literal does. A parser that took the quoted form literally would
 // report a file nobody can open.
@@ -94,7 +164,30 @@ func TestParseUnifiedDiff_LineNumbersAreTheNewFilesOwn(t *testing.T) {
 func TestParseUnifiedDiff_IgnoresAnythingBeforeTheFirstHeader(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("testdata", "unrecognised.diff"))
 	require.NoError(t, err)
-	prefixed := "commit 0123456789abcdef\nAuthor: Somebody <s@example.com>\n\n    a subject line\n\n" + string(body)
+	// The preamble is the hostile version on purpose. A commit message that
+	// quotes a diff, which is a normal thing to write and a normal thing for
+	// git show to print, contains every line a header parser looks for. If
+	// anything before the first "diff --git" is read as file metadata, these
+	// lines either invent a file or attach themselves to one that follows.
+	prefixed := strings.Join([]string{
+		"commit 0123456789abcdef",
+		"Author: Somebody <s@example.com>",
+		"",
+		"    a subject line",
+		"",
+		"    The old code said:",
+		"",
+		"    --- a/ghost/before.txt",
+		"    +++ b/ghost/after.txt",
+		"    new file mode 100644",
+		"    deleted file mode 100644",
+		"    rename from ghost/one.txt",
+		"    rename to ghost/two.txt",
+		"    Binary files a/ghost.png and b/ghost.png differ",
+		"    @@ -1,2 +1,2 @@",
+		"    +a line that is not part of any file",
+		"",
+	}, "\n") + "\n" + string(body)
 
 	files, truncated, err := change.ParseUnifiedDiff(strings.NewReader(prefixed))
 	require.NoError(t, err)

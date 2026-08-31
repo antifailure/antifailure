@@ -70,6 +70,47 @@ func surfaces(facts []change.Fact) []string {
 	return out
 }
 
+// rules returns the rule that produced each fact, sorted and deduplicated.
+// Asserting on these rather than only on surfaces is what makes a
+// classification auditable: two rules can assign the same surface, and a test
+// that reads only the surface cannot tell which one fired.
+func rules(facts []change.Fact) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range facts {
+		if f.Rule == "" || seen[f.Rule] {
+			continue
+		}
+		seen[f.Rule] = true
+		out = append(out, f.Rule)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// A migration is not always a .sql file. Ruby, Python and Go migration tools
+// all write code into a migrations directory, and the path rule is the only
+// thing that recognises those; asserting the surface of a .sql migration
+// alone would let path.sql quietly cover for path.migration being broken.
+func TestAnalyze_RecognisesAMigrationThatIsNotASQLFile(t *testing.T) {
+	for _, p := range []string{
+		"db/migrate/20260824120000_add_billing_status.rb",
+		"alembic/versions/9f2a_add_billing_status.py",
+		"prisma/migrations/20260824_add_status/migration.sql",
+	} {
+		profile := change.Analyze(change.Options{
+			Manifest: billingManifest(),
+			Files:    []change.File{{Path: p, Status: change.StatusAdded}},
+		})
+		facts := factsFor(profile, p)
+		require.NotEmpty(t, facts, "%s must be classified", p)
+		assert.Equal(t, []string{"path.migration"}, rules(facts), "%s", p)
+		assert.Contains(t, surfaces(facts), "schema", "%s", p)
+		assert.True(t, profile.Selects(change.CheckMigration), "%s", p)
+		assert.False(t, profile.Everything, "%s is recognised, so the fail safe must not fire", p)
+	}
+}
+
 // The diff the marketing page has always shown: a migration, a service, a
 // worker and an event type. This is the whole feature in one test.
 func TestAnalyze_ClassifiesAMigrationAndAServiceDiff(t *testing.T) {
@@ -83,6 +124,11 @@ func TestAnalyze_ClassifiesAMigrationAndAServiceDiff(t *testing.T) {
 
 	assert.Equal(t, []string{"schema"},
 		surfaces(factsFor(p, "migrations/20260824_add_billing_status.sql")))
+	// Which rule claimed it, not merely what it was claimed as. This path is
+	// both inside a migrations directory and a .sql file, so asserting only
+	// the surface lets either rule cover for the other being broken.
+	assert.Equal(t, []string{"path.migration"},
+		rules(factsFor(p, "migrations/20260824_add_billing_status.sql")))
 	assert.Equal(t, []string{"code", "egress:api.stripe.com", "egress:hooks.slack.com", "service:billing-api"},
 		surfaces(factsFor(p, "api/billing.ts")))
 	assert.Equal(t, []string{"code", "service:billing-worker"},
@@ -204,6 +250,18 @@ func TestAnalyze_SaysWhatItCannotSee(t *testing.T) {
 	assert.Contains(t, blind, "binary")
 	assert.Contains(t, blind, "infrastructure as code")
 	assert.Contains(t, blind, "Nothing here says this change is safe")
+
+	// The two unconditional sentences are the ones that must survive every
+	// future edit to this list, so they are asserted by their substance
+	// rather than left to the conditional sentences above to imply. The
+	// first is the honest limit of reading a diff at all: size is not
+	// danger, in either direction.
+	assert.Contains(t, blind, "does not run the program",
+		"the report has to say that this reads a diff rather than executing anything")
+	assert.Contains(t, blind, "one line change to a configuration default",
+		"a small diff being able to matter more than a large one is the single most important thing this cannot see")
+	assert.Contains(t, blind, "thousand line refactor",
+		"and the converse, so nobody reads a big diff as a big risk")
 
 	// The rename is attributed to the service by its NEW path, and the test
 	// says so out loud because a reader of the report has to know which.
