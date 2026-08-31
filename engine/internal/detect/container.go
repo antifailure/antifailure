@@ -24,6 +24,7 @@ var (
 	dockerExposeRe  = regexp.MustCompile(`(?i)^\s*EXPOSE\s+(.+)$`)
 	dockerCmdRe     = regexp.MustCompile(`(?i)^\s*(CMD|ENTRYPOINT)\s+(.+)$`)
 	dockerWorkdirRe = regexp.MustCompile(`(?i)^\s*WORKDIR\s+(\S+)`)
+	dockerCopyRe    = regexp.MustCompile(`(?i)^\s*(COPY|ADD)\s+(.+)$`)
 )
 
 // dockerfileNames are the spellings that appear in real repositories.
@@ -46,16 +47,26 @@ func (a *DockerAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error) 
 		name := sanitizeServiceName(baseNameFor(dir, r))
 
 		df := parseDockerfile(body)
+		inDir, ambiguous, why := contextFor(dir, df.copySources, r)
+		extra := map[string]string{
+			"dir":        dir,
+			"dockerfile": p,
+			"target":     df.finalStage,
+			"base":       df.finalBase,
+		}
+		if inDir {
+			extra["context"] = dir
+			extra["context_why"] = why
+		}
+		if ambiguous {
+			extra["context_ambiguous"] = dir
+			extra["context_why"] = why
+		}
 		out = append(out, Finding{
 			Kind: KindBuild, Subject: name, Value: "dockerfile",
 			Confidence: High, Evidence: p,
 			Detail: fmt.Sprintf("%s builds this service.", p),
-			Extra: map[string]string{
-				"dir":        dir,
-				"dockerfile": p,
-				"target":     df.finalStage,
-				"base":       df.finalBase,
-			},
+			Extra:  extra,
 		})
 		out = append(out, Finding{
 			Kind: KindService, Subject: name, Value: "web",
@@ -96,6 +107,11 @@ type dockerfileInfo struct {
 	ports      []int
 	command    string
 	workdir    string
+	// copySources are the paths COPY and ADD read out of the build context.
+	// They are the only statement a Dockerfile makes about which directory it
+	// expects to be built from. A copy from an earlier stage is excluded,
+	// because it reads from the image rather than from the context.
+	copySources []string
 }
 
 // parseDockerfile reads the instructions detection cares about. It is not a
@@ -134,6 +150,10 @@ func parseDockerfile(body string) dockerfileInfo {
 		}
 		if m := dockerWorkdirRe.FindStringSubmatch(raw); m != nil {
 			info.workdir = m[1]
+			continue
+		}
+		if m := dockerCopyRe.FindStringSubmatch(raw); m != nil {
+			info.copySources = append(info.copySources, copySourcesOf(m[2])...)
 			continue
 		}
 		if m := dockerCmdRe.FindStringSubmatch(raw); m != nil {
@@ -200,6 +220,106 @@ func normalizeDockerArgs(s string) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// copySourcesOf returns the context paths one COPY or ADD instruction reads.
+//
+// A line carrying --from reads from an earlier stage or a named image rather
+// than from the build context, so it says nothing about which directory the
+// context is and is dropped whole. Every other flag is dropped individually,
+// and the last remaining field is the destination inside the image.
+func copySourcesOf(args string) []string {
+	fields := strings.Fields(normalizeDockerArgs(args))
+	var kept []string
+	for _, f := range fields {
+		if strings.HasPrefix(f, "--") {
+			if strings.HasPrefix(strings.ToLower(f), "--from=") {
+				return nil
+			}
+			continue
+		}
+		kept = append(kept, f)
+	}
+	if len(kept) < 2 {
+		// One field is a destination with no source, which Docker refuses.
+		// Reading it as a source would invent evidence out of a broken line.
+		return nil
+	}
+	return kept[:len(kept)-1]
+}
+
+// contextFor works out which directory a Dockerfile expects to be built from.
+//
+// The failure it exists to stop: af init never set build.context, so the
+// context was always the repository root, while a Dockerfile at
+// dashboard/Dockerfile is conventionally built with dashboard/ as its context,
+// which is what 'docker build dashboard' does. With an explicit COPY the build
+// fails outright; with COPY . . it SUCCEEDS and produces an image built from
+// the wrong directory, so the failure moves to startup and nothing says why.
+//
+// Rather than choose a default and be wrong for one of the two conventions,
+// this reads the evidence the Dockerfile already carries. A COPY source that
+// exists beside the Dockerfile and not at the root means the context is the
+// Dockerfile's directory. One that exists at the root and not beside it means
+// the root, which is the monorepo shape where a service image needs the
+// lockfile at the top of the tree. Anything else is a real ambiguity and is
+// returned as one, so it can be asked rather than guessed.
+//
+// It never reports the root, because the root is what an unset context already
+// means. Saying so in the manifest would be noise, and more importantly it
+// would be a behaviour change for every repository that builds correctly
+// today.
+func contextFor(dir string, sources []string, r *Repo) (dirContext bool, ambiguous bool, why string) {
+	if dir == "" || len(sources) == 0 {
+		// A Dockerfile at the root is already built from the root. One that
+		// copies nothing does not read the context at all, so which directory
+		// it is cannot change what the image contains, and asking would be
+		// noise about a decision that has no consequence.
+		return false, false, ""
+	}
+	var beside, atRoot string
+	for _, src := range sources {
+		clean := strings.TrimPrefix(path.Clean(src), "./")
+		if clean == "." || clean == "/" || clean == "*" || strings.HasPrefix(clean, "..") {
+			// COPY . . works from either directory and copies whatever it is
+			// given, which is exactly why it is the shape that fails quietly.
+			continue
+		}
+		if beside == "" && repoHas(r, path.Join(dir, clean)) {
+			beside = clean
+		}
+		if atRoot == "" && repoHas(r, clean) {
+			atRoot = clean
+		}
+	}
+	switch {
+	case beside != "" && atRoot == "":
+		return true, false, fmt.Sprintf("%s/Dockerfile copies %s, which exists in %s and not at the repository root.",
+			dir, beside, dir)
+	case atRoot != "" && beside == "":
+		return false, false, ""
+	}
+	return false, true, fmt.Sprintf("%s/Dockerfile does not name a path that exists in only one of them.", dir)
+}
+
+// repoHas reports whether the index holds this path, a file under it, or
+// anything matching it as a pattern. COPY takes globs, and a directory source
+// never appears in an index of files.
+func repoHas(r *Repo, p string) bool {
+	p = path.Clean(p)
+	if r.Exists(p) {
+		return true
+	}
+	prefix := p + "/"
+	for _, f := range r.Files() {
+		if strings.HasPrefix(f, prefix) {
+			return true
+		}
+		if ok, err := path.Match(p, f); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }
 
 func isExamplePath(p string) bool {

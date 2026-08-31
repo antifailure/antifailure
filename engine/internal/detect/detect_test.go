@@ -258,6 +258,169 @@ CMD ["node", "server.js"]
 		"the stage that ships has no name, so there is no target to name")
 }
 
+// af init never set build.context, so a build always ran from the repository
+// root, while a Dockerfile at dashboard/Dockerfile is conventionally built
+// with dashboard/ as its context. With an explicit COPY the build fails
+// outright. With COPY . . it SUCCEEDS and produces an image assembled from the
+// wrong directory, so the failure moves to startup and names a path inside a
+// container. The second is the dangerous one, so the evidence is read rather
+// than a default being picked.
+func TestRun_ADockerfileThatCopiesFromItsOwnDirectoryIsBuiltFromIt(t *testing.T) {
+	t.Parallel()
+	res := run(t, "myrepo", map[string]string{
+		"dashboard/package.json": `{"name":"dash","scripts":{"start":"next start"},"dependencies":{"next":"16.0.0"}}`,
+		"dashboard/Dockerfile": `FROM node:22-alpine
+WORKDIR /app
+COPY package.json ./
+RUN npm ci
+EXPOSE 3100
+CMD ["npm", "start"]
+`,
+	})
+	svc := serviceNamed(t, res.Draft, "dash")
+	require.Equal(t, "dashboard", svc.Build.Context,
+		"package.json exists in dashboard and not at the root, so the context is dashboard")
+	for _, q := range res.Questions {
+		require.NotEqual(t, "service.dash.context", q.ID,
+			"the evidence settles it, so there is nothing to ask")
+	}
+}
+
+// The monorepo, and the reason this reads evidence instead of changing the
+// default. apps/web/Dockerfile reaching the lockfile at the top of the tree
+// genuinely wants the repository root, and that build works today. Nothing
+// about it may change.
+func TestRun_AMonorepoDockerfileReachingTheRootLockfileKeepsTheRoot(t *testing.T) {
+	t.Parallel()
+	res := run(t, "myrepo", map[string]string{
+		"package.json":      `{"name":"root"}`,
+		"package-lock.json": `{}`,
+		"apps/web/package.json": `{"name":"acme-web","scripts":{"start":"next start"},` +
+			`"dependencies":{"next":"16.0.0"}}`,
+		"apps/web/Dockerfile": `FROM node:22-alpine
+WORKDIR /app
+COPY package-lock.json ./
+COPY apps/web ./apps/web
+RUN npm ci
+EXPOSE 3000
+CMD ["npm", "start"]
+`,
+	})
+	svc := serviceNamed(t, res.Draft, "acme-web")
+	require.Empty(t, svc.Build.Context,
+		"the lockfile is only at the root, so the root is the context and an unset value already means it")
+	for _, q := range res.Questions {
+		require.NotEqual(t, "service.acme-web.context", q.ID,
+			"the evidence settles it, so there is nothing to ask")
+	}
+}
+
+// COPY . . works from either directory, which is exactly why it is the shape
+// that fails quietly. There is no evidence to read, so it is asked, the way a
+// port disagreement is asked. The default is what 'docker build dashboard'
+// does, and a non interactive run reports it as an assumption.
+func TestRun_ADockerfileThatOnlyCopiesEverythingAsksWhichDirectory(t *testing.T) {
+	t.Parallel()
+	res := run(t, "myrepo", map[string]string{
+		"dashboard/package.json": `{"name":"dash","scripts":{"start":"next start"},"dependencies":{"next":"16.0.0"}}`,
+		"dashboard/Dockerfile": `FROM node:22-alpine
+WORKDIR /app
+COPY . .
+EXPOSE 3100
+CMD ["npm", "start"]
+`,
+	})
+	var asked *detect.Question
+	for i := range res.Questions {
+		if res.Questions[i].ID == "service.dash.context" {
+			asked = &res.Questions[i]
+		}
+	}
+	require.NotNil(t, asked, "COPY . . carries no evidence either way, so it has to be asked")
+	require.Equal(t, []string{"dashboard", "."}, asked.Options)
+	require.Equal(t, "dashboard", asked.Default)
+	require.Contains(t, asked.Why, "docker build dashboard")
+}
+
+// The question above lived on the candidate rather than inside build, and the
+// fold moved build across without it, so the question vanished exactly when a
+// Dockerfile was folded into the package that named it. That is the common
+// case, which is what made it worth a test of its own rather than trusting the
+// case above to cover it.
+func TestRun_AnAmbiguousContextSurvivesTheFold(t *testing.T) {
+	t.Parallel()
+	res := run(t, "myrepo", map[string]string{
+		"dashboard/package.json": `{"name":"a-name-that-is-not-the-directory",` +
+			`"scripts":{"start":"next start"},"dependencies":{"next":"16.0.0"}}`,
+		"dashboard/Dockerfile": `FROM node:22-alpine
+WORKDIR /app
+COPY . .
+EXPOSE 3100
+CMD ["npm", "start"]
+`,
+	})
+	require.Len(t, res.Draft.Services, 1)
+	found := false
+	for _, q := range res.Questions {
+		if q.ID == "service.a-name-that-is-not-the-directory.context" {
+			found = true
+		}
+	}
+	require.True(t, found, "the fold renamed the service and dropped the question with it")
+}
+
+// A Dockerfile that copies nothing does not read the context at all, so which
+// directory it is cannot change what the image contains. Asking would be noise
+// about a decision with no consequence.
+func TestRun_ADockerfileThatCopiesNothingIsNotAskedAboutItsContext(t *testing.T) {
+	t.Parallel()
+	res := run(t, "myrepo", map[string]string{
+		"svc/Dockerfile": `FROM alpine
+EXPOSE 9000
+CMD ["/bin/svc"]
+`,
+	})
+	svc := serviceNamed(t, res.Draft, "svc")
+	require.Empty(t, svc.Build.Context)
+	for _, q := range res.Questions {
+		require.NotEqual(t, "service.svc.context", q.ID,
+			"nothing is copied, so the context has no effect to ask about")
+	}
+}
+
+// A copy from an earlier stage reads out of the image, not out of the context,
+// so it is not evidence about which directory the context is. Counting it
+// would read /app as a root path and settle a question it knows nothing about.
+func TestRun_ACopyFromAnEarlierStageIsNotEvidenceAboutTheContext(t *testing.T) {
+	t.Parallel()
+	res := run(t, "myrepo", map[string]string{
+		"dashboard/package.json": `{"name":"dash","scripts":{"start":"next start"},"dependencies":{"next":"16.0.0"}}`,
+		// The only COPY naming a path is the one from the earlier stage, and
+		// that path also exists in dashboard/. Counting it would settle the
+		// question on a line that never read the context at all, so this
+		// fixture is red the moment the --from guard goes.
+		"dashboard/Dockerfile": `FROM node:22-alpine AS build
+WORKDIR /app
+COPY . .
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+COPY --from=build package.json ./
+EXPOSE 3100
+CMD ["npm", "start"]
+`,
+	})
+	var asked bool
+	for _, q := range res.Questions {
+		if q.ID == "service.dash.context" {
+			asked = true
+		}
+	}
+	require.True(t, asked,
+		"only COPY . . reads the context here, so this is the ambiguous case and not a settled one")
+}
+
 // The median containerised Node repository, and the shape af init failed on:
 // the package is not named after the directory somebody cloned it into.
 //

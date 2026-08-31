@@ -35,6 +35,10 @@ const (
 	// The build context for {service} holds more than {count} files;
 	// {path} is where the count was reached.
 	AFBLD004 Code = "AF-BLD-004"
+	// The build for service {service} failed after {duration}, and its
+	// Dockerfile is {dockerfile} inside a build context rooted at the
+	// repository.
+	AFBLD005 Code = "AF-BLD-005"
 	// No build strategy could be detected for {service}.
 	AFBLD010 Code = "AF-BLD-010"
 	// The Dockerfile {dockerfile} for {service} is excluded from the build
@@ -452,6 +456,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/build",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFBLD005: {
+		Code:      AFBLD005,
+		Area:      "BLD",
+		Message:   "The build for service {service} failed after {duration}, and its Dockerfile is {dockerfile} inside a build context rooted at the repository.",
+		NextStep:  "If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed.",
+		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitFailure,
 	},
 	AFBLD010: {
 		Code:      AFBLD010,

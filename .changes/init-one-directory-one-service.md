@@ -47,6 +47,22 @@ in `af env list` and `af down`, not just an internal identifier. Nobody with a
 committed `antifailure.yaml` is renamed under them: `af init` refuses to touch
 an existing manifest without `--force`.
 
+`af init` also now works out which directory a Dockerfile is built from,
+rather than always using the repository root. A Dockerfile at
+`dashboard/Dockerfile` is conventionally built with `dashboard` as its context,
+which is what `docker build dashboard` does, and building it from the root
+either fails on a path that is not there or, with `COPY . .`, succeeds and
+produces an image assembled from the wrong directory so the failure moves to
+startup. Its COPY lines say which context it expects, so those are read: a path
+that exists beside the Dockerfile and not at the root means the directory, one
+that exists only at the root means the root, and anything else is asked rather
+than guessed. A monorepo image that reaches a lockfile at the top of the tree
+is unchanged, which is the case that made a new default the wrong answer.
+
+Where that inference is wrong, or where the manifest was written by hand, a
+failed build now returns AF-BLD-005 naming `build.context` instead of leaving
+the reader with a path that does not exist inside a container.
+
 `AF-DET-003` is deleted. It was reserved for a port collision and never
 emitted by anything. The sentence it would have printed is produced by the
 manifest validator, which reaches the user as AF-MAN-002 from `af doctor` and

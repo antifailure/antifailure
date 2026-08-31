@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -287,10 +288,32 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 	res.Log = log
 	res.Duration = b.clock.Since(started)
 	if buildErr != nil {
-		return res, aferrors.Wrap(buildErr, aferrors.AFBLD001,
-			"service", req.Service, "duration", res.Duration.Round(time.Second).String())
+		return res, buildFailure(buildErr, req, res.Duration.Round(time.Second).String())
 	}
 	return res, nil
+}
+
+// buildFailure names build.context when the build ran from the repository root
+// over a Dockerfile that lives somewhere else.
+//
+// A Dockerfile at dashboard/Dockerfile is conventionally built with dashboard
+// as its context, which is what 'docker build dashboard' does. af init reads
+// the COPY lines and sets build.context when they settle it, but they do not
+// always settle it, and a hand written manifest never had the benefit. When
+// the guess is wrong the daemon reports a path that does not exist in the
+// context, which reads as a broken Dockerfile rather than as one line of
+// manifest. DockerfilePath is relative to the context, so a separator in it is
+// exactly the condition: the Dockerfile is not at the root of what it is
+// being built from.
+func buildFailure(err error, req Request, duration string) error {
+	dir := path.Dir(req.DockerfilePath)
+	if req.Dockerfile != "" || dir == "." || dir == "/" || dir == "" {
+		return aferrors.Wrap(err, aferrors.AFBLD001,
+			"service", req.Service, "duration", duration)
+	}
+	return aferrors.Wrap(err, aferrors.AFBLD005,
+		"service", req.Service, "duration", duration,
+		"dockerfile", req.DockerfilePath, "dir", dir)
 }
 
 // attempt runs one build and reads its stream.

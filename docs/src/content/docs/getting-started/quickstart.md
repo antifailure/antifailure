@@ -32,6 +32,18 @@ af doctor
 running first because every problem it names here is one you would otherwise
 meet halfway through a run.
 
+Then finish the agent runner, which is the third step the installer prints:
+
+```bash
+af runner install
+```
+
+The runner drives a real browser, so it needs Node and a copy of Chromium that
+the install script deliberately does not download for you. It reports what it
+copied and what it fetched, and once it says it is ready, `af test` finds it
+without a flag. Everything up to `af up` works without it; only `af test` needs
+it.
+
 ## Describe the repository
 
 ```bash
