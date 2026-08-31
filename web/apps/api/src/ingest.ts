@@ -363,10 +363,17 @@ async function applyToProjection(
   const pullRequest = wholeNumber(payload.pull_request)
   const ttl = lifetimeSeconds(payload.ttl_seconds)
   const now = clock.now().toISOString()
+  // The engine's own timestamp, not this clock's. Both ends of the interval a
+  // bill is computed from have to come from the same clock or the number is
+  // partly a measurement of the network: an environment torn down while the
+  // control plane was unreachable, whose event arrives a day later, would
+  // otherwise be charged for the day it spent in a spool file. created_at
+  // already comes from occurred_at, so this makes the pair consistent.
+  const tornDownAt = state === 'torn_down' ? event.occurredAt : null
 
   if (repository === null || branch === null) {
     return advanceExisting(db, orgId, event.envId, {
-      state, sequence, previewUrl, runtime, golden, ttl, now,
+      state, sequence, previewUrl, runtime, golden, ttl, tornDownAt, now,
     })
   }
 
@@ -384,7 +391,7 @@ async function applyToProjection(
       CASE WHEN ${ttl}::double precision IS NULL THEN NULL
            ELSE ${event.occurredAt}::timestamptz
                 + make_interval(secs => ${ttl}::double precision) END,
-      CASE WHEN ${state} = 'torn_down' THEN ${now}::timestamptz ELSE NULL END)
+      ${tornDownAt}::timestamptz)
     -- The engine's own identifier for the environment, scoped to the
     -- organization, which is the key the whole event stream is written
     -- against. A retry of the creating event collides here and updates the one
@@ -411,8 +418,14 @@ async function applyToProjection(
       golden_version = CASE WHEN environments.last_sequence < EXCLUDED.last_sequence
                             THEN COALESCE(EXCLUDED.golden_version, environments.golden_version)
                             ELSE environments.golden_version END,
+      -- Clamped to created_at, because occurred_at comes from a sender this
+      -- service does not trust and an environment torn down before it was
+      -- created is a negative duration in every sum computed from these two
+      -- columns.
       torn_down_at = CASE WHEN environments.last_sequence < EXCLUDED.last_sequence
-                          THEN COALESCE(EXCLUDED.torn_down_at, environments.torn_down_at)
+                               AND EXCLUDED.torn_down_at IS NOT NULL
+                          THEN GREATEST(EXCLUDED.torn_down_at,
+                                        LEAST(environments.created_at, EXCLUDED.created_at))
                           ELSE environments.torn_down_at END,
       updated_at = ${now}::timestamptz`)
 
@@ -426,6 +439,8 @@ interface Advance {
   runtime: string | null
   golden: string | null
   ttl: number | null
+  /** The engine's timestamp for the teardown, or null when this is not one. */
+  tornDownAt: string | null
   now: string
 }
 
@@ -457,8 +472,9 @@ async function advanceExisting(
       golden_version = COALESCE(${a.golden}, golden_version),
       expires_at = CASE WHEN ${a.ttl}::double precision IS NULL THEN expires_at
                         ELSE created_at + make_interval(secs => ${a.ttl}::double precision) END,
-      torn_down_at = CASE WHEN ${a.state} = 'torn_down'
-                          THEN ${a.now}::timestamptz ELSE torn_down_at END,
+      torn_down_at = CASE WHEN ${a.tornDownAt}::timestamptz IS NOT NULL
+                          THEN GREATEST(${a.tornDownAt}::timestamptz, created_at)
+                          ELSE torn_down_at END,
       updated_at = ${a.now}
     WHERE org_id = ${orgId} AND env_id = ${envId} AND last_sequence < ${a.sequence}
     RETURNING id`)

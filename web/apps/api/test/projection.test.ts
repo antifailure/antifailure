@@ -137,7 +137,10 @@ describe('the environments projection', {
     await send([event('environment.ready', id, 2, {
       payload: { preview_url: 'https://a.example.test', runtime: 'local' },
     })])
-    await send([event('environment.torn_down', id, 3)])
+    const tornDownAt = new Date(h.clock.now().getTime() - 90 * 60 * 1000)
+    await send([event('environment.torn_down', id, 3, {
+      occurredAt: tornDownAt.toISOString(),
+    })])
 
     const finished = await one(id)
     assert.equal(finished.state, 'torn_down')
@@ -145,6 +148,10 @@ describe('the environments projection', {
     assert.equal(finished.runtime, 'local')
     assert.equal(Number(finished.last_sequence), 3)
     assert.notEqual(finished.torn_down_at, null, 'a torn down environment needs the timestamp the bill is computed from')
+    // The engine's timestamp, not this service's. Both ends of the interval a
+    // bill is computed from come from the same clock, so an event that spent a
+    // day in a spool file does not add a day to the bill.
+    assert.equal(finished.torn_down_at!.toISOString(), tornDownAt.toISOString())
     assert.equal(finished.id, created.id, 'the later events updated the row rather than making another')
   })
 
@@ -230,6 +237,42 @@ describe('the environments projection', {
     // that was held and then torn down is on the bill, and an environment the
     // control plane never recorded is not.
     assert.notEqual(row.created_at, null)
+  })
+
+  it('ordering: a teardown that spent a day in the spool is not a day on the bill', async () => {
+    // The engine buffers to disk when the control plane is unreachable and
+    // sends on the next command, which can be the next day. The interval a
+    // bill is computed from is created_at to torn_down_at, so taking the
+    // teardown time from this service's clock would charge the customer for
+    // the outage.
+    const id = envId('late-teardown')
+    const created = new Date(h.clock.now().getTime() - 26 * 60 * 60 * 1000)
+    const removed = new Date(created.getTime() + 60 * 60 * 1000)
+
+    await send([event('environment.creating', id, 1, { occurredAt: created.toISOString() })])
+    await send([event('environment.torn_down', id, 2, { occurredAt: removed.toISOString() })])
+
+    const row = await one(id)
+    const held = (row.torn_down_at!.getTime() - row.created_at.getTime()) / 3_600_000
+    assert.equal(held, 1, `the environment was held for an hour and the row says ${held}`)
+  })
+
+  it('ordering: a teardown claiming to predate the creation cannot make a negative duration', async () => {
+    // occurred_at comes from a sender this service does not trust, and a
+    // negative interval poisons every sum computed from these two columns.
+    const id = envId('impossible-teardown')
+    const created = h.clock.now()
+
+    await send([event('environment.creating', id, 1, { occurredAt: created.toISOString() })])
+    await send([event('environment.torn_down', id, 2, {
+      occurredAt: new Date(created.getTime() - 6 * 60 * 60 * 1000).toISOString(),
+    })])
+
+    const row = await one(id)
+    assert.ok(
+      row.torn_down_at!.getTime() >= row.created_at.getTime(),
+      'an environment was torn down before it was created',
+    )
   })
 
   it('ordering: failed with nothing before it, because the run died before it reported anything else', async () => {
