@@ -111,7 +111,8 @@ const (
 	AFDET001 Code = "AF-DET-001"
 	// Detection stopped after {budget} with partial results.
 	AFDET002 Code = "AF-DET-002"
-	// Services {first} and {second} both claim port {port}.
+	// Detection found {first} and {second} both listening on port {port},
+	// so no manifest was written.
 	AFDET003 Code = "AF-DET-003"
 	// The changed files between {base} and {head} could not be read:
 	// {detail}
@@ -711,8 +712,8 @@ var catalog = map[Code]Entry{
 	AFDET003: {
 		Code:      AFDET003,
 		Area:      "DET",
-		Message:   "Services {first} and {second} both claim port {port}.",
-		NextStep:  "Give one of them a different port in antifailure.yaml.",
+		Message:   "Detection found {first} and {second} both listening on port {port}, so no manifest was written.",
+		NextStep:  "Give one of them a different port where it is declared, in the compose file or Dockerfile detection read, then run 'af init' again. Writing antifailure.yaml by hand also works; the manifest reference lists the minimum fields.",
 		Docs:      "concepts/detection",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

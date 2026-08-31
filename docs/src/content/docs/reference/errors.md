@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-30 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+29 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -453,6 +453,18 @@ The previous release does not survive this migration: {detail}
 No application could be detected in {path}.
 
 **What to do.** Declare your services by hand in antifailure.yaml; the manifest reference lists the minimum fields.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/detection](/docs/concepts/detection/) |
+
+### AF-DET-003
+
+Detection found {first} and {second} both listening on port {port}, so no manifest was written.
+
+**What to do.** Give one of them a different port where it is declared, in the compose file or Dockerfile detection read, then run 'af init' again. Writing antifailure.yaml by hand also works; the manifest reference lists the minimum fields.
 
 | | |
 | --- | --- |
