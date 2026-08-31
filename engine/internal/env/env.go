@@ -306,6 +306,20 @@ func (s *session) close() {
 // open acquires the lock and every provider, in the order that lets a failure
 // leave the least behind.
 func (o *Orchestrator) open(ctx context.Context, command string) (*session, error) {
+	return o.openLocking(ctx, command, o.envID)
+}
+
+// openLocking opens a session holding a named lock rather than this
+// orchestrator's environment lock.
+//
+// The reaper is why this is a parameter. It holds one session and destroys
+// several environments through it, taking each environment's own lock as it
+// goes, so the session itself must not already hold one of them: with the
+// environment lock, a reaper run from a checkout of a branch whose environment
+// had expired would find that environment locked, by itself, and skip the one
+// environment it was most certainly meant to take. It takes a lock named for
+// the sweep instead, which also stops two sweeps from running at once.
+func (o *Orchestrator) openLocking(ctx context.Context, command, lockName string) (*session, error) {
 	s := &session{}
 	stateDir := filepath.Join(o.opts.Root, StateDir)
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
@@ -314,7 +328,7 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 
 	// The lock comes first. Two af up runs on one branch would otherwise race
 	// on the same container names and both fail in ways neither explains.
-	l, err := lock.Acquire(filepath.Join(stateDir, o.envID+".lock"), o.opts.Clock, command)
+	l, err := lock.Acquire(filepath.Join(stateDir, lockName+".lock"), o.opts.Clock, command)
 	if err != nil {
 		return nil, err
 	}
