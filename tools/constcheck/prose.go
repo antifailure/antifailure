@@ -77,11 +77,10 @@ var hypothetical = regexp.MustCompile(`(?i)\b(when|whenever|if|unless|because|si
 // findings, because the caller reports what was examined. A rule that has
 // stopped matching anything reports zero findings, and zero findings is what a
 // clean tree looks like too.
-func checkCounts(name, body string, members map[string][]string) ([]finding, int) {
+func checkCounts(name, body string, members map[string][]string, reached map[string]int) []finding {
 	flat, lineAt := flatten(body)
 	var out []finding
 	seen := map[string]bool{}
-	considered := 0
 
 	for _, s := range sentences(flat) {
 		for _, m := range counted.FindAllStringSubmatchIndex(s.text, -1) {
@@ -122,7 +121,7 @@ func checkCounts(name, body string, members map[string][]string) ([]finding, int
 					!set.context.MatchString(s.text) && !set.context.MatchString(between) {
 					continue
 				}
-				considered++
+				reached[set.name]++
 				real := len(members[set.name])
 				if n == real {
 					continue
@@ -146,7 +145,7 @@ func checkCounts(name, body string, members map[string][]string) ([]finding, int
 			}
 		}
 	}
-	return out, considered
+	return out
 }
 
 type sentence struct {

@@ -192,6 +192,14 @@ var sets = []decl{
 		context: regexp.MustCompile(`(?i)\b(change|classif\w+)\b`),
 	},
 	{
+		name:    "plan regression kinds",
+		file:    "engine/internal/insights/plan.go",
+		kind:    constType,
+		symbol:  "PlanChange",
+		noun:    regexp.MustCompile(`(?i)\b(plan )?regressions?\b`),
+		context: regexp.MustCompile(`(?i)\bplan\b`),
+	},
+	{
 		name:    "third parties detected",
 		file:    "engine/internal/detect/thirdparty.go",
 		kind:    sliceVar,
@@ -280,15 +288,15 @@ func run(root string, out io.Writer) error {
 	}
 
 	var found []finding
-	sentencesRead := 0
+	// Per set rather than in total, because a total cannot answer the question
+	// a reader of this output actually has. See the coverage note below.
+	reached := map[string]int{}
 	for _, f := range files {
 		body, err := os.ReadFile(filepath.Join(root, f))
 		if err != nil {
 			return err
 		}
-		fs, n := checkCounts(f, string(body), members)
-		found = append(found, fs...)
-		sentencesRead += n
+		found = append(found, checkCounts(f, string(body), members, reached)...)
 	}
 
 	// Rule 2 runs against named tables rather than against every file, so a
@@ -333,11 +341,35 @@ func run(root string, out io.Writer) error {
 		"  cannot be located fails this command rather than being skipped, so a\n"+
 		"  renamed type breaks the gate loudly instead of quietly emptying it.\n",
 		len(sets))
+	sentencesRead := 0
 	for _, s := range sets {
-		report("  %-28s %2d  %s %s\n", s.name, len(members[s.name]), s.file, s.symbol)
+		sentencesRead += reached[s.name]
+		held := fmt.Sprintf("%d counted sentences", reached[s.name])
+		if reached[s.name] == 1 {
+			held = "1 counted sentence"
+		}
+		if s.table != nil {
+			held += " and a reference table"
+		}
+		report("  %-28s %2d  %s %s\n      held by %s\n",
+			s.name, len(members[s.name]), s.file, s.symbol, held)
 	}
 	report("constcheck: %d files scanned, %d sentences stating a count considered\n",
 		len(files), sentencesRead)
+	// A set held by nothing is reported and never fails.
+	//
+	// Silence would otherwise look like coverage: a rewrite that removes the
+	// last sentence counting a set leaves this command green and leaves the
+	// set unwatched, and the two are indistinguishable from the total alone.
+	//
+	// It does not fail, and that is deliberate rather than timid. Failing
+	// would force somebody to keep a count sentence alive to satisfy the
+	// gate, and a count is the weaker form. The best fix for a miscounted
+	// sentence is to rewrite it so it states a property and carries no number,
+	// which is what happened to four of these on the marketing site: the word
+	// analyzers left the page entirely. Failing on zero would punish exactly
+	// that rewrite and push people back towards a number somebody has to keep
+	// true forever.
 	report("constcheck: %d reference tables checked row for row\n", tablesRead)
 	report("constcheck: %d miscounted claims\n", len(found))
 	report("constcheck: deliberately not checked, so that silence is not read as coverage:\n")

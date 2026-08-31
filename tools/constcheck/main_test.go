@@ -33,8 +33,7 @@ func thirteen() []string {
 
 func found(t *testing.T, body string) []finding {
 	t.Helper()
-	f, _ := checkCounts("f.md", body, rules)
-	return f
+	return checkCounts("f.md", body, rules, map[string]int{})
 }
 
 // The defect this tool exists for, in the words it was actually written in.
@@ -350,6 +349,9 @@ func TestRunReportsWhatItExamined(t *testing.T) {
 		"closed sets read from Go source",
 		"sentences stating a count considered",
 		"reference tables checked row for row",
+		// Per set coverage, so that a set no sentence counts any more is
+		// visible rather than absorbed into a total that still looks healthy.
+		"held by",
 		// Silence is not coverage. Nineteen oracle kinds that nothing
 		// enumerates is a fine reason not to check them, and it has to be
 		// visible as a decision rather than absent as an oversight.
