@@ -2,6 +2,7 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import tailwindcss from "@tailwindcss/vite";
+import { codeTheme } from "./src/code-theme.mjs";
 
 // Every error the engine prints ends with a link to this site. errors.go builds
 // it as "https://antifailure.dev/docs/" + the catalog's docs field, and
@@ -21,11 +22,55 @@ export default defineConfig({
         "A disposable copy of your production stack for every pull request: masked Postgres branches, contained third-party APIs, agents that use the app like people, and load shaped like your real traffic.",
       favicon: "/favicon.svg",
       customCss: ["./src/styles/antifailure.css"],
+      // One theme, not a light/dark pair. The site commits to a single light
+      // appearance and the theme toggle is off, so a second code theme would
+      // only ever be dead configuration.
+      expressiveCode: {
+        themes: [codeTheme],
+        // One theme, so there is no media query to pick between two. Do not
+        // add `themeCssSelector: () => null` here: with a single theme it stops
+        // Expressive Code emitting its stylesheet at all, which silently drops
+        // the frame's own `overflow-x` and lets a wide line push the whole page
+        // sideways on a phone.
+        useDarkModeMediaQuery: false,
+        styleOverrides: {
+          // 7px, not 8: Expressive Code adds the border width to this, so 8
+          // here renders a 9px outer corner and puts a third value in the scale.
+          borderRadius: "7px",
+          borderColor: "#2b2d31",
+          borderWidth: "1px",
+          codeFontFamily: "var(--sl-font-mono)",
+          codeFontSize: "0.875rem",
+          codeLineHeight: "1.65",
+          codePaddingBlock: "0.9rem",
+          codePaddingInline: "1rem",
+          frames: {
+            shadowColor: "transparent",
+            frameBoxShadowCssValue: "none",
+            editorTabBarBackground: "#111214",
+            editorTabBarBorderBottomColor: "#2b2d31",
+            editorActiveTabBackground: "#18191b",
+            editorActiveTabForeground: "#e4e5e7",
+            editorActiveTabBorderColor: "#2b2d31",
+            editorActiveTabIndicatorTopColor: "#33bf00",
+            terminalBackground: "#18191b",
+            terminalTitlebarBackground: "#111214",
+            terminalTitlebarForeground: "#c9cbcf",
+            terminalTitlebarBorderBottomColor: "#2b2d31",
+            inlineButtonBackground: "#ffffff",
+            inlineButtonForeground: "#c9cbcf",
+            inlineButtonBorder: "#4a4d53",
+            tooltipSuccessBackground: "#1a7f00",
+            tooltipSuccessForeground: "#ffffff",
+          },
+        },
+      },
       components: {
         Header: "./src/components/Header.astro",
         Footer: "./src/components/Footer.astro",
         Pagination: "./src/components/Pagination.astro",
         Search: "./src/components/Search.astro",
+        MobileMenuFooter: "./src/components/MobileMenuFooter.astro",
       },
       social: [
         {
