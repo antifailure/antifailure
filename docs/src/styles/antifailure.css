@@ -144,7 +144,7 @@
   --af-accent-ink: #1a7f00;
 
   /* One radius scale, applied by role. The page was carrying six values at
-     once — 1px, 3px, 3.2px, 4px, 8px and 10px — which is what "inconsistent
+     once (1px, 3px, 3.2px, 4px, 8px and 10px), which is what "inconsistent
      radii" looks like when nobody chose. */
   --af-radius-sm: 4px;
   --af-radius-md: 8px;
@@ -233,7 +233,7 @@ body {
 
 /* Expressive Code sets the block's own type from styleOverrides. Its inner
    spans inherited a second 0.9em on top of that, which landed tokens at
-   12.96px on a phone — small enough to be part of the same complaint as the
+   12.96px on a phone, small enough to be part of the same complaint as the
    invisible fill. */
 .expressive-code code,
 .expressive-code .ec-line span {
@@ -245,7 +245,7 @@ body {
  * The same reasoning as the reference tables below: on a phone the scrollbar
  * is invisible until you already know to scroll, so an install command cut off
  * at the right edge reads as a broken block rather than a scrollable one. This
- * is the standard CSS scroll shadow, in the block's own colours — the opaque
+ * is the standard CSS scroll shadow, in the block's own colours: the opaque
  * cover scrolls with the content, the shadow does not, so the shadow only
  * shows while there is something past that edge. No script, and nothing
  * animates. */
@@ -373,7 +373,11 @@ body {
   color: var(--sl-color-gray-3);
 }
 
-.sidebar-content ul li {
+/* The tree line down the sidebar's groups. Excluded from the site navigation
+   at the foot of the mobile menu: those are destinations on antifailure.dev,
+   not pages in this tree, and the inherited line drew them as if they were a
+   branch of Contributing. */
+.sidebar-content ul:not(.af-menu-links) li {
   border-inline-start: 1px solid var(--af-rule);
 }
 
