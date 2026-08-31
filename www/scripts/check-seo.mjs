@@ -262,6 +262,24 @@ if (has("404.html")) {
       ? "the page carries no robots tag at all"
       : `these permit it: ${permits.map((r) => JSON.stringify(r)).join(", ")}`,
   );
+  // The strongest of the three claims this page was making. The root layout
+  // canonicalises the whole site to SITE_URL, so the 404 inherited it and told
+  // crawlers it WAS the home page. Google generally honours a rel=canonical
+  // over a noindex when the two conflict, and its canonicalization guidance
+  // separately says to check that a canonical target does not carry a noindex,
+  // so the pair invited consolidating the 404 into the home page and taking
+  // the noindex along.
+  //
+  // Asserted as a property rather than as an absence, so a later
+  // self-referential canonical still passes: the 404 may not point somewhere
+  // that is not itself.
+  const canonical = html.match(/<link rel="canonical" href="([^"]*)"/i)?.[1];
+  assert(
+    !canonical || /\/404(\.html)?$/.test(canonical),
+    "the 404 does not canonicalise to another page",
+    `it claims to be ${canonical}`,
+  );
+
   const title = html.match(/<title>([^<]*)<\/title>/i)?.[1] ?? "";
   const times = title.split("Antifailure").length - 1;
   assert(times === 1, "the 404 title names the site once", `"${title}" names it ${times} times`);
