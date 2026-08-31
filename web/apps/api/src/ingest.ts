@@ -397,9 +397,13 @@ async function applyToProjection(
     -- against. A retry of the creating event collides here and updates the one
     -- row rather than making a second.
     ON CONFLICT (org_id, env_id) DO UPDATE SET
-      -- Identity. Never taken from a later event: an environment id is a
-      -- project and a branch run through a hash, so a second answer for either
-      -- is a collision to investigate rather than a correction to apply.
+      -- Identity. repository_id and branch are deliberately absent from this
+      -- list, so a later event cannot move them: an environment id is a
+      -- project and a branch run through a hash, and a second answer for
+      -- either is a collision to investigate rather than a correction to
+      -- apply. pull_request is filled only while it is null, because an
+      -- environment created on a branch and later attached to a pull request
+      -- is ordinary and losing the number is not.
       pull_request = COALESCE(environments.pull_request, EXCLUDED.pull_request),
       created_at = LEAST(environments.created_at, EXCLUDED.created_at),
       expires_at = CASE WHEN ${ttl}::double precision IS NULL THEN environments.expires_at
