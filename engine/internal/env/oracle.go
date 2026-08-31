@@ -356,24 +356,29 @@ func gitOutput(root string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// baselineTree writes the baseline revision into a directory under the state
-// directory and returns a function that removes it.
+// baselineTree writes the baseline revision into a temporary directory and
+// returns a function that removes it.
 //
 // git archive rather than git worktree. A worktree writes into .git/worktrees
 // and takes a lock there, so an interrupted run leaves an entry somebody has to
 // find and prune, and two comparisons in one repository would contend. An
 // archive is a tar of one commit and the cleanup is a directory removal.
 //
+// OUTSIDE the repository, which is not a detail. A build context is the whole
+// root minus what .dockerignore excludes, and nothing excludes .antifailure, so
+// a checkout under the state directory would land in the candidate's own build
+// context: a second copy of the source inside the image, and a context digest
+// that changes on every run, which is a cache miss on every build forever. The
+// checkout holds no state teardown needs, so it does not have to be findable
+// after a crash the way the journal does.
+//
 // Untarred in Go rather than by shelling out to tar, so that the path
 // confinement is this package's rather than the local tar's: an archive entry
 // naming ../../etc would otherwise write outside the directory this function
 // promises to remove.
 func (o *Orchestrator) baselineTree(ctx context.Context, rev string) (string, func(), error) {
-	dir := filepath.Join(o.opts.Root, StateDir, "oracle", o.envID, "baseline")
-	if err := os.RemoveAll(dir); err != nil {
-		return "", nil, aferrors.Wrap(err, aferrors.AFORC005, "commit", short(rev), "detail", err.Error())
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := os.MkdirTemp("", "af-oracle-"+o.envID+"-")
+	if err != nil {
 		return "", nil, aferrors.Wrap(err, aferrors.AFORC005, "commit", short(rev), "detail", err.Error())
 	}
 	clean := func() { _ = os.RemoveAll(dir) }
@@ -411,7 +416,7 @@ func (o *Orchestrator) baselineTree(ctx context.Context, rev string) (string, fu
 		clean()
 		return "", nil, aferrors.Wrap(err, aferrors.AFORC005, "commit", short(rev), "detail", err.Error())
 	}
-	o.progress("checked " + short(rev) + " out to compare against")
+	o.progress("checked " + short(rev) + " out to " + dir + " to compare against")
 	return dir, clean, nil
 }
 

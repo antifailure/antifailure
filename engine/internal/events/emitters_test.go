@@ -93,9 +93,8 @@ var unemitted = map[events.Type]string{
 		"not put on the stream.",
 	events.LoadSample:   "load results are returned to the caller in the same way.",
 	events.LoadFinished: "same.",
-	events.Warning: "warnings reach the terminal through Orchestrator.progress and the " +
-		"error path uses env.failed at error level.",
-	events.Error: "same.",
+	events.Error: "the error path uses env.failed at error level rather than a " +
+		"generic engine.error.",
 	events.Retry: "retries happen in the journal and in the providers and are not " +
 		"reported as their own event.",
 	events.SinkDropped: "drops are counted on the bus and read by Bus.Drops, which the " +

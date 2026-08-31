@@ -61,7 +61,7 @@ func drive(t *testing.T, baseline, candidate http.Handler, probes []oracle.Probe
 	return oracle.Compare(oracle.Input{Config: cfg, Probes: results})
 }
 
-func json(w http.ResponseWriter, status int, body string) {
+func writeJSON(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(body))
@@ -87,7 +87,7 @@ func TestAChangeThatDoesNotMatterIsNotReported(t *testing.T) {
 		w.Header().Set("Set-Cookie", "session=aaaaaaaaaaaa; Path=/")
 		w.Header().Set("ETag", `"v1-abc"`)
 		w.Header().Set("X-Request-Id", "11111111-1111-4111-8111-111111111111")
-		json(w, 200, `{"orders":[{"id":1,"total":25.99,
+		writeJSON(w, 200, `{"orders":[{"id":1,"total":25.99,
 			"placed_at":"2026-08-30T09:00:00.123456Z",
 			"trace":"3f8a1c2e-0000-4000-8000-aaaaaaaaaaaa"}]}`)
 	})
@@ -98,7 +98,7 @@ func TestAChangeThatDoesNotMatterIsNotReported(t *testing.T) {
 		// The key order in the document is different, the timestamp has moved,
 		// the request identifier is fresh, and the float has picked up
 		// representation noise. None of it is a behaviour change.
-		json(w, 200, `{"orders":[{"trace":"7c2b9d4f-1111-4111-9111-bbbbbbbbbbbb",
+		writeJSON(w, 200, `{"orders":[{"trace":"7c2b9d4f-1111-4111-9111-bbbbbbbbbbbb",
 			"placed_at":"2026-08-30T09:00:04.998877Z",
 			"total":25.990000000000002,"id":1}]}`)
 	})
@@ -120,12 +120,12 @@ func TestAChangeThatDoesNotMatterIsNotReported(t *testing.T) {
 // in what the candidate did.
 func TestAChangeThatMattersIsReportedAndRanked(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"orders":[{"id":1,"total_cents":2599,"customer_id":7}]}`)
+		writeJSON(w, 200, `{"orders":[{"id":1,"total_cents":2599,"customer_id":7}]}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// total_cents became total, in dollars, and customer_id is gone. Every
 		// client reading this response breaks.
-		json(w, 200, `{"orders":[{"id":1,"total":25.99}]}`)
+		writeJSON(w, 200, `{"orders":[{"id":1,"total":25.99}]}`)
 	})
 
 	res := drive(t, baseline, candidate, listProbe, oracle.Config{})
@@ -153,10 +153,10 @@ func TestAChangeThatMattersIsReportedAndRanked(t *testing.T) {
 
 func TestAStatusThatFallsIntoAnErrorClassIsCritical(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"ok":true}`)
+		writeJSON(w, 200, `{"ok":true}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 500, `{"ok":true}`)
+		writeJSON(w, 500, `{"ok":true}`)
 	})
 	res := drive(t, baseline, candidate, listProbe, oracle.Config{})
 
@@ -172,10 +172,10 @@ func TestAStatusThatFallsIntoAnErrorClassIsCritical(t *testing.T) {
 // a regression, or the gate teaches people to ignore it.
 func TestAStatusThatLeavesAnErrorClassIsMinor(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 500, `{"error":"boom"}`)
+		writeJSON(w, 500, `{"error":"boom"}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"error":"boom"}`)
+		writeJSON(w, 200, `{"error":"boom"}`)
 	})
 	res := drive(t, baseline, candidate, listProbe, oracle.Config{})
 
@@ -187,7 +187,7 @@ func TestAStatusThatLeavesAnErrorClassIsMinor(t *testing.T) {
 
 func TestASideThatDoesNotAnswerIsCritical(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"ok":true}`)
+		writeJSON(w, 200, `{"ok":true}`)
 	})
 	// Closed before the probe runs, so the connection is refused rather than
 	// slow. That is the shape of a candidate whose service crashed on start.
@@ -212,10 +212,10 @@ func TestASideThatDoesNotAnswerIsCritical(t *testing.T) {
 // and never rewrites one side into something a third value could match.
 func TestANormaliserOnlyFiresWhenBothSidesMatchIt(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"placed_at":"2026-08-30T09:00:00Z"}`)
+		writeJSON(w, 200, `{"placed_at":"2026-08-30T09:00:00Z"}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"placed_at":"pending"}`)
+		writeJSON(w, 200, `{"placed_at":"pending"}`)
 	})
 	res := drive(t, baseline, candidate, listProbe, oracle.Config{})
 	require.Len(t, res.Findings, 1)
@@ -229,10 +229,10 @@ func TestANormaliserOnlyFiresWhenBothSidesMatchIt(t *testing.T) {
 // diverged means the candidate wrote a row the baseline did not.
 func TestIdentifiersAreComparedExactly(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 201, `{"id":41}`)
+		writeJSON(w, 201, `{"id":41}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 201, `{"id":42}`)
+		writeJSON(w, 201, `{"id":42}`)
 	})
 	res := drive(t, baseline, candidate, listProbe, oracle.Config{})
 	require.Len(t, res.Findings, 1)
@@ -245,10 +245,10 @@ func TestIdentifiersAreComparedExactly(t *testing.T) {
 // somebody would have to write. Advice, not behaviour.
 func TestANumericClockIsComparedAndTheReportSaysHowToIgnoreIt(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"expires_at":1756512345}`)
+		writeJSON(w, 200, `{"expires_at":1756512345}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"expires_at":1756512399}`)
+		writeJSON(w, 200, `{"expires_at":1756512399}`)
 	})
 	res := drive(t, baseline, candidate, listProbe, oracle.Config{})
 	require.Len(t, res.Findings, 1)
@@ -266,10 +266,10 @@ func TestANumericClockIsComparedAndTheReportSaysHowToIgnoreIt(t *testing.T) {
 // answer, or the manifest key is decoration.
 func TestTurningOffANormaliserMakesTheDifferenceVisible(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"created_at":"2026-08-30T09:00:00Z"}`)
+		writeJSON(w, 200, `{"created_at":"2026-08-30T09:00:00Z"}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"created_at":"2026-08-30T10:00:00Z"}`)
+		writeJSON(w, 200, `{"created_at":"2026-08-30T10:00:00Z"}`)
 	})
 	require.Empty(t, drive(t, baseline, candidate, listProbe, oracle.Config{}).Findings)
 
@@ -281,10 +281,10 @@ func TestTurningOffANormaliserMakesTheDifferenceVisible(t *testing.T) {
 // A reordered list is one sentence rather than a difference at every index.
 func TestAReorderedArrayIsOneMinorFinding(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"names":["ada","grace","alan"]}`)
+		writeJSON(w, 200, `{"names":["ada","grace","alan"]}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"names":["alan","ada","grace"]}`)
+		writeJSON(w, 200, `{"names":["alan","ada","grace"]}`)
 	})
 	res := drive(t, baseline, candidate, listProbe, oracle.Config{})
 	require.Len(t, res.Findings, 1)
@@ -296,10 +296,10 @@ func TestAReorderedArrayIsOneMinorFinding(t *testing.T) {
 // longer one.
 func TestALostArrayElementOutranksAnAddedOne(t *testing.T) {
 	three := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"names":["ada","grace","alan"]}`)
+		writeJSON(w, 200, `{"names":["ada","grace","alan"]}`)
 	})
 	two := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"names":["ada","grace"]}`)
+		writeJSON(w, 200, `{"names":["ada","grace"]}`)
 	})
 	shorter := findingsOfKind(drive(t, three, two, listProbe, oracle.Config{}), oracle.KindBodyLength)
 	require.Len(t, shorter, 1)
@@ -318,7 +318,7 @@ func TestEveryProbeReachesBothSidesInTheSameOrder(t *testing.T) {
 	record := func(side string) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			seen = append(seen, side+" "+r.Method+" "+r.URL.Path)
-			json(w, 200, `{}`)
+			writeJSON(w, 200, `{}`)
 		})
 	}
 	probes := []oracle.Probe{
@@ -343,7 +343,7 @@ func TestTheSameBodyReachesBothSides(t *testing.T) {
 			buf := make([]byte, r.ContentLength)
 			_, _ = r.Body.Read(buf)
 			bodies[side] = string(buf)
-			json(w, 201, `{}`)
+			writeJSON(w, 201, `{}`)
 		})
 	}
 	probes := []oracle.Probe{{
@@ -381,11 +381,11 @@ func TestSeverityParsesTheWordsTheManifestAccepts(t *testing.T) {
 func TestTheComparisonCanActuallyFail(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		json(w, 200, `{"kept":1,"gone":2,"typed":3,"list":[1,2]}`)
+		writeJSON(w, 200, `{"kept":1,"gone":2,"typed":3,"list":[1,2]}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=60")
-		json(w, 201, `{"kept":9,"added":2,"typed":"3","list":[1]}`)
+		writeJSON(w, 201, `{"kept":9,"added":2,"typed":"3","list":[1]}`)
 	})
 	res := drive(t, baseline, candidate, listProbe, oracle.Config{})
 
@@ -414,7 +414,7 @@ func TestTheComparisonCanActuallyFail(t *testing.T) {
 func TestTheTimestampNormaliserIsBoundedAndSaysHowWideItWent(t *testing.T) {
 	at := func(s string) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json(w, 200, `{"expires_at":"`+s+`"}`)
+			writeJSON(w, 200, `{"expires_at":"`+s+`"}`)
 		})
 	}
 	near := drive(t, at("2026-08-30T09:00:00Z"), at("2026-08-30T09:04:00Z"), listProbe, oracle.Config{})
@@ -443,10 +443,10 @@ func TestAShiftedListIsNotMistakenForAReordering(t *testing.T) {
 	// so a fixture inside the tolerance would prove nothing about the
 	// reordering check.
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"at":["2026-08-01T09:00:00Z","2026-08-10T09:00:00Z"]}`)
+		writeJSON(w, 200, `{"at":["2026-08-01T09:00:00Z","2026-08-10T09:00:00Z"]}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"at":["2026-09-01T09:00:00Z","2026-09-10T09:00:00Z"]}`)
+		writeJSON(w, 200, `{"at":["2026-09-01T09:00:00Z","2026-09-10T09:00:00Z"]}`)
 	})
 	res := drive(t, baseline, candidate, listProbe, oracle.Config{})
 	require.Empty(t, findingsOfKind(res, oracle.KindBodyOrder))
@@ -454,7 +454,7 @@ func TestAShiftedListIsNotMistakenForAReordering(t *testing.T) {
 
 	// A genuine reordering of the same instants is still one finding.
 	swapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"at":["2026-08-10T09:00:00Z","2026-08-01T09:00:00Z"]}`)
+		writeJSON(w, 200, `{"at":["2026-08-10T09:00:00Z","2026-08-01T09:00:00Z"]}`)
 	})
 	genuine := drive(t, baseline, swapped, listProbe, oracle.Config{})
 	require.Len(t, findingsOfKind(genuine, oracle.KindBodyOrder), 1)
@@ -465,10 +465,10 @@ func TestAShiftedListIsNotMistakenForAReordering(t *testing.T) {
 // changed.
 func TestAOneElementArrayIsNeverAReordering(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"at":["2026-08-30T09:00:00Z"]}`)
+		writeJSON(w, 200, `{"at":["2026-08-30T09:00:00Z"]}`)
 	})
 	candidate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json(w, 200, `{"at":["2027-08-30T09:00:00Z"]}`)
+		writeJSON(w, 200, `{"at":["2027-08-30T09:00:00Z"]}`)
 	})
 	res := drive(t, baseline, candidate, listProbe, oracle.Config{})
 	require.Len(t, res.Findings, 1)

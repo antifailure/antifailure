@@ -197,8 +197,27 @@ for (const file of pages) {
     // no twin, because nothing about it looks wrong.
     const pageH1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
     const twinH1 = readFileSync(twin, "utf8").match(/^# (.+)$/m)?.[1];
+    // The entity set here has to match decode() in markdown-twins.mjs, which is
+    // what wrote the twin. Decoding only &amp; was enough for as long as no h1
+    // held an apostrophe: React serializes one as &#x27; in the HTML while the
+    // twin carries the character itself, so the two sides of a comparison that
+    // are the same string stopped comparing equal the day a title said
+    // "production's". &amp; is decoded last so an escaped entity does not get
+    // unescaped twice.
     const flatten = (v) =>
-      v ? v.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim() : "";
+      v
+        ? v
+            .replace(/<[^>]*>/g, "")
+            .replace(/&nbsp;/g, " ")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d))
+            .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+            .replace(/&amp;/g, "&")
+            .replace(/\s+/g, " ")
+            .trim()
+        : "";
     if (pageH1 && flatten(pageH1) !== flatten(twinH1)) {
       missing.twinHeading.push(
         `${rel} (page "${flatten(pageH1).slice(0, 40)}" vs twin "${flatten(twinH1).slice(0, 40)}")`,
@@ -298,6 +317,56 @@ console.log("\nReachability");
     unreachable.length > 0
       ? `${unreachable.length} reachable only through the sitemap: ${unreachable.join(", ")}`
       : "",
+  );
+}
+
+// Navigation that belongs to no landmark.
+//
+// The product flyout is a sibling of the header bar rather than a child, so
+// its nineteen links sat outside header, main and footer alike. Somebody
+// navigating by landmark met the banner and then the page, and never the
+// navigation. Every other nav on the site was already inside one, which is
+// what made this invisible: the markup looked consistent everywhere you
+// checked.
+//
+// Counting <a> elements rather than <nav>, because the defect was a block of
+// links with no nav around it either. An anchor that is inside no landmark at
+// all is the thing to catch, whatever element it sits in.
+console.log("\nLandmarks");
+{
+  const stray = [];
+  for (const file of pages) {
+    const html = readFileSync(file, "utf8");
+    if (/<meta name="robots" content="[^"]*noindex/i.test(html)) continue;
+
+    // Walk the tags, tracking landmark depth. A link seen at depth zero is in
+    // no landmark. Regex rather than a parser because the built output is
+    // machine generated and well formed, and this file has no dependencies.
+    let depth = 0;
+    let loose = 0;
+    for (const m of html.matchAll(/<(\/?)(header|main|footer|nav|aside|a)\b[^>]*>/gi)) {
+      const [tagText, closing, tag] = m;
+      const name = tag.toLowerCase();
+      if (name === "a") {
+        // Opening tags only. Counting </a> too reported every link twice, which
+        // is how this check first "found" two loose links on every page.
+        if (closing) continue;
+        // The skip link is the one anchor that has to be outside everything: it
+        // is the first thing in the body precisely so it comes before the
+        // banner a keyboard user is trying to skip.
+        if (/class="[^"]*skip-to-content/.test(tagText)) continue;
+        if (depth === 0) loose++;
+        continue;
+      }
+      if (closing) depth = Math.max(0, depth - 1);
+      else depth++;
+    }
+    if (loose > 0) stray.push(`${path.relative(OUT, file)} (${loose})`);
+  }
+  assert(
+    stray.length === 0,
+    "every link on every page is inside a landmark",
+    stray.length > 0 ? `links outside header, main, footer, nav and aside: ${stray.slice(0, 5).join(", ")}` : "",
   );
 }
 

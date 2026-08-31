@@ -127,7 +127,7 @@ func newSidecar(t *testing.T, egress *schema.Egress) *sidecar {
 		destinations: newDestinations(eng.Rules(), "", eng.AllowsIPv6()),
 		transport:    &http.Transport{MaxIdleConnsPerHost: 4, IdleConnTimeout: time.Second},
 	}
-	s.proxy.transport.DialContext = s.proxy.dialGuarded
+	s.transport.DialContext = s.dialGuarded
 
 	done := make(chan struct{})
 	go func() {
@@ -146,7 +146,7 @@ func newSidecar(t *testing.T, egress *schema.Egress) *sidecar {
 	t.Cleanup(func() {
 		_ = pw.Close()
 		<-done
-		s.proxy.transport.CloseIdleConnections()
+		s.transport.CloseIdleConnections()
 	})
 	return s
 }
@@ -228,7 +228,7 @@ func TestAttack_LiveCredentialOnThePlainHTTPProxyPathIsRefused(t *testing.T) {
 			Host: host, Mode: schema.ModeSandbox, Credential: "TEST_KEY",
 		}},
 	})
-	s.proxy.credentials["TEST_KEY"] = "sk" + "_" + "test" + "_" + "substituted00000000"
+	s.credentials["TEST_KEY"] = "sk" + "_" + "test" + "_" + "substituted00000000"
 
 	attack, err := http.NewRequest(http.MethodGet, o.URL+"/charge", nil)
 	require.NoError(t, err)
@@ -273,7 +273,7 @@ func TestAttack_SandboxCredentialIsSubstitutedOnThePlainHTTPProxyPath(t *testing
 		}},
 	})
 	const substituted = "sk" + "_" + "test" + "_" + "substituted00000000"
-	s.proxy.credentials["TEST_KEY"] = substituted
+	s.credentials["TEST_KEY"] = substituted
 
 	req, err := http.NewRequest(http.MethodGet, o.URL+"/v1/customers", nil)
 	require.NoError(t, err)
@@ -369,7 +369,7 @@ func TestAttack_ANameThatResolvesToTheMetadataAddressIsStillRefused(t *testing.T
 		Rules:   []schema.EgressRule{{Host: "cdn.attacker.test", Mode: schema.ModeAllow}},
 	})
 	var asked []string
-	s.proxy.resolve = func(_ context.Context, host string) ([]net.IP, error) {
+	s.resolve = func(_ context.Context, host string) ([]net.IP, error) {
 		asked = append(asked, host)
 		if host == "cdn.attacker.test" {
 			return []net.IP{net.ParseIP("169.254.169.254")}, nil
@@ -397,8 +397,8 @@ func TestAttack_ANameThatResolvesToTheMetadataAddressIsStillRefused(t *testing.T
 		Rules:   []schema.EgressRule{{Host: "cdn.attacker.test", Mode: schema.ModeAllow}},
 	})
 	// Loopback is guarded, so the control names it, which is consent.
-	ok.proxy.destinations.named["127.0.0.1"] = true
-	ok.proxy.resolve = func(_ context.Context, string2 string) ([]net.IP, error) {
+	ok.destinations.named["127.0.0.1"] = true
+	ok.resolve = func(_ context.Context, string2 string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("127.0.0.1")}, nil
 	}
 	control, err := http.NewRequest(http.MethodGet, "http://cdn.attacker.test:"+port+"/", nil)
@@ -500,8 +500,8 @@ func TestGuard_ADualStackNameStillConnectsOverIPv4(t *testing.T) {
 		Default: schema.ModeBlock,
 		Rules:   []schema.EgressRule{{Host: "dual.example.test", Mode: schema.ModeAllow}},
 	})
-	s.proxy.destinations.named["127.0.0.1"] = true
-	s.proxy.resolve = func(context.Context, string) ([]net.IP, error) {
+	s.destinations.named["127.0.0.1"] = true
+	s.resolve = func(context.Context, string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("2606:4700:4700::1111"), net.ParseIP("127.0.0.1")}, nil
 	}
 
@@ -517,7 +517,7 @@ func TestGuard_ANameWithOnlyAnIPv6AddressIsRefusedWithTheReason(t *testing.T) {
 		Default: schema.ModeBlock,
 		Rules:   []schema.EgressRule{{Host: "v6only.example.test", Mode: schema.ModeAllow}},
 	})
-	s.proxy.resolve = func(context.Context, string) ([]net.IP, error) {
+	s.resolve = func(context.Context, string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("2606:4700:4700::1111")}, nil
 	}
 	req, err := http.NewRequest(http.MethodGet, "http://v6only.example.test/", nil)
@@ -544,8 +544,8 @@ func TestAttack_ARedirectFromAnAllowedHostToABlockedOneIsNotFollowed(t *testing.
 	// about the name and both fixtures have to be reachable for the refusal
 	// to mean anything. Loopback is guarded, so it is named, which leaves the
 	// policy as the only thing separating the two hosts.
-	s.proxy.destinations.named["127.0.0.1"] = true
-	s.proxy.resolve = func(context.Context, string) ([]net.IP, error) {
+	s.destinations.named["127.0.0.1"] = true
+	s.resolve = func(context.Context, string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("127.0.0.1")}, nil
 	}
 	allowedURL := "http://allowed.example.test:" + portOf(t, allowed.URL)
@@ -589,8 +589,8 @@ func TestAttack_ConfusableHostsDoNotSatisfyAWildcardRule(t *testing.T) {
 		Rules:   []schema.EgressRule{{Host: "*.example.test", Mode: schema.ModeAllow}},
 	})
 	o := newOrigin(t)
-	s.proxy.destinations.named["127.0.0.1"] = true
-	s.proxy.resolve = func(context.Context, string) ([]net.IP, error) {
+	s.destinations.named["127.0.0.1"] = true
+	s.resolve = func(context.Context, string) ([]net.IP, error) {
 		// Every name resolves, and to a fixture that answers, so a refusal
 		// can only have come from the policy. A test where the attacking
 		// names did not resolve would pass against a sidecar with no policy
@@ -642,7 +642,7 @@ func TestAttack_TheHostHeaderCannotChooseThePort(t *testing.T) {
 	})
 
 	client, server := net.Pipe()
-	go s.proxy.serveTransparentHTTP(server)
+	go s.serveTransparentHTTP(server)
 	go func() {
 		_, _ = fmt.Fprintf(client,
 			"GET /steal HTTP/1.1\r\nHost: 127.0.0.1:%s\r\nConnection: close\r\n\r\n", port)
@@ -810,7 +810,7 @@ func TestAttack_ATLSConnectionWithNoServerNameIsRefused(t *testing.T) {
 	s := newSidecar(t, &schema.Egress{Default: schema.ModeAllow})
 
 	client, server := net.Pipe()
-	go s.proxy.serveTransparentTLS(server)
+	go s.serveTransparentTLS(server)
 	go func() {
 		// A handshake for an address rather than a name carries no
 		// server_name extension, which is what a client connecting straight
@@ -849,14 +849,14 @@ func TestAttack_AnInspectedTunnelDecidesOnTheInnerHost(t *testing.T) {
 			{Host: "allowed.example.test", Mode: schema.ModeAllow, Paths: []string{"/"}},
 		},
 	})
-	s.proxy.ca, err = newCertAuthority(certPEM, keyPEM)
+	s.ca, err = newCertAuthority(certPEM, keyPEM)
 	require.NoError(t, err)
 
 	roots := x509.NewCertPool()
 	require.True(t, roots.AppendCertsFromPEM([]byte(certPEM)))
 
 	client, server := net.Pipe()
-	go s.proxy.serveTransparentTLS(server)
+	go s.serveTransparentTLS(server)
 
 	done := make(chan string, 1)
 	go func() {

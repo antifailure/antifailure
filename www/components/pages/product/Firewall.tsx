@@ -33,7 +33,7 @@ const LEDGER: LedgerEntry[] = [
   {
     method: "POST",
     dest: "api.stripe.com/v1/charges",
-    action: "simulate",
+    action: "mock",
     receipt: "ch_sim_08f2",
     tone: "PASS",
   },
@@ -79,9 +79,9 @@ const FEATURED = [
   {
     provider: "Stripe",
     op: "POST /v1/charges",
-    body: "Simulate and store in a clone-local ledger. Not live.",
+    body: "Answered from the stateful pack that ships with the engine. Clone-local, not live.",
     tone: "PASS" as const,
-    chip: "simulate",
+    chip: "mock",
     receipt: (
       <>
         ch_sim_08f2

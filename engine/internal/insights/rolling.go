@@ -999,7 +999,7 @@ func shortRef(ref string) string {
 	}
 	for i := 0; i < len(ref); i++ {
 		c := ref[i]
-		if !(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return ref
 		}
 	}

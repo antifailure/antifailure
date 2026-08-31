@@ -407,7 +407,7 @@ function EvidenceColumn({ t }: { t: number }) {
           </Drawer>
           <Drawer t={t} start={DRAWER_AT[2]} height={DRAWER_H[2]} title="3 · Attempted effects">
             <div className="flex gap-1.5">
-              <Receipt>Stripe · simulate x2</Receipt>
+              <Receipt>Stripe · mock x2</Receipt>
               <Receipt>email · capture x1</Receipt>
               <Receipt className="text-black/45">escaped · 0</Receipt>
             </div>
