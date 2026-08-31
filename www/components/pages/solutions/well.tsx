@@ -311,7 +311,7 @@ export function Notebook({
                   <div className="overflow-hidden rounded-[10px] border border-black/[0.06]">
                     <div className="grid grid-cols-[16px_72px_1fr_auto_64px] items-center gap-2 bg-[#f7f7f5] px-3 py-1.5 text-[9px] font-medium uppercase tracking-[0.12em] text-black/35 max-sm:grid-cols-[16px_1fr_auto]">
                       <span className="size-3 rounded-[3px] border border-black/20 bg-white" />
-                      <span>Id</span>
+                      <span className="max-sm:hidden">Id</span>
                       <span>Entity</span>
                       <span>Policy</span>
                       <span className="max-sm:hidden">Cover</span>
@@ -332,7 +332,9 @@ export function Notebook({
                               : "border-black/20 bg-white",
                           )}
                         />
-                        <span className="truncate font-mono text-[11px] text-black/40">{row.id}</span>
+                        <span className="truncate font-mono text-[11px] text-black/40 max-sm:hidden">
+                          {row.id}
+                        </span>
                         <span className="min-w-0 truncate text-[13px] text-black">
                           {row.label}
                           {row.kind ? (
@@ -414,7 +416,7 @@ export function DashChart({
             ))}
             <div className="absolute inset-x-0 bottom-0 flex h-full items-end gap-1.5 px-1">
               {bars.map((h, i) => (
-                <div key={i} className="relative flex-1">
+                <div key={i} className="relative flex h-full flex-1 items-end">
                   <div
                     className="w-full rounded-t-[5px]"
                     style={{
@@ -425,7 +427,12 @@ export function DashChart({
                 </div>
               ))}
             </div>
-            <svg className="pointer-events-none absolute inset-0" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+            <svg
+              className="pointer-events-none absolute inset-0 h-full w-full"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              aria-hidden
+            >
               <polyline
                 fill="none"
                 stroke="#285D49"
@@ -446,7 +453,10 @@ export function DashChart({
       </FloatWindow>
       <div
         className={cn(
-          "absolute top-[18%] z-10 w-[220px] rounded-[12px] bg-white p-4 shadow-[0_16px_48px_rgba(0,0,0,0.14)] max-md:static max-md:mt-4 max-md:w-full max-md:right-auto max-md:left-auto",
+          // 34% rather than 18%: at 18% the card's left edge cut through the
+          // middle of the chart's own header row, leaving half of "twin · live"
+          // showing, which reads as broken text rather than as depth.
+          "absolute top-[34%] z-10 w-[220px] rounded-[12px] bg-white p-4 shadow-[0_16px_48px_rgba(0,0,0,0.14)] max-md:static max-md:mt-4 max-md:w-full max-md:right-auto max-md:left-auto",
           popupSide === "right" ? "right-[6%]" : "left-[6%]",
         )}
       >

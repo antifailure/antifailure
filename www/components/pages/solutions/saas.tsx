@@ -67,8 +67,8 @@ export function SaasPage() {
         kicker="Staging"
         title="Staging differs in too many dimensions at once."
         items={[
-          { title: "A change can pass unit, integration, and a manual staging check", body: "then still fail in production." },
-          { title: "The twin reproduces tenant shape, concurrency, and schema coexistence", body: "then reports whether the deploy is safe." },
+          { title: "Unit, integration, and a manual staging check", body: "A change can pass all three and still fail in production." },
+          { title: "Tenant shape, concurrency, and schema coexistence", body: "The twin reproduces all three, then reports whether the deploy is safe." },
           { title: "Old + new", body: "Application instances still running while the new column lands." },
         ]}
         visual={

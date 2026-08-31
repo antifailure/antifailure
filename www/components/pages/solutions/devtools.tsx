@@ -75,7 +75,7 @@ export function DevtoolsPage() {
         title="Exceptional Postgres instrumentation first."
         items={[
           { title: "The first supported stack should be exceptional", body: "A broad compatibility list with unreliable connectors would destroy trust." },
-          { title: "Start with Postgres volume, plans, and pools", body: "then expand." },
+          { title: "Postgres first", body: "Volume, plans, and pools, then expand." },
           { title: "Publish what the twin reproduced", body: "Do not pretend unsupported components are cloned." },
         ]}
         visual={
@@ -97,8 +97,8 @@ export function DevtoolsPage() {
         kicker="The wedge"
         title="Locks, plans, and rollback feasibility before it ships."
         items={[
-          { title: "Measure lock duration", body: "and blocked statements." },
-          { title: "Whether old instances can still read the new schema", body: "shows up here first." },
+          { title: "Lock duration", body: "Measured together with the statements it blocks." },
+          { title: "Schema coexistence", body: "Whether old instances can still read the new schema shows up here first." },
           { title: "Users notice p99 immediately", body: "Large tables plus frequent schema change." },
         ]}
         visual={
