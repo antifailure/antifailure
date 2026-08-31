@@ -229,8 +229,9 @@ export function FirewallPage() {
           </div>
         </Panel>
         <Illustrative>
-          Six rows chosen to show the five decisions. The hosts, the modes and the decision log are
-          real: <code className="font-mono text-[12px] text-black/70">af net log</code> prints every
+          Six rows chosen to show mocked calls, captured messages and denials. The hosts, the modes
+          and the decision log are real:{" "}
+          <code className="font-mono text-[12px] text-black/70">af net log</code> prints every
           request the gateway decided, allowed as well as refused, and{" "}
           <code className="font-mono text-[12px] text-black/70">af ci</code> summarises them on the
           pull request. A packet that never reaches the gateway, such as a connection straight to a
