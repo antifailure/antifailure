@@ -1013,15 +1013,16 @@ func (v *validator) policy(m *schema.Manifest) {
 		return
 	}
 	levels := map[string]schema.PolicyLevel{
-		"migration_failed":  p.MigrationFailed,
-		"migration_rewrite": p.MigrationRewrite,
-		"migration_lint":    p.MigrationLint,
-		"plan_regression":   p.PlanRegression,
-		"query_regression":  p.QueryRegression,
-		"load_regression":   p.LoadRegression,
-		"egress_surprise":   p.EgressSurprise,
-		"masking":           p.Masking,
-		"cleanup":           p.Cleanup,
+		"migration_failed":     p.MigrationFailed,
+		"migration_rewrite":    p.MigrationRewrite,
+		"migration_lint":       p.MigrationLint,
+		"plan_regression":      p.PlanRegression,
+		"query_regression":     p.QueryRegression,
+		"load_regression":      p.LoadRegression,
+		"egress_surprise":      p.EgressSurprise,
+		"workflows_unverified": p.WorkflowsUnverified,
+		"masking":              p.Masking,
+		"cleanup":              p.Cleanup,
 	}
 	keys := make([]string, 0, len(levels))
 	for k := range levels {

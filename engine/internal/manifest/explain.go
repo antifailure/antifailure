@@ -374,6 +374,7 @@ func failingPolicies(p *schema.Policy) string {
 		{"query_regression", p.QueryRegression},
 		{"load_regression", p.LoadRegression},
 		{"egress_surprise", p.EgressSurprise},
+		{"workflows_unverified", p.WorkflowsUnverified},
 		{"masking", p.Masking},
 		{"cleanup", p.Cleanup},
 	}

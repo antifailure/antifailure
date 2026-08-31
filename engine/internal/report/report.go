@@ -278,6 +278,28 @@ func (r Run) Verdict() string {
 	}
 }
 
+// NothingVerified reports that no workflow reached a verdict about the
+// application.
+//
+// Pass, fail and flaky are verdicts about the application: the run drove it and
+// the screen said something. Blocked and unverified are statements about us,
+// and a run made only of those has not tested anything, whatever its exit code
+// said. A manifest declaring no workflows lands here too, because "nothing was
+// tested" is the same fact whether the workflows were missing or unreachable.
+//
+// Deliberately separate from Verdict. Verdict already resolves to blocked or
+// unverified in exactly these cases and is right to; what was missing is
+// anybody treating that as a result rather than as an absence of one.
+func (r Run) NothingVerified() bool {
+	for _, w := range r.Workflows {
+		switch read(w.Verdict) {
+		case VerdictPass, VerdictFail, VerdictFlaky:
+			return false
+		}
+	}
+	return true
+}
+
 // Headline is the first line, which is the only line most people read.
 func (r Run) Headline() string {
 	counts := map[string]int{}

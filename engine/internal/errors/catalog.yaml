@@ -598,6 +598,13 @@ errors:
     docs: concepts/agents
     retryable: false
     exit_code: 3
+  - code: AF-AGT-005
+    area: AGT
+    message: "No workflow reached a verdict about the application: {detail}"
+    next_step: "Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet."
+    docs: concepts/verdicts
+    retryable: false
+    exit_code: 9
   - code: AF-AGT-002
     area: AGT
     message: "Workflow {workflow} exhausted its budget of {budget} before completing."

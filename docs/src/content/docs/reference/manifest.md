@@ -182,6 +182,7 @@ refused at the line rather than treated as the weakest one.
 | `egress_surprise` | `fail` | The environment reached for a host the manifest does not mention. |
 | `masking` | `fail` | The branch read back with data that still parses as real. |
 | `cleanup` | `fail` | Teardown left a resource behind. |
+| `workflows_unverified` | `fail` | No workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. |
 
 See [verdicts](/docs/concepts/verdicts/) for what each level does to the run
 and to the exit code.

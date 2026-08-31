@@ -112,6 +112,23 @@ func (r TestReport) AnyFailed() bool {
 	return r.Failed > 0 || r.InvariantsViolated() > 0
 }
 
+// NothingVerified reports that no workflow reached a verdict about the
+// application.
+//
+// The counterpart to AnyFailed and not a weakening of it. AnyFailed answers
+// "did we find something wrong", and the comment above is right that a blocked
+// workflow must not answer yes. This answers "did we find anything at all",
+// which nothing asked until now: `af test` exited zero on a run where every
+// workflow was blocked, which tells a pipeline the application was checked and
+// found fine when it was never driven.
+//
+// Passed, failed and flaky are verdicts about the application. Blocked and
+// unverified are statements about us. A run made only of the second kind, or of
+// no workflows at all, has tested nothing.
+func (r TestReport) NothingVerified() bool {
+	return r.Passed+r.Failed+r.Flaky == 0
+}
+
 // jobDocument is what the runner reads.
 type jobDocument struct {
 	BaseURL   string        `json:"base_url"`

@@ -226,6 +226,12 @@ type EgressRule struct {
 type LoginStrategy string
 
 const (
+	// LoginNone is a persona that never signs in: the agent adopts the
+	// identity and goes straight to start_path. The manifest schema has always
+	// offered it and Go never named it, so every comparison against it was a
+	// bare "none" somebody had to spell right, which is how the engine came to
+	// demand a users table for a persona that needs no account.
+	LoginNone      LoginStrategy = "none"
 	LoginPassword  LoginStrategy = "password"
 	LoginMagicLink LoginStrategy = "magic_link"
 	LoginEmailCode LoginStrategy = "email_code"
@@ -665,6 +671,10 @@ type Policy struct {
 	Masking PolicyLevel `json:"masking,omitempty" yaml:"masking,omitempty"`
 	// Cleanup is teardown leaving a resource behind.
 	Cleanup PolicyLevel `json:"cleanup,omitempty" yaml:"cleanup,omitempty"`
+	// WorkflowsUnverified is a run in which no workflow reached a verdict
+	// about the application, because every one was blocked or unverified or
+	// because none was declared.
+	WorkflowsUnverified PolicyLevel `json:"workflows_unverified,omitempty" yaml:"workflows_unverified,omitempty"`
 }
 
 // LockPolicy is the two thresholds on how long a migration held a lock.

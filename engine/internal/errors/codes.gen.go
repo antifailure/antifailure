@@ -14,6 +14,8 @@ const (
 	AFAGT003 Code = "AF-AGT-003"
 	// The agent runner could not be found: {detail}
 	AFAGT004 Code = "AF-AGT-004"
+	// No workflow reached a verdict about the application: {detail}
+	AFAGT005 Code = "AF-AGT-005"
 	// Invariant {invariant} did not finish within {timeout}.
 	AFAGT010 Code = "AF-AGT-010"
 	// Invariant {invariant} is not read only.
@@ -365,6 +367,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/agents",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFAGT005: {
+		Code:      AFAGT005,
+		Area:      "AGT",
+		Message:   "No workflow reached a verdict about the application: {detail}",
+		NextStep:  "Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet.",
+		Docs:      "concepts/verdicts",
+		Retryable: false,
+		ExitCode:  ExitInterruptedClean,
 	},
 	AFAGT010: {
 		Code:      AFAGT010,

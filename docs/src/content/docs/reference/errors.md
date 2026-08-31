@@ -80,6 +80,18 @@ The agent runner could not be found: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/agents](/docs/concepts/agents/) |
 
+### AF-AGT-005
+
+No workflow reached a verdict about the application: {detail}
+
+**What to do.** Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet.
+
+| | |
+| --- | --- |
+| Exit code | `9` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+
 ### AF-AGT-010
 
 Invariant {invariant} did not finish within {timeout}.

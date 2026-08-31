@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/antifailure/antifailure/engine/internal/personas"
@@ -59,7 +60,29 @@ func (o *Orchestrator) provisionPersonas(
 	}
 
 	adapter, closeAdapter, err := o.personaAdapter(ctx, s)
-	if err != nil {
+	switch {
+	case errors.Is(err, errNoUsersTable) && !anyPersonaSignsIn(list):
+		// The same reasoning the doc comment above already applies to a
+		// manifest with no personas at all. A persona whose login is `none` is
+		// a signed out visitor with a name: the agent adopts the identity and
+		// goes straight to start_path, so there is no credential to store and
+		// nothing that has to exist in a users table.
+		//
+		// Refusing was correct for a persona that signs in and wrong for one
+		// that does not, and nothing here distinguished them. It cost the one
+		// example in the corpus that declares a workflow: examples/go-api sets
+		// `login: none` because the service serves JSON and has no sign in
+		// page, and it was refused for having nowhere to create a user it
+		// would never use.
+		//
+		// Deliberately narrow. This tolerates a missing users table; it does
+		// not skip provisioning when one exists. A manifest that reaches a
+		// table today still creates its rows and still has its session tables
+		// emptied, because "no real session survives into a branch" is a
+		// safety property and widening a refusal must not quietly drop it.
+		o.progress("no persona signs in, so no accounts are needed and none were created")
+		return nil, nil
+	case err != nil:
 		return nil, err
 	}
 	defer closeAdapter()
@@ -158,6 +181,29 @@ func (o *Orchestrator) personaAdapter(
 	return personas.NewSQLAdapter(conn, scheme, o.opts.Manifest.Name), done, nil
 }
 
+// errNoUsersTable is the one refusal that depends on whether anybody signs in.
+//
+// A sentinel rather than a string match, because provisionPersonas has to tell
+// this refusal apart from every other reason a scheme could not be built (a
+// connection that failed, a probe that errored) and only this one is safe to
+// tolerate. Its text is the message a persona that DOES sign in still sees.
+var errNoUsersTable = errors.New("no users table could be found")
+
+// anyPersonaSignsIn reports whether any of these personas needs an account.
+//
+// The zero value is `password`, applied by the manifest normaliser, so an
+// empty Login here means a persona that signs in rather than one that does
+// not. Reading it the other way round would turn a manifest somebody wrote
+// before this field existed into one that silently creates nobody.
+func anyPersonaSignsIn(list []schema.Persona) bool {
+	for _, p := range list {
+		if p.Login != schema.LoginNone {
+			return true
+		}
+	}
+	return false
+}
+
 // personaScheme decides which tables the persona rows go in.
 func (o *Orchestrator) personaScheme(
 	ctx context.Context, conn personas.Conn, auth *schema.Auth,
@@ -181,8 +227,8 @@ func (o *Orchestrator) personaScheme(
 		}
 		if !found {
 			return personas.Scheme{}, fmt.Errorf(
-				"the direct adapter is selected and no users table could be found; " +
-					"describe it with auth.table")
+				"%w: the direct adapter is selected and no users table could be found; "+
+					"describe it with auth.table", errNoUsersTable)
 		}
 		return withExtraSessions(scheme, auth), nil
 	}
@@ -202,8 +248,9 @@ func (o *Orchestrator) personaScheme(
 	}
 	if !found {
 		return personas.Scheme{}, fmt.Errorf(
-			"no users table could be found, so there is nowhere to create a persona; " +
-				"describe the table with auth.table, or use auth.adapter: seed")
+			"%w, so there is nowhere to create a persona; "+
+				"describe the table with auth.table, or use auth.adapter: seed",
+			errNoUsersTable)
 	}
 	o.progress("personas will be created in " + scheme.Users.Name)
 	return withExtraSessions(scheme, auth), nil

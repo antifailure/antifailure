@@ -67,6 +67,9 @@ people learn to ignore the results. Only a real failure exits non zero.`),
 				if report.AnyFailed() {
 					return silent(failure(report))
 				}
+				if report.NothingVerified() {
+					return silent(nothingVerified(report))
+				}
 				return nil
 			}
 
@@ -98,13 +101,18 @@ people learn to ignore the results. Only a real failure exits non zero.`),
 			e.Out.Printf("  %d passed, %d failed, %d flaky, %d blocked, %d unverified, in %s\n",
 				report.Passed, report.Failed, report.Flaky, report.Blocked,
 				report.Unverified, report.Duration.Round(time.Second))
-			if report.Blocked > 0 {
+			if report.Blocked > 0 || report.Unverified > 0 {
 				e.Out.Println(e.Out.Wrap(
-					"  Blocked means the runner or the environment could not carry the workflow "+
-						"through, so it is not counted against the application.", 2))
+					"  Blocked is the runner or the environment failing to carry a workflow "+
+						"through. Unverified is a workflow that ran and proved nothing either "+
+						"way. Neither counts against the application, and a run made only of "+
+						"them has not tested it.", 2))
 			}
 			if report.AnyFailed() {
 				return silent(failure(report))
+			}
+			if report.NothingVerified() {
+				return silent(nothingVerified(report))
 			}
 			return nil
 		},
@@ -193,6 +201,24 @@ func firstViolated(report *env.TestReport) string {
 // trace that shows nothing wrong. The workflows are named first because a
 // broken flow usually explains a broken invariant, and not the other way
 // round.
+// nothingVerified is the run level outcome, distinct from a failing workflow.
+//
+// A separate code, and therefore a separate exit code, because a pipeline can
+// only read the number and "tests failed" and "nothing was tested" call for
+// opposite responses: the first blocks the merge on evidence, the second says
+// the setup is broken and there is no evidence at all. Sharing AF-AGT-002's
+// exit 8 between them would have made the distinction unreadable exactly where
+// it is needed.
+func nothingVerified(r *env.TestReport) error {
+	detail := fmt.Sprintf(
+		"%d blocked and %d unverified, and none passed, failed or was flaky",
+		r.Blocked, r.Unverified)
+	if len(r.Results) == 0 {
+		detail = "the manifest declares no workflows to run"
+	}
+	return aferrors.Coded(aferrors.AFAGT005, "detail", detail)
+}
+
 func failure(report *env.TestReport) error {
 	if report.Failed > 0 {
 		return aferrors.Coded(aferrors.AFAGT002,

@@ -120,6 +120,7 @@ change.`),
 				// what we failed to clean up.
 				run.Findings = append(run.Findings, migration...)
 				for _, f := range []*report.Finding{
+					workflowsUnverifiedFinding(run, gate),
 					egressFinding(run.Egress, gate),
 					maskingFinding(run.Verification, gate),
 					loadFinding(run.Load, gate),
