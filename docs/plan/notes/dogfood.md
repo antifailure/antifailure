@@ -5,9 +5,12 @@ the pipeline, what it has found, and what is not finished.
 
 **State: the loop works; the streak does not exist yet.** `af up` brings the
 control plane up from a masked and verified copy of its own database in about
-three and a half minutes, and agents drive it: one workflow passes outright and
-sign-in works end to end through an email the environment captured from itself.
-Thirty-three defects were found getting there and thirty-two are fixed with a
+three and a half minutes, and agents drive it: sign-in works end to end through
+an email the environment captured from itself. That was measured on a laptop,
+against a second web service the manifest no longer declares. On a hosted
+runner, against the console the API now serves itself, every workflow came back
+blocked until the three sign-in defects below were fixed.
+Thirty-six defects were found getting there and thirty-five are fixed with a
 regression test. What has not happened is ten consecutive green runs, and none
 is claimed. The honest accounting is at the bottom.
 
@@ -1030,14 +1033,14 @@ no note.
 | Masking rules written first, attestation required | **Proven.** `af mask plan` refuses an unclassified column, and a golden that does not verify cannot be branched. |
 | `af test` driving the workflows | **Proven that agents run.** One workflow passes outright, sign-in works end to end through a captured email. The rest need either a model key or the rewritten expectations to return a verdict rather than `unverified`. |
 | `af insights` on control-plane migrations | Wired into `af ci`'s report and not yet run against the control plane. |
-| The standard pull request comment | `af ci` writes it, and now fills in the masking and insights sections that were unreachable. Posting is wired in `dogfood.yml` and has never posted. |
-| `.github/workflows/dogfood.yml` | Written: pull request job, nightly job, comment job. **Never run.** |
-| Nightly against the corpus, with a load smoke | Written, in the same file. **Never run.** |
+| The standard pull request comment | `af ci` writes it, and now fills in the masking and insights sections that were unreachable. It has posted, on two pull requests. |
+| `.github/workflows/dogfood.yml` | Written: pull request job, nightly job, comment job. The pull request job and the comment job have run and been green, in about six and a half minutes. The nightly job is `schedule` only and has still never fired. |
+| Nightly against the corpus, with a load smoke | Written, in the same file. **Never run.** No scheduled run has fired. |
 | Recorded-model mode so the spend stays at zero | Built, 11 tests. The runs above spent nothing at all, because no key was set. |
 | An issue per finding, labelled and classified | Filed. [#17](https://github.com/antifailure/antifailure/issues/17) through [#24](https://github.com/antifailure/antifailure/issues/24); six closed with their fixes. |
 | Fix product bugs with a regression test that would have caught it | Thirty-two of thirty-three. |
-| **Ten consecutive green runs** | **Not run. No streak exists and none is claimed.** |
-| **Total CI time before and after** | **Not measured.** The workflow has never executed, so there is no "after". |
+| **Ten consecutive green runs** | **No streak exists and none is claimed.** Two runs have been green and neither counts toward one: both reported all six workflows `blocked`, so the record says green about a run that carried nothing through. |
+| **Total CI time before and after** | **Not measured.** The workflow's own runs are 6m29s and 6m49s, of which `af ci` is about four minutes. What is not measured is the effect on total CI time, because Dogfood runs beside `ci.yml` rather than inside it. |
 
 ### Why the streak is not here
 
@@ -1057,11 +1060,13 @@ argument for the workflow file rather than an excuse for it.
 
 ### The next three things
 
-1. **Push the branch and let `dogfood.yml` run.** Everything upstream is
-   written and the remaining unknowns are the ones only a real run answers.
-   The budgets in `tools/dogfood` are measurements doubled from a loaded
-   laptop and the first green run should replace them with numbers from a
-   runner.
+1. **Done, and it answered the unknown.** `dogfood.yml` has run green twice
+   on a hosted runner, and both runs reported all six workflows blocked with
+   a ten second timeout waiting for an email field. The runner navigated to
+   `/login`, which the console's static export does not have, so the agents
+   were driving its 404 page. That is fixed, along with two more defects
+   underneath it that each would have blocked all six on their own. The
+   budgets in `tools/dogfood` still want replacing with runner numbers.
 2. **Get the six workflows to a verdict.** The rewritten expectations are the
    zero-spend half; a recorded cassette for the corpus is the other.
 3. **Then the streak.** Ten runs, ten records on disk, and the burn-down
