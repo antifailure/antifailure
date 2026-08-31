@@ -66,8 +66,14 @@ const LEDGER: LedgerEntry[] = [
     tone: "FAIL",
   },
   {
-    method: "TCP",
-    dest: "18.4.2.9:443",
+    // Was `TCP 18.4.2.9:443 DENY deny_02`, a direct-IP attempt drawn as a row
+    // in the decision log. A direct-IP connection never reaches the gateway:
+    // the twin has no route to a public address, so the packet fails at the
+    // network and there is nothing to write a row about. It is blocked harder
+    // than a ledger row implies and it is not logged. A CONNECT to an unlisted
+    // name does reach the gateway, is refused there, and is what this row is.
+    method: "CONNECT",
+    dest: "example.com:443",
     action: "DENY",
     receipt: "deny_02",
     tone: "FAIL",
@@ -109,16 +115,16 @@ const FEATURED = [
     ),
   },
   {
-    provider: "Unknown TCP",
-    op: "18.4.2.9:443",
-    body: "Unknown destination. Deny by default.",
+    provider: "Unknown host",
+    op: "CONNECT example.com:443",
+    body: "No rule names it, and the default is block. Refused at the gateway with a row in the log.",
     tone: "FAIL" as const,
     chip: "DENY",
     receipt: (
       <>
         deny_02
         <br />
-        direct-IP · ip-bypass
+        no rule matches · default block
         <br />
         fail closed
       </>
@@ -217,9 +223,12 @@ export function FirewallPage() {
         <Illustrative>
           Six rows chosen to show the five decisions. The hosts, the modes and the decision log are
           real: <code className="font-mono text-[12px] text-black/70">af net log</code> prints every
-          attempt, and <code className="font-mono text-[12px] text-black/70">af ci</code> summarises
-          them on the pull request. A denied destination is denied inside the twin; it does not on
-          its own fail the check.
+          request the gateway decided, allowed as well as refused, and{" "}
+          <code className="font-mono text-[12px] text-black/70">af ci</code> summarises them on the
+          pull request. A packet that never reaches the gateway, such as a connection straight to a
+          public address, leaves no row: it fails at the network instead, which is stronger and is
+          the section below. A denied destination is denied inside the twin; it does not on its own
+          fail the check.
         </Illustrative>
       </PageSection>
 
@@ -228,28 +237,33 @@ export function FirewallPage() {
           visual={
             <Panel className="flex flex-col rounded-[12px] bg-white">
               <div className="flex items-center justify-between gap-3 px-5 py-3">
-                <MonoLabel>BYPASS DETECTED</MonoLabel>
+                <MonoLabel>BYPASS BLOCKED</MonoLabel>
                 <StatusPill tone="FAIL">DENY</StatusPill>
               </div>
               <Hairline className="block" />
               <div className="px-5 py-5">
                 <div className="font-mono text-[13px] tracking-extra-tight text-black">TCP 18.4.2.9:443</div>
                 <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">
-                  Direct-IP skip of clone-local DNS. Caught at the mandatory egress gateway. Denied. Logged.
+                  Direct-IP skip of clone-local DNS. There is no route out of the twin to a public
+                  address, so the connection does not fail a rule, it fails at the network.
                 </p>
                 <div className="mt-5 flex flex-wrap gap-2">
                   <QueueChip blocked>ip-bypass</QueueChip>
                   <QueueChip blocked>unknown TCP</QueueChip>
                   <QueueChip>no default public egress</QueueChip>
                 </div>
+                {/* Not a ledger row. The decision log records what the
+                    gateway decided, and this connection never got to it. What
+                    the caller sees is the syscall failing, and what proves it
+                    is the conformance behaviour rather than a receipt. */}
                 <Receipt className="mt-5 bg-white">
-                  deny_02
-                  <br />
-                  source: twin egress slot
+                  connect ENETUNREACH
                   <br />
                   dest: 18.4.2.9:443
                   <br />
-                  reason: unresolved · fail closed
+                  no route · not a rule that can be edited
+                  <br />
+                  Egress_CannotBeBypassedByAddress
                 </Receipt>
               </div>
             </Panel>
