@@ -1,43 +1,117 @@
-import { PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
-import { AFTER_HEADING, FeatureList, Lead, OpenSteps, SectionHeading, WorkersScene } from "./visuals";
+import { PageShell, RelatedGrid } from "@/components/pages/kit";
+import { CircularMap, DashChart, FeatureRow, Notebook, SplitHero, TaskTable } from "./well";
 
 export function MarketplacesPage() {
   return (
     <PageShell>
-      <PageHero
+      <SplitHero
+        stack
         path="/solutions/marketplaces"
         eyebrow="Solutions · Marketplaces"
         title="Queues, workers, dual-writes, matching logic staging never reproduces."
-        lead="The twin runs your own workers and cron services beside the web tier, on the same branched database. Production webhooks are denied inside it, and every attempt is recorded."
-        visual={<WorkersScene />}
+        paragraphs={[
+          "The twin includes workers and queues. Production webhooks are blocked.",
+          "Impatient retries and multi-tab checkout become deterministic scenarios.",
+          "Matching logic that depends on queue order will not show up if staging skips workers.",
+        ]}
+        visual={
+          <Notebook
+            tab="matching.worker"
+            rail="NOTES"
+            rows={[
+              { id: "W-01", label: "matching.worker", kind: "worker", status: "RUNNING", tone: "PASS", bar: 92 },
+              { id: "W-02", label: "notify.worker", kind: "worker", status: "RUNNING", tone: "PASS", bar: 86 },
+              { id: "W-03", label: "settle.worker", kind: "worker", status: "RUNNING", tone: "PASS", bar: 80 },
+              { id: "WH-09", label: "api.partners.test", kind: "hook", status: "BLOCKED", tone: "BLOCK", bar: 10 },
+              { id: "Q-14", label: "listings.created → match.attempt", kind: "queue", status: "QUEUED", tone: "WARN", bar: 54 },
+            ]}
+            overlay={{
+              title: "Webhook deny",
+              checks: [
+                "Outbound webhooks store a preview. Production hostnames never resolve.",
+                "Partner webhooks are written to the attempted-effect ledger.",
+                "Impatient retries compile into deterministic scenarios.",
+                "Multi-tab checkout is a scenario, not a surprise.",
+                "api.partners.test stays BLOCKED.",
+              ],
+            }}
+          />
+        }
       />
-      <PageSection tone="sage">
-        <SectionHeading title="<strong>Timing is the bug.</strong> Services, queues, and workers are a dimension staging drops." />
-        <Lead>
-          Matching logic that depends on queue order will not show up in a shared staging environment
-          that skips workers. The twin runs them, against a branch carrying production's shape, and
-          then asks the data whether the ordering held.
-        </Lead>
-        <div className={AFTER_HEADING}>
-          <FeatureList
-            items={[
-              { title: "Workers in the twin", body: "The web, worker and cron services the manifest declares, all against one branched database." },
-              { title: "Webhook containment", body: "Production partner webhooks are blocked and written to the attempted-effect ledger." },
-              { title: "Invariants on the orders", body: "A statement asked of the data after the run: no order matched twice, no settlement without a match." },
+
+      <FeatureRow
+        reverse
+        kicker="Timing is the bug"
+        title="Services, queues, and workers are a dimension staging drops."
+        items={[
+          { title: "Queues in the twin", body: "Simulated streams so dual-writes and retries are visible." },
+          { title: "Webhook containment", body: "Production partner webhooks are blocked and written to the attempted-effect ledger." },
+          { title: "Retry personas", body: "Impatient users and API clients become deterministic scenarios." },
+        ]}
+        visual={
+          <DashChart
+            popupSide="left"
+            title="Queue order"
+            bars={[22, 30, 48, 36, 58, 64, 71, 60, 84, 78]}
+            popup={{
+              title: "clone-local queue",
+              rows: [
+                ["01", "listings.created"],
+                ["02", "orders.paid"],
+                ["03", "match.attempt"],
+              ],
+            }}
+          />
+        }
+      />
+
+      <FeatureRow
+        stack
+        kicker="Restore both sides"
+        title="Buyers, sellers, listings, and in-flight orders as a referential subset."
+        items={[
+          { title: "Restore both sides", body: "Buyers, sellers, listings, and in-flight orders as a referential subset." },
+          { title: "Run the workers", body: "Matching, notify, and settle against clone-local queues." },
+          { title: "Contain partners", body: "Outbound webhooks store a preview. Production hostnames never resolve." },
+        ]}
+        visual={
+          <CircularMap
+            shift="center"
+            tabs={["MATCH", "NOTIFY", "SETTLE"]}
+            active="MATCH"
+            rings={[
+              { label: "buyers", r: 40 },
+              { label: "sellers", r: 34 },
+              { label: "listings", r: 30 },
+              { label: "orders", r: 38 },
             ]}
           />
-        </div>
-      </PageSection>
-      <PageSection tone="white">
-        <OpenSteps
-          items={[
-            { title: "Restore both sides", body: "Buyers, sellers, listings, and in-flight orders as a referential subset." },
-            { title: "Run the workers", body: "Matching, notify and settle, against the branched database." },
-            { title: "Contain partners", body: "Outbound webhooks are captured. Production hostnames never resolve." },
-            { title: "Ask the data", body: "Duplicate events and missed matches, as invariants that return the offending rows." },
-          ]}
-        />
-      </PageSection>
+        }
+      />
+
+      <FeatureRow
+        reverse
+        kicker="Compare"
+        title="Duplicate events, missed matches, and irreversible writes in the oracle."
+        items={[
+          { title: "Rolling deploys", body: "Old and new schema coexistence is exactly what a disposable twin is for." },
+          { title: "Duplicate events", body: "Visible when workers actually run." },
+          { title: "Compare", body: "Duplicate events, missed matches, and irreversible writes in the oracle." },
+        ]}
+        visual={
+          <TaskTable
+            shift="left"
+            heading="Tasks · marketplace twin"
+            rows={[
+              { task: "Restore both sides", status: "Completed", tone: "PASS", who: "R", date: "00:03" },
+              { task: "Run matching.worker", status: "Running", tone: "PASS", who: "M", date: "00:09" },
+              { task: "Contain partners", status: "BLOCKED", tone: "BLOCK", who: "P", date: "—" },
+              { task: "Compare in oracle", status: "In review", tone: "WARN", who: "O", date: "00:14" },
+            ]}
+          />
+        }
+      />
+
       <RelatedGrid
         items={[
           { href: "/product/load", title: "Load", description: "Traffic shaped like production's access log." },
