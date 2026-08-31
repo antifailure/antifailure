@@ -223,11 +223,18 @@ func TestTheProseAgreesWithTheRegistryAboutUniqueness(t *testing.T) {
 	// The guard that stops this test passing because it found nothing. A
 	// rewording that breaks the parse has to fail here rather than quietly
 	// stop checking, which is the failure mode of every test that scans prose.
-	require.NotEmpty(t, claimed,
-		"the paragraph naming which transforms preserve uniqueness was not found, so "+
-			"this check is not checking anything. If the wording changed, teach this "+
-			"about the new wording rather than deleting it")
-	require.NotEmpty(t, denied, "the same, for the half that names the ones that do not")
+	//
+	// Only the denied half now, and that is a narrowing rather than a
+	// weakening. The sentence naming which transforms DO preserve uniqueness
+	// is generated from PreservesUniqueness and sits inside the unique
+	// markers, so it cannot contradict the registry and
+	// TestTheUniquenessSentenceAgreesWithTheTable holds it there. What is
+	// still written by a person, and still able to be wrong, is the half that
+	// names the ones that do not.
+	require.NotEmpty(t, denied,
+		"the paragraph naming which transforms do not preserve uniqueness was not "+
+			"found, so this check is not checking anything. If the wording changed, "+
+			"teach this about the new wording rather than deleting it")
 
 	for _, name := range claimed {
 		tr, ok := masking.Lookup(name)
@@ -301,7 +308,21 @@ func uniquenessClaims(t *testing.T, prose string) (claimed, denied []string) {
 	const pivot = "preserve uniqueness"
 	i := strings.Index(prose, pivot)
 	if i < 0 {
-		return nil, nil
+		// No pivot means the claimed half is not here, which is the shape the
+		// page has now: that sentence is generated inside the unique markers
+		// and this is reading what comes after them. What is left is the
+		// denied list on its own, "`name`, `city`, `company` and the rest do
+		// not, because ...", and it is still hand written and still able to
+		// disagree with the registry.
+		k := strings.Index(prose, "do not")
+		if k < 0 {
+			return nil, nil
+		}
+		span := prose[:k]
+		if from := strings.LastIndex(span, ". "); from >= 0 {
+			span = span[from:]
+		}
+		return nil, backticked(span)
 	}
 	// Back to the start of the sentence, so a name in the previous one is not
 	// swept in. The paragraph begins after a blank line.
