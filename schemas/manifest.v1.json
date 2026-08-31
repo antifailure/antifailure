@@ -1252,18 +1252,21 @@
             "p95_increase": {
               "type": "number",
               "minimum": 0,
-              "default": 0.25
+              "default": 0.25,
+              "description": "How much slower than production a route may get, as a ratio. It divides a measured p95 by production's own p95 for that route, so it needs a source that carries one: the default applies under source otel, and the engine refuses this key under access_log or none, where a route arrives with no baseline and the threshold could never fire."
             },
             "error_rate": {
               "type": "number",
               "minimum": 0,
               "maximum": 1,
-              "default": 0.01
+              "default": 0.01,
+              "description": "The share of requests that may fail. Counted from the run's own responses, so it needs no baseline and works under every source."
             },
             "query_count_increase": {
               "type": "number",
               "minimum": 0,
-              "default": 0.2
+              "deprecated": true,
+              "description": "Not read by anything, and refused by the engine. A load run counts requests, not statements. The check that compares statement counts against the base branch is insights.query_regression, and how much growth fails it is insights.regression_factor."
             }
           }
         }
