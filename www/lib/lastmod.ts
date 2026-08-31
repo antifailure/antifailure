@@ -89,20 +89,13 @@ function sourcesFor(routePath: string): string[] {
 
 let warned = false;
 
-export function contentLastModified(routePath: string): Date {
-  // A post carries its own date. Asking git when content/blog/<file>.tsx last
-  // changed would answer a different question, and the file name is not the
-  // slug anyway: what-staging-misses.tsx publishes at
-  // /blog/what-staging-misses-about-migrations. Before this branch existed
-  // these three routes fell through to the build clock, which is the exact
-  // thing this module was written to stop, and check:seo caught it.
-  if (routePath.startsWith("/blog/")) {
-    const post = getPost(routePath.slice("/blog/".length));
-    if (post) return new Date(postModified(post));
-  }
-
-  const sources = sourcesFor(routePath);
-  if (sources.length === 0) return new Date();
+/**
+ * CI is the place where a wrong date ships. A developer's `next build` is a
+ * preview; the workflow's is what the world reads, and it is also the only
+ * place a shallow checkout happens, because actions/checkout defaults to
+ * depth 1.
+ */
+const STRICT = process.env.CI === "true" || process.env.CI === "1";
 
 /**
  * A shallow checkout, asked directly rather than inferred.
@@ -154,6 +147,18 @@ function unavailable(routePath: string, why: string): Date {
 }
 
 export function contentLastModified(routePath: string): Date {
+  // A post carries its own date, so this answers without git at all and runs
+  // ahead of the shallow check. Asking git when content/blog/<file>.tsx last
+  // changed would answer a different question, and the file name is not the
+  // slug anyway: what-staging-misses.tsx publishes at
+  // /blog/what-staging-misses-about-migrations. Before this branch existed
+  // these three routes fell through to the build clock, which is the exact
+  // thing this module was written to stop, and check:seo caught it.
+  if (routePath.startsWith("/blog/")) {
+    const post = getPost(routePath.slice("/blog/".length));
+    if (post) return new Date(postModified(post));
+  }
+
   if (!shallowChecked) {
     shallowChecked = true;
     shallow = isShallow();
