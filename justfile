@@ -60,6 +60,7 @@ gate: _reports
     fi
 
     echo "Gates"
+    run "installs match their lockfiles" just installcheck
     run "generated files are current" just _generated
     run "release stamps a real version"  just ldcheck
     run "error catalog and code agree"   just errcheck
@@ -252,8 +253,47 @@ db-down:
 
 # Install the JavaScript dependencies.
 deps:
-    npm --prefix web ci --no-audit --no-fund
-    npm --prefix runner ci --no-audit --no-fund
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Every workspace in the tree, found rather than listed. This named web and
+    # runner, which is two of the eight lockfiles here, so `just deps` on a
+    # fresh clone left www, docs, console, api, ee/web and examples/next-app
+    # uninstalled and said nothing. `just installcheck` points people at this
+    # recipe, and advice that installs a quarter of the tree is worse than none.
+    #
+    # ee/web last, because its four packages resolve @antifailure/db and
+    # @antifailure/api out of web/ with file: dependencies. `npm ci` there
+    # before web exists SUCCEEDS and leaves a tree that does not work: the links
+    # resolve to source directories whose own dependencies are absent, and
+    # `npm run typecheck` then reports five implicit-any errors inside
+    # web/packages/db/src/schema.ts, in a file nobody touched. The order is read
+    # from the lockfile rather than from this comment: a workspace whose
+    # lockfile links outside its own directory goes last.
+    #
+    # `ci` for all of them, including ee/web. ci.yml uses `install` there and
+    # this followed it until running both showed the difference: `ci` works, and
+    # `install` rewrites ee/web/package-lock.json and chmods two files in web/.
+    # The verb was never the point. The order always was.
+    linked=()
+    plain=()
+    while IFS= read -r lock; do
+      dir=${lock#./}; dir=${dir%/package-lock.json}
+      if node -e "const p=require('./$lock').packages||{};process.exit(Object.values(p).some(e=>e.link&&String(e.resolved||'').startsWith('..'))?0:1)"; then
+        linked+=("$dir")
+      else
+        plain+=("$dir")
+      fi
+    done < <(find . -name package-lock.json -not -path '*/node_modules/*' | sort)
+
+    for dir in "${plain[@]}"; do
+      echo "  $dir"
+      npm --prefix "$dir" ci --no-audit --no-fund
+    done
+    for dir in "${linked[@]}"; do
+      echo "  $dir (last, because it links into another workspace)"
+      npm --prefix "$dir" ci --no-audit --no-fund
+    done
 
 # ---------------------------------------------------------------------------
 # Build
@@ -317,9 +357,11 @@ test-tools:
     cd tools && go test ./... -count=1 -timeout 5m
 
 test-web:
+    go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
     npm --prefix web test --workspaces --if-present
 
 test-runner:
+    go run ./tools/installcheck . runner || npm --prefix runner ci --no-audit --no-fund
     npm --prefix runner test
 
 # The marketing site's own backend: api/, one anonymous write endpoint and the
@@ -334,6 +376,12 @@ test-site-api:
 # them by hand is how two of them ended up untested.
 test-ee:
     cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./... -race -count=1 -timeout 15m
+    # web first, because ee/web's packages resolve @antifailure/db and
+    # @antifailure/api out of web/ with file: dependencies, and `npm ci` in
+    # ee/web with web absent succeeds and leaves a tree whose typecheck fails
+    # inside web/packages/db/src/schema.ts.
+    go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    go run ./tools/installcheck . ee/web || npm --prefix ee/web ci --no-audit --no-fund
     npm --prefix ee/web run typecheck
     npm --prefix ee/web test
 
@@ -389,6 +437,11 @@ prosecheck:
 figurecheck:
     go run ./tools/figurecheck .
 
+# Every sentence that enumerates the egress modes enumerates the real ones,
+# read from schemas/manifest.v1.json rather than from a second copy of the list.
+modecheck:
+    go run ./tools/modecheck .
+
 # No class on a rendered element that another class on the same element beats,
 # so it is written, reviewed, and does nothing.
 #
@@ -399,10 +452,6 @@ figurecheck:
 # nothing at all. Reads the built HTML, so it needs a built www.
 classcheck:
     go run ./tools/classcheck .
-# Every sentence that enumerates the egress modes enumerates the real ones,
-# read from schemas/manifest.v1.json rather than from a second copy of the list.
-modecheck:
-    go run ./tools/modecheck .
 
 # Spelling, with the project dictionary in tools/docs/dictionary.txt.
 spell:
@@ -468,7 +517,10 @@ links:
 seo:
     #!/usr/bin/env bash
     set -euo pipefail
-    [ -d www/node_modules ] || npm --prefix www ci --no-audit --no-fund --silent
+    # Not `[ -d www/node_modules ]`. That condition installs when nothing is
+    # there and does nothing when what is there is wrong, which is how a week of
+    # www work got verified against Next 15 while the lockfile pinned 16.
+    go run ./tools/installcheck . www || npm --prefix www ci --no-audit --no-fund --silent
     (cd www && npm run build)
     (cd www && npm run check:seo)
 
@@ -728,7 +780,10 @@ typecheck:
       fi
       root=$(npm_root "$dir") || { echo "  $dir: no lockfile above it, so there is no project to check it in"; exit 1; }
       echo "  $dir"
-      [ -d "$root/node_modules" ] || npm --prefix "$root" ci --no-audit --no-fund --silent
+      # Absent OR stale. This asked only whether the directory existed, in the
+      # recipe an agent is most likely to trust after editing TypeScript, so a
+      # drifted install was typechecked against the wrong versions and passed.
+      go run ./tools/installcheck . "$root" || npm --prefix "$root" ci --no-audit --no-fund --silent
       npx --prefix "$root" tsc --noEmit -p "$cfg"
       checked=$((checked + 1))
     done < <(find . -name tsconfig.json \
@@ -753,9 +808,32 @@ typecheck:
     # too and then does the part a typecheck cannot: an import written as
     # ../lib/guard from a page two directories deep resolves through baseUrl
     # and fails in webpack with "Module not found".
-    [ -d console/node_modules ] || npm --prefix console ci --no-audit --no-fund
+    go run ./tools/installcheck . console || npm --prefix console ci --no-audit --no-fund
     NEXT_TELEMETRY_DISABLED=1 npm --prefix console run build
     echo "typecheck: $checked projects typechecked, $excused checked by another gate"
+
+# Every installed node_modules is the tree its lockfile describes.
+#
+# First in `gate`, and cheap enough to be, because it compares two files rather
+# than installing anything. It answers in milliseconds and needs no network, so
+# finding out at second two beats finding out after fifty minutes of gates that
+# were all answering about the wrong versions.
+#
+# The failure it exists for: a week of www work was verified with
+# www/node_modules holding Next 15.5.23 against a lockfile pinning 16.3.3.
+# Every build, every SEO assertion and a whole prose sweep ran against a
+# different Next major from the one CI uses, and every one of them reported
+# success in good faith. It also explains `next build` rewriting
+# www/tsconfig.json for some people and not others, which several agents chased
+# as flakiness: it is Next 16 behaviour and a stale 15 install does not do it.
+#
+# --drift-only, so a workspace nobody has installed is reported and does not
+# fail. It cannot have answered about the wrong versions, every recipe below
+# installs what it uses, and a gate that went red on a fresh worktree for a
+# directory it was about to create anyway is the false alarm that gets a check
+# deleted.
+installcheck:
+    go run ./tools/installcheck --drift-only .
 
 # G11. Two builds of one commit produce the same release artifact.
 #
