@@ -409,6 +409,76 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     }
   })
 
+  it("an update's new row must satisfy the SELECT policies, not only the WITH CHECK", async () => {
+    // Written here because it could not be written where it belongs. The right
+    // place is a comment beside `stripe_delivery_moves_plan` in 0020, and a
+    // migration that has already been applied cannot be edited: the runner
+    // compares a digest and refuses, because databases that ran the old text
+    // would never receive the new text.
+    //
+    // What the next person to edit that policy needs to know: Postgres applies
+    // the table's SELECT policies to the NEW row of an UPDATE as well, with no
+    // RETURNING clause needed. So on `organizations`, where the delivery has a
+    // SELECT policy keyed on the same customer, weakening the UPDATE policy's
+    // WITH CHECK removes a real defence and breaks nothing visible, because the
+    // read half goes on catching the escape. Establishing that took a table of
+    // its own: rewriting the real policy with `WITH CHECK (true)` and watching
+    // the escape still fail proves only that something stopped it.
+    //
+    // It is asserted rather than described because the day it stops being true
+    // is a Postgres upgrade, and the only warning would be this going red.
+    await h.admin`CREATE TABLE update_sees_select_policies (id int PRIMARY KEY, v text)`
+    try {
+      await h.admin`INSERT INTO update_sees_select_policies VALUES (1, 'visible')`
+      await h.admin`ALTER TABLE update_sees_select_policies ENABLE ROW LEVEL SECURITY`
+      await h.admin`ALTER TABLE update_sees_select_policies FORCE ROW LEVEL SECURITY`
+      await h.admin`GRANT SELECT, UPDATE ON update_sees_select_policies TO antifailure_app`
+      await h.admin`
+        CREATE POLICY reads ON update_sees_select_policies
+          FOR SELECT TO antifailure_app USING (v = 'visible')`
+      // Deliberately the widest an UPDATE policy can be. Nothing in this policy
+      // refuses anything, so whatever refuses the write below is the other half.
+      //
+      // FOR UPDATE and not FOR ALL, which is the shape `stripe_delivery_moves_plan`
+      // has and is load bearing here: FOR ALL is a SELECT policy too, so writing
+      // it that way would widen the read half to `true` as well and the defence
+      // this test is about would disappear. The first version of this test did
+      // exactly that and went red, which is how the dependency was found.
+      await h.admin`
+        CREATE POLICY writes ON update_sees_select_policies
+          FOR UPDATE TO antifailure_app USING (true) WITH CHECK (true)`
+
+      const err = await h.pool
+        .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+          await db.execute(sql`UPDATE update_sees_select_policies SET v = 'hidden' WHERE id = 1`)
+        })
+        .then(
+          () => null,
+          (e: unknown) => pgError(e),
+        )
+      assert.ok(
+        err,
+        'an update moved a row out of what the SELECT policy admits, so that defence is gone',
+      )
+      assert.equal(err.code, '42501', `expected a policy refusal, got ${err.code}: ${err.message}`)
+
+      // The negative control, so this is a property of the SELECT policy rather
+      // than of the table. With the read half open, the same write succeeds.
+      await h.admin`DROP POLICY reads ON update_sees_select_policies`
+      await h.admin`
+        CREATE POLICY reads ON update_sees_select_policies
+          FOR SELECT TO antifailure_app USING (true)`
+      await h.pool.withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+        await db.execute(sql`UPDATE update_sees_select_policies SET v = 'hidden' WHERE id = 1`)
+      })
+      const [row] = await h.admin<{ v: string }[]>`
+        SELECT v FROM update_sees_select_policies WHERE id = 1`
+      assert.equal(row?.v, 'hidden', 'the control write was refused too, so the test proves nothing')
+    } finally {
+      await h.admin`DROP TABLE IF EXISTS update_sees_select_policies`
+    }
+  })
+
   it('a tenant cannot record a delivery in the billing ledger', async () => {
     // billing_events grants the tenant SELECT and UPDATE and deliberately no
     // INSERT policy, because the primary key is the payment provider's own

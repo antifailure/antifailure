@@ -20,7 +20,22 @@ event id and a tenant able to insert could claim the id of an event that has not
 arrived yet, which would make the real delivery look like a retry and be
 dropped. Nothing else in the suite would have noticed that verb widening.
 
-Both were watched failing before they were kept: the first against a pool whose
+A third records a PostgreSQL behaviour the review established and there was
+nowhere else to put: the new row of an UPDATE must satisfy the table's SELECT
+policies as well as the UPDATE policy's `WITH CHECK`, with no RETURNING clause
+needed. On `organizations` that means weakening the `WITH CHECK` on
+`stripe_delivery_moves_plan` would remove a real defence and break nothing
+visible, because the read half goes on catching the escape. The comment belongs
+beside that policy and a migration that has already been applied cannot be
+edited, so it is asserted here instead, which also means a Postgres upgrade that
+changed the behaviour would say so. Writing it turned up a dependency nobody had
+noticed: the defence holds only because that policy is `FOR UPDATE`. `FOR ALL`
+is a SELECT policy too, so it would widen the read half and the second lock
+would be gone.
+
+All three were watched failing before they were kept: the first against a pool whose
 settings are session scoped rather than transaction scoped, in both the declared
 identity and the `statement_timeout` half, and the second against a ledger policy
-widened from SELECT to ALL.
+widened from SELECT to ALL. The third was watched failing in both directions,
+once with its write policy as `FOR ALL` and once with the read half of its own
+negative control left closed.
