@@ -11,9 +11,21 @@
 // would pass just as well with the policies removed.
 
 import { after, before, describe, it } from 'node:test'
+import { readFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 import { sql } from 'drizzle-orm'
-import { available, setup, seedTenant, dropTenant, pgError, type Harness, type Fixture } from './harness.ts'
+import { createPool } from '../src/client.ts'
+import {
+  available,
+  appUrl,
+  connectTimeoutSeconds,
+  setup,
+  seedTenant,
+  dropTenant,
+  pgError,
+  type Harness,
+  type Fixture,
+} from './harness.ts'
 
 const hasDatabase = await available()
 
@@ -336,6 +348,91 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       'bob can read the email address of a user in another organization',
     )
     assert.ok(emails.includes(`${bob.slug}@example.test`), 'bob cannot read his own user row')
+  })
+
+  it('a declared identity does not survive its transaction onto the next borrower', async () => {
+    // The whole of the webhook design rests on this one property. The policies
+    // in 0013 and 0020 do not key on the tenant, they key on a name the caller
+    // declares, so a declared name left behind on a pooled connection is read
+    // by whoever borrows it next and it reaches another company's rows. Proven
+    // in this repository rather than assumed: `lock_timeout` and
+    // `statement_timeout` were found leaking off a migration connection the
+    // same night this suite was written, so the failure mode is live here.
+    //
+    // max: 1 is the point of the test. With a larger pool the second query can
+    // land on a connection that never carried the setting, and the assertion
+    // passes for the wrong reason.
+    const one = createPool({ url: appUrl(), max: 1, connectTimeoutSeconds })
+    try {
+      await one.withTenant({ orgId: alice.orgId, userId: alice.userId }, async (db) =>
+        db.execute(sql`SELECT 1`),
+      )
+      await one.withGitHubAccount('some-account', async (db) => db.execute(sql`SELECT 1`))
+      await one.withStripeCustomer('cus_declared_by_a_delivery', async (db) =>
+        db.execute(sql`SELECT 1`),
+      )
+
+      // Every setting the pool declares, read out of the pool's own source
+      // rather than listed here. A hand-written list goes stale the next time a
+      // policy keys on something new, and the new one is exactly the one that
+      // would leak unnoticed.
+      //
+      // pg_settings is NOT the way to ask this and looked like it was. A custom
+      // GUC set through set_config is a placeholder and never appears there, so
+      // the query returned nothing whether or not anything had leaked: a green
+      // check over a subject it never examined.
+      const source = await readFile(new URL('../src/client.ts', import.meta.url), 'utf8')
+      const declared = [...new Set(source.match(/'antifailure\.[a-z_]+'/g) ?? [])].map((q) =>
+        q.slice(1, -1),
+      )
+      assert.ok(declared.length >= 10, `found only ${declared.length} settings in client.ts`)
+
+      for (const name of declared) {
+        const [row] = await one.sql<{ left: string | null }[]>`
+          SELECT current_setting(${name}, true) AS left`
+        assert.ok(
+          row?.left === null || row?.left === '',
+          `${name} outlived its transaction on a pooled connection, carrying ${row?.left}`,
+        )
+      }
+
+      // The timeouts too, for the same reason and because that is the shape the
+      // leak actually took here.
+      const [timeout] = await one.sql<{ statement_timeout: string }[]>`SHOW statement_timeout`
+      assert.equal(
+        timeout?.statement_timeout,
+        '0',
+        'statement_timeout outlived its transaction on a pooled connection',
+      )
+    } finally {
+      await one.close()
+    }
+  })
+
+  it('a tenant cannot record a delivery in the billing ledger', async () => {
+    // billing_events grants the tenant SELECT and UPDATE and deliberately no
+    // INSERT policy, because the primary key is the payment provider's own
+    // event id: a tenant able to insert could claim the id of an event that has
+    // not arrived yet, and the real delivery would then look like a retry and
+    // be dropped. Narrowing the verb is what makes that impossible rather than
+    // unlikely, and nothing else in the suite would notice it widening.
+    const err = await h.pool
+      .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+        await db.execute(sql`
+          INSERT INTO billing_events (
+            stripe_event_id, org_id, stripe_customer_id, type, event_created_at)
+          VALUES ('evt_claimed_before_it_arrived', ${bob.orgId}, 'cus_bob', 'invoice.paid', now())`)
+      })
+      .then(
+        () => null,
+        (e: unknown) => pgError(e),
+      )
+    assert.ok(err, 'a tenant wrote a row into the billing ledger')
+    assert.equal(
+      err.code,
+      '42501',
+      `expected the insert to be refused for insufficient privilege, got ${err.code}: ${err.message}`,
+    )
   })
 
   it('a session is readable only by the user who owns it, or by presenting its token', async () => {
