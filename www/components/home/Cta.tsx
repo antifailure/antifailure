@@ -48,11 +48,7 @@ export function Cta() {
               <Button href="/signup" theme="white">
                 Get started
               </Button>
-              <Button
-                href="/docs"
-                theme="outlined"
-                className="border-white/40 bg-white/[0.02] text-white hover:border-white"
-              >
+              <Button href="/docs" theme="outlined-inverse">
                 Read the docs
               </Button>
             </div>

@@ -161,7 +161,7 @@ export function FirewallPage() {
             <li key={item.provider}>
               <Panel className="flex h-full flex-col rounded-[12px] bg-white p-5">
                 <div className="flex items-center justify-between gap-3">
-                  <MonoLabel>{item.provider}</MonoLabel>
+                  <MonoLabel tone="reader">{item.provider}</MonoLabel>
                   <StatusPill tone={item.tone}>{item.tone}</StatusPill>
                 </div>
                 <div className="mt-4 font-mono text-[13px] tracking-extra-tight text-black">{item.op}</div>
@@ -193,7 +193,7 @@ export function FirewallPage() {
               <StatusPill tone="PASS">FAIL CLOSED</StatusPill>
             </div>
           </div>
-          <Hairline className="block" />
+          <Hairline />
           <ul>
             {LEDGER.map((row) => (
               <li
@@ -222,7 +222,7 @@ export function FirewallPage() {
               </li>
             ))}
           </ul>
-          <Hairline className="block" />
+          <Hairline />
           <div className="flex flex-wrap items-center gap-2 px-5 py-3">
             <QueueChip>duplicate would have been live.</QueueChip>
             <QueueChip blocked>unknown destination · denied inside the twin</QueueChip>
@@ -249,7 +249,7 @@ export function FirewallPage() {
                 <MonoLabel>BYPASS BLOCKED</MonoLabel>
                 <StatusPill tone="FAIL">DENY</StatusPill>
               </div>
-              <Hairline className="block" />
+              <Hairline />
               <div className="px-5 py-5">
                 <div className="font-mono text-[13px] tracking-extra-tight text-black">TCP 18.4.2.9:443</div>
                 <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">

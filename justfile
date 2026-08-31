@@ -76,6 +76,7 @@ gate: _reports
     run "spelling"                       just spell
     run "prose style"                    just vale
     run "every link resolves"            just links
+    run "no class that never applies"    just classcheck
     run "the built docs carry their head" just docscheck
     run "the site's own claims"          just seo
     run "prose stays readable"           just readability
@@ -440,6 +441,17 @@ figurecheck:
 # read from schemas/manifest.v1.json rather than from a second copy of the list.
 modecheck:
     go run ./tools/modecheck .
+
+# No class on a rendered element that another class on the same element beats,
+# so it is written, reviewed, and does nothing.
+#
+# `cn` is a plain join, not tailwind-merge, so a className passed to a component
+# lands beside the component's own class rather than replacing it, and the
+# cascade picks whichever Tailwind emitted last. The site header marked the
+# current page with text-black over a text-black/70 default, lost, and marked
+# nothing at all. Reads the built HTML, so it needs a built www.
+classcheck:
+    go run ./tools/classcheck .
 
 # Spelling, with the project dictionary in tools/docs/dictionary.txt.
 spell:

@@ -1079,7 +1079,7 @@ export function FirewallScene() {
               <Hairline />
               <div className="flex items-center gap-2 px-3 py-1.5">
                   <span className="relative flex min-w-0 flex-1 items-center bg-[#f4f7f5] px-2 py-1 ring-1 ring-black/10">
-                  <MonoLabel className="text-black/35">filter</MonoLabel>
+                  <MonoLabel>filter</MonoLabel>
                   <span
                     className="ml-2 inline-block h-3 w-px bg-black/70"
                     style={{ opacity: caretOn ? 1 : 0 }}
