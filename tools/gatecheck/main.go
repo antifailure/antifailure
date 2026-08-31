@@ -36,10 +36,16 @@ import (
 // reporting drift that does not exist and gets deleted for being noisy.
 const cmd = "(?:^|[\\s;&|(])"
 
+// The npm class carries `"` and `$` because a quoted span is replaced with `""`
+// rather than dropped, and an argument can be a shell variable. Without them
+// `npx --prefix "$root" tsc` reads as no gate at all, and `just typecheck`
+// became invisible here the day it started deriving its projects from the tree
+// instead of naming them. A gate this cannot see is a gate it silently stops
+// pairing, which is the failure this tool exists to prevent.
 var gatePatterns = []*regexp.Regexp{
 	regexp.MustCompile(cmd + `go run \./tools/(\w+)`),
 	regexp.MustCompile(cmd + `go (test|vet|build) ([^\s|;&]+)`),
-	regexp.MustCompile(cmd + `(npm|npx) [\w\s./-]*?(test|tsc)\b`),
+	regexp.MustCompile(cmd + `(npm|npx) [\w\s./"$-]*?(test|tsc)\b`),
 	regexp.MustCompile(cmd + `gofmt -l`),
 	regexp.MustCompile(cmd + `node --test`),
 }
