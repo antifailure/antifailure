@@ -47,6 +47,41 @@ NOT EXISTS pgcrypto`, so the first statement of the first migration was refused
 and the whole file rolled back. The allow list is `database_extensions` in the
 stack's variables.
 
+**`gave up waiting for a lock`** is a deploy that was blocked rather than
+broken, and it is the one failure here that is usually safe to simply run again.
+The migration asked for a lock on a table the running revision writes to, waited
+three seconds, and gave up. Nothing applied: a migration file is one
+transaction, so it rolled back whole and was not recorded.
+
+That failure is deliberate and the alternative is worse. A lock request that
+cannot be granted queues, and every later request queues behind the request
+rather than behind the table, so a migration that waits is a migration that
+stops every sign-in for as long as the transaction in its way lives. The server
+bounds none of that on its own: `lock_timeout`, `statement_timeout` and
+`idle_in_transaction_session_timeout` are all zero on a flexible server.
+
+Start the job again. If it fails the same way twice, find the holder before a
+third attempt:
+
+```sql
+SELECT pid, state, wait_event_type, xact_start, left(query, 120)
+FROM pg_stat_activity
+WHERE state <> 'idle' OR state = 'idle in transaction'
+ORDER BY xact_start;
+```
+
+An `idle in transaction` backend older than the deploy is the usual answer, and
+it is a client that opened a transaction and never finished it rather than
+anything the migration did.
+
+**`canceling statement due to statement timeout`** is the opposite case: nothing
+was blocking the migration, the migration was blocking everybody else. One of
+its statements ran past five minutes while holding its locks. Do not raise the
+timeout to get the deploy through. Read which statement it was, because a
+migration statement that takes five minutes on this data will take longer on
+more of it, and the answer is usually an index or a batched backfill rather than
+a larger budget.
+
 **A migration that failed part way** leaves the schema between two versions. Do
 not write a corrective migration under pressure. Read what applied, decide
 whether to roll forward, and remember that point in time recovery reaches back
