@@ -21,17 +21,20 @@ af change --diff pr.patch          against a diff you already have
 ```
 
 ```
-4 files changed, touching the schema, the api service and an outbound host.
-5 checks will run, and 1 more is selected and not configured.
+4 files changed, touching the schema, the api service and an outbound host. 5 checks will run, and 1 more is selected and not configured.
 
-  run   environment  api/billing.ts: the manifest declares the service api at the repository root
+  run   environment  api/billing.ts: the manifest declares the service api at the repository root, so every file in the repository is part of it (and 7 more)
   run   migration    migrations/20260824_add_billing_status.sql: the path is inside a migrations directory
   run   invariants   migrations/20260824_add_billing_status.sql: the path is inside a migrations directory
-  run   workflows    api/billing.ts: the manifest declares the service api at the repository root
+  run   workflows    api/billing.ts: the manifest declares the service api at the repository root, so every file in the repository is part of it (and 6 more)
   gap   load         load is off in the manifest, and af ci generates it only with --load
-  run   egress       api/billing.ts: an added line names api.stripe.com, which the manifest routes to mode mock
+  run   egress       api/billing.ts: an added line names api.stripe.com, which the manifest routes to mode mock (and 1 more)
   skip  masking      nothing this change touches is exercised by it
 ```
+
+Each line names one reason and counts the rest, because a check selected by
+eight files does not need eight sentences to justify it. `af change -o json`
+carries all of them.
 
 ## What it will not tell you
 

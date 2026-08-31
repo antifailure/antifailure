@@ -46,6 +46,10 @@ mistakes is not the same.
 In a GitHub Actions job it writes one output per check, so a later step can
 skip work this change does not need.
 
+This is the one command that does not need antifailure.yaml. Without one it
+still says what the diff touches, and reports every check as unavailable
+because nothing is configured to run it.
+
 ```
 af change [flags]
 ```

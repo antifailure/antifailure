@@ -53,7 +53,11 @@ mistakes is not the same.
   af change --diff pr.patch          against a diff you already have
 
 In a GitHub Actions job it writes one output per check, so a later step can
-skip work this change does not need.`),
+skip work this change does not need.
+
+This is the one command that does not need antifailure.yaml. Without one it
+still says what the diff touches, and reports every check as unavailable
+because nothing is configured to run it.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			profile, err := changeProfile(cmd.Context(), e, branch,
