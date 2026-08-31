@@ -122,7 +122,7 @@ const FILE_TOKENS: Record<string, Token[]> = {
     { t: " subscriptions\n  ", cls: VAR },
     { t: "add column", cls: KW },
     { t: " access_tier text;\n\n", cls: VAR },
-    { t: "-- No default here on purpose: a default rewrites the table.\n", cls: CM },
+    { t: "-- Backfilled in a later migration, in batches, so no lock spans the table.\n", cls: CM },
   ],
   "masking.yaml": [
     { t: "# Compiled to SQL, then read back by the scanner.\n", cls: CM },
@@ -184,7 +184,7 @@ const CHECKS = [
 ];
 
 const CHECK_DETAIL = [
-  "Twelve analyzers read the repository and say what they assumed. Edit what they got wrong.",
+  "Detection reads the repository and says what it assumed, naming the file each answer came from. Edit what it got wrong.",
   "A masked, referentially consistent branch. An unverified golden cannot be branched at all.",
   "Stripe answered from a stateful pack with the network unplugged. Mail rendered and captured.",
   "Agents drive the workflows through the accessibility tree and return a verdict with a trace.",
@@ -460,12 +460,16 @@ export function IdePlay() {
     if (term >= 2) {
       lines.push({ text: "" });
       lines.push({ text: "$ af init" });
-      lines.push({ text: "Step 1/3: reading the repository..." });
+      lines.push({ text: "Reading the repository" });
     }
-    if (term >= 3) lines.push({ text: "Step 2/3: 12 analyzers, 3 services, 1 database..." });
-    if (term >= 4) lines.push({ text: "Step 3/3: writing antifailure.yaml..." });
+    if (term >= 3) lines.push({ text: "Detected  3 services, 1 database" });
+    if (term >= 4) lines.push({ text: "Assumed   2 answers, each naming the file it came from" });
     if (term >= 5) {
-      lines.push({ text: "Wrote antifailure.yaml. Run af up next.", cls: "text-[#16a34a]", success: true });
+      lines.push({
+        text: "Written   antifailure.yaml. Next: read it, edit anything that looks wrong, then run af up",
+        cls: "text-[#16a34a]",
+        success: true,
+      });
     }
     return lines;
   }, [term, cmdChars]);
