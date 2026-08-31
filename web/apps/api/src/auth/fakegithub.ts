@@ -181,6 +181,23 @@ export class FakeGitHub implements GitHubClient {
     this.absentBranches.add(`${repository}#${ref}`)
   }
 
+  /**
+   * Puts every dispatch exception back, leaving the registered workflows and
+   * the dispatch log alone.
+   *
+   * One suite shares one fake across its tests, so a test that revokes a
+   * permission to reach the refusal would otherwise revoke it for everything
+   * after it. Restoring in a finally is what keeps a failed assertion from
+   * turning into a different failure three tests later.
+   */
+  reset(): void {
+    this.uninstalled.clear()
+    this.invisible.clear()
+    this.absentBranches.clear()
+    this.actionsWrite = true
+    this.dispatchRefusal = null
+  }
+
   /** Every dispatch the control plane asked for, in order. */
   get dispatches(): readonly Dispatched[] {
     return this.dispatched

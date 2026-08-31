@@ -772,9 +772,9 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
     })
 
     it('GitHub refusing is an answer, not an internal error', async () => {
-      // No workflow file registered for this repository, which is what a
-      // missing .github/workflows/antifailure.yml, a repository the App was
-      // not given, and a missing actions:write permission all look like.
+      // No workflow file registered for this repository. Distinct from a
+      // missing installation and from an ungranted permission, which are the
+      // two states this message used to be given for as well.
       const res = await callProcedure(h, member, 'environments.create', 'mutation', {
         repository: org.repository,
         workflow: 'not-there.yml',
@@ -784,7 +784,127 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
         'PRECONDITION_FAILED',
         'GitHub saying no arrived as a fault in this control plane',
       )
-      assert.match(message(res.body), /not-there\.yml/)
+      assert.match(message(res.body), /\.github\/workflows\/not-there\.yml/)
+      assert.doesNotMatch(message(res.body), /Actions write/)
+    })
+
+    /**
+     * The five states behind a refused dispatch, through the route a person
+     * actually presses.
+     *
+     * One test per remedy, because the remedies are what differ: accepting a
+     * permission on GitHub, adding a repository to an installation, checking a
+     * name, committing a file, and pushing a branch are five afternoons, and
+     * the message this replaced named three of them at once and left the
+     * reader to pick.
+     */
+    it('every way a dispatch is refused reaches the person as its own remedy', async () => {
+      // Each arrangement takes the repository it is about. Closing over the
+      // suite's own `org` instead would arrange a state on a repository the
+      // call never touches, and every case would quietly pass by dispatching
+      // successfully, which is exactly what it did once.
+      const cases: [string, (repo: string) => void, RegExp, RegExp][] = [
+        [
+          'the permission was never accepted',
+          () => h.github.revokeActionsWrite(),
+          /Actions write/,
+          /workflows\//,
+        ],
+        [
+          'the App does not hold this repository',
+          (repo) => h.github.uninstallFrom(repo),
+          /not installed on /,
+          /Actions write/,
+        ],
+        [
+          'GitHub will not show the repository',
+          (repo) => h.github.hideRepository(repo),
+          /will not show this App/,
+          /Actions write/,
+        ],
+        [
+          'the branch was never pushed',
+          (repo) => h.github.removeBranch(repo, 'main'),
+          /no branch named main/,
+          /Actions write/,
+        ],
+        [
+          'the workflow has no dispatch trigger',
+          () => h.github.refuseDispatches('trigger-missing'),
+          /workflow_dispatch/,
+          /Actions write/,
+        ],
+      ]
+      for (const [i, [what, arrange, names, doesNotName]] of cases.entries()) {
+        const fresh = await seedOrg(h.admin, `refused${i}`)
+        const session = await signInAs(h, fresh, 'admin')
+        try {
+          await install(fresh)
+          h.github.addWorkflow(fresh.repository, 'antifailure.yml')
+          arrange(fresh.repository)
+          const res = await callProcedure(h, session, 'environments.create', 'mutation', {
+            repository: fresh.repository,
+          })
+          assert.equal(errorCode(res.body), 'PRECONDITION_FAILED', what)
+          assert.match(message(res.body), names, what)
+          assert.doesNotMatch(message(res.body), doesNotName, what)
+          // The whole reason this work exists: no JSON reaches a screen.
+          assert.doesNotMatch(message(res.body), /documentation_url|[{}]/, what)
+        } finally {
+          h.github.reset()
+          await dropOrg(h.admin, fresh.orgId)
+        }
+      }
+    })
+
+    /**
+     * The same states, before anybody presses anything.
+     *
+     * A form that only fails on submit is the defect this closes: none of what
+     * it reports is caused by anything typed into the form, and every one of
+     * them was already true when the page loaded.
+     */
+    it('readiness answers before the button is pressed, and never throws on a supported state', async () => {
+      const ready = data<{ status: string }>(
+        await callProcedure(h, member, 'environments.readiness', 'query', {
+          repository: org.repository,
+        }),
+        'environments.readiness',
+      )
+      assert.deepEqual(ready, { status: 'ready' })
+
+      h.github.revokeActionsWrite()
+      try {
+        const blocked = data<{ status: string; cause: string; message: string }>(
+          await callProcedure(h, member, 'environments.readiness', 'query', {
+            repository: org.repository,
+          }),
+          'environments.readiness',
+        )
+        assert.equal(blocked.status, 'blocked')
+        assert.equal(blocked.cause, 'permission-missing')
+        assert.match(blocked.message, /Actions write/)
+      } finally {
+        h.github.reset()
+      }
+
+      // An organization that has not installed the App is the most ordinary
+      // state this product has, and a query that threw on it would make the
+      // page render its error state instead of its answer.
+      const lonely = await seedOrg(h.admin, 'noapp-readiness')
+      const session = await signInAs(h, lonely, 'admin')
+      try {
+        const answer = data<{ status: string; cause: string }>(
+          await callProcedure(h, session, 'environments.readiness', 'query', {
+            repository: lonely.repository,
+          }),
+          'environments.readiness',
+        )
+        assert.equal(answer.status, 'blocked')
+        assert.equal(answer.cause, 'app-not-installed')
+      } finally {
+        await dropOrg(h.admin, lonely.orgId)
+      }
     })
 
     it('a suspended organization cannot start new work', async () => {
