@@ -21,6 +21,28 @@ These work on every command.
 | `-q`, `--quiet` | `false` | Print only what was asked for. |
 | `-v`, `--verbose` | `false` | Print the underlying cause of an error. |
 
+## How output adapts
+
+Text output is stable for the same input. There are no timestamps and no
+durations in it, so a snapshot test, a diff and two CI logs of the same run
+compare cleanly. Timestamps live in `--output json`, where a machine
+wants them.
+
+What does vary is layout, and only where there is a terminal to lay anything
+out on. Colour, width and the live status line under a long run are decided
+once, from the output stream, when the command starts.
+
+| Variable | What it does |
+| --- | --- |
+| `NO_COLOR` | Any non-empty value turns colour off. It wins over everything, including `AF_FORCE_COLOR`. |
+| `AF_FORCE_COLOR` | Any non-empty value turns colour on for a stream that is not a terminal, for a CI system that renders escape codes. |
+| `AF_WIDTH` | Lay output out at this many columns rather than measuring the terminal. Clamped to between 40 and 200. |
+
+A stream that is not a terminal, a pipe, a file, or a CI log, is laid out at 80
+columns and carries no escape sequences. That is what keeps the output of a
+piped run identical from one machine to the next. `TERM=dumb` is
+treated the same way.
+
 ## Commands
 
 ### `af ci`
