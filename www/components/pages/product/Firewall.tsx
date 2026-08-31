@@ -7,6 +7,7 @@ import {
   RelatedGrid,
   Split,
 } from "@/components/pages/kit";
+import { Illustrative } from "@/components/layout/Illustrative";
 import { FailClosedScene } from "@/components/home/visuals/FailClosedScene";
 import {
   Hairline,
@@ -17,7 +18,7 @@ import {
   StatusPill,
 } from "@/components/home/visuals/primitives";
 
-type LedgerTone = "PASS" | "BLOCK";
+type LedgerTone = "PASS" | "FAIL";
 
 type LedgerEntry = {
   method: string;
@@ -32,7 +33,7 @@ const LEDGER: LedgerEntry[] = [
   {
     method: "POST",
     dest: "api.stripe.com/v1/charges",
-    action: "simulate",
+    action: "mock",
     receipt: "ch_sim_08f2",
     tone: "PASS",
   },
@@ -45,16 +46,16 @@ const LEDGER: LedgerEntry[] = [
   },
   {
     method: "POST",
-    dest: "hooks.slack.com",
-    action: "store",
-    receipt: "evt_sim_91c0",
+    dest: "hooks.slack.com/services/T0/B0",
+    action: "capture",
+    receipt: "req_sim_91c0",
     tone: "PASS",
   },
   {
-    method: "PUT",
-    dest: "s3.amazonaws.com/prod-bucket → twin-bucket",
-    action: "clone-bucket",
-    receipt: "obj_sim_44",
+    method: "POST",
+    dest: "api.openai.com/v1/chat/completions",
+    action: "mock",
+    receipt: "mock_5b12",
     tone: "PASS",
   },
   {
@@ -62,14 +63,14 @@ const LEDGER: LedgerEntry[] = [
     dest: "api.prod.internal/v1/health",
     action: "production-host",
     receipt: "deny_01",
-    tone: "BLOCK",
+    tone: "FAIL",
   },
   {
     method: "TCP",
     dest: "18.4.2.9:443",
     action: "DENY",
     receipt: "deny_02",
-    tone: "BLOCK",
+    tone: "FAIL",
     bypass: true,
   },
 ];
@@ -78,9 +79,9 @@ const FEATURED = [
   {
     provider: "Stripe",
     op: "POST /v1/charges",
-    body: "Simulate and store in a clone-local ledger. Not live.",
+    body: "Answered from the stateful pack that ships with the engine. Clone-local, not live.",
     tone: "PASS" as const,
-    chip: "simulate",
+    chip: "mock",
     receipt: (
       <>
         ch_sim_08f2
@@ -111,7 +112,7 @@ const FEATURED = [
     provider: "Unknown TCP",
     op: "18.4.2.9:443",
     body: "Unknown destination. Deny by default.",
-    tone: "BLOCK" as const,
+    tone: "FAIL" as const,
     chip: "DENY",
     receipt: (
       <>
@@ -129,16 +130,17 @@ const CONTROLS = [
   { title: "No default egress", body: "There is no default public internet route from the twin." },
   { title: "Clone-local DNS", body: "Production hostnames do not resolve to production." },
   { title: "Mandatory gateway", body: "Domain, IP, protocol, method, and operation policies at the edge." },
-  { title: "Stateful simulators", body: "Stripe, email, and webhooks keep clone-local ledgers." },
+  { title: "A stateful Stripe", body: "One built-in pack answers the Stripe API from a clone-local ledger. Other mocked hosts answer without keeping state." },
 ] as const;
 
 export function FirewallPage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/firewall"
         eyebrow="Side-Effect Firewall"
         title="The twin cannot act on the real world."
-        lead="No default public egress. Clone-local DNS. Stateful provider simulators. Unknown destinations are blocked and written to the attempted-effect ledger."
+        lead="No default public egress. Clone-local DNS. A stateful Stripe that answers offline, mail rendered and captured rather than sent. Unknown destinations are denied and written to the attempted-effect ledger."
         framed={false}
         visual={<FailClosedScene />}
       />
@@ -146,7 +148,7 @@ export function FirewallPage() {
       <PageSection>
         <PageHeading
           kicker="Attempted-effect ledger"
-          title="<strong>Every outbound action is recorded.</strong> Simulate, capture, or deny — never a live processor."
+          title="<strong>Every outbound attempt is recorded, including the denials.</strong> Simulate, capture, mock, or deny. Never a live processor."
         />
         <ul className="mt-14 grid grid-cols-3 gap-5 max-xl:grid-cols-1">
           {FEATURED.map((item) => (
@@ -159,7 +161,7 @@ export function FirewallPage() {
                 <div className="mt-4 font-mono text-[13px] tracking-extra-tight text-black">{item.op}</div>
                 <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">{item.body}</p>
                 <div className="mt-5 flex flex-wrap items-center gap-2">
-                  <QueueChip blocked={item.tone === "BLOCK"}>{item.chip}</QueueChip>
+                  <QueueChip blocked={item.tone === "FAIL"}>{item.chip}</QueueChip>
                 </div>
                 <div className="mt-auto pt-5">
                   <Receipt>{item.receipt}</Receipt>
@@ -209,9 +211,16 @@ export function FirewallPage() {
           <Hairline className="block" />
           <div className="flex flex-wrap items-center gap-2 px-5 py-3">
             <QueueChip>duplicate would have been live.</QueueChip>
-            <QueueChip blocked>unknown dest · run blocked by policy</QueueChip>
+            <QueueChip blocked>unknown destination · denied inside the twin</QueueChip>
           </div>
         </Panel>
+        <Illustrative>
+          Six rows chosen to show the five decisions. The hosts, the modes and the decision log are
+          real: <code className="font-mono text-[12px] text-black/70">af net log</code> prints every
+          attempt, and <code className="font-mono text-[12px] text-black/70">af ci</code> summarises
+          them on the pull request. A denied destination is denied inside the twin; it does not on
+          its own fail the check.
+        </Illustrative>
       </PageSection>
 
       <PageSection tone="white">
@@ -220,7 +229,7 @@ export function FirewallPage() {
             <Panel className="flex flex-col rounded-[12px] bg-white">
               <div className="flex items-center justify-between gap-3 px-5 py-3">
                 <MonoLabel>BYPASS DETECTED</MonoLabel>
-                <StatusPill tone="BLOCK">BLOCK</StatusPill>
+                <StatusPill tone="FAIL">DENY</StatusPill>
               </div>
               <Hairline className="block" />
               <div className="px-5 py-5">
@@ -280,7 +289,7 @@ export function FirewallPage() {
       <RelatedGrid
         items={[
           { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
-          { href: "/product/oracle", title: "Differential Oracle", description: "Third-party effects are compared." },
+          { href: "/product/report", title: "Safety Report", description: "Where the attempted effects are summarised." },
           { href: "/docs/concepts/egress", title: "Egress docs", description: "Controls and example behavior." },
         ]}
       />

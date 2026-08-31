@@ -84,7 +84,12 @@ if (has("sitemap.xml")) {
   const sitemap = read("sitemap.xml");
   const urls = (sitemap.match(/<loc>/g) ?? []).length;
   console.log("\nSitemap");
-  assert(urls >= 25, `sitemap lists ${urls} URLs`, urls < 25 ? "expected at least 25" : "");
+  // Twenty, not the twenty-five this was written with. Four product pages
+  // described subsystems that do not exist and were removed, and two more
+  // collapsed into one. The number is a canary against a truncated or empty
+  // sitemap, so it tracks the real page count rather than holding a page
+  // hostage to a threshold.
+  assert(urls >= 20, `sitemap lists ${urls} URLs`, urls < 20 ? "expected at least 20" : "");
   assert(
     !sitemap.includes("/signin") && !sitemap.includes("/signup"),
     "sitemap excludes the noindex waitlist routes",
@@ -149,8 +154,11 @@ const missing = {
   twitter: [],
   description: [],
   jsonld: [],
+  breadcrumb: [],
   h1: [],
+  oneMain: [],
   markdownTwin: [],
+  twinHeading: [],
 };
 
 for (const file of pages) {
@@ -165,8 +173,57 @@ for (const file of pages) {
   if (!/name="twitter:card"/i.test(html)) missing.twitter.push(rel);
   if (!/<meta name="description"/i.test(html)) missing.description.push(rel);
   if (!/application\/ld\+json/i.test(html)) missing.jsonld.push(rel);
+  // A trail a reader can see and no BreadcrumbList describing it is the failure
+  // this catches: the blog posts rendered the visible trail and shipped no
+  // markup for it, because they use PostJsonLd rather than the PageHero that
+  // emits both. The home page is exempt, since a trail of one is the page
+  // pointing at itself.
+  if (rel !== "index.html" && !html.includes('"BreadcrumbList"')) missing.breadcrumb.push(rel);
+  // Exactly one, because the markdown twins are cut from it and because a
+  // second one is a second content landmark. The home page had two: a
+  // decorative drawing of an application used a real <main> as a layout box,
+  // so anybody navigating by landmark met the page and then met a picture.
+  const mains = (html.match(/<main\b/gi) ?? []).length;
+  if (mains !== 1) missing.oneMain.push(`${rel} (${mains})`);
   if (!/<h1[\s>]/i.test(html)) missing.h1.push(rel);
-  if (!existsSync(file.replace(/\.html$/, ".md"))) missing.markdownTwin.push(rel);
+  const twin = file.replace(/\.html$/, ".md");
+  if (!existsSync(twin)) missing.markdownTwin.push(rel);
+  else {
+    // The twin's first heading has to be the page's own h1. It is the check
+    // that catches content being dropped rather than merely absent: the three
+    // blog posts lost their whole <article><header> to a chrome filter, and
+    // the twin still opened with a plausible heading because the generator
+    // silently substituted the <title>. A twin missing a section is worse than
+    // no twin, because nothing about it looks wrong.
+    const pageH1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+    const twinH1 = readFileSync(twin, "utf8").match(/^# (.+)$/m)?.[1];
+    // The entity set here has to match decode() in markdown-twins.mjs, which is
+    // what wrote the twin. Decoding only &amp; was enough for as long as no h1
+    // held an apostrophe: React serializes one as &#x27; in the HTML while the
+    // twin carries the character itself, so the two sides of a comparison that
+    // are the same string stopped comparing equal the day a title said
+    // "production's". &amp; is decoded last so an escaped entity does not get
+    // unescaped twice.
+    const flatten = (v) =>
+      v
+        ? v
+            .replace(/<[^>]*>/g, "")
+            .replace(/&nbsp;/g, " ")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d))
+            .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+            .replace(/&amp;/g, "&")
+            .replace(/\s+/g, " ")
+            .trim()
+        : "";
+    if (pageH1 && flatten(pageH1) !== flatten(twinH1)) {
+      missing.twinHeading.push(
+        `${rel} (page "${flatten(pageH1).slice(0, 40)}" vs twin "${flatten(twinH1).slice(0, 40)}")`,
+      );
+    }
+  }
 }
 
 // The skip link is in the root layout, so it is on every page, but the element
@@ -198,8 +255,11 @@ const LABELS = {
   twitter: "every indexable page has a twitter card",
   description: "every indexable page has a meta description",
   jsonld: "every indexable page has JSON-LD",
+  breadcrumb: "every indexable page below the root has a BreadcrumbList",
   h1: "every indexable page has an h1",
+  oneMain: "every indexable page has exactly one <main>",
   markdownTwin: "every indexable page has its markdown twin",
+  twinHeading: "every twin opens with the page's own h1",
 };
 
 for (const [key, list] of Object.entries(missing)) {
@@ -207,6 +267,106 @@ for (const [key, list] of Object.entries(missing)) {
     list.length === 0,
     LABELS[key],
     list.length > 0 ? `missing on ${list.length}: ${list.slice(0, 5).join(", ")}${list.length > 5 ? " ..." : ""}` : "",
+  );
+}
+
+// Reachability, which is a different question from "does this link resolve".
+//
+// Every link on the site pointed somewhere real and the blog was still an
+// island: /blog was linked only from its own three posts, and each post only
+// from /blog. Nothing anywhere else on the site pointed into the cluster, so
+// the only route in was the sitemap. A page a crawler reaches only through a
+// sitemap is a page it treats as unimportant, and a reader cannot reach it at
+// all.
+//
+// So: walk out from the home page the way a crawler does, and require that
+// every indexable route is found. Depth is reported rather than asserted,
+// because "three clicks" is a guideline and this is a small site.
+console.log("\nReachability");
+{
+  const hrefs = (html) =>
+    [...html.matchAll(/href="(\/[^"#?][^"]*)"/g)].map((m) => m[1].replace(/\/$/, "") || "/");
+  const fileFor = (route) =>
+    [route === "/" ? "index.html" : `${route.slice(1)}.html`, `${route.slice(1)}/index.html`]
+      .map((r) => path.join(OUT, r))
+      .find(existsSync);
+
+  const seen = new Set(["/"]);
+  const depth = new Map([["/", 0]]);
+  const queue = ["/"];
+  while (queue.length > 0) {
+    const here = queue.shift();
+    const file = fileFor(here);
+    if (!file) continue;
+    for (const href of hrefs(readFileSync(file, "utf8"))) {
+      if (seen.has(href) || href.startsWith("/docs") || href.startsWith("/_next")) continue;
+      seen.add(href);
+      depth.set(href, depth.get(here) + 1);
+      queue.push(href);
+    }
+  }
+
+  const sitemapRoutes = [...readFileSync(path.join(OUT, "sitemap.xml"), "utf8")
+    .matchAll(/<loc>[^<]*?(\/[^<]*)?<\/loc>/g)]
+    .map((m) => new URL(m[0].replace(/<\/?loc>/g, "")).pathname.replace(/\/$/, "") || "/");
+  const unreachable = sitemapRoutes.filter((r) => !seen.has(r));
+  const deepest = Math.max(...[...depth.values()]);
+  assert(
+    unreachable.length === 0,
+    `every route in the sitemap is reachable from the home page (deepest is ${deepest} clicks)`,
+    unreachable.length > 0
+      ? `${unreachable.length} reachable only through the sitemap: ${unreachable.join(", ")}`
+      : "",
+  );
+}
+
+// Navigation that belongs to no landmark.
+//
+// The product flyout is a sibling of the header bar rather than a child, so
+// its nineteen links sat outside header, main and footer alike. Somebody
+// navigating by landmark met the banner and then the page, and never the
+// navigation. Every other nav on the site was already inside one, which is
+// what made this invisible: the markup looked consistent everywhere you
+// checked.
+//
+// Counting <a> elements rather than <nav>, because the defect was a block of
+// links with no nav around it either. An anchor that is inside no landmark at
+// all is the thing to catch, whatever element it sits in.
+console.log("\nLandmarks");
+{
+  const stray = [];
+  for (const file of pages) {
+    const html = readFileSync(file, "utf8");
+    if (/<meta name="robots" content="[^"]*noindex/i.test(html)) continue;
+
+    // Walk the tags, tracking landmark depth. A link seen at depth zero is in
+    // no landmark. Regex rather than a parser because the built output is
+    // machine generated and well formed, and this file has no dependencies.
+    let depth = 0;
+    let loose = 0;
+    for (const m of html.matchAll(/<(\/?)(header|main|footer|nav|aside|a)\b[^>]*>/gi)) {
+      const [tagText, closing, tag] = m;
+      const name = tag.toLowerCase();
+      if (name === "a") {
+        // Opening tags only. Counting </a> too reported every link twice, which
+        // is how this check first "found" two loose links on every page.
+        if (closing) continue;
+        // The skip link is the one anchor that has to be outside everything: it
+        // is the first thing in the body precisely so it comes before the
+        // banner a keyboard user is trying to skip.
+        if (/class="[^"]*skip-to-content/.test(tagText)) continue;
+        if (depth === 0) loose++;
+        continue;
+      }
+      if (closing) depth = Math.max(0, depth - 1);
+      else depth++;
+    }
+    if (loose > 0) stray.push(`${path.relative(OUT, file)} (${loose})`);
+  }
+  assert(
+    stray.length === 0,
+    "every link on every page is inside a landmark",
+    stray.length > 0 ? `links outside header, main, footer, nav and aside: ${stray.slice(0, 5).join(", ")}` : "",
   );
 }
 

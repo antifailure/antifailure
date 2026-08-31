@@ -1,0 +1,513 @@
+# What is replaced before anyone can branch from a copy of the staging control
+# plane.
+#
+# Read this beside web/packages/db/migrations. The shape of the file follows
+# from one rule in the engine: a text or JSON column that no rule names is
+# emptied, because a column nobody has classified is not a column anybody has
+# confirmed is safe. So this file is not a list of everything that gets masked.
+# It is a list of the two things the default cannot decide:
+#
+#   the columns that need a *particular* transform, because emptying them
+#   would be safe and useless, and
+#
+#   the columns that must survive untouched, because the application or the
+#   audit chain is built on them.
+#
+# Every `preserve` below is a column somebody read and passed. That is a
+# different fact from a column nobody read, and keeping them different is the
+# whole point of writing this down.
+
+rules:
+  # ---------------------------------------------------------------------------
+  # People.
+  #
+  # Everything here identifies somebody, and every one of these columns holds
+  # something a detector would find in the verification scan if it survived.
+  # ---------------------------------------------------------------------------
+
+  - table: users
+    column: email
+    transform: email
+    link: person
+    why: "the address a real person reads, and what the sign-in path is keyed on"
+
+  - table: users
+    column: name
+    transform: name
+    why: "a person's name"
+
+  - table: users
+    column: github_login
+    transform: username
+    link: person
+    why: "identifies a person across systems, and is what the audit log falls back to"
+
+  - table: users
+    column: avatar_url
+    transform: nullify
+    why: >-
+      it points at githubusercontent, which the environment cannot reach anyway,
+      and a URL can carry a token in its query
+
+  - table: audit_entries
+    column: actor_label
+    transform: name
+    why: >-
+      how the actor is named a year from now, when the user row may be gone.
+      It is a person's name and it is the one column of the log that is one
+
+  - table: organizations
+    column: suspended_by
+    transform: name
+    why: "who stopped an organization, which is a person"
+
+  # An organization is a customer, not a person, and the built-in rule for a
+  # column called `name` on a text type would turn one into somebody's name.
+  # Naming them here is what stops that.
+  - table: organizations
+    column: name
+    transform: company
+    link: customer
+    why: "a real company's name; the default rule for `name` would make it a person's"
+
+  - table: organizations
+    column: slug
+    transform: username
+    link: customer
+    why: >-
+      identifies a customer and appears in URLs. `username` rather than
+      `string_fpe` because the column carries a unique index and only a
+      transform that preserves uniqueness may go on one: the planner refuses
+      the other, which is how this rule got written twice
+
+  - table: organizations
+    column: github_login
+    transform: username
+    link: customer
+    why: "the customer's GitHub organization"
+
+  - table: github_installations
+    column: account_login
+    transform: username
+    link: customer
+    why: "the same customer, from GitHub's side"
+
+  # ---------------------------------------------------------------------------
+  # Anything that grants access.
+  #
+  # Every one of these is a hash rather than a secret, so what is being removed
+  # is the ability to correlate a copy against production rather than a
+  # credential. `hash_hex` and not `nullify`, because all three are NOT NULL and
+  # a null would fail the update partway through and leave the table half
+  # masked.
+  # ---------------------------------------------------------------------------
+
+  - table: sessions
+    column: token_hash
+    transform: hash_hex
+    why: "a live session must not survive into a copy, and this column cannot hold null"
+
+  - table: engine_tokens
+    column: token_hash
+    transform: hash_hex
+    why: "the same, for a token an engine holds"
+
+  - table: engine_tokens
+    column: prefix
+    transform: string_fpe
+    why: >-
+      the visible half of a token. Kept in shape so the tokens page still looks
+      like itself, and changed so it cannot be matched against a real one
+
+  - table: email_signin_tokens
+    column: token_hash
+    transform: hash_hex
+    why: "an unredeemed sign-in link must not survive into a copy"
+
+  - table: email_signin_tokens
+    column: email
+    transform: email
+    link: person
+    why: "the address a link was sent to"
+
+  # ---------------------------------------------------------------------------
+  # Where somebody was.
+  # ---------------------------------------------------------------------------
+
+  - table: sessions
+    column: ip
+    transform: ip
+    why: "locates a person; replaced with a documentation range that cannot route"
+
+  - table: email_signin_tokens
+    column: ip
+    transform: ip
+    why: "the same"
+
+  # ---------------------------------------------------------------------------
+  # Free-form JSON, emptied on purpose.
+  #
+  # Each of these holds whatever the code that wrote it decided to put there,
+  # which over a year is everything. They are named rather than left to the
+  # default so that this reads as a decision: they were looked at, and the
+  # answer was that nothing can be said about their contents.
+  #
+  # `empty_json` and not `nullify`. Two of these columns are NOT NULL, so
+  # nullify is refused on them, and `empty_json` writes an empty value of the
+  # same kind instead: a reader that indexes into an array still finds an
+  # array. The refusal is what made this transform exist.
+  # ---------------------------------------------------------------------------
+
+  - table: events
+    column: payload
+    transform: empty_json
+    why: >-
+      an event payload is whatever the engine that sent it decided to include,
+      and it demonstrably includes addresses
+
+  - table: audit_entries
+    column: detail
+    transform: empty_json
+    why: >-
+      the detail of an action is free-form and written by whichever code took
+      the action. The action, the actor, the target, and the chain all survive,
+      which is what the log is for
+
+  - table: golden_versions
+    column: attestation
+    transform: empty_json
+    why: >-
+      a verification attestation quotes the findings it made, and a finding
+      quotes the value that produced it
+
+  - table: verdicts
+    column: reproduction
+    transform: empty_json
+    why: >-
+      the steps to reproduce a failure name the persona and quote what was typed
+      into the form
+
+  - table: verdicts
+    column: summary
+    transform: nullify
+    why: "one sentence about what happened, which routinely names the address it happened to"
+
+  # ---------------------------------------------------------------------------
+  # Reviewed and left alone.
+  #
+  # This is the half of the file the fail-closed default makes necessary.
+  # Without these lines every one of these columns would be emptied and the
+  # environment would come up with a working schema and no readable data in it,
+  # which is a copy of production in name only.
+  # ---------------------------------------------------------------------------
+
+  # The audit chain. Masking these breaks verification, and a log that fails its
+  # own verification is worse than no log. The invariant in antifailure.yaml
+  # fails if this is ever changed.
+  - table: audit_entries
+    column: prev_hash
+    transform: preserve
+    why: "the chain. Rewriting it makes every entry after the first fail verification"
+  - table: audit_entries
+    column: entry_hash
+    transform: preserve
+    why: "the same"
+  - table: audit_entries
+    column: action
+    transform: preserve
+    why: "the verb. It is a fixed vocabulary, and the log says nothing without it"
+  - table: audit_entries
+    column: target_type
+    transform: preserve
+    why: "what kind of thing was acted on, from a fixed vocabulary"
+  - table: audit_entries
+    column: target_id
+    transform: preserve
+    why: >-
+      an environment identifier or a repository name. Both survive elsewhere in
+      the schema, so masking this one would only break the join a reader makes
+      by eye
+  - table: audit_entries
+    column: origin
+    transform: preserve
+    why: "web, api, engine, or github. A fixed vocabulary"
+
+  # The environment matrix. These are the shape of the work, not facts about a
+  # person, and they are the entire content of the page.
+  - table: environments
+    column: env_id
+    transform: preserve
+    why: "names an environment, and is what a pull request comment links to"
+  - table: environments
+    column: branch
+    transform: preserve
+    why: "a branch name. The distribution of them is what the matrix is for"
+  - table: environments
+    column: preview_url
+    transform: preserve
+    why: >-
+      an address inside an environment that no longer exists. The built-in rule
+      for a column ending in _url would rewrite the host for nothing
+  - table: environments
+    column: runtime
+    transform: preserve
+    why: "local or kubernetes"
+  - table: environments
+    column: golden_version
+    transform: preserve
+    why: "names a golden, which is how a branch is traced back to what it came from"
+
+  - table: repositories
+    column: full_name
+    transform: preserve
+    why: >-
+      the repository this control plane is watching. The built-in rule for
+      full_name would make it a person's name, which is wrong twice: it is not
+      a person, and the matrix is unreadable without it
+  - table: repositories
+    column: default_branch
+    transform: preserve
+    why: "main, usually"
+
+  - table: runs
+    column: kind
+    transform: preserve
+    why: "test, load, insights, or up. A fixed vocabulary"
+
+  - table: verdicts
+    column: workflow
+    transform: preserve
+    why: "the name of a workflow in a manifest, which is the row's whole identity"
+  - table: verdicts
+    column: persona
+    transform: preserve
+    why: >-
+      the persona's name from the manifest, such as returning-customer. Not the
+      address it signed in with, which is masked
+
+  - table: artifacts
+    column: kind
+    transform: preserve
+    why: "video, trace, screenshot, or console"
+  - table: artifacts
+    column: content_type
+    transform: preserve
+    why: "a MIME type"
+  - table: artifacts
+    column: storage_key
+    transform: preserve
+    why: "a path built from identifiers, holding nothing that was typed by anybody"
+  - table: artifacts
+    column: sha256
+    transform: preserve
+    why: "a digest of the artifact, which is how a download is checked"
+
+  - table: golden_versions
+    column: version
+    transform: preserve
+    why: "names a golden. Environments reference it and the join has to survive"
+  - table: golden_versions
+    column: source_digest
+    transform: preserve
+    why: "a digest, which is what proves two goldens came from the same source"
+  - table: golden_versions
+    column: rules_digest
+    transform: preserve
+    why: "a digest of this file, which is what makes a golden traceable to its rules"
+
+  # The policy pages. All of this is configuration a customer wrote about hosts
+  # and columns. None of it is about a person, and the pages are empty without
+  # it.
+  - table: network_rules
+    column: host
+    transform: preserve
+    why: "a third-party host. The whole network page is a list of these"
+  - table: network_rules
+    column: mode
+    transform: preserve
+    why: "block, allow, capture, mock, sandbox, or synth"
+  - table: network_rules
+    column: rate_limit
+    transform: preserve
+    why: "a rate, such as 20/s"
+  - table: network_rules
+    column: credential
+    transform: preserve
+    why: >-
+      the *name* of an environment variable, never its value. The value is
+      resolved at run time and this control plane has never held one
+  - table: network_rules
+    column: fixtures
+    transform: preserve
+    why: "the name of a mock pack"
+  - table: network_rules
+    column: webhook_path
+    transform: preserve
+    why: "a path a provider calls back on"
+  - table: network_rules
+    column: note
+    transform: free_text
+    why: >-
+      why a host was named, written by a person. Kept at a similar length so the
+      column still looks like itself, and rewritten because a note is where
+      somebody pastes a customer's name
+
+  - table: masking_rules
+    column: table_name
+    transform: preserve
+    why: "names a table in the customer's schema"
+  - table: masking_rules
+    column: column_name
+    transform: preserve
+    why: "names a column in it"
+  - table: masking_rules
+    column: transform
+    transform: preserve
+    why: "one of the transforms in the catalogue"
+  - table: masking_rules
+    column: link
+    transform: preserve
+    why: "the group a transform shares a subkey with"
+  - table: masking_rules
+    column: reason
+    transform: free_text
+    why: "why a column was classified, written by a person, so it is prose"
+  - table: masking_rules
+    column: source_digest
+    transform: preserve
+    why: "a digest"
+
+  - table: organizations
+    column: plan
+    transform: preserve
+    why: "free, team, or enterprise"
+  - table: organizations
+    column: suspended_reason
+    transform: free_text
+    why: "written by a person during an incident, so it is prose"
+
+  - table: members
+    column: source
+    transform: preserve
+    why: "github or manual, which decides whether a sync may overwrite the role"
+
+  - table: github_installations
+    column: account_type
+    transform: preserve
+    why: "User or Organization"
+
+  - table: events
+    column: type
+    transform: preserve
+    why: >-
+      the event's name, from a fixed vocabulary. The sequence and idempotency
+      machinery is asserted against it
+  - table: events
+    column: env_id
+    transform: preserve
+    why: "matches environments.env_id, and the join is what makes an event findable"
+  - table: events
+    column: idempotency_key
+    transform: preserve
+    why: >-
+      what makes a resend a no-op. Rewriting it would let a replayed batch be
+      accepted twice in a copy and not in production, which is the opposite of
+      what a copy is for
+
+  - table: schema_migrations
+    column: name
+    transform: preserve
+    why: "which migrations have run. Rewriting it makes every later deploy re-run them"
+  - table: schema_migrations
+    column: digest
+    transform: preserve
+    why: "what proves a migration file has not changed since it was applied"
+
+  # ---------------------------------------------------------------------------
+  # Single sign-on and SCIM.
+  #
+  # These tables arrived while this file was being written, on a branch that
+  # did not touch it, and the first dogfood run that got far enough to read the
+  # schema refused the plan because of one of them. That is the failure mode
+  # this whole exercise is about: nobody forgot anything, two changes were
+  # correct apart, and the pair was wrong.
+  # ---------------------------------------------------------------------------
+
+  # The one that made the plan refuse.
+  #
+  # It is unique, and an unclassified text column is emptied, so the update
+  # would have set every row to the same value and failed on the second one,
+  # leaving the table half masked. `hash_hex` keeps uniqueness and keeps
+  # equality and nothing else, which is exactly what an identifier that is
+  # matched but never read wants.
+  - table: sso_connections
+    column: idp_entity_id
+    transform: hash_hex
+    why: >-
+      the identity provider's own identifier, which is unique and is compared
+      rather than displayed. Emptying it is refused, because the constraint
+      would fail the run partway through
+
+  # A customer's real domain. It decides which connection a sign-in is routed
+  # to, so it is identifying in the way a company name is.
+  # Unique, and matched exactly rather than parsed, which is what makes a hash
+  # the right answer here where it would be wrong on a column somebody reads.
+  # `company` was tried first and refused for the same reason as the one above.
+  - table: sso_domains
+    column: domain
+    transform: hash_hex
+    why: >-
+      the customer's own domain, which names them as surely as their name does.
+      It is unique and it is compared rather than displayed, so a keyed hash
+      keeps the routing working and carries nothing back to the customer
+
+  - table: sso_connections
+    column: display_name
+    transform: company
+    link: customer
+    why: "what the customer calls their own connection, which is usually their name"
+
+  # SCIM carries people, directly. Emptying these is safe and useless: the
+  # members page in a preview would render a column of blanks, which proves
+  # nothing about whether it renders a directory.
+  - table: scim_resources
+    column: user_name
+    transform: username
+    link: person
+    why: "the handle the directory knows somebody by, and it is unique"
+  - table: scim_resources
+    column: given_name
+    transform: first_name
+    why: "a person's first name"
+  - table: scim_resources
+    column: family_name
+    transform: last_name
+    why: "a person's family name"
+  - table: scim_resources
+    column: display_name
+    transform: name
+    why: "how the directory shows a person, which is their name"
+  - table: scim_groups
+    column: display_name
+    transform: company
+    why: >-
+      a group name, which is a customer's own vocabulary rather than a person's.
+      Not linked to the customer, because a group is not the organization
+
+  # Left to the default on purpose, and listed here so that the omission is
+  # visible rather than accidental:
+  #
+  #   sessions.user_agent          a browser string, emptied
+  #   email_signin_tokens.*        redirect_to and user_agent, emptied
+  #   oauth_states.*               a handshake in flight, emptied
+  #   engine_tokens.name           a label somebody typed, emptied
+  #   device_authorizations.*      a code in flight and the label beside it
+  #   sso_login_states.*           a handshake in flight, every column of it
+  #   sso_assertions_seen.*        replay protection for assertions now gone
+  #   sso_connection_secrets.*     a certificate, which must not be copied
+  #   sso_connections.oidc_*       endpoint addresses and a client id
+  #   scim_tokens.prefix           the visible half of a token
+  #   provider_keys.*              fingerprint, last4 and version of a key
+  #
+  # `af mask plan` lists every one of them with the reason, which is the
+  # check that this comment is still true.

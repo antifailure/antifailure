@@ -229,9 +229,16 @@ func (r *Runtime) startIngress(
 		}
 	}
 
-	hostPort, err := r.ports.Free()
-	if err != nil {
-		return 0, err
+	// The port was reserved before any service started, so that the service
+	// could be told its own address. Falling back to allocating one here keeps
+	// a caller that did not reserve working.
+	hostPort, reserved := spec.PublicPorts[s.Name]
+	if !reserved {
+		var err error
+		hostPort, err = r.ports.Free()
+		if err != nil {
+			return 0, err
+		}
 	}
 	release := func() { r.ports.Release(hostPort) }
 
@@ -303,6 +310,32 @@ func (r *Runtime) envList(spec provider.EnvSpec, s provider.ServiceSpec) []strin
 	vars := map[string]string{}
 	if raw := spec.DatabaseURL.Reveal(); raw != "" {
 		vars["DATABASE_URL"] = raw
+	}
+	// The address this service answers on from outside the environment.
+	//
+	// An application that emails a link, redirects through OAuth, or registers
+	// a webhook callback has to build an absolute URL, and the only address
+	// that works from a browser is the one the runtime published. Nothing told
+	// it before this, so every such application sent a link to its own
+	// container port.
+	if p, ok := spec.PublicPorts[s.Name]; ok && p > 0 {
+		public := fmt.Sprintf("http://127.0.0.1:%d", p)
+		vars["AF_PUBLIC_URL"] = public
+		// The conventional names too, because most frameworks already read
+		// one of them and an application that does needs no change at all.
+		vars["PUBLIC_URL"] = public
+		vars["BASE_URL"] = public
+	}
+	// The environment's own address, which is a different question from this
+	// service's.
+	//
+	// A link in an email has to land on the application a person opens, and
+	// the service that sends it is usually not that application: here the API
+	// mails the sign in link and the web application serves the page it lands
+	// on. Every container gets the same answer, which is the address `af up`
+	// prints and a pull request comment links to.
+	if url := environmentURL(spec); url != "" {
+		vars["AF_ENV_URL"] = url
 	}
 	if s.Port > 0 {
 		vars["PORT"] = strconv.Itoa(s.Port)
@@ -595,4 +628,21 @@ func stripDockerLogFraming(s string) string {
 	}
 	b.WriteString(s)
 	return b.String()
+}
+
+// environmentURL is the address of the first web service the manifest declares.
+//
+// The same rule Env.URL uses, applied before anything is running, because the
+// containers have to be told it at creation time and the running environment
+// does not exist yet.
+func environmentURL(spec provider.EnvSpec) string {
+	for _, s := range spec.Services {
+		if s.Kind != "web" || s.Port <= 0 {
+			continue
+		}
+		if p, ok := spec.PublicPorts[s.Name]; ok && p > 0 {
+			return fmt.Sprintf("http://127.0.0.1:%d", p)
+		}
+	}
+	return ""
 }

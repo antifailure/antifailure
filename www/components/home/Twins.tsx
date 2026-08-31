@@ -1,11 +1,12 @@
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
+import { Illustrative } from "@/components/layout/Illustrative";
 import { TwinIdeStage } from "./visuals/TwinIdeStage";
 
 const FEATURES = [
   {
     title: "Isolated networking",
-    description: "Clone-local DNS, no default public egress, TTL and budget on every resource.",
+    description: "Clone-local DNS, no default public egress, no route out of the network.",
     icon: (
       <svg viewBox="0 0 20 20" className="size-[18px]" fill="none" aria-hidden>
         <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.4" />
@@ -26,7 +27,7 @@ const FEATURES = [
   },
   {
     title: "Cleanup proof",
-    description: "Every resource is journaled, destroyed, and attested. Nothing outlives the run.",
+    description: "Every resource is journaled, destroyed, and counted at teardown. Nothing outlives the run.",
     icon: (
       <svg viewBox="0 0 20 20" className="size-[18px]" fill="none" aria-hidden>
         {Array.from({ length: 9 }, (_, i) => (
@@ -61,6 +62,9 @@ export function Twins() {
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <TwinIdeStage />
+            <Illustrative className="mt-6">
+              The four phases and the containment seals are real. The percentages are a shaped run.
+            </Illustrative>
           </div>
           <ul className="mt-10 grid grid-cols-3 gap-x-16 max-xl:mt-8 max-xl:grid-cols-1 max-xl:gap-y-7 max-lg:mt-10">
             {FEATURES.map((item) => (

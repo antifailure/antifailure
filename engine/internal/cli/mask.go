@@ -13,8 +13,11 @@ import (
 
 // MaskPlanJSON is the machine readable plan.
 type MaskPlanJSON struct {
-	RulesHash    string           `json:"rules_hash"`
-	Runnable     bool             `json:"runnable"`
+	RulesHash string `json:"rules_hash"`
+	Runnable  bool   `json:"runnable"`
+	// Which database the schema was read from. A plan is about a schema, and
+	// two databases here can differ by the migration somebody is writing.
+	Source       string           `json:"source,omitempty"`
 	Tables       int              `json:"tables"`
 	Columns      int              `json:"columns"`
 	Rows         int64            `json:"rows_estimated"`
@@ -101,7 +104,7 @@ func newMaskPlanCommand(env *Env) *cobra.Command {
 
 			if env.Out.Format == FormatJSON {
 				doc := MaskPlanJSON{
-					RulesHash: res.RulesHash, Runnable: plan.Runnable(),
+					RulesHash: res.RulesHash, Runnable: plan.Runnable(), Source: res.Source,
 					Tables: len(plan.Tables), Columns: plan.Columns(), Rows: plan.Rows(),
 				}
 				for _, t := range plan.Tables {
@@ -119,6 +122,13 @@ func newMaskPlanCommand(env *Env) *cobra.Command {
 			}
 
 			env.Out.Section("Masking plan")
+			// Which database this describes. A plan read from the source and a
+			// plan read from a branch can differ by exactly the migration
+			// somebody is working on, and a plan that does not say which it is
+			// is a plan that can be trusted for the wrong schema.
+			if res.Source != "" {
+				env.Out.Printf("  Read from %s.\n", res.Source)
+			}
 			env.Out.Printf("  %d columns across %d tables, about %d rows.\n\n",
 				plan.Columns(), len(plan.Tables), plan.Rows())
 			env.Out.Raw(plan.Explain())

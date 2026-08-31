@@ -123,6 +123,41 @@ stripping it would hide that the key is in there.
 The value is never printed. The detector recognises the prefixes providers use,
 which is the same detector CI runs over the repository.
 
+## What the sidecar refuses whatever the policy says
+
+The sidecar is the only thing in an environment with a route out, so a service
+that cannot reach an address itself can still ask the sidecar to reach it. Some
+addresses are refused there regardless of the rules, because no rule was ever
+written about them.
+
+- **Loopback, link local, private and carrier grade addresses.** The link local
+  range holds the instance metadata endpoint, which hands out the node's own
+  cloud credentials to anything on the node that asks. `default: allow` is a
+  sentence about the internet, not about the machine the environment is running
+  on, so it does not cover these.
+- **A name that resolves to one of them.** The check reads the address the name
+  resolved to, so pointing a domain you control at `169.254.169.254` reaches
+  nothing.
+- **Anything but an address lookup for an external name.** `TXT`, `NULL`,
+  `CNAME` and `SRV` queries are answered inside the environment rather than
+  forwarded, because the payload of a DNS query is whatever the client puts in
+  the name and forwarding one is a way out that opens no connection. Names
+  inside the environment resolve normally.
+- **A port the client picked.** A transparent connection arrives on 80 or 443,
+  and that is the port the rule is evaluated against. The port in a `Host`
+  header is not a destination.
+
+To reach a private address on purpose, name it in a rule:
+
+```yaml
+    - host: 10.0.4.20
+      mode: allow
+      note: "the staging API on our own network"
+```
+
+Naming the address is the consent. A wildcard is not: `*` means every host on
+the internet.
+
 ## Certificate pinning
 
 ```
@@ -149,6 +184,10 @@ disabled.
 IPv6 is off by default, because an environment that can reach a host by an
 address the policy did not evaluate is an environment whose policy is advisory.
 Turning it on is one line, and the policy applies to both families equally.
+
+The refusal is per address rather than per name, so a host that resolves to
+both families is still reached over IPv4 with IPv6 off, and a host with only an
+IPv6 address is refused with that as the reason.
 
 Related: [mocking](/docs/guides/mocking/), [sandbox credentials](/docs/guides/sandbox/),
 [the inbox](/docs/guides/inbox/), [webhooks](/docs/guides/webhooks/).

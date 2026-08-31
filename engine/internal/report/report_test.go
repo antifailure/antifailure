@@ -152,6 +152,55 @@ func TestMarkdown_FooterCarriesWhatWasTested(t *testing.T) {
 	require.Contains(t, body, "gv_20260826")
 }
 
+// The masking section renders when something fills it in.
+//
+// It could not, before. Run.Verification was rendered here and assigned by
+// nothing outside a test, so the section that tells a reviewer the data was
+// proved masked was unreachable in a real comment. That is the product's
+// central promise, and it was a field nobody filled in.
+func TestMarkdown_ReportsVerifiedMasking(t *testing.T) {
+	r := run(report.Workflow{Name: "sign in", Verdict: "pass"})
+	r.Verification = &report.Verification{Clean: true, Columns: 84, RowsSampled: 2620}
+	md := r.Markdown()
+	require.Contains(t, md, "Masking verified")
+	require.Contains(t, md, "84 columns")
+	require.Contains(t, md, "2620 rows")
+}
+
+// The insights section says what the database noticed.
+func TestMarkdown_ReportsWhatTheDatabaseNoticed(t *testing.T) {
+	r := run(report.Workflow{Name: "sign in", Verdict: "pass"})
+	r.Insights = &report.Insights{
+		Sequential: []report.Scan{{Table: "audit_entries", Scans: 12, Rows: 41000}},
+		Slowest:    "select * from environments", SlowestMs: 412,
+		Unused: []string{"events.events_env_idx"},
+	}
+	md := r.Markdown()
+	require.Contains(t, md, "audit_entries")
+	require.Contains(t, md, "41000 rows")
+	require.Contains(t, md, "412ms")
+	require.Contains(t, md, "1 indexes nothing read")
+}
+
+// Looked and found nothing is not the same as could not look.
+//
+// Both are four words on a pull request and only one of them is evidence. A
+// section that reports a clean bill of health because the extension was not
+// installed is the worst possible answer, because it is the one somebody
+// trusts.
+func TestMarkdown_SaysWhenInsightsCouldNotLook(t *testing.T) {
+	r := run(report.Workflow{Name: "sign in", Verdict: "pass"})
+	r.Insights = &report.Insights{Missing: []string{"pg_stat_statements is not installed"}}
+	md := r.Markdown()
+	require.Contains(t, md, "could not look")
+	require.Contains(t, md, "pg_stat_statements")
+	require.NotContains(t, md, "no table read end to end")
+
+	clean := run(report.Workflow{Name: "sign in", Verdict: "pass"})
+	clean.Insights = &report.Insights{}
+	require.Contains(t, clean.Markdown(), "no table read end to end")
+}
+
 // The comment is the only part of this most people see, so what it says when
 // the workflows pass and the data is broken is the thing to get right.
 func TestACleanRunOfWorkflowsWithBrokenDataDoesNotReadAsAPass(t *testing.T) {

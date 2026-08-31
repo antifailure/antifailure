@@ -154,24 +154,35 @@ export class Session {
       return out;
     }).catch(() => [] as { name: string; type: string; filled: boolean }[]);
 
-    const controls = await pw.evaluate(() => {
+    const interactive = await pw.evaluate(() => {
       const out: string[] = [];
+      let unnamed = 0;
       const add = (s: string | null | undefined) => {
         const name = (s ?? '').trim();
-        if (name && name.length < 60 && !out.includes(name)) out.push(name);
+        if (!name) {
+          // An icon button with no label, a link whose only child is an image
+          // with no alt text. A screen reader announces nothing here and
+          // neither planner can press it, so it is counted rather than
+          // dropped: the count is the evidence for the finding.
+          unnamed++;
+          return;
+        }
+        if (name.length < 60 && !out.includes(name)) out.push(name);
       };
       for (const el of document.querySelectorAll(
         'button, a[href], [role="button"], [role="link"], input[type="submit"]')) {
-        add(el.getAttribute('aria-label') ?? el.textContent ?? (el as HTMLInputElement).value);
+        add(el.getAttribute('aria-label') ?? el.getAttribute('title')
+          ?? el.textContent ?? (el as HTMLInputElement).value);
       }
-      return out;
-    }).catch(() => [] as string[]);
+      return { controls: out, unnamed };
+    }).catch(() => ({ controls: [] as string[], unnamed: 0 }));
 
     return {
       url: pw.url(),
       title: await pw.title().catch(() => ''),
       fields,
-      controls,
+      controls: interactive.controls,
+      unnamed: interactive.unnamed,
       text: await pw.locator('body').innerText().catch(() => ''),
     };
   }

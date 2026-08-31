@@ -14,6 +14,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -30,6 +32,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
+	"github.com/antifailure/antifailure/engine/pkg/livekey"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -92,6 +95,8 @@ func main() {
 		engine: engine, envID: cfg.EnvID, out: json.NewEncoder(os.Stdout),
 		credentials: cfg.Credentials,
 		limits:      newLimiter(),
+		destinations: newDestinations(
+			engine.Rules(), cfg.Subnet, engine.AllowsIPv6()),
 		// Read from this process's environment rather than from the
 		// configuration file, so a key never passes through something the
 		// engine wrote to disk.
@@ -106,6 +111,11 @@ func main() {
 			TLSHandshakeTimeout: 20 * time.Second,
 		},
 	}
+	// Set after construction because the dialer is a method on the proxy it
+	// belongs to. Every re-originated request goes through it, so the address
+	// guard applies to the inspected path as well as to the tunnelled one.
+	p.transport.DialContext = p.dialGuarded
+
 	packs, err := mockpack.Builtin()
 	if err != nil {
 		log.Fatalf("af-proxy: %v", err)
@@ -318,6 +328,13 @@ type proxy struct {
 	// limits shape traffic to a rule's declared rate, so a load run does not
 	// get somebody's sandbox account throttled.
 	limits *limiter
+	// destinations refuse the addresses the environment must not reach
+	// through this sidecar, whatever the policy says about the name.
+	destinations *destinations
+	// resolve turns a name into addresses. Nil means the system resolver,
+	// which is what the sidecar always uses; a test sets it to say what a
+	// name resolves to.
+	resolve func(context.Context, string) ([]net.IP, error)
 	// synth invents a response when a rule asks for one. Nil when no model
 	// key is available, in which case a synth rule refuses and says so.
 	synth *synthConfig
@@ -437,7 +454,10 @@ func (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstream, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 30*time.Second)
+	// Background rather than the request's context. The connection was
+	// hijacked a few lines up, so this handler owns it now and no longer
+	// wants a deadline that belongs to a request net/http considers finished.
+	upstream, err := p.dialGuarded(context.Background(), "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
 		rec.Error = err.Error()
 		rec.Status = http.StatusBadGateway
@@ -475,6 +495,16 @@ func pipe(client, upstream net.Conn) int64 {
 }
 
 // serveHTTP handles a plain request, where the whole thing is visible.
+//
+// This is the path a client that reads its proxy variables takes for an http
+// URL, and until this was written it was the one path that did not enforce the
+// whole policy. It read the mode and forwarded: the live credential tripwire
+// never ran, a sandbox rule sent the application's own credential to the
+// provider untouched, and capture, mock and synth were refused with a body
+// claiming they were not wired up in this build. Which of those happened
+// depended on whether the application's HTTP library honoured http_proxy,
+// which is not a property anybody reasons about while writing a rule. The
+// same defect was found and fixed on the CONNECT path and left here.
 func (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	if !r.URL.IsAbs() {
@@ -494,13 +524,46 @@ func (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := record{
 		Event: "decision", Method: r.Method, Host: host, Port: port, Path: r.URL.Path,
 		Mode: string(d.Mode), Rule: d.RuleHost, Reason: d.Reason(), Allowed: d.Allowed(),
+		Via: "proxy",
 	}
+
+	// Before anything is forwarded and before the mode is acted on, in every
+	// mode, exactly as on the other two paths. A credential that can act on
+	// production must not leave an environment running unreviewed code against
+	// a copy of production data, and which HTTP library the application chose
+	// has nothing to do with that.
+	if found := p.tripwire(r, host); len(found) > 0 {
+		rec.Status = http.StatusForbidden
+		rec.Allowed = false
+		rec.Reason = "This request carries a live credential: " + livekey.Describe(found)
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("X-Antifailure-Decision", "block")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, refusalForLiveCredential(req, found))
+		return
+	}
+
+	switch d.Mode {
+	case schema.ModeCapture, schema.ModeMock, schema.ModeSynth:
+		p.serveInsideTheEnvironment(w, r, host, d, &rec, started)
+		return
+	}
+
 	if !d.Allowed() {
 		rec.Status = http.StatusForbidden
 		rec.Duration = time.Since(started).String()
 		p.emit(rec)
 		writeRefusal(w, d, req)
 		return
+	}
+
+	if d.RateLimit != "" {
+		if waited := p.limits.wait(d.RuleHost, d.RateLimit); waited > 0 {
+			rec.WaitedMs = waited.Milliseconds()
+			rec.Limit = describeRate(d.RateLimit)
+		}
 	}
 
 	outbound := r.Clone(r.Context())
@@ -511,8 +574,17 @@ func (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, h := range hopByHop {
 		outbound.Header.Del(h)
 	}
+	if d.Mode == schema.ModeSandbox {
+		// Whatever the application sent is discarded before the request
+		// leaves, which is the whole difference between sandbox mode and
+		// asking somebody to configure a sandbox key correctly.
+		applySandbox(outbound, host, p.credentials[d.Credential])
+		rec.Substituted = p.credentials[d.Credential] != ""
+	}
 
-	resp, err := http.DefaultTransport.RoundTrip(outbound)
+	// p.transport rather than http.DefaultTransport, because the address
+	// guard hangs off its dialer and the default one has no guard at all.
+	resp, err := p.transport.RoundTrip(outbound)
 	if err != nil {
 		rec.Error = err.Error()
 		rec.Status = http.StatusBadGateway
@@ -535,6 +607,55 @@ func (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	rec.Bytes = n
 	rec.Duration = time.Since(started).String()
 	p.emit(rec)
+}
+
+// serveInsideTheEnvironment answers a capture, mock or synth request that
+// arrived through the explicit proxy port.
+//
+// All three write a whole HTTP response rather than filling in a
+// ResponseWriter, because the other two paths hold a raw connection and have
+// nothing else to write onto. Rather than a second implementation of each
+// mode for this path, the connection is taken over and handed to the same
+// code. The body is read first, because a hijacked request's Body is no
+// longer safe to touch.
+func (p *proxy) serveInsideTheEnvironment(
+	w http.ResponseWriter, r *http.Request, host string, d policy.Decision,
+	rec *record, started time.Time,
+) {
+	// The larger of the two limits the modes below apply, so neither is
+	// handed a body this function truncated first. Each still applies its own.
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(body))
+
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		rec.Error = "the connection cannot be taken over"
+		rec.Duration = time.Since(started).String()
+		p.emit(*rec)
+		http.Error(w, "af-proxy: cannot answer this request", http.StatusInternalServerError)
+		return
+	}
+	conn, _, err := hijacker.Hijack()
+	if err != nil {
+		rec.Error = err.Error()
+		rec.Duration = time.Since(started).String()
+		p.emit(*rec)
+		return
+	}
+	defer func() { _ = conn.Close() }()
+
+	switch d.Mode {
+	case schema.ModeCapture:
+		rec.Status = http.StatusOK
+		p.capture(conn, r, host)
+	case schema.ModeMock:
+		p.serveMock(conn, r, host, rec)
+	case schema.ModeSynth:
+		p.serveSynth(conn, r, host, rec)
+	}
+	rec.Duration = time.Since(started).String()
+	p.emit(*rec)
 }
 
 // writeRefusal explains a refusal in the response body.
@@ -560,15 +681,8 @@ func refusalBody(d policy.Decision, req policy.Request) string {
 	fmt.Fprintf(&b, "Antifailure refused this request.\n\n")
 	fmt.Fprintf(&b, "  %s\n\n", req.String())
 	fmt.Fprintf(&b, "%s\n\n", d.Reason())
-	switch d.Mode {
-	case schema.ModeCapture:
-		b.WriteString("This host is set to capture, which is not wired up yet in this build.\n")
-	case schema.ModeMock:
-		b.WriteString("This host is set to mock, which is not wired up yet in this build.\n")
-	default:
-		fmt.Fprintf(&b, "Ask about it with:\n\n  af net explain %s %s\n",
-			req.Method, schemeOf(req)+"://"+req.Host+req.Path)
-	}
+	fmt.Fprintf(&b, "Ask about it with:\n\n  af net explain %s %s\n",
+		req.Method, schemeOf(req)+"://"+req.Host+req.Path)
 	return b.String()
 }
 

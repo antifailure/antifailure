@@ -44,12 +44,29 @@ export function MonoLabel({
   );
 }
 
+/**
+ * The verdict badge, in the engine's vocabulary.
+ *
+ * The tones used to be PASS, WARN and BLOCK, and two of the three were wrong.
+ * The engine has no warning state at all: a run resolves to pass, fail, flaky,
+ * blocked or unverified (engine/internal/report/report.go). Worse, its
+ * `blocked` means the opposite of what BLOCK said here. On the site BLOCK read
+ * as "merge disabled"; in the product it means the run could not be carried
+ * through, nothing here counts against the change, and `af ci` exits zero. A
+ * reader who learned the word from this site and then read a real check would
+ * conclude the check had inverted its own verdict.
+ *
+ * So FAIL is the badge for a change that must not merge, and UNVERIFIED is the
+ * neutral one for a run that could not answer. Neither is amber, because a
+ * colour that says "proceed with care" is a third outcome the gate does not
+ * have.
+ */
 export function StatusPill({
   tone,
   children,
   className,
 }: {
-  tone: "PASS" | "WARN" | "BLOCK";
+  tone: "PASS" | "FAIL" | "UNVERIFIED";
   children?: ReactNode;
   className?: string;
 }) {
@@ -58,8 +75,8 @@ export function StatusPill({
       className={cn(
         "inline-flex items-center px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight uppercase ring-1",
         tone === "PASS" && "text-[#285D49] ring-[#33bf00]/50",
-        tone === "WARN" && "text-amber-800 ring-amber-700/40",
-        tone === "BLOCK" && "text-red-700 ring-red-600/50",
+        tone === "UNVERIFIED" && "text-black/50 ring-black/20",
+        tone === "FAIL" && "text-red-700 ring-red-600/50",
         className,
       )}
     >

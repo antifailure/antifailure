@@ -25,7 +25,10 @@ type Manifest struct {
 	Invariants []Invariant `json:"invariants,omitempty" yaml:"invariants,omitempty"`
 	Insights   *Insights   `json:"insights,omitempty" yaml:"insights,omitempty"`
 	Change     *Change     `json:"change,omitempty" yaml:"change,omitempty"`
+	Oracle     *Oracle     `json:"oracle,omitempty" yaml:"oracle,omitempty"`
+	Explore    *Explore    `json:"explore,omitempty" yaml:"explore,omitempty"`
 	Load       *Load       `json:"load,omitempty" yaml:"load,omitempty"`
+	Policy     *Policy     `json:"policy,omitempty" yaml:"policy,omitempty"`
 	Runtime    *Runtime    `json:"runtime,omitempty" yaml:"runtime,omitempty"`
 	GitHub     *GitHub     `json:"github,omitempty" yaml:"github,omitempty"`
 }
@@ -360,6 +363,119 @@ type Insights struct {
 	RegressionFactor   float64 `json:"regression_factor,omitempty" yaml:"regression_factor,omitempty"`
 	RegressionMinMS    float64 `json:"regression_min_ms,omitempty" yaml:"regression_min_ms,omitempty"`
 	LargeTableRows     int     `json:"large_table_rows,omitempty" yaml:"large_table_rows,omitempty"`
+	// RollingCompatibility is the check that runs the PREVIOUS release against
+	// the migrated schema. It is a block rather than a bool because two of its
+	// three answers are not on and off: which commit the previous release is,
+	// and whether to pay for the check when the migration cannot break
+	// anything.
+	RollingCompatibility *RollingCompatibility `json:"rolling_compatibility,omitempty" yaml:"rolling_compatibility,omitempty"`
+}
+
+// RollingCompatibility configures the rolling deploy check.
+type RollingCompatibility struct {
+	// When is never, risky or always. Risky is the default and runs the check
+	// only when the pending migrations contain a change the previous release
+	// could notice.
+	When string `json:"when,omitempty" yaml:"when,omitempty"`
+	// Against names the previous release: merge-base, previous-commit, or any
+	// revision git can resolve, such as a tag.
+	Against string `json:"against,omitempty" yaml:"against,omitempty"`
+}
+
+// BaselineSource names how the version to compare against is chosen.
+//
+// The two answer different questions and a project has to say which it wants.
+// The merge base answers "what does this branch change", and it does not move
+// when somebody else lands a commit on main halfway through a review. An
+// explicit ref answers "what changes when this ships", which is what a release
+// gate wants and what a tag names. There is no third value for "the revision
+// currently deployed", because the engine has no way to know what that is: a
+// deployment pipeline does, and it passes the commit as base_ref.
+type BaselineSource string
+
+const (
+	// BaselineMergeBase is the commit this branch and the base branch share.
+	BaselineMergeBase BaselineSource = "merge_base"
+	// BaselineRef is a git ref named outright: a branch, a tag, or a commit.
+	BaselineRef BaselineSource = "ref"
+)
+
+// Oracle configures the differential comparison of two versions.
+type Oracle struct {
+	Enabled           *bool           `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Baseline          BaselineSource  `json:"baseline,omitempty" yaml:"baseline,omitempty"`
+	BaseRef           string          `json:"base_ref,omitempty" yaml:"base_ref,omitempty"`
+	FailOn            string          `json:"fail_on,omitempty" yaml:"fail_on,omitempty"`
+	Probes            []Probe         `json:"probes,omitempty" yaml:"probes,omitempty"`
+	CompareTimestamps bool            `json:"compare_timestamps,omitempty" yaml:"compare_timestamps,omitempty"`
+	CompareUUIDs      bool            `json:"compare_uuids,omitempty" yaml:"compare_uuids,omitempty"`
+	Ignore            *OracleIgnore   `json:"ignore,omitempty" yaml:"ignore,omitempty"`
+	Database          *OracleDatabase `json:"database,omitempty" yaml:"database,omitempty"`
+}
+
+// Probe is one request sent to both versions.
+//
+// Written down rather than discovered, because both sides have to receive the
+// same bytes in the same order. The agents that drive a workflow decide their
+// next step from what is on the screen, so two runs of one workflow send two
+// different request sequences, and a diff of those compares the agent with
+// itself.
+type Probe struct {
+	Name    string            `json:"name" yaml:"name"`
+	Method  string            `json:"method,omitempty" yaml:"method,omitempty"`
+	Path    string            `json:"path" yaml:"path"`
+	Headers map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
+	Body    string            `json:"body,omitempty" yaml:"body,omitempty"`
+}
+
+// OracleIgnore is what the comparison is told not to look at.
+//
+// Everything named here is printed in the report along with the defaults, so a
+// reader can see what was skipped rather than wondering.
+type OracleIgnore struct {
+	Headers []string `json:"headers,omitempty" yaml:"headers,omitempty"`
+	Fields  []string `json:"fields,omitempty" yaml:"fields,omitempty"`
+}
+
+// OracleDatabase configures the comparison of the two branches' contents.
+type OracleDatabase struct {
+	Enabled *bool    `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Tables  []string `json:"tables,omitempty" yaml:"tables,omitempty"`
+	Exclude []string `json:"exclude,omitempty" yaml:"exclude,omitempty"`
+	MaxRows int      `json:"max_rows,omitempty" yaml:"max_rows,omitempty"`
+}
+
+// Explore configures the exploratory runs.
+//
+// A separate block from Workflows rather than a flag on one, because the two
+// are different things asked of the same browser. A workflow declares an
+// outcome and is judged against it; a goal declares an intention and is judged
+// against nothing, which is why an exploration cannot fail a build. Overloading
+// workflows[] would also collide with its own validation: a workflow needs a
+// description of at least four words to plan from and a persona to run as, and
+// a goal needs neither.
+type Explore struct {
+	Enabled bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Goals   []Goal `json:"goals,omitempty" yaml:"goals,omitempty"`
+}
+
+// Goal is one thing an exploratory agent tries to achieve.
+type Goal struct {
+	Name string `json:"name" yaml:"name"`
+	// Goal is the sentence, written the way somebody would say it out loud.
+	// The agent has no script, so this is the only thing telling it where to
+	// go, and it is what the run is judged to have reached or not reached.
+	Goal    string `json:"goal" yaml:"goal"`
+	Persona string `json:"persona,omitempty" yaml:"persona,omitempty"`
+	// Seed decides every choice the agent makes. The same seed against the
+	// same application takes the same path, which is what makes a finding
+	// something somebody can replay rather than something they have to
+	// believe. Defaults to the goal's name.
+	Seed      string `json:"seed,omitempty" yaml:"seed,omitempty"`
+	StartPath string `json:"start_path,omitempty" yaml:"start_path,omitempty"`
+	// SlowMs is how long one step may take before it is reported as friction.
+	SlowMs int     `json:"slow_ms,omitempty" yaml:"slow_ms,omitempty"`
+	Budget *Budget `json:"budget,omitempty" yaml:"budget,omitempty"`
 }
 
 // Change configures how a pull request's diff is classified.
@@ -415,6 +531,84 @@ type LoadThresholds struct {
 	P95Increase        float64 `json:"p95_increase,omitempty" yaml:"p95_increase,omitempty"`
 	ErrorRate          float64 `json:"error_rate,omitempty" yaml:"error_rate,omitempty"`
 	QueryCountIncrease float64 `json:"query_count_increase,omitempty" yaml:"query_count_increase,omitempty"`
+}
+
+// PolicyLevel is what one class of finding does to the check.
+//
+// Three levels rather than two, because a real finding that does not stop a
+// merge had nowhere to go before this: everything the run noticed either
+// failed the build or was printed and forgotten. A rewrite on a table of four
+// hundred rows is worth a line in the comment and is not worth blocking on,
+// and a policy that can only say fail or nothing teaches people to say
+// nothing.
+type PolicyLevel string
+
+const (
+	// PolicyIgnore drops the finding entirely. It is not printed and it does
+	// not reach the verdict.
+	PolicyIgnore PolicyLevel = "ignore"
+	// PolicyWarn reports the finding and leaves the check passing.
+	PolicyWarn PolicyLevel = "warn"
+	// PolicyFail reports the finding and fails the check.
+	PolicyFail PolicyLevel = "fail"
+)
+
+// AllPolicyLevels returns every level, weakest first. Kept so the schema, the
+// validator and the documentation cannot drift.
+func AllPolicyLevels() []PolicyLevel {
+	return []PolicyLevel{PolicyIgnore, PolicyWarn, PolicyFail}
+}
+
+// Policy is what each class of finding does to the pull request check.
+//
+// It exists because "pass, warning, or block" was a sentence on a web page and
+// nothing in the engine could produce the middle one. Every key here is read
+// by af ci when it builds the report, and each maps one kind of evidence to
+// one level, so that the answer to "why did this fail" is always a key in this
+// block rather than a rule somebody has to read Go to find.
+type Policy struct {
+	// MigrationLock is how long a migration may hold a lock on a table.
+	MigrationLock *LockPolicy `json:"migration_lock,omitempty" yaml:"migration_lock,omitempty"`
+	// MigrationFailed is a migration that did not apply to a branch with
+	// production's shape in it.
+	MigrationFailed PolicyLevel `json:"migration_failed,omitempty" yaml:"migration_failed,omitempty"`
+	// MigrationRewrite is a statement Postgres reported as rewriting a table.
+	MigrationRewrite PolicyLevel `json:"migration_rewrite,omitempty" yaml:"migration_rewrite,omitempty"`
+	// MigrationLint governs all six lint rules together. They are one setting
+	// because a project that wants the lint wants all of it: the rules are
+	// already scoped by table size, so the noisy case is handled by
+	// insights.large_table_rows rather than by turning a rule off.
+	MigrationLint PolicyLevel `json:"migration_lint,omitempty" yaml:"migration_lint,omitempty"`
+	// PlanRegression is a query plan that got worse.
+	PlanRegression PolicyLevel `json:"plan_regression,omitempty" yaml:"plan_regression,omitempty"`
+	// QueryRegression is a statement that runs more often or slower than the
+	// baseline did.
+	QueryRegression PolicyLevel `json:"query_regression,omitempty" yaml:"query_regression,omitempty"`
+	// LoadRegression is a load threshold from the load block being exceeded.
+	LoadRegression PolicyLevel `json:"load_regression,omitempty" yaml:"load_regression,omitempty"`
+	// EgressSurprise is the environment trying to reach a host the manifest
+	// does not mention.
+	EgressSurprise PolicyLevel `json:"egress_surprise,omitempty" yaml:"egress_surprise,omitempty"`
+	// Masking is the environment's own branch reading back with something in
+	// it that still parses as real data.
+	Masking PolicyLevel `json:"masking,omitempty" yaml:"masking,omitempty"`
+	// Cleanup is teardown leaving a resource behind.
+	Cleanup PolicyLevel `json:"cleanup,omitempty" yaml:"cleanup,omitempty"`
+}
+
+// LockPolicy is the two thresholds on how long a migration held a lock.
+//
+// Two numbers rather than one because the interesting range is wide: a lock
+// held for a fifth of a second is a pause, one held for five seconds is an
+// outage on a busy table, and there is no single figure that is right for
+// both. Both are compared against a sampled lower bound, so a run that
+// breaches one really did hold the lock at least that long.
+type LockPolicy struct {
+	// WarnMS reports a lock held at least this long.
+	WarnMS float64 `json:"warn_ms,omitempty" yaml:"warn_ms,omitempty"`
+	// FailMS fails the check on a lock held at least this long. It must not be
+	// below WarnMS, which the validator enforces.
+	FailMS float64 `json:"fail_ms,omitempty" yaml:"fail_ms,omitempty"`
 }
 
 // RuntimeProvider names where environments run.

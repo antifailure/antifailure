@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-32 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+30 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -116,6 +116,30 @@ Invariant {invariant} does not hold: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/invariants](/docs/guides/invariants/) |
 
+### AF-AGT-020
+
+There is nothing to explore: {detail}
+
+**What to do.** Add a goal under explore in the manifest, and set explore.enabled to true.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/exploration](/docs/concepts/exploration/) |
+
+### AF-AGT-021
+
+No goal named {goal} is declared under explore.
+
+**What to do.** Run 'af explain' to see the goals this manifest declares, then check the spelling.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/exploration](/docs/concepts/exploration/) |
+
 ## Build
 
 ### AF-BLD-001
@@ -175,6 +199,30 @@ No build strategy could be detected for {service}.
 | | |
 | --- | --- |
 | Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/build](/docs/guides/build/) |
+
+### AF-BLD-011
+
+The Dockerfile {dockerfile} for {service} is excluded from the build context by .dockerignore.
+
+**What to do.** Add '!{dockerfile}' to .dockerignore. The file exists, and the build sends a filtered copy of the tree to the daemon, so a path the ignore file excludes is not there to build from.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/build](/docs/guides/build/) |
+
+### AF-BLD-012
+
+The Dockerfile {dockerfile} for {service} is outside the build context {context}.
+
+**What to do.** Widen build.context, or move the Dockerfile inside it. A build cannot read a file the context does not carry.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/build](/docs/guides/build/) |
 
@@ -302,6 +350,42 @@ The subset could not be taken: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/subsetting](/docs/concepts/subsetting/) |
 
+### AF-DB-012
+
+No golden matches this manifest's masking rules, and {count} were made under different ones.
+
+**What to do.** Run 'af golden refresh' to make one from the source this manifest names.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens/) |
+
+### AF-DB-013
+
+The database seed command failed: {detail}
+
+**What to do.** Run the command yourself against an empty database of the same version. It is: {command}
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens/) |
+
+### AF-DB-014
+
+No database branch exists for {env}.
+
+**What to do.** Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens/) |
+
 ### AF-DB-020
 
 Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured.
@@ -335,6 +419,30 @@ Migrations failed on the branch: {detail}
 | | |
 | --- | --- |
 | Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/insights](/docs/concepts/insights/) |
+
+### AF-DB-031
+
+The migration finding {rule} fails this project's policy: {detail}
+
+**What to do.** The report above names the table and the statement. Fix the migration, or lower the rule to 'warn' in the manifest's policy block.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+
+### AF-DB-032
+
+The previous release does not survive this migration: {detail}
+
+**What to do.** A rolling deploy runs both releases at once, so make the change backward compatible: add the new column and write to both, migrate the readers, and drop the old one in a later deploy.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/insights](/docs/concepts/insights/) |
 
@@ -375,6 +483,32 @@ The diff at {path} could not be read: {detail}
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/change-analysis](/docs/concepts/change-analysis/) |
+
+## Enterprise
+
+### AF-EE-004
+
+The license covers {seats} seats and they are all in use.
+
+**What to do.** Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [enterprise/licensing](/docs/enterprise/licensing/) |
+
+### AF-EE-010
+
+Organization policy {policy} refuses this environment: {detail}
+
+**What to do.** Ask an organization administrator to review {policy}, or bring the repository into compliance.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [enterprise/policy](/docs/enterprise/policy/) |
 
 ## Infrastructure
 
@@ -577,6 +711,140 @@ The webhook could not be delivered to {service}: {detail}
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/webhooks](/docs/guides/webhooks/) |
+
+### AF-NET-013
+
+The environment tried to reach {hosts}, which nothing in the manifest mentions.
+
+**What to do.** Add an egress rule for it with the mode you intend, or set policy.egress_surprise to 'warn' to let the attempt through the check.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+
+## Differential oracle
+
+### AF-ORC-001
+
+The manifest declares no oracle block, so there is nothing to compare.
+
+**What to do.** Add an oracle block with at least one probe; the manifest reference has the shape.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-002
+
+The oracle is on and declares no requests to send.
+
+**What to do.** Add at least one entry under oracle.probes. Both versions have to receive the same requests in the same order, so the plan is written down rather than discovered.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-003
+
+The baseline revision could not be resolved: {detail}
+
+**What to do.** Set oracle.base_ref to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-004
+
+The baseline and the candidate are both {commit}, so there is nothing to compare.
+
+**What to do.** Commit the change, or point oracle.base_ref at the revision you meant to compare against.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-005
+
+The baseline revision {commit} could not be checked out: {detail}
+
+**What to do.** Check that the commit is present in this clone; a shallow clone often is not deep enough to reach it.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-006
+
+There is no web service to send requests to in the {side} environment.
+
+**What to do.** Declare a service of kind web in the manifest; the oracle compares HTTP responses and needs somewhere to send them.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-007
+
+The baseline environment did not come up: {detail}
+
+**What to do.** Bring the baseline revision up on its own with 'af up' from a checkout of it to see the build or migration failure in full.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-008
+
+The {side} branch could not be read for comparison: {detail}
+
+**What to do.** Check the branch is reachable, or turn the contents comparison off with oracle.database.enabled: false to compare responses alone.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-009
+
+The golden version {version} the comparison pinned is no longer present or no longer verified.
+
+**What to do.** Run the comparison again; both sides branch one golden and the one the candidate used has gone.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
+
+### AF-ORC-010
+
+The candidate behaves differently from the baseline: {detail}
+
+**What to do.** Read the differences above. Each one is either the change you meant to make or a regression; raise oracle.fail_on if this class of difference is expected.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/oracle](/docs/concepts/oracle/) |
 
 ## Runtime
 

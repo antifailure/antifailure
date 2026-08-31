@@ -1,10 +1,11 @@
 import { SubprocessorsPage } from "@/components/pages/company/Legal";
-import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Subprocessors — Antifailure",
-  description: "Everyone who receives data, everyone who deliberately does not, and how the list changes.",
-};
+// From lib/routes.ts, like every other page. Written out by hand these
+// four had a title and a description and nothing else: no canonical, no
+// OpenGraph, no Twitter card, no markdown alternate, and no place in the
+// sitemap, because the registry is what the sitemap is built from.
+export const metadata = pageMetadata("/subprocessors");
 
 export default function Page() {
   return <SubprocessorsPage />;

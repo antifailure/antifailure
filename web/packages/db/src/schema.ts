@@ -113,6 +113,24 @@ export const oauthStates = pgTable('oauth_states', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 })
 
+export const emailSignInTokens = pgTable('email_signin_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tokenHash: bytea('token_hash').notNull(),
+  // Lowercased. The user is resolved when the token comes back, not when it is
+  // issued: see migrations/0012 for why issuing must not be able to read a
+  // user row by address.
+  email: text('email').notNull(),
+  redirectTo: text('redirect_to'),
+  ip: inet('ip'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+}, (t) => [
+  uniqueIndex('email_signin_tokens_hash_key').on(t.tokenHash),
+  index('email_signin_tokens_expiry_idx').on(t.expiresAt),
+])
+
 export const githubInstallations = pgTable('github_installations', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').notNull(),
@@ -241,9 +259,34 @@ export const networkRules = pgTable('network_rules', {
   webhookPath: text('webhook_path'),
   note: text('note'),
   position: integer('position').notNull().default(0),
+  // Proposed by one person, approved by another, or by the same person in a
+  // team small enough that the distinction is bookkeeping. A rule is inert
+  // until approvedAt is set: effectiveEgress will not read it and no
+  // environment applies it.
+  proposedBy: uuid('proposed_by'),
+  approvedBy: uuid('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index('network_rules_scope_idx').on(t.orgId, t.repositoryId, t.position)])
+
+// Where an organization's environments are allowed to run. A name and a
+// provider, never a credential: the control plane does not reach a runtime, it
+// hands the name to the customer's own CI. See migrations/0018.
+export const runtimes = pgTable('runtimes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  name: text('name').notNull(),
+  provider: text('provider').notNull(),
+  labels: textArray('labels').notNull(),
+  note: text('note'),
+  registeredBy: uuid('registered_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  // Removed rather than deleted, so an environment that named this runtime
+  // still resolves to something the console can explain.
+  removedAt: timestamp('removed_at', { withTimezone: true }),
+}, (t) => [index('runtimes_org_idx').on(t.orgId, t.createdAt)])
 
 export const engineTokens = pgTable('engine_tokens', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -514,8 +557,8 @@ export const scimGroupMembers = pgTable('scim_group_members', {
  *  isolated, so the suite asserts this list covers the database. */
 export const tenantScopedTables = [
   members, githubInstallations, repositories, environments, goldenVersions,
-  runs, verdicts, artifacts, maskingRules, networkRules, engineTokens, events,
-  auditEntries, providerKeys, providerBudgets,
+  runs, verdicts, artifacts, maskingRules, networkRules, runtimes, engineTokens,
+  events, auditEntries, providerKeys, providerBudgets,
   ssoConnections, ssoConnectionSecrets, ssoDomains, ssoLoginStates,
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,

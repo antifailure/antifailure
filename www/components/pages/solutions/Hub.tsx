@@ -13,25 +13,25 @@ const TEAMS = [
     href: "/solutions/saas",
     title: "B2B SaaS",
     body: "Daily deploys, expanding schemas, and staging that drifted years ago. Tenant-shaped state without production identities.",
-    metric: "Seats · billing · coexistence",
+    metric: "Seats · billing · rare rows",
   },
   {
     href: "/solutions/fintech",
     title: "Fintech",
-    body: "Billing, ledgers, and side effects that must never hit live processors. Simulators, not production APIs.",
-    metric: "Stripe simulated · fail closed",
+    body: "Billing, ledgers, and side effects that must never hit live processors. A stateful Stripe pack, not the production API.",
+    metric: "Stripe offline · fail closed",
   },
   {
     href: "/solutions/marketplaces",
     title: "Marketplaces",
     body: "Queues, workers, dual-writes, and matching logic staging never reproduces. Timing is the bug.",
-    metric: "Workers · webhooks blocked",
+    metric: "Workers · webhooks captured",
   },
   {
     href: "/solutions/devtools",
     title: "Developer tools",
-    body: "Schema changes on large tables. Users notice p99 immediately. Locks, plans, and pool pressure show up here first.",
-    metric: "Locks · plans · pools",
+    body: "Schema changes on large tables. Users notice p99 immediately. Locks, rewrites and plan regressions show up here first.",
+    metric: "Locks · rewrites · plans",
   },
 ];
 
@@ -39,6 +39,7 @@ export function SolutionsHubPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions"
         eyebrow="Solutions"
         title="The same question, for the teams who feel it first."
         lead="Before a risky change meets production, prove it on a disposable twin. Built for teams who already feel migration anxiety, staging drift, and release incidents."

@@ -5,9 +5,10 @@ export function DevtoolsPage() {
   return (
     <PageShell>
       <PageHero
+        path="/solutions/devtools"
         eyebrow="Solutions · Developer tools"
         title="Schema changes on large tables."
-        lead="The flagship wedge, felt first by teams whose users notice p99 immediately. Measure lock duration, blocked statements, and whether old instances can still read the new schema."
+        lead="The flagship wedge, felt first by teams whose users notice p99 immediately. Measure the strongest lock held per table, how long it was held, what queued behind it, and how the query plans moved."
         framed={false}
         visual={<MigrationHero tab={1} />}
       />
@@ -15,20 +16,20 @@ export function DevtoolsPage() {
         <Split
           reverse
           visual={
-            <CodePanel label="plan regression · events">{`baseline   Index Scan  events_created_at_idx   12ms
-candidate  Seq Scan    events                  410ms
+            <CodePanel label="af insights · events">{`before   Index Scan  events_created_at_idx   12ms
+after    Seq Scan    events                  410ms
 
-rows           12,403,881
-lock           ACCESS SHARE  1.1s
-pool waited    84 connections
-old app        cannot decode events.v2 payload`}
+rows      12,403,881
+lock      ACCESS EXCLUSIVE  events  4.2s
+blocked   84 statements queued behind it
+rewrite   events rewritten in full`}
             </CodePanel>
           }
         >
           <SectionHeading title="<strong>Users notice p99 immediately.</strong> Large tables plus frequent schema change." />
           <Lead>
             The first supported stack should be exceptional. A broad compatibility list with unreliable
-            connectors would destroy trust. Start with Postgres volume, plans, and pools — then expand.
+            connectors would destroy trust. Start with Postgres volume, locks and plans, then expand.
           </Lead>
         </Split>
         <div className={AFTER_HEADING}>
@@ -36,21 +37,21 @@ old app        cannot decode events.v2 payload`}
             items={[
               { title: "Large tables", body: "Exclusive locks and rewrites that never show up on a laptop database." },
               { title: "Query plans", body: "Plan regressions under production-shaped volume." },
-              { title: "Pools", body: "Connection-pool exhaustion during migrate-and-serve." },
+              { title: "Statements", body: "Per-statement duration, so the slow one in a batch is named." },
             ]}
           />
         </div>
       </PageSection>
       <PageSection tone="sage">
         <Note label="Narrow adapters, complete stack">
-          Exceptional Postgres instrumentation first. Publish what the twin reproduced. Do not pretend
-          unsupported components are cloned.
+          Exceptional Postgres instrumentation first. Say what the run could not measure. Do not
+          pretend unsupported components are cloned.
         </Note>
       </PageSection>
       <RelatedGrid
         items={[
-          { href: "/product/migrations", title: "Migration Safety", description: "Locks, plans, pools, rollback." },
-          { href: "/product/fidelity", title: "Fidelity Graph", description: "What the twin actually reproduced." },
+          { href: "/product/migrations", title: "Migration Safety", description: "Locks, rewrites, plans, lint." },
+          { href: "/product/load", title: "Load", description: "Production's own route mix against the branch." },
           { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
         ]}
       />

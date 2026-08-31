@@ -11,6 +11,7 @@ import {
   Stage,
   Steps,
 } from "@/components/pages/kit";
+import { Illustrative } from "@/components/layout/Illustrative";
 import { TrustBoundaryScene } from "@/components/home/visuals/TrustBoundaryScene";
 import {
   CheckRow,
@@ -32,9 +33,9 @@ type PlaneItem = {
 const CONTROL_PLANE: PlaneItem[] = [
   { label: "Organizations", detail: "Projects, entitlements, and fleet status." },
   { label: "GitHub and CI", detail: "Integrations that plan the run and attach the gate." },
-  { label: "Run planning", detail: "Policy, fidelity, and the validation plan." },
+  { label: "Run planning", detail: "Organization policy and which repositories may run." },
   { label: "Reports", detail: "Aggregated evidence and historical comparisons." },
-  { label: "Billing", detail: "Credits, caps, and cost attribution." },
+  { label: "Billing", detail: "Plans and usage. Not deployed yet; the engine runs in your CI today." },
 ];
 
 const DATA_PLANE: PlaneItem[] = [
@@ -42,33 +43,44 @@ const DATA_PLANE: PlaneItem[] = [
   { label: "Snapshots", detail: "Access, restore, and sanitization in-boundary." },
   { label: "Provisioning", detail: "Twins, networks, and secret replacement." },
   { label: "Egress", detail: "Capture, redaction, and fail-closed enforcement." },
-  { label: "Execution", detail: "Workloads, raw logs, traces, and cleanup." },
+  { label: "Execution", detail: "Workflows, traffic, raw logs, traces, and cleanup." },
 ];
 
+/** In force today. Each of these is something a run will refuse to start without. */
 const ISOLATION_MINIMUMS = [
   "No production write credentials",
   "No production database route",
   "No default internet route",
   "Separate DNS policy",
   "Separate secrets namespace",
-  "Temporary workload identity",
-  "Resource tags with run ID and expiration",
-  "Hard cost ceiling",
-  "Admission policy that rejects unowned resources",
-  "Independent cleanup controller",
 ] as const;
 
+/**
+ * Designed and not built.
+ *
+ * This list used to sit beside the one above under the same heading, so a
+ * reader had no way to tell which five were enforced. Grepping the engine and
+ * the control plane for admission, reaper, budget, workload identity and
+ * resource expiry finds no implementation of any of them.
+ */
+const ISOLATION_PLANNED = [
+  "Temporary workload identity",
+  "Resource tags with an expiry a controller enforces",
+  "Hard per-run cost ceiling",
+  "Admission policy that rejects unowned resources",
+  "An independent cleanup controller",
+] as const;
+
+/** What keeps a run cheap today, and what does not exist yet. */
 const COST_ROWS: [string, string][] = [
-  ["Estimate", "Cost is computed before anything is provisioned."],
-  ["Per-run cap", "A hard spending ceiling on every twin."],
-  ["Daily cap", "Per-organization daily budget."],
-  ["Concurrency", "Maximum agent and deterministic concurrency."],
-  ["Downscale", "Automatic downscaling when statistical confidence is reached."],
-  ["Cache", "Snapshot and build caching across runs."],
-  ["Subset", "Referential copies instead of full cloning by default."],
-  ["BYOC", "Customer-cloud execution for expensive enterprise workloads."],
-  ["TTL", "Inactivity expiration with attested destruction."],
-  ["Attribution", "Cost by pull request and team."],
+  ["Subset", "A referential subset instead of a full copy, by default. Built."],
+  ["Cache", "Goldens are branched rather than restored per run. Built."],
+  ["BYOC", "The engine runs in your own CI on your own compute. Built."],
+  ["Sweep", "af env prune removes environments past a cutoff you pass. Built."],
+  ["Estimate", "A cost computed before anything is provisioned. Not built."],
+  ["Per-run cap", "A hard spending ceiling on every twin. Not built."],
+  ["Daily cap", "A per-organization daily budget. Not built."],
+  ["Attribution", "Cost by pull request and team. Not built."],
 ];
 
 function PlaneColumn({
@@ -128,7 +140,7 @@ function PlaneDiagram() {
                   rpt_08f2 · sha256:7c1a…
                   <span className="mt-0.5 block text-black/45">evidence, not records</span>
                 </span>
-                <StatusPill tone="BLOCK" />
+                <StatusPill tone="FAIL" />
               </Receipt>
             }
           />
@@ -161,7 +173,10 @@ function PlaneDiagram() {
           className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-px bg-[#c41e1e]/70 xl:block"
           aria-hidden
         />
-        <div className="pointer-events-none absolute top-6 left-1/2 z-[1] hidden -translate-x-1/2 border border-black/[0.08] bg-white px-2.5 py-1 xl:block">
+        {/* Centred on the divider rather than pinned to the top, where it sat
+            on top of the data plane's own kicker and rendered it as
+            "TOMER-HOSTED". */}
+        <div className="pointer-events-none absolute top-1/2 left-1/2 z-[1] hidden -translate-x-1/2 -translate-y-1/2 border border-black/[0.08] bg-white px-2.5 py-1 xl:block">
           <MonoLabel className="uppercase tracking-[0.12em]">trust boundary</MonoLabel>
         </div>
       </div>
@@ -169,7 +184,7 @@ function PlaneDiagram() {
       <div className="flex items-center justify-between gap-6 border-t border-black/10 bg-white px-8 py-4 max-md:flex-col max-md:items-start max-md:gap-3 max-md:px-6">
         <CheckRow ok={false}>raw snapshots · secrets · request bodies</CheckRow>
         <MonoLabel className="uppercase tracking-[0.12em]">do not enter the control plane</MonoLabel>
-        <CheckRow ok>reports · sha256 · pass / warn / block</CheckRow>
+        <CheckRow ok>reports · sha256 · pass or fail</CheckRow>
       </div>
     </Stage>
   );
@@ -179,6 +194,7 @@ export function ArchitecturePage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/architecture"
         eyebrow="Architecture"
         title="Hosted control plane. Customer-hosted data plane."
         lead="Organizations, policy, and reports live in the control plane. Snapshots, secrets, sanitization, provisioning, egress, and cleanup stay in the customer boundary. The agent is outbound-only, authenticated with short-lived mTLS."
@@ -192,17 +208,33 @@ export function ArchitecturePage() {
           title="<strong>The control plane never needs a copy of production data.</strong> Evidence crosses the boundary. Records do not."
         />
         <PlaneDiagram />
+        <Illustrative>
+          The split is architectural and enforced today: masking and verification run in your data
+          plane, and the control plane's ingest takes events rather than records. The control plane
+          itself is not deployed yet, so this boundary has not been exercised in production.
+        </Illustrative>
       </PageSection>
 
       <PageSection tone="sage">
         <Split
           visual={
             <Panel className="rounded-[12px] bg-white p-7 max-md:p-5">
-              <MonoLabel className="uppercase tracking-[0.14em]">Isolation minimums</MonoLabel>
+              <MonoLabel className="uppercase tracking-[0.14em]">In force today</MonoLabel>
               <ul className="mt-5 grid grid-cols-1 gap-3">
                 {ISOLATION_MINIMUMS.map((item) => (
                   <li key={item}>
                     <CheckRow ok>{item}</CheckRow>
+                  </li>
+                ))}
+              </ul>
+              <Hairline className="my-6" />
+              <MonoLabel className="uppercase tracking-[0.14em]">Designed, not yet built</MonoLabel>
+              <ul className="mt-5 grid grid-cols-1 gap-3">
+                {ISOLATION_PLANNED.map((item) => (
+                  <li key={item}>
+                    <CheckRow ok={false} className="text-black/45">
+                      {item}
+                    </CheckRow>
                   </li>
                 ))}
               </ul>
@@ -212,12 +244,14 @@ export function ArchitecturePage() {
           <PageHeading title="<strong>Dedicated account, or a strongly isolated network.</strong> When practical, the clone is its own account, subscription, or project." />
           <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             No production write credentials. No production database route. No default internet route.
-            Isolation is a ship condition, not a later hardening pass.
+            Isolation is a ship condition, not a later hardening pass. The list beside this one is
+            split on purpose: five of these are enforced today and five are design.
           </p>
           <div className="mt-8">
             <Callout label="Fail closed">
-              Unknown destinations, unresolved secrets, incomplete cleanup, or missing isolation block
-              the run. Convenience must not silently override containment.
+              An unverified golden cannot be branched, and an unresolved secret stops the run. Inside
+              the twin the network has no route out and DNS is intercepted, so a client that ignores
+              its proxy variables has nowhere to send the packet.
             </Callout>
           </div>
         </Split>
@@ -226,11 +260,12 @@ export function ArchitecturePage() {
       <PageSection tone="white">
         <PageHeading
           kicker="Cost controls"
-          title="<strong>Estimate before you provision.</strong> Hard ceilings, not hope."
+          title="<strong>What keeps a run cheap,</strong> and what is still only a plan."
         />
         <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Unlimited free hosted compute is not viable. Free usage has strict credits, or it runs in the
-          customer’s own cloud with their model credentials.
+          Unlimited free hosted compute is not viable. Today the engine runs on your own compute with
+          your own credentials, and the four controls below marked built are what hold the cost down.
+          The rest are named here because they are designed, not because they are shipping.
         </p>
         <div className="mt-12">
           <SpecTable rows={COST_ROWS} />
@@ -249,15 +284,16 @@ export function ArchitecturePage() {
             items={[
               { title: "Dial out", body: "The agent initiates. The control plane does not open a path in." },
               { title: "Handshake", body: "Short-lived mTLS credentials authenticate the session." },
-              { title: "Evidence", body: "Reports, hashes, and the pass / warning / block cross. Records do not." },
-              { title: "Reap", body: "A TTL reaper runs independently of the orchestrator and attests destroy." },
+              { title: "Evidence", body: "Reports, hashes and the verdict cross. Records do not." },
+              { title: "Tear down", body: "The journal is replayed in reverse, and what was removed is counted." },
             ]}
           />
         </div>
         <div className="mt-12">
           <Callout label="Recoverable">
-            Every lifecycle transition is idempotent. Stuck resources retry, then the independent reaper
-            destroys them. Cleanup is a first-class safety property.
+            Every lifecycle transition is idempotent, and a resource is journaled the moment it
+            exists rather than after the run succeeds. A run that dies halfway still leaves a list of
+            what it made, which is what af down replays.
           </Callout>
         </div>
       </PageSection>

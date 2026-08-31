@@ -44,6 +44,14 @@ export interface Snapshot {
   readonly fields: readonly { readonly name: string; readonly type: string; readonly filled: boolean }[];
   /** controls are the buttons and links, by accessible name. */
   readonly controls: readonly string[];
+  /** unnamed counts the interactive elements that have no accessible name at
+   *  all, so they appear in neither `controls` nor `fields`.
+   *
+   *  Counted rather than dropped silently because the count is the only
+   *  evidence that a page offers something an agent, and a screen reader,
+   *  cannot reach. An exploration reports it; the planners ignore it, because
+   *  there is nothing they could press. */
+  readonly unnamed: number;
   /** text is the visible text, which the expectations are checked against. */
   readonly text: string;
 }
@@ -101,6 +109,17 @@ const FIELD_VALUES: readonly { readonly match: RegExp; readonly pick: (id: Ident
   { match: /phone|mobile|telephone/i, pick: (i) => i.phone },
   { match: /full name|your name|^name$|first name|last name|company/i, pick: (i) => i.name },
 ];
+
+/** identityValueFor returns what to type into a field with this name, or
+ *  undefined when nothing here recognises it.
+ *
+ *  Exported so that the exploratory planner types the same values the declared
+ *  one does. Two tables that agree today are two tables that disagree later,
+ *  and the symptom would be a form an exploration can fill and a workflow
+ *  compiled from it cannot. */
+export function identityValueFor(field: string, identity: Identity): string | undefined {
+  return FIELD_VALUES.find((r) => r.match.test(field))?.pick(identity);
+}
 
 /** Controls a deterministic planner will press, most likely first. */
 const PROGRESS_CONTROLS: readonly RegExp[] = [

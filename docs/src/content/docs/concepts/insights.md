@@ -2,7 +2,7 @@
 title: Insights
 description: What Postgres itself can tell you about a change, before anybody clicks anything.
 sidebar:
-  order: 10
+  order: 11
 ---
 
 A branch is a real database with production's shape in it, which makes some
@@ -20,12 +20,30 @@ insights:
   regression_factor: 1.5
   regression_min_ms: 5
   large_table_rows: 100000
+  rolling_compatibility:
+    when: risky
+    against: merge-base
 ```
 
 ```
 af insights --save baseline.json      on main
 af insights --baseline baseline.json  on the branch
 ```
+
+Every check here also runs inside `af ci`, so what it finds reaches the pull
+request comment rather than only a terminal somebody chose to open. `af ci`
+takes the same two flags, spelled `--save-baseline` and `--baseline`. What each
+finding does to the check is the manifest's
+[policy block](/docs/concepts/verdicts/): a lock held past two seconds fails by
+default, a rewrite and a lint finding warn.
+
+The rehearsal runs on every change, including one with no migrations in it.
+There is no cheaper way to know: `af up` applies the branch's migrations to the
+environment's own database, so asking that database what is pending returns
+nothing on exactly the pull requests that have migrations. Finding out costs a
+branch of the golden, which is the branch the rehearsal needs anyway, so the
+check runs and a change with nothing pending gets one line saying so. Set
+`insights.migration_rehearsal: false` to skip it.
 
 ## Migration rehearsal
 
@@ -48,8 +66,9 @@ AF-DB-030 Migrations failed on the branch: relation "users_email_key" already
 exists
 ```
 
-`af insights` exits non-zero when that happens, so a pull request check fails
-rather than printing a note nobody reads.
+`af insights` exits non-zero when that happens, and inside `af ci` it is a
+`migration_failed` finding, which fails the check by default. Either way a
+pull request check fails rather than printing a note nobody reads.
 
 ### Every statement is timed on its own
 
@@ -140,6 +159,130 @@ rewrite is how a check loses its reader.
 `large_table_rows` decides which findings read as urgent. It does not decide
 whether a rule fires: a rewrite of a small table is still a rewrite, and the
 row count is on the finding so a reader can judge it.
+
+## The rolling deploy check
+
+The rehearsal proves what a migration costs. It does not prove the thing a
+deploy depends on.
+
+A rolling deploy replaces instances one at a time, so for the minutes between
+the migration applying and the last old instance stopping, the **previous
+release is talking to the new schema**. If that release still selects a column
+this migration dropped, every request it serves in that window fails, and
+nothing in the rehearsal would have said so.
+
+So the previous release is built and run against the migrated branch, and its
+own workflows are driven through it:
+
+```
+Rolling deploy compatibility:
+  the previous release is ac5f6d8912ab, the merge base with origin/main
+  FAIL        browse-customers
+              It passes against a branch of the same golden carrying
+              the schema that release was deployed against, so this
+              branch's migrations are the difference.
+              ac5f6d8912ab still reads customers.email, which this migration
+              dropped.
+              customer list: ERROR: column "email" does not exist (SQLSTATE 42703)
+              ALTER TABLE customers DROP COLUMN email
+
+  A rolling deploy runs both releases at once. Until the last old
+  instance stops, the release above is talking to this schema.
+```
+
+`af insights` exits with `AF-DB-032` when that happens.
+
+### It is a controlled experiment, not a single run
+
+A workflow that fails against the migrated branch has proved nothing on its
+own. It might be a workflow the previous release does not pass anyway. So a
+failure is re-run against a second branch of the **same golden**, carrying the
+schema the previous release was deployed against and nothing from this pull
+request:
+
+| Migrated branch | Control branch | Verdict |
+| --- | --- | --- |
+| fail | pass | `fail`, and the migration is the only difference |
+| fail | fail | `unverified`, because this workflow does not pass on that release either |
+| fail | could not be run | `unverified`, because there is no evidence the migration changed anything |
+| pass or flaky | not run | `pass` |
+| blocked | not run | `blocked`, which never counts against the change |
+
+The control runs only when something has already failed. Confirming a pass
+would double the cost of the usual case to learn nothing.
+
+### What it will and will not claim
+
+The finding names the object when it can support the claim, and says so plainly
+when it cannot. The evidence is the previous release's own output, where its
+driver puts the message Postgres composed, matched against the objects this
+migration changed. An error naming something the migration never touched is
+reported without a claim attached rather than attributed to it, and a column
+name that two changed tables share is left unattributed rather than guessed.
+
+A release that swallows its database errors gives nothing to match, and the
+report says the cause was not identified rather than inventing one. The finding
+itself still stands, because the control run is what establishes it.
+
+### Anything the check itself could not do is `blocked`
+
+An image that will not build, a previous commit that will not resolve, a runner
+that will not start: none of those is evidence about the schema, so none of
+them fails the run. The check exits zero and says which happened. The first
+time a check like this reports "your migration breaks the previous release"
+because a base image moved, nobody believes it again.
+
+A shallow checkout is the usual cause. `actions/checkout` needs `fetch-depth: 0`
+for the merge base to exist locally.
+
+### Which commit the previous release is
+
+`against` decides, and the three answers are different questions.
+
+| Value | What it resolves to |
+| --- | --- |
+| `merge-base` | The commit this branch was cut from. The default, because under continuous deployment that commit was built, merged and deployed. |
+| `previous-commit` | HEAD's first parent, for a repository that deploys every commit on a trunk. |
+| Anything else | Handed to git, so a team that deploys from tags writes the tag: `against: v2.4.0`. |
+
+`--against` overrides it for one run.
+
+### When it runs
+
+`when: risky`, the default, runs the check only when the pending migrations
+contain something the previous release could notice: a dropped or renamed
+column, a dropped or renamed table, a dropped view, a column type change, a new
+`NOT NULL` column with no default, a `SET NOT NULL`, a dropped default, or a
+new constraint.
+
+Everything else is invisible to code that never heard of it. A new table, a
+nullable column, a column with a default, an index, a view: none of them can
+break a release that does not mention them, so running a second build and a
+second environment for those would double a pipeline and learn nothing.
+
+```yaml
+insights:
+  rolling_compatibility:
+    when: always
+```
+
+`always` runs it for every migration, including a purely additive one.
+`never` turns it off, and the report says so rather than leaving it out.
+
+A check that did not run is named in the report rather than left out:
+
+```
+Rolling deploy compatibility:
+  not run: these migrations only add things the previous release cannot notice.
+  Set insights.rolling_compatibility.when to always to run it regardless
+```
+
+### What it costs
+
+One extra image build and one extra environment, so roughly double a run when
+it fires, plus a second environment again on the rare run where something
+failed and the control is needed. That is the reason the default is `risky`
+rather than `always`.
 
 ## Query regression
 
@@ -280,5 +423,6 @@ Not measured: query statistics need the pg_stat_statements extension, which is
 not available here
 ```
 
-Related: [goldens](/docs/concepts/goldens/), [load](/docs/concepts/load/),
+Related: [verdicts](/docs/concepts/verdicts/),
+[goldens](/docs/concepts/goldens/), [load](/docs/concepts/load/),
 [invariants](/docs/guides/invariants/).

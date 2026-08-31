@@ -34,7 +34,7 @@ const PROD = [
 const SEALS = [
   { id: "dns", label: "Clone-local DNS", detail: "No public resolver", from: 0.6 },
   { id: "keys", label: "Secrets replaced", detail: "Live keys unreachable", from: 3.2 },
-  { id: "egress", label: "No default egress", detail: "TTL and budget on every resource", from: 6.2 },
+  { id: "egress", label: "No default egress", detail: "The network has no route out", from: 6.2 },
 ] as const;
 
 function u01(t: number, a: number, b: number) {
@@ -210,7 +210,7 @@ function TwinIsolationMap() {
         <div className="text-[13px] tracking-tight text-black">Cleanup proof</div>
         <p className="mt-0.5 text-[12px] tracking-tight text-black/45">
           {gone
-            ? "Every resource journaled, destroyed, and attested."
+            ? "Every resource journaled, destroyed, and counted."
             : "Resources are journaled as they come up. Nothing outlives the run."}
         </p>
       </div>

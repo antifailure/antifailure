@@ -126,6 +126,9 @@ func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestra
 			env2.Out.Printf("  %s\n", r.String(line))
 		},
 	})
+	if err != nil {
+		return nil, nil, err
+	}
 	return o, m, err
 }
 

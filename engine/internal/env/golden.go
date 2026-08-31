@@ -595,6 +595,17 @@ func (o *Orchestrator) maskDatabase(
 		fmt.Sprintf("masked %d rows across %d tables", res.Rows, res.Tables),
 		events.F("rows", res.Rows), events.F("tables", res.Tables),
 		events.F("percent", 100))
+
+	// Analysed again, because masking just rewrote most of the columns the copy
+	// had statistics for. A golden published without this is one every branch
+	// inherits a blind planner from, and `af insights` then compares two
+	// sequential scans and reports no regression however bad the change was.
+	if err := pgcopy.Analyze(ctx, url); err != nil {
+		// Not fatal. A golden with stale statistics is worse than one with
+		// fresh ones and far better than no golden, and the failure is worth
+		// saying out loud rather than stopping a refresh for.
+		o.progress("could not refresh planner statistics: " + err.Error())
+	}
 	return res.Rows, res.Tables, nil
 }
 
@@ -664,24 +675,42 @@ func (o *Orchestrator) verifyDatabase(
 type PlanResult struct {
 	Plan      masking.Plan
 	RulesHash string
+	// Source names the database the schema was read from, for the caller to
+	// print. A plan is about a schema, and which schema is not obvious when
+	// there are two it could have been.
+	Source string
 }
 
 // MaskPlan reads a database and reports what masking would do to it.
 //
-// It runs against the environment's own branch, so somebody iterating on rules
-// sees the effect on the schema they actually have rather than on a
+// The environment's own branch when there is one, so somebody iterating on
+// rules sees the effect on the schema they actually have rather than on a
 // description of it.
+//
+// The configured source when there is not, and that fallback is the whole
+// point of this comment. `af mask plan` in a fresh checkout is the first thing
+// anybody does with masking, before `af up` has ever run, and it used to fail
+// there: no branch exists, so the connection was refused, and what it said was
+// that a golden with no name no longer existed. Three things wrong at once.
+// The schema a plan is about is the source's schema, which the golden is a
+// copy of, so reading it from the source is not a lesser answer. It is the
+// same answer one step earlier, which is where somebody fixing a masking rule
+// wants it.
+//
+// With neither, the refusal says so plainly rather than describing a database
+// that was never configured.
 func (o *Orchestrator) MaskPlan(ctx context.Context) (*PlanResult, error) {
-	conn, closeConn, err := o.connectBranch(ctx)
+	rules, hash, err := o.rules()
+	if err != nil {
+		return nil, err
+	}
+
+	conn, closeConn, source, err := o.connectForPlan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer closeConn()
 
-	rules, hash, err := o.rules()
-	if err != nil {
-		return nil, err
-	}
 	tables, err := masking.ReadCatalog(ctx, conn)
 	if err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFMSK010, "detail", err.Error())
@@ -689,7 +718,41 @@ func (o *Orchestrator) MaskPlan(ctx context.Context) (*PlanResult, error) {
 	return &PlanResult{
 		Plan:      masking.BuildPlan(tables, rules.Assign(tables), hash),
 		RulesHash: hash,
+		Source:    source,
 	}, nil
+}
+
+// connectForPlan opens the branch if there is one and the source if there is
+// not, and says which it opened.
+//
+// The branch is tried first and its failure is not reported when a source is
+// available, because "there is no environment yet" is the normal state for
+// this command rather than an error worth interrupting somebody with.
+func (o *Orchestrator) connectForPlan(
+	ctx context.Context,
+) (conn *pgx.Conn, done func(), source string, err error) {
+	conn, done, branchErr := o.connectBranch(ctx)
+	if branchErr == nil {
+		return conn, done, "this environment's branch", nil
+	}
+
+	url := o.sourceURL()
+	if url.IsZero() {
+		// Nothing to fall back to, so the branch's own failure is the honest
+		// answer and it is passed through rather than replaced.
+		return nil, nil, "", branchErr
+	}
+
+	conn, err = pgx.Connect(ctx, url.Reveal())
+	if err != nil {
+		// The variable's name rather than the value. A connection string is a
+		// credential, and the reader needs to know which setting to look at
+		// rather than what is currently in it.
+		return nil, nil, "", aferrors.Wrap(err, aferrors.AFDB002,
+			"host", "the source named by "+o.opts.Manifest.Database.SourceURLEnv)
+	}
+	return conn, func() { _ = conn.Close(context.Background()) },
+		"the source named by " + o.opts.Manifest.Database.SourceURLEnv, nil
 }
 
 // MaskApply applies the plan to the environment's branch.

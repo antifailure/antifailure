@@ -20,18 +20,10 @@ import {
   RunWindow,
 } from "./StudioWindow";
 
-export type MigrationBar = {
-  verdict: "BLOCK" | "PASS";
-  slam: boolean;
-  decided: boolean;
-  passGlow: boolean;
-};
-
 type SceneProps = {
   tab: 0 | 1;
   playId: number;
   onTab?: (tab: 0 | 1) => void;
-  onBar?: (bar: MigrationBar) => void;
 };
 
 type Op = {
@@ -61,10 +53,10 @@ const OPS_A: Op[] = [
   { id: "submit", at: 0, label: "Apply", title: "Apply migration" },
   { id: "lock", at: 2.05, label: "Lock", title: "ACCESS EXCLUSIVE" },
   { id: "queue", at: 3.7, label: "Queue", title: "Checkout waiting" },
-  { id: "pool", at: 5.55, label: "Pool", title: "Pool pressure" },
+  { id: "rewrite", at: 5.55, label: "Rewrite", title: "Table rewritten" },
   { id: "plan", at: 7.45, label: "Plan", title: "Plan regression" },
-  { id: "rollback", at: 9.35, label: "Rollback", title: "Rollback unsafe" },
-  { id: "block", at: 11.15, label: "BLOCK", title: "Verdict" },
+  { id: "lint", at: 9.35, label: "Lint", title: "Unsafe pattern" },
+  { id: "finding", at: 11.15, label: "FINDING", title: "Reported" },
 ];
 
 const OPS_B: Op[] = [
@@ -72,7 +64,7 @@ const OPS_B: Op[] = [
   { id: "backfill", at: 2.35, label: "Backfill", title: "Batched backfill" },
   { id: "dual", at: 6.15, label: "Dual-read", title: "Compatibility window" },
   { id: "contract", at: 8.55, label: "Contract", title: "Constraint later" },
-  { id: "pass", at: 10.85, label: "PASS", title: "Verdict" },
+  { id: "clean", at: 10.85, label: "CLEAN", title: "Reported" },
 ];
 
 const LOCK_AT = OPS_A[1].at;
@@ -110,10 +102,6 @@ function typeText(text: string, t: number, start: number, cps = 34) {
   return text.slice(0, Math.min(text.length, Math.max(0, Math.floor((t - start) * cps))));
 }
 
-function fmtMs(ms: number) {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
-}
-
 function padStep(index: number, total: number) {
   return `${String(index + 1).padStart(2, "0")} / ${String(total).padStart(2, "0")}`;
 }
@@ -123,15 +111,17 @@ function lockHold(t: number) {
   return Math.min(27.4, lerp(0, 27.4, clamp((t - LOCK_AT) / (10.6 - LOCK_AT))));
 }
 
-function p99ms(t: number, locked: boolean) {
-  const grain = Math.sin(t * 1.45) * 14;
-  if (!locked) return Math.round(820 + grain);
-  return Math.round(lerp(820, 6900, clamp((t - LOCK_AT) / 7.4)) + grain * 0.22);
-}
-
-function timeouts(t: number, locked: boolean) {
-  if (!locked || t < OPS_A[4].at) return 0;
-  return lerp(0, 11.8, clamp((t - OPS_A[4].at) / 3.5));
+/**
+ * Statements queued behind the lock.
+ *
+ * This used to be a checkout p99 climbing from 820ms to 6.9s and an upgrade
+ * timeout rate. Neither is something this engine can produce: nothing sends
+ * traffic at a migration while it applies. Blocked waiters are real, and they
+ * come from the same pg_locks sample as the hold time.
+ */
+function blockedWaiters(t: number, locked: boolean) {
+  if (!locked) return 0;
+  return Math.round(lerp(0, 84, clamp((t - LOCK_AT) / 7.4)));
 }
 
 function useFilmClock(playing: boolean, reduced: boolean, stillT: number) {
@@ -308,19 +298,14 @@ function Film({
   tab,
   playing,
   reduced,
-  onBar,
   onTab,
 }: {
   tab: 0 | 1;
   playing: boolean;
   reduced: boolean;
-  onBar?: (bar: MigrationBar) => void;
   onTab?: (tab: 0 | 1) => void;
 }) {
   const { t, fade } = useFilmClock(playing, reduced, HOLD);
-  const lastKey = useRef("");
-  const onBarRef = useRef(onBar);
-  onBarRef.current = onBar;
   const stamp = tab === 0 ? STAMP_A : STAMP_B;
   const viewT = Math.min(t, HOLD);
   const ops = tab === 0 ? OPS_A : OPS_B;
@@ -336,13 +321,11 @@ function Film({
         : viewT >= SHORT_LOCK_END
           ? 0.4
           : 0;
-  const p99 = tab === 0 ? p99ms(viewT, locked) : Math.round(820 + Math.sin(viewT * 1.4) * 16);
-  const tout = tab === 0 ? timeouts(viewT, locked) : 0;
+  const waiters = tab === 0 ? blockedWaiters(viewT, locked) : 0;
   const stamped = viewT >= stamp;
-  const rollbackHot = tab === 0 ? viewT >= OPS_A[5].at : viewT >= OPS_B[2].at;
+  const lintHot = tab === 0 ? viewT >= OPS_A[5].at : viewT >= OPS_B[2].at;
   const lockHot = lockS > LOCK_LIMIT;
-  const p99Hot = p99 > 1400;
-  const toutHot = tout > 1;
+  const waitersHot = waiters > 0;
 
   const phase: 0 | 1 | 2 | 3 =
     tab === 1
@@ -370,27 +353,13 @@ function Film({
     tab === 0 ? SQL_RISKY : phase === 0 ? SQL_EXPAND : phase === 1 ? SQL_BACKFILL : SQL_CONTRACT;
   const sqlStart = tab === 0 ? 0.12 : phase === 0 ? 0.1 : phase === 1 ? 2.35 : 8.55;
 
-  useEffect(() => {
-    const decided = reduced || viewT >= stamp;
-    const next: MigrationBar = {
-      verdict: tab === 0 ? "BLOCK" : "PASS",
-      slam: !reduced && tab === 0 && viewT >= stamp && viewT < stamp + 0.2,
-      decided,
-      passGlow: tab === 1 && decided,
-    };
-    const key = `${next.verdict}|${next.slam}|${next.decided}|${next.passGlow}`;
-    if (lastKey.current === key) return;
-    lastKey.current = key;
-    onBarRef.current?.(next);
-  }, [viewT, tab, reduced, stamp]);
-
   const evidence =
     tab === 0
-      ? `ACCESS EXCLUSIVE ${lockS.toFixed(1)}s · checkout p99 ${fmtMs(p99)} · ${tout.toFixed(1)}% upgrade timeouts · rollback unsafe`
-      : `expand → backfill → contract · lock ${lockS.toFixed(1)}s · blocked 0 · p99 ${fmtMs(p99)} · rollback feasible`;
+      ? `ACCESS EXCLUSIVE ${lockS.toFixed(1)}s · ${waiters} statements queued · table rewritten · plan regressed`
+      : `expand → backfill → contract · lock ${lockS.toFixed(1)}s · 0 queued · no rewrite`;
 
   const moon = stamped ? (tab === 0 ? "block" : "ok") : locked ? "progress" : "progress";
-  const action = stamped ? (tab === 0 ? "BLOCK" : "PASS") : "Measuring";
+  const action = stamped ? (tab === 0 ? "FINDING" : "CLEAN") : "Measuring";
   const lockValue = `${tab === 0 && lockS > 0 ? "+" : ""}${lockS.toFixed(1)}s`;
 
   return (
@@ -406,7 +375,7 @@ function Film({
         }
         metrics={[
           { value: lockValue, tone: lockHot ? "block" : "ok" },
-          { value: fmtMs(p99), tone: p99Hot ? "block" : "ok" },
+          { value: `${waiters} queued`, tone: waitersHot ? "block" : "ok" },
         ]}
       />
       <InnerPills
@@ -436,8 +405,8 @@ function Film({
               step={padStep(idx, ops.length)}
               body={
                 tab === 0
-                  ? "An exclusive lock on subscriptions stalls checkout. The twin reports BLOCK before it ships."
-                  : "Expand-and-contract keeps checkout live. Lock 0.4s, rollback feasible, PASS."
+                  ? "An exclusive lock on subscriptions holds while everything else queues. The rehearsal reports it before it ships."
+                  : "Expand-and-contract holds the lock for 0.4s, and nothing queues behind it."
               }
             />
             <div className="mt-4 flex flex-col gap-1.5">
@@ -448,22 +417,22 @@ function Film({
                 tone={lockHot ? "block" : "ok"}
               />
               <EvidenceRow
-                moon={p99Hot ? "block" : "ok"}
-                label="Checkout p99"
-                value={fmtMs(p99)}
-                tone={p99Hot ? "block" : "ok"}
+                moon={waitersHot ? "block" : "ok"}
+                label="Blocked statements"
+                value={String(waiters)}
+                tone={waitersHot ? "block" : "ok"}
               />
               <EvidenceRow
-                moon={tab === 0 ? (toutHot ? "block" : "todo") : "ok"}
-                label={tab === 0 ? "Upgrade timeouts" : "Blocked"}
-                value={tab === 0 ? `${tout.toFixed(1)}%` : "0"}
-                tone={toutHot ? "block" : "ok"}
+                moon={tab === 0 ? (lintHot ? "block" : "todo") : "ok"}
+                label="Table rewrite"
+                value={tab === 0 ? (lintHot ? "yes" : "measuring") : "no"}
+                tone={tab === 0 && lintHot ? "block" : "ok"}
               />
               <EvidenceRow
-                moon={rollbackHot ? (tab === 0 ? "block" : "ok") : "progress"}
-                label="Rollback"
-                value={rollbackHot ? (tab === 0 ? "unsafe" : "feasible") : "measuring"}
-                tone={rollbackHot ? (tab === 0 ? "block" : "ok") : "muted"}
+                moon={lintHot ? (tab === 0 ? "block" : "ok") : "progress"}
+                label="Query plan"
+                value={lintHot ? (tab === 0 ? "Seq Scan" : "unchanged") : "measuring"}
+                tone={lintHot ? (tab === 0 ? "block" : "ok") : "muted"}
               />
             </div>
           </>
@@ -489,14 +458,14 @@ function Film({
       <RunToast
         visible={stamped}
         tone={tab === 0 ? "block" : "ok"}
-        title={tab === 0 ? "BLOCK" : "PASS"}
+        title={tab === 0 ? "FINDING" : "CLEAN"}
         detail={evidence}
       />
     </RunWindow>
   );
 }
 
-export function MigrationScene({ tab, playId, onTab, onBar }: SceneProps) {
+export function MigrationScene({ tab, playId, onTab }: SceneProps) {
   const ref = useRef<HTMLDivElement>(null);
   const { idle, reduced } = useInViewPlay(ref, 0.18);
   const [localTab, setLocalTab] = useState<0 | 1>(tab);
@@ -521,7 +490,6 @@ export function MigrationScene({ tab, playId, onTab, onBar }: SceneProps) {
           tab={viewTab}
           playing={idle}
           reduced={reduced}
-          onBar={onBar}
           onTab={selectTab}
         />
       </div>

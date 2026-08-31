@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { SectionLabel } from "@/components/layout/SectionLabel";
-import { CheckRow, MonoLabel, StatusPill } from "@/components/home/visuals/primitives";
+import { CheckRow, MonoLabel } from "@/components/home/visuals/primitives";
 import { CompactSwap } from "@/components/pages/kit";
 import { LockChartMobile } from "@/components/home/media/LockChart";
 import { MigrationScene } from "@/components/home/visuals/MigrationScene";
@@ -160,43 +160,6 @@ export function OpenSteps({ items }: { items: { title: string; body: string }[] 
         </li>
       ))}
     </ol>
-  );
-}
-
-export function Verdicts({
-  items,
-}: {
-  items: { tone: "PASS" | "WARN" | "BLOCK"; title: string; body: string }[];
-}) {
-  return (
-    <ul className="grid grid-cols-3 gap-x-16 gap-y-10 text-left max-xl:grid-cols-1">
-      {items.map((item) => (
-        <li key={item.tone} className="min-w-0 border-t border-black/12 pt-6">
-          <StatusPill tone={item.tone} />
-          <h3 className="mt-4 text-[18px] leading-snug tracking-extra-tight text-black">{item.title}</h3>
-          <p className="mt-2 max-w-[320px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
-            {item.body}
-          </p>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-export function PolicyList({
-  items,
-}: {
-  items: { tone: "PASS" | "WARN" | "BLOCK"; text: string }[];
-}) {
-  return (
-    <ul className="divide-y divide-black/12 border-y border-black/12 text-left">
-      {items.map((item) => (
-        <li key={item.text} className="flex items-start gap-4 py-4">
-          <StatusPill tone={item.tone} className="mt-1 shrink-0" />
-          <span className="text-[16px] leading-7 tracking-extra-tight text-gray-new-40">{item.text}</span>
-        </li>
-      ))}
-    </ul>
   );
 }
 

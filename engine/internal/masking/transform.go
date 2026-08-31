@@ -84,6 +84,7 @@ func init() {
 	register(dateShiftTransform{})
 	register(numericNoiseTransform{})
 	register(nullifyTransform{})
+	register(emptyJSONTransform{})
 	register(hashHexTransform{})
 	register(freeTextTransform{})
 	register(usernameTransform{})
@@ -355,26 +356,20 @@ func (postcodeTransform) Describe() string {
 
 func (postcodeTransform) PreservesUniqueness() bool { return false }
 
+// A postal code is a string with a format, so this is stringFPE's rewrite and
+// not a copy of it.
+//
+// It was a copy: twenty identical lines, differing only in the order of two
+// mutually exclusive switch cases and in which of them carried the comment
+// explaining the rule. dupl found it, and running both proved they return the
+// same bytes for every input. That is the dangerous shape, because somebody
+// teaching postcode about outward codes would improve one of two identical
+// functions and leave the other behind with nothing to say so.
+//
+// The two names stay. They are what a manifest writes, they describe different
+// intents, and collapsing them would break every rules file that says postcode.
 func (postcodeTransform) Apply(k *Key, c Column, in *string) (*string, error) {
-	if nullOK(in) {
-		return nil, nil
-	}
-	if *in == "" {
-		return in, nil
-	}
-	s := newPRFStream(k.Sub(c), *in)
-	runes := []rune(*in)
-	for i, r := range runes {
-		switch {
-		case unicode.IsDigit(r):
-			runes[i] = rune('0' + s.intn(10))
-		case r >= 'A' && r <= 'Z':
-			runes[i] = rune('A' + s.intn(26))
-		case r >= 'a' && r <= 'z':
-			runes[i] = rune('a' + s.intn(26))
-		}
-	}
-	return str(string(runes)), nil
+	return stringFPETransform{}.Apply(k, c, in)
 }
 
 type companyTransform struct{}
@@ -679,6 +674,48 @@ func (nullifyTransform) PreservesUniqueness() bool { return false }
 
 func (nullifyTransform) Apply(_ *Key, _ Column, _ *string) (*string, error) {
 	return nil, nil
+}
+
+// emptyJSONTransform empties a JSON column without removing it.
+//
+// It exists because `nullify` cannot do this job and the shape it cannot do it
+// for is everywhere. `jsonb NOT NULL DEFAULT '{}'` is how most schemas hold a
+// payload, a detail blob, or a set of attributes, and every one of those is
+// free-form: whatever the code that wrote it decided to put there, which over a
+// year is everything, including addresses. Nullify is refused on the column by
+// the planner, correctly, because the constraint would fail partway through and
+// leave the table half masked. So without this the only options were to copy
+// the column verbatim or to make the whole plan unrunnable.
+//
+// What it writes is an empty value of the same kind, so a reader that indexes
+// into an array still finds an array and one that reads a key still finds an
+// object. A row's structure survives and its contents do not, which is exactly
+// what emptying is supposed to mean.
+type emptyJSONTransform struct{}
+
+func (emptyJSONTransform) Name() string { return "empty_json" }
+
+func (emptyJSONTransform) Describe() string {
+	return "Replaces a JSON value with an empty one of the same kind, an object or an array. " +
+		"This is what empties a JSON column that cannot hold null, which nullify cannot do."
+}
+
+// Every row becomes the same two characters, so nothing is distinct afterwards.
+func (emptyJSONTransform) PreservesUniqueness() bool { return false }
+
+func (emptyJSONTransform) Apply(_ *Key, _ Column, in *string) (*string, error) {
+	if nullOK(in) {
+		return in, nil
+	}
+	// The kind is decided by the first character that is not whitespace, which
+	// is what Postgres itself renders: an array starts with `[` and everything
+	// else is replaced by an object. A scalar becomes `{}` rather than staying
+	// a scalar, because a scalar in a free-form column is a value somebody put
+	// there and the point is to remove it.
+	if strings.HasPrefix(strings.TrimSpace(*in), "[") {
+		return str("[]"), nil
+	}
+	return str("{}"), nil
 }
 
 // hashHexTransform replaces a value with a keyed hash.

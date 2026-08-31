@@ -14,7 +14,6 @@ export const EGRESS_MODES: Post = {
   summary:
     "The five per-host egress modes for a pre-production environment, what each is for, and why the default must be to refuse.",
   published: "2026-08-27",
-  author: { name: "Antifailure", url: "https://antifailure.dev/company" },
   tags: ["Testing", "Networking", "Third-party APIs"],
   body: (
     <>

@@ -156,6 +156,17 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 1, burst: 20, key: 'ip',
     reason: 'The same flow returning. A higher rate here would let somebody grind state values.',
   },
+  'POST /auth/email': {
+    rate: 1, burst: 10, key: 'ip',
+    reason:
+      'Asking for a sign-in link is a human action and it causes mail to be sent to somebody ' +
+      'else. Ten at once covers a person mistyping their address; a sustained one per second ' +
+      'does not, and the thing being bounded is using this endpoint to post somebody mail.',
+  },
+  'GET /auth/email/callback': {
+    rate: 1, burst: 20, key: 'ip',
+    reason: 'The link coming back. A higher rate here would let somebody grind token values.',
+  },
   'POST /auth/signout': {
     rate: 2, burst: 20, key: 'ip',
     reason: 'Signing out must never be refused in practice; this only bounds a script.',

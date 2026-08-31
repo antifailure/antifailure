@@ -2,7 +2,7 @@
 title: Load
 description: Traffic shaped like production, replayed against a branch.
 sidebar:
-  order: 9
+  order: 10
 ---
 
 A preview environment with one person clicking through it does not resemble

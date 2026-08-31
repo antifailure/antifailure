@@ -48,7 +48,7 @@ export const SITE_DESCRIPTION =
  * Organization description, llms.txt, and the documentation landing page.
  */
 export const SITE_DESCRIPTION_LONG =
-  "Antifailure builds a disposable copy of your production stack for every pull request. It branches a masked, referentially consistent Postgres from a verified golden, builds and runs your services inside a sandbox that cannot reach the internet except where you say it can, drives real workflows with agents that use the accessibility tree the way a person does, and rehearses pending migrations for locks, plan regressions and rollback feasibility before any of it reaches production.";
+  "Antifailure builds a disposable copy of your production stack for every pull request. It branches a masked, referentially consistent Postgres from a verified golden, builds and runs your services inside a sandbox that cannot reach the internet except where you say it can, drives real workflows with agents that use the accessibility tree the way a person does, and rehearses pending migrations for exclusive locks, table rewrites and query plan regressions before any of it reaches production.";
 
 /** The category, stated outright rather than implied, so an engine can place it. */
 export const SITE_CATEGORY = "Pre-production testing and release safety for teams that deploy to Postgres";

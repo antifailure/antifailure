@@ -187,6 +187,34 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 			return env, err
 		}
 	}
+	// Reserved before anything starts, because a service has to be told its
+	// own public address before it runs, and the ingress that publishes it is
+	// created after the service it forwards to.
+	if spec.PublicPorts == nil {
+		spec.PublicPorts = map[string]int{}
+	}
+	for _, s := range order {
+		if s.Kind != "web" || s.Port <= 0 {
+			continue
+		}
+		if _, taken := spec.PublicPorts[s.Name]; taken {
+			continue
+		}
+		// An ingress left by an earlier run already holds a port, and reusing
+		// it is what makes a second Up address the same environment rather
+		// than a new one.
+		if existing, err := r.cli.ContainerInspect(ctx, ingressName(spec.EnvID, s.Name)); err == nil {
+			if p, ok := publishedPort(existing.NetworkSettings.Ports); ok {
+				spec.PublicPorts[s.Name] = p
+				continue
+			}
+		}
+		p, err := r.ports.Free()
+		if err != nil {
+			return env, err
+		}
+		spec.PublicPorts[s.Name] = p
+	}
 	for _, s := range order {
 		running, err := r.startService(ctx, spec, s, nets, proxyIP, journal, progress)
 		env.Services = append(env.Services, running)
@@ -197,7 +225,47 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 			return env, err
 		}
 	}
+	// Back into the order the manifest declares, not the order they started
+	// in.
+	//
+	// `order` is a dependency sort, so a web application that depends on an
+	// API starts second and would be listed second. Env.URL returns the first
+	// web service, which then meant `af up` printed the API's address and the
+	// agents drove the API with a browser: six workflows blocked on a login
+	// form that was never going to be there, and the message was a Playwright
+	// timeout about a label.
+	//
+	// Start order is an implementation detail of bringing things up. The
+	// manifest is where the author says which service the product is, and
+	// every reader of this list wants that order: the status table, the
+	// pull request comment, and the address a person opens.
+	sortByManifestOrder(env.Services, spec.Services)
 	return env, nil
+}
+
+// sortByManifestOrder puts running services back into the order they were
+// declared in.
+func sortByManifestOrder(running []provider.RunningService, declared []provider.ServiceSpec) {
+	position := make(map[string]int, len(declared))
+	for i, s := range declared {
+		position[s.Name] = i
+	}
+	sort.SliceStable(running, func(i, j int) bool {
+		pi, oki := position[running[i].Name]
+		pj, okj := position[running[j].Name]
+		switch {
+		case oki && okj:
+			return pi < pj
+		case oki:
+			return true
+		case okj:
+			return false
+		}
+		// Neither is declared, which cannot happen from Up and can from a
+		// Status of an environment whose manifest has changed. Leaving them
+		// in the order they were found is better than inventing one.
+		return false
+	})
 }
 
 // needsIngress reports whether any service has to be reachable from the host.

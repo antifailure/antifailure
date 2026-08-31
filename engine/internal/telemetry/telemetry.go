@@ -145,6 +145,15 @@ func Attach(ctx context.Context, bus *events.Bus, opts Options) (*Telemetry, err
 			warn(fmt.Sprintf(
 				"the durable event sequence could not be read, so the control plane may ignore this run's events: %v", err))
 			t.sequence = nil
+			// The local log is the second copy of the same fact, so a state
+			// database that cannot be read does not have to mean starting the
+			// counter over. Restarting it would make two different events in
+			// one environment share a sequence number, which is the one thing
+			// a consumer reading for gaps cannot recover from.
+			if opts.StateDir != "" {
+				bus.ResumeSequence(opts.EnvID, events.LastSequence(
+					filepath.Join(opts.StateDir, LogDir), safeName(opts.EnvID), opts.EnvID))
+			}
 		} else {
 			bus.ResumeSequence(opts.EnvID, base)
 		}

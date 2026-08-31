@@ -28,13 +28,14 @@
 import postgres from 'postgres'
 import { migrate } from '@antifailure/db'
 
-function required(name) {
-  const v = process.env[name]
-  if (!v) {
-    console.error(`${name} is not set. The bootstrap needs it.`)
-    process.exit(2)
+function required(name, ...fallbacks) {
+  for (const n of [name, ...fallbacks]) {
+    const v = process.env[n]
+    if (v) return v
   }
-  return v
+  const names = [name, ...fallbacks].join(' or ')
+  console.error(`${names} is not set. The bootstrap needs one of them.`)
+  process.exit(2)
 }
 
 // Identifiers cannot be parameterised, so the role name is validated against a
@@ -51,8 +52,23 @@ function identifier(name, where) {
   return name
 }
 
-const adminUrl = required('AF_MIGRATION_DATABASE_URL')
-const appUrl = required('AF_DATABASE_URL')
+// Two names, and a fallback to the one the engine injects.
+//
+// A Kubernetes Job and a Terraform deployment both set the AF_ names, because
+// there they are two different connection strings: an administrative one that
+// may run DDL and create a role, and the unprivileged one the server will use.
+// `af up` sets neither. It gives a migration command an elevated DATABASE_URL
+// and gives the service an unprivileged DATABASE_URL, so inside a preview
+// environment there is one name that means both things depending on which
+// container is reading it.
+//
+// Falling back rather than failing is what lets the published image run under
+// `af up` unchanged, which is the whole point of a preview being made of the
+// real artifact. It is not a silent downgrade: if that URL cannot run DDL the
+// migration fails on the first statement, which is louder and more specific
+// than this file refusing up front.
+const adminUrl = required('AF_MIGRATION_DATABASE_URL', 'DATABASE_URL')
+const appUrl = required('AF_DATABASE_URL', 'DATABASE_URL')
 
 // The login role and its password are taken from the URL the application will
 // actually use, rather than configured a second time. Two places to write the

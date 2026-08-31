@@ -48,6 +48,16 @@ const (
 	LabelEnv = "dev.antifailure.env"
 	// LabelGolden is the golden version a branch came from.
 	LabelGolden = "dev.antifailure.golden"
+	// LabelRules is the masking rules digest a golden was produced under, and
+	// LabelAttestation is the signed statement that it verified.
+	//
+	// On the image, because the image is the only thing that survives. A
+	// golden's metadata used to live in the struct a refresh returned and
+	// nowhere else: `ListGoldens` rebuilt every version from its tag, so the
+	// rules digest came back empty and the attestation came back missing. Two
+	// separate checks read those fields, and both were silently inert.
+	LabelRules       = "dev.antifailure.rules"
+	LabelAttestation = "dev.antifailure.attestation"
 	// LabelService is the manifest service name a container runs.
 	LabelService = "dev.antifailure.service"
 	// LabelServiceKind is web, worker, or cron.

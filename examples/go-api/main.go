@@ -132,6 +132,14 @@ func main() {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		// The content type before the status, not after. WriteHeader flushes
+		// the headers, so the Set inside writeJSON below lands on a response
+		// that has already been written and does nothing: Go then sniffs the
+		// body and this endpoint answered every successful order with
+		// text/plain. Found by running af oracle against this example, which
+		// compares a JSON body structurally and a text one as bytes, and
+		// reported the second for a response that is plainly JSON.
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		writeJSON(w, o)
 	})

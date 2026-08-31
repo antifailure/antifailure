@@ -17,12 +17,15 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `change` | [Change](#change) | no | How a pull request's diff is classified. |
 | `database` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | `egress` | [Egress](#egress) | no | What the environment may reach on the network. |
+| `explore` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
 | `github` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
 | `insights` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
 | `load` | [Load](#load) | no | Traffic shaped like production, compared between the base branch and this one. |
 | `name` | string | no | A short name for this application, used in environment hostnames and in the control plane. Defaults to the repository directory name. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
+| `oracle` | [Oracle](#oracle) | no | Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database. |
 | `personas` | list of [Persona](#persona) | no | The accounts agents log in as. Each is created or reconciled in the golden by the authentication adapter, so a persona is a real user of the application rather than a bypass. Max items 50. |
+| `policy` | [Policy](#policy) | no | What each class of finding does to the pull request check. |
 | `runtime` | [Runtime](#runtime) | no | Where and how long the environment runs. |
 | `services` | list of [Service](#service) | no | Every process the environment runs: web servers, API servers, background workers, and scheduled jobs. Min items 1, max items 50. |
 | `version` | `1` | **yes** | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
@@ -105,7 +108,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | `max_branches` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | `project` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
 | `provider` | `docker`, `neon`, `supabase`, `dblab` | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service. Defaults to `docker`. |
-| `seed` | string | no | Command that seeds a branch, for a project with no production database yet. Mutually exclusive with source_url_env. Max length 1024. |
+| `seed` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | `source_url_env` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
 | `subset` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
 | `url_env` | string | no | Name of the environment variable to inject into services with the branch's connection string. Defaults to `DATABASE_URL`. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
@@ -149,6 +152,15 @@ One variable a service needs. The manifest declares the name and where the value
 | `sandbox` | boolean | no | Marks a credential that must be a sandbox one. The secrets subsystem refuses a value carrying a known live prefix, and the proxy trips a wire if one reaches the network anyway. Defaults to `false`. |
 | `value` | string | no | A literal value for a variable that is configuration rather than a secret, such as a feature flag or a public URL. A value that looks like a credential is rejected. Max length 2048. |
 
+## Explore
+
+Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. An exploration is reproducible from its seed and never counts against the change.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | no | Defaults to `false`. |
+| `goals` | list of [Goal](#goal) | no | One thing an exploratory agent tries to achieve. Max items 50. |
+
 ## GitHub
 
 How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down.
@@ -159,6 +171,20 @@ How Antifailure appears on a pull request: what runs it, whether it comments, wh
 | `fork_policy` | `never`, `label`, `always` | no | What to do with a pull request from a fork. label requires a maintainer to add antifailure:allow first, which is the only safe default: a fork's code would otherwise run with the environment's credentials. Defaults to `label`. |
 | `mode` | `actions`, `app`, `off` | no | actions runs everything inside a workflow with no server. app uses the GitHub App and the control plane. Defaults to `actions`. |
 | `teardown_on` | list of string | no | Events that tear the environment down. Defaults to `[close merge ttl]`. Max items 5. |
+
+## Goal
+
+One thing an exploratory agent tries to achieve. Unlike a workflow this declares no outcome, so it cannot fail: what it produces is the path it took and the friction it met on the way.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `budget` | object | no | Hard caps. An exploration that exhausts its budget reports what it found up to that point and says the budget ran out. |
+| `goal` | string | **yes** | What somebody is trying to do, in one sentence. The agent has no script, so this is the only thing telling it where to go, and its words are what decide whether the goal was reached. Min length 10, max length 1000. |
+| `name` | string | **yes** | Max length 64, matches `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. |
+| `persona` | string | no | Which persona explores. Defaults to the first persona. Max length 40. |
+| `seed` | string | no | Decides every choice the agent makes. The same seed against the same application takes the same path, step for step, which is what lets a finding be replayed. Defaults to the goal's name. Max length 64. |
+| `slow_ms` | integer | no | How long one step may take before it is reported as friction. Defaults to `3000`. Minimum 1, maximum 600000. |
+| `start_path` | string | no | Where to begin. Defaults to the application root. Defaults to `/`. Max length 512. |
 
 ## Golden
 
@@ -185,6 +211,7 @@ The Postgres native checks that turn a preview environment into a database revie
 | `query_regression` | boolean | no | Diff pg_stat_statements between the base branch and this one after running the same workflows, to catch a query loop before it reaches production. Defaults to `true`. |
 | `regression_factor` | number | no | How much slower a query may get before it is reported. Defaults to `1.5`. Minimum 1. |
 | `regression_min_ms` | number | no | Minimum absolute change in mean milliseconds before a regression is reported, so that a query going from 0.1 to 0.2 milliseconds is not news. Defaults to `5`. Minimum 0. |
+| `rolling_compatibility` | [Rolling compatibility](#rolling-compatibility) | no | Run the previous release against the migrated schema and see whether its workflows still pass, which is the invariant a rolling deploy actually depends on. |
 
 ## Invariant
 
@@ -211,6 +238,42 @@ Traffic shaped like production, compared between the base branch and this one. R
 | `thresholds` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
 | `unsafe_routes` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
 
+## Oracle
+
+Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `base_ref` | string | no | The git ref the baseline comes from, or the ref the merge base is taken against. Empty tries origin/HEAD, then origin/main, then origin/master, and says which it used. Max length 256. |
+| `baseline` | `merge_base`, `ref` | no | How the version to compare against is chosen. merge_base answers what this branch changes; ref answers what changes when it ships. Defaults to `merge_base`. |
+| `compare_timestamps` | boolean | no | Compare timestamp strings exactly instead of treating two well formed timestamps as equal. Turn it on when timestamps come from the data rather than from the clock. Defaults to `false`. |
+| `compare_uuids` | boolean | no | Compare UUIDs exactly instead of treating two well formed UUIDs as equal. Turn it on when identifiers are stored rather than generated per request. Defaults to `false`. |
+| `database` | [Oracle database](#oracle-database) | no | The comparison of the two branches' contents. |
+| `enabled` | boolean | no | Whether the comparison runs. Present but false is how a project keeps its probe plan and turns the check off for a while. Defaults to `true`. |
+| `fail_on` | `none`, `minor`, `major`, `critical` | no | The lowest severity that fails the command. critical is a request the baseline served and the candidate did not, a status that fell into an error class, or a row the baseline wrote and the candidate did not. Defaults to `critical`. |
+| `ignore` | [Oracle ignore](#oracle-ignore) | no | What the comparison is told not to look at. |
+| `probes` | list of [Probe](#probe) | no | The requests sent to both versions, in order, byte for byte the same on each side. Max items 200. |
+
+## Oracle database
+
+The comparison of the two branches' contents.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | no | Defaults to `true`. |
+| `exclude` | list of string | no | Tables to leave out, applied after tables. Max items 500. |
+| `max_rows` | integer | no | How many rows a table may hold and still be compared. A table over the bound is reported as not compared, never silently skipped. Defaults to `10000`. Minimum 1, maximum 1e+06. |
+| `tables` | list of string | no | Tables to compare. Empty compares every table. A pattern is schema.table, and either half may be an asterisk. Max items 500. |
+
+## Oracle ignore
+
+What the comparison is told not to look at. Everything here is printed in the report along with the defaults, because an oracle that silently ignores a field is worse than one that reports it.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `fields` | list of string | no | JSON paths to skip, in a response body and in a table row alike. $.token, $.orders[*].placed_at and $..created_at are all accepted. Max items 200. |
+| `headers` | list of string | no | Response headers to skip, in addition to the defaults. Max items 100. |
+
 ## password rules
 
 The application's password policy, so the generated password satisfies it. Without this, an application stricter than the generator refuses a correct password at sign in and the run reports a login failure that looks like the application's fault.
@@ -235,6 +298,35 @@ One account an agent logs in as. Personas are created or reconciled in the golde
 | `phone` | string | no | Number an SMS code is sent to. Defaults to a number in the +1 555 0100 block, which is reserved for fictional use and can never reach a real handset. Only sms_code uses it. Max length 32. |
 | `role` | string | no | Application role to provision, for example admin or member. Interpreted by the authentication adapter. Max length 64. |
 
+## Policy
+
+What each class of finding does to the pull request check. A finding at 'fail' fails the check, one at 'warn' is reported and the check still passes, and one at 'ignore' is not reported at all. Every key here is read when the report is built, so the answer to why a check failed is always one of these keys.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `cleanup` | `ignore`, `warn`, `fail` | no | Teardown left a resource behind. The journal remembers what is left, so 'af down' can finish the job. Defaults to `fail`. |
+| `egress_surprise` | `ignore`, `warn`, `fail` | no | The environment tried to reach a host the manifest does not mention. The request was refused either way; this decides whether the attempt stops the merge. Defaults to `fail`. |
+| `load_regression` | `ignore`, `warn`, `fail` | no | A load threshold from the load block being exceeded. Defaults to `warn`. |
+| `masking` | `ignore`, `warn`, `fail` | no | The environment's own branch read back with something in it that still parses as real data. Defaults to `fail`. |
+| `migration_failed` | `ignore`, `warn`, `fail` | no | A migration that did not apply to a branch with production's shape in it. A migration that fails here is one that would have failed in production. Defaults to `fail`. |
+| `migration_lint` | `ignore`, `warn`, `fail` | no | Any of the six migration lint rules. They share one setting because the rules are already scoped by table size. Defaults to `warn`. |
+| `migration_lock` | object | no | How long a migration may hold a lock on a table. Both figures are compared against a sampled lower bound, so a breach really did hold the lock at least that long. |
+| `migration_rewrite` | `ignore`, `warn`, `fail` | no | A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through. Defaults to `warn`. |
+| `plan_regression` | `ignore`, `warn`, `fail` | no | A query plan that got worse: a table now read end to end, or an index no longer used. Defaults to `warn`. |
+| `query_regression` | `ignore`, `warn`, `fail` | no | A statement that runs more often, or slower, than the saved baseline did. Needs a baseline to compare against. Defaults to `warn`. |
+
+## Probe
+
+One request sent to both versions.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `body` | string | no | The request body, sent byte for byte to both sides. Max length 65536. |
+| `headers` | object | no | Headers sent on both sides. Credentials come from the secrets subsystem, never from here. Max properties 20. |
+| `method` | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` | no | Defaults to `GET`. |
+| `name` | string | **yes** | Identifies the request in the report. Min length 1, max length 64, matches `^[a-z0-9][a-z0-9-]*$`. |
+| `path` | string | **yes** | The path and query, starting with a slash. Min length 1, max length 2048. |
+
 ## Resources
 
 What one replica of a service is allowed to use. Absent means the runtime decides, which locally means no limit and on a cluster means the namespace default.
@@ -243,6 +335,15 @@ What one replica of a service is allowed to use. Absent means the runtime decide
 | --- | --- | --- | --- |
 | `cpu` | string | no | CPU limit, in cores or millicores. Defaults to `1`. Matches `^[0-9]+(\.[0-9]+)?m?$`. |
 | `memory` | string | no | Memory limit. Defaults to `1Gi`. Matches `^[0-9]+(Mi\|Gi\|M\|G)$`. |
+
+## Rolling compatibility
+
+Run the previous release against the migrated schema and see whether its workflows still pass, which is the invariant a rolling deploy actually depends on.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `against` | string | no | Which commit the previous release is: merge-base, previous-commit, or any revision git can resolve, such as a release tag. Defaults to `merge-base`. Max length 256. |
+| `when` | `never`, `risky`, `always` | no | risky runs the check only when the pending migrations contain a change the previous release could notice, such as a dropped or renamed column. always runs it for every migration, and costs a second image build and a second environment every time. Defaults to `risky`. |
 
 ## Runtime
 

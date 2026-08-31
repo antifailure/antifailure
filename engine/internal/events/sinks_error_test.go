@@ -207,3 +207,35 @@ func TestLevelRank_UnknownLevelSortsAsInfo(t *testing.T) {
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, os.ErrClosed }
+
+// A sink outlives the bus that closed it.
+//
+// The regression, found by the log's first consumer: a sink is attached to
+// each session as that session opens and closed with it, which is right for a
+// dashboard, because a command has one session. `af ci` has two: its teardown
+// runs after the lifecycle that failed. The second session's events went into
+// a buffered writer over a closed file and were lost with no error, so the log
+// recorded a run failing and never recorded it being torn down. That is the
+// one line somebody reading that log most needs.
+func TestFileSink_ReopensAfterTheBusClosedIt(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s, err := events.NewFileSink(dir, "env_reopen", redact.New(), events.FileSinkOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, s.Deliver(context.Background(),
+		events.Event{Type: events.EnvFailed, Level: events.LevelError, Msg: "the first session"}))
+	require.NoError(t, s.Close())
+
+	// The second session, after the first one's bus closed everything.
+	require.NoError(t, s.Deliver(context.Background(),
+		events.Event{Type: events.EnvDestroyed, Level: events.LevelInfo, Msg: "the second session"}))
+	require.NoError(t, s.Close())
+
+	body, err := os.ReadFile(filepath.Join(dir, "env_reopen.ndjson"))
+	require.NoError(t, err)
+	require.Contains(t, string(body), "the first session")
+	require.Contains(t, string(body), "the second session",
+		"an event delivered after Close was lost")
+	require.False(t, s.Disabled(), "reopening is not a failure")
+}

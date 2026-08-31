@@ -31,11 +31,36 @@ const (
 	DefaultWorkflowSteps = 60
 	DefaultWorkflowUSD   = 0.5
 	DefaultWorkflowTime  = "10m"
+	DefaultExploreSteps  = 40
+	DefaultExploreSlowMs = 3000
 	DefaultLoadScale     = 0.05
 	DefaultLoadDuration  = "2m"
 	DefaultRegressionFac = 1.5
 	DefaultRegressionMS  = 5
 	DefaultLargeTable    = 100000
+	// DefaultOracleFailOn is the lowest severity that fails af oracle.
+	//
+	// critical rather than any difference. A pull request exists to change
+	// behaviour, so failing on any difference at all would fail every branch
+	// and teach everybody to pass the flag that turns it off. critical is the
+	// short list of differences that are a regression unless somebody can say
+	// why they are not: a request the baseline served and the candidate did
+	// not, a status that fell into an error class, and a row the baseline
+	// wrote and the candidate did not.
+	DefaultOracleFailOn = "critical"
+	// DefaultOracleMaxRows is how many rows a table may hold and still have
+	// its contents compared. It matches oracle.DefaultMaxRowsPerTable, and the
+	// two are checked against each other by a test rather than by a comment.
+	DefaultOracleMaxRows = 10000
+	// DefaultLockWarnMS and DefaultLockFailMS bound how long a migration may
+	// hold a lock on a table. Two seconds is the figure the product has
+	// advertised since before it could enforce it: past that, a lock on a busy
+	// table is an outage rather than a pause. Half a second is the point at
+	// which it is worth a line in the comment.
+	DefaultLockWarnMS  = 500
+	DefaultLockFailMS  = 2000
+	DefaultRollingWhen = "risky"
+	DefaultRollingRef  = "merge-base"
 	// DefaultPersonaDomain is reserved by RFC 6761 and can never receive mail,
 	// so a persona address cannot become a real one by accident.
 	DefaultPersonaDomain = "example.test"
@@ -73,7 +98,10 @@ func normalize(m *schema.Manifest, root string) {
 	normalizeAuth(m)
 	normalizeWorkflows(m)
 	normalizeInsights(m)
+	normalizeOracle(m)
+	normalizeExplore(m)
 	normalizeLoad(m)
+	normalizePolicy(m)
 	normalizeRuntime(m)
 	normalizeGitHub(m)
 }
@@ -275,6 +303,123 @@ func normalizeInsights(m *schema.Manifest) {
 	if i.LargeTableRows == 0 {
 		i.LargeTableRows = DefaultLargeTable
 	}
+	// Filled in rather than left nil, so that `af explain` can print which
+	// commit this repository's rolling check would compare against. A block
+	// nobody can see the effective value of is a block people set twice.
+	if i.RollingCompatibility == nil {
+		i.RollingCompatibility = &schema.RollingCompatibility{}
+	}
+	if i.RollingCompatibility.When == "" {
+		i.RollingCompatibility.When = DefaultRollingWhen
+	}
+	if i.RollingCompatibility.Against == "" {
+		i.RollingCompatibility.Against = DefaultRollingRef
+	}
+}
+
+// normalizeOracle fills the defaults, and only when the block is present.
+//
+// Every other normaliser in this file creates its block when it is missing,
+// because every other subsystem runs whether or not the manifest mentions it.
+// The oracle does not: it doubles the environments a run costs and it needs a
+// probe plan somebody wrote. So an absent block stays absent, which is what
+// lets `af oracle` tell "not configured" from "configured and turned off" and
+// say something different about each.
+func normalizeOracle(m *schema.Manifest) {
+	o := m.Oracle
+	if o == nil {
+		return
+	}
+	setTrue(&o.Enabled)
+	if o.Baseline == "" {
+		o.Baseline = schema.BaselineMergeBase
+	}
+	if o.FailOn == "" {
+		o.FailOn = DefaultOracleFailOn
+	}
+	o.FailOn = strings.ToLower(strings.TrimSpace(o.FailOn))
+
+	for i := range o.Probes {
+		p := &o.Probes[i]
+		p.Name = strings.TrimSpace(p.Name)
+		p.Method = strings.ToUpper(strings.TrimSpace(p.Method))
+		if p.Method == "" {
+			p.Method = "GET"
+		}
+		p.Path = strings.TrimSpace(p.Path)
+		if p.Path != "" && !strings.HasPrefix(p.Path, "/") {
+			p.Path = "/" + p.Path
+		}
+	}
+
+	if o.Ignore == nil {
+		o.Ignore = &schema.OracleIgnore{}
+	}
+	for i, h := range o.Ignore.Headers {
+		// Lowercased here so the comparison never has to case fold, which is
+		// the same reason egress hosts are lowercased above.
+		o.Ignore.Headers[i] = strings.ToLower(strings.TrimSpace(h))
+	}
+	for i, f := range o.Ignore.Fields {
+		o.Ignore.Fields[i] = strings.TrimSpace(f)
+	}
+	if o.Database == nil {
+		o.Database = &schema.OracleDatabase{}
+	}
+	setTrue(&o.Database.Enabled)
+	if o.Database.MaxRows == 0 {
+		o.Database.MaxRows = DefaultOracleMaxRows
+	}
+	for i, t := range o.Database.Tables {
+		o.Database.Tables[i] = strings.TrimSpace(t)
+	}
+	for i, t := range o.Database.Exclude {
+		o.Database.Exclude[i] = strings.TrimSpace(t)
+	}
+}
+
+func normalizeExplore(m *schema.Manifest) {
+	if m.Explore == nil {
+		m.Explore = &schema.Explore{}
+	}
+	firstPersona := ""
+	if len(m.Personas) > 0 {
+		firstPersona = m.Personas[0].Name
+	}
+	for i := range m.Explore.Goals {
+		g := &m.Explore.Goals[i]
+		if g.Persona == "" {
+			g.Persona = firstPersona
+		}
+		// The name, so that a manifest which sets no seed still replays. A
+		// seed derived from the wall clock or from the process would make the
+		// default case the one that cannot be reproduced, which is exactly
+		// backwards for the feature this key exists to make possible.
+		if g.Seed == "" {
+			g.Seed = g.Name
+		}
+		if g.StartPath == "" {
+			g.StartPath = DefaultStartPath
+		}
+		if !strings.HasPrefix(g.StartPath, "/") {
+			g.StartPath = "/" + g.StartPath
+		}
+		if g.SlowMs == 0 {
+			g.SlowMs = DefaultExploreSlowMs
+		}
+		if g.Budget == nil {
+			g.Budget = &schema.Budget{}
+		}
+		if g.Budget.Steps == 0 {
+			g.Budget.Steps = DefaultExploreSteps
+		}
+		if g.Budget.USD == 0 {
+			g.Budget.USD = DefaultWorkflowUSD
+		}
+		if g.Budget.Duration == "" {
+			g.Budget.Duration = DefaultWorkflowTime
+		}
+	}
 }
 
 func normalizeLoad(m *schema.Manifest) {
@@ -309,6 +454,44 @@ func normalizeLoad(m *schema.Manifest) {
 	for i, r := range l.UnsafeRoutes {
 		l.UnsafeRoutes[i] = normalizeRoute(r)
 	}
+}
+
+// normalizePolicy fills in the release gate.
+//
+// The two defaults that are not "warn" are the two the product has always
+// claimed: an unknown destination and a failed teardown cannot ship. A
+// migration that does not apply is the third, and it is not really a policy
+// choice: a migration that fails against production's shape fails the deploy.
+// Everything else defaults to warn, because a gate that blocks on its first
+// day is a gate people turn off on their second.
+func normalizePolicy(m *schema.Manifest) {
+	if m.Policy == nil {
+		m.Policy = &schema.Policy{}
+	}
+	p := m.Policy
+	if p.MigrationLock == nil {
+		p.MigrationLock = &schema.LockPolicy{}
+	}
+	if p.MigrationLock.WarnMS == 0 {
+		p.MigrationLock.WarnMS = DefaultLockWarnMS
+	}
+	if p.MigrationLock.FailMS == 0 {
+		p.MigrationLock.FailMS = DefaultLockFailMS
+	}
+	level := func(v *schema.PolicyLevel, def schema.PolicyLevel) {
+		if *v == "" {
+			*v = def
+		}
+	}
+	level(&p.MigrationFailed, schema.PolicyFail)
+	level(&p.MigrationRewrite, schema.PolicyWarn)
+	level(&p.MigrationLint, schema.PolicyWarn)
+	level(&p.PlanRegression, schema.PolicyWarn)
+	level(&p.QueryRegression, schema.PolicyWarn)
+	level(&p.LoadRegression, schema.PolicyWarn)
+	level(&p.EgressSurprise, schema.PolicyFail)
+	level(&p.Masking, schema.PolicyFail)
+	level(&p.Cleanup, schema.PolicyFail)
 }
 
 func normalizeRoute(r string) string {

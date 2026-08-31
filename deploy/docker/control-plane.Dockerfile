@@ -24,10 +24,28 @@ COPY web/apps/api/package.json ./apps/api/
 COPY web/packages/db/package.json ./packages/db/
 COPY web/packages/policy/package.json ./packages/policy/
 
+# Scoped to this workspace, not the whole tree. A plain `npm ci` here would
+# install every workspace member's dependencies into an image that runs one
+# server, and the assertion below exists because that scoping is one flag away
+# from bringing a web framework along for the ride.
+#
+# The console is deliberately not among the manifests above. It is its own npm
+# project with its own lockfile rather than a workspace member, and it is built
+# in its own stage further down, which is what keeps a compiler and a framework
+# out of this stage entirely rather than merely unselected.
+#
 # --ignore-scripts: nothing in this dependency tree needs a build step, and a
 # postinstall script running at image build time is a supply chain hole that
 # buys nothing here.
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts \
+      --workspace @antifailure/api --include-workspace-root
+
+# Asserted rather than assumed. The scoping above is one flag away from
+# silently installing a web framework into this image, and an image that is
+# three hundred megabytes larger than it should be is not something anybody
+# notices from a build log.
+RUN test ! -d node_modules/next \
+  || (echo 'the web framework is in the API image: the workspace scoping above stopped working' && exit 1)
 
 # ---------------------------------------------------------------------------
 # The console.
@@ -103,6 +121,9 @@ COPY web/packages/policy ./packages/policy
 # how a schema arrives that the running code does not understand.
 COPY deploy/docker/bootstrap.mjs ./bootstrap.mjs
 COPY deploy/docker/maintenance.mjs ./maintenance.mjs
+# The preview identities. Refuses to run outside an environment the engine
+# created; see the file for why that check is not a formality.
+COPY deploy/docker/personas.mjs ./personas.mjs
 
 # The console's build. src/console/static.ts looks here by default; the path is
 # overridable with AF_CONSOLE_DIR for a self-hosted operator who serves it some
@@ -132,7 +153,13 @@ EXPOSE 8080
 # so this answers "is the process up", never "can it serve". Readiness is left
 # to the orchestrator, and the reason is written down in the self-hosting page
 # rather than implied by a probe that claims more than it checks.
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+# Ten seconds, and five retries. /health is a cheap route and this is still
+# generous on purpose: a check that fails on a loaded machine takes down a
+# container that was answering correctly, which is a worse outcome than a check
+# that waits. Measured against the sibling image, where a three second timeout
+# failed seventeen times in a row against a page that was returning 200 in 4.4
+# seconds.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=5 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.AF_PORT||8080)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "apps/api/src/main.ts"]

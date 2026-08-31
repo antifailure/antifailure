@@ -135,11 +135,19 @@ jobs:
             )
           done
           go build -o /tmp/af-examples ./engine/cmd/af
-          for dir in examples/*/; do
-            [ -f "$dir/antifailure.yaml" ] || continue
-            (cd "$dir" && /tmp/af-examples explain > /dev/null)
+          # The repository's own manifest first, and it was in no gate at all
+          # until this line. Every example was validated and the one file this
+          # product is dogfooded with was not, so its four invariants were
+          # written as SELECT count(*) and every one of them could never fail:
+          # an invariant holds when its statement returns no rows, and a bare
+          # count returns one row saying zero. Four checks that read as
+          # evidence and were not. `af explain` refuses them by name, and
+          # nothing was running it here.
+          for manifest in ./antifailure.yaml examples/*/antifailure.yaml; do
+            [ -f "$manifest" ] || continue
+            (cd "$(dirname "$manifest")" && /tmp/af-examples explain > /dev/null)
           done
-          echo "every example builds and every manifest is valid"
+          echo "every example builds, and every manifest here is valid"
 
       - name: The prose stays readable
         # A regression guard rather than a style rule. The hardest page today
@@ -304,9 +312,16 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: runner/package.json
+          # The lockfile, not the manifest. Keyed on package.json the cache key
+          # was a file full of ranges, so two runs of the same commit could
+          # resolve different trees and the cache made that quieter rather than
+          # louder. That is the failure a lockfile exists to prevent.
+          cache-dependency-path: runner/package-lock.json
 
-      - run: npm install --no-audit --no-fund
+      # ci rather than install, now that there is a lockfile to obey. It also
+      # fails when the lockfile has drifted from package.json, which is the
+      # only thing checking that they agree.
+      - run: npm ci --no-audit --no-fund
         working-directory: runner
 
       - name: Install the browser
@@ -682,6 +697,40 @@ jobs:
         run: |
           cd ee/engine
           GOWORK=off go test ./license -run FuzzParse -fuzz FuzzParse -fuzztime 60s
+
+  reproducible:
+    name: the release rebuilds to the same bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # Full history, because the build stamps the commit date and a shallow
+      # checkout of a merge commit does not have the one the release would use.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Two builds of this commit produce the same release artifact
+        # G11, which was a local recipe and is now a job, because a gate that
+        # only ever runs on somebody's workstation is a gate that stops
+        # running. `just gate` still calls the same script, so the two cannot
+        # drift; this is the copy that runs on every pull request.
+        #
+        # It compares the archive as well as the binary. The previous version
+        # compared bin/af, which was already identical every time, and passed
+        # for months while all four .tar.gz files it stood in for differed
+        # between builds. The archive is what a person downloads and what
+        # checksums.txt names, so it is the one whose reproducibility is worth
+        # anything.
+        #
+        # This does not run through `just`. ci.yml never has: `just gate` is a
+        # workstation command whose recipes assume vale, lychee and cspell are
+        # installed, and cd.yml records what happened when a job copied it
+        # without its prerequisites. The script is the shared part.
+        run: ./tools/release/reproducible.sh
 
   secrets:
     name: no credentials in the tree

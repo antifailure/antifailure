@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -49,11 +50,31 @@ func main() {
 }
 
 // codePattern matches the generated constant names, AFRUN001 and so on. The
-// constants are what the code refers to; the catalog holds AF-RUN-001. Matching
-// on the constant rather than on the string is deliberate: a code assembled
-// from pieces at runtime would not be found by a text search either, and there
-// are none, which this proves by scanning identifiers rather than strings.
+// constants are what most of the code refers to; the catalog holds AF-RUN-001.
+//
+// The comment here used to say a code assembled from pieces would not be found
+// by a text search either, and that there were none. There was one.
+// policyenforce.Refusal.Error builds "AF-EE-010: organization policy ..." with
+// Sprintf and never mentions the constant, so the identifier walk went straight
+// past a code that ships, is tested, and is written up on the enterprise policy
+// page. It sat marked 'planned: true' and errgen therefore left it off the
+// reference page. String literals are read as well now, from the syntax tree
+// rather than from the file's text, which is what keeps a comment mentioning a
+// code from counting as a use.
 var codePattern = regexp.MustCompile(`^AF[A-Z]{2,4}\d{3}$`)
+
+// returnedWire matches a string literal that IS a code, which is the form a
+// user reads: the code, then a colon, then the sentence.
+//
+// Anchored at the start rather than matched anywhere, and the difference is the
+// whole rule. Codes appear inside ordinary sentences all over this repository,
+// in assertion messages and in prose kept as strings, and every one of those is
+// somebody writing ABOUT an error rather than returning one. Matching anywhere
+// reported five codes as reachable and only one of them was: the other four
+// were "so AF-CPL-003's promise is not kept" and its kind, and clearing their
+// planned markers would have put four descriptions of impossible situations on
+// the reference page, which is the exact harm this command exists to prevent.
+var returnedWire = regexp.MustCompile(`^(AF-[A-Z]{2,4}-[0-9]{3})(:|$)`)
 
 func run(root string) ([]string, int, error) {
 	catalog, err := catalogCodes(filepath.Join(root, "engine", "internal", "errors", "codes.gen.go"))
@@ -67,6 +88,17 @@ func run(root string) ([]string, int, error) {
 	used, err := usedCodes(root)
 	if err != nil {
 		return nil, 0, err
+	}
+
+	// The control plane returns codes too, and it is TypeScript. Merged rather
+	// than checked separately, because the question either scan answers is the
+	// same one: does a user ever see this code.
+	fromTS, err := usedInTypeScript(root)
+	if err != nil {
+		return nil, 0, err
+	}
+	for code := range fromTS {
+		used[code] = true
 	}
 
 	planned, err := plannedCodes(filepath.Join(root, "engine", "internal", "errors", "catalog.yaml"))
@@ -260,6 +292,95 @@ func catalogCodes(path string) (map[string]string, error) {
 	return out, nil
 }
 
+// wireInSource matches a code written out as a string, which is the only form
+// the TypeScript side has.
+//
+// Quoted deliberately. provision.ts explains the seat limit in a comment that
+// names AF-EE-004 in prose, and a pattern that matched the bare code would
+// count that comment as a use, which is the mistake the Go scan avoids by
+// walking identifiers instead of text.
+var wireInSource = regexp.MustCompile("['\"`](AF-[A-Z]{2,4}-[0-9]{3})['\"`]")
+
+// stringLiteralCodes reads the codes out of one Go string literal.
+//
+// The literal's own quotes are part of its value, so it is unquoted first and
+// the bare pattern is matched against the text a user would see.
+func stringLiteralCode(lit string) string {
+	unquoted, err := strconv.Unquote(lit)
+	if err != nil {
+		// A literal this package cannot unquote is one it cannot read a code
+		// out of either, and skipping it is the honest answer. Raw strings and
+		// ordinary quoted ones both unquote; nothing else carries a code.
+		return ""
+	}
+	m := returnedWire.FindStringSubmatch(unquoted)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// constantFor turns AF-EE-004 into AFEE004, which is how the catalog map is
+// keyed.
+func constantFor(wire string) string { return strings.ReplaceAll(wire, "-", "") }
+
+// usedInTypeScript finds every code the control plane returns to a user.
+//
+// This exists because AF-EE-004 shipped marked 'planned: true'. It is thrown on
+// the live SAML path in ee/web/sso/src/provision.ts and asserted by a passing
+// test, and the marker meant errgen left it off the reference page: somebody
+// whose single sign-on was refused with that code searched the errors reference
+// and found nothing. The scan above walks Go syntax trees and returns early on
+// anything that is not a .go file, so it had walked straight past the throw.
+//
+// Source only, and tests deliberately excluded, which is the opposite of the Go
+// rule three lines up and is not an inconsistency. A Go test reaches a code
+// through the generated constant, so it is exercising the path that returns it.
+// A TypeScript string is just text: metrics-endpoint.test.ts posts a payload
+// carrying AF-DB-001 to prove the control plane groups metrics by whatever code
+// arrives, and the control plane neither produces that code nor could. Counting
+// that as a use would clear a marker on an error only the engine can raise.
+func usedInTypeScript(root string) (map[string]bool, error) {
+	used := map[string]bool{}
+	for _, dir := range []string{"web", "console", "runner", "ee"} {
+		base := filepath.Join(root, dir)
+		if _, err := os.Stat(base); err != nil {
+			continue
+		}
+		err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				switch d.Name() {
+				case "node_modules", "testdata", "test", "tests", "__tests__", "dist", ".next":
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			name := d.Name()
+			if !strings.HasSuffix(name, ".ts") && !strings.HasSuffix(name, ".tsx") {
+				return nil
+			}
+			if strings.HasSuffix(name, ".test.ts") || strings.HasSuffix(name, ".test.tsx") {
+				return nil
+			}
+			b, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return fmt.Errorf("%s: %w", path, readErr)
+			}
+			for _, m := range wireInSource.FindAllSubmatch(b, -1) {
+				used[constantFor(string(m[1]))] = true
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return used, nil
+}
+
 // usedCodes finds every code the engine actually refers to.
 //
 // Parsed rather than grepped. A grep for AFRUN001 matches the definition, the
@@ -280,7 +401,12 @@ func usedCodes(root string) (map[string]bool, error) {
 				return err
 			}
 			if d.IsDir() {
-				if d.Name() == "node_modules" || d.Name() == "testdata" {
+				// testutil is skipped because its fakes stand in for components
+				// that are not there, and they raise codes they have not earned:
+				// the in-memory database answers "AF-DB-010: that version still
+				// has a branch" where the catalog says AF-DB-010 means the
+				// storage pool is full. A fake is not a place a user can reach.
+				if d.Name() == "node_modules" || d.Name() == "testdata" || d.Name() == "testutil" {
 					return filepath.SkipDir
 				}
 				return nil
@@ -297,12 +423,18 @@ func usedCodes(root string) (map[string]bool, error) {
 				return fmt.Errorf("%s: %w", path, parseErr)
 			}
 			ast.Inspect(file, func(n ast.Node) bool {
-				ident, ok := n.(*ast.Ident)
-				if !ok {
-					return true
-				}
-				if codePattern.MatchString(ident.Name) {
-					used[ident.Name] = true
+				switch v := n.(type) {
+				case *ast.Ident:
+					if codePattern.MatchString(v.Name) {
+						used[v.Name] = true
+					}
+				case *ast.BasicLit:
+					if v.Kind != token.STRING {
+						return true
+					}
+					if wire := stringLiteralCode(v.Value); wire != "" {
+						used[constantFor(wire)] = true
+					}
 				}
 				return true
 			})

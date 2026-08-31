@@ -8,9 +8,17 @@
 // "unknown". Nothing in the pipeline could have caught that, because every
 // stage did exactly what it was asked.
 //
-// This reads the -X flags out of the workflow and checks each one against the
-// source: the package has to exist, the variable has to be in it, and it has to
-// be a string. Anything else fails, with the symbol named.
+// This reads the -X flags out of every place that writes them and checks each
+// one against the source: the package has to exist, the variable has to be in
+// it, and it has to be a string. Anything else fails, with the symbol named.
+//
+// Every place, plural, because there is more than one. The workflow builds the
+// release and tools/release/build.sh is the script it calls, and `just
+// build-release` calls the same script so that the shipping build exists once
+// rather than twice. Checking only the workflow would leave the file that
+// actually carries the flags unexamined, which is the same shape of gap as the
+// original bug: a stage that does exactly what it was asked, about the wrong
+// thing.
 package main
 
 import (
@@ -30,7 +38,8 @@ var xFlag = regexp.MustCompile(`-X\s+["']?([^\s"'=]+)=`)
 
 func main() {
 	root := flag.String("root", ".", "repository root")
-	workflow := flag.String("workflow", ".github/workflows/release.yml", "workflow to read")
+	sources := flag.String("sources", ".github/workflows/release.yml,tools/release/build.sh",
+		"comma separated files that write -X flags")
 	modulePath := flag.String("module", "github.com/antifailure/antifailure/engine", "the module the flags refer to")
 	moduleDir := flag.String("module-dir", "engine", "that module's directory")
 	flag.Parse()
@@ -42,18 +51,32 @@ func main() {
 		*root = args[0]
 	}
 
-	source, err := os.ReadFile(filepath.Join(*root, *workflow))
-	if err != nil {
-		fail("reading %s: %v", *workflow, err)
+	var symbols [][]string
+	var carriers []string
+	for _, name := range strings.Split(*sources, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		source, err := os.ReadFile(filepath.Join(*root, name))
+		if err != nil {
+			// A named source that is not there is a failure rather than a skip.
+			// Skipping is how this check would quietly start reading nothing
+			// after somebody renamed a file.
+			fail("reading %s: %v", name, err)
+		}
+		found := xFlag.FindAllStringSubmatch(string(source), -1)
+		if len(found) > 0 {
+			carriers = append(carriers, name)
+		}
+		symbols = append(symbols, found...)
 	}
-
-	symbols := xFlag.FindAllStringSubmatch(string(source), -1)
 	if len(symbols) == 0 {
-		// A workflow with no -X at all is either a mistake or a deliberate
-		// change nobody told this tool about. Either way it is worth a failure
-		// rather than a silent pass over an empty list.
-		fail("%s sets no -X flags; either the release stopped stamping a version "+
-			"or this check is looking at the wrong file", *workflow)
+		// No -X anywhere is either a mistake or a deliberate change nobody told
+		// this tool about. Either way it is worth a failure rather than a
+		// silent pass over an empty list.
+		fail("none of %s sets any -X flag; either the release stopped stamping a "+
+			"version or this check is looking at the wrong files", *sources)
 	}
 
 	var problems []string
@@ -88,7 +111,8 @@ func main() {
 			"so this would ship a binary that does not know its own version.\n")
 		os.Exit(1)
 	}
-	fmt.Printf("ldcheck: %d symbols, every one present and a string\n", len(symbols))
+	fmt.Printf("ldcheck: %d symbols in %s, every one present and a string\n",
+		len(symbols), strings.Join(carriers, " and "))
 }
 
 // packageDir resolves an import path to a directory on disk.

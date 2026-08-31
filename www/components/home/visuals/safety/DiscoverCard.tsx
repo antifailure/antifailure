@@ -5,7 +5,7 @@ import { useInViewPlay } from "@/lib/useInViewPlay";
 import { u } from "../SafetyCards";
 
 /**
- * Waveform of exploratory traffic, measured off the 288×351 reference crop.
+ * Waveform of the route mix, measured off the 288x351 reference crop.
  * Local y = 0 is card y = 90. 19 capsules, width 10, pitch 15.5, origin −1
  * so they bleed both card edges. Vertically centered on y = 121.
  */
@@ -102,7 +102,7 @@ export function DiscoverCard() {
           className="whitespace-nowrap font-sans font-medium leading-none tracking-extra-tight text-black-pure"
           style={{ fontSize: u(8.6), letterSpacing: u(-0.14) }}
         >
-          What breaks on checkout?
+          Worst regression first
         </span>
       </div>
     </div>

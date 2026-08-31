@@ -26,6 +26,9 @@ export interface Session {
   orgId?: string | null;
   role?: string | null;
   csrfToken?: string;
+  /** The ways in this deployment offers, when signed out. Absent from an
+   *  older control plane, which is read as GitHub alone rather than as none. */
+  methods?: string[];
 }
 
 export class ApiError extends Error {

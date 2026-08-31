@@ -20,24 +20,37 @@ import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
 import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
+import { ResendMailer } from './auth/mail.ts'
+import { sweepEmailSignInTokens } from './auth/email.ts'
+import type { EmailSignInConfig } from './auth/email.ts'
 
-function required(name: string): string {
-  const value = process.env[name]
-  if (!value) {
-    console.error(`${name} is not set. The control plane needs it to start.`)
-    process.exit(2)
+function required(name: string, ...fallbacks: string[]): string {
+  for (const n of [name, ...fallbacks]) {
+    const value = process.env[n]
+    if (value) return value
   }
-  return value
+  const names = [name, ...fallbacks].join(' or ')
+  console.error(`${names} is not set. The control plane needs one of them to start.`)
+  process.exit(2)
 }
 
-const databaseUrl = required('AF_DATABASE_URL')
+// AF_DATABASE_URL is what a deployment sets. DATABASE_URL is what Antifailure
+// injects into a service it runs, and inside a preview environment they are
+// the same database, so either is accepted.
+//
+// This is not a convenience. The whole argument for a preview being made of
+// the real artifact is that the artifact is unchanged, and an image that can
+// only start under one orchestrator's variable names is an image a preview
+// cannot run. Found by pointing af up at this control plane and watching the
+// server refuse to start.
+const databaseUrl = required('AF_DATABASE_URL', 'DATABASE_URL')
 const port = Number(process.env.AF_PORT ?? 8080)
 
 if (process.env.AF_MIGRATE === '1') {
   // Migrations run as a privileged role, deliberately not the one the
   // application connects as: a role that can ALTER TABLE can disable the
   // policies that isolate tenants.
-  const adminUrl = required('AF_MIGRATION_DATABASE_URL')
+  const adminUrl = required('AF_MIGRATION_DATABASE_URL', 'DATABASE_URL')
   const admin = postgres(adminUrl, { max: 1, onnotice: () => {} })
   const result = await migrate(admin, { log: (line) => console.log(line) })
   await admin.end({ timeout: 10 })
@@ -69,6 +82,53 @@ const github = new RealGitHubClient({
   redirectUri: required('AF_GITHUB_REDIRECT_URI'),
   installationTokens,
 })
+
+// Signing in with a link, off unless it is configured.
+//
+// Three variables and all three are needed, because two of them without the
+// third is a link that goes nowhere or mail that cannot be sent. Naming which
+// one is missing is the difference between a five-second fix and an afternoon.
+function emailSignInFromEnv(): EmailSignInConfig | undefined {
+  const apiKey = process.env.AF_RESEND_API_KEY
+  const from = process.env.AF_MAIL_FROM
+  // AF_PUBLIC_URL is what a deployment sets. AF_ENV_URL is what Antifailure
+  // injects: the address of the environment's first web service, which is the
+  // application a person opens.
+  //
+  // The distinction matters because the link is sent by this process and
+  // landed on by another one. Inside a preview, this service's own address is
+  // the API's, and a sign in link pointing there is a link that goes nowhere.
+  // A run got as far as reading the mail and then failed on
+  // ERR_CONNECTION_REFUSED four minutes in, because the only address the
+  // application knew was its own container port.
+  const publicUrl = process.env.AF_PUBLIC_URL ?? process.env.AF_ENV_URL
+  if (!apiKey && !from && !publicUrl) return undefined
+
+  const missing = [
+    apiKey ? null : 'AF_RESEND_API_KEY',
+    from ? null : 'AF_MAIL_FROM',
+    publicUrl ? null : 'AF_PUBLIC_URL or AF_ENV_URL',
+  ].filter((name): name is string => name !== null)
+  if (missing.length > 0) {
+    console.error(
+      `signing in with a link is half configured: ${missing.join(', ')} not set. ` +
+        'Set all three, or none of them to turn the path off.',
+    )
+    process.exit(2)
+  }
+
+  return {
+    mailer: new ResendMailer({
+      apiKey: apiKey!,
+      from: from!,
+      ...(process.env.AF_RESEND_BASE_URL ? { baseUrl: process.env.AF_RESEND_BASE_URL } : {}),
+    }),
+    baseUrl: publicUrl!,
+    ...(process.env.AF_PRODUCT_NAME ? { productName: process.env.AF_PRODUCT_NAME } : {}),
+  }
+}
+
+const emailSignIn = emailSignInFromEnv()
 
 // Said out loud at startup, every time. Whether an instance is open to the
 // world is not something anybody should have to infer from a deployment
@@ -103,12 +163,13 @@ const { app, ingestLimiter, authLimiter } = createServer({
   github,
   clock: systemClock,
   secureCookies: process.env.AF_INSECURE_COOKIES !== '1',
-  appBaseUrl: process.env.AF_APP_BASE_URL,
+  appBaseUrl: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL,
   signInAllowlist,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
   modelPrices,
   consoleBuild,
+  ...(emailSignIn ? { emailSignIn } : {}),
 })
 
 // Partitions, kept ahead of the writes. Skipped when this process is not the
@@ -139,6 +200,10 @@ if (maintenanceUrl) {
 const housekeeping = setInterval(
   () => {
     void sweepSessions(pool, systemClock).catch((err) => console.error('session sweep', err))
+    if (emailSignIn) {
+      void sweepEmailSignInTokens(pool, systemClock).catch((err) => console.error('link sweep', err))
+    }
+
     // Beside the session sweep for the same reason and with the same cost:
     // expiry is checked on every read, so being late costs table size. It was
     // written with this comment on it and then never called from anywhere, so

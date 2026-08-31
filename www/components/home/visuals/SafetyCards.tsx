@@ -19,17 +19,17 @@ export function u(px: number) {
 const CARDS = [
   {
     title: "Fail closed.",
-    description: "Unknown egress, missing sanitization, or failed cleanup blocks the ship.",
+    description: "Unknown destinations are denied inside the twin, and an unverified golden cannot be branched.",
     Visual: FailClosedCard,
   },
   {
-    title: "AI discovers, systems prove.",
-    description: "Observed patterns, deterministic journeys, and exploratory users. The oracle decides.",
+    title: "Traffic shaped like production's.",
+    description: "The route mix out of your own access log, with the worst regression first.",
     Visual: DiscoverCard,
   },
   {
-    title: "Pass, warning, or block.",
-    description: "An evidence-backed gate on the pull request, not a preview URL alone.",
+    title: "Pass or fail, with evidence.",
+    description: "A gate on the pull request carrying the rows, the trace, and the video behind it.",
     Visual: VerdictCard,
   },
 ];

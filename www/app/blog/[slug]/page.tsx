@@ -5,7 +5,7 @@ import { Container } from "@/components/layout/Container";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { PageShell } from "@/components/pages/kit";
 import { POSTS, POSTS_BY_DATE, formatDate, getPost, postModified } from "@/lib/blog";
-import { PostJsonLd } from "@/lib/jsonld";
+import { PageJsonLd, PostJsonLd } from "@/lib/jsonld";
 import { OG_IMAGE, SITE_NAME, absoluteUrl } from "@/lib/site";
 
 export function generateStaticParams() {
@@ -56,7 +56,7 @@ export async function generateMetadata({
       description: post.dek,
       publishedTime: post.published,
       modifiedTime: postModified(post),
-      authors: [post.author.name],
+      authors: [SITE_NAME],
       tags: [...post.tags],
       images: [{ url: OG_IMAGE.url, width: OG_IMAGE.width, height: OG_IMAGE.height, alt: OG_IMAGE.alt }],
     },
@@ -80,6 +80,10 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
 
   return (
     <PageShell>
+      {/* Both, because they describe different things. PostJsonLd is the
+          article; PageJsonLd is the page it is served at and the breadcrumb
+          trail rendered below, which was visible here and undescribed. */}
+      <PageJsonLd path={`/blog/${post.slug}`} />
       <PostJsonLd post={post} />
 
       <article>

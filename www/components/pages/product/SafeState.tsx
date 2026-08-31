@@ -339,9 +339,10 @@ export function SafeStatePage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/safe-state"
         eyebrow="Safe State Engine"
         title="Production-shaped Postgres without production identities."
-        lead="Snapshot restore, referentially consistent subsetting, and deterministic masking inside the customer boundary. Tokens, sessions, and secrets are deleted — not disguised. The output is a sanitization evidence report, not a dataset."
+        lead="Snapshot restore, referentially consistent subsetting, and deterministic masking inside the customer boundary. Tokens, sessions, and secrets are deleted, not disguised. The output is a sanitization evidence report, not a dataset."
         visual={<MaskingPanel />}
       />
       <PageSection>
@@ -362,7 +363,7 @@ export function SafeStatePage() {
           <PageHeading title="<strong>A 12% subset that still joins.</strong> Dropped parents take their children. Rare rows stay." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Subsetting is the default instead of full copying. The twin keeps referential integrity, long-tail
-            billing states, and malformed history — the records that actually break migrations — while
+            billing states, and malformed history, the records that actually break migrations, while
             volume stays bounded.
           </p>
           <div className="mt-8">
@@ -402,7 +403,7 @@ export function SafeStatePage() {
           <div className="mt-8">
             <Callout label="Customer boundary">
               Production data stays in the customer boundary. What crosses the trust boundary is a
-              sanitization attestation — hashes, coverage, and a pass or block — not the rows.
+              sanitization attestation: hashes, coverage, and whether it verified. Not the rows.
             </Callout>
           </div>
         </Split>
@@ -411,7 +412,7 @@ export function SafeStatePage() {
         items={[
           { href: "/product/firewall", title: "Side-Effect Firewall", description: "The twin cannot act on the real world." },
           { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
-          { href: "/product/fidelity", title: "Fidelity Graph", description: "Volume and distribution actually restored." },
+          { href: "/product/migrations", title: "Migration Safety", description: "What a branch with production's shape shows." },
         ]}
       />
     </PageShell>

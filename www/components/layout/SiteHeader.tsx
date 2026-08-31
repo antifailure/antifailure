@@ -9,7 +9,7 @@ import { Logo } from "./Logo";
 import { cn } from "@/lib/cn";
 import { FOOTER_MENUS, GITHUB_URL, HEADER_MENUS } from "@/lib/nav";
 import { HeaderMini, MenuCardArt, ProductMiniStyles } from "@/components/home/visuals/headerMinis";
-import { Chevron, DiscordIcon, GitHubIcon } from "../icons";
+import { BookIcon, Chevron, GitHubIcon } from "../icons";
 
 function HeaderLink({
   href,
@@ -118,9 +118,14 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
   }, [closeNow]);
 
   return (
-    <div className={cn("sticky top-0 z-50", overlay && "-mb-16 max-xl:-mb-14")}>
+    // The banner is out here rather than around the bar alone, because the
+    // flyout panel below is a sibling of the bar and not a child of it. With
+    // <header> on the inner element the panel's nineteen links belonged to no
+    // landmark at all: every other nav on the page sits inside header, main or
+    // footer, and the navigation itself did not.
+    <header className={cn("sticky top-0 z-50", overlay && "-mb-16 max-xl:-mb-14")}>
       <ProductMiniStyles />
-      <header
+      <div
         className={cn(
           "header relative z-50 flex h-16 w-full items-center bg-white max-xl:h-14",
           "after:absolute after:right-0 after:bottom-0 after:left-0 after:h-px after:bg-gray-new-90",
@@ -163,6 +168,10 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                           )}
                           aria-expanded={isActive}
                           aria-haspopup="menu"
+                          // The panel already carried this id and nothing
+                          // pointed at it, so the button announced that it
+                          // expands something without ever saying what.
+                          aria-controls={`submenu-${index}`}
                           onClick={() => enterMenu(isActive ? null : index)}
                         >
                           {menu.text}
@@ -192,12 +201,15 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                 <GitHubIcon className="h-[18px] w-[18px] text-gray-new-20" />
                 <span className="text-sm leading-none tracking-extra-tight">GitHub</span>
               </a>
+              {/* There is no Discord. The link that used to sit here was
+                  labelled Discord and went to the waitlist form, which is a
+                  broken promise in the header of every page. */}
               <Link
-                href="/signup"
+                href="/docs"
                 className="flex items-center gap-1.5 text-black transition-colors hover:text-gray-new-40"
               >
-                <DiscordIcon className="h-[18px] w-[18px] text-gray-new-20" />
-                <span className="text-sm leading-none tracking-extra-tight">Discord</span>
+                <BookIcon className="h-[18px] w-[18px] text-gray-new-20" />
+                <span className="text-sm leading-none tracking-extra-tight">Docs</span>
               </Link>
             </div>
             <div className="flex gap-x-3.5">
@@ -223,13 +235,22 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
             </span>
           </button>
         </Container>
-      </header>
+      </div>
 
       <div
         className={cn(
           "main-navigation-submenu absolute top-full left-0 z-40 w-full overflow-hidden border-b border-gray-new-90 bg-white transition-[height] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] max-xl:hidden",
           open === null ? "pointer-events-none border-transparent" : "pointer-events-auto",
         )}
+        // Closed, this panel is a pixel tall with its overflow clipped, and
+        // clipping removes nothing from the tab order. All nineteen links
+        // stayed focusable and stayed in the accessibility tree, so tabbing
+        // from the logo went through nineteen invisible destinations before
+        // reaching the page. `pointer-events: none` only ever covered the mouse.
+        //
+        // `inert` is the attribute for this: not focusable, not read, not
+        // clickable, and it takes the whole subtree with it.
+        inert={open === null || undefined}
         style={{ height: `${height}px` }}
         onMouseEnter={clearClose}
         onMouseLeave={leaveMenu}
@@ -249,6 +270,11 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                   "absolute top-0 left-0 w-full transition-opacity duration-200",
                   isActive ? "opacity-100" : "pointer-events-none opacity-0",
                 )}
+                // The panels are stacked on each other and all but one is
+                // transparent. Transparent is still focusable, so without this
+                // an open menu would hand a keyboard user every other menu's
+                // links as well as its own.
+                inert={!isActive || undefined}
               >
                 {sections.length > 0 && (
                   <Container className="overflow-visible pt-8 pb-10" size="1920">
@@ -407,6 +433,6 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
           </div>
         </div>
       ) : null}
-    </div>
+    </header>
   );
 }
