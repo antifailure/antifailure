@@ -59,9 +59,27 @@ that exists only at the root means the root, and anything else is asked rather
 than guessed. A monorepo image that reaches a lockfile at the top of the tree
 is unchanged, which is the case that made a new default the wrong answer.
 
+Where the COPY lines settle nothing there are two different ambiguities and
+they do not get the same answer. When every source resolves in both places a
+build from either works, so a repository doing that today is building from the
+root and succeeding, and the root stays what an unattended run takes. When
+nothing resolves anywhere, which in practice means the only instruction reading
+the context is `COPY . .`, there is no evidence for the root at all and the
+root is the case that succeeds while assembling the image from the wrong
+directory, so the default is the Dockerfile's own directory. Both are asked on
+a terminal and both are reported as assumptions otherwise.
+
 Where that inference is wrong, or where the manifest was written by hand, a
 failed build now returns AF-BLD-005 naming `build.context` instead of leaving
 the reader with a path that does not exist inside a container.
+
+`af up` no longer answers with a segmentation fault and a Go stack trace when
+it fails before an environment exists. It rendered a service table off a result
+that is nil on every such path, which includes a lock another `af up` already
+holds, an unresolved secret, an egress rule that will not compile, and a state
+directory it cannot create. The diagnosed error had been built and was thrown
+away at the last step. Found by running two `af up` commands at once on one
+repository, which is an ordinary thing to do by accident.
 
 `AF-DET-003` is deleted. It was reserved for a port collision and never
 emitted by anything. The sentence it would have printed is produced by the

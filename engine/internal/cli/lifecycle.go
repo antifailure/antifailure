@@ -349,7 +349,17 @@ interrupt at any point leaves something af down can clean up.`),
 				return runErr
 			}
 			if upErr != nil {
-				renderServices(e, res.Services)
+				// Most failures come back with a partial result worth showing,
+				// but a good many do not: every 'return nil, err' in Up, which
+				// includes a missing manifest, an unresolved secret, an egress
+				// rule that will not compile and a build that failed before
+				// any service existed. Those dereferenced a nil pointer here,
+				// so the command a first run is most likely to fail on printed
+				// a segmentation fault and a Go stack trace instead of the
+				// diagnosed error it had already produced.
+				if res != nil {
+					renderServices(e, res.Services)
+				}
 				return upErr
 			}
 

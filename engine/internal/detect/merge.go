@@ -113,6 +113,9 @@ type candidate struct {
 	// it, so the caller asks instead of choosing.
 	contextWhy       string
 	contextAmbiguous string
+	// contextDefault is the answer an unattended run takes, which is not
+	// always the directory. See detect.contextFor.
+	contextDefault string
 }
 
 func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
@@ -227,6 +230,7 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 				c.build = b
 				c.contextWhy = f.Extra["context_why"]
 				c.contextAmbiguous = f.Extra["context_ambiguous"]
+				c.contextDefault = f.Extra["context_default"]
 			}
 			if d := f.Extra["dir"]; d != "" && c.dir == "" {
 				c.dir = d
@@ -320,7 +324,7 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 				ID:      "service." + c.name + ".context",
 				Prompt:  fmt.Sprintf("Which directory is %s built from?", c.name),
 				Options: []string{c.contextAmbiguous, "."},
-				Default: c.contextAmbiguous,
+				Default: c.contextDefault,
 				Why: c.contextWhy + " " + fmt.Sprintf(
 					"'docker build %s' would use %s; a monorepo image that needs a file from the top of the tree wants '.'.",
 					c.contextAmbiguous, c.contextAmbiguous),
@@ -519,6 +523,7 @@ func (c *candidate) absorb(o *candidate) {
 	}
 	if c.contextAmbiguous == "" {
 		c.contextAmbiguous = o.contextAmbiguous
+		c.contextDefault = o.contextDefault
 	}
 	// The command the image runs beats a package script of equal confidence.
 	// A Dockerfile that ships a standalone server declares CMD ["node",

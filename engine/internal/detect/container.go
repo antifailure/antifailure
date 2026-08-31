@@ -54,12 +54,18 @@ func (a *DockerAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error) 
 			"target":     df.finalStage,
 			"base":       df.finalBase,
 		}
-		if inDir {
-			extra["context"] = dir
-			extra["context_why"] = why
-		}
-		if ambiguous {
+		switch {
+		case ambiguous:
+			// inDir is the default here rather than the answer, and which one
+			// it is depends on which ambiguity this is. See contextFor.
 			extra["context_ambiguous"] = dir
+			extra["context_default"] = "."
+			if inDir {
+				extra["context_default"] = dir
+			}
+			extra["context_why"] = why
+		case inDir:
+			extra["context"] = dir
 			extra["context_why"] = why
 		}
 		out = append(out, Finding{
@@ -269,6 +275,16 @@ func copySourcesOf(args string) []string {
 // means. Saying so in the manifest would be noise, and more importantly it
 // would be a behaviour change for every repository that builds correctly
 // today.
+//
+// The two ambiguous shapes deliberately get different defaults, because they
+// are different questions. When every source resolves in BOTH places a build
+// from either works, so a repository doing that today is building from the
+// root and succeeding, and the root stays the default. When nothing resolves
+// anywhere the only instruction reading the context is COPY . ., there is no
+// evidence for the root at all, and the root is the case that succeeds while
+// assembling the image from the wrong directory. Treating those two as one
+// ambiguity would either break the first or leave the second exactly as it
+// was. Both are still asked.
 func contextFor(dir string, sources []string, r *Repo) (dirContext bool, ambiguous bool, why string) {
 	if dir == "" || len(sources) == 0 {
 		// A Dockerfile at the root is already built from the root. One that
@@ -298,8 +314,23 @@ func contextFor(dir string, sources []string, r *Repo) (dirContext bool, ambiguo
 			dir, beside, dir)
 	case atRoot != "" && beside == "":
 		return false, false, ""
+	case beside != "" && atRoot != "":
+		// Both roots satisfy every source, so a build from either produces an
+		// image. A repository doing this today is building from the root and
+		// working, so the root stays the answer a run with nobody watching
+		// takes, and the question is only put to a person.
+		return false, true, fmt.Sprintf(
+			"%s/Dockerfile copies %s, which exists in %s and at the repository root, so both would build.",
+			dir, beside, dir)
 	}
-	return false, true, fmt.Sprintf("%s/Dockerfile does not name a path that exists in only one of them.", dir)
+	// Nothing resolves anywhere, which in practice means the only instruction
+	// reading the context is COPY . .. That is a different ambiguity from the
+	// one above and it does not get the same answer: there is no evidence for
+	// the root, and building from the root is the case that SUCCEEDS while
+	// producing an image assembled from the wrong directory. So the default
+	// here is what 'docker build <dir>' does, and it is still asked.
+	return true, true, fmt.Sprintf(
+		"%s/Dockerfile copies its whole context and names no path that exists in only one of them.", dir)
 }
 
 // repoHas reports whether the index holds this path, a file under it, or

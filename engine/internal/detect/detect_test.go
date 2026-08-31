@@ -342,6 +342,38 @@ CMD ["npm", "start"]
 	require.Contains(t, asked.Why, "docker build dashboard")
 }
 
+// The other ambiguity, and it does not get the same answer. Here the source
+// resolves in BOTH places, so a build from either produces an image, which
+// means a repository doing this today is building from the root and working.
+// Defaulting to the directory would break it. Defaulting the COPY . . case to
+// the root would leave the quiet wrong-image failure exactly as it was. They
+// are different questions, so they get different defaults, and both are asked.
+func TestRun_WhenBothDirectoriesSatisfyEverySourceTheRootStaysTheDefault(t *testing.T) {
+	t.Parallel()
+	res := run(t, "myrepo", map[string]string{
+		"package.json":           `{"name":"root"}`,
+		"dashboard/package.json": `{"name":"dash","scripts":{"start":"next start"},"dependencies":{"next":"16.0.0"}}`,
+		"dashboard/Dockerfile": `FROM node:22-alpine
+WORKDIR /app
+COPY package.json ./
+EXPOSE 3100
+CMD ["npm", "start"]
+`,
+	})
+	var asked *detect.Question
+	for i := range res.Questions {
+		if res.Questions[i].ID == "service.dash.context" {
+			asked = &res.Questions[i]
+		}
+	}
+	require.NotNil(t, asked, "both would build, so a person should choose")
+	require.Equal(t, ".", asked.Default,
+		"a repository shaped like this builds from the root today and works")
+	require.Equal(t, []string{"dashboard", "."}, asked.Options)
+	require.Empty(t, serviceNamed(t, res.Draft, "dash").Build.Context,
+		"an unattended run keeps today's behaviour")
+}
+
 // The question above lived on the candidate rather than inside build, and the
 // fold moved build across without it, so the question vanished exactly when a
 // Dockerfile was folded into the package that named it. That is the common
