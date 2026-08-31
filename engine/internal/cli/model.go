@@ -36,6 +36,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/auth"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -56,6 +57,14 @@ type ModelShowJSON struct {
 	BaseURL    string `json:"base_url,omitempty"`
 	// Custom reports whether BaseURL is somewhere other than the provider's.
 	Custom bool `json:"custom_endpoint,omitempty"`
+	// Capped reports whether calls go through a control plane, where a monthly
+	// cap is checked before the sealed key is decrypted. False means straight
+	// to the provider with no cap at all, which is worth a field of its own
+	// rather than something a reader has to infer from base_url.
+	Capped bool `json:"capped_by_control_plane"`
+	// UncappedDespiteControlPlane names a control plane this machine is signed
+	// in to whose cap is not in force, because this key goes direct.
+	UncappedDespiteControlPlane string `json:"uncapped_despite_control_plane,omitempty"`
 	// Source names where the key was found, never what it is.
 	Source      string `json:"source,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
@@ -217,20 +226,23 @@ until they disagree, and then the only useful sentence is which one won.`),
 			}
 
 			shadow := shadowedBy(ctx, chain, cfg)
+			uncapped := uncappedControlPlane(e, cfg)
 
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(ModelShowJSON{
-					Configured:  true,
-					Provider:    cfg.Provider.Name,
-					Model:       cfg.Model,
-					BaseURL:     cfg.BaseURL,
-					Custom:      cfg.Custom(),
-					Source:      cfg.Source,
-					Fingerprint: cfg.Fingerprint,
-					VerifiedAt:  verified,
-					Planner:     "model",
-					Shadowing:   shadow,
-					Searched:    searched,
+					Configured:                  true,
+					Provider:                    cfg.Provider.Name,
+					Model:                       cfg.Model,
+					BaseURL:                     cfg.BaseURL,
+					Custom:                      cfg.Custom(),
+					Capped:                      cfg.ThroughControlPlane(),
+					UncappedDespiteControlPlane: uncapped,
+					Source:                      cfg.Source,
+					Fingerprint:                 cfg.Fingerprint,
+					VerifiedAt:                  verified,
+					Planner:                     "model",
+					Shadowing:                   shadow,
+					Searched:                    searched,
 				})
 			}
 
@@ -240,7 +252,10 @@ until they disagree, and then the only useful sentence is which one won.`),
 				{"Model", cfg.Model},
 			}
 			endpoint := cfg.BaseURL
-			if cfg.Custom() {
+			switch {
+			case cfg.ThroughControlPlane():
+				endpoint += "  (your control plane, where the monthly cap applies)"
+			case cfg.Custom():
 				endpoint += "  (a custom endpoint, not " + cfg.Provider.DefaultBaseURL + ")"
 			}
 			rows = append(rows,
@@ -268,6 +283,16 @@ until they disagree, and then the only useful sentence is which one won.`),
 				e.Out.Printf("  %s is also set in %s, which is asked after\n",
 					cfg.Provider.KeyVar, shadow)
 				e.Out.Printf("  %s. Unset the one here to use that one instead.\n", cfg.Source)
+			}
+			if uncapped != "" {
+				e.Out.Println("")
+				e.Out.Printf("  You are signed in to %s, and a key stored\n", uncapped)
+				e.Out.Println("  there with 'af provider' has a monthly cap. This key is not that")
+				e.Out.Println("  one: it goes straight to the provider and no cap applies.")
+				e.Out.Println("")
+				e.Out.Printf("  To use the capped key instead, point %s at\n", cfg.Provider.BaseURLVar)
+				e.Out.Printf("  %s/byok/%s and use an Antifailure token as the key.\n",
+					uncapped, cfg.Provider.Name)
 			}
 			return nil
 		},
@@ -301,6 +326,42 @@ func shadowedBy(ctx context.Context, chain *secrets.Chain, cfg *model.Config) st
 		}
 	}
 	return ""
+}
+
+// uncappedControlPlane names a control plane whose cap this key is bypassing.
+//
+// The failure it exists for is quiet and expensive. Somebody runs 'af provider
+// set anthropic' and 'af provider budget anthropic 50', and believes they have
+// a fifty dollar ceiling. Nothing routes a run through the control plane on its
+// own: reaching the sealed key means pointing the base URL at the gateway by
+// hand, and the documentation for it says so in a code block people skim. So a
+// local key, which is the thing this whole command family makes easy to have,
+// sends every run straight to the provider with no ceiling whatsoever, and the
+// only evidence is a bill at the end of the month.
+//
+// The cap was the entire reason to prefer the hosted arrangement. A cap that
+// silently is not applied is worse than no cap, because the person stopped
+// watching.
+//
+// Local only. It reads the credential this machine already stored, makes no
+// request, and says nothing about whether a provider key exists on that control
+// plane, because finding that out needs a network call and a scope. "You are
+// signed in to somewhere that can cap this and this key is not capped" is both
+// true and enough.
+func uncappedControlPlane(e *Env, cfg *model.Config) string {
+	if cfg.ThroughControlPlane() {
+		return ""
+	}
+	origin := auth.Normalise(controlPlaneFor(e, ""))
+	cred, err := e.CredentialStore().Load(origin)
+	if err != nil || cred.Expired(e.Clock.Now()) {
+		// Not signed in, or signed in with something that has lapsed. Neither
+		// is a state where a cap could have been in force, so there is nothing
+		// to warn about and saying so anyway would be noise on every machine
+		// that has never seen a control plane.
+		return ""
+	}
+	return origin
 }
 
 // ---------------------------------------------------------------------------

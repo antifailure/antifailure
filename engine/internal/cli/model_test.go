@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/engine/internal/auth"
 	"github.com/antifailure/antifailure/engine/internal/cli"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -37,17 +38,135 @@ func runModelCLI(
 	ring secrets.Keyring, stdin string, args ...string,
 ) result {
 	t.Helper()
+	return runModelCLIAs(t, dir, env, ring, nil, stdin, args...)
+}
+
+// runModelCLIAs also substitutes the credential store, for the cases that turn
+// on whether this machine is signed in to a control plane.
+func runModelCLIAs(
+	t *testing.T, dir string, env map[string]string,
+	ring secrets.Keyring, creds *auth.Store, stdin string, args ...string,
+) result {
+	t.Helper()
 	var out, errW bytes.Buffer
 	code := cli.Execute(context.Background(), args, cli.Options{
-		Stdout:  &out,
-		Stderr:  &errW,
-		Stdin:   strings.NewReader(stdin),
-		Getenv:  func(k string) string { return env[k] },
-		Clock:   clock.NewFake(epoch),
-		WorkDir: dir,
-		Keyring: ring,
+		Stdout:      &out,
+		Stderr:      &errW,
+		Stdin:       strings.NewReader(stdin),
+		Getenv:      func(k string) string { return env[k] },
+		Clock:       clock.NewFake(epoch),
+		WorkDir:     dir,
+		Keyring:     ring,
+		Credentials: creds,
 	})
 	return result{code: code, stdout: out.String(), stderr: errW.String()}
+}
+
+// signedInTo returns a credential store holding a live session for an origin.
+func signedInTo(t *testing.T, origin string, scopes ...string) *auth.Store {
+	t.Helper()
+	store := &auth.Store{Ring: newMemoryRing(), Dir: t.TempDir()}
+	require.NoError(t, store.Save(auth.Credential{
+		ControlPlane: auth.Normalise(origin),
+		Token:        "afu_" + strings.Repeat("t", 43),
+		Login:        "somebody",
+		Organization: "antifailure",
+		Scopes:       scopes,
+	}))
+	return store
+}
+
+// The cap somebody set and is not getting.
+//
+// This is the most expensive confusion these two commands can produce together
+// and it is completely silent. 'af provider budget anthropic 50' sets a
+// ceiling on the control plane, nothing routes a run through the control plane
+// on its own, and a local key therefore sends every run straight to the
+// provider with no ceiling at all. The person stopped watching because they
+// set a cap.
+func TestModel_WarnsWhenAControlPlaneCapIsNotInForce(t *testing.T) {
+	t.Parallel()
+	const origin = "https://app.example.test"
+
+	t.Run("a local key while signed in is uncapped, and says so", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"ANTHROPIC_API_KEY":    "sk-local",
+			"AF_CONTROL_PLANE_URL": origin,
+		}
+		creds := signedInTo(t, origin)
+
+		res := runModelCLIAs(t, t.TempDir(), env, newMemoryRing(), creds, "", "model", "show")
+		require.Contains(t, res.stdout, "no cap applies")
+		require.Contains(t, res.stdout, origin)
+		require.Contains(t, res.stdout, "ANTHROPIC_BASE_URL")
+
+		js := runModelCLIAs(t, t.TempDir(), env, newMemoryRing(), creds, "",
+			"model", "show", "-o", "json")
+		var got cli.ModelShowJSON
+		require.NoError(t, json.Unmarshal([]byte(js.stdout), &got))
+		require.False(t, got.Capped)
+		require.Equal(t, origin, got.UncappedDespiteControlPlane)
+
+		doc := runModelCLIAs(t, t.TempDir(), env, newMemoryRing(), creds, "",
+			"doctor", "-o", "json")
+		var report cli.DoctorReport
+		require.NoError(t, json.Unmarshal([]byte(doc.stdout), &report))
+		check := findCheck(t, report, "Model key")
+		require.Equal(t, cli.CheckWarn, check.Status)
+		require.Contains(t, check.Detail, "not capped")
+		require.Contains(t, check.Remediation, "af provider budget")
+	})
+
+	t.Run("routed through the control plane, the cap is in force", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"ANTHROPIC_API_KEY":    "afu_a_token_not_a_provider_key",
+			"ANTHROPIC_BASE_URL":   origin + "/byok/anthropic",
+			"AF_CONTROL_PLANE_URL": origin,
+		}
+		creds := signedInTo(t, origin)
+
+		res := runModelCLIAs(t, t.TempDir(), env, newMemoryRing(), creds, "", "model", "show")
+		require.Contains(t, res.stdout, "the monthly cap applies")
+		require.NotContains(t, res.stdout, "no cap applies")
+		// Not described as an anonymous custom endpoint, which is what it was
+		// before and which says nothing about the thing that matters.
+		require.NotContains(t, res.stdout, "a custom endpoint")
+
+		js := runModelCLIAs(t, t.TempDir(), env, newMemoryRing(), creds, "",
+			"model", "show", "-o", "json")
+		var got cli.ModelShowJSON
+		require.NoError(t, json.Unmarshal([]byte(js.stdout), &got))
+		require.True(t, got.Capped)
+		require.Empty(t, got.UncappedDespiteControlPlane)
+	})
+
+	t.Run("not signed in anywhere says nothing", func(t *testing.T) {
+		t.Parallel()
+		// The overwhelmingly common case, and a warning here would be noise on
+		// every machine that has never seen a control plane.
+		res := runModelCLIAs(t, t.TempDir(),
+			map[string]string{"ANTHROPIC_API_KEY": "sk-local"},
+			newMemoryRing(), &auth.Store{Ring: newMemoryRing(), Dir: t.TempDir()},
+			"", "model", "show")
+		require.NotContains(t, res.stdout, "no cap applies")
+		require.NotContains(t, res.stdout, "control plane")
+	})
+
+	t.Run("a self-hosted control plane on its own domain is recognised", func(t *testing.T) {
+		t.Parallel()
+		// Matched on the /byok/ path rather than a host list, because a
+		// self-hosted control plane is on the operator's own domain and a host
+		// list would be wrong for exactly the people asked to self-host.
+		const mine = "https://antifailure.internal.example"
+		res := runModelCLIAs(t, t.TempDir(), map[string]string{
+			"ANTHROPIC_API_KEY":    "afu_token",
+			"ANTHROPIC_BASE_URL":   mine + "/byok/anthropic",
+			"AF_CONTROL_PLANE_URL": mine,
+		}, newMemoryRing(), signedInTo(t, mine), "", "model", "show")
+		require.Contains(t, res.stdout, "the monthly cap applies")
+	})
 }
 
 // Running with no key is a supported mode and the command has to say so. A

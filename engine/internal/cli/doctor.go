@@ -524,10 +524,27 @@ func checkModelKey(ctx context.Context, env *Env, _ Prober) CheckResult {
 	}
 
 	detail := fmt.Sprintf("%s/%s from %s", cfg.Provider.Name, cfg.Model, cfg.Source)
-	if cfg.Custom() {
+	switch {
+	case cfg.ThroughControlPlane():
+		detail += ", through your control plane"
+	case cfg.Custom():
 		detail += ", at " + cfg.BaseURL
 	}
 	r.Detail = detail
+
+	// Said before anything about verification, because it is the more expensive
+	// mistake of the two. A key that is never tested costs a run; a cap somebody
+	// believes in and that is not applied costs whatever the month costs.
+	if origin := uncappedControlPlane(env, cfg); origin != "" {
+		r.Status = CheckWarn
+		r.Detail = detail + ", not capped"
+		r.Remediation = fmt.Sprintf(
+			"This key goes straight to the provider, so a monthly cap set with "+
+				"'af provider budget' on %s is not in force. Run 'af model show' for how to "+
+				"route through the control plane instead, or keep this key and know there is "+
+				"no ceiling on it.", origin)
+		return r
+	}
 
 	if rec := model.ReadRecord(env.WorkDir, cfg.Fingerprint); rec != nil {
 		r.Status = CheckPass

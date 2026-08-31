@@ -143,6 +143,23 @@ func (c Config) Custom() bool {
 	return strings.TrimRight(c.BaseURL, "/") != c.Provider.DefaultBaseURL
 }
 
+// ThroughControlPlane reports whether the endpoint is a control plane's gateway.
+//
+// Worth telling apart from any other custom endpoint, because it is the one
+// that changes what the key means. Through the gateway the key in hand is an
+// Antifailure token, the provider key is the sealed one on the control plane,
+// and a monthly cap is checked before it is decrypted. Straight to the provider
+// there is no cap at all, and somebody who set one is entitled to be told which
+// of the two they are actually running.
+//
+// Matched on the path the control plane serves, which is /byok/<provider>, and
+// not on the host: a self-hosted control plane is on the operator's own domain
+// and a hosted one is not, so a host list would be wrong for exactly the people
+// this product asks to self-host.
+func (c Config) ThroughControlPlane() bool {
+	return strings.HasSuffix(strings.TrimRight(c.BaseURL, "/"), "/byok/"+c.Provider.Name)
+}
+
 // Resolve finds a key for the first provider that has one.
 //
 // Nothing found is not an error. It is the normal case for somebody who has not
@@ -270,13 +287,24 @@ func Remove(
 ) ([]string, error) {
 	var removed []string
 	if ring != nil {
-		// Asked before it is deleted, rather than reading the answer out of
-		// Delete. Every implementation here treats deleting something that is
-		// not there as success, because the caller wanted it gone, so Delete
-		// returning nil is not evidence that anything was removed. Reporting a
-		// removal that did not happen is worse than saying nothing: it is read
-		// as "the leaked key is out of the keyring" by somebody whose keyring
-		// never had it and whose shell still does.
+		// DO NOT collapse this into a bare Delete. It reads like two calls
+		// where one would do, and the one would be wrong.
+		//
+		// Every keyring implementation here returns nil for deleting an entry
+		// that is not there, deliberately, because the caller wanted it gone:
+		// macOS maps the keychain's "item not found" to success in
+		// keyring_darwin.go, and the others match it. So Delete returning nil
+		// is not evidence that anything was removed.
+		//
+		// What that cost, before this read: somebody rotating a leaked key ran
+		// 'af model rm anthropic' and was told "Removed the anthropic key from
+		// the system keyring" by a keyring that had never held it. The sentence
+		// was false, it was the sentence they were relying on, and they stopped
+		// there. The key was still wherever it actually was, still live at the
+		// provider, and the one person who was going to deal with it had been
+		// told it was handled.
+		//
+		// A removal command may only report a removal it can show happened.
 		_, err := ring.Get(secrets.DefaultKeyringService, p.KeyVar)
 		switch {
 		case err == nil:

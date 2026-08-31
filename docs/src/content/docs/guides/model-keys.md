@@ -37,6 +37,33 @@ build machine is spent by that machine and you find out afterwards, if at all.
 If you do not, this page is the whole story and nothing here is a lesser
 version of it.
 
+### Having both is the one combination to watch
+
+Nothing routes a run through your control plane on its own. Reaching the sealed
+key means pointing the base URL at the gateway yourself:
+
+```sh
+export ANTHROPIC_BASE_URL=https://your-control-plane/byok/anthropic
+export ANTHROPIC_API_KEY=<your Antifailure token>
+```
+
+So a local key and a capped key on a control plane can both exist, and **the
+local one wins**, because it is the one the runner reaches without being told
+anything. That is the right precedence: the base URL is an explicit instruction
+and a stored key is a default. It is also the more expensive way round to be
+wrong, since somebody who ran `af provider budget anthropic 50` has a ceiling
+they believe in and are not getting.
+
+`af model show` and `af doctor` say so rather than leaving you to notice:
+
+```
+warn  Model key    anthropic/claude-sonnet-5 from the system keyring, not capped
+```
+
+They check only whether this machine is signed in to a control plane, which is
+a local read and not a request, so the warning appears whenever a cap could
+have been in force and never on a machine that has no control plane at all.
+
 ## With no key at all
 
 Runs work. This is worth saying plainly because it is the thing people assume
@@ -209,7 +236,13 @@ answer is `af model test --timeout 5m`.
 
 `af model show` and `af doctor` both name a custom endpoint explicitly, so a
 run that is quietly going somewhere unexpected is visible rather than something
-you have to remember.
+you have to remember. A control plane gateway is named as that rather than as
+an anonymous custom endpoint, because it is the one destination that changes
+what the key means:
+
+```
+Endpoint       https://your-control-plane/byok/anthropic  (your control plane, where the monthly cap applies)
+```
 
 ## Egress policy does not switch the model off
 
