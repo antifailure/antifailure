@@ -304,7 +304,7 @@ const (
 	// {kind} {name} was not created by this runtime, so it was not
 	// removed.
 	AFRUN045 Code = "AF-RUN-045"
-	// {variable} is set to {value}, which is not a port number.
+	// AF_PORT_RANGE_START is set to {value}, which is not a port number.
 	AFRUN046 Code = "AF-RUN-046"
 
 	// Scheduling
@@ -1370,8 +1370,8 @@ var catalog = map[Code]Entry{
 	AFRUN046: {
 		Code:      AFRUN046,
 		Area:      "RUN",
-		Message:   "{variable} is set to {value}, which is not a port number.",
-		NextStep:  "Set {variable} to a number in {limit}, or unset it to use the default range.",
+		Message:   "AF_PORT_RANGE_START is set to {value}, which is not a port number.",
+		NextStep:  "Set it to the first port of a free range, between {limit}, or unset it to use the default.",
 		Docs:      "guides/local-runtime",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

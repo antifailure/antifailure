@@ -216,9 +216,11 @@ func ingressName(envID, service string) string {
 // rather than being retried into a longer wait for the same answer.
 //
 // A retry moves the address, and the containers already created were told the
-// old one in AF_PUBLIC_URL and AF_ENV_URL. Those go stale, which is worth it
-// against the alternative of the whole environment failing, and is why the
-// reservation happens as late as it usefully can rather than later.
+// old one in AF_PUBLIC_URL and AF_ENV_URL, so those two go stale. That is worth
+// it against the whole environment failing, and it is as far as the staleness
+// reaches: the address `af up` prints comes from this function's answer and the
+// one `af status` prints is read back off the forwarder itself, so only a
+// variable baked into a container at creation can name the port that was lost.
 func (r *Runtime) startIngress(
 	ctx context.Context,
 	spec provider.EnvSpec,

@@ -1104,9 +1104,9 @@ This runtime cannot do that: {detail}
 
 ### AF-RUN-046
 
-{variable} is set to {value}, which is not a port number.
+AF_PORT_RANGE_START is set to {value}, which is not a port number.
 
-**What to do.** Set {variable} to a number in {limit}, or unset it to use the default range.
+**What to do.** Set it to the first port of a free range, between {limit}, or unset it to use the default.
 
 | | |
 | --- | --- |

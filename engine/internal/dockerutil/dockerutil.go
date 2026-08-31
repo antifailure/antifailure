@@ -287,9 +287,8 @@ func PortRangeFrom(getenv func(string) string) (int, error) {
 	// the offset the local runtime adds, so a value that parses cannot hand
 	// out a number that is not a port.
 	if err != nil || n < 1024 || n > maxPort-6000 {
-		return 0, aferrors.Coded(aferrors.AFRUN046,
-			"variable", PortRangeStartVar, "value", raw,
-			"limit", fmt.Sprintf("1024-%d", maxPort-6000))
+		return 0, aferrors.Coded(aferrors.AFRUN046, "value", raw,
+			"limit", fmt.Sprintf("1024 and %d", maxPort-6000))
 	}
 	return n, nil
 }

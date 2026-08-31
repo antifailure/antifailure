@@ -457,8 +457,8 @@ errors:
     exit_code: 3
   - code: AF-RUN-046
     area: RUN
-    message: "{variable} is set to {value}, which is not a port number."
-    next_step: "Set {variable} to a number in {limit}, or unset it to use the default range."
+    message: "AF_PORT_RANGE_START is set to {value}, which is not a port number."
+    next_step: "Set it to the first port of a free range, between {limit}, or unset it to use the default."
     docs: guides/local-runtime
     retryable: false
     exit_code: 3
