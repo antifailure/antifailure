@@ -241,13 +241,27 @@ jobs:
       - name: Keep the record
         # A dispatched run leaves no pull request comment, so without this it
         # produces nothing a person can read. The environment itself reaches
-        # the console over /v1/events; this is for the run.
+        # the console over /v1/events; this is the local stream, for the run.
+        #
+        # `.antifailure/logs`, and the path is worth stating rather than
+        # copying. dogfood.yml uploads `.antifailure/events`, which is where
+        # the log lived before `attachEventLog` was removed, and telemetry's
+        # FileSink has written to `logs` since. STATUS.md records that same
+        # wrong path being fixed inside tools/dogfood, where it had silently
+        # killed every check downstream of the stream; the copy in the workflow
+        # was not fixed with it, and `if-no-files-found: warn` is why nobody
+        # noticed a record that recorded nothing.
+        #
+        # No report.md here. `af ci --output report.md` writes that file and
+        # none of the three commands this workflow runs is `af ci`, so naming
+        # it would be a path that can never match pretending to be an artifact.
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: antifailure-${{ inputs.command }}-${{ github.run_id }}
-          path: |
-            report.md
-            .antifailure/events
+          path: .antifailure/logs
           retention-days: 14
+          # warn rather than error. A run that failed before it opened the log
+          # has nothing to upload and is already failing for its own reason,
+          # and turning that into a second red step buries the first.
           if-no-files-found: warn
