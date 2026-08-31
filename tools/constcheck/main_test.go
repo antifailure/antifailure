@@ -333,6 +333,14 @@ func TestRunReportsWhatItExamined(t *testing.T) {
 		"closed sets read from Go source",
 		"sentences stating a count considered",
 		"reference tables checked row for row",
+		// Silence is not coverage. Nineteen oracle kinds that nothing
+		// enumerates is a fine reason not to check them, and it has to be
+		// visible as a decision rather than absent as an oversight.
+		"deliberately not checked",
+		"already gated elsewhere",
+		// The anti-vacuum property, stated where a reader of the output sees
+		// it rather than only in a comment they would have to go and find.
+		"fails this command rather than being skipped",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("output does not say %q:\n%s", want, got)
@@ -343,5 +351,8 @@ func TestRunReportsWhatItExamined(t *testing.T) {
 	}
 	if m := regexp.MustCompile(`(\d+) reference tables checked`).FindStringSubmatch(got); m == nil || m[1] == "0" {
 		t.Fatalf("no reference tables were checked at all:\n%s", got)
+	}
+	if len(unchecked) == 0 {
+		t.Fatal("the deliberately unchecked list is empty, so the output claims a decision it no longer records")
 	}
 }

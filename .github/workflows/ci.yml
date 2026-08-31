@@ -783,6 +783,19 @@ jobs:
         # site and every documentation gate was green.
         run: go run ./tools/manifestcheck .
 
+      - name: A count of a closed set is its real size
+        # None of the gates above knows how many of anything there are. The
+        # schema, the error catalogue, the transform registry and the command
+        # tree each have one because each is declared in a machine readable
+        # file. The sets declared as Go constants had none, and that is where
+        # the worst instance was living: seventeen DDL lint rules, every one of
+        # which becomes a pull request finding, described in eight places as
+        # six. Fourteen wrong counts and not one overstatement, which is the
+        # signature of a sentence written accurately at one version and never
+        # revisited. It stays invisible because an understatement produces a
+        # happy user who never learns the feature exists.
+        run: go run ./tools/constcheck .
+
       - name: The prose reads like a person wrote it
         # The build plan asks for vale with "a custom rule that flags em dashes
         # and double hyphens in prose". This is that rule. Em dashes are the

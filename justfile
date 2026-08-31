@@ -67,6 +67,7 @@ gate: _reports
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
     run "documented manifests are valid" just manifestcheck
+    run "closed sets are counted right"  just constcheck
     run "prose reads like a person"      just prosecheck
     run "every figure has a source"      just figurecheck
     run "no forbidden tokens in docs"    just forbidden
@@ -631,6 +632,18 @@ docscheck:
 # environment.
 manifestcheck:
     go run ./tools/manifestcheck .
+
+# A count of a closed set that lives only in Go constants must be its real
+# size.
+#
+# The schema, the error catalogue, the transform registry and the command tree
+# all have a gate because each is declared in a machine readable file. The Go
+# constants had none, and that is where the worst instance was: seventeen DDL
+# lint rules described in eight places as six. Fourteen wrong counts, every one
+# of them an understatement, which is what documentation written accurately at
+# one version and never revisited looks like.
+constcheck:
+    go run ./tools/constcheck .
 
 # This justfile runs what CI runs.
 gatecheck:

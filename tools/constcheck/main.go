@@ -209,6 +209,29 @@ var sets = []decl{
 	},
 }
 
+// unchecked are closed sets declared only in Go that this tool deliberately
+// does not check, each with the reason.
+//
+// It is printed on every run because silence is not coverage, and the next
+// person to read this output should not have to work out whether nineteen
+// oracle kinds are checked and clean or simply absent. An unchecked set is a
+// decision, and a decision has to be visible to be revisited.
+var unchecked = []struct{ name, why string }{
+	{"oracle difference kinds (19)",
+		"no page counts or enumerates them, so there is no claim to check"},
+	{"change checks (7)",
+		`"checks" also names af doctor's ten and the three the manifest configures`},
+	{"rolling verdicts (5)",
+		`"verdicts" also names the run verdicts, a different set of a different size`},
+	{"journal states, change statuses, doctor statuses, policy levels (3 to 4 each)",
+		"no prose counts them, and their nouns are among the most reused words in the tree"},
+}
+
+// covered are the closed sets that already have a gate, named here so that
+// their absence from the list above does not read as a gap.
+var covered = "error codes (errcheck), event types and masking transforms and the " +
+	"command tree (generated, `just generated` diffs them), manifest enums (modecheck)"
+
 type finding struct {
 	file, why string
 	line      int
@@ -301,7 +324,11 @@ func run(root string, out io.Writer) error {
 	// What was examined, not only what was wrong. A check that has stopped
 	// reaching its subject reports zero findings and exits green, which is
 	// indistinguishable from a clean tree unless it says what it read.
-	report("\nconstcheck: %d closed sets read from Go source\n", len(sets))
+	report("\nconstcheck: %d closed sets read from Go source. Sizes come from the\n"+
+		"  source on every run and are never written down here, and a set that\n"+
+		"  cannot be located fails this command rather than being skipped, so a\n"+
+		"  renamed type breaks the gate loudly instead of quietly emptying it.\n",
+		len(sets))
 	for _, s := range sets {
 		report("  %-28s %2d  %s %s\n", s.name, len(members[s.name]), s.file, s.symbol)
 	}
@@ -309,6 +336,11 @@ func run(root string, out io.Writer) error {
 		len(files), sentencesRead)
 	report("constcheck: %d reference tables checked row for row\n", tablesRead)
 	report("constcheck: %d miscounted claims\n", len(found))
+	report("constcheck: deliberately not checked, so that silence is not read as coverage:\n")
+	for _, u := range unchecked {
+		report("  %s\n      %s\n", u.name, u.why)
+	}
+	report("  already gated elsewhere: %s\n", covered)
 
 	if len(found) > 0 {
 		return fmt.Errorf("%d places state a count for a closed set that is not its real size", len(found))
