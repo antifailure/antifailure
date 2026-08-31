@@ -170,21 +170,30 @@ git diff --name-only v0.1.1..v0.1.2 -- web/packages/db/migrations
 
 ### This is the first time production will deploy itself
 
-Every production `cd` run so far has been skipped, and the live production
-revision was not put there by this workflow. So the first tag exercises the
-`production` job from the top, and these are the parts with no prior run behind
-them:
+Every production `cd` run so far has been skipped. The script inside it has run
+against production once, by hand: `afcpprod-app` carries a revision named
+`afcpprod-app--cf66d6af2-164545`, which is `deploy.sh`'s own naming, and
+`afcpprod-bootstrap` has exactly one execution, `Succeeded`, a minute before it.
+So the script is not the untested part. The job around it is.
+
+What has no prior run behind it:
 
 * `azure/login` under the `production` environment needs a federated credential
   for `repo:antifailure/antifailure:environment:production`. Staging's proves
-  the pattern and not this subject.
-* `afcpprod-bootstrap` gets its image updated and started for the first time by
-  a workflow. Its own configuration, and whether it can reach the database, is
-  what the first execution answers.
-* `deploy.sh` reads the currently serving revision before it changes anything.
-  Production is in `Multiple` revision mode, so there is a revision to go back
-  to. On an app that had never served, there would not be, and the script says
-  so plainly rather than pretending a rollback happened.
+  the pattern and not this subject. This is the step to read first if the job
+  fails early with nothing else to go on.
+* `tools/azguard` against `af-cp-prod-centralus`. It is offline and fails
+  closed, and it has only ever been pointed at staging's group.
+* The approval itself.
+
+Two things that are fine and are worth knowing anyway. The app is in `Multiple`
+revision mode with one revision at 100 percent, so there is a revision to roll
+back onto; the case where there is not is the one `deploy.sh` reports plainly
+rather than pretending a rollback happened. And production is at migration
+`0017`, so a tag from here applies `0018` and `0019`, both of which are
+additive: `0018` adds three nullable columns to `network_rules` and backfills
+`approved_at` from `created_at` so no live egress rule stops enforcing, and
+`0019` creates `runtimes` with row level security enabled and forced.
 
 ## After it is green
 
@@ -222,6 +231,7 @@ curl -sS https://app.antifailure.dev/readyz
 | `sbomcheck` reports a low package count | The bill of materials describes the directory rather than the binaries | Nothing published. Read the unpack stage above it: it printed the binaries it found |
 | The tampered file was accepted | cosign is not rejecting a file that does not match its signature | Nothing published, and this is the loudest thing in the pipeline. Do not retry it |
 | `MIGRATION FAILED` | The bootstrap job returned Failed or Degraded | No traffic moved. Read the job's logs before retrying. A partly applied schema is not something the script papers over |
+| `MIGRATION DID NOT FINISH within the budget` | The job was still running after five minutes | No traffic moved, and the job itself is not dead: its `replicaTimeout` is ten minutes, twice the script's poll. Let it finish, confirm the execution succeeded, then re run the deploy, which will find the schema already up to date |
 | `NEW REVISION FAILED TO START` | The revision never reached Running | Traffic never moved. The new revision is deactivated |
 | `healthy but wrong build` | The origin answers, on the previous commit | The rollout did not happen. This is the check that exists to catch exactly that, and it is doing its job |
 | `ROLLED BACK` | The deploy failed and the damage was contained | The previous revision is serving again. The job still fails, which is correct: a successful rollback is not a successful deploy |
