@@ -22,7 +22,15 @@ export function Hairline({ className, vertical }: { className?: string; vertical
     <span
       className={cn(
         "pointer-events-none bg-black/12",
-        vertical ? "w-px self-stretch" : "h-px w-full",
+        // A span is inline by default, and an inline box takes neither h-px nor
+        // w-full, so a horizontal Hairline whose parent is not a flex container
+        // painted nothing at all and swallowed its own margin with it. Three
+        // call sites in Firewall.tsx had already passed className="block" to
+        // work around it one at a time. The last one that had not is
+        // Architecture.tsx, where the rule between the isolation minimums that
+        // are in force and the ones that are only designed simply was not
+        // there, and the two lists ran together.
+        vertical ? "w-px self-stretch" : "block h-px w-full",
         className,
       )}
       aria-hidden
@@ -30,15 +38,55 @@ export function Hairline({ className, vertical }: { className?: string; vertical
   );
 }
 
+/**
+ * The 10px mono label, in the three jobs it actually does.
+ *
+ * The default grey draws. It is the type inside a mock terminal, a fake log
+ * line, a simulated report frame: there the grey depicts a screen rather than
+ * addressing a reader, and darkening it flattens the drawing into something
+ * that reads as real interface chrome. So the default stays where it was, at
+ * black/45, whatever a contrast script says about it.
+ *
+ * `tone="reader"` addresses. A kicker over a paragraph, a caption naming what
+ * a panel is, a comparison column heading, the annotation a diagram turns on:
+ * that text is read, not looked at, so it takes black/60. Composited against
+ * every surface a MonoLabel sits on, black/60 is 5.74:1 on white, 5.62:1 on
+ * the page ground #f7f7f5, 5.61:1 on a Panel #f4f7f5 and 5.49:1 on the sage
+ * band #E4F1EB. black/45 is 3.27:1 to 3.35:1 on the same four, under the
+ * 4.5:1 floor.
+ *
+ * `tone="ok"` marks the side of a diagram that came out right, in the same
+ * green as a passing StatusPill.
+ *
+ * The reason this is a prop rather than a className at each call site is not
+ * tidiness. `cn` here is a plain join, not tailwind-merge, so an override does
+ * not replace the default: both classes land on the element and the cascade
+ * picks. Tailwind emits text-black/N in ascending opacity at equal
+ * specificity, so a darker override wins and a lighter one loses in silence,
+ * and an arbitrary colour like text-[#285D49] is emitted before every
+ * text-black/N and loses to all of them. Six overrides on this component were
+ * inert for exactly that reason. A prop selecting between mutually exclusive
+ * strings cannot lose that race, because only one string is ever emitted.
+ */
 export function MonoLabel({
   children,
   className,
+  tone = "art",
 }: {
   children: ReactNode;
   className?: string;
+  tone?: "art" | "reader" | "ok";
 }) {
   return (
-    <span className={cn("font-mono text-[10px] tracking-extra-tight text-black/45", className)}>
+    <span
+      className={cn(
+        "font-mono text-[10px] tracking-extra-tight",
+        tone === "reader" && "text-black/60",
+        tone === "ok" && "text-[#285D49]",
+        tone === "art" && "text-black/45",
+        className,
+      )}
+    >
       {children}
     </span>
   );

@@ -371,7 +371,7 @@ export function ReportPage() {
           baseline, and the report says "no baseline" rather than inventing one.
         </p>
         <div className="mt-12 max-w-[720px] border-t border-black/10 pt-8">
-          <MonoLabel className="uppercase tracking-[0.14em] text-black/60">How close the twin got</MonoLabel>
+          <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">How close the twin got</MonoLabel>
           <p className="mt-5 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
             The report carries an inventory of what this environment reproduced and what it did
             not, dimension by dimension: services, data, third-party hosts, personas, runtime and
@@ -394,7 +394,7 @@ export function ReportPage() {
         </div>
 
         <div className="mt-12 max-w-[720px] border-t border-black/10 pt-8">
-          <MonoLabel className="uppercase tracking-[0.14em]">Thresholds that exist</MonoLabel>
+          <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">Thresholds that exist</MonoLabel>
           <ul className="mt-5 space-y-3 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
             <li>
               <span className="font-mono text-[14px] text-black">p95_increase</span>, default 0.25.

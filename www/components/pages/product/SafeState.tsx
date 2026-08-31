@@ -90,7 +90,7 @@ function MaskingPanel() {
         <MonoLabel className="uppercase">public.users</MonoLabel>
         <div className="flex items-center gap-2">
           <MonoLabel className="uppercase">before → after</MonoLabel>
-          <MonoLabel className="uppercase text-[#285D49]">unique</MonoLabel>
+          <MonoLabel tone="ok" className="uppercase">unique</MonoLabel>
         </div>
       </div>
       <Hairline />
@@ -127,7 +127,7 @@ function MaskingPanel() {
         <Hairline vertical className="max-xl:hidden" />
         <div className="min-w-0 flex-1 shadow-[inset_2px_0_0_#33bf00] max-xl:shadow-[inset_0_2px_0_#33bf00]">
           <div className="flex items-center justify-between px-4 py-2">
-            <MonoLabel className="uppercase text-[#285D49]">twin</MonoLabel>
+            <MonoLabel tone="ok" className="uppercase">twin</MonoLabel>
             <MonoLabel className="uppercase">sanitized</MonoLabel>
           </div>
           <Hairline />
@@ -240,7 +240,7 @@ function SubsetPanel() {
     <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between gap-3 px-4 py-2.5">
         <MonoLabel className="uppercase">referential subset</MonoLabel>
-        <MonoLabel className="uppercase text-[#285D49]">12% · joins valid</MonoLabel>
+        <MonoLabel tone="ok" className="uppercase">12% · joins valid</MonoLabel>
       </div>
       <Hairline />
       <div className="px-4 pt-3 pb-1">

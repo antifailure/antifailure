@@ -189,8 +189,8 @@ export function OverviewPage() {
           visual={
             <Panel className="rounded-[12px] bg-white">
               <div className="flex items-center justify-between gap-3 px-5 py-3">
-                <MonoLabel className="text-black/55">What teams assemble today</MonoLabel>
-                <MonoLabel>no single decision</MonoLabel>
+                <MonoLabel tone="reader">What teams assemble today</MonoLabel>
+                <MonoLabel tone="reader">no single decision</MonoLabel>
               </div>
               <Hairline />
               <div className="flex flex-wrap gap-2 px-5 py-4">
@@ -207,7 +207,7 @@ export function OverviewPage() {
               <div className="grid grid-cols-2 max-xl:grid-cols-1">
                 <div className="border-r border-black/8 px-5 py-5 max-xl:border-r-0 max-xl:border-b max-xl:border-black/8">
                   <div className="flex items-center justify-between gap-2">
-                    <MonoLabel>Shared staging</MonoLabel>
+                    <MonoLabel tone="reader">Shared staging</MonoLabel>
                     <span className="border border-black/[0.08] px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight text-black/35">
                       drifted
                     </span>
@@ -224,7 +224,7 @@ export function OverviewPage() {
                 </div>
                 <div className="px-5 py-5">
                   <div className="flex items-center justify-between gap-2">
-                    <MonoLabel className="text-black/55">Disposable twin</MonoLabel>
+                    <MonoLabel tone="reader">Disposable twin</MonoLabel>
                     <StatusPill tone="FAIL">FAIL</StatusPill>
                   </div>
                   <ul className="mt-4 space-y-2.5">
@@ -271,7 +271,7 @@ export function OverviewPage() {
         <div className="mt-8 grid grid-cols-2 gap-5 max-xl:grid-cols-1">
           <Panel className="rounded-[12px] bg-white">
             <div className="flex items-center justify-between gap-3 px-5 py-3">
-              <MonoLabel className="text-black/55">af insights · migration rehearsal</MonoLabel>
+              <MonoLabel tone="reader">af insights · migration rehearsal</MonoLabel>
               <StatusPill tone="FAIL">FAIL</StatusPill>
             </div>
             <Hairline />
@@ -314,7 +314,7 @@ export function OverviewPage() {
         </div>
 
         <div className="mt-16">
-          <MonoLabel className="text-black/55">How a run decides</MonoLabel>
+          <MonoLabel tone="reader">How a run decides</MonoLabel>
           <div className="mt-8">
             <Steps
               items={[
@@ -346,7 +346,7 @@ export function OverviewPage() {
           <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-xl:hidden" />
         </ul>
         <div className="mt-16 max-w-[640px] border-t border-black/10 pt-8">
-          <MonoLabel>What we will not claim</MonoLabel>
+          <MonoLabel tone="reader">What we will not claim</MonoLabel>
           <p className="mt-3 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
             Zero rollback. No deployment can ever fail. Thousands of AI agents behave exactly like
             humans. One click perfectly clones every cloud. Where a run could not measure something,
