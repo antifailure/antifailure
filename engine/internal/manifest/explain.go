@@ -166,6 +166,18 @@ func Explain(m *schema.Manifest) string {
 	fmt.Fprintf(&b, "  regression   %s, above %.1fx and %.0f ms\n",
 		enabledWord(deref(m.Insights.QueryRegression)), m.Insights.RegressionFactor, m.Insights.RegressionMinMS)
 	fmt.Fprintf(&b, "  plan diff    %s\n", enabledWord(deref(m.Insights.PlanDiff)))
+	if r := m.Insights.RollingCompatibility; r != nil {
+		fmt.Fprintf(&b, "  rolling      %s, against %s\n", r.When, r.Against)
+	}
+	b.WriteString("\n")
+
+	// Only the keys that stop a merge, and the lock thresholds. The full
+	// block is ten lines of "warn" and this section exists so that somebody
+	// can see what will block them without reading the schema.
+	b.WriteString("Policy\n")
+	fmt.Fprintf(&b, "  locks        warn at %.0f ms, fail at %.0f ms\n",
+		m.Policy.MigrationLock.WarnMS, m.Policy.MigrationLock.FailMS)
+	fmt.Fprintf(&b, "  fails on     %s\n", failingPolicies(m.Policy))
 	b.WriteString("\n")
 
 	b.WriteString("Runtime\n")
@@ -179,6 +191,39 @@ func Explain(m *schema.Manifest) string {
 	fmt.Fprintf(&b, "  comment      %s\n", enabledWord(deref(m.GitHub.Comment)))
 	fmt.Fprintf(&b, "  forks        %s\n", forkWord(m.GitHub.ForkPolicy))
 	fmt.Fprintf(&b, "  teardown on  %s\n", strings.Join(m.GitHub.TeardownOn, ", "))
+
+	// Printed only when the block is there, because the oracle is the one
+	// subsystem that does not run unless a manifest asks for it. A section
+	// saying "off" on every manifest in the world would be noise in the one
+	// command whose job is to show what is actually in force.
+	if o := m.Oracle; o != nil {
+		b.WriteString("\nOracle\n")
+		fmt.Fprintf(&b, "  comparison   %s\n", enabledWord(deref(o.Enabled)))
+		fmt.Fprintf(&b, "  baseline     %s\n", baselineWord(o))
+		fmt.Fprintf(&b, "  fails on     %s\n", o.FailOn)
+		fmt.Fprintf(&b, "  requests     %d %s\n", len(o.Probes), plural("probe", len(o.Probes)))
+		for _, p := range o.Probes {
+			fmt.Fprintf(&b, "    %-20s %s %s\n", p.Name, p.Method, p.Path)
+		}
+		fmt.Fprintf(&b, "  database     %s, up to %d rows a table\n",
+			enabledWord(deref(o.Database.Enabled)), o.Database.MaxRows)
+		fmt.Fprintf(&b, "  timestamps   %s\n", normalisedWord(o.CompareTimestamps))
+		fmt.Fprintf(&b, "  identifiers  %s\n", normalisedWord(o.CompareUUIDs))
+		if len(o.Ignore.Headers) > 0 {
+			fmt.Fprintf(&b, "  also ignores %s\n", strings.Join(o.Ignore.Headers, ", "))
+		}
+		if len(o.Ignore.Fields) > 0 {
+			fmt.Fprintf(&b, "  ignores      %s\n", strings.Join(o.Ignore.Fields, ", "))
+		}
+	}
+
+	if m.Explore != nil && m.Explore.Enabled && len(m.Explore.Goals) > 0 {
+		b.WriteString("\nExplore\n")
+		for _, g := range m.Explore.Goals {
+			fmt.Fprintf(&b, "  %-24s as %-14s seed %s, up to %d steps\n",
+				g.Name, g.Persona, g.Seed, g.Budget.Steps)
+		}
+	}
 
 	if m.Load.Enabled {
 		b.WriteString("\nLoad\n")
@@ -270,4 +315,56 @@ func Hosts(m *schema.Manifest) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// baselineWord says which revision the oracle compares against, in words.
+func baselineWord(o *schema.Oracle) string {
+	ref := o.BaseRef
+	if ref == "" {
+		ref = "origin/HEAD, or main, or master"
+	}
+	if o.Baseline == schema.BaselineRef {
+		return "the ref " + ref
+	}
+	return "the merge base with " + ref
+}
+
+// normalisedWord reports whether a class of value is compared or absorbed.
+func normalisedWord(compared bool) string {
+	if compared {
+		return "compared exactly"
+	}
+	return "two well formed values are equal"
+}
+
+// failingPolicies names every class of finding that stops a merge.
+//
+// Named rather than counted, because "3 policies" tells a reader nothing and
+// the whole point of the block is that the answer to "why did this fail" is a
+// key they can go and read.
+func failingPolicies(p *schema.Policy) string {
+	pairs := []struct {
+		name  string
+		level schema.PolicyLevel
+	}{
+		{"migration_failed", p.MigrationFailed},
+		{"migration_rewrite", p.MigrationRewrite},
+		{"migration_lint", p.MigrationLint},
+		{"plan_regression", p.PlanRegression},
+		{"query_regression", p.QueryRegression},
+		{"load_regression", p.LoadRegression},
+		{"egress_surprise", p.EgressSurprise},
+		{"masking", p.Masking},
+		{"cleanup", p.Cleanup},
+	}
+	var names []string
+	for _, pair := range pairs {
+		if pair.level == schema.PolicyFail {
+			names = append(names, pair.name)
+		}
+	}
+	if len(names) == 0 {
+		return "nothing; every finding is a warning"
+	}
+	return strings.Join(names, ", ")
 }

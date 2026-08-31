@@ -6,6 +6,7 @@ import {
   RelatedGrid,
   Split,
 } from "@/components/pages/kit";
+import { Illustrative } from "@/components/layout/Illustrative";
 import { TwinLifecycleScene } from "@/components/home/visuals/TwinLifecycleScene";
 import { Hairline, MonoLabel, Node, Panel, StatusPill } from "@/components/home/visuals/primitives";
 
@@ -32,7 +33,7 @@ const PHASES = [
     name: "Plan",
     from: "REQUESTED" as const,
     to: "PLANNED" as const,
-    note: "Change intelligence assigns fidelity and a validation plan.",
+    note: "Read the manifest, take the environment lock, write the plan.",
   },
   {
     name: "Provision",
@@ -44,13 +45,13 @@ const PHASES = [
     name: "Run",
     from: "READY" as const,
     to: "ANALYZING" as const,
-    note: "Baseline and candidate receive equivalent state and behavior.",
+    note: "Agents drive the declared workflows. Invariants are asked of the data.",
   },
   {
     name: "Close",
     from: "REPORTING" as const,
     to: "DESTROYED" as const,
-    note: "Evidence attaches to the pull request. Cleanup is attested.",
+    note: "Evidence attaches to the pull request. The journal is replayed in reverse.",
   },
 ] as const;
 
@@ -86,34 +87,16 @@ const ISOLATION = [
     node: "namespace twin-scoped",
   },
   {
-    kicker: "identity",
-    title: "Temporary workload identity",
-    body: "Short-lived identity for the run. Never a standing production role.",
-    node: "identity ephemeral",
-  },
-  {
     kicker: "ownership",
-    title: "Resource tags: run ID and expiration",
-    body: "Every resource is tagged with the run and TTL. Unowned resources are rejected.",
-    node: "run_08f2 · expires",
+    title: "One label scheme, on everything",
+    body: "Every container, network and volume carries the run that made it.",
+    node: "run_08f2",
   },
   {
-    kicker: "budget",
-    title: "Hard cost ceiling",
-    body: "Estimate before provision. Per-run spending cap, not a hope.",
-    node: "ceiling $25",
-  },
-  {
-    kicker: "admission",
-    title: "Reject unowned resources",
-    body: "Admission policy refuses anything the orchestrator did not create.",
-    node: "admission enforce",
-  },
-  {
-    kicker: "reaper",
-    title: "Independent cleanup controller",
-    body: "A TTL reaper operates separately from the main orchestrator.",
-    node: "reaper independent",
+    kicker: "teardown",
+    title: "Refuses what it did not create",
+    body: "Teardown will not destroy a namespace this run did not provision. It errors instead.",
+    node: "AF-RUN-045",
   },
 ] as const;
 
@@ -124,7 +107,7 @@ const JOURNAL = [
   { id: "dns-clone", at: "17:02" },
   { id: "postgres-sub", at: "17:12" },
   { id: "vpc-iso", at: "17:21" },
-  { id: "cert-preview", at: "17:30" },
+  { id: "proxy-08f2", at: "17:30" },
 ] as const;
 
 function railLabel(name: LifecycleState): string[] {
@@ -141,25 +124,31 @@ export function TwinsPage() {
         path="/product/twins"
         eyebrow="Twin Orchestrator"
         title="A disposable production twin for every risky change."
-        lead="Build the candidate, deploy a baseline for comparison, isolate the network, inject clone-specific configuration, replace production credentials, and tear everything down when the report is done."
+        lead="Build the change, branch a sanitized database, isolate the network, replace production credentials, journal every resource as it comes up, and tear all of it down when the report is done."
         visual={<TwinLifecycleScene />}
       />
 
       <PageSection>
         <PageHeading
           kicker="Lifecycle"
-          title="<strong>Every transition is idempotent and recoverable.</strong> A TTL reaper runs independently of the orchestrator."
+          title="<strong>Every transition is idempotent and recoverable.</strong> A resource is journaled the moment it exists, not after the run succeeds."
         />
         <LifecycleRail />
+        <Illustrative>
+          The thirteen states and the four phases are the ones the orchestrator moves through. The
+          run identifier is invented.
+        </Illustrative>
       </PageSection>
 
       <PageSection tone="white">
         <PageHeading
-          title="<strong>Isolation is a spec, not a hope.</strong> Missing containment fails closed and blocks the run."
+          title="<strong>Isolation is a spec, not a hope.</strong> An unresolved secret fails closed and stops the run."
         />
         <p className="mt-6 max-w-[640px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          For serious customers the clone uses a dedicated account, subscription, project, or a strongly
-          isolated network boundary. Convenience must not silently override containment.
+          These seven are in force today on the Docker runtime, which passes all thirty-two runtime
+          conformance behaviours against a real daemon. The Kubernetes runtime is written and not yet
+          proven to the same standard, and no cloud runtime exists. Convenience must not silently
+          override containment.
         </p>
         <IsolationSpec />
       </PageSection>
@@ -169,32 +158,34 @@ export function TwinsPage() {
           visual={
             <Panel className="rounded-[12px] bg-white p-6">
               <div className="flex items-center justify-between gap-3">
-                <MonoLabel className="uppercase tracking-[0.14em]">authenticated preview</MonoLabel>
-                <StatusPill tone="PASS">private</StatusPill>
+                <MonoLabel className="uppercase tracking-[0.14em]">where a run answers</MonoLabel>
+                <StatusPill tone="PASS">local</StatusPill>
               </div>
               <div className="mt-4 flex items-center gap-2 border border-black/[0.08] bg-white px-3 py-2.5">
                 <span className="size-2 rounded-full bg-[#33bf00]" aria-hidden />
                 <span className="min-w-0 truncate font-mono text-[13px] tracking-extra-tight text-black tabular-nums">
-                  fix-billing-184.preview.company.com
+                  http://127.0.0.1:46000
                 </span>
               </div>
               <Hairline className="mt-5" />
               <p className="mt-4 font-mono text-[11px] leading-5 tracking-extra-tight text-black/50">
-                Protected by short-lived access tokens, an identity-aware proxy, or the customer’s existing
-                access system. Credentials are never shared across agent sessions unless they represent an
-                intentionally reusable synthetic identity.
+                A run serves on a loopback port on the machine that made it, which is what af up
+                prints. There is no hosted preview hostname and no certificate for one; the
+                per-environment certificate authority exists so the egress sidecar can terminate TLS,
+                not to publish an address.
               </p>
             </Panel>
           }
         >
           <PageHeading title="<strong>A preview URL is not the product.</strong> The twin exists to answer whether the deployment is safe, then it is destroyed." />
           <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Each twin may receive an authenticated endpoint. Private by default. The output is an
-            evidence-backed pass, warning, or block — not a dataset, and not a preview URL alone.
+            The output is a pass or a fail on the pull request, with the rows and the trace behind
+            it. Not a dataset, and not an address somebody has to remember to shut down.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2">
-            <Node label="Create Wind Tunnel" lit />
-            <MonoLabel>adapter and fidelity chosen for you</MonoLabel>
+            <Node label="af up" lit />
+            <Node label="af ci" lit />
+            <Node label="af down" lit />
           </div>
         </Split>
       </PageSection>
@@ -204,14 +195,14 @@ export function TwinsPage() {
           visual={
             <Panel className="rounded-[12px] bg-white">
               <div className="flex items-center justify-between gap-3 px-5 py-3">
-                <MonoLabel className="uppercase tracking-[0.14em]">cleanup controller</MonoLabel>
-                <StatusPill tone="PASS">attested</StatusPill>
+                <MonoLabel className="uppercase tracking-[0.14em]">journal replay</MonoLabel>
+                <StatusPill tone="PASS">counted</StatusPill>
               </div>
               <Hairline />
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
-                <Node label="TTL reaper" lit />
-                <Node label="independent of orchestrator" lit />
-                <MonoLabel className="ml-auto tabular-nums">cost $6.14 / $25.00</MonoLabel>
+                <Node label="af down" lit />
+                <Node label="reverse order" lit />
+                <MonoLabel className="ml-auto tabular-nums">14 removed</MonoLabel>
               </div>
               <Hairline />
               <ul className="px-5 py-3">
@@ -229,29 +220,36 @@ export function TwinsPage() {
               </ul>
               <Hairline />
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3">
-                <MonoLabel className="tabular-nums text-black/70">14/14 destroyed</MonoLabel>
-                <MonoLabel className="tabular-nums">0 orphans</MonoLabel>
-                <MonoLabel>production untouched</MonoLabel>
+                <MonoLabel className="tabular-nums text-black/70">14 removed</MonoLabel>
+                <MonoLabel className="tabular-nums">0 left behind</MonoLabel>
+                <MonoLabel>production never in the path</MonoLabel>
               </div>
             </Panel>
           }
         >
           <PageHeading title="<strong>Cleanup is a first-class safety property.</strong> Resource deletion is not a background convenience." />
           <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Every environment has a TTL, a cost ceiling, an independent cleanup path, and a verifiable
-            destruction record. Incomplete cleanup policies fail closed. Nothing outlives the run.
+            Every resource is written to the journal as it is created, so a run that dies halfway
+            still has a list of what it made. Teardown replays that journal in reverse and counts
+            what it removed. A continuous integration step counts the managed containers and networks
+            afterwards and fails the build if any are left.
           </p>
+          <Illustrative className="mt-8">
+            A teardown of one run. The journal, the reverse replay and the count of what was removed
+            are real; the resource names and the timestamps are written.
+          </Illustrative>
           <div className="mt-8 grid grid-cols-2 gap-x-8 gap-y-5 max-xl:grid-cols-1">
             <div>
-              <MonoLabel className="uppercase tracking-[0.14em]">ttl</MonoLabel>
+              <MonoLabel className="uppercase tracking-[0.14em]">sweep</MonoLabel>
               <p className="mt-1.5 text-[15px] leading-6 tracking-extra-tight text-black">
-                Inactivity expiration. A separate reaper, not the orchestrator.
+                af env prune removes environments older than a cutoff you pass.
               </p>
             </div>
             <div>
-              <MonoLabel className="uppercase tracking-[0.14em]">proof</MonoLabel>
+              <MonoLabel className="uppercase tracking-[0.14em]">limit</MonoLabel>
               <p className="mt-1.5 text-[15px] leading-6 tracking-extra-tight text-black">
-                Journaled destruction. Zero orphans. Production never in the path.
+                There is no automatic time-to-live and no independent reaper yet. The sweep is a
+                command a person or a schedule runs.
               </p>
             </div>
           </div>
@@ -262,7 +260,7 @@ export function TwinsPage() {
         items={[
           { href: "/product/safe-state", title: "Safe State", description: "What gets restored into the twin." },
           { href: "/product/architecture", title: "Architecture", description: "Customer-hosted data plane." },
-          { href: "/product/fidelity", title: "Fidelity Graph", description: "What the twin actually reproduced." },
+          { href: "/product/report", title: "Safety Report", description: "What the run says it could not measure." },
         ]}
       />
     </PageShell>
@@ -347,16 +345,19 @@ function IsolationSpec() {
           <MonoLabel className="uppercase tracking-[0.14em]">isolation model</MonoLabel>
           <Node label="run_08f2" lit />
         </div>
-        <StatusPill tone="BLOCK">fail closed</StatusPill>
+        <StatusPill tone="FAIL">fail closed</StatusPill>
       </div>
       <Hairline />
-      <div className="grid grid-cols-5 max-xl:grid-cols-1">
+      {/* Four across, not five. The list lost three claims that were not built
+          and seven do not divide by five without leaving a row three cells
+          short. */}
+      <div className="grid grid-cols-4 max-xl:grid-cols-2 max-md:grid-cols-1">
         {ISOLATION.map((item, i) => {
-          const lastInRowXl = (i + 1) % 5 === 0 || i === ISOLATION.length - 1;
+          const lastInRowXl = (i + 1) % 4 === 0 || i === ISOLATION.length - 1;
           return (
             <div
               key={item.title}
-              className="relative px-5 py-6 max-xl:border-t max-xl:border-black/10 max-xl:first:border-t-0 xl:border-black/10 xl:[&:nth-child(n+6)]:border-t"
+              className="relative px-5 py-6 max-md:border-t max-md:border-black/10 max-md:first:border-t-0 md:max-xl:border-black/10 md:max-xl:[&:nth-child(n+3)]:border-t xl:border-black/10 xl:[&:nth-child(n+5)]:border-t"
             >
               {!lastInRowXl ? (
                 <Hairline vertical className="absolute top-5 right-0 bottom-5 hidden h-auto xl:block" />

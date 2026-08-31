@@ -7,7 +7,7 @@ const SECTIONS = [
   { id: "migrations", title: "Migration Safety" },
   { id: "twins", title: "Isolated Twin" },
   { id: "features", title: "Safety properties" },
-  { id: "workload", title: "Workload Studio" },
+  { id: "workload", title: "Load" },
   { id: "firewall", title: "Side-Effect Firewall" },
 ];
 

@@ -276,6 +276,9 @@ func uncalledByGate(just string) []string {
 	// it is out of `gate` for the reason recorded in exemptFromGate.
 	exemptRecipes := map[string]bool{
 		"vuln": true,
+		// The npm half of the same scan, out of `gate` for the same reason and
+		// running in the same workflow.
+		"npmaudit": true,
 		// The getting started path end to end. It needs a daemon and takes
 		// minutes, so it runs on a schedule rather than on every branch, the
 		// same reasoning as the external link check: a check that costs
@@ -367,6 +370,19 @@ var exemptFromGate = map[string]string{
 		"which is where a scan whose input is a moving database belongs. Run it by " +
 		"hand with `just vuln`.",
 
+	"tool npmaudit": "" +
+		"The same reasoning as vulncheck's, for the JavaScript half. " +
+		"tools/npmaudit asks the npm registry's advisory database what is known " +
+		"against the packages in each lockfile, so its answer moves without the " +
+		"tree moving, and it needs the network. What IS a function of the tree " +
+		"is every decision the tool makes about a report, and `go test " +
+		"./tools/npmaudit` covers it inside `gate`: a string element in npm's " +
+		"`via` union does not become a phantom finding, an unaccepted advisory " +
+		"fails, an expired acceptance fails, an acceptance that matches nothing " +
+		"fails, npm refusing to run is told apart from a clean tree, and a " +
+		"workspace member is not reported as uncovered. " +
+		"It runs beside vulncheck in security.yml. Run it by hand with `just " +
+		"npmaudit`.",
 	"tool dogfood": "" +
 		"Its input is not in the tree either, and it is not one thing. tools/dogfood " +
 		"runs the product against itself: it needs a container runtime, a staging " +

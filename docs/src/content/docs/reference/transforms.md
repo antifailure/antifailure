@@ -89,11 +89,13 @@ unique constraint users_email_key.
   for users.email.
 ```
 
-`email`, `uuid_remap`, `username`, `hash_hex` and `preserve` preserve
-uniqueness. `name`, `city`, `company`, `string_fpe`, `int_fpe` and the rest do
-not, because two people can share a name and pretending otherwise would mean
-generating increasingly unlikely ones to satisfy a constraint the data never
-had.
+<!-- unique:start -->
+`email`, `hash_hex`, `preserve`, `username` and `uuid_remap` preserve uniqueness.
+<!-- unique:end -->
+
+`name`, `city`, `company` and the rest do not, because two people can share a
+name and pretending otherwise would mean generating increasingly unlikely ones
+to satisfy a constraint the data never had.
 
 The format preserving pair are the ones worth saying twice, because they read
 like they should be safe here and are not. `string_fpe` keeps a value's length

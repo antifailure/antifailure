@@ -1,0 +1,215 @@
+---
+title: Releases and how to verify one
+description: What a release is made of, how to check that what you downloaded is what we published, and how to rebuild it yourself and compare.
+sidebar:
+  order: 1
+---
+
+The install command on the front page pipes a script into a shell. That is
+convenient and it means the release artifacts are the security boundary for
+everybody who uses this product. This page is how you stop taking our word for
+it.
+
+Three checks are available, and they answer different questions:
+
+| Check | Question it answers |
+| --- | --- |
+| Checksum | Did the file arrive intact? |
+| Signature | Did we publish it? |
+| Rebuild | Was it built from the source it claims? |
+
+The first is the weakest and the fastest. The third is the strongest and takes
+a few minutes. Most people should do the first two.
+
+## What a release contains
+
+Each tag publishes four archives, one per platform, plus the files you check
+them with.
+
+| File | What it is |
+| --- | --- |
+| `antifailure_<version>_<os>_<arch>.tar.gz` | The `af` binary, the agent runner's source, the licence and the README |
+| `checksums.txt` | The SHA256 of every archive |
+| `checksums.txt.sigstore.json` | A signature over `checksums.txt`, with the certificate that made it |
+| `sbom.spdx.json` | An SPDX bill of materials, read out of the built binaries |
+| `sbom.spdx.json.sigstore.json` | A signature over the bill of materials |
+| `THIRD_PARTY_NOTICES.md` | Attribution, generated from what is actually linked |
+
+Only `checksums.txt` is signed rather than each archive. That is deliberate.
+`checksums.txt` names every archive by its hash, so one signature covers all of
+them, and checking it is two commands instead of eight. Eight things to check
+get checked zero times.
+
+## Check the checksum
+
+The installer does this for you and refuses to install a file that does not
+match. If you downloaded an archive by hand:
+
+```sh
+sha256sum --check --ignore-missing checksums.txt
+```
+
+On macOS, `shasum -a 256 -c --ignore-missing checksums.txt`.
+
+This proves the file is not corrupt. It proves nothing about who wrote
+`checksums.txt`, which is what the signature is for.
+
+## Check the signature
+
+Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/).
+The identity is long and you need it three times, so name it once:
+
+```sh
+TAG=v0.1.0
+REPO=antifailure/antifailure
+WORKFLOW=.github/workflows/release.yml
+
+IDENTITY="https://github.com/$REPO/$WORKFLOW@refs/tags/$TAG"
+ISSUER="https://token.actions.githubusercontent.com"
+```
+
+Then check the checksums:
+
+```sh
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity "$IDENTITY" \
+  --certificate-oidc-issuer "$ISSUER" \
+  checksums.txt
+```
+
+`Verified OK` means the file is the one that was signed.
+
+There is no public key to fetch, because there is no signing key. The release
+workflow asks GitHub for a short lived identity token, proves to Sigstore that
+this workflow in this repository is running, and gets a certificate that expires
+almost immediately. Nothing is stored, so there is nothing to leak and nothing
+to rotate.
+
+`--certificate-identity` is the part that makes this mean anything. Without it
+you would be checking that somebody signed the file, which anybody can do.
+With it you are checking that this workflow, in this repository, at this tag
+signed it. If you leave it out, cosign refuses rather than checking less.
+
+The bill of materials is signed the same way, with its own bundle:
+
+```sh
+cosign verify-blob \
+  --bundle sbom.spdx.json.sigstore.json \
+  --certificate-identity "$IDENTITY" \
+  --certificate-oidc-issuer "$ISSUER" \
+  sbom.spdx.json
+```
+
+### Proving your check can fail
+
+A verification you have only ever run against good input has told you nothing.
+Change a byte and watch it refuse:
+
+```sh
+cp checksums.txt tampered.txt
+printf 'x' >> tampered.txt
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity "$IDENTITY" \
+  --certificate-oidc-issuer "$ISSUER" \
+  tampered.txt
+```
+
+That must fail. The release workflow runs this same pair, the good file and the
+tampered copy, on every release, and refuses to publish if the tampered one is
+accepted.
+
+## Rebuild it yourself
+
+The archives are reproducible. Building a tag again produces the same bytes, so
+you can compare a hash you computed against the one we published instead of
+trusting either of us.
+
+```sh
+git clone https://github.com/antifailure/antifailure
+cd antifailure
+git checkout v0.1.0
+./tools/release/build.sh linux amd64 0.1.0 \
+  "$(git rev-parse HEAD)" "$(git show -s --format=%cI HEAD)" dist stage
+sha256sum dist/antifailure_0.1.0_linux_amd64.tar.gz
+```
+
+That hash should be the line for your platform in `checksums.txt`. You need the
+same Go version the release used, which is the one in `engine/go.mod`.
+
+Three things make this work, and all three are load bearing:
+
+* `-trimpath`, so the directory you built in does not reach the binary.
+* The build date comes from the commit, not from the clock. Every build of one
+  commit therefore agrees.
+* The archive is written by `tools/reltar` rather than by `tar`, with a fixed
+  modification time, no ownership, normalised permissions and sorted entries.
+
+Without the third the binaries matched and the archives never did. `tar` takes
+each entry's timestamp from the filesystem and `gzip` writes another into its
+own header, so two builds a minute apart produced two different archives of one
+identical binary. That is fixed, and `just reproducible` builds twice in two
+directories and compares, on every pull request.
+
+### What reproducibility here does and does not cover
+
+Covered: the four release archives and the binaries inside them.
+
+Not covered: `sbom.spdx.json`. An SPDX document records the moment it was
+created and a unique document namespace, so two runs differ by design. Verify
+it with its signature, not by rebuilding it.
+
+## The bill of materials
+
+`sbom.spdx.json` lists what is inside the binaries. It is read out of the built
+artifacts rather than generated from `go.mod`, because Go records the module
+graph it actually linked inside the binary. Reading the artifact answers what
+shipped; reading `go.mod` answers what was asked for. Those differ whenever a
+build constraint or a pruned dependency changes what the linker kept.
+
+Every release runs `tools/sbomcheck` over it before publishing. That validates
+the document against the published SPDX 2.3 schema and then asks the question a
+schema cannot: does it record the SHA256 of every binary that actually ships. A
+bill of materials can be perfectly valid SPDX and describe nothing at all, which
+is exactly what this one did before the check existed.
+
+One gap, stated rather than left to be found: the agent runner ships as source
+with `playwright` declared as a version range, resolved on your machine when you
+run `af runner install`. The bill of materials covers the Go dependencies
+compiled into `af` and cannot name a runner dependency version that is not
+chosen yet.
+
+## Cutting a release
+
+For maintainers. Everything below runs from a tag and nothing runs from a
+branch, because a release built from a branch is a release nobody can reproduce.
+
+1. Confirm the gates are green on the commit you are about to tag. `just gate`
+   locally, and CI green on the merge.
+2. Add the changelog fragments to a release note if the version deserves one.
+3. Tag and push:
+
+   ```sh
+   git tag -s v0.1.0 -m "v0.1.0"
+   git push origin v0.1.0
+   ```
+
+4. Watch `.github/workflows/release.yml`. It builds four platforms, packages
+   each with `tools/release/build.sh`, unpacks them so the bill of materials can
+   read the binaries, signs `checksums.txt` and the bill of materials, verifies
+   both signatures, proves a tampered file is rejected, and only then creates
+   the release.
+5. Check the published artifacts the way this page tells a user to. If the
+   instructions do not work, the release is not done.
+
+The workflow fails rather than publishing when any of those checks fail. That
+ordering is the point: every previous version of this pipeline signed and
+published first and verified never.
+
+### If a release goes out wrong
+
+Do not delete the tag and re-push it. A tag that changes meaning breaks
+everybody who already fetched it, and it breaks the signature's identity
+binding, which names the tag. Cut a new patch version instead and mark the bad
+release as such on GitHub.

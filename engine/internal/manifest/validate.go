@@ -1,15 +1,19 @@
 package manifest
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/antifailure/antifailure/engine/internal/oracle"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -30,7 +34,11 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.auth(m)
 	v.workflows(m)
 	v.invariants(m)
+	v.oracle(m)
+	v.explore(m)
 	v.load(m)
+	v.policy(m)
+	v.insights(m)
 	v.runtime(m)
 
 	if v.suppressed > 0 {
@@ -668,6 +676,188 @@ func (v *validator) invariants(m *schema.Manifest) {
 	}
 }
 
+// oracle checks that a comparison somebody asked for can actually be made.
+//
+// Each rule here prevents a failure that would otherwise arrive after two
+// environments have been built, which is minutes of Docker and two database
+// branches spent to learn that a path was missing a slash.
+func (v *validator) oracle(m *schema.Manifest) {
+	o := m.Oracle
+	if o == nil {
+		return
+	}
+
+	if _, ok := oracle.ParseSeverity(o.FailOn); !ok {
+		v.add("oracle.fail_on",
+			fmt.Sprintf("%q is not a severity.", o.FailOn),
+			"Use none, minor, major, or critical.")
+	}
+
+	if o.Baseline == schema.BaselineRef && o.BaseRef == "" {
+		v.add("oracle.base_ref",
+			"The baseline is an explicit ref and no ref is given.",
+			"Name the branch, tag, or commit to compare against, or use baseline: merge_base.")
+	}
+
+	if len(o.Probes) == 0 && deref(o.Enabled) {
+		v.add("oracle.probes",
+			"The oracle is on and declares no requests to send.",
+			"Add at least one probe. Both versions have to receive the same requests in the same "+
+				"order, so the plan is written down rather than discovered.")
+	}
+
+	names := map[string]int{}
+	for i := range o.Probes {
+		p := &o.Probes[i]
+		base := fmt.Sprintf("oracle.probes[%d]", i)
+
+		if prev, dup := names[p.Name]; dup {
+			v.add(base+".name",
+				fmt.Sprintf("Two probes are both named %q.", p.Name),
+				fmt.Sprintf("The first is oracle.probes[%d]. The name is how a difference is "+
+					"reported, so two of them make a report nobody can act on.", prev))
+		}
+		names[p.Name] = i
+
+		if !strings.HasPrefix(p.Path, "/") {
+			v.add(base+".path",
+				fmt.Sprintf("The path %q does not start with a slash.", p.Path),
+				"A probe path is a path and a query, such as /orders?limit=10.")
+		}
+		if p.Body != "" && p.Method == http.MethodGet {
+			v.add(base+".body",
+				fmt.Sprintf("Probe %q is a GET and declares a body.", p.Name),
+				"Most servers ignore a body on a GET, so this would be sent and have no effect. "+
+					"Set a method, or move the values into the query.")
+		}
+		if p.Body != "" && jsonContentType(p.Headers) && !json.Valid([]byte(p.Body)) {
+			v.add(base+".body",
+				fmt.Sprintf("Probe %q declares a JSON content type and a body that is not JSON.", p.Name),
+				"Both versions would refuse it identically, so the comparison would prove nothing.")
+		}
+		for name, value := range p.Headers {
+			if looksLikeACredential(value) {
+				v.add(base+".headers",
+					fmt.Sprintf("The header %q on probe %q carries what looks like a credential.", name, p.Name),
+					"A probe is committed to the repository. Credentials come from the secrets "+
+						"subsystem; a probe that needs a session should sign in through one.")
+			}
+		}
+	}
+
+	if o.Ignore != nil {
+		for i, f := range o.Ignore.Fields {
+			if !oracle.ValidPattern(f) {
+				v.add(fmt.Sprintf("oracle.ignore.fields[%d]", i),
+					fmt.Sprintf("%q is not a field path.", f),
+					"Write $.field, $.list[0].field, $.list[*].field, $..field, or $.object.*.")
+			}
+		}
+	}
+
+	if o.Database != nil {
+		for i, t := range append(append([]string(nil), o.Database.Tables...), o.Database.Exclude...) {
+			if strings.Count(t, ".") > 1 {
+				key := "oracle.database.tables"
+				if i >= len(o.Database.Tables) {
+					key = "oracle.database.exclude"
+				}
+				v.add(key,
+					fmt.Sprintf("%q is not a table pattern.", t),
+					"Write a table name, or schema.table, with an asterisk for either half.")
+			}
+		}
+	}
+}
+
+// jsonContentType reports whether a probe declares a JSON body.
+func jsonContentType(headers map[string]string) bool {
+	for k, v := range headers {
+		if strings.EqualFold(k, "content-type") {
+			lower := strings.ToLower(v)
+			return strings.Contains(lower, "json")
+		}
+	}
+	return false
+}
+
+func (v *validator) explore(m *schema.Manifest) {
+	e := m.Explore
+	if e == nil {
+		return
+	}
+	if e.Enabled && len(e.Goals) == 0 {
+		v.add("explore.goals",
+			"Exploration is enabled and declares no goals.",
+			"Add a goal saying what somebody is trying to do, or set explore.enabled to false.")
+	}
+	personas := map[string]bool{}
+	for _, p := range m.Personas {
+		personas[p.Name] = true
+	}
+	workflows := map[string]bool{}
+	for _, w := range m.Workflows {
+		workflows[w.Name] = true
+	}
+	names := map[string]bool{}
+	seeds := map[string]string{}
+	for i := range e.Goals {
+		g := &e.Goals[i]
+		base := fmt.Sprintf("explore.goals[%d]", i)
+		if names[g.Name] {
+			v.add(base+".name", fmt.Sprintf("Two goals are both named %q.", g.Name), "")
+		}
+		names[g.Name] = true
+		// A goal and a workflow with one name would produce two results a
+		// person cannot tell apart in a report, and 'af explore --only' and
+		// 'af test --only' would each match something different.
+		if workflows[g.Name] {
+			v.add(base+".name",
+				fmt.Sprintf("The goal %q has the same name as a workflow.", g.Name),
+				"Rename one. A report showing both would give two results the same label.")
+		}
+
+		if g.Persona == "" {
+			v.add(base+".persona",
+				fmt.Sprintf("Goal %q names no persona and the manifest declares none.", g.Name),
+				"Add a persona so that the agent has an account to explore as, or set login: none on one.")
+		} else if !personas[g.Persona] {
+			v.add(base+".persona",
+				fmt.Sprintf("Goal %q explores as %q, which is not a declared persona.", g.Name, g.Persona),
+				"Check the spelling against the persona names.")
+		}
+
+		// The agent has no script and no expectations, so this sentence is the
+		// only thing telling it where to go and the only thing deciding
+		// whether it arrived. A goal of two words matches half the page and
+		// reports itself reached on the front page.
+		if len(strings.Fields(g.Goal)) < 4 {
+			v.add(base+".goal",
+				fmt.Sprintf("The goal of %q is too short to explore towards.", g.Name),
+				"Say what somebody is trying to achieve, in a sentence. The agent has no other "+
+					"instruction, and these words are what decide whether it got there.")
+		}
+
+		// Two goals on one seed take correlated paths through the same
+		// application and the second explores very little that the first did
+		// not, which reads as two explorations and is closer to one.
+		if other, clash := seeds[g.Seed]; clash {
+			v.add(base+".seed",
+				fmt.Sprintf("Goals %q and %q share the seed %q.", other, g.Name, g.Seed),
+				"Give them different seeds. Two explorations on one seed walk the same tie breaks "+
+					"and cover less than their step counts suggest.")
+		}
+		seeds[g.Seed] = g.Name
+
+		if g.Budget != nil {
+			if _, err := ParseDuration(g.Budget.Duration); err != nil {
+				v.add(base+".budget.duration",
+					fmt.Sprintf("The budget duration %q is not a duration.", g.Budget.Duration), "")
+			}
+		}
+	}
+}
+
 func (v *validator) load(m *schema.Manifest) {
 	l := m.Load
 	if l == nil || !l.Enabled {
@@ -693,6 +883,91 @@ func (v *validator) load(m *schema.Manifest) {
 				fmt.Sprintf("The route %q is listed as both safe and unsafe.", r),
 				"Unsafe wins, and the ambiguity will confuse whoever reads this next. Remove one.")
 		}
+	}
+}
+
+// policy checks the release gate.
+//
+// A level nobody recognises is the failure worth catching here. Falling back
+// to a default would mean a manifest that says "block" quietly warns instead,
+// and the first time anybody noticed would be a merge that should not have
+// happened.
+func (v *validator) policy(m *schema.Manifest) {
+	p := m.Policy
+	if p == nil {
+		return
+	}
+	levels := map[string]schema.PolicyLevel{
+		"migration_failed":  p.MigrationFailed,
+		"migration_rewrite": p.MigrationRewrite,
+		"migration_lint":    p.MigrationLint,
+		"plan_regression":   p.PlanRegression,
+		"query_regression":  p.QueryRegression,
+		"load_regression":   p.LoadRegression,
+		"egress_surprise":   p.EgressSurprise,
+		"masking":           p.Masking,
+		"cleanup":           p.Cleanup,
+	}
+	keys := make([]string, 0, len(levels))
+	for k := range levels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !knownPolicyLevel(levels[k]) {
+			v.add("policy."+k,
+				fmt.Sprintf("%q is not a policy level.", string(levels[k])),
+				"The levels are ignore, warn and fail. Use fail to stop the merge, warn to report the finding and let it through, and ignore to drop it.")
+		}
+	}
+
+	if l := p.MigrationLock; l != nil && l.FailMS > 0 && l.WarnMS > l.FailMS {
+		v.add("policy.migration_lock.fail_ms",
+			fmt.Sprintf("The failing threshold %.0fms is below the warning threshold %.0fms.", l.FailMS, l.WarnMS),
+			"A lock long enough to fail the check is always long enough to be worth reporting. Raise fail_ms above warn_ms, or lower warn_ms.")
+	}
+}
+
+func knownPolicyLevel(l schema.PolicyLevel) bool {
+	for _, known := range schema.AllPolicyLevels() {
+		if l == known {
+			return true
+		}
+	}
+	return false
+}
+
+// insights checks the one part of the block the JSON Schema cannot: whether
+// `against` names something git could resolve.
+//
+// Only the obviously wrong shapes are refused here, because whether a
+// revision exists is a question about the checkout rather than about the
+// manifest, and a manifest that stops validating when somebody does a shallow
+// clone is a manifest that fails for the wrong reason. A revision that does
+// not resolve at run time is reported as `blocked` by the check itself, which
+// is where it belongs.
+func (v *validator) insights(m *schema.Manifest) {
+	i := m.Insights
+	if i == nil || i.RollingCompatibility == nil {
+		return
+	}
+	r := i.RollingCompatibility
+	switch r.When {
+	case "", "never", "risky", "always":
+	default:
+		v.add("insights.rolling_compatibility.when",
+			fmt.Sprintf("The value %q is not one of never, risky or always.", r.When),
+			"risky, the default, runs the check only when the migration contains something the previous release could notice.")
+	}
+	if strings.ContainsAny(r.Against, " \t\n") {
+		v.add("insights.rolling_compatibility.against",
+			fmt.Sprintf("The revision %q contains whitespace, so git cannot resolve it.", r.Against),
+			"Use merge-base, previous-commit, or a single revision such as a tag name.")
+	}
+	if strings.HasPrefix(r.Against, "-") {
+		v.add("insights.rolling_compatibility.against",
+			fmt.Sprintf("The revision %q starts with a hyphen, which git would read as an option.", r.Against),
+			"Use merge-base, previous-commit, or a single revision such as a tag name.")
 	}
 }
 

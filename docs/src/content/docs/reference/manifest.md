@@ -27,6 +27,7 @@ named. Everything else is refused with a decision you can read.
 | `invariants` | list | Statements about the data that must stay true. |
 | `insights` | block | The Postgres native checks. |
 | `load` | block | Production shaped traffic. |
+| `policy` | block | What each class of finding does to the check. |
 | `runtime` | block | Where and how long environments run. |
 | `github` | block | The pull request integration. |
 
@@ -159,6 +160,29 @@ subset silently breaks.
 | `default` | `block` (default) or `allow`. |
 | `allow_ipv6` | Off by default. |
 | `rules` | See [egress](/docs/concepts/egress/). |
+
+## `policy`
+
+Which findings fail the check, which only warn, and which are dropped. Every
+key takes `ignore`, `warn` or `fail`, and a value outside those three is
+refused at the line rather than treated as the weakest one.
+
+| Key | Default | The finding |
+| --- | --- | --- |
+| `migration_lock.warn_ms` | `500` | Report a lock held at least this long. |
+| `migration_lock.fail_ms` | `2000` | Fail on a lock held at least this long. Must not be below `warn_ms`. |
+| `migration_failed` | `fail` | The migrations did not apply to a branch of the golden. |
+| `migration_rewrite` | `warn` | Postgres rewrote a table. |
+| `migration_lint` | `warn` | Any of the six migration lint rules. |
+| `plan_regression` | `warn` | A query plan got worse. |
+| `query_regression` | `warn` | A statement runs more often or slower than the baseline. |
+| `load_regression` | `warn` | A threshold from the `load` block was exceeded. |
+| `egress_surprise` | `fail` | The environment reached for a host the manifest does not mention. |
+| `masking` | `fail` | The branch read back with data that still parses as real. |
+| `cleanup` | `fail` | Teardown left a resource behind. |
+
+See [verdicts](/docs/concepts/verdicts/) for what each level does to the run
+and to the exit code.
 
 ## `runtime`
 

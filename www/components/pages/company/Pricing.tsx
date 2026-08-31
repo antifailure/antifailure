@@ -38,7 +38,7 @@ const PLANS: Plan[] = [
       "Bring-your-own infrastructure and model keys",
       "Community simulators and local reports",
       "Inspectable agent, sanitization, egress, and cleanup",
-      "No hosted compute — your cloud, your credentials",
+      "No hosted compute. Your cloud, your credentials",
     ],
   },
   {
@@ -54,11 +54,12 @@ const PLANS: Plan[] = [
       "Included run credits for deployment twins",
       "Usage for environment minutes, data volume, and workload execution",
       "Customer-cloud execution for margin and data exposure",
-      "Pull-request checks and a private preview URL",
+      "Pull-request checks and aggregated reports across repositories",
     ],
   },
   {
     name: "Growth + Enterprise",
+    badge: "Illustrative",
     price: "$2,000–$8,000",
     period: "per month · Growth band",
     secondary: {
@@ -73,17 +74,17 @@ const PLANS: Plan[] = [
       "Organization-wide release policy",
       "Governance, evidence retention, and residency",
       "Fleet management and premium connectors",
-      "Support and service-level commitments — sold when references exist",
+      "Support and service-level commitments, sold when references exist",
     ],
   },
 ];
 
 const VALUE_METRICS: [string, string][] = [
-  ["Applications protected", "The systems the twin actually covers — not a personality count."],
+  ["Applications protected", "The systems the twin actually covers, not a count of personalities."],
   ["Deployment runs", "Safety validations attached to a pull request or release."],
   ["Environment execution", "Minutes the twin is provisioned, exercised, and destroyed."],
   ["Data volume", "Sanitized, referential state restored inside your boundary."],
-  ["Peak workload", "Deterministic concurrency and traffic shape, not LLM fan-out."],
+  ["Peak workload", "Traffic shape and concurrency, not model fan-out."],
   ["Governance and support", "Policy scope, evidence retention, residency, and response level."],
 ];
 
@@ -141,10 +142,10 @@ export function PricingPage() {
         path="/pricing"
         eyebrow="Pricing"
         title="Operational value, not AI personalities."
-        lead="Community is the local engine. Team is a platform fee plus run usage. Growth and Enterprise add volume, policy, and governance. These bands are illustrative — not a quote."
+        lead="Community is the local engine and it works today. Team is a platform fee plus run usage. Growth and Enterprise add volume, policy, and governance. These bands are illustrative, not a quote."
         actions={
           <>
-            <Button href="/signup">Get started</Button>
+            <Button href="/signup">Join the waitlist</Button>
             <Button href="/docs" theme="outlined">
               Read the docs
             </Button>
@@ -152,6 +153,11 @@ export function PricingPage() {
         }
       />
       <PageSection className="pt-0">
+        <p className="mb-14 max-w-[720px] border-l border-black/15 pl-6 text-[16px] leading-7 tracking-extra-tight text-gray-new-40 max-md:mb-10 max-md:pl-4">
+          The hosted control plane is in development. Today the engine runs in your own continuous
+          integration, on your own compute, and every button on this page leads to a waitlist. Team
+          and Enterprise are open for design partners.
+        </p>
         <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
           {PLANS.map((plan) => (
             <li key={plan.name} className="min-w-0">
@@ -163,7 +169,7 @@ export function PricingPage() {
       <PageSection tone="white">
         <PageHeading
           kicker="Value metrics"
-          title="<strong>We meter what the twin actually does.</strong> Not how many exploratory users you named."
+          title="<strong>We meter what the twin actually does.</strong> Not how many agents you named."
         />
         <div className="mt-14 max-w-[960px] pl-24 max-xl:pl-16 max-md:pl-0">
           {VALUE_METRICS.map(([title, body]) => (

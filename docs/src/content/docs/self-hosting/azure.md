@@ -23,6 +23,8 @@ can run is worse than a short one.
 | CI identity, federated, no secret | **applied**, `af-infra-ci` |
 | Control plane on Kubernetes instead | **works**, the Helm chart, installed on a real cluster in CI |
 | Goldens storage | **off by default**, see below |
+| Alerting, an action group and eleven rules | **written**, `infra/terraform/modules/alerting`, off unless `alerting_enabled` |
+| Production, `app.antifailure.dev` | **written**, `production.tfvars`, not applied. [Standing up production](/docs/self-hosting/production/) |
 | Environment pool on AKS | **does not exist** |
 
 The goldens storage account is `goldens_enabled = false` on purpose. Nothing in
@@ -273,6 +275,124 @@ The bootstrap job is idempotent and applies whatever is outstanding.
 az containerapp job start -n afcp-bootstrap -g af-cp-centralus
 ```
 
+### Upgrade and rollback, the manual path
+
+`deploy/cd/deploy.sh` already does most of this: migrate first, start the new
+revision at zero traffic, check it there, shift traffic, check the public
+origin, and shift back on any failure after the shift. Read the script before
+this section; it is short and it is the actual mechanism, not a summary of one.
+
+What follows is for the case its own rollback does not fire, because the
+failure showed up after the health gate already passed and the deploy exited.
+An error rate that ramps up over the next hour, a customer report, a graph that
+looks wrong: the gate cannot catch what has not happened yet, and once it exits
+nothing is watching the deploy anymore. From here it is a person.
+
+**1. Find the last revision that was actually good.**
+
+```sh
+az containerapp revision list -n afcp-app -g af-cp-centralus \
+  --query "[?properties.active].{name:name, created:properties.createdTime, traffic:properties.trafficWeight, fqdn:properties.fqdn}" \
+  -o table
+```
+
+Old revisions are left active at zero traffic rather than deactivated, exactly
+so this list has something to go back to; deploy.sh's own comment says why.
+"The one before this one" is not the same question as "the last one that was
+good": if two bad releases shipped in a row, the previous revision is also
+broken. Cross-reference against the CD run history
+(`gh run list --workflow=cd.yml` or the Actions tab) for the last run whose
+"What is serving" step summary showed a healthy `/readyz`, and note which
+commit it deployed. That commit is what you are rolling back to, and the
+revision list above tells you which revision name still serves it. If the
+revision is gone, `deploy.sh`'s promotion step will make you a new one from the
+same image, at zero traffic, checked before it takes any.
+
+**2. Move traffic to it.**
+
+```sh
+az containerapp ingress traffic set -n afcp-app -g af-cp-centralus \
+  --revision-weight <good-revision>=100
+```
+
+This is the exact command step 5 of `deploy.sh` runs on your behalf when its
+own gate catches the failure. Running it by hand is not a lesser version of the
+same action.
+
+**3. Verify it took, the same way the pipeline does.**
+
+A revision report and a real check are not the same evidence: `az` can say the
+weight moved while the origin still answers from a cache or a stale connection.
+Run the actual gate against the public origin:
+
+```sh
+deploy/cd/health-gate.sh https://app.antifailure.dev <commit-you-rolled-back-to> 20 3
+```
+
+It checks two things, not one: that `/readyz` answers, and that it names the
+commit you expect. A healthy answer from the wrong commit is exactly the
+failure this script exists to catch, and it is the one a plain `curl` would
+miss.
+
+**4. The migration that already applied.**
+
+This is the genuinely hard part, and it deserves more than "roll the schema
+back too", because there is no such command here. `web/packages/db`'s migration
+runner has no down migration and has never had one: each file is one
+transaction, applied and recorded together, so a migration is either fully
+applied or not applied at all. There is no partial state to reason about, which
+narrows the problem to exactly two cases.
+
+**The migration is additive.** This is the case the whole design assumes, and
+it is why `deploy.sh`'s own comment states the constraint plainly: migrations
+in this project are expected to be backward compatible with the previous
+release. A new nullable column, a new table, a new index, a new policy grant,
+none of it is visible to a query the old code never learned to send. If that
+holds, step 2 above is already the whole fix: the revision you just moved
+traffic back to runs correctly against the schema as it now stands, and nothing
+about the database needs to change. Do not assume this. Read the migration
+files that shipped with the release you are rolling back, the same files
+`git diff <good-commit>..<bad-commit> -- web/packages/db/migrations` shows you,
+and check each statement is additive rather than something that removes or
+narrows what the old code depends on: a dropped or renamed column, a `NOT NULL`
+added with no default, a changed type, a revoked grant. This is a five minute
+read and it is not optional. Assuming compatibility instead of checking it is
+how a rollback becomes a second incident.
+
+**The migration is not additive.** Now the old code is the one that breaks,
+because it is querying a column, a type, or a grant that no longer matches what
+it expects. Moving traffic back in this case does not fix anything; it trades
+one broken revision for a different one. There is no third option that makes
+both sides correct at once, because the schema and the code serving it cannot
+disagree, and disagreement, not either release on its own, is the incident:
+
+- Do not write a rollback migration under incident pressure. A migration
+  authored in a hurry, run once and never tested against the same suite every
+  other migration goes through, is exactly the kind of change this project's
+  own migration runner has been burned by before: a failed statement leaves the
+  connection in an aborted transaction, and every diagnostic that runs after it
+  in the same connection reports the aborted state rather than the real cause.
+  Fast, under-tested schema changes are where that shows up.
+- Compare what each side actually does in production right now: is the new
+  code erroring in a way worse than the old code would against the changed
+  schema, or the other way around. Whichever fails less badly is what stays
+  serving while the real fix is written, and that choice is a judgment call
+  under real constraints, not a formula. Say which way you chose and why in the
+  incident record, because the next person reading it needs the reasoning more
+  than the outcome.
+- The actual fix is forward, not back: a new migration that restores what the
+  old code needs, or, if the new code is staying, a migration that finishes
+  what it started, tested the same way any migration is, through a normal pull
+  request and the kind cluster check in `control-plane-image.yml`, then
+  deployed the same way any deploy is. There is no faster correct path than
+  that, because a schema and the traffic serving it cannot be made to agree by
+  moving a traffic weight.
+- Afterwards, name the specific miss. It is almost always one release both
+  dropping or renaming a column and no longer being read by anything that still
+  expects it. The prevention is a convention rather than a tool: deprecate a
+  column for one release before dropping it, so the release that stops writing
+  it and the release that removes it are never the same one.
+
 ## What it costs
 
 Read from the Azure retail prices API rather than remembered, for `centralus`,
@@ -500,4 +620,6 @@ window, because that is precisely the sequence purge protection exists to
 prevent. Set `key_vault_name` yourself if you need to sidestep it knowingly.
 
 Related: [the control plane](/docs/self-hosting/control-plane/),
+[standing up production](/docs/self-hosting/production/),
+[the runbooks](/docs/self-hosting/runbooks/),
 [configuration](/docs/reference/control-plane/).

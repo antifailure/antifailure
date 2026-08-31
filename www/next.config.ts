@@ -36,9 +36,10 @@ const nextConfig: NextConfig = {
 
   // No `redirects()` here on purpose. next.config redirects are evaluated by a
   // server this build does not have, so `output: "export"` refuses them. The
-  // one redirect the site needs, /product/crowdi to /product/exploratory-users,
-  // is app/product/crowdi/page.tsx: a real page, with the canonical link and
-  // noindex, that the CDN can hand out like any other.
+  // redirects the site needs are 301s in public/staticwebapp.config.json, each
+  // backed by a real page under app/product/ built from MovedPage: a canonical
+  // link and noindex, which the CDN can hand out like any other file when the
+  // host config is not in play.
 };
 
 export default nextConfig;

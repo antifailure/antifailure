@@ -10,7 +10,7 @@ github:
   mode: actions        # or app, or off
   comment: true
   fork_policy: label
-  teardown_on: [closed, merged]
+  teardown_on: [close, merge, ttl]
 ```
 
 ## Two modes
@@ -41,13 +41,20 @@ branch, the commit, the duration and the golden it branched from.
 It also carries what the data said. Every invariant the manifest declares is
 asked after the workflows, and a violated one puts the violating rows in the
 comment and the failure in the headline, so a run where every workflow passed
-and the data is broken does not read as a pass. The insights summary is meant
-to join it and does not appear yet.
+and the data is broken does not read as a pass.
+
+And it carries what this change does to the database and the network: the
+migrations rehearsed against a branch of the golden, the locks they held, what
+Postgres rewrote, the lint findings, the plans that changed, the hosts the
+environment reached for, whether the branch read back masked, and what teardown
+removed. Each of those is ranked by the manifest's
+[policy block](/docs/concepts/verdicts/), worst first, and the ones set to
+`fail` are what stop the merge.
 
 ## Forks
 
 ```yaml
-  fork_policy: label     # none, label, or all
+  fork_policy: label     # never, label, or always
 ```
 
 A pull request from a fork runs code somebody outside your organisation wrote,
@@ -55,19 +62,20 @@ against an environment holding a masked copy of your data with real sandbox
 credentials in the proxy.
 
 `label` is the default and the right one: nothing runs until a maintainer adds
-the label, which is a person deciding. `none` refuses forks. `all` runs
+the label, which is a person deciding. `never` refuses forks. `always` runs
 everything, and is only reasonable for a repository where every contributor
 already has write access.
 
 ## Teardown
 
 ```yaml
-  teardown_on: [closed, merged]
+  teardown_on: [close, merge, ttl]
 ```
 
 An environment that outlives its pull request is the leak this product exists
-to prevent. Both events are listed because a merged pull request is closed and
-a closed one may never be merged.
+to prevent. Close and merge are both listed because a merged pull request is
+closed and a closed one may never be merged, and `ttl` bounds the case where
+neither happens.
 
 ## Signature verification
 

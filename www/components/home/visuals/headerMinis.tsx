@@ -253,76 +253,6 @@ function SafetyReportMini() {
   );
 }
 
-function ChangeIntelligenceMini() {
-  return (
-    <Svg>
-      <text x="12" y="18" fill="rgba(0,0,0,0.4)" fontFamily={SANS} fontSize="7">
-        app.ts
-      </text>
-      <text x="12" y="34" fill={INK} fontFamily={SANS} fontSize="7">
-        migrate.sql
-      </text>
-      <g className="mini-high">
-        <rect x="62" y="22" width="22" height="14" fill={CREAM} stroke="#dc2626" strokeWidth="1" />
-        <text x="73" y="32" textAnchor="middle" fill="#b91c1c" fontFamily={SANS} fontSize="6.5">
-          HIGH
-        </text>
-      </g>
-      <line x1="12" y1="44" x2="84" y2="44" stroke="rgba(0,0,0,0.1)" />
-      <text x="12" y="56" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
-        migration detected
-      </text>
-    </Svg>
-  );
-}
-
-function DifferentialOracleMini() {
-  return (
-    <Svg>
-      <line x1="12" y1="32" x2="82" y2="32" stroke={GREEN} strokeWidth="1.4" />
-      <circle cx="20" cy="32" r="2.2" fill={GREEN} />
-      <path d="M36 32 C36 24, 36 18, 46 18 H70" fill="none" stroke={GREEN} strokeWidth="1.2" strokeDasharray="2 3" />
-      <path d="M56 32 C56 40, 56 46, 66 46 H80" fill="none" stroke={GREEN} strokeWidth="1.2" strokeDasharray="2 3" />
-      <rect className="mini-hit" x="46" y="13" width="22" height="10" rx="5" fill="#111" />
-      <circle cx="74" cy="18" r="2.6" fill="#dc2626" />
-      <circle cx="78" cy="46" r="2.6" fill={GREEN} />
-    </Svg>
-  );
-}
-
-function FidelityGraphMini() {
-  const rows = [
-    { label: "svc", w: 50 },
-    { label: "pg", w: 10 },
-    { label: "3p", w: 38 },
-    { label: "cov", w: 44 },
-  ];
-  return (
-    <Svg>
-      {rows.map((row, i) => {
-        const y = 10 + i * 12;
-        return (
-          <g key={row.label}>
-            <text x="10" y={y + 7} fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
-              {row.label}
-            </text>
-            <rect x="28" y={y} width="56" height="8" fill="rgba(0,0,0,0.06)" />
-            <rect
-              className="mini-bar"
-              x="28"
-              y={y}
-              width={row.w}
-              height="8"
-              fill={GREEN}
-              style={{ ["--stagger" as `--stagger`]: i } as CSSProperties}
-            />
-          </g>
-        );
-      })}
-    </Svg>
-  );
-}
-
 function ArchitectureMini() {
   return (
     <Svg>
@@ -348,12 +278,9 @@ const MINIS: Record<string, () => ReactNode> = {
   "Isolated Twin": IsolatedTwinMini,
   "Safe State": SafeStateMini,
   "Side-Effect Firewall": FirewallMini,
-  "Workload Studio": WorkloadMini,
+  Load: WorkloadMini,
   "Migration Safety": MigrationMini,
   "Safety Report": SafetyReportMini,
-  "Change Intelligence": ChangeIntelligenceMini,
-  "Differential Oracle": DifferentialOracleMini,
-  "Fidelity Graph": FidelityGraphMini,
   Architecture: ArchitectureMini,
 };
 

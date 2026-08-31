@@ -18,6 +18,63 @@ attestation.
   bring the repository into compliance.
 ```
 
+## Writing the policy down
+
+A policy is a YAML document, and the engine reads it from the path in
+`AF_ORG_POLICY_FILE`:
+
+```sh
+export AF_ORG_POLICY_FILE=/etc/antifailure/policy.yaml
+```
+
+```yaml
+# Every key is a restriction. There is no key that grants anything.
+required_masked_columns:
+  - "*.email"
+  - "customers.card_number"
+denied_hosts:
+  - api.stripe.com
+allowed_modes:
+  - block
+  - capture
+  - mock
+synth_requires_approval: true
+allowed_providers:
+  - neon
+allowed_regions:
+  - westeurope
+```
+
+`required_masked_columns` is `table.column` with `*` allowed in either part. A
+pattern that matches no column in the database counts as unsatisfied, because a
+policy that quietly passes when the thing it protects is absent stops protecting
+the moment somebody renames a table.
+
+`denied_hosts` refuses a host named in any mode other than `block`. A repository
+may still write a `block` rule for one, so that it can document what it
+deliberately refuses.
+
+The engine prints which rules are in force at startup, on standard error:
+
+```
+af: organization policy: egress deny list (1 hosts)
+af: organization policy: required masking (*.email, customers.card_number)
+```
+
+A file you named that cannot be read, cannot be parsed, or carries a key this
+build does not know stops the engine with the reason. That is deliberate:
+starting anyway means every environment is created without being checked and
+nothing in the output says so, which is exactly the behaviour the policy exists
+to change.
+
+Setting nothing registers nothing and prints nothing, which is the ordinary
+case for an installation with no organization policy.
+
+Approvals live in the control plane and this file does not carry them, so
+`synth_requires_approval` refuses every synth rule when the engine reads its
+policy from a file. A lookup that answered "approved" because it had nowhere to
+ask would turn the rule into decoration.
+
 ## Where it runs
 
 The check happens before anything is created, not after. A policy that refused

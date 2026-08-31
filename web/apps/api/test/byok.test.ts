@@ -25,7 +25,7 @@ import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import { createServer as createHttpServer, type Server } from 'node:http'
 import { available, startApi, seedOrg, dropOrg, type ApiHarness, type Org } from './harness.ts'
-import { saveKey, setBudget, listBudgets } from '../src/providers/store.ts'
+import { saveKey, setBudget, listBudgets, borrowKey, recordSpend } from '../src/providers/store.ts'
 import { costOf, pricesFrom, PricingError, usageFrom, DEFAULT_PRICES } from '../src/providers/pricing.ts'
 
 const ANTHROPIC = ['sk', 'ant', 'api03'].join('-')
@@ -347,5 +347,57 @@ describe('spending a key against a budget', {
     const body = { model: 'test-model', messages: [{ role: 'user', content: 'héllo 🎉' }], max_tokens: 64 }
     await call(await engineToken(), body)
     assert.deepEqual(JSON.parse(seen[0]!.body), body)
+  })
+
+  // -------------------------------------------------------------------------
+  // The month boundary. A budget row is keyed on (org, provider, period), and
+  // the two halves of one call read the period separately: borrowKey when the
+  // request goes out, recordSpend when it comes back. A request that starts on
+  // the last minute of a month and finishes on the first minute of the next one
+  // reads two different periods, and the row for the second does not exist yet.
+  // -------------------------------------------------------------------------
+
+  test('a call that crosses a month boundary is charged to the month that allowed it', async () => {
+    // Clock at 2026-01-31T23:59:30Z. The cap is set for January and the call is
+    // authorised against January.
+    const toJanuary = new Date('2026-01-31T23:59:30.000Z').getTime() - api.clock.now().getTime()
+    api.clock.advance(toJanuary)
+    await ready(100)
+
+    const borrowed = await borrowKey(api.pool, api.clock, sealingKey, {
+      orgId: org.orgId, provider: 'anthropic',
+    })
+    assert.equal(borrowed.budget.period, '2026-01-01')
+
+    // The provider took a minute to answer, which is ordinary for a long
+    // completion, and the month turned over while it did.
+    api.clock.advance(60_000)
+    await recordSpend(api.pool, api.clock, {
+      orgId: org.orgId, provider: 'anthropic', usd: 7, period: borrowed.budget.period,
+    })
+
+    const [row] = await api.admin<{ spent_usd: string }[]>`
+      SELECT spent_usd FROM provider_budgets
+      WHERE org_id = ${org.orgId} AND provider = 'anthropic' AND period = '2026-01-01'`
+    assert.ok(row, 'the January budget row is gone')
+    // Before the fix this was 0. recordSpend read February, February had no
+    // row, the UPDATE matched nothing, and the money was spent and recorded
+    // nowhere. Nothing threw, nothing logged, and the cap that authorised the
+    // spend never learned about it.
+    assert.equal(Number(row!.spent_usd), 7)
+  })
+
+  test('spend that lands nowhere is an error rather than a silent zero', async () => {
+    // The general form. An UPDATE that matches no row is indistinguishable from
+    // one that matched, so the only way a lost charge can be noticed is if the
+    // statement says how many rows it touched. Nothing has ever set a cap for
+    // this period, so there is nothing for the UPDATE to hit.
+    await ready(100)
+    await assert.rejects(
+      () => recordSpend(api.pool, api.clock, {
+        orgId: org.orgId, provider: 'anthropic', usd: 3, period: '2029-03-01',
+      }),
+      /no budget row/i,
+    )
   })
 })

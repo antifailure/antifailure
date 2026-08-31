@@ -7,7 +7,7 @@ const ITEMS = [
   {
     icon: "failclosed" as const,
     title: "Fail closed",
-    description: "Unknown destinations, missing sanitization evidence, or failed cleanup cannot ship.",
+    description: "An unverified golden cannot be branched, and inside the twin there is no route out.",
     className: "w-[216px] max-xl:w-48",
   },
   {
@@ -36,7 +36,7 @@ export function Trust() {
               )}
             >
               <strong>Fail closed. Customer-hosted.</strong> Production data stays in your
-              boundary. Cleanup is a first-class safety property, not a best-effort script.
+              boundary. Cleanup is journaled as it happens, not reconstructed afterwards.
             </h2>
             <ul className="mt-16 flex gap-[92px] max-xl:mt-12 max-xl:gap-10 max-md:flex-col max-md:gap-7">
               {ITEMS.map((item) => (

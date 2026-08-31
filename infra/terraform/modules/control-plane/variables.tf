@@ -308,3 +308,27 @@ variable "key_vault_name" {
     error_message = "A Key Vault name is 3 to 24 characters, alphanumerics and hyphens, starts with a letter and does not end with a hyphen."
   }
 }
+
+# --- the public name ------------------------------------------------------
+#
+# Empty means the app serves only its generated
+# <name>-app.<region>.azurecontainerapps.io address, which is a supported state
+# and is what every installation starts as. Set all three together: a custom
+# domain with no zone is a name Terraform cannot create a record for.
+variable "custom_domain" {
+  type        = string
+  default     = ""
+  description = "The public name to bind, for example app.antifailure.dev. Empty binds nothing."
+}
+
+variable "dns_zone_name" {
+  type        = string
+  default     = ""
+  description = "The Azure DNS zone that holds custom_domain, for example antifailure.dev."
+}
+
+variable "dns_zone_resource_group" {
+  type        = string
+  default     = ""
+  description = "The resource group holding the zone, which is NOT this stack's group: antifailure.dev lives in af-web with the marketing site. The identity applying this stack needs DNS Zone Contributor there, and this module deliberately does not create that grant."
+}

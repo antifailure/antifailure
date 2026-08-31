@@ -18,6 +18,7 @@ const snapshot: Snapshot = {
   title: 'Pricing',
   fields: [{ name: 'Card number', type: 'text', filled: false }],
   controls: ['Choose Pro', 'Back'],
+  unnamed: 0,
   text: 'Pricing. Free or Pro.',
 };
 

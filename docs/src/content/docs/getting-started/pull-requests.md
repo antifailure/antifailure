@@ -25,8 +25,9 @@ and a step that leaves the report:
   run: af ci --output report.md
 ```
 
-`af ci` brings the environment up, runs the agents, writes the report, and
-tears down afterwards. Teardown happens whatever the outcome, including on a
+`af ci` brings the environment up, reads the branch back, runs the agents, asks
+the invariants, rehearses the migrations, writes the report, and tears down
+afterwards. Teardown happens whatever the outcome, including on a
 failed job and including on a cancelled one, because an environment that
 outlives its pull request is the leak this product exists to prevent.
 
@@ -62,8 +63,14 @@ commit, how long it took and which golden it branched from.
 
 It also carries what the data said: every
 [invariant](/docs/guides/invariants/) the manifest declares is asked after the
-workflows, and a violated one puts the offending rows in the comment. The
-insights summary is meant to join it and does not appear yet.
+workflows, and a violated one puts the offending rows in the comment.
+
+And it carries what this change does to the database. The pending migrations
+are rehearsed against a throwaway branch of the golden, and the comment names
+what they locked and for how long, what Postgres rewrote, and what the
+[lint](/docs/concepts/insights/) objected to. A lock held past two seconds
+fails the check by default; a rewrite warns. The
+[policy block](/docs/concepts/verdicts/) is where you change that.
 
 It edits that comment in place on the next push rather than adding another. A
 bot that comments on every push is a bot people mute, and a muted bot reports

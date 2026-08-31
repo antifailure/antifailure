@@ -42,6 +42,35 @@ func TestSources_CarryEverythingTheBuildNeeds(t *testing.T) {
 	require.Contains(t, proxyimage.Sources, "pkg/schema/manifest.go")
 }
 
+func TestSources_CarryEveryFileInTheSidecarsPackage(t *testing.T) {
+	t.Parallel()
+	// The list in tools/proxysrc is written by hand, and a file added to
+	// cmd/af-proxy that nobody adds to it is not packaged. Nothing noticed:
+	// the engine builds, its tests pass against the real package, and the
+	// image build fails inside the daemon minutes later with an undefined
+	// symbol. That is exactly what happened when the address guard was added,
+	// and it is the kind of failure that reads as a broken Docker rather than
+	// as a missing line in a generator.
+	root := engineRoot(t)
+	dir := filepath.Join(root, "cmd", "af-proxy")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		// Checked by lookup rather than with Contains, because a failing
+		// Contains on this map prints every byte of the sidecar's source at
+		// somebody trying to read one missing filename.
+		if _, ok := proxyimage.Sources["cmd/af-proxy/"+name]; !ok {
+			t.Errorf("cmd/af-proxy/%s is part of the sidecar and is not packaged into its "+
+				"image. Add it to sources in tools/proxysrc and run 'go run ./tools/proxysrc'.", name)
+		}
+	}
+}
+
 func TestSources_ImportNothingOutsideTheStandardLibrary(t *testing.T) {
 	t.Parallel()
 	// The build inside the image downloads no modules, which is what lets it

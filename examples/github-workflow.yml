@@ -10,10 +10,47 @@ name: Antifailure
 on:
   pull_request:
 
+  # The hosted control plane's verbs. `environments.create`, `agents.run` and
+  # `load.run` in the console do not run anything themselves: they ask GitHub to
+  # run THIS workflow, on the branch the environment is on, with these inputs.
+  # That is the only way a hosted button can start work without a masked copy of
+  # your database and your credentials leaving your own cloud.
+  #
+  # Two things about this that are easy to get wrong and cost an afternoon.
+  # Without this block a dispatch answers 404, indistinguishable from the App
+  # not being installed. And GitHub reads the trigger list from the DEFAULT
+  # branch, so adding this on a feature branch alone does nothing at all.
+  #
+  # Delete it if you do not use the hosted control plane. `af ci` on a pull
+  # request needs none of it.
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Which part to run
+        required: true
+        default: up
+        type: choice
+        options: [up, agents, load]
+      workflows:
+        description: Comma separated workflow names for agents. Empty means all of them.
+        required: false
+        default: ''
+      duration:
+        description: How long to send load for, as a Go duration such as 60s.
+        required: false
+        default: ''
+      scale:
+        description: Multiplier on production's rate, for load.
+        required: false
+        default: ''
+
 # One environment per branch. A second push replaces the first rather than
 # running beside it and fighting it for container names.
 concurrency:
-  group: antifailure-${{ github.head_ref }}
+  # github.head_ref is empty on anything that is not a pull request, so a
+  # dispatch would otherwise share one group called `antifailure-` with every
+  # other dispatch and cancel it.
+  group: antifailure-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -32,8 +69,19 @@ jobs:
         run: curl -fsSL https://antifailure.dev/install.sh | sh
 
       - name: Run the check
-        run: af ci --report report.md
+        # A pull request runs the whole check. A dispatch runs the third of it
+        # the console asked for, because `af ci` would bring up an environment,
+        # run the agents and tear it down again, which is not what somebody
+        # pressing "Run agents" against a running environment asked for.
+        #
+        # The inputs go through the environment rather than into the script
+        # text. A `${{ inputs.workflows }}` interpolated into a run block is a
+        # shell injection from anybody who can dispatch this workflow.
         env:
+          AF_COMMAND: ${{ inputs.command || 'ci' }}
+          AF_WORKFLOWS: ${{ inputs.workflows }}
+          AF_DURATION: ${{ inputs.duration }}
+          AF_SCALE: ${{ inputs.scale }}
           # Bring your own key. Without one the agents still run; workflows
           # that need a page read come back unverified rather than guessed at.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -43,6 +91,39 @@ jobs:
           # Set this so every runner produces the same masking, and two
           # goldens can be compared. Left unset, each machine generates its own.
           AF_MASKING_KEY: ${{ secrets.AF_MASKING_KEY }}
+        run: |
+          set -euo pipefail
+          case "$AF_COMMAND" in
+            up)
+              # No branch flag: the dispatch ran on the branch the environment
+              # belongs to, so the checked out one is already right.
+              af up
+              ;;
+            agents)
+              args=()
+              # `|| true`, and `if` rather than `[ ... ] && ...`, because both
+              # of those return non zero on the ordinary empty case and set -e
+              # would end the job there with no output at all.
+              IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
+              for name in "${names[@]:-}"; do
+                if [ -n "$name" ]; then args+=(--only "$name"); fi
+              done
+              # ${args[@]+"${args[@]}"} rather than "${args[@]}": under set -u
+              # an empty array is an unbound variable on bash 3.2, which is the
+              # bash on a macOS runner, and "run everything" is the ordinary
+              # case here.
+              af test ${args[@]+"${args[@]}"}
+              ;;
+            load)
+              args=()
+              if [ -n "$AF_DURATION" ]; then args+=(--duration "$AF_DURATION"); fi
+              if [ -n "$AF_SCALE" ]; then args+=(--scale "$AF_SCALE"); fi
+              af load run ${args[@]+"${args[@]}"}
+              ;;
+            *)
+              af ci --output report.md
+              ;;
+          esac
 
       - name: Leave the report on the pull request
         # Always, because the report of a failing run is the one worth reading.

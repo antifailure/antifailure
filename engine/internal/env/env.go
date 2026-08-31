@@ -68,6 +68,29 @@ type Options struct {
 	Clock clock.Clock
 	// Progress receives human readable lines, already redacted.
 	Progress func(string)
+	// BuildRoot is the tree images are built from. Empty means Root.
+	//
+	// The oracle is the only caller that sets it. It brings a second
+	// environment up from a checkout of an older revision, and everything
+	// except the source being compiled has to stay the same or the comparison
+	// measures the harness instead of the change: the same manifest, the same
+	// secrets, the same egress policy, the same personas.
+	//
+	// Splitting the build context out rather than the whole root is what keeps
+	// the journal, the state database and the artifacts in the repository. A
+	// journal inside a directory the run deletes afterwards is a journal
+	// teardown cannot read, and an environment nobody can tear down is the leak
+	// this product exists to prevent.
+	BuildRoot string
+	// PinGolden forces the database branch to come from this golden version
+	// instead of the newest verified one, and suppresses the scheduled refresh.
+	//
+	// Also the oracle's. Both sides of a comparison have to branch ONE golden
+	// or the diff is a diff of two different databases, and the refresh that
+	// ordinarily runs between two environments coming up would silently make
+	// them two. The candidate comes up first and the baseline is pinned to
+	// whatever the candidate used.
+	PinGolden string
 	// Rebuild forces images to be built even when an identical one exists.
 	Rebuild bool
 	// Verbose streams the full build output.
@@ -162,6 +185,14 @@ func trimForName(s string, max int) string {
 
 // EnvID reports the identifier this orchestrator works on.
 func (o *Orchestrator) EnvID() string { return o.envID }
+
+// buildRoot is the tree images are built from.
+func (o *Orchestrator) buildRoot() string {
+	if o.opts.BuildRoot != "" {
+		return o.opts.BuildRoot
+	}
+	return o.opts.Root
+}
 
 // AddSink subscribes something to the event stream for every lifecycle this
 // orchestrator runs from now on.
@@ -1435,6 +1466,28 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			aferrors.Coded(aferrors.AFDB012, "count", fmt.Sprint(refused))
 	}
 
+	// A pinned version replaces the choice and skips the refresh below.
+	// Refused rather than fallen back on when it is gone or unverified: the
+	// caller pinned it because a second environment already branched it, and
+	// quietly using a different one would produce a comparison between two
+	// databases that were never the same. That is the failure mode the
+	// rehearsal branch in insights.go carries the same warning about.
+	if pinned := o.opts.PinGolden; pinned != "" {
+		version = ""
+		for _, g := range goldens {
+			if g.ID == pinned && g.Verified {
+				version = g.ID
+				break
+			}
+		}
+		if version == "" {
+			return "", zero, secrets.Value{}, secrets.Value{}, aferrors.Coded(
+				aferrors.AFORC009, "version", pinned)
+		}
+		o.progress("branching the database from " + version + ", pinned by the caller")
+		return o.branchFrom(ctx, s, version)
+	}
+
 	// A cron expression on a laptop has nothing to fire it, so the next
 	// command that would use a golden asks whether one was due since the last
 	// refresh. That is what makes database.golden.schedule and max_age
@@ -1503,6 +1556,19 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			events.F("phase", "golden"), events.F("version", version),
 			events.F("verified", true))
 	}
+	return o.branchFrom(ctx, s, version)
+}
+
+// branchFrom creates this environment's branch of a chosen golden.
+//
+// Split out of database so that a pinned version takes exactly the same path
+// as a chosen one. Two copies of the journal, branch and connection string
+// sequence would be two places to forget to record an intent, and a branch
+// created before its journal entry is a branch teardown cannot find.
+func (o *Orchestrator) branchFrom(
+	ctx context.Context, s *session, version string,
+) (string, provider.Branch, secrets.Value, secrets.Value, error) {
+	var zero provider.Branch
 	o.progress("branching the database from " + version)
 	o.event(s, events.DBBranching, "branching from "+version,
 		events.F("phase", "branching"), events.F("version", version))
@@ -1560,7 +1626,7 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 func (o *Orchestrator) buildServices(
 	ctx context.Context, s *session,
 ) ([]provider.ServiceSpec, int, int, error) {
-	ig, err := readIgnore(o.opts.Root)
+	ig, err := readIgnore(o.buildRoot())
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -1628,7 +1694,20 @@ func readIgnore(root string) (*build.Ignore, error) {
 func (o *Orchestrator) buildOne(
 	ctx context.Context, s *session, svc schema.Service, ig *build.Ignore,
 ) (string, bool, error) {
-	root := o.opts.Root
+	return o.buildOneFrom(ctx, s, o.buildRoot(), svc, ig)
+}
+
+// buildOneFrom builds a service out of a tree that is not necessarily this
+// repository's working copy.
+//
+// The root is a parameter because the rolling deploy check builds the PREVIOUS
+// commit's services out of an exported copy of that commit. Everything else
+// about the build is identical, including the image reference, which is
+// derived from the build context's digest and so distinguishes the two trees
+// without anybody naming them differently.
+func (o *Orchestrator) buildOneFrom(
+	ctx context.Context, s *session, root string, svc schema.Service, ig *build.Ignore,
+) (string, bool, error) {
 	dir := strings.Trim(filepath.ToSlash(svc.Path), "/")
 	o.event(s, events.BuildStarted, svc.Name+": build starting", events.F("service", svc.Name))
 
@@ -1920,6 +1999,12 @@ func (o *Orchestrator) teardown(ctx context.Context, s *session, envID string) *
 		td.Removed++
 		o.progress("removed the database branch")
 	}
+
+	// The rolling deploy check's own environments, which carry identifiers of
+	// their own so the sweep above does not see them. They exist only while
+	// that check is running, which means they are here for exactly the case
+	// that matters: a run somebody interrupted.
+	o.rollingDown(ctx, s, envID, td)
 
 	o.reconcile(ctx, s, envID, td)
 	return td

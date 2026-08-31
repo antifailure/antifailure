@@ -31,6 +31,7 @@ import (
 	"github.com/antifailure/antifailure/ee/engine/compliance"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
+	"github.com/antifailure/antifailure/ee/engine/policyenforce"
 	"github.com/antifailure/antifailure/ee/engine/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/afcli"
 	"github.com/antifailure/antifailure/engine/pkg/edition"
@@ -92,6 +93,28 @@ func main() {
 		for _, line := range secrets.Describe(ctx, registered) {
 			fmt.Fprintf(os.Stderr, "af: secret source: %s\n", line)
 		}
+	}
+
+	// The organization policy, plugged into the same registry and refused at
+	// startup for the same reason. This registration is the whole of what the
+	// policy_enforcement feature does, and it was missing: the hook was written
+	// and tested and no binary constructed one, so a licensed customer got a
+	// feature that refused nothing and a compliance control that reported no
+	// policy was configured. The comment at the top of this file already said
+	// that a policy hook nothing consults is a shippable gap, and this file was
+	// the place it was.
+	//
+	// Registered unconditionally rather than only under a licence. Hook.Check
+	// asks the licence per call, so a licence that lapses mid-process stops
+	// enforcement without a restart, and gating here instead would mean an
+	// installation that starts before its licence renews never enforces again.
+	policy, err := policyenforce.RegisterFromEnvironment(extension.Default, os.Getenv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "af: %v\n", err)
+		os.Exit(3)
+	}
+	for _, rule := range policyenforce.Rules(policy) {
+		fmt.Fprintf(os.Stderr, "af: organization policy: %s\n", rule)
 	}
 	if warning := status.Warning; warning != "" {
 		fmt.Fprintf(os.Stderr, "af: %s\n", warning)

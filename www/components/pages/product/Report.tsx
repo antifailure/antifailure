@@ -1,9 +1,95 @@
 import { PageHeading, PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
 import { ReportScene } from "@/components/home/visuals/ReportScene";
-import { Hairline, Panel, StatusPill } from "@/components/home/visuals/primitives";
+import { Illustrative } from "@/components/layout/Illustrative";
+import { Hairline, MonoLabel, Panel, StatusPill } from "@/components/home/visuals/primitives";
 import { cn } from "@/lib/cn";
 
-type Tone = "PASS" | "WARN" | "BLOCK";
+type Tone = "PASS" | "FAIL" | "UNVERIFIED";
+
+/**
+ * The five verdicts a workflow can return, in the engine's own words.
+ *
+ * They are the product's vocabulary, not a marketing one: the strings come
+ * from runner/src/verdict.ts and the sentences from report.go's Headline. The
+ * page used to say "pass, warning, or block", which was two words the engine
+ * has never produced and one that means the opposite of what it said here.
+ */
+const VERDICTS: { verdict: string; tone: Tone; title: string; body: string }[] = [
+  {
+    verdict: "pass",
+    tone: "PASS",
+    title: "It did what you said it would",
+    body: "The workflow reached the outcome the manifest declared, and every invariant held.",
+  },
+  {
+    verdict: "fail",
+    tone: "FAIL",
+    title: "The change broke something",
+    body: "An expectation was not met, or the application errored. This is the only verdict that exits non-zero.",
+  },
+  {
+    verdict: "flaky",
+    tone: "UNVERIFIED",
+    title: "It passed only sometimes",
+    body: "It passed on some attempts and failed on others. Something is wrong, and it is not reliable enough to call either way.",
+  },
+  {
+    verdict: "blocked",
+    tone: "UNVERIFIED",
+    title: "It could not be carried through",
+    body: "The runner could not drive the application, or the environment owed the workflow something it never got. Never the application's fault, and the check says so.",
+  },
+  {
+    verdict: "unverified",
+    tone: "UNVERIFIED",
+    title: "It ran without proving anything",
+    body: "The workflow touched a response a model invented, so the result cannot be trusted either way.",
+  },
+];
+
+/** The sections af ci actually writes, in the order it writes them. */
+const CONTENTS: { label: string; value: string; tone: Tone; pill?: string }[] = [
+  {
+    label: "Workflows",
+    value: "4 passed, 1 failed, with the trace and the video behind the failure",
+    tone: "FAIL",
+  },
+  {
+    label: "Invariants",
+    value: "no account has two active subscriptions: 3 rows returned, listed in full",
+    tone: "FAIL",
+  },
+  {
+    label: "Reproduction",
+    value: "the steps to see the failure yourself, folded under the comment",
+    tone: "PASS",
+    pill: "PASS",
+  },
+  {
+    label: "Outbound",
+    value: "18 allowed, 2 captured, 1 mocked, 1 refused host nothing in the manifest mentions",
+    tone: "PASS",
+    pill: "PASS",
+  },
+  {
+    label: "Load",
+    value: "2,140 requests at 18 a second, p95 412ms on a route production serves in 180ms",
+    tone: "PASS",
+    pill: "PASS",
+  },
+  {
+    label: "Golden",
+    value: "branched from a verified golden, which is the only kind that can be branched",
+    tone: "PASS",
+    pill: "PASS",
+  },
+];
+
+const CI_CHECKS: { name: string; time: string }[] = [
+  { name: "Lint / typecheck", time: "12s" },
+  { name: "Unit tests", time: "1m 04s" },
+  { name: "Docker build", time: "2m 11s" },
+];
 
 const GATES: {
   tone: Tone;
@@ -16,68 +102,22 @@ const GATES: {
     tone: "PASS",
     pr: "pr/182",
     title: "expand-and-contract",
-    evidence: "lock 0.4s · rollback feasible · fidelity 87%",
+    evidence: "5 workflows passed, 2 invariants held",
     merge: "Merge ready",
   },
   {
-    tone: "WARN",
-    pr: "pr/183",
-    title: "index on access_tier",
-    evidence: "p95 +18% · checkout intact · no exclusive lock",
-    merge: "Merge with approval",
-  },
-  {
-    tone: "BLOCK",
+    tone: "FAIL",
     pr: "pr/184",
     title: "add billing_status default",
-    evidence: "ACCESS EXCLUSIVE 27.4s · rolling rollback unsafe",
-    merge: "Merge disabled",
-  },
-];
-
-const CI_CHECKS: { name: string; time: string }[] = [
-  { name: "Lint / typecheck", time: "12s" },
-  { name: "Unit tests", time: "1m 04s" },
-  { name: "Docker build", time: "2m 11s" },
-];
-
-const EVIDENCE: { label: string; value: string; tone: Tone; pill?: string }[] = [
-  { label: "Exclusive lock", value: "27.4s ACCESS EXCLUSIVE on subscriptions · policy 2s", tone: "BLOCK" },
-  { label: "Unknown egress", value: "0 attempts · attempted-effect ledger clean", tone: "PASS" },
-  { label: "p95 latency", value: "+18% vs baseline under equivalent traffic · policy +15%", tone: "WARN" },
-  { label: "Fidelity", value: "87% reproduced · approval threshold 80%", tone: "PASS" },
-  { label: "Sanitization", value: "attested inside the customer boundary", tone: "PASS" },
-  { label: "Cleanup proof", value: "14/14 destroyed · sha256:c7e91a4b0e2f14f0", tone: "PASS" },
-];
-
-const POLICIES: { tone: Tone; pill: string; rule: string; title: string; body: string }[] = [
-  {
-    tone: "BLOCK",
-    pill: "BLOCK",
-    rule: "lock > 2s",
-    title: "Exclusive lock on a critical table",
-    body: "Block if an exclusive lock exceeds two seconds. A 27-second ACCESS EXCLUSIVE on subscriptions is a merge block, not a log line.",
+    evidence: "checkout failed, 3 rows broke an invariant",
+    merge: "Check failed, exit 1",
   },
   {
-    tone: "BLOCK",
-    pill: "BLOCK",
-    rule: "unknown egress",
-    title: "Unknown external egress",
-    body: "Block if the twin attempts an unknown destination. Fail closed. Convenience must not silently override containment.",
-  },
-  {
-    tone: "WARN",
-    pill: "WARN",
-    rule: "p95 +15%",
-    title: "Latency against baseline",
-    body: "Warn if candidate p95 increases by more than 15% versus baseline under equivalent traffic.",
-  },
-  {
-    tone: "WARN",
-    pill: "APPROVE",
-    rule: "fidelity < 80%",
-    title: "Fidelity below threshold",
-    body: "Require approval if twin fidelity is below 80%. A number you cannot inspect is not a fidelity score.",
+    tone: "UNVERIFIED",
+    pr: "pr/185",
+    title: "index on access_tier",
+    evidence: "the twin never came up, nothing counts against the change",
+    merge: "Exit 0, nothing proven",
   },
 ];
 
@@ -87,8 +127,8 @@ function ToneDot({ tone }: { tone: Tone }) {
       className={cn(
         "size-1.5 shrink-0 rounded-full",
         tone === "PASS" && "bg-[#33bf00]",
-        tone === "WARN" && "bg-amber-600",
-        tone === "BLOCK" && "bg-red-600",
+        tone === "UNVERIFIED" && "bg-black/30",
+        tone === "FAIL" && "bg-red-600",
       )}
       aria-hidden
     />
@@ -112,8 +152,8 @@ function GateCard({ tone, pr, title, evidence, merge }: (typeof GATES)[number]) 
         className={cn(
           "px-4 py-2.5 font-mono text-[10px] tracking-extra-tight",
           tone === "PASS" && "text-[#285D49]",
-          tone === "WARN" && "text-amber-800",
-          tone === "BLOCK" && "text-black/35",
+          tone === "UNVERIFIED" && "text-black/45",
+          tone === "FAIL" && "text-red-700",
         )}
       >
         {merge}
@@ -134,7 +174,7 @@ function PrCheckChrome() {
         </div>
         <div className="flex items-center gap-2">
           <span className="font-mono text-[10px] tracking-extra-tight text-black/40">required · 1 of 4</span>
-          <StatusPill tone="BLOCK">BLOCK</StatusPill>
+          <StatusPill tone="FAIL">FAIL</StatusPill>
         </div>
       </div>
       <Hairline />
@@ -157,44 +197,69 @@ function PrCheckChrome() {
       <Hairline />
 
       <div className="px-4 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 items-start gap-2">
-              <ToneDot tone="BLOCK" />
-              <div className="min-w-0">
-                <div className="font-mono text-[12px] tracking-extra-tight text-black">
-                  Antifailure / deployment safety
-                </div>
-                <div className="mt-0.5 font-mono text-[10px] tracking-extra-tight text-black/40">
-                  candidate vs baseline · 4m 12s
-                </div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-2">
+            <ToneDot tone="FAIL" />
+            <div className="min-w-0">
+              <div className="font-mono text-[12px] tracking-extra-tight text-black">
+                Antifailure / deployment safety
+              </div>
+              <div className="mt-0.5 font-mono text-[10px] tracking-extra-tight text-black/40">
+                env-08f2 · 4m 12s
               </div>
             </div>
-            <StatusPill tone="BLOCK">BLOCK</StatusPill>
           </div>
-
-          <p className="mt-4 font-mono text-[13px] tracking-extra-tight text-black">
-            BLOCKED: unsafe schema migration
-          </p>
-          <p className="mt-2 max-w-[640px] font-mono text-[11px] leading-5 tracking-extra-tight text-black/65">
-            Migration 20260824_add_billing_status held an ACCESS EXCLUSIVE lock on subscriptions for 27.4s.
-            Checkout p99 820ms → 6.9s; 11.8% of upgrades timed out. Previous binary cannot deserialize
-            candidate rows — rolling rollback is unsafe.
-          </p>
-          <div className="mt-3">
-            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/35">Suggested action</div>
-            <p className="mt-1 font-mono text-[11px] leading-5 tracking-extra-tight text-black">
-              nullable, no default · batch backfill · dual-read compatibility · constrain later
-            </p>
-          </div>
+          <StatusPill tone="FAIL">FAIL</StatusPill>
         </div>
+
+        <p className="mt-4 font-mono text-[13px] tracking-extra-tight text-black">
+          1 workflow failed, and 1 invariant did not hold.
+        </p>
+        <p className="mt-2 max-w-[640px] font-mono text-[11px] leading-5 tracking-extra-tight text-black/65">
+          Invariant `one_active_subscription` does not hold. No account has more than one active
+          subscription row.
+        </p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[380px] text-left font-mono text-[11px] tracking-extra-tight tabular-nums">
+            <thead>
+              <tr className="text-black/40">
+                <th className="py-1 pr-6 font-normal">account_id</th>
+                <th className="py-1 pr-6 font-normal">active</th>
+                <th className="py-1 font-normal">latest</th>
+              </tr>
+            </thead>
+            <tbody className="text-black/70">
+              {[
+                ["acct_00418", "2", "sub_9c41"],
+                ["acct_02277", "2", "sub_a180"],
+                ["acct_09903", "3", "sub_b774"],
+              ].map((row) => (
+                <tr key={row[0]} className="border-t border-black/[0.06]">
+                  <td className="py-1 pr-6">{row[0]}</td>
+                  <td className="py-1 pr-6">{row[1]}</td>
+                  <td className="py-1">{row[2]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/35">
+            How to see it yourself
+          </div>
+          <p className="mt-1 font-mono text-[11px] leading-5 tracking-extra-tight text-black">
+            open /settings/billing · click Upgrade · submit · trace.zip · video.webm
+          </p>
+        </div>
+      </div>
 
       <Hairline />
 
       <div className="px-4 py-2">
-        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/35">Evidence</div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/35">In the report</div>
       </div>
       <Hairline />
-      {EVIDENCE.map((row, i) => (
+      {CONTENTS.map((row, i) => (
         <div key={row.label}>
           {i > 0 ? <Hairline /> : null}
           <div className="flex items-center justify-between gap-4 px-4 py-2.5">
@@ -212,7 +277,7 @@ function PrCheckChrome() {
         <div>
           <div className="font-mono text-[12px] tracking-extra-tight text-black/35">Merge pull request</div>
           <div className="mt-0.5 font-mono text-[10px] tracking-extra-tight text-black/30">
-            inert · required check BLOCKED
+            inert · required check failed
           </div>
         </div>
         <span className="border border-black/[0.08] bg-white px-2.5 py-1 font-mono text-[10px] tracking-extra-tight text-black/30">
@@ -229,8 +294,8 @@ export function ReportPage() {
       <PageHero
         path="/product/report"
         eyebrow="Safety Report and Release Gate"
-        title="Pass, warning, or block. With evidence."
-        lead="Overall decision, fidelity, migration findings, functional and performance regressions, attempted external effects, sanitization status, and cleanup proof."
+        title="Pass or fail, with evidence."
+        lead="The overall decision, every workflow's verdict, the rows behind an invariant that did not hold, the steps and the trace and the video to see a failure yourself, a summary of every outbound attempt including the denials, and latency against the p95 production serves each route in."
       />
 
       <PageSection>
@@ -239,13 +304,46 @@ export function ReportPage() {
           title="<strong>It looks like a GitHub check</strong> because that is the product surface."
         />
         <ReportScene />
+        <Illustrative>
+          One shaped run, played through. The sections, the order and the headline sentence are the
+          ones <code className="font-mono text-[12px] text-black/70">af ci</code> writes. The
+          numbers in it were chosen, not measured.
+        </Illustrative>
+      </PageSection>
+
+      <PageSection tone="white">
+        <PageHeading
+          kicker="Five verdicts"
+          title="<strong>A run that could not answer says so</strong> instead of blaming the change."
+        />
+        <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
+          A gate with two outcomes has to call our own outage your bug. This one does not. Only
+          <span className="text-black"> fail</span> exits non-zero, and only fail means the change
+          broke something. The other three say, in the comment, exactly which of them happened.
+        </p>
+        <ul className="mt-14 grid grid-cols-3 gap-x-16 gap-y-12 max-xl:grid-cols-2 max-xl:gap-x-10 max-md:grid-cols-1 max-md:gap-y-8">
+          {VERDICTS.map((item) => (
+            <li key={item.verdict} className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="font-mono text-[13px] tracking-extra-tight text-black">{item.verdict}</span>
+                <StatusPill tone={item.tone} />
+              </div>
+              <h3 className="mt-4 text-[18px] leading-snug tracking-extra-tight text-black">{item.title}</h3>
+              <p className="mt-2 max-w-[320px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+                {item.body}
+              </p>
+            </li>
+          ))}
+        </ul>
       </PageSection>
 
       <PageSection>
         <PageHeading title="<strong>Attached to the pull request.</strong> Not a dataset. Not a preview URL." />
-        <p className="mt-6 max-w-[540px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          “Error rate increased” is insufficient. The report connects the change, the behavior, the
-          affected workflow, the evidence, and the safer pattern — then marks the check.
+        <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
+          "Error rate increased" is insufficient. When an invariant does not hold the comment carries
+          the offending rows, because a reader who has to go and run the query has been told there is
+          a problem and not what it is. When a workflow fails it carries the steps, the Playwright
+          trace and the video.
         </p>
         <div className="mt-12 grid grid-cols-3 gap-5 max-xl:grid-cols-1">
           {GATES.map((gate) => (
@@ -255,28 +353,36 @@ export function ReportPage() {
         <div className="mt-5">
           <PrCheckChrome />
         </div>
+        <Illustrative label="Example finding">
+          An invariant violation in the shape the comment renders one: the statement's name, its
+          description, and the rows it returned. The accounts and the identifiers are invented.
+        </Illustrative>
       </PageSection>
 
       <PageSection tone="white">
-        <PageHeading title="<strong>Policy is the product surface</strong> for platform teams." />
-        <p className="mt-6 max-w-[540px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Reports that are noisy get ignored. Baseline comparisons, expected-difference declarations, and
-          severity policies keep the gate useful. Enforce them organization-wide.
+        <PageHeading title="<strong>What the report does not contain</strong> is written down too." />
+        <p className="mt-6 max-w-[640px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
+          A passing run that hides its own gaps is worth less than a failing one. Migration findings
+          come from <code className="font-mono text-[15px] text-black">af insights</code>, which is a
+          command you run rather than a section of this check. A load threshold produces a listed
+          regression here and exits non-zero under{" "}
+          <code className="font-mono text-[15px] text-black">af load</code>; the check's verdict comes
+          from the workflows and the invariants. A route the access log has never served carries no
+          baseline, and the report says "no baseline" rather than inventing one.
         </p>
-        <div className="mt-12 grid grid-cols-2 gap-5 max-xl:grid-cols-1">
-          {POLICIES.map((policy) => (
-            <Panel key={policy.rule} className="rounded-[12px] bg-white">
-              <div className="flex items-center justify-between gap-3 px-5 py-3">
-                <span className="font-mono text-[11px] tracking-extra-tight text-black/45">{policy.rule}</span>
-                <StatusPill tone={policy.tone}>{policy.pill}</StatusPill>
-              </div>
-              <Hairline />
-              <div className="px-5 py-4">
-                <h3 className="text-[18px] leading-snug tracking-extra-tight text-black">{policy.title}</h3>
-                <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">{policy.body}</p>
-              </div>
-            </Panel>
-          ))}
+        <div className="mt-12 max-w-[720px] border-t border-black/10 pt-8">
+          <MonoLabel className="uppercase tracking-[0.14em]">Thresholds that exist</MonoLabel>
+          <ul className="mt-5 space-y-3 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+            <li>
+              <span className="font-mono text-[14px] text-black">p95_increase</span>, default 0.25.
+              Applied per route, against the p95 in your own access log, and never to a route with no
+              baseline.
+            </li>
+            <li>
+              <span className="font-mono text-[14px] text-black">error_rate</span>, default 0.01.
+              Applied to the run as a whole.
+            </li>
+          </ul>
         </div>
       </PageSection>
 
@@ -284,20 +390,20 @@ export function ReportPage() {
         <PageHeading title="<strong>Center the deployment decision.</strong> Environment creation, data, agents, and load are supporting systems." />
         <div className="mt-8 flex items-center gap-2">
           <StatusPill tone="PASS" />
-          <StatusPill tone="WARN" />
-          <StatusPill tone="BLOCK" />
+          <StatusPill tone="FAIL" />
+          <StatusPill tone="UNVERIFIED" />
         </div>
         <p className="mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Every workflow and report answers whether this deployment is safe to ship under the conditions
-          that actually matter. If the product becomes a bundle of tools, it has failed.
+          Every workflow and report answers whether this deployment is safe to ship under the
+          conditions that actually matter. If the product becomes a bundle of tools, it has failed.
         </p>
       </PageSection>
 
       <RelatedGrid
         items={[
-          { href: "/product/oracle", title: "Differential Oracle", description: "Where comparisons are produced." },
-          { href: "/product/fidelity", title: "Fidelity Graph", description: "What the twin actually reproduced." },
-          { href: "/product/migrations", title: "Migration Safety", description: "The lock that becomes a GitHub check." },
+          { href: "/product/load", title: "Load", description: "Where a latency regression is measured." },
+          { href: "/product/twins", title: "Isolated Twin", description: "What the run is carried out inside." },
+          { href: "/product/migrations", title: "Migration Safety", description: "The lock that a rehearsal finds." },
         ]}
       />
     </PageShell>

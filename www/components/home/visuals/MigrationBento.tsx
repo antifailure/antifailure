@@ -26,11 +26,11 @@ const OK = "#1E7A3A";
 /**
  * Which of the two plans the panel is showing.
  *
- * The point of the whole visual is that a BLOCK is not a dead end: the run
- * names the failure AND the change that passes. So the plan is a control the
- * reader can flip, and flipping it moves the findings, the verdict and the
+ * The point of the whole visual is that a finding is not a dead end: the run
+ * names the problem AND the change that clears it. So the plan is a control
+ * the reader can flip, and flipping it moves the findings, the verdict and the
  * issue's own activity feed together. One state, read by both halves, because
- * a verdict that said READY next to an activity row that still said BLOCK
+ * a verdict that said READY next to an activity row that still said FINDING
  * would be the lie this product exists to prevent.
  */
 type Plan = "as-written" | "safer";
@@ -95,7 +95,7 @@ export function MigrationBento() {
                 color: "#3F3F3A",
               }}
             >
-              Add a nullable column on <Code>subscriptions</Code> and measure exclusive lock, checkout p99, and pool pressure before the change ships.
+              Add a nullable column on <Code>subscriptions</Code> and measure the exclusive lock, what queues behind it, and whether the table is rewritten before the change ships.
             </p>
 
             <p
@@ -315,7 +315,7 @@ function activityFor(plan: Plan): Activity[] {
         time: "just now",
         body: (
           <>
-            Policy cleared <Pill tone="block">BLOCK</Pill> · labels now <Pill tone="ok">READY</Pill> and{" "}
+            Cleared <Pill tone="block">FINDING</Pill> · labels now <Pill tone="ok">READY</Pill> and{" "}
             <Pill>Locks</Pill> · <span style={{ color: DIM }}>just now</span>
           </>
         ),
@@ -325,7 +325,7 @@ function activityFor(plan: Plan): Activity[] {
     time: "2min ago",
     body: (
       <>
-        Policy added the labels <Pill tone="block">BLOCK</Pill> and <Pill>Locks</Pill> ·{" "}
+        The run added the labels <Pill tone="block">FINDING</Pill> and <Pill>Locks</Pill> ·{" "}
         <span style={{ color: DIM }}>2min ago</span>
       </>
     ),
@@ -335,7 +335,7 @@ function activityFor(plan: Plan): Activity[] {
     who: "maya",
     avatar: "/home/avatar-maya.jpg",
     time: "4min ago",
-    body: "ACCESS EXCLUSIVE held 27.4s — POST /v1/checkout is stalled behind the rewrite.",
+    body: "ACCESS EXCLUSIVE held 27.4s. 84 statements queued behind it, including POST /v1/checkout.",
   },
   {
     kind: "comment",
@@ -789,49 +789,55 @@ type Finding = {
 };
 
 // The same five checks under both plans. Selecting one shows the line the run
-// actually measured, because "BLOCK" on its own is an opinion and the number
+// actually measured, because a mark on its own is an opinion and the number
 // under it is the argument.
+//
+// Two of these used to be a connection pool and a rollback replay. Neither is
+// something af insights measures: it samples locks, times statements, asks
+// Postgres about rewrites, runs EXPLAIN before and after, diffs
+// pg_stat_statements and applies six lint rules. That is the whole list, and
+// these five now come from it.
 const FINDINGS: Record<Plan, Finding[]> = {
   "as-written": [
     {
       id: "locks",
       label: "Locks",
-      mark: "BLOCK",
+      mark: "FOUND",
       tone: "block",
-      detail: "ACCESS EXCLUSIVE on subscriptions for 27.4s. Policy is under 2s.",
-      evidence: "lock_waits 41 · longest hold 27.4s · budget 2.0s",
+      detail: "ACCESS EXCLUSIVE on subscriptions, held for 27.4s while 84 statements queued.",
+      evidence: "strongest mode ACCESS EXCLUSIVE · longest hold 27.4s · 84 waiters",
     },
     {
       id: "plans",
       label: "Plans",
-      mark: "BLOCK",
+      mark: "FOUND",
       tone: "block",
       detail: "Checkout reads fell back to Seq Scan. Planner dropped subscriptions_status_idx.",
       evidence: "checkout_by_status → Seq Scan on subscriptions · cost 84210",
     },
     {
-      id: "pool",
-      label: "Pool",
-      mark: "BLOCK",
+      id: "rewrite",
+      label: "Rewrite",
+      mark: "FOUND",
       tone: "block",
-      detail: "20/20 connections busy, +14 waiting. Checkout p99 820ms → 6.9s.",
-      evidence: "cl_waiting 14 · p99 6.9s against a 820ms baseline",
+      detail: "The default rewrites every row of subscriptions. Postgres reports it, we do not guess.",
+      evidence: "subscriptions rewritten · 12,403,881 rows",
     },
     {
-      id: "rollback",
-      label: "Rollback",
-      mark: "BLOCK",
+      id: "lint",
+      label: "Lint",
+      mark: "FOUND",
       tone: "block",
-      detail: "Old binary cannot read the new column. Rolling revert is not feasible.",
-      evidence: "v412 replay → column billing_status does not exist",
+      detail: "Adding a column with a default rewrites the table. The rule carries the fix.",
+      evidence: "add the column nullable, backfill in batches, constrain later",
     },
     {
       id: "cleanup",
       label: "Cleanup",
       mark: "OK",
       tone: "ok",
-      detail: "Run torn down. Production data never left the customer boundary.",
-      evidence: "clone destroyed · 0 rows crossed the boundary",
+      detail: "Branch torn down. Production data never left the customer boundary.",
+      evidence: "14 resources removed · 0 rows crossed the boundary",
     },
   ],
   safer: [
@@ -840,8 +846,8 @@ const FINDINGS: Record<Plan, Finding[]> = {
       label: "Locks",
       mark: "OK",
       tone: "ok",
-      detail: "Nullable add takes no rewrite. Longest hold 0.04s.",
-      evidence: "lock_waits 0 · longest hold 0.04s · budget 2.0s",
+      detail: "Nullable add takes no rewrite. Longest hold 0.04s, and nothing queued.",
+      evidence: "strongest mode ACCESS EXCLUSIVE · longest hold 0.04s · 0 waiters",
     },
     {
       id: "plans",
@@ -852,35 +858,35 @@ const FINDINGS: Record<Plan, Finding[]> = {
       evidence: "checkout_by_status → Index Scan · cost 84 (was 84210)",
     },
     {
-      id: "pool",
-      label: "Pool",
+      id: "rewrite",
+      label: "Rewrite",
       mark: "OK",
       tone: "ok",
-      detail: "Backfill in 5k batches. 7/20 connections busy at peak.",
-      evidence: "cl_waiting 0 · p99 840ms against a 820ms baseline",
+      detail: "No table rewrite. The column is added without a default and backfilled in batches.",
+      evidence: "subscriptions not rewritten · 5,000 rows a batch",
     },
     {
-      id: "rollback",
-      label: "Rollback",
+      id: "lint",
+      label: "Lint",
       mark: "OK",
       tone: "ok",
-      detail: "Old binary ignores the nullable column. Revert replayed clean.",
-      evidence: "v412 replay → 11s, no error",
+      detail: "Six rules, none of them fired against this plan.",
+      evidence: "0 of 6 rules fired",
     },
     {
       id: "cleanup",
       label: "Cleanup",
       mark: "OK",
       tone: "ok",
-      detail: "Run torn down. Production data never left the customer boundary.",
-      evidence: "clone destroyed · 0 rows crossed the boundary",
+      detail: "Branch torn down. Production data never left the customer boundary.",
+      evidence: "14 resources removed · 0 rows crossed the boundary",
     },
   ],
 };
 
 const VERDICT: Record<Plan, { mark: string; tone: "block" | "ok"; title: string; note: string }> = {
   "as-written": {
-    mark: "BLOCK",
+    mark: "FINDING",
     tone: "block",
     title: "Do not ship add_billing_status as written",
     note: "Safer path: nullable add, no table rewrite, backfill in small batches",
@@ -981,8 +987,8 @@ const WORKSPACE = [
 const FAVORITES = [
   { label: "add_billing_status", active: true, tone: GOLD, icon: <GoldMark /> },
   { label: "checkout replay", active: false, tone: MUTED, icon: <IconDot /> },
-  { label: "pool pressure", active: false, tone: "#5B8DEF", icon: <IconBars /> },
-  { label: "rollback", active: false, tone: DEL, icon: <IconX /> },
+  { label: "table rewrite", active: false, tone: "#5B8DEF", icon: <IconBars /> },
+  { label: "lint rules", active: false, tone: DEL, icon: <IconX /> },
 ];
 
 function strokeIcon(d: string) {

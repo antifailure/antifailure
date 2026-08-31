@@ -472,6 +472,75 @@ describe('what a delivery writes', {
     assert.equal(out.handled, false)
     assert.match(out.detail, /no installation/)
   })
+
+  // -------------------------------------------------------------------------
+  // Orderings. GitHub does not promise that deliveries arrive in the order the
+  // events happened: a delivery that answered 5xx is retried for hours, and two
+  // deliveries in flight at once land in whatever order the network gives them.
+  // So every ordering that can reach `suspended_at` gets a case here, because
+  // that column is what sign-in reads to decide who may enter a tenant.
+  // -------------------------------------------------------------------------
+
+  test('a repository event arriving after a suspend does not un-suspend', async () => {
+    // suspend-then-repository. The owner suspends the App; a `repository`
+    // delivery from before the suspension is retried afterwards. The retry must
+    // not restore access the owner took away.
+    await handleDelivery(api.pool, clock, 'installation', { action: 'suspend', installation })
+    await handleDelivery(api.pool, clock, 'repository', {
+      action: 'edited',
+      installation: { id: 900123, node_id: 'x' },
+      organization: { login: 'delivery-test-org' },
+      repository: {
+        id: 77,
+        full_name: 'delivery-test-org/renamed',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    })
+    const [row] = await api.admin<{ suspended_at: Date | null }[]>`
+      SELECT suspended_at FROM github_installations WHERE installation_id = 900123`
+    assert.notEqual(
+      row!.suspended_at,
+      null,
+      'a repository delivery restored a suspended installation, and sign-in grants membership on suspended_at IS NULL',
+    )
+  })
+
+  test('an installation_repositories event arriving after an uninstall does not un-suspend', async () => {
+    // deleted-then-installation_repositories. Same shape, different event, and
+    // it is the one that carries the full installation object, so it looked
+    // most like a legitimate reason to write the row.
+    await handleDelivery(api.pool, clock, 'installation', { action: 'deleted', installation })
+    await handleDelivery(api.pool, clock, 'installation_repositories', {
+      action: 'added',
+      installation,
+      repositories_added: [{ id: 2, full_name: 'delivery-test-org/docs' }],
+      repositories_removed: [],
+    })
+    const [row] = await api.admin<{ suspended_at: Date | null }[]>`
+      SELECT suspended_at FROM github_installations WHERE installation_id = 900123`
+    assert.notEqual(row!.suspended_at, null, 'an uninstalled App was reconnected by a repository list')
+    // The repository still lands: recording what the account owns is harmless
+    // and is not what grants anybody access.
+    const [repo] = await api.admin<{ archived_at: Date | null }[]>`
+      SELECT archived_at FROM repositories WHERE full_name = 'delivery-test-org/docs'`
+    assert.ok(repo)
+  })
+
+  test('unsuspend and reinstall still clear the suspension', async () => {
+    // The other half, so the fix above cannot be "never clear it". These are
+    // the two deliveries that mean the installation is live again, and they are
+    // the only two allowed to say so.
+    await handleDelivery(api.pool, clock, 'installation', { action: 'unsuspend', installation })
+    const [unsuspended] = await api.admin<{ suspended_at: Date | null }[]>`
+      SELECT suspended_at FROM github_installations WHERE installation_id = 900123`
+    assert.equal(unsuspended!.suspended_at, null)
+
+    await handleDelivery(api.pool, clock, 'installation', { action: 'suspend', installation })
+    await handleDelivery(api.pool, clock, 'installation', { action: 'created', installation })
+    const [reinstalled] = await api.admin<{ suspended_at: Date | null }[]>`
+      SELECT suspended_at FROM github_installations WHERE installation_id = 900123`
+    assert.equal(reinstalled!.suspended_at, null)
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -173,6 +173,9 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
     INSERT INTO network_rules (org_id, repository_id, host, mode)
     VALUES (${orgId}, ${repoId}, 'api.stripe.com', 'sandbox')`
   await admin`
+    INSERT INTO runtimes (org_id, name, provider, labels)
+    VALUES (${orgId}, 'default', 'local', ${admin.array(['seed'])})`
+  await admin`
     INSERT INTO github_installations (org_id, installation_id, account_login, account_type)
     VALUES (${orgId}, ${Math.floor(Math.random() * 1e12)}, ${slug}, 'Organization')`
   await admin`

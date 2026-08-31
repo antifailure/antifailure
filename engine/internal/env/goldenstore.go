@@ -227,7 +227,7 @@ func (o *Orchestrator) pullWithin(ctx context.Context, s *session, version strin
 		// attestation describe a database that no longer exists.
 		Mask: func(context.Context, secrets.Value) error { return nil },
 		Verify: func(ctx context.Context, url secrets.Value) (string, error) {
-			report, att, verifyErr := o.verifyDatabase(ctx, url, rulesHash)
+			report, att, verifyErr := o.verifyDatabase(ctx, s, url, rulesHash)
 			result.Report = report
 			if verifyErr != nil {
 				return "", verifyErr

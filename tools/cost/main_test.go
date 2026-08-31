@@ -148,3 +148,111 @@ func TestGibParsing(t *testing.T) {
 		}
 	}
 }
+
+// High availability is a second server, so it doubles the disk as well as the
+// compute. The tool multiplied only compute until the production stack was
+// priced, which is a quiet understatement of exactly the plan that needed the
+// number most.
+func TestHighAvailabilityDoublesStorageAsWellAsCompute(t *testing.T) {
+	p := load(t)
+	after := func(ha bool) map[string]any {
+		a := map[string]any{"sku_name": "GP_Standard_D2ds_v4", "storage_mb": float64(65536)}
+		if ha {
+			a["high_availability"] = []any{map[string]any{"mode": "ZoneRedundant"}}
+		}
+		return a
+	}
+	single := planFrom(t, []map[string]any{{
+		"address": "azurerm_postgresql_flexible_server.this",
+		"type":    "azurerm_postgresql_flexible_server",
+		"after":   after(false),
+	}})
+	paired := planFrom(t, []map[string]any{{
+		"address": "azurerm_postgresql_flexible_server.this",
+		"type":    "azurerm_postgresql_flexible_server",
+		"after":   after(true),
+	}})
+
+	_, one, unknowns := estimate(single, p)
+	if unknowns != 0 {
+		t.Fatalf("GP_Standard_D2ds_v4 is the SKU high availability forces and it must be priced, got %d unknowns", unknowns)
+	}
+	_, two, _ := estimate(paired, p)
+
+	if diff := two - one*p.Postgres.HighAvailabilityMult; diff > 0.01 || diff < -0.01 {
+		t.Errorf("HA total = %.2f, want %.2f: the standby carries its own storage, not only its own compute",
+			two, one*p.Postgres.HighAvailabilityMult)
+	}
+}
+
+// An availability test is billed per execution, and an execution is one
+// location running once. Three locations every five minutes is three times the
+// bill of one, which is the part that surprises people.
+func TestWebTestIsPricedPerLocationPerRun(t *testing.T) {
+	p := load(t)
+	pl := planFrom(t, []map[string]any{{
+		"address": "azurerm_application_insights_standard_web_test.readyz",
+		"type":    "azurerm_application_insights_standard_web_test",
+		"after": map[string]any{
+			"geo_locations": []any{"us-va-ash-azr", "us-ca-sjc-azr", "emea-nl-ams-azr"},
+			"frequency":     float64(300),
+		},
+	}})
+	_, total, unknowns := estimate(pl, p)
+	if unknowns != 0 {
+		t.Fatalf("an availability test must be priced, got %d unknowns", unknowns)
+	}
+	want := p.Meta.HoursPerMonth * 3600 / 300 * 3 * p.AzureMonitor.WebTestExecution
+	if diff := total - want; diff > 0.01 || diff < -0.01 {
+		t.Errorf("total = %.4f, want %.4f", total, want)
+	}
+}
+
+// Every resource type the two stacks in this repository can create must be
+// either priced or explicitly free. A type nobody taught the tool about is
+// reported UNKNOWN, which suppresses the total, which is exactly what happened
+// to the production plan: GP_Standard_D2ds_v4 had no price and the largest line
+// in the bill came back as an admission of ignorance.
+func TestEveryResourceTypeTheStacksCreateIsAccountedFor(t *testing.T) {
+	p := load(t)
+	types := []string{
+		"azurerm_resource_group",
+		"azurerm_log_analytics_workspace",
+		"azurerm_consumption_budget_resource_group",
+		"azurerm_virtual_network",
+		"azurerm_subnet",
+		"azurerm_private_dns_zone",
+		"azurerm_private_dns_zone_virtual_network_link",
+		"azurerm_postgresql_flexible_server_configuration",
+		"azurerm_postgresql_flexible_server_database",
+		"azurerm_key_vault",
+		"azurerm_key_vault_secret",
+		"azurerm_user_assigned_identity",
+		"azurerm_role_assignment",
+		"azurerm_monitor_diagnostic_setting",
+		"azurerm_container_app_environment",
+		"random_password",
+		"random_bytes",
+		"terraform_data",
+		"azurerm_dns_cname_record",
+		"azurerm_dns_txt_record",
+		"azurerm_container_app_environment_managed_certificate",
+		"azurerm_container_app_custom_domain",
+		"azurerm_monitor_action_group",
+		"azurerm_application_insights",
+		"azurerm_monitor_metric_alert",
+	}
+	var resources []map[string]any
+	for _, ty := range types {
+		resources = append(resources, map[string]any{"address": ty + ".x", "type": ty, "after": map[string]any{}})
+	}
+	lines, _, unknowns := estimate(planFrom(t, resources), p)
+	if unknowns != 0 {
+		for _, l := range lines {
+			if l.unknown {
+				t.Errorf("%s: %s", l.address, l.detail)
+			}
+		}
+		t.Fatalf("%d resource type(s) the stacks create have no price and no free entry", unknowns)
+	}
+}

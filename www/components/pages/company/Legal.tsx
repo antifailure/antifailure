@@ -217,7 +217,7 @@ export function TermsPage() {
       <PageSection>
         <PageHeading
           kicker="Scope"
-          title="<strong>Evidence under stated fidelity.</strong> You remain responsible for the permissions you grant."
+          title="<strong>Evidence, with its limits stated.</strong> You remain responsible for the permissions you grant."
         />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
@@ -255,9 +255,9 @@ export function TermsPage() {
         <Prose className="mt-10">
           <p>
             When a hosted control plane is generally available, these pages will be replaced with
-            dated legal documents that name a contracting entity, governing law, and acceptable use.
-            Until then, treat every safety report as evidence under the fidelity the run disclosed,
-            whether that is pass, warning, or block, and not as insurance.
+            dated legal documents that name a contracting entity, governing law, and acceptable
+            use. Until then, treat every safety report as evidence about the conditions the run
+            actually reproduced, a pass or a fail, not as insurance.
           </p>
         </Prose>
       </PageSection>

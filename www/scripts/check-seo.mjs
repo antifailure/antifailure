@@ -84,7 +84,12 @@ if (has("sitemap.xml")) {
   const sitemap = read("sitemap.xml");
   const urls = (sitemap.match(/<loc>/g) ?? []).length;
   console.log("\nSitemap");
-  assert(urls >= 25, `sitemap lists ${urls} URLs`, urls < 25 ? "expected at least 25" : "");
+  // Twenty, not the twenty-five this was written with. Four product pages
+  // described subsystems that do not exist and were removed, and two more
+  // collapsed into one. The number is a canary against a truncated or empty
+  // sitemap, so it tracks the real page count rather than holding a page
+  // hostage to a threshold.
+  assert(urls >= 20, `sitemap lists ${urls} URLs`, urls < 20 ? "expected at least 20" : "");
   assert(
     !sitemap.includes("/signin") && !sitemap.includes("/signup"),
     "sitemap excludes the noindex waitlist routes",

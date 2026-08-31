@@ -29,43 +29,22 @@ jobs:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
 
-      - name: Build
-        working-directory: engine
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-          # Static, so the binary runs on a distroless image and on a
-          # distribution whose libc is older than the builder's.
-          CGO_ENABLED: '0'
+      - name: Build and package
+        # One script, called here and by `just build-release`, rather than a
+        # copy of the build in each. The copies are what produced the bug this
+        # pipeline is still living down: both stamped BuildDate with $(date -u),
+        # so every build of one commit differed, and the local gate could not
+        # see it because it was comparing its own copy against itself.
+        #
+        # The script carries the -X flags written out in full, and
+        # tools/ldcheck reads it to prove each one names a symbol that exists.
+        # The linker accepts -X for a symbol it cannot find and says nothing,
+        # which is how v0.1.0 shipped four platforms that all reported "dev".
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          # Full import paths, not bare main. The variables live in
-          # internal/cli, and the linker accepts a -X for a symbol it cannot
-          # find without saying anything: this said main.version for one
-          # release, every flag was a no-op, and the published binary reported
-          # itself as "dev". tools/ldcheck runs in CI to keep that from
-          # recurring.
-          # Written out in full rather than through a shell variable, so that
-          # tools/ldcheck can read them. A check a one line change can defeat
-          # is not worth having.
-          go build -trimpath \
-            -ldflags "-s -w \
-              -X github.com/antifailure/antifailure/engine/internal/cli.Version=$version \
-              -X github.com/antifailure/antifailure/engine/internal/cli.Commit=$GITHUB_SHA \
-              -X github.com/antifailure/antifailure/engine/internal/cli.BuildDate=$(git show -s --format=%cI HEAD)" \
-            -o "../dist/af" ./cmd/af
-
-      - name: Package
-        # The runner travels with the binary rather than being fetched later,
-        # so the source a release was tested with is the source it runs.
-        run: |
-          name="antifailure_${GITHUB_REF_NAME#v}_${{ matrix.os }}_${{ matrix.arch }}"
-          mkdir -p "stage/$name/runner"
-          cp dist/af "stage/$name/af"
-          cp -R runner/src runner/package.json runner/tsconfig.json runner/README.md "stage/$name/runner/"
-          cp LICENSE README.md "stage/$name/"
-          tar -C stage -czf "dist/$name.tar.gz" "$name"
-          (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+          ./tools/release/build.sh \
+            "${{ matrix.os }}" "${{ matrix.arch }}" \
+            "${GITHUB_REF_NAME#v}" "$GITHUB_SHA" "$(git show -s --format=%cI HEAD)" \
+            dist stage
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -90,23 +69,44 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with: { path: dist, merge-multiple: true }
 
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
       - name: Third party notices
         # Generated from what is actually linked rather than maintained by
         # hand. MIT does not require a NOTICE file, but the Apache licensed
         # dependencies still require attribution, and a stale list attributes
         # the wrong people.
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: engine/go.mod
-          cache-dependency-path: engine/go.sum
-
-      - run: go run ./tools/notices > THIRD_PARTY_NOTICES.md
+        run: go run ./tools/notices > THIRD_PARTY_NOTICES.md
 
       - name: Checksums
         run: |
           cd dist
           cat *.sha256 > checksums.txt
           rm -f *.sha256
+
+      - name: Unpack the archives so the bill of materials can read the binaries
+        # This step is the fix for a release that would have shipped a bill of
+        # materials describing nothing.
+        #
+        # The previous version pointed syft at dist/, and by the time this job
+        # runs dist/ holds four .tar.gz files and a checksums file. syft's
+        # directory cataloger does not open archives, so it walked past every
+        # one of them and emitted a valid SPDX 2.3 document containing exactly
+        # one package: the directory itself. Zero Go modules. That document
+        # would have been signed and published, and every step was green,
+        # because every step did what it was asked.
+        #
+        # Measured on this repository at e564cb9: syft over dist/ finds 1
+        # package, syft over these extracted binaries finds 363.
+        run: |
+          mkdir -p unpacked
+          for archive in dist/*.tar.gz; do
+            tar -C unpacked -xzf "$archive"
+          done
+          find unpacked -name af -type f | sort
 
       - name: Software bill of materials
         # Read out of the built binaries rather than generated from go.mod.
@@ -117,14 +117,32 @@ jobs:
         # the one a person downloading a release needs is the first.
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          path: dist
+          path: unpacked
           format: spdx-json
           output-file: dist/sbom.spdx.json
           upload-artifact: false
           upload-release-assets: false
 
+      - name: The bill of materials describes this release
+        # An SBOM nobody validates is decoration, and a signed one that lists
+        # nothing is worse, because it carries the authority of the signature.
+        # This asks two questions the generator cannot answer about itself: is
+        # the document SPDX, and does it record the SHA256 of every binary that
+        # actually ships. The empty document above passes the first and fails
+        # the second, which is why both are here.
+        run: go run ./tools/sbomcheck -sbom dist/sbom.spdx.json -artifacts unpacked
+
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          # Pinned, for the same reason every action above is pinned to a
+          # commit. The installer's own default moves, and cosign v3 changed
+          # what `sign-blob` produces: --output-signature and
+          # --output-certificate are deprecated there and the command refuses
+          # to run without --bundle. An unpinned version is a release that
+          # starts failing, or starts producing a different artifact shape,
+          # on a day nobody touched this file.
+          cosign-release: v3.0.6
 
       - name: Sign the checksums and the bill of materials
         # Signing the checksum file rather than each archive is deliberate and
@@ -135,15 +153,66 @@ jobs:
         #
         # The bundle is signed separately because it is not listed in
         # checksums.txt.
+        #
+        # A .sigstore.json bundle rather than a separate .sig and .pem. That is
+        # cosign v3's only output for sign-blob, and it is the better artifact
+        # anyway: the signature, the certificate and the transparency log entry
+        # travel together, so a person verifying has one file to fetch instead
+        # of three to keep in step.
         run: |
           cosign sign-blob --yes \
-            --output-signature dist/checksums.txt.sig \
-            --output-certificate dist/checksums.txt.pem \
+            --bundle dist/checksums.txt.sigstore.json \
             dist/checksums.txt
           cosign sign-blob --yes \
-            --output-signature dist/sbom.spdx.json.sig \
-            --output-certificate dist/sbom.spdx.json.pem \
+            --bundle dist/sbom.spdx.json.sigstore.json \
             dist/sbom.spdx.json
+
+      - name: The signature verifies, and a changed byte does not
+        # The assertion that matters, and the one that was missing. A signature
+        # nobody checks proves nothing, and a verification that only ever sees
+        # good input proves less than nothing: it would pass just as happily
+        # against a command that accepted everything.
+        #
+        # So both controls run here. The positive one is the exact command the
+        # release notes tell a user to run, with the identity bound, so the
+        # published instructions are tested rather than described. The negative
+        # one flips a single byte and requires the verification to fail. If
+        # cosign ever stops rejecting a tampered blob, this release does not
+        # publish.
+        env:
+          IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+          ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -euo pipefail
+
+          for blob in checksums.txt sbom.spdx.json; do
+            echo "verifying $blob"
+            cosign verify-blob \
+              --bundle "dist/$blob.sigstore.json" \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "dist/$blob"
+          done
+
+          # One byte, in a copy, so the published file is untouched.
+          cp dist/checksums.txt tampered.txt
+          printf 'x' >> tampered.txt
+          if cosign verify-blob \
+              --bundle dist/checksums.txt.sigstore.json \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              tampered.txt 2>/dev/null; then
+            echo "cosign accepted a file that does not match its signature." >&2
+            echo "Every verification instruction we publish is worthless while that is true." >&2
+            exit 1
+          fi
+          echo "a tampered checksums.txt was rejected, as it must be"
+          rm -f tampered.txt
+
+          # And the other half of what a user is told to do: the checksums
+          # actually match the archives they name. checksums.txt is only worth
+          # signing if it is true.
+          (cd dist && sha256sum --check --ignore-missing checksums.txt)
 
       - name: Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
@@ -151,17 +220,16 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/checksums.txt
-            dist/checksums.txt.sig
-            dist/checksums.txt.pem
+            dist/checksums.txt.sigstore.json
             dist/sbom.spdx.json
-            dist/sbom.spdx.json.sig
-            dist/sbom.spdx.json.pem
+            dist/sbom.spdx.json.sigstore.json
             THIRD_PARTY_NOTICES.md
           generate_release_notes: true
           # Prepended above the generated commit list. A signature nobody knows
           # how to check is decoration, so the instructions ship with the thing
           # they verify rather than in a documentation page a person would have
-          # to know exists.
+          # to know exists. The longer version, including how to rebuild these
+          # archives yourself, is at antifailure.dev/docs/security/releases.
           body: |
             ### Verifying this release
 
@@ -170,8 +238,7 @@ jobs:
 
             ```sh
             cosign verify-blob \
-              --certificate checksums.txt.pem \
-              --signature checksums.txt.sig \
+              --bundle checksums.txt.sigstore.json \
               --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
               checksums.txt
@@ -179,13 +246,17 @@ jobs:
             sha256sum --check --ignore-missing checksums.txt
             ```
 
-            There is no public key to fetch. The certificate records which
-            workflow, in which repository, at which tag produced these files,
-            and `--certificate-identity` is what makes the check mean
-            something: without it you would be verifying that somebody signed
-            this, rather than that we did.
+            There is no public key to fetch. The certificate inside the bundle
+            records which workflow, in which repository, at which tag produced
+            these files, and `--certificate-identity` is what makes the check
+            mean something: without it you would be verifying that somebody
+            signed this, rather than that we did.
 
             `sbom.spdx.json` lists what is inside the binaries, read out of the
             built artifacts rather than from `go.mod`. It is signed the same
-            way, substituting its own `.pem` and `.sig`.
+            way, substituting its own bundle.
 
+            These archives are reproducible. Building this tag again produces
+            the same bytes, so you can check the hash above against one you
+            built yourself rather than taking ours:
+            antifailure.dev/docs/security/releases.

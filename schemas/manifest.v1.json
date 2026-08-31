@@ -67,8 +67,17 @@
     "insights": {
       "$ref": "#/$defs/insights"
     },
+    "oracle": {
+      "$ref": "#/$defs/oracle"
+    },
+    "explore": {
+      "$ref": "#/$defs/explore"
+    },
     "load": {
       "$ref": "#/$defs/load"
+    },
+    "policy": {
+      "$ref": "#/$defs/policy"
     },
     "runtime": {
       "$ref": "#/$defs/runtime"
@@ -783,6 +792,298 @@
           "minimum": 0,
           "default": 100000,
           "description": "Row count above which a migration lint treats a table as large, where a rewrite or an exclusive lock is an outage rather than a pause."
+        },
+        "rolling_compatibility": {
+          "$ref": "#/$defs/rolling_compatibility"
+        }
+      }
+    },
+    "rolling_compatibility": {
+      "title": "Rolling compatibility",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Run the previous release against the migrated schema and see whether its workflows still pass, which is the invariant a rolling deploy actually depends on.",
+      "properties": {
+        "when": {
+          "type": "string",
+          "enum": [
+            "never",
+            "risky",
+            "always"
+          ],
+          "default": "risky",
+          "description": "risky runs the check only when the pending migrations contain a change the previous release could notice, such as a dropped or renamed column. always runs it for every migration, and costs a second image build and a second environment every time."
+        },
+        "against": {
+          "type": "string",
+          "maxLength": 256,
+          "default": "merge-base",
+          "description": "Which commit the previous release is: merge-base, previous-commit, or any revision git can resolve, such as a release tag."
+        }
+      }
+    },
+    "oracle": {
+      "title": "Oracle",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the comparison runs. Present but false is how a project keeps its probe plan and turns the check off for a while."
+        },
+        "baseline": {
+          "type": "string",
+          "enum": [
+            "merge_base",
+            "ref"
+          ],
+          "default": "merge_base",
+          "description": "How the version to compare against is chosen. merge_base answers what this branch changes; ref answers what changes when it ships."
+        },
+        "base_ref": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "The git ref the baseline comes from, or the ref the merge base is taken against. Empty tries origin/HEAD, then origin/main, then origin/master, and says which it used."
+        },
+        "fail_on": {
+          "type": "string",
+          "enum": [
+            "none",
+            "minor",
+            "major",
+            "critical"
+          ],
+          "default": "critical",
+          "description": "The lowest severity that fails the command. critical is a request the baseline served and the candidate did not, a status that fell into an error class, or a row the baseline wrote and the candidate did not."
+        },
+        "probes": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/probe"
+          },
+          "description": "The requests sent to both versions, in order, byte for byte the same on each side."
+        },
+        "compare_timestamps": {
+          "type": "boolean",
+          "default": false,
+          "description": "Compare timestamp strings exactly instead of treating two well formed timestamps as equal. Turn it on when timestamps come from the data rather than from the clock."
+        },
+        "compare_uuids": {
+          "type": "boolean",
+          "default": false,
+          "description": "Compare UUIDs exactly instead of treating two well formed UUIDs as equal. Turn it on when identifiers are stored rather than generated per request."
+        },
+        "ignore": {
+          "$ref": "#/$defs/oracleIgnore"
+        },
+        "database": {
+          "$ref": "#/$defs/oracleDatabase"
+        }
+      }
+    },
+    "probe": {
+      "title": "Probe",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path"
+      ],
+      "description": "One request sent to both versions.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Identifies the request in the report."
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "HEAD",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS"
+          ],
+          "default": "GET"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "description": "The path and query, starting with a slash."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "maxProperties": 20,
+          "description": "Headers sent on both sides. Credentials come from the secrets subsystem, never from here."
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 65536,
+          "description": "The request body, sent byte for byte to both sides."
+        }
+      }
+    },
+    "oracleIgnore": {
+      "title": "Oracle ignore",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the comparison is told not to look at. Everything here is printed in the report along with the defaults, because an oracle that silently ignores a field is worse than one that reports it.",
+      "properties": {
+        "headers": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "description": "Response headers to skip, in addition to the defaults."
+        },
+        "fields": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": "JSON paths to skip, in a response body and in a table row alike. $.token, $.orders[*].placed_at and $..created_at are all accepted."
+        }
+      }
+    },
+    "oracleDatabase": {
+      "title": "Oracle database",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The comparison of the two branches' contents.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "tables": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "description": "Tables to compare. Empty compares every table. A pattern is schema.table, and either half may be an asterisk."
+        },
+        "exclude": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "description": "Tables to leave out, applied after tables."
+        },
+        "max_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000,
+          "default": 10000,
+          "description": "How many rows a table may hold and still be compared. A table over the bound is reported as not compared, never silently skipped."
+        }
+      }
+    },
+    "explore": {
+      "title": "Explore",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. An exploration is reproducible from its seed and never counts against the change.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "goals": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/goal"
+          }
+        }
+      }
+    },
+    "goal": {
+      "title": "Goal",
+      "description": "One thing an exploratory agent tries to achieve. Unlike a workflow this declares no outcome, so it cannot fail: what it produces is the path it took and the friction it met on the way.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "goal"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+          "maxLength": 64
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1000,
+          "description": "What somebody is trying to do, in one sentence. The agent has no script, so this is the only thing telling it where to go, and its words are what decide whether the goal was reached."
+        },
+        "persona": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Which persona explores. Defaults to the first persona."
+        },
+        "seed": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Decides every choice the agent makes. The same seed against the same application takes the same path, step for step, which is what lets a finding be replayed. Defaults to the goal's name."
+        },
+        "start_path": {
+          "type": "string",
+          "maxLength": 512,
+          "default": "/",
+          "description": "Where to begin. Defaults to the application root."
+        },
+        "slow_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600000,
+          "default": 3000,
+          "description": "How long one step may take before it is reported as friction."
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Hard caps. An exploration that exhausts its budget reports what it found up to that point and says the budget ran out.",
+          "properties": {
+            "steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 40
+            },
+            "usd": {
+              "type": "number",
+              "minimum": 0,
+              "default": 0.5
+            },
+            "duration": {
+              "type": "string",
+              "pattern": "^[0-9]+(s|m)$",
+              "default": "10m"
+            }
+          }
         }
       }
     },
@@ -870,6 +1171,123 @@
               "default": 0.2
             }
           }
+        }
+      }
+    },
+    "policy": {
+      "title": "Policy",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What each class of finding does to the pull request check. A finding at 'fail' fails the check, one at 'warn' is reported and the check still passes, and one at 'ignore' is not reported at all. Every key here is read when the report is built, so the answer to why a check failed is always one of these keys.",
+      "properties": {
+        "migration_lock": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How long a migration may hold a lock on a table. Both figures are compared against a sampled lower bound, so a breach really did hold the lock at least that long.",
+          "properties": {
+            "warn_ms": {
+              "type": "number",
+              "minimum": 0,
+              "default": 500,
+              "description": "Report a lock held at least this many milliseconds."
+            },
+            "fail_ms": {
+              "type": "number",
+              "minimum": 0,
+              "default": 2000,
+              "description": "Fail the check on a lock held at least this many milliseconds. Must not be below warn_ms."
+            }
+          }
+        },
+        "migration_failed": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "A migration that did not apply to a branch with production's shape in it. A migration that fails here is one that would have failed in production."
+        },
+        "migration_rewrite": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through."
+        },
+        "migration_lint": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "Any of the six migration lint rules. They share one setting because the rules are already scoped by table size."
+        },
+        "plan_regression": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "A query plan that got worse: a table now read end to end, or an index no longer used."
+        },
+        "query_regression": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "A statement that runs more often, or slower, than the saved baseline did. Needs a baseline to compare against."
+        },
+        "load_regression": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "A load threshold from the load block being exceeded."
+        },
+        "egress_surprise": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "The environment tried to reach a host the manifest does not mention. The request was refused either way; this decides whether the attempt stops the merge."
+        },
+        "masking": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "The environment's own branch read back with something in it that still parses as real data."
+        },
+        "cleanup": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "Teardown left a resource behind. The journal remembers what is left, so 'af down' can finish the job."
         }
       }
     },

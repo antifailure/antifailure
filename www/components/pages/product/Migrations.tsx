@@ -13,20 +13,30 @@ import {
   Split,
   Steps,
 } from "@/components/pages/kit";
+import { Illustrative } from "@/components/layout/Illustrative";
 import { LockChart, LockChartMobile } from "@/components/home/media/LockChart";
 import { MigrationScene } from "@/components/home/visuals/MigrationScene";
 import { cn } from "@/lib/cn";
 
 const CAPTIONS = [
-  "An exclusive lock on subscriptions stalls checkout. The twin reports BLOCK before it ships.",
-  "Expand-and-contract keeps checkout live. Lock 0.4s, rollback feasible, PASS.",
+  "An exclusive lock on subscriptions holds for 27 seconds. The rehearsal reports it before it ships.",
+  "Expand-and-contract holds the same lock for 0.4s, and nothing queues behind it.",
 ] as const;
 
+/**
+ * What the rehearsal measures.
+ *
+ * These four rows used to be a lock, a checkout p99, a timeout rate and a
+ * rollback verdict. Three of the four were not things this engine can produce:
+ * nothing sends traffic at a migration while it applies, and there is no
+ * old-binary coexistence check in the product under any name. What is here is
+ * what internal/insights returns.
+ */
 const FINDINGS = [
-  { value: "27.4s", label: "ACCESS EXCLUSIVE", hint: "held on subscriptions", danger: true },
-  { value: "6.9s", label: "Checkout p99", hint: "from 820ms under equivalent traffic", danger: true },
-  { value: "11.8%", label: "Upgrade timeouts", hint: "of attempts failed during the lock", danger: true },
-  { value: "Unsafe", label: "Rolling rollback", hint: "old app cannot read candidate writes", danger: true },
+  { value: "27.4s", label: "ACCESS EXCLUSIVE", hint: "the strongest mode held on subscriptions, sampled every 250ms", danger: true },
+  { value: "84", label: "Blocked statements", hint: "queued behind the lock while it was held", danger: true },
+  { value: "Yes", label: "Table rewrite", hint: "reported by Postgres, not inferred from the statement", danger: true },
+  { value: "Seq Scan", label: "Plan change", hint: "EXPLAIN before and after, on production's own shape", danger: true },
 ] as const;
 
 function MigrationStudio() {
@@ -56,7 +66,7 @@ export function MigrationsPage() {
         path="/product/migrations"
         eyebrow="Migration Safety Engine"
         title="Catch exclusive locks before they take checkout down."
-        lead="The flagship module. A disposable production twin applies the proposed schema change under production-shaped traffic, then returns an evidence-backed pass, warning, or block — with the lock, the p99, and a safer pattern."
+        lead="The flagship module. A fresh branch carrying production's shape applies the pending migrations while a second connection samples what is locked, then reports the strongest mode held per table, how long it was held, what queued behind it, which tables were rewritten, and how the query plans moved."
         framed={false}
         visual={<MigrationStudio />}
       />
@@ -64,7 +74,7 @@ export function MigrationsPage() {
       <PageSection tone="sage">
         <PageHeading
           kicker="The finding"
-          title="<strong>A 27-second lock is a block.</strong> Not a warning you can ignore."
+          title="<strong>A 27-second lock is a finding.</strong> Not a line in a log nobody reads."
         />
         <ul className="mt-16 divide-y divide-black/[0.08] border-y border-black/[0.08] max-md:mt-10">
           {FINDINGS.map((item) => (
@@ -92,26 +102,32 @@ export function MigrationsPage() {
           <LockChart state={0} />
           <LockChartMobile state={0} />
         </div>
+        <Illustrative label="Example finding">
+          A rehearsal of one migration, with the numbers chosen. The measurements are the ones{" "}
+          <code className="font-mono text-[12px] text-black/70">af insights</code> takes: lock mode
+          and hold time from pg_locks, rewrites from Postgres, plans from EXPLAIN.
+        </Illustrative>
       </PageSection>
 
       <PageSection tone="white">
         <Split
           visual={
-            <CodePanel label="BLOCKED: unsafe schema migration">{`Migration 20260824_add_billing_status held an
-ACCESS EXCLUSIVE lock on subscriptions for 27.4s.
+            <CodePanel label="af insights">{`20260824_add_billing_status
 
-checkout p99          820ms → 6.9s
-upgrade timeouts      11.8%
-old app cannot deserialize candidate writes
-rolling rollback is unsafe`}
+lock        ACCESS EXCLUSIVE  subscriptions  27.4s
+blocked     84 statements queued behind it
+rewrite     subscriptions rewritten in full
+plan        events: Index Scan -> Seq Scan  12ms -> 410ms
+lint        adding a column with a default rewrites the table`}
             </CodePanel>
           }
         >
-          <PageHeading title="<strong>The report is causal.</strong> Change, lock, workflow, evidence, then the decision." />
+          <PageHeading title="<strong>Measured, not inferred.</strong> The lock comes from pg_locks and the rewrite from Postgres itself." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Staging with a handful of rows will not show an exclusive lock, a table rewrite, or the
-            moment old binaries fail to read new rows. The twin runs the migration the way production
-            would — then attaches the finding to the pull request.
+            Staging with a handful of rows will not show an exclusive lock or a table rewrite. A
+            sampler on its own connection watches pg_locks and pg_stat_activity while the migration
+            runs, because the session running it cannot see its own lock until the statement returns,
+            which is exactly when the interesting part is over.
           </p>
           <div className="mt-8">
             <Callout label="Suggested remediation">
@@ -126,12 +142,12 @@ rolling rollback is unsafe`}
         <PageHeading title="<strong>Failures conventional tests miss.</strong> The engine measures what staging cannot." />
         <FeatureGrid
           items={[
-            { title: "Locks", body: "Acquisition, duration, blocked statements, and cumulative blocked time." },
-            { title: "Rewrites", body: "Full table rewrites, index builds, constraint failures on rare rows." },
-            { title: "Plans", body: "Query-plan changes and latency distributions under production-shaped data." },
-            { title: "Pools", body: "Connection-pool pressure, CPU, memory, IOPS, disk, and WAL growth." },
-            { title: "Coexistence", body: "Old and new application versions during a rolling deploy." },
-            { title: "Rollback", body: "Whether candidate writes make rolling rollback unsafe." },
+            { title: "Locks", body: "The strongest mode held per table, how long, and what queued behind it." },
+            { title: "Rewrites", body: "Full table rewrites, reported by Postgres rather than guessed from the SQL." },
+            { title: "Plans", body: "EXPLAIN before and against the migrated branch, on production's own shape." },
+            { title: "Statements", body: "Per-statement duration, so the slow one in a batch is named." },
+            { title: "Lint", body: "Six rules, each carrying the fix rather than only the complaint." },
+            { title: "Comparison", body: "A saved report from an earlier run, compared against this one." },
           ]}
         />
       </PageSection>
@@ -145,15 +161,15 @@ rolling rollback is unsafe`}
             </div>
           }
         >
-          <PageHeading title="<strong>Safer pattern: expand-and-contract.</strong> Evidence, then a recommended path that keeps checkout live." />
+          <PageHeading title="<strong>Safer pattern: expand-and-contract.</strong> The lint rule carries the fix, not only the complaint." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Switch the film to expand-and-contract. Lock drops to 0.4s, blocked statements stay at
-            zero, checkout p99 holds near 830ms, and rollback stays feasible.
+            Switch the film to expand-and-contract. The strongest lock drops to 0.4s, no statement
+            queues behind it, and the table is not rewritten.
           </p>
           <div className="mt-8">
-            <Callout label="Expand-and-contract">
-              Dual-read compatibility. Constraint later. The engine generates both the evidence and
-              the recommended safer migration pattern.
+            <Callout label="What the lint rule says">
+              Adding a column with a default rewrites the table. Add it nullable with no default,
+              backfill in batches, then enforce the constraint in a later migration.
             </Callout>
           </div>
         </Split>
@@ -174,7 +190,7 @@ rolling rollback is unsafe`}
               },
               {
                 title: "Contract",
-                body: "Enforce the constraint in a later migration. Rolling rollback stays feasible.",
+                body: "Enforce the constraint in a later migration, when every row already satisfies it.",
               },
             ]}
           />

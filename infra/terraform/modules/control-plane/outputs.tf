@@ -30,3 +30,23 @@ output "bootstrap_job_name" {
 # `terraform output` that prints a database password to a terminal is a
 # password in a shell history and in a CI log.
 
+
+# The ids the alerting module scopes its rules to.
+#
+# Ids rather than names, because azurerm_monitor_metric_alert takes a resource
+# id in `scopes` and assembling one from a subscription, a group and a name in
+# the caller is four chances to get a string wrong and no error until apply.
+output "container_app_id" { value = azurerm_container_app.this.id }
+output "postgres_server_id" { value = azurerm_postgresql_flexible_server.this.id }
+output "job_ids" {
+  value = {
+    bootstrap   = azurerm_container_app_job.bootstrap.id
+    maintenance = azurerm_container_app_job.maintenance.id
+  }
+  description = "Keyed by the short name that ends up in the alert rule's name, so a page says which job failed."
+}
+
+output "custom_domain_verification_id" {
+  value       = azurerm_container_app.this.custom_domain_verification_id
+  description = "The value the asuid TXT record carries. Output so that binding a name in a zone this stack does not own is a copy rather than a portal visit."
+}

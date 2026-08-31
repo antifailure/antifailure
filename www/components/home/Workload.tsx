@@ -1,5 +1,6 @@
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
+import { Illustrative } from "@/components/layout/Illustrative";
 import { WorkloadIdeStage } from "./visuals/WorkloadIdeStage";
 
 export function Workload() {
@@ -15,11 +16,15 @@ export function Workload() {
         <div className="min-w-0">
           <Heading
             icon="workload"
-            label="Workload Studio"
-            title="<strong>Workload Studio for the change that matters.</strong> Observed patterns, deterministic journeys, and exploratory users. Not production traffic diverted."
+            label="Load"
+            title="<strong>Traffic shaped like production's.</strong> The route mix out of your own access log, sent at the twin. Not production traffic diverted."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <WorkloadIdeStage />
+            <Illustrative className="mt-6">
+              An editor with the real files in it. af init, af up and af ci exist and do what the
+              terminal shows; the repository and its contents are made up.
+            </Illustrative>
           </div>
         </div>
       </Container>

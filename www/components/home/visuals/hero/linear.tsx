@@ -140,28 +140,6 @@ export function StatusMoon({
   );
 }
 
-export function Avatar({
-  initial,
-  bg,
-  className,
-}: {
-  initial: string;
-  bg: string;
-  className?: string;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex size-[16px] shrink-0 items-center justify-center rounded-[4px] text-[8px] font-medium text-white ring-1 ring-white",
-        className,
-      )}
-      style={{ background: bg }}
-    >
-      {initial}
-    </span>
-  );
-}
-
 export function Meta({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <span className={cn("text-[10px] tracking-extra-tight text-[#9B9EA5]", className)}>{children}</span>

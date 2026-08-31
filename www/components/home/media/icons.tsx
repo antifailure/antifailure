@@ -122,7 +122,7 @@ export function FeatureIcon({
 /**
  * The two trust-model marks.
  *
- * These slots used to be `size-8 rounded-full bg-black` — a filled circle in
+ * These slots used to be `size-8 rounded-full bg-black`, a filled circle in
  * place of an icon, which reads as a decision nobody made. They now say what
  * the claim underneath them says: a packet stopped at a closed gate, and a
  * boundary with the data inside it.

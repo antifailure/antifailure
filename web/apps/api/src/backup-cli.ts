@@ -10,10 +10,16 @@
 // backup taken during an incident does not depend on the shell it was taken in
 // being configured the way the deployment is. The one exception is the password
 // in the connection string, which has nowhere else to live.
+//
+// `break-glass` lives here rather than in a binary of its own for that same
+// reason: it is one job, done once, with the same privileged connection, by the
+// same person on the same night, and a second entry point would be a second
+// thing to remember exists.
 
 import { writeFile } from 'node:fs/promises'
-
+import { userInfo } from 'node:os'
 import { backup, rehearse, restore } from './backup.ts'
+import { breakGlass, parseRole, BreakGlassRefused } from './breakglass.ts'
 
 function usage(): never {
   console.error(`af-control-plane-backup <command>
@@ -40,6 +46,14 @@ function usage(): never {
             --max-restore-seconds it measures and gates nothing, which is right
             against a production database: its size is not a constant, so a
             budget set once fires on growth rather than on a regression.
+
+  break-glass --url <admin connection string>
+            --org <slug or id> --github-login <login>
+            --role <owner|admin|member|viewer> --reason <why> [--dry-run]
+            Sets somebody's role directly in the database, for when nobody can
+            sign in to do it. Writes an audit entry saying a break-glass was
+            used. Start with --dry-run: it reports what would change and writes
+            nothing.
 
 The connection string must be a role that can read every table and create a
 database. It is not the role the application connects as.
@@ -198,10 +212,59 @@ try {
       break
     }
 
+    case 'break-glass': {
+      const dryRun = argv.includes('--dry-run')
+      const result = await breakGlass({
+        adminUrl: required(argv, 'url'),
+        org: required(argv, 'org'),
+        githubLogin: required(argv, 'github-login'),
+        role: parseRole(required(argv, 'role')),
+        reason: required(argv, 'reason'),
+        dryRun,
+        // Recorded rather than asked for. A prompt is a thing to script around;
+        // the login name of whoever the shell belongs to is a fact, and it is
+        // the one an incident review starts from.
+        operator: operatorName(),
+      })
+
+      const was = result.from ?? 'not a member'
+      console.log(`organization  ${result.orgSlug} (${result.orgId})`)
+      console.log(`account       ${result.githubLogin}`)
+      console.log(`role          ${was} -> ${result.to}`)
+      if (!result.applied) {
+        console.log('')
+        console.log('DRY RUN. Nothing was written and no audit entry exists.')
+        console.log('Run it again without --dry-run to apply it.')
+        break
+      }
+      console.log(`audit entry   ${result.auditSeq}`)
+      console.log('')
+      console.log('BREAK-GLASS USED. It is in the audit log as member.break_glass and it')
+      console.log('cannot be taken out. The role is marked manual, so the next membership')
+      console.log('sync will not undo it; take it back by hand once GitHub works again.')
+      break
+    }
+
     default:
       usage()
   }
 } catch (err) {
+  // An argument the operator can fix is exit 2, the same as a missing flag,
+  // rather than 1. At three in the morning the difference between "you typed
+  // the wrong thing" and "the database refused" is most of the diagnosis.
+  if (err instanceof BreakGlassRefused) {
+    console.error(err.message)
+    process.exit(2)
+  }
   console.error(err instanceof Error ? err.message : String(err))
   process.exit(1)
+}
+
+/** Best effort. A container with no passwd entry is not a reason to refuse. */
+function operatorName(): string | undefined {
+  try {
+    return userInfo().username
+  } catch {
+    return undefined
+  }
 }

@@ -11,7 +11,6 @@ import {
 } from "react";
 import { motion } from "motion/react";
 import { EASE } from "@/lib/easing";
-import { CopyCli } from "./Pills";
 import { Caret } from "./motion/Caret";
 import { useInViewPlay } from "@/lib/useInViewPlay";
 
@@ -34,10 +33,10 @@ const TREE: TreeItem[] = [
   { id: "api", name: "api", indent: 3, folder: true, parent: "routes", path: "src/routes/api" },
   { id: "index.tsx", name: "index.tsx", indent: 4, parent: "api", path: "src/routes/api/index.tsx" },
   { id: "app.tsx", name: "app.tsx", indent: 2, parent: "src", path: "src/app.tsx" },
-  { id: "scenarios", name: "scenarios", indent: 1, folder: true, parent: "root", path: "scenarios" },
-  { id: "impatient.ts", name: "impatient.ts", indent: 2, parent: "scenarios", path: "scenarios/impatient.ts" },
-  { id: "wind-tunnel.yml", name: "wind-tunnel.yml", indent: 1, parent: "root", path: "wind-tunnel.yml" },
-  { id: "seed.sql", name: "seed.sql", indent: 1, parent: "root", path: "seed.sql" },
+  { id: "migrations", name: "migrations", indent: 1, folder: true, parent: "root", path: "migrations" },
+  { id: "0002_access_tier.sql", name: "0002_access_tier.sql", indent: 2, parent: "migrations", path: "migrations/0002_access_tier.sql" },
+  { id: "antifailure.yaml", name: "antifailure.yaml", indent: 1, parent: "root", path: "antifailure.yaml" },
+  { id: "masking.yaml", name: "masking.yaml", indent: 1, parent: "root", path: "masking.yaml" },
   { id: "tsconfig.json", name: "tsconfig.json", indent: 1, parent: "root", path: "tsconfig.json" },
   { id: "package.json", name: "package.json", indent: 1, parent: "root", path: "package.json" },
   { id: "README.md", name: "README.md", indent: 1, parent: "root", path: "README.md" },
@@ -51,77 +50,93 @@ const CM = "text-[#22863a]";
 const DIM = "text-black/50";
 const TEAL = "text-[#116329]";
 
+/**
+ * The manifest, in keys the schema actually has.
+ *
+ * This block used to be a file called wind-tunnel.yml holding repository,
+ * cloud, source, contain, compare and on_pr, none of which exist in
+ * schemas/manifest.v1.json. The file is antifailure.yaml and the schema closes
+ * itself, so a developer who copied what was on the homepage got AF-MAN-002
+ * and a manifest the CLI refused.
+ */
 const YML: Token[] = [
-  { t: "# Generated — do not hand-author\n", cls: CM },
-  { t: "repository", cls: VAR },
+  { t: "# af init wrote this. Edit it.\n", cls: CM },
+  { t: "version", cls: VAR },
+  { t: ": ", cls: DIM },
+  { t: "1\n", cls: TEAL },
+  { t: "name", cls: VAR },
   { t: ": ", cls: DIM },
   { t: "checkout-app\n", cls: STR },
-  { t: "cloud", cls: VAR },
-  { t: ": ", cls: DIM },
-  { t: "customer-hosted\n", cls: STR },
-  { t: "source", cls: VAR },
-  { t: ": ", cls: DIM },
-  { t: "postgres\n", cls: STR },
-  { t: "contain", cls: VAR },
+  { t: "services", cls: VAR },
   { t: ":\n  - ", cls: DIM },
-  { t: "stripe\n", cls: STR },
-  { t: "  - ", cls: DIM },
-  { t: "email\n", cls: STR },
-  { t: "compare", cls: VAR },
+  { t: "name", cls: VAR },
   { t: ": ", cls: DIM },
-  { t: "baseline_vs_candidate\n", cls: STR },
-  { t: "on_pr", cls: VAR },
+  { t: "web\n    ", cls: STR },
+  { t: "kind", cls: VAR },
   { t: ": ", cls: DIM },
-  { t: "create_wind_tunnel", cls: STR },
+  { t: "web\n    ", cls: STR },
+  { t: "port", cls: VAR },
+  { t: ": ", cls: DIM },
+  { t: "3000\n", cls: TEAL },
+  { t: "database", cls: VAR },
+  { t: ":\n  ", cls: DIM },
+  { t: "provider", cls: VAR },
+  { t: ": ", cls: DIM },
+  { t: "docker\n  ", cls: STR },
+  { t: "masking_rules", cls: VAR },
+  { t: ": ", cls: DIM },
+  { t: "masking.yaml\n", cls: STR },
+  { t: "egress", cls: VAR },
+  { t: ":\n  ", cls: DIM },
+  { t: "default", cls: VAR },
+  { t: ": ", cls: DIM },
+  { t: "block", cls: STR },
 ];
 
 const FILE_TOKENS: Record<string, Token[]> = {
-  "wind-tunnel.yml": YML,
+  "antifailure.yaml": YML,
   "index.tsx": [
-    { t: "import", cls: KW },
-    { t: " { ", cls: VAR },
-    { t: "Workload", cls: TEAL },
-    { t: " } ", cls: VAR },
-    { t: "from", cls: KW },
-    { t: " ", cls: VAR },
-    { t: "'@antifailure/studio'", cls: STR },
-    { t: ";\n\n", cls: VAR },
+    { t: "// The application. Antifailure needs no import in it.\n", cls: CM },
     { t: "export default async function", cls: KW },
     { t: " handler", cls: FN },
     { t: "(req, res) {\n  ", cls: VAR },
     { t: "const", cls: KW },
-    { t: " result = ", cls: VAR },
+    { t: " subs = ", cls: VAR },
     { t: "await", cls: KW },
-    { t: " Workload", cls: TEAL },
-    { t: ".run", cls: FN },
-    { t: "(", cls: VAR },
-    { t: "'impatient'", cls: STR },
-    { t: ");\n\n  ", cls: VAR },
+    { t: " db", cls: VAR },
+    { t: ".query", cls: FN },
+    { t: "(\n    ", cls: VAR },
+    { t: '"select * from subscriptions where account_id = $1"', cls: STR },
+    { t: ",\n    [req.accountId],\n  );\n\n  ", cls: VAR },
     { t: "res", cls: VAR },
     { t: ".status", cls: FN },
     { t: "(", cls: VAR },
     { t: "200", cls: "text-[#116329]" },
     { t: ").", cls: VAR },
     { t: "json", cls: FN },
-    { t: "({ verdict: result });\n}", cls: VAR },
+    { t: "(subs);\n}", cls: VAR },
   ],
-  "impatient.ts": [
-    { t: "import", cls: KW },
-    { t: " { ", cls: VAR },
-    { t: "Workload", cls: TEAL },
-    { t: " } ", cls: VAR },
-    { t: "from", cls: KW },
-    { t: " ", cls: VAR },
-    { t: '"@antifailure/studio"', cls: STR },
-    { t: "\n\n", cls: VAR },
-    { t: "export const", cls: KW },
-    { t: " impatientUpgrade", cls: FN },
-    { t: " = ", cls: VAR },
-    { t: "Workload", cls: TEAL },
-    { t: ".compile", cls: FN },
-    { t: "(\n  ", cls: VAR },
-    { t: '"explore:double_click_upgrade"', cls: STR },
-    { t: "\n)", cls: VAR },
+  "0002_access_tier.sql": [
+    { t: "-- Rehearsed on a branch before it reaches production.\n", cls: CM },
+    { t: "alter table", cls: KW },
+    { t: " subscriptions\n  ", cls: VAR },
+    { t: "add column", cls: KW },
+    { t: " access_tier text;\n\n", cls: VAR },
+    { t: "-- No default here on purpose: a default rewrites the table.\n", cls: CM },
+  ],
+  "masking.yaml": [
+    { t: "# Compiled to SQL, then read back by the scanner.\n", cls: CM },
+    { t: "rules", cls: VAR },
+    { t: ":\n  - ", cls: DIM },
+    { t: "table", cls: VAR },
+    { t: ": ", cls: DIM },
+    { t: "accounts\n    ", cls: STR },
+    { t: "column", cls: VAR },
+    { t: ": ", cls: DIM },
+    { t: "email\n    ", cls: STR },
+    { t: "transform", cls: VAR },
+    { t: ": ", cls: DIM },
+    { t: "email", cls: STR },
   ],
   "app.tsx": [
     { t: "export default function", cls: KW },
@@ -131,15 +146,6 @@ const FILE_TOKENS: Record<string, Token[]> = {
     { t: " <main className=", cls: VAR },
     { t: '"checkout"', cls: STR },
     { t: ">{children}</main>\n}", cls: VAR },
-  ],
-  "seed.sql": [
-    { t: "-- Sanitized snapshot. Tokens deleted, emails masked.\n", cls: CM },
-    { t: "insert into", cls: KW },
-    { t: " accounts (email) ", cls: VAR },
-    { t: "values", cls: KW },
-    { t: " (", cls: VAR },
-    { t: "'user_00418@mask.local'", cls: STR },
-    { t: ");", cls: VAR },
   ],
   "tsconfig.json": [
     { t: "{\n  ", cls: DIM },
@@ -163,7 +169,7 @@ const FILE_TOKENS: Record<string, Token[]> = {
   ],
   "README.md": [
     { t: "# checkout-app\n", cls: "text-black" },
-    { t: "Create Wind Tunnel from the pull request.\nThe safety report attaches to the check.", cls: "text-black/70" },
+    { t: "af ci runs on the pull request.\nThe safety report attaches to the check.", cls: "text-black/70" },
   ],
 };
 
@@ -171,17 +177,17 @@ const CMD = "curl -fsSL https://antifailure.dev/install.sh | sh";
 const HOME_FILE = "index.tsx";
 
 const CHECKS = [
-  "Isolated twin provisioned: 'Checkout App'",
-  "Imported observed production patterns",
-  "Compiled scenarios/impatient.ts",
-  "Contained Stripe + email in the twin",
+  "Read the repository, wrote antifailure.yaml",
+  "Branched a verified golden for this change",
+  "Contained Stripe and email inside the twin",
+  "Ran the declared workflows, attached the report",
 ];
 
 const CHECK_DETAIL = [
-  "Isolated twin of this PR. Destroyed when the TTL expires.",
-  "Redacted production-shaped traffic. Never diverted from live users.",
-  "Exploratory discoveries compiled to versioned IR. No LLM at scale.",
-  "Stripe simulated in a clone-local ledger. Email captured, never delivered.",
+  "Twelve analyzers read the repository and say what they assumed. Edit what they got wrong.",
+  "A masked, referentially consistent branch. An unverified golden cannot be branched at all.",
+  "Stripe answered from a stateful pack with the network unplugged. Mail rendered and captured.",
+  "Agents drive the workflows through the accessibility tree and return a verdict with a trace.",
 ];
 
 const BOTTOM_TABS: { id: BottomTab; label: string }[] = [
@@ -453,13 +459,13 @@ export function IdePlay() {
     }
     if (term >= 2) {
       lines.push({ text: "" });
-      lines.push({ text: "Antifailure Initialization" });
-      lines.push({ text: "Step 1/3: Connecting isolated twin..." });
+      lines.push({ text: "$ af init" });
+      lines.push({ text: "Step 1/3: reading the repository..." });
     }
-    if (term >= 3) lines.push({ text: "Step 2/3: Importing observed patterns..." });
-    if (term >= 4) lines.push({ text: "Step 3/3: Compiling deterministic journeys..." });
+    if (term >= 3) lines.push({ text: "Step 2/3: 12 analyzers, 3 services, 1 database..." });
+    if (term >= 4) lines.push({ text: "Step 3/3: writing antifailure.yaml..." });
     if (term >= 5) {
-      lines.push({ text: "Success! Workload Studio initialized.", cls: "text-[#16a34a]", success: true });
+      lines.push({ text: "Wrote antifailure.yaml. Run af up next.", cls: "text-[#16a34a]", success: true });
     }
     return lines;
   }, [term, cmdChars]);
@@ -542,7 +548,7 @@ export function IdePlay() {
     bottomBody =
       inspectCheck === 3 ? (
         <div>
-          <span className="text-red-400">BLOCK / schema.lock</span>
+          <span className="text-red-400">af insights</span>
           {"  ACCESS EXCLUSIVE on subscriptions 27.4s"}
         </div>
       ) : (
@@ -554,10 +560,10 @@ export function IdePlay() {
         <div>{CHECK_DETAIL[inspectCheck]}</div>
       ) : (
         <div className="space-y-1">
-          <div>Connecting isolated twin</div>
-          <div>Importing observed patterns</div>
-          <div>Compiling deterministic journeys</div>
-          {term >= 5 ? <div className="text-[#16a34a]">Workload Studio initialized.</div> : null}
+          <div>af init: reading the repository</div>
+          <div>af up: branching the golden, starting the services</div>
+          <div>af ci: running the workflows, writing the report</div>
+          {term >= 5 ? <div className="text-[#16a34a]">Wrote antifailure.yaml.</div> : null}
         </div>
       );
   } else if (bottomTab === "debug") {
@@ -570,8 +576,8 @@ export function IdePlay() {
   } else if (bottomTab === "ports") {
     bottomBody = (
       <div>
-        <div className="text-black/45">Private</div>
-        <div>fix-billing-184.preview.company.com</div>
+        <div className="text-black/45">Local</div>
+        <div>http://127.0.0.1:46000</div>
       </div>
     );
   } else {
@@ -749,24 +755,18 @@ export function IdePlay() {
               <span className="shrink-0 text-[15px] tracking-[0.2em] text-black/35">···</span>
             </div>
             <p className="mt-3 px-3.5 text-[12px] leading-[18px] text-black/55">
-              Workload Studio compiles observed traffic, deterministic journeys, and exploratory
-              users into a scenario that runs against an isolated twin.
+              Three commands. af init reads the repository and writes the manifest, af up builds the
+              twin around a masked branch, af ci runs it and attaches the report.
             </p>
             <pre className="mx-3.5 mt-3 overflow-hidden rounded-lg bg-[#f4f4f2] p-2.5 font-mono text-[10.5px] leading-[17px]">
-              <span className="mb-1 block text-[10px] text-black/35">workload.ts</span>
-              <span className={KW}>import</span>
-              <span className={VAR}>{" { "}</span>
-              <span className={TEAL}>Workload</span>
-              <span className={VAR}>{" } "}</span>
-              <span className={KW}>from</span>
-              <span className={STR}>{` "@antifailure/studio"`}</span>
-              <span className={VAR}>{";\n"}</span>
-              <span className={KW}>const</span>
-              <span className={VAR}> studio = </span>
-              <span className={TEAL}>Workload</span>
-              <span className={FN}>.connect</span>
-              <span className={VAR}>{"();\n"}</span>
-              <span className={CM}>{"// Observed, deterministic, exploratory"}</span>
+              <span className="mb-1 block text-[10px] text-black/35">terminal</span>
+              <span className={DIM}>{"$ "}</span>
+              <span className={VAR}>{"af init\n"}</span>
+              <span className={DIM}>{"$ "}</span>
+              <span className={VAR}>{"af up\n"}</span>
+              <span className={DIM}>{"$ "}</span>
+              <span className={VAR}>{"af ci\n"}</span>
+              <span className={CM}>{"# pass or fail, with evidence"}</span>
             </pre>
             <ul className="mt-3 space-y-2 px-3.5 text-[12.5px]">
               {CHECKS.map((item, i) => (
@@ -822,93 +822,3 @@ export function IdePlay() {
     </div>
   );
 }
-
-export function IdeSection() {
-  const glow = useRef<HTMLDivElement>(null);
-  const { story } = useInViewPlay(glow, 0.15);
-
-  return (
-    <section className="relative bg-[#f7f7f5] px-6 pb-24 pt-16 lg:px-12 lg:pt-20" id="ide">
-      <div className="flex gap-6">
-        <div className="hidden w-[200px] shrink-0 lg:block" />
-        <div className="relative mx-auto min-w-0 max-w-[1240px] flex-1">
-          <h2
-            id="from-pr"
-            className="max-w-[920px] scroll-mt-[88px] text-[36px] font-semibold leading-[1.12] tracking-[-0.035em] text-black md:text-[44px] lg:text-[48px]"
-          >
-            A disposable production twin for every risky change.{" "}
-            <span className="text-black/40">
-              Connect a repository and cloud environment. The platform proves whether it is safe to ship.
-            </span>
-          </h2>
-
-          <div className="relative mt-14 overflow-hidden border border-black/12 bg-[#f7f7f5]">
-            <div className="pointer-events-none absolute inset-0" aria-hidden>
-              <div
-                className="absolute inset-0"
-                style={{
-                  background:
-                    "radial-gradient(ellipse 58% 52% at 6% 100%, rgba(51,191,0,0.58), transparent 62%), radial-gradient(ellipse 58% 52% at 94% 100%, rgba(0,229,153,0.55), transparent 62%)",
-                  opacity: story ? 1 : 0.7,
-                  transition: "opacity 0.8s ease",
-                }}
-              />
-              <div
-                ref={glow}
-                className="ide-dots absolute inset-0"
-                style={{
-                  WebkitMaskImage:
-                    "radial-gradient(ellipse 60% 55% at 8% 100%, black 0%, transparent 70%), radial-gradient(ellipse 60% 55% at 92% 100%, black 0%, transparent 70%)",
-                  maskImage:
-                    "radial-gradient(ellipse 60% 55% at 8% 100%, black 0%, transparent 70%), radial-gradient(ellipse 60% 55% at 92% 100%, black 0%, transparent 70%)",
-                  opacity: story ? 0.85 : 0.5,
-                  transition: "opacity 0.8s ease",
-                }}
-              />
-              <div
-                className="auth-honeycomb absolute inset-0"
-                style={{
-                  WebkitMaskImage:
-                    "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 55%), linear-gradient(90deg, rgba(0,0,0,0.55), transparent 40%, transparent 60%, rgba(0,0,0,0.55))",
-                  maskImage:
-                    "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 55%), linear-gradient(90deg, rgba(0,0,0,0.55), transparent 40%, transparent 60%, rgba(0,0,0,0.55))",
-                  opacity: 0.4,
-                }}
-              />
-            </div>
-
-            <div className="relative px-6 pb-8 pt-[72px] sm:px-10 lg:px-14 lg:pb-10 lg:pt-[88px]">
-              <div
-                className="pointer-events-none absolute left-[16%] top-5 hidden items-start gap-2 lg:flex"
-                aria-hidden
-              >
-                <span className="h-[56px] w-px bg-black/25" />
-                <span className="pt-0.5 text-[12px] leading-4 text-black/45">
-                  Attaches the safety report to the PR
-                </span>
-              </div>
-              <div
-                className="pointer-events-none absolute right-[14%] top-5 hidden items-start gap-2 lg:flex"
-                aria-hidden
-              >
-                <span className="h-[56px] w-px bg-black/25" />
-                <span className="pt-0.5 text-[12px] leading-4 text-black/45">
-                  Provisions an isolated twin with contained integrations
-                </span>
-              </div>
-              <IdePlay />
-            </div>
-
-            <div className="relative flex flex-wrap items-center justify-between gap-4 border-t border-black/12 px-6 py-5 sm:px-10 lg:px-14">
-              <p className="text-[15px] tracking-[-0.01em] text-black">
-                Try for yourself, prove the next deploy before it ships.
-              </p>
-              <CopyCli variant="mint" />
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-

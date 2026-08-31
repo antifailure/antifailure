@@ -17,7 +17,9 @@ import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { listProcedures } from '../src/openapi.ts'
 import { declaredPermissions } from '../src/trpc.ts'
-import { ROLES, ROLE_PERMISSIONS, roleHas, type Permission, type Role } from '../src/permissions.ts'
+import {
+  PERMISSIONS, ROLES, ROLE_PERMISSIONS, roleHas, type Permission, type Role,
+} from '../src/permissions.ts'
 import {
   available, startApi, seedOrg, signInAs, callProcedure, errorCode, dropOrg,
   type ApiHarness, type Org, type SignedIn,
@@ -41,6 +43,13 @@ function inputsFor(org: Org): Record<string, unknown> {
     'environments.list': { limit: 10 },
     'environments.get': { envId: org.envId },
     'environments.teardown': { envId: org.envId },
+    // The dispatch verbs. This fixture has no GitHub App installation, so a
+    // role that holds the permission reaches the handler and gets
+    // PRECONDITION_FAILED, which is what the matrix accepts and what proves the
+    // gate let the call through rather than what GitHub then made of it.
+    'environments.create': { repository: org.repository, branch: 'main' },
+    'agents.run': { envId: org.envId },
+    'load.run': { envId: org.envId },
     'runs.list': { envId: org.envId },
     'runs.recent': { limit: 10 },
     'runs.get': { runId: '00000000-0000-0000-0000-000000000000' },
@@ -50,6 +59,11 @@ function inputsFor(org: Org): Record<string, unknown> {
     'network.explain': { host: 'api.stripe.com', tls: true, path: '/v1/charges' },
     'network.decisions': { limit: 10 },
     'network.propose': { repository: org.repository, host: 'api.example.test', mode: 'block' },
+    'network.pending': { repository: org.repository },
+    // A rule id that is deliberately not a pending rule. An admin reaches the
+    // handler and gets NOT_FOUND, so the matrix proves the gate without
+    // approving an egress change as a side effect of running the tests.
+    'network.approve': { ruleId: '00000000-0000-0000-0000-000000000000' },
     'masking.rules': { repository: org.repository },
     'masking.attestations': { repository: org.repository },
     'masking.propose': { repository: org.repository, table: 'users', column: 'email', transform: 'email' },
@@ -60,6 +74,18 @@ function inputsFor(org: Org): Record<string, unknown> {
     'members.list': {},
     'members.sync': {},
     'members.setRole': { githubLogin: 'nobody-here', role: 'member' },
+    'runtimes.list': { includeRemoved: false },
+    // Two roles hold runtimes.manage, so the second one to run gets
+    // BAD_REQUEST for a name that is already registered. The matrix accepts
+    // that as the gate having let the call through, which is all it claims to
+    // test; what the route actually does is proved in verbs.test.ts.
+    'runtimes.register': { name: 'matrix', provider: 'local', labels: [] },
+    'runtimes.tag': { name: 'nothing-registered-here', labels: [] },
+    'runtimes.remove': { name: 'nothing-registered-here' },
+    'billing.get': {},
+    // The plan the fixture already has, so the matrix cannot change what an
+    // organization is on as a side effect: `set` treats that as a no-op.
+    'billing.set': { plan: 'free' },
     'tokens.list': {},
     'tokens.revoke': { id: '00000000-0000-0000-0000-000000000000' },
     'org.status': {},
@@ -112,6 +138,34 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
       .map(({ path }) => path)
       .filter((path) => !(path in inputs))
     assert.deepEqual(missing, [], `no sample input for: ${missing.join(', ')}`)
+  })
+
+  /**
+   * The inverse of the assertion above, and the one that was missing.
+   *
+   * "Every route declares a permission" catches an endpoint added without a
+   * guard. It says nothing at all about a permission that guards nothing, and
+   * six of them did: environments.create, network.approve, agents.run,
+   * load.run, billing.manage and runtimes.manage. Every one of them was
+   * described in PERMISSION_DESCRIPTIONS, granted to roles, and rendered in the
+   * documentation table a customer's security team reads, and none of them
+   * could be exercised by anybody. A permission with no route is a feature the
+   * product claims and does not have, and it is invisible from every direction
+   * except this one.
+   *
+   * There is no exception list on purpose. A permission that is genuinely not
+   * ready to be routed should not be in the catalog yet, because the catalog is
+   * what the documentation is generated from.
+   */
+  it('every permission in the catalog guards at least one route', () => {
+    const used = new Set(declaredPermissions().values())
+    const unrouted = PERMISSIONS.filter((p) => !used.has(p))
+    assert.deepEqual(
+      unrouted,
+      [],
+      `these permissions guard no route, so nobody can exercise them:\n  ${unrouted.join('\n  ')}\n` +
+        'Either build the route, or take the permission out of the catalog it documents.',
+    )
   })
 
   it('the catalog and the router agree about which permissions exist', () => {

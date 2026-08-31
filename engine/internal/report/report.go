@@ -10,24 +10,37 @@ package report
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
 
 // Run is everything one pull request check produced.
 type Run struct {
-	Environment  string
-	URL          string
-	Branch       string
-	Commit       string
-	Golden       string
-	Workflows    []Workflow
-	Invariants   []Invariant
+	Environment string
+	URL         string
+	Branch      string
+	Commit      string
+	Golden      string
+	Workflows   []Workflow
+	Invariants  []Invariant
+	// Findings are what the run noticed about the change that is not a
+	// workflow or an invariant: migration locks, rewrites, lint, plans, query
+	// counts, an unknown destination, unmasked data, a resource left behind.
+	// Each carries the level a policy gave it, so the verdict is decided here
+	// rather than in the command.
+	Findings []Finding
+	// Migration is what the rehearsal did, for the section that says it.
+	Migration    *Migration
 	Load         *Load
 	Egress       *Egress
 	Verification *Verification
+	Cleanup      *Cleanup
 	Insights     *Insights
-	Duration     string
+	// Notes say what could not be measured, and why. A report that silently
+	// omits a check reads exactly like a check that found nothing.
+	Notes    []string
+	Duration string
 	// DocsBase is where links point, so a self hosted instance can point at
 	// its own copy rather than at ours.
 	DocsBase string
@@ -80,13 +93,129 @@ type Egress struct {
 	Surprises []string
 }
 
-// Verification is the masking check on the golden.
+// Verification is the environment's own branch read back.
+//
+// It covers the branch rather than the golden it came from, because the branch
+// is the database the agents used and it is the one a person is being asked to
+// trust. It is taken before the workflows run, so nothing an agent wrote can
+// be mistaken for data that came out of the golden unmasked.
 type Verification struct {
 	Clean       bool
 	Columns     int
 	RowsSampled int64
 	Findings    []string
+	// Unavailable says why the branch could not be read back, when it could
+	// not. A verification that did not happen is not a verification that
+	// passed, and the report says which it was.
+	Unavailable string
 }
+
+// Verdicts is every word a workflow result may carry, worst first.
+//
+// The runner decides these and declares them in runner/src/verdict.ts. They are
+// two programs in two languages that have to agree on one vocabulary and
+// nothing in either compiler can make them, so vocabulary_test.go reads that
+// file and this list and fails when they differ, the way the control plane's
+// event types are kept in step.
+var Verdicts = []string{"fail", "flaky", "blocked", "unverified", "pass"}
+
+// Known reports whether a word is one this engine can read.
+//
+// Exported because the terminal renders the same words and had its own list.
+// One authority, so that a runner ahead of this engine cannot be understood two
+// ways in one program.
+func Known(verdict string) bool { return slices.Contains(Verdicts, verdict) }
+
+// read is what this engine will treat a runner's word as.
+//
+// Anything outside Verdicts becomes blocked, because an outcome we cannot read
+// is a fact about us rather than about the change. That is the same rule that
+// puts a runner failure in blocked and not in fail.
+//
+// It has to be somewhere, because the alternative was in force and was wrong:
+// four separate switches over these words each fell through to a different
+// default, and the one in Verdict fell through to pass. A runner one version
+// ahead naming a new outcome would have reported the whole run green, exited
+// zero, and printed "unverified" beside that workflow in the same comment.
+func read(verdict string) string {
+	if Known(verdict) {
+		return verdict
+	}
+	return "blocked"
+}
+
+// Migration is what the rehearsal did on a throwaway branch of the golden.
+//
+// It is the narrative half of the migration checks. The half that decides
+// anything is in Findings, so a reader who only wants the answer does not have
+// to interpret a duration.
+type Migration struct {
+	// Tool is the migration tool that was recognised.
+	Tool string
+	// Pending is how many migrations had not been applied to the branch.
+	Pending int
+	// TotalMS is how long they took against production's row counts.
+	TotalMS float64
+	// Slowest are the statements worth a line, slowest first.
+	Slowest []Statement
+	// Locks are the locks that stopped other work.
+	Locks []Lock
+	// Notes say what could not be measured, and why.
+	Notes []string
+}
+
+// Statement is one migration statement and what it cost.
+type Statement struct {
+	SQL     string
+	MS      float64
+	Rewrote []string
+}
+
+// Lock is one table and the strongest lock it was seen under.
+type Lock struct {
+	Table  string
+	Mode   string
+	HeldMS float64
+	// Blocking is whether another session was ever seen waiting on it.
+	Blocking bool
+}
+
+// Cleanup is what teardown removed and what it could not.
+//
+// Nil means teardown was not attempted, which is what --keep asks for. It is
+// not the same as a teardown that removed nothing, and the report distinguishes
+// them.
+type Cleanup struct {
+	Removed int
+	// Pending is what is still recorded, one line each. The journal remembers
+	// them, so af down can finish the job.
+	Pending []string
+	// Error is the teardown's own failure, when it had one.
+	Error string
+}
+
+// The six verdicts, worst first. Nothing outside this list is a run verdict,
+// and the order here is the order Verdict resolves them in.
+const (
+	// VerdictFail is a real finding about the change that stops the merge: a
+	// workflow that failed, an invariant that did not hold, or a finding a
+	// policy puts at fail.
+	VerdictFail = "fail"
+	// VerdictFlaky is a workflow that passed only sometimes.
+	VerdictFlaky = "flaky"
+	// VerdictWarn is a real finding about the change that does not stop the
+	// merge. It is the level "pass, warning, or block" always described and
+	// the engine could not produce.
+	VerdictWarn = "warn"
+	// VerdictBlocked is the runner or the environment failing to evaluate
+	// something. It is NOT a failure and it exits zero: a gap in our tooling
+	// must never count against somebody's code.
+	VerdictBlocked = "blocked"
+	// VerdictUnverified is a workflow that ran and proved nothing either way.
+	VerdictUnverified = "unverified"
+	// VerdictPass is everything asked and nothing found.
+	VerdictPass = "pass"
+)
 
 // Insights is what the database noticed while the environment ran.
 //
@@ -118,27 +247,34 @@ type Scan struct {
 
 // Verdict is the one word answer for the whole run.
 //
-// A failure outranks everything, then flaky, then blocked. Blocked below flaky
-// on purpose: a flaky workflow is a real signal about the application and a
-// blocked one is a signal about us.
+// A failure outranks everything, then flaky, then warn, then blocked. Blocked
+// below all three on purpose: a flaky workflow and a warning are real signals
+// about the application, and a blocked one is a signal about us.
+//
+// Warn sits under flaky rather than over it only because flaky already has a
+// headline of its own; the findings section lists everything worst first
+// whichever word wins here, so nothing is hidden by the order.
 func (r Run) Verdict() string {
 	counts := map[string]int{}
 	for _, w := range r.Workflows {
-		counts[w.Verdict]++
+		counts[read(w.Verdict)]++
 	}
+	fail, warn := r.Counts()
 	switch {
-	case counts["fail"] > 0, r.InvariantsViolated() > 0:
-		return "fail"
-	case counts["flaky"] > 0:
-		return "flaky"
-	case counts["blocked"] > 0:
-		return "blocked"
-	case counts["unverified"] > 0:
-		return "unverified"
+	case counts[VerdictFail] > 0, r.InvariantsViolated() > 0, fail > 0:
+		return VerdictFail
+	case counts[VerdictFlaky] > 0:
+		return VerdictFlaky
+	case warn > 0:
+		return VerdictWarn
+	case counts[VerdictBlocked] > 0:
+		return VerdictBlocked
+	case counts[VerdictUnverified] > 0:
+		return VerdictUnverified
 	case len(r.Workflows) == 0:
-		return "blocked"
+		return VerdictBlocked
 	default:
-		return "pass"
+		return VerdictPass
 	}
 }
 
@@ -146,41 +282,58 @@ func (r Run) Verdict() string {
 func (r Run) Headline() string {
 	counts := map[string]int{}
 	for _, w := range r.Workflows {
-		counts[w.Verdict]++
+		counts[read(w.Verdict)]++
 	}
+	_, warns := r.Counts()
 	switch r.Verdict() {
-	case "pass":
+	case VerdictPass:
 		if len(r.Invariants) > 0 {
 			return fmt.Sprintf("All %d workflows passed, and %s held.",
 				len(r.Workflows), plural(len(r.Invariants), "invariant", "invariants"))
 		}
 		return fmt.Sprintf("All %d workflows passed.", len(r.Workflows))
-	case "fail":
+	case VerdictFail:
 		// The invariant is named first when the workflows are all green,
 		// because "3 workflows passed" above a failing run is the comment
 		// people learn to stop believing.
-		if counts["fail"] == 0 {
+		if counts[VerdictFail] == 0 && r.InvariantsViolated() == 0 {
+			// Neither a workflow nor an invariant. Something the database or
+			// the network said, and naming it beats reporting a count.
+			if worst, ok := r.Worst(); ok {
+				return worst.Title
+			}
+		}
+		if counts[VerdictFail] == 0 {
 			return fmt.Sprintf("Every workflow passed and %s did not hold.",
 				plural(r.InvariantsViolated(), "invariant", "invariants"))
 		}
 		if v := r.InvariantsViolated(); v > 0 {
 			return fmt.Sprintf("%s failed, and %s did not hold.",
-				plural(counts["fail"], "workflow", "workflows"),
+				plural(counts[VerdictFail], "workflow", "workflows"),
 				plural(v, "invariant", "invariants"))
 		}
-		return fmt.Sprintf("%s failed.", plural(counts["fail"], "workflow", "workflows"))
-	case "flaky":
+		return fmt.Sprintf("%s failed.", plural(counts[VerdictFail], "workflow", "workflows"))
+	case VerdictFlaky:
 		return fmt.Sprintf("%s passed only sometimes.",
-			plural(counts["flaky"], "workflow", "workflows"))
-	case "blocked":
+			plural(counts[VerdictFlaky], "workflow", "workflows"))
+	case VerdictWarn:
+		// The count rather than the first title, because a warning headline
+		// naming one of four findings reads as though there were one.
+		if len(r.Workflows) == 0 {
+			return fmt.Sprintf("No workflows ran, and %s to look at.",
+				plural(warns, "finding", "findings"))
+		}
+		return fmt.Sprintf("Nothing failed, and %s to look at.",
+			plural(warns, "finding", "findings"))
+	case VerdictBlocked:
 		if len(r.Workflows) == 0 {
 			return "Nothing ran."
 		}
 		return fmt.Sprintf("%s could not be carried through. Nothing here counts against the change.",
-			plural(counts["blocked"], "workflow", "workflows"))
+			plural(counts[VerdictBlocked], "workflow", "workflows"))
 	default:
 		return fmt.Sprintf("%s ran without proving anything either way.",
-			plural(counts["unverified"], "workflow", "workflows"))
+			plural(counts[VerdictUnverified], "workflow", "workflows"))
 	}
 }
 
@@ -270,14 +423,16 @@ func plural(n int, one, many string) string {
 // in an email digest, and by a screen reader, and only one of those renders an
 // emoji usefully.
 func symbol(verdict string) string {
-	switch verdict {
-	case "pass":
+	switch read(verdict) {
+	case VerdictPass:
 		return "passed"
-	case "fail":
+	case VerdictFail:
 		return "FAILED"
-	case "flaky":
+	case VerdictFlaky:
 		return "flaky"
-	case "blocked":
+	case VerdictWarn:
+		return "warning"
+	case VerdictBlocked:
 		return "blocked"
 	default:
 		return "unverified"
@@ -308,7 +463,7 @@ func (r Run) Markdown() string {
 		})
 		for _, w := range sorted {
 			detail := w.Detail
-			if w.Verdict == "pass" {
+			if w.Verdict == VerdictPass {
 				detail = ""
 			}
 			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", w.Name, symbol(w.Verdict), oneLine(detail))
@@ -319,7 +474,7 @@ func (r Run) Markdown() string {
 	// Folded, because the audience did not ask for this comment. Somebody who
 	// wants the steps opens it; everybody else reads four lines and moves on.
 	for _, w := range r.Workflows {
-		if w.Verdict == "pass" || len(w.Steps) == 0 {
+		if w.Verdict == VerdictPass || len(w.Steps) == 0 {
 			continue
 		}
 		fmt.Fprintf(&b, "<details><summary>How to see <code>%s</code> yourself</summary>\n\n", w.Name)
@@ -332,16 +487,23 @@ func (r Run) Markdown() string {
 		b.WriteString("\n</details>\n\n")
 	}
 
+	b.WriteString(r.findingSection())
+
 	if len(r.Invariants) > 0 {
 		b.WriteString(r.invariantSection())
 	}
 
+	b.WriteString(r.migrationSection())
+
 	if v := r.Verification; v != nil {
-		if v.Clean {
+		switch {
+		case v.Unavailable != "":
+			fmt.Fprintf(&b, "Masking was not checked on this branch: %s\n\n", oneLine(v.Unavailable))
+		case v.Clean:
 			fmt.Fprintf(&b,
 				"Masking verified: %d columns read back, %d rows sampled, nothing that still parses as real.\n\n",
 				v.Columns, v.RowsSampled)
-		} else {
+		default:
 			fmt.Fprintf(&b, "**Masking did not verify.** %s\n\n", strings.Join(v.Findings, " "))
 		}
 	}
@@ -397,10 +559,38 @@ func (r Run) Markdown() string {
 		b.WriteString("\n")
 	}
 
-	if r.Verdict() == "blocked" {
+	if c := r.Cleanup; c != nil {
+		switch {
+		case c.Error != "":
+			fmt.Fprintf(&b, "**Teardown failed after removing %d resources.** %s\n\n",
+				c.Removed, oneLine(c.Error))
+		case len(c.Pending) > 0:
+			fmt.Fprintf(&b, "**Teardown removed %d resources and left %s behind:**\n",
+				c.Removed, plural(len(c.Pending), "one", "these"))
+			for _, p := range c.Pending {
+				fmt.Fprintf(&b, "- %s\n", oneLine(p))
+			}
+			b.WriteString("\nThe journal remembers them. Run `af down` against this environment to finish the job.\n\n")
+		default:
+			fmt.Fprintf(&b, "Torn down: %d resources removed, nothing left behind.\n\n", c.Removed)
+		}
+	}
+
+	for _, n := range r.Notes {
+		fmt.Fprintf(&b, "Not measured: %s\n\n", oneLine(n))
+	}
+
+	if r.Verdict() == VerdictBlocked {
 		fmt.Fprintf(&b,
 			"Blocked means the environment or the runner could not carry a workflow through. "+
 				"It is not counted against this change. [What blocked means](%s/concepts/verdicts)\n\n",
+			docs)
+	}
+	if r.Verdict() == VerdictWarn {
+		fmt.Fprintf(&b,
+			"A warning is a real finding about this change that does not fail the check. "+
+				"Which findings fail is the manifest's `policy` block. "+
+				"[What the verdicts mean](%s/concepts/verdicts)\n\n",
 			docs)
 	}
 
@@ -419,18 +609,36 @@ func (r Run) Markdown() string {
 }
 
 func rank(verdict string) int {
-	switch verdict {
-	case "fail":
+	switch read(verdict) {
+	case VerdictFail:
 		return 0
-	case "flaky":
+	case VerdictFlaky:
 		return 1
-	case "blocked":
+	case VerdictWarn:
 		return 2
-	case "unverified":
+	case VerdictBlocked:
 		return 3
-	default:
+	case VerdictUnverified:
 		return 4
+	default:
+		return 5
 	}
+}
+
+// flatten is oneLine's sibling for prose that is not in a table.
+//
+// The cap is much higher because a finding's detail is a paragraph rather than
+// a cell, and truncating "so the window is the statement rather than the whole
+// migration" at 120 characters loses the half that says what to do. There is
+// still a cap, because one of these can carry a database error and an error
+// that fills the comment is an error nobody reads past.
+func flatten(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	const max = 500
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-1] + "…"
 }
 
 // oneLine keeps a table cell a table cell.
@@ -459,3 +667,106 @@ const Marker = "<!-- antifailure:report -->"
 
 // Comment returns the comment body, with the marker.
 func (r Run) Comment() string { return Marker + "\n" + r.Markdown() }
+
+// findingSection is what the run noticed that is not a workflow or an
+// invariant, worst first.
+//
+// Nothing at all when there is nothing to say, because a heading over an empty
+// list is a line the reader pays for and learns nothing from. A failing
+// finding is bold and a warning is not, so the two are told apart at a glance
+// rather than by reading the level.
+func (r Run) findingSection() string {
+	shown := make([]Finding, 0, len(r.Findings))
+	for _, f := range r.Findings {
+		if f.Level != LevelIgnore {
+			shown = append(shown, f)
+		}
+	}
+	if len(shown) == 0 {
+		return ""
+	}
+	// Stable, so that two findings at the same level keep the order they were
+	// added in, which is the order the checks run in and the order somebody
+	// would work through them.
+	sort.SliceStable(shown, func(i, j int) bool {
+		return findingRank(shown[i].Level) < findingRank(shown[j].Level)
+	})
+
+	var b strings.Builder
+	b.WriteString("**What this change does to the database and the network**\n\n")
+	for _, f := range shown {
+		title := f.Title
+		if f.Level == LevelFail {
+			title = "**" + title + "**"
+		}
+		fmt.Fprintf(&b, "%s `%s`", title, f.Rule)
+		if f.Where != "" {
+			fmt.Fprintf(&b, " on `%s`", f.Where)
+		}
+		b.WriteString("\n")
+		if f.Detail != "" {
+			fmt.Fprintf(&b, "%s\n", flatten(f.Detail))
+		}
+		if f.Fix != "" {
+			fmt.Fprintf(&b, "Instead: %s\n", flatten(f.Fix))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// migrationSection is what the rehearsal did, folded away.
+//
+// Folded because it is the evidence rather than the answer: the answer is in
+// the findings above, and somebody who wants to know what the migration cost
+// on production's row counts opens it. A run with nothing pending still gets a
+// line, because "no migrations in this change" is worth saying once and reads
+// nothing like a rehearsal that did not happen.
+func (r Run) migrationSection() string {
+	m := r.Migration
+	if m == nil {
+		return ""
+	}
+	var b strings.Builder
+	if m.Pending == 0 && len(m.Notes) == 0 {
+		b.WriteString("Migrations: nothing pending on this branch.\n\n")
+		return b.String()
+	}
+	if m.Pending == 0 {
+		for _, n := range m.Notes {
+			fmt.Fprintf(&b, "Migrations: %s\n\n", oneLine(n))
+		}
+		return b.String()
+	}
+
+	fmt.Fprintf(&b, "<details><summary>%s rehearsed against production's row counts, %s in total</summary>\n\n",
+		plural(m.Pending, "migration", "migrations"), duration(m.TotalMS))
+	if m.Tool != "" {
+		fmt.Fprintf(&b, "Tool: `%s`\n\n", m.Tool)
+	}
+	if len(m.Slowest) > 0 {
+		b.WriteString("| Statement | Took | Rewrote |\n| --- | --- | --- |\n")
+		for _, st := range m.Slowest {
+			fmt.Fprintf(&b, "| `%s` | %s | %s |\n",
+				oneLine(st.SQL), duration(st.MS), strings.Join(st.Rewrote, ", "))
+		}
+		b.WriteString("\n")
+	}
+	if len(m.Locks) > 0 {
+		b.WriteString("| Table | Lock | Held for at least | Blocked another session |\n")
+		b.WriteString("| --- | --- | --- | --- |\n")
+		for _, l := range m.Locks {
+			waited := "no"
+			if l.Blocking {
+				waited = "yes"
+			}
+			fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", l.Table, l.Mode, duration(l.HeldMS), waited)
+		}
+		b.WriteString("\nSampled every 250ms, so each figure is a lower bound rather than a measurement.\n\n")
+	}
+	for _, n := range m.Notes {
+		fmt.Fprintf(&b, "Not measured: %s\n\n", oneLine(n))
+	}
+	b.WriteString("</details>\n\n")
+	return b.String()
+}

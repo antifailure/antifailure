@@ -64,6 +64,10 @@ type pricing struct {
 		RetentionPerGBMon float64 `yaml:"retention_per_gb_month"`
 		FreeIngestionGB   float64 `yaml:"free_ingestion_gb"`
 	} `yaml:"log_analytics"`
+	AzureMonitor struct {
+		MetricAlertPerMonth float64 `yaml:"metric_alert_per_month"`
+		WebTestExecution    float64 `yaml:"web_test_execution"`
+	} `yaml:"azure_monitor"`
 	Assumptions struct {
 		LogAnalyticsGBPerMonth float64 `yaml:"log_analytics_gb_per_month"`
 		KeyVaultOpsPerMonth    float64 `yaml:"key_vault_operations_per_month"`
@@ -109,7 +113,32 @@ var free = map[string]string{
 	"azurerm_container_app_environment":             "the environment is free on the consumption plan; the apps in it are not",
 	"azurerm_key_vault_secret":                      "storing a secret is free; the operations that read it are counted on the vault",
 	"random_password":                               "",
+	"random_bytes":                                  "",
 	"terraform_data":                                "",
+
+	// Missing until the production stack was written, and each of them was
+	// reported UNKNOWN on a plan that has been run since the beginning:
+	// random_bytes is the provider key sealing secret and the server
+	// configuration is the azure.extensions allow-list without which the first
+	// migration is refused.
+	"azurerm_postgresql_flexible_server_configuration": "a server parameter is free; the server is not",
+
+	// The public name. A record SET costs nothing; the zone that holds it is
+	// billed per month and per million queries, and that zone is in af-web with
+	// the marketing site rather than in this stack.
+	"azurerm_dns_cname_record": "record sets are free; the zone they live in is billed in the group that owns it",
+	"azurerm_dns_txt_record":   "",
+
+	// Container Apps issues and renews a managed certificate at no charge, and
+	// binding a domain to an app is not itself billed.
+	"azurerm_container_app_environment_managed_certificate": "a managed certificate is free; a certificate you upload is too",
+	"azurerm_container_app_custom_domain":                   "",
+
+	// Alerting. The group is free and so are its first 1000 emails and 100 SMS
+	// a month, which this tool does not try to model: the rules and the probes
+	// below are where the money is.
+	"azurerm_monitor_action_group": "the group is free; the notifications it sends have their own free grants",
+	"azurerm_application_insights": "the component is free; the availability results it stores are ingestion on the workspace",
 }
 
 func main() {
@@ -212,13 +241,23 @@ func estimate(pl plan, p pricing) (lines []line, total float64, unknowns int) {
 				break
 			}
 			compute := rate * hours
-			if ha, _ := after["high_availability"].([]any); len(ha) > 0 && p.Postgres.HighAvailabilityMult > 0 {
-				compute *= p.Postgres.HighAvailabilityMult
-			}
 			storageGB := num(after["storage_mb"]) / 1024
 			storage := storageGB * p.Postgres.StoragePerGBMonth
+			// Zone redundant HA is a SECOND SERVER, with its own compute and
+			// its own disk, and Azure bills both. This multiplied compute only
+			// until the production stack was priced, which understated a
+			// 64 GB production plan by 8.32 a month.
+			ha, _ := after["high_availability"].([]any)
+			highlyAvailable := len(ha) > 0 && p.Postgres.HighAvailabilityMult > 0
+			if highlyAvailable {
+				compute *= p.Postgres.HighAvailabilityMult
+				storage *= p.Postgres.HighAvailabilityMult
+			}
 			l.monthly = compute + storage
 			l.detail = fmt.Sprintf("%s, %.0f GB", sku, storageGB)
+			if highlyAvailable {
+				l.detail += fmt.Sprintf(", x%g for zone redundant HA", p.Postgres.HighAvailabilityMult)
+			}
 
 		case "azurerm_container_app":
 			cpu, mem, replicas := containerShape(after)
@@ -266,6 +305,39 @@ func estimate(pl plan, p pricing) (lines []line, total float64, unknowns int) {
 		case "azurerm_private_dns_zone":
 			l.monthly = 0.50
 			l.detail = "one hosted zone"
+
+		case "azurerm_monitor_metric_alert":
+			// Per rule per month. Every rule this project writes filters to a
+			// single time series, which is the unit Azure bills, so one rule is
+			// one charge. A rule that split on a dimension with `*` would cost
+			// this for each series it produced.
+			if p.AzureMonitor.MetricAlertPerMonth == 0 {
+				l.unknown, l.detail = true, "no azure_monitor.metric_alert_per_month in pricing.yaml"
+				break
+			}
+			l.monthly = p.AzureMonitor.MetricAlertPerMonth
+			l.detail = "one metric alert rule"
+
+		case "azurerm_application_insights_standard_web_test":
+			// Billed per execution, and an execution is one LOCATION running
+			// once. This is the line people are surprised by: the same test
+			// from five locations every five minutes costs five times what it
+			// does from one.
+			if p.AzureMonitor.WebTestExecution == 0 {
+				l.unknown, l.detail = true, "no azure_monitor.web_test_execution in pricing.yaml"
+				break
+			}
+			locations := 1
+			if ls, ok := after["geo_locations"].([]any); ok && len(ls) > 0 {
+				locations = len(ls)
+			}
+			every := num(after["frequency"])
+			if every == 0 {
+				every = 300 // the provider's default, and Azure's minimum
+			}
+			runs := seconds / every * float64(locations)
+			l.monthly = runs * p.AzureMonitor.WebTestExecution
+			l.detail = fmt.Sprintf("%d location(s) every %.0fs, %.0f executions", locations, every, runs)
 
 		default:
 			if why, ok := free[rc.Type]; ok {

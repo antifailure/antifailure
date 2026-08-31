@@ -110,3 +110,40 @@ describe('schema drift', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_D
     }
   })
 })
+
+// tenantScopedTables says in its own comment that the cross-tenant suite
+// asserts it covers the database, and until this test existed nothing read it
+// at all: the suite deliberately asks the database which tables carry org_id
+// rather than trusting a hand-written list, which is the stronger check and
+// left the list as a stale copy nobody maintained.
+//
+// So the list is checked against the typed schema instead, which needs no
+// database and therefore runs on every machine. A table added with an org_id
+// column and left out of the list is now a failure here rather than a silent
+// omission from the only place a reviewer would look for the set.
+describe('the tenant scoped table list', () => {
+  // sessions carries org_id and is not tenant scoped: a session belongs to a
+  // person, and the cross-tenant suite covers it by its own test for that
+  // reason. Named here so that the exemption is a decision somebody made
+  // rather than a table that fell out.
+  const isolatedByUser = new Set(['sessions'])
+
+  it('names every typed table that carries an org_id', () => {
+    const typed: PgTable[] = (Object.values(schema) as unknown[]).filter(
+      (v): v is PgTable => is(v, PgTable),
+    )
+    const orgScoped = typed
+      .map((t) => getTableConfig(t))
+      .filter((c) => c.columns.some((col) => col.name === 'org_id'))
+      .map((c) => c.name)
+      .filter((name) => !isolatedByUser.has(name))
+      .sort()
+    const listed = schema.tenantScopedTables.map((t) => getTableConfig(t).name).sort()
+
+    assert.deepEqual(
+      listed,
+      orgScoped,
+      'tenantScopedTables and the org_id columns in the schema disagree',
+    )
+  })
+})

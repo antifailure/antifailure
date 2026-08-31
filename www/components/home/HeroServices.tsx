@@ -20,17 +20,17 @@ export const HERO_SERVICES = [
   },
   {
     title: "Side-Effect Firewall",
-    description: "Simulators instead of charging cards or emailing users.",
+    description: "A stateful Stripe and captured mail instead of charging cards.",
     kind: "firewall" as const,
   },
   {
-    title: "Workload Studio",
-    description: "Observed patterns, deterministic journeys, and exploratory users.",
+    title: "Load",
+    description: "Traffic shaped like production's own access log, sent at the twin.",
     kind: "workload" as const,
   },
   {
     title: "Migration Safety",
-    description: "Locks, plans, and rollback feasibility before it ships.",
+    description: "Locks, table rewrites, and query plans before it ships.",
     kind: "migration" as const,
   },
 ];

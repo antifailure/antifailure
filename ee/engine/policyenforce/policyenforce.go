@@ -43,30 +43,37 @@ func init() {
 //
 // Every field is a restriction. There is no field that grants anything, which
 // is what makes "the stricter wins" true by construction rather than by care.
+//
+// The YAML tags are how an administrator writes one down; see configure.go for
+// where the document is read from and why an unreadable one stops the process.
 type Policy struct {
 	// RequiredMaskedColumns are patterns that must be covered by a masking
 	// rule. A pattern is table.column with * allowed in either part, so
 	// "*.email" covers every email column in the database.
-	RequiredMaskedColumns []string
+	RequiredMaskedColumns []string `yaml:"required_masked_columns"`
 	// DeniedHosts are hosts no repository may reach in any mode other than
 	// block, whatever its manifest says.
-	DeniedHosts []string
+	DeniedHosts []string `yaml:"denied_hosts"`
 	// AllowedModes limits which egress modes may be used at all. Empty means
 	// every mode. Naming any mode excludes the rest.
-	AllowedModes []string
+	AllowedModes []string `yaml:"allowed_modes"`
 	// SynthRequiresApproval refuses synth mode outright unless the environment
 	// carries an approval. Synth invents responses from a model, so an
 	// environment using it proves less than it appears to.
-	SynthRequiresApproval bool
+	SynthRequiresApproval bool `yaml:"synth_requires_approval"`
 	// AllowedProviders limits which database providers may be used, for
 	// residency. Empty means any.
-	AllowedProviders []string
+	AllowedProviders []string `yaml:"allowed_providers"`
 	// AllowedRegions limits where an environment may run. Empty means anywhere.
-	AllowedRegions []string
+	AllowedRegions []string `yaml:"allowed_regions"`
 	// MaxLifetimeHours bounds how long an environment may exist. Zero means no
 	// bound. Enforced by the reaper rather than at creation, and carried here
 	// so that one policy object describes the whole rule.
-	MaxLifetimeHours int
+	//
+	// There is no reaper yet, which is why FromEnvironment refuses a document
+	// that sets this rather than accepting it. A field that reads as a bound
+	// and enforces nothing is worse than an error.
+	MaxLifetimeHours int `yaml:"max_lifetime_hours"`
 }
 
 // Approval is what a run carries when a human has agreed to something.

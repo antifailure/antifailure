@@ -29,11 +29,17 @@ Bring an environment up, run everything, write a report, tear it down.
 
 The whole check in one command, for a pull request.
 
+The agents drive the workflows, the invariants are asked of the data, the
+migrations are rehearsed against a throwaway branch of the golden, and what the
+environment reached for is summarised. Every finding is ranked by the manifest's
+policy block, which decides what fails the check and what is only reported.
+
 Teardown happens whatever the outcome, including a failure and including an
 interrupt, because an environment that outlives its pull request is the leak
-this product exists to prevent.
+this product exists to prevent. It happens before the report is written, so a
+teardown that left something behind is in the report rather than after it.
 
-Only a real failure exits non zero. A blocked run says what was missing and
+Only a real finding exits non zero. A blocked run says what was missing and
 exits zero, so an incomplete environment is not indistinguishable from a broken
 change.
 
@@ -43,12 +49,14 @@ af ci [flags]
 
 | Flag | Default | What it does |
 | --- | --- | --- |
+| `--baseline` | - | Compare queries and plans against a report saved on the base branch. |
 | `--branch` | - | Branch to check, defaulting to the checked out one. |
 | `--docs` | - | Where documentation links point. |
 | `--keep` | `false` | Leave the environment up, for debugging a failure. |
 | `--load` | `false` | Generate load as well as running the workflows. |
 | `--report` | - | Write the report here as well as to the terminal. |
 | `--runner` | - | Path to the runner's entry point. |
+| `--save-baseline` | - | Save this run's queries and plans, to compare a later branch against. |
 | `--timeout` | `30m0s` | Give up after this long. |
 
 ### `af doctor`
@@ -165,6 +173,35 @@ one line answer.
 ```
 af explain
 ```
+
+### `af explore`
+
+Send agents at a goal with no declared workflow.
+
+An exploration is a goal without a script. The agent reads each page through
+the accessibility tree, chooses somewhere to go, and writes down every place
+the application cost it effort. It answers the question a workflow cannot ask:
+nothing broke, so why would somebody give up here.
+
+It cannot fail your build. Nobody declared what should happen on the pages it
+wanders onto, so a finding is an observation and never a red mark. Only a run
+that could not start is reported as blocked.
+
+Every choice comes from the goal's seed, so the same seed takes the same path
+and every finding arrives with the command that replays it.
+
+```
+af explore [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to run against, defaulting to the checked out one. |
+| `--emit-workflow` | `false` | Print the workflow block that replays what was explored, instead of the report. |
+| `--headed` | `false` | Show the browser rather than running it hidden. |
+| `--only` | - | Explore just these goals, by name. |
+| `--runner` | - | Path to the runner's entry point. |
+| `--seed` | - | Replay with this seed rather than the one the manifest declares. |
 
 ### `af golden`
 
@@ -391,6 +428,12 @@ this environment ran are compared against a report saved on the base branch.
   af insights --save baseline.json     on main
   af insights --baseline baseline.json on the branch
 
+Where the migrations take something away, the previous release is built and run
+against the migrated branch as well, because a rolling deploy leaves both
+releases talking to the same database for the length of the window and nothing
+else here checks that. It exits non zero only when a workflow passes without
+the migrations and fails with them.
+
 It says what it could not measure, and it names any check the manifest turned
 off. A report that silently omits a check reads exactly like a check that found
 nothing.
@@ -401,10 +444,12 @@ af insights [flags]
 
 | Flag | Default | What it does |
 | --- | --- | --- |
+| `--against` | - | Which commit the previous release is, overriding the manifest. |
 | `--baseline` | - | Compare against a report saved earlier. |
 | `--branch` | - | Branch to read, defaulting to the checked out one. |
 | `--limit` | `20` | How many queries to show. |
 | `--no-rehearsal` | `false` | Skip the migration rehearsal, which is the only check that makes a second branch. |
+| `--runner` | - | Path to the runner's entry point. |
 | `--save` | - | Save this report to compare against later. |
 
 ### `af invariants`
@@ -766,6 +811,41 @@ in the decision, no matter where it sits in the file.
 ```
 af net policy
 ```
+
+### `af oracle`
+
+Run this change beside the version it is replacing and diff what they did.
+
+Brings a second environment up from a baseline revision, branches the same
+golden for both so they start from identical rows, sends both the same requests
+in the same order, and reports every difference in what came back and in what
+ended up in the database.
+
+Responses and database contents are compared. Events, outbound effects, traces
+and query plans are not: two comparisons done completely are worth more than six
+done shallowly, because the first one that cries wolf is the last one anybody
+looks at.
+
+Values that no two runs can agree on are normalised before they are compared:
+two timestamps within an hour, two UUIDs, two numbers within a relative
+tolerance. Everything the comparison declined to look at is printed, defaults
+included, because an oracle that silently ignores a field is worse than one that
+reports it.
+
+The candidate environment is left running whether or not this command brought it
+up. The baseline is torn down unless --keep says otherwise.
+
+```
+af oracle [flags]
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--baseline` | - | Revision to compare against, overriding oracle.base_ref. |
+| `--branch` | - | Branch to compare, defaulting to the checked out one. |
+| `--fail-on` | - | Lowest severity that fails the command: none, minor, major, or critical. |
+| `--keep` | `false` | Leave the baseline environment up, for looking at a difference. |
+| `-o`, `--output` | - | Write the report here as well as to the terminal. |
 
 ### `af provider`
 

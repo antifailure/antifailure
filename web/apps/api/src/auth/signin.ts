@@ -191,75 +191,184 @@ export async function completeSignIn(
 
   const logins = orgs.map((o) => o.login.toLowerCase())
 
-  return pool.withoutTenant(
-    async (db) => {
-      // Membership is granted only where an installation exists. Belonging to a
-      // GitHub organization is not by itself a reason to see another company's
-      // environments: somebody has to have installed the App for it first.
-      //
-      // sql.param, not a bare array. An array interpolated directly becomes a
-      // record of one parameter per element, which is a tuple rather than an
-      // array, and the mistake reads as correct in every language this is
-      // written in.
-      const installed = logins.length
+  // Membership is granted only where an installation exists. Belonging to a
+  // GitHub organization is not by itself a reason to see another company's
+  // environments: somebody has to have installed the App for it first.
+  //
+  // sql.param, not a bare array. An array interpolated directly becomes a
+  // record of one parameter per element, which is a tuple rather than an array,
+  // and the mistake reads as correct in every language this is written in.
+  const installed = await pool.withoutTenant(
+    async (db) =>
+      logins.length
         ? await db.execute<{ org_id: string; installation_id: string; account_login: string }>(sql`
             SELECT org_id, installation_id, account_login FROM github_installations
             WHERE lower(account_login) = ANY(${sql.param(logins)}::text[])
               AND suspended_at IS NULL`)
-        : []
-
-      for (const row of installed) {
-        // The role comes from GitHub rather than from a constant here.
-        //
-        // This used to write 'member' for everybody, which is wrong in the one
-        // case that matters most: the person who installed the App, on the
-        // organization they own, arrives as a plain member and cannot manage
-        // members, mint engine tokens, export the audit log, approve a masking
-        // or egress change, or store a provider key. Their own control plane
-        // refuses them, and the only way out was a database console.
-        //
-        // An organization owner becomes an admin rather than an owner, for the
-        // reason syncMembership gives further down: owner also holds billing,
-        // and that is this application's decision rather than GitHub's.
-        const upstream = await github
-          .roleIn(Number(row.installation_id), row.account_login, user.login)
-          .catch(() => null)
-        const role: Role = upstream === 'admin' ? 'admin' : 'member'
-
-        await db.execute(sql`
-          INSERT INTO members (org_id, user_id, role, source)
-          VALUES (${row.org_id}, ${userId}, ${role}, 'github')
-          ON CONFLICT (org_id, user_id) DO UPDATE SET
-            -- Two things this must not do. It must not overwrite a role set by
-            -- hand in this application, which is what source = 'manual' marks.
-            -- And it must not act on a role GitHub declined to report: null is
-            -- "ask again later", not "demote them", or a rate limit during
-            -- sign-in would quietly strip an administrator of their rights.
-            role = CASE
-              WHEN members.source = 'github' AND ${upstream !== null}
-                THEN ${role}
-              ELSE members.role
-            END,
-            updated_at = ${clock.now().toISOString()}`)
-      }
-
-      // Memberships that already existed count too: an installation may have
-      // been set up while this person was signed in, or by somebody else.
-      const memberships = await db.execute<{ org_id: string }>(sql`
-        SELECT org_id FROM members WHERE user_id = ${userId} ORDER BY created_at ASC`)
-
-      return {
-        userId,
-        // An organization is chosen only when there is exactly one. With
-        // several, the caller shows a picker: guessing puts somebody in the
-        // wrong tenant, where every page is empty for no visible reason.
-        orgId: memberships.length === 1 ? memberships[0]!.org_id : null,
-        redirectTo: consumed.redirect_to,
-        label: user.name || user.login,
-      }
-    },
-    { signinUserId: userId, githubLogins: logins },
+        : [],
+    // Only the logins. Each of these two reads declares the one value its own
+    // policy keys on, rather than both declaring both: a transaction that names
+    // something it does not use is a policy nobody can tell is unnecessary.
+    { githubLogins: logins },
   )
+
+  for (const row of installed) {
+    await grantMembership(pool, clock, github, {
+      orgId: row.org_id,
+      installationId: Number(row.installation_id),
+      orgLogin: row.account_login,
+      userId,
+      login: user.login,
+      label: user.name || user.login,
+    })
+  }
+
+  // Memberships that already existed count too: an installation may have been
+  // set up while this person was signed in, or by somebody else.
+  const memberships = await pool.withoutTenant(
+    async (db) =>
+      db.execute<{ org_id: string }>(sql`
+        SELECT org_id FROM members WHERE user_id = ${userId} ORDER BY created_at ASC`),
+    { signinUserId: userId },
+  )
+
+  return {
+    userId,
+    // An organization is chosen only when there is exactly one. With several,
+    // the caller shows a picker: guessing puts somebody in the wrong tenant,
+    // where every page is empty for no visible reason.
+    orgId: memberships.length === 1 ? memberships[0]!.org_id : null,
+    redirectTo: consumed.redirect_to,
+    label: user.name || user.login,
+  }
+}
+
+/**
+ * Writes one person's membership of one organization, in that organization's
+ * own tenant scope.
+ *
+ * WHY THIS IS NOT PART OF THE SIGN-IN TRANSACTION any more. Deciding whether
+ * this person is the FIRST member of the organization means counting the
+ * organization's members, and the sign-in scope cannot: `signin_own_membership`
+ * in migration 0007 exposes only rows where `user_id` is the person signing in,
+ * so a count taken there is always zero and everybody would look like the
+ * first. Widening that policy would have let a sign-in read other people's
+ * membership rows; entering the organization's own scope reads them under the
+ * isolation rule that already exists.
+ *
+ * The evidence that entitles this transaction to the tenant is the same
+ * evidence that entitles it to write the row at all: GitHub said, moments ago
+ * and for this person, that they belong to that organization, and an
+ * installation exists for it.
+ *
+ * The cost is that memberships are no longer written all-or-nothing across
+ * several organizations. That is the better failure: an error reaching GitHub
+ * about the second organization should not discard the membership already
+ * established for the first.
+ */
+async function grantMembership(
+  pool: Pool,
+  clock: Clock,
+  github: GitHubClient,
+  input: {
+    orgId: string
+    installationId: number
+    orgLogin: string
+    userId: string
+    login: string
+    label: string
+  },
+): Promise<void> {
+  // The role comes from GitHub rather than from a constant here.
+  //
+  // This used to write 'member' for everybody, which is wrong in the one case
+  // that matters most: the person who installed the App, on the organization
+  // they own, arrives as a plain member and cannot manage members, mint engine
+  // tokens, export the audit log, approve a masking or egress change, or store
+  // a provider key. Their own control plane refuses them, and the only way out
+  // was a database console.
+  //
+  // An organization owner becomes an admin rather than an owner, for the reason
+  // syncMembership gives further down: owner also holds billing, and that is
+  // this application's decision rather than GitHub's.
+  const upstream = await github
+    .roleIn(input.installationId, input.orgLogin, input.login)
+    .catch(() => null)
+  const fromGitHub: Role = upstream === 'admin' ? 'admin' : 'member'
+
+  await pool.withTenant({ orgId: input.orgId, userId: input.userId }, async (db) => {
+    // Serialised per organization, for the reason appendAudit gives: two people
+    // signing in at the same instant would both read an empty member list and
+    // both claim to be the first. An advisory lock rather than SELECT ... FOR
+    // UPDATE, because locking the rows a query returns locks nothing when it
+    // returns none, and none is exactly the case being decided here. It is also
+    // the only lock this transaction takes, so two sign-ins that share two
+    // organizations cannot deadlock against each other.
+    await db.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`members:${input.orgId}`}))`)
+
+    const existing = await db.execute<{ n: string }>(sql`
+      SELECT count(*) AS n FROM members WHERE org_id = ${input.orgId}`)
+    const unclaimed = Number(existing[0]?.n ?? 0) === 0
+
+    // The first member of an organization becomes its owner, and only then.
+    //
+    // Every organization here is created by an installation webhook, before
+    // anybody has signed in, so a fresh organization has no members at all.
+    // Mapping every GitHub administrator to `admin` therefore left every
+    // organization on this control plane with NOBODY holding `billing.manage`,
+    // which is owner-only: the plan, the payment method and the spending caps
+    // were unreachable for everyone, on every tenant, from the day it was
+    // created. An admin could promote themselves out of it, which is why this
+    // was survivable, and nothing said that was the step required.
+    //
+    // GitHub still has to confirm the promotion. `upstream === null` means
+    // GitHub would not say, and guessing upward on a null is the thing
+    // `roleIn` returns null to prevent: an outage during the first sign-in
+    // would hand ownership to whoever happened to arrive first. So a first
+    // sign-in that GitHub cannot speak for gets `member`, exactly as before,
+    // and the way out of an organization whose GitHub link is permanently
+    // broken is the break-glass command in backup-cli, not a guess made here.
+    const bootstrap = unclaimed && upstream === 'admin'
+    const role: Role = bootstrap ? 'owner' : fromGitHub
+
+    await db.execute(sql`
+      INSERT INTO members (org_id, user_id, role, source)
+      VALUES (${input.orgId}, ${input.userId}, ${role}, ${bootstrap ? 'manual' : 'github'})
+      ON CONFLICT (org_id, user_id) DO UPDATE SET
+        -- Two things this must not do. It must not overwrite a role set by
+        -- hand in this application, which is what source = 'manual' marks.
+        -- And it must not act on a role GitHub declined to report: null is
+        -- "ask again later", not "demote them", or a rate limit during
+        -- sign-in would quietly strip an administrator of their rights.
+        --
+        -- GitHub's answer, never the bootstrapped one. A conflict means a
+        -- membership row already exists, which means the organization was not
+        -- unclaimed, which means there was no bootstrap to carry here.
+        role = CASE
+          WHEN members.source = 'github' AND ${upstream !== null}
+            THEN ${fromGitHub}
+          ELSE members.role
+        END,
+        updated_at = ${clock.now().toISOString()}`)
+
+    if (!bootstrap) return
+
+    // Marked `manual` above and audited here, and the two go together. A
+    // promotion this application decided is not GitHub's to take back on the
+    // next sync, and an organization acquiring an owner without a person
+    // asking for one is a thing a security review has to be able to find.
+    await appendAudit(db, {
+      orgId: input.orgId,
+      actorUserId: input.userId,
+      actorLabel: input.label,
+      action: 'member.bootstrapped',
+      targetType: 'member',
+      targetId: input.login,
+      origin: 'github',
+      detail: { role, githubRole: upstream, reason: 'first member of the organization' },
+      occurredAt: clock.now(),
+    })
+  })
 }
 
 async function upsertUser(db: Db, clock: Clock, user: GitHubUser): Promise<string> {

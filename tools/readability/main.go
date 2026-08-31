@@ -9,7 +9,18 @@
 // Usage:
 //
 //	go run ./tools/readability .            report every page, worst first
-//	go run ./tools/readability . --max 24   also fail when a page is worse
+//	go run ./tools/readability --max 24 .   also fail when a page is worse
+//
+// The flags come BEFORE the path, and that ordering is load bearing rather
+// than cosmetic. Go's flag package stops parsing at the first argument that
+// is not a flag, so `readability . --max 24` parses no flags at all: max
+// stays at its zero value, the threshold branch never runs, and the command
+// reports every page and exits 0 no matter how bad the prose is. Both the
+// justfile recipe and the CI step were written that way, and the usage line
+// directly above this one is where they copied it from, so this gate could
+// not fail from the day it was added until the day somebody read the flag
+// package's rule. NArg is checked below so that the next person gets an
+// error instead of a green run.
 //
 // The score is Flesch reading ease, on the usual scale where higher is
 // easier: 60 to 70 is plain English, below 30 is heavy going. Syllables are
@@ -36,6 +47,17 @@ func main() {
 	root := "."
 	if flag.NArg() > 0 {
 		root = flag.Arg(0)
+	}
+	// A gate that cannot fail is worse than no gate, because it is counted.
+	// Anything after the path is an argument the flag package silently
+	// ignored, and the only way to reach here with one is the mistake
+	// described above, so refuse rather than measure and pass.
+	if flag.NArg() > 1 {
+		fmt.Fprintf(os.Stderr,
+			"readability: %q came after the path and was ignored, so any threshold in it was not applied.\n"+
+				"Put the flags first: go run ./tools/readability --max 28 %s\n",
+			strings.Join(flag.Args()[1:], " "), root)
+		os.Exit(2)
 	}
 	if err := run(root, *max, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "readability:", err)
