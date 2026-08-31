@@ -52,5 +52,21 @@ horizontal padding below `lg` stays, because that is what keeps two buttons on
 one line. Measured 44px tall with 16px type at 320, 375, 414, 640, 768, 900,
 1023, 1024, 1100, 1280 and 1440.
 
-No page on the site scrolls horizontally at any width: 23 routes times ten
-widths, checked against the static export with the check proved able to fail.
+No page on the site scrolls horizontally at any width: all 35 exported routes
+times ten widths, 350 combinations, checked against the static export. The check
+was proved able to fail rather than assumed to work: injecting an element wider
+than the viewport makes it report the overflow and name the element.
+
+Everything above was measured against the static export rather than `next dev`,
+and that distinction is not pedantry. `optimize-images.mjs` runs only in `build`,
+so the development server answers 404 for every piece of the hero art and the
+hero renders on flat ground. A measurement of the aurora's edge taken there reads
+0 whether the edge is torn or not, which is how the phone half of this was nearly
+dismissed as already fine when the real step was 100 out of 255.
+
+There is no dark theme to check, which is a different claim from having checked
+one. The site sets `colorScheme: "light"` and carries no `dark:` variant and no
+`prefers-color-scheme` rule anywhere, and full page screenshots under an emulated
+dark preference are byte-identical to the light ones at all ten widths. That is
+the evidence that the page ignores the preference, not evidence that a dark
+palette renders correctly.
