@@ -63,6 +63,10 @@ af env list / prune   what this machine is holding, and a cutoff to clear it
 af insights    what the database noticed: the N+1, the index that stopped
                being used, the scan on a table that grew
 
+af fidelity    what this environment reproduces and what it does not, one
+               component at a time, with what could not be measured named
+               rather than counted either way
+
 af env pull    what the control plane recorded for one environment
 
 af license     what this installation is licensed for, in both editions

@@ -17,6 +17,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `database` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | `egress` | [Egress](#egress) | no | What the environment may reach on the network. |
 | `explore` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
+| `fidelity` | [Fidelity](#fidelity) | no | The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all. |
 | `github` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
 | `insights` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
@@ -141,6 +142,15 @@ Agents that pursue a goal with no declared workflow, discover the paths an appli
 | --- | --- | --- | --- |
 | `enabled` | boolean | no | Defaults to `false`. |
 | `goals` | list of [Goal](#goal) | no | One thing an exploratory agent tries to achieve. Max items 50. |
+
+## Fidelity
+
+The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | no | Defaults to `true`. |
+| `require` | list of string | no | Dimensions every component of which must be reproduced. A dimension that could not be measured neither satisfies a requirement nor breaks one. |
 
 ## GitHub
 

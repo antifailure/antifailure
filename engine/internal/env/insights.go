@@ -225,7 +225,15 @@ func (o *Orchestrator) rehearsalBranch(
 		return nil, nil, "", err
 	}
 	if version == "" {
-		return nil, nil, why, nil
+		// The reason arrives neutral, because two callers want it: the
+		// rehearsal, which has to explain what it did not do, and the fidelity
+		// inventory, which has to explain what it could not measure. It read
+		// "the migrations were not rehearsed" for both until the inventory
+		// printed that under a database heading and said nothing about the
+		// database.
+		return nil, nil, "the migrations were not rehearsed: " + why +
+			", and rehearsing against a different golden would compare two databases " +
+			"that were never the same", nil
 	}
 
 	o.progress("branching " + version + " to rehearse the migrations against")
@@ -381,27 +389,15 @@ func databaseURLVar(m *schema.Manifest) string {
 // identical.
 //
 // A provider that does not record where a branch came from gets a reason rather
-// than a guess.
+// than a guess. The reason is a fact about the branch and carries no mention of
+// what the caller wanted it for, because two callers want it for different
+// things and one of them is not a rehearsal.
 func (o *Orchestrator) environmentGolden(
 	ctx context.Context, s *session,
 ) (version, why string, err error) {
-	inventory, err := s.dbProv.Inventory(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	for _, r := range inventory {
-		if r.EnvID != o.envID {
-			continue
-		}
-		if v := r.Labels["golden"]; v != "" {
-			version = v
-			break
-		}
-	}
-	if version == "" {
-		return "", "the migrations were not rehearsed: this provider does not record which " +
-			"golden the environment's database came from, and rehearsing against a different " +
-			"one would compare two databases that were never the same", nil
+	version, why, err = o.branchGolden(ctx, s)
+	if err != nil || version == "" {
+		return "", why, err
 	}
 
 	goldens, err := s.dbProv.ListGoldens(ctx)
@@ -413,6 +409,34 @@ func (o *Orchestrator) environmentGolden(
 			return version, "", nil
 		}
 	}
-	return "", "the migrations were not rehearsed: the golden this environment came from, " +
-		version + ", is no longer present or no longer verified", nil
+	return "", "the golden this environment came from, " + version +
+		", is no longer present or no longer verified", nil
+}
+
+// branchGolden is the golden the branch was made from, as the provider records
+// it, with no judgement about whether that golden is still good.
+//
+// Split out because the fidelity inventory has to tell "the provider cannot
+// say" apart from "it says, and that golden is no longer verified", and the
+// answer above folds the two into one reason. For the rehearsal they are the
+// same outcome; for a report on whether the data can be shown to have been
+// masked they are not, and reporting an unverified golden as an unknown would
+// hide the one case somebody has to act on.
+func (o *Orchestrator) branchGolden(
+	ctx context.Context, s *session,
+) (version, why string, err error) {
+	inventory, err := s.dbProv.Inventory(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	for _, r := range inventory {
+		if r.EnvID != o.envID {
+			continue
+		}
+		if v := r.Labels["golden"]; v != "" {
+			return v, "", nil
+		}
+	}
+	return "", "this provider does not record which golden the environment's database " +
+		"came from", nil
 }

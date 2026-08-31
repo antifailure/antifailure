@@ -486,6 +486,32 @@ Organization policy {policy} refuses this environment: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [enterprise/policy](/docs/enterprise/policy/) |
 
+## Fidelity
+
+### AF-FID-001
+
+The environment does not reproduce {dimension}, which the manifest requires: {detail}
+
+**What to do.** Fix what the inventory names, or remove {dimension} from fidelity.require.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/fidelity](/docs/concepts/fidelity/) |
+
+### AF-FID-002
+
+{dimension} is required and could not be measured, so it is neither met nor broken: {detail}
+
+**What to do.** Run 'af fidelity' to see what could not be measured, and fix that before trusting the requirement.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/fidelity](/docs/concepts/fidelity/) |
+
 ## Infrastructure
 
 ### AF-INF-002

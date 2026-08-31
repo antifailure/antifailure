@@ -62,6 +62,7 @@ var areaNames = map[string]string{
 	"INF": "Infrastructure",
 	"EE":  "Enterprise",
 	"SCH": "Scheduling",
+	"FID": "Fidelity",
 	"CPL": "Control plane",
 }
 

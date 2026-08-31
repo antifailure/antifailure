@@ -128,6 +128,14 @@ const (
 	// Organization policy {policy} refuses this environment: {detail}
 	AFEE010 Code = "AF-EE-010"
 
+	// Fidelity
+	// The environment does not reproduce {dimension}, which the manifest
+	// requires: {detail}
+	AFFID001 Code = "AF-FID-001"
+	// {dimension} is required and could not be measured, so it is neither
+	// met nor broken: {detail}
+	AFFID002 Code = "AF-FID-002"
+
 	// GitHub
 	// The webhook signature did not verify.
 	AFGH001 Code = "AF-GH-001"
@@ -740,6 +748,24 @@ var catalog = map[Code]Entry{
 		Docs:      "enterprise/policy",
 		Retryable: false,
 		ExitCode:  ExitPolicyDenied,
+	},
+	AFFID001: {
+		Code:      AFFID001,
+		Area:      "FID",
+		Message:   "The environment does not reproduce {dimension}, which the manifest requires: {detail}",
+		NextStep:  "Fix what the inventory names, or remove {dimension} from fidelity.require.",
+		Docs:      "concepts/fidelity",
+		Retryable: false,
+		ExitCode:  ExitPolicyDenied,
+	},
+	AFFID002: {
+		Code:      AFFID002,
+		Area:      "FID",
+		Message:   "{dimension} is required and could not be measured, so it is neither met nor broken: {detail}",
+		NextStep:  "Run 'af fidelity' to see what could not be measured, and fix that before trusting the requirement.",
+		Docs:      "concepts/fidelity",
+		Retryable: false,
+		ExitCode:  ExitFailure,
 	},
 	AFGH001: {
 		Code:      AFGH001,

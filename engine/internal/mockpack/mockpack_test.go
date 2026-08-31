@@ -268,3 +268,45 @@ func decodeField(t *testing.T, body []byte, field string) string {
 	s, _ := obj[field].(string)
 	return s
 }
+
+// A pack that stores what was created and returns it on the next read is a
+// mock of the provider; one that does not is a list of canned answers. The
+// fidelity inventory reports the two differently, so the difference has to be
+// something the package answers rather than something a caller judges.
+func TestStateful_SeparatesAMockFromCannedAnswers(t *testing.T) {
+	t.Parallel()
+	packs, err := mockpack.Builtin()
+	require.NoError(t, err)
+	require.NotEmpty(t, packs)
+	for _, p := range packs {
+		require.True(t, p.Stateful(),
+			"the built in %s pack no longer keeps state, which the inventory reports on", p.Name)
+	}
+
+	canned, err := mockpack.Parse([]byte(
+		`{"name":"canned","hosts":["t.test"],"routes":[{"path":"/v1/things","body":{"ok":true}}]}`))
+	require.NoError(t, err)
+	require.False(t, canned.Stateful())
+}
+
+// PackFor has to name the pack Answer would consult, or the inventory reports
+// cover a request would not get.
+func TestPackFor_NamesThePackThatWouldAnswer(t *testing.T) {
+	t.Parallel()
+	packs, err := mockpack.Builtin()
+	require.NoError(t, err)
+	engine := mockpack.New(packs)
+
+	pack, ok := engine.PackFor("api.stripe.com")
+	require.True(t, ok)
+	require.Equal(t, "stripe", pack.Name)
+	require.True(t, engine.Handles("api.stripe.com"))
+
+	resp, answered := engine.Answer("api.stripe.com", "POST", "/v1/customers", []byte(`{}`))
+	require.True(t, answered, "PackFor named a pack that does not answer")
+	require.Equal(t, pack.Name, resp.Pack)
+
+	_, ok = engine.PackFor("api.example.invalid")
+	require.False(t, ok)
+	require.False(t, engine.Handles("api.example.invalid"))
+}

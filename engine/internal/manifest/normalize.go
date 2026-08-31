@@ -100,6 +100,7 @@ func normalize(m *schema.Manifest, root string) {
 	normalizeInsights(m)
 	normalizeOracle(m)
 	normalizeExplore(m)
+	normalizeFidelity(m)
 	normalizeLoad(m)
 	normalizePolicy(m)
 	normalizeRuntime(m)
@@ -420,6 +421,13 @@ func normalizeExplore(m *schema.Manifest) {
 			g.Budget.Duration = DefaultWorkflowTime
 		}
 	}
+}
+
+func normalizeFidelity(m *schema.Manifest) {
+	if m.Fidelity == nil {
+		m.Fidelity = &schema.Fidelity{}
+	}
+	setTrue(&m.Fidelity.Enabled)
 }
 
 func normalizeLoad(m *schema.Manifest) {
