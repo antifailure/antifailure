@@ -17,6 +17,7 @@ import type { Permission, Role } from './permissions.ts'
 import { permits } from './permissions.ts'
 import type { Clock } from './clock.ts'
 import type { GitHubClient } from './auth/github.ts'
+import type { Billing } from './billing/index.ts'
 
 /** Who is making the request, once the session cookie has been resolved. */
 export interface Actor {
@@ -36,6 +37,13 @@ export interface Context {
    * and then throws the first time somebody presses the button.
    */
   github: GitHubClient
+  /**
+   * Stripe, when this installation takes money. Null is a supported state and
+   * not an oversight: a self-hosted control plane charges nobody, and the
+   * routes that need it answer PRECONDITION_FAILED naming the variables rather
+   * than the process refusing to start over a feature nobody wants.
+   */
+  stripe: Billing | null
   /** Null for an unauthenticated request. */
   actor: Actor | null
   /** Where the request came from, recorded on every audit entry. */

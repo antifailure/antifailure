@@ -89,6 +89,16 @@ function inputsFor(org: Org): Record<string, unknown> {
     'tokens.list': {},
     'tokens.revoke': { id: '00000000-0000-0000-0000-000000000000' },
     'org.status': {},
+    'subscriptions.current': {},
+    'subscriptions.invoices': { limit: 10 },
+    'subscriptions.checkout': {
+      plan: 'team', seats: 1,
+      successUrl: 'https://app.test/billing/done',
+      cancelUrl: 'https://app.test/billing',
+    },
+    'subscriptions.portal': { returnUrl: 'https://app.test/billing' },
+    'subscriptions.cancel': { reason: 'testing the matrix' },
+    'subscriptions.reconcile': {},
     'org.suspend': { reason: 'testing the matrix' },
     'org.resume': {},
   }

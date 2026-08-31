@@ -17,6 +17,7 @@ import { GitHubError } from '../auth/github.ts'
 import { createEnvironment, agentsRouter, loadRouter } from './dispatch.ts'
 import { runtimesRouter } from './runtimes.ts'
 import { billingRouter } from './billing.ts'
+import { subscriptionsRouter } from './subscriptions.ts'
 
 const uuid = z.string().uuid()
 
@@ -923,6 +924,7 @@ export const appRouter = router({
   billing: billingRouter,
   tokens: tokensRouter,
   org: orgRouter,
+  subscriptions: subscriptionsRouter,
 })
 
 export type AppRouter = typeof appRouter

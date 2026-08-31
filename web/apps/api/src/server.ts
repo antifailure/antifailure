@@ -72,6 +72,12 @@ import { forward, ProxyError } from './providers/proxy.ts'
 import { PricingError, type Price } from './providers/pricing.ts'
 import { handleDelivery } from './github/webhook.ts'
 import {
+  handleStripeDelivery,
+  parseStripeEvent,
+  verifyStripeSignature,
+  type Billing,
+} from './billing/index.ts'
+import {
   listBudgets,
   listKeys,
   MAY_MANAGE_KEYS,
@@ -115,6 +121,11 @@ export interface ServerOptions {
    *  webhook endpoint refuses every delivery rather than accepting unsigned
    *  ones. */
   githubWebhookSecret?: string | null
+  /** Stripe, when this installation takes money. Null is the self-hosted
+   *  default: the billing routes answer PRECONDITION_FAILED naming the
+   *  variables, and the webhook endpoint refuses every delivery rather than
+   *  accepting unsigned ones. */
+  stripe?: Billing | null
   /** What each model costs, for charging a budget. */
   modelPrices?: Record<string, Price>
   /** Where the providers live. Overridden in tests so nothing reaches a real
@@ -1160,6 +1171,64 @@ export function createServer(options: ServerOptions) {
   })
 
   // -------------------------------------------------------------------------
+  // Stripe webhook deliveries
+  // -------------------------------------------------------------------------
+  //
+  // The same order as the GitHub endpoint above, and for a sharper reason: this
+  // is the endpoint that decides who has paid.
+  //
+  //   1. read the RAW body,
+  //   2. verify the HMAC over those exact bytes and the timestamp,
+  //   3. only then parse it.
+  //
+  // The timestamp is inside the signature, so a captured delivery is useless
+  // minutes later. Without that a signature anybody ever saw could be replayed
+  // forever, and the delivery worth replaying is invoice.paid.
+
+  app.post('/webhooks/stripe', async (c) => {
+    const billing = options.stripe ?? null
+    if (!billing) {
+      // 503, not 401. Nothing is wrong with the request; this installation
+      // takes no money, and a delivery arriving here is a misconfiguration
+      // worth seeing in Stripe's delivery log rather than a rejection.
+      return c.json({ error: 'This control plane is not configured to take payments.' }, 503)
+    }
+
+    const raw = await c.req.text()
+    const failure = verifyStripeSignature(
+      billing.config.webhookSecret,
+      raw,
+      c.req.header('stripe-signature'),
+      clock.now(),
+    )
+    if (failure) {
+      // The reason is logged and not returned. A body that says which check
+      // failed is a body that helps somebody iterate towards a valid signature,
+      // and the difference between "stale" and "wrong" tells them which half to
+      // work on.
+      console.warn(`stripe webhook refused: ${failure}`)
+      return c.json({ error: 'That delivery could not be verified.' }, 401)
+    }
+
+    const event = parseStripeEvent(raw)
+    if (!event) {
+      // 400, so Stripe stops. A 500 would make it retry a body that will never
+      // parse, forever.
+      return c.json({ error: 'The body is not a Stripe event.' }, 400)
+    }
+
+    try {
+      const outcome = await handleStripeDelivery(options.pool, clock, billing.config, event)
+      return c.json(outcome, 200)
+    } catch (err) {
+      // A real failure on our side, and the retry is wanted: a database that
+      // was briefly unreachable must not lose the event that says somebody paid.
+      const message = err instanceof Error ? err.message : String(err)
+      return c.json({ event: event.id, type: event.type, error: message }, 500)
+    }
+  })
+
+  // -------------------------------------------------------------------------
   // Ingestion
   // -------------------------------------------------------------------------
 
@@ -1317,6 +1386,7 @@ export function createServer(options: ServerOptions) {
           pool: options.pool,
           clock,
           github: options.github,
+          stripe: options.stripe ?? null,
           actor,
           origin: 'web',
           ip: c.req.header('x-forwarded-for') ?? undefined,

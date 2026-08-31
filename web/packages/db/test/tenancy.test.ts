@@ -206,25 +206,67 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
   })
 
   it("writes into another tenant's rows are refused, for every tenant-scoped table", async () => {
-    const tables = (await orgScopedTables()).filter((t) => t !== 'audit_entries')
+    // Which verbs the application role holds per table, asked of the database
+    // rather than written down. Not every table grants all four: audit_entries
+    // is append-only, and so are the billing tables, because a cancelled
+    // subscription is a row whose status is canceled and an invoice that was
+    // issued stays issued.
+    //
+    // This used to exclude audit_entries by name and run a bare UPDATE and
+    // DELETE against everything else, which meant a table without those grants
+    // could only be added to this suite by adding it to the exclusion, where it
+    // would then be skipped entirely. Asking the grant table instead asserts
+    // BOTH outcomes: where the verb is granted the policy has to be what stops
+    // the write, and where it is not the database has to refuse the statement.
+    const granted = await h.admin<{ table_name: string; privilege_type: string }[]>`
+      SELECT table_name, privilege_type FROM information_schema.role_table_grants
+      WHERE grantee = 'antifailure_app' AND table_schema = 'public'
+        AND privilege_type IN ('UPDATE', 'DELETE')`
+    const holds = (table: string, verb: string): boolean =>
+      granted.some((g) => g.table_name === table && g.privilege_type === verb)
+
+    const tables = await orgScopedTables()
+    assert.ok(
+      tables.some((t) => !holds(t, 'DELETE')),
+      'every table grants DELETE, so the append-only half of this test proves nothing',
+    )
+
+    // One attempt, and what it must have done. A granted verb has to be stopped
+    // by the policy, which shows up as a statement that raises nothing and
+    // changes nothing; a withheld verb has to be refused outright.
+    async function attempt(table: string, verb: 'UPDATE' | 'DELETE'): Promise<void> {
+      const failure = await h.pool
+        .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+          await db.execute(
+            verb === 'UPDATE'
+              ? sql`UPDATE ${sql.identifier(table)} SET org_id = ${bob.orgId} WHERE org_id = ${alice.orgId}`
+              : sql`DELETE FROM ${sql.identifier(table)} WHERE org_id = ${alice.orgId}`,
+          )
+        })
+        .then(
+          () => null,
+          (e: unknown) => pgError(e),
+        )
+      if (holds(table, verb)) {
+        // An UPDATE or DELETE that matches no visible row changes nothing
+        // rather than raising, so the assertion is on the row still being
+        // alice's afterwards.
+        assert.equal(failure, null, `${verb} on ${table} raised: ${failure?.message}`)
+      } else {
+        assert.equal(
+          failure?.code,
+          '42501',
+          `${table} grants no ${verb} but the statement was not refused for insufficient privilege`,
+        )
+      }
+      const [left] = await h.admin<{ n: string }[]>`
+        SELECT count(*) AS n FROM ${h.admin(table)} WHERE org_id = ${alice.orgId}`
+      assert.ok(Number(left!.n) > 0, `bob's ${verb} reached alice's ${table} rows`)
+    }
 
     for (const table of tables) {
-      // An UPDATE that matches no visible row updates nothing rather than
-      // raising, so the assertion is on the row still being alice's afterwards.
-      await h.pool.withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
-        await db.execute(sql`
-          UPDATE ${sql.identifier(table)} SET org_id = ${bob.orgId} WHERE org_id = ${alice.orgId}`)
-      })
-      const [still] = await h.admin<{ n: string }[]>`
-        SELECT count(*) AS n FROM ${h.admin(table)} WHERE org_id = ${alice.orgId}`
-      assert.ok(Number(still!.n) > 0, `bob's update stole alice's ${table} rows`)
-
-      await h.pool.withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
-        await db.execute(sql`DELETE FROM ${sql.identifier(table)} WHERE org_id = ${alice.orgId}`)
-      })
-      const [after] = await h.admin<{ n: string }[]>`
-        SELECT count(*) AS n FROM ${h.admin(table)} WHERE org_id = ${alice.orgId}`
-      assert.ok(Number(after!.n) > 0, `bob's delete removed alice's ${table} rows`)
+      await attempt(table, 'UPDATE')
+      await attempt(table, 'DELETE')
     }
   })
 

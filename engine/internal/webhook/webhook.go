@@ -162,7 +162,7 @@ func envelope(p Provider, eventType string, data map[string]any, now time.Time) 
 	switch p.Name {
 	case "stripe":
 		return json.Marshal(map[string]any{
-			"id":               "evt_afmock" + strconv.FormatInt(now.Unix(), 10),
+			"id":               eventID(eventType, data, now),
 			"object":           "event",
 			"api_version":      "2024-06-20",
 			"created":          now.Unix(),
@@ -183,6 +183,35 @@ func envelope(p Provider, eventType string, data map[string]any, now time.Time) 
 		// level, with the event name in a header rather than in the body.
 		return json.Marshal(data)
 	}
+}
+
+// eventID is unique per event and the same for two runs of one workflow.
+//
+// It used to be "evt_afmock" plus the unix second, which meant every event
+// triggered in the same second carried the SAME id. That is invisible until
+// somebody builds the integration this simulator exists for: a Stripe webhook
+// handler must be idempotent on the event id, because Stripe retries, so a
+// correct handler treats the second event of a second as a repeat of the first
+// and does nothing with it. A subscription created and an invoice paid in one
+// second would deliver one of them.
+//
+// The digest covers the event type and its payload rather than a counter or
+// random bytes, so the property that earned the fixed clock is kept: two runs
+// of one workflow produce the same identifiers and can be compared. Two
+// triggers of the same event with the same payload in the same second still
+// collide, and should: that is the same event, and an application dropping the
+// repeat is behaving correctly.
+func eventID(eventType string, data map[string]any, now time.Time) string {
+	digest := sha256.New()
+	digest.Write([]byte(eventType))
+	digest.Write([]byte{0})
+	// Marshalling a map sorts its keys, so the digest does not depend on
+	// whatever order the overrides happened to be merged in.
+	if payload, err := json.Marshal(data); err == nil {
+		digest.Write(payload)
+	}
+	return "evt_afmock" + strconv.FormatInt(now.Unix(), 10) +
+		hex.EncodeToString(digest.Sum(nil))[:8]
 }
 
 // signStripe produces the Stripe-Signature header.

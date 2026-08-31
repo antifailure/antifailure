@@ -132,6 +132,20 @@ export interface Pool {
    * statements that match nothing and raise nothing.
    */
   withGitHubAccount<T>(login: string, fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn scoped to one Stripe customer, for a billing webhook delivery.
+   *
+   * The same shape as withGitHubAccount and for the same reason: a delivery has
+   * no tenant, so it cannot use withTenant, and withoutTenant would leave a
+   * payment provider's callback able to reach every row in the database. What
+   * it declares instead is the customer the verified payload named, and the
+   * policies in 0020 confine it to that customer's organization, subscriptions,
+   * invoices and delivery ledger.
+   *
+   * The customer identifier is opaque and is not a secret. What makes it
+   * believable is the HMAC over the raw body, checked before this is called.
+   */
+  withStripeCustomer<T>(customerId: string, fn: (db: Db) => Promise<T>): Promise<T>
   /** The raw client, for migrations and tests only. */
   sql: postgres.Sql
   close(): Promise<void>
@@ -208,6 +222,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.device_code_hash': '',
           'antifailure.device_user_code': '',
           'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
         },
         fn,
       )
@@ -239,6 +254,7 @@ export function createPool(options: PoolOptions): Pool {
             : '',
           'antifailure.device_user_code': opts?.deviceUserCode ?? '',
           'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
         },
         fn,
       )
@@ -263,6 +279,32 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.device_code_hash': '',
           'antifailure.device_user_code': '',
           'antifailure.github_account': account,
+          'antifailure.stripe_customer': '',
+        },
+        fn,
+      )
+    },
+    withStripeCustomer(customerId, fn) {
+      const customer = customerId.trim()
+      if (!customer) {
+        // An empty setting makes every policy deny, which reads as an empty
+        // database rather than as a bug. Naming it here is the difference
+        // between a delivery that silently writes nothing and one that says why.
+        throw new Error('withStripeCustomer needs a customer identifier')
+      }
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
+          'antifailure.stripe_customer': customer,
         },
         fn,
       )

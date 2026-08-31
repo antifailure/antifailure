@@ -6,12 +6,13 @@
     {
       "method": "POST", "path": "/v1/customers", "store": "customers",
       "body": {
-        "id": "{id:cus_}", "object": "customer", "created": "{now}",
+        "id": "{id:cus_}", "object": "customer", "created": "{json:now}",
         "email": "{request.email}", "name": "{request.name}",
         "description": "{request.description}", "livemode": false,
         "currency": null, "default_source": null, "delinquent": false,
         "invoice_prefix": "AFMOCK", "balance": 0,
-        "metadata": {}, "subscriptions": {"object": "list", "data": [], "has_more": false}
+        "metadata": {"org_id": "{request.metadata[org_id]}"},
+        "subscriptions": {"object": "list", "data": [], "has_more": false}
       }
     },
     {
@@ -25,13 +26,27 @@
       }
     },
     {
+      "method": "POST", "path": "/v1/customers/{id}", "merge": "customers",
+      "body": {
+        "id": "{id}", "object": "customer",
+        "email": "{request.email}", "name": "{request.name}"
+      },
+      "not_found": {
+        "error": {
+          "type": "invalid_request_error", "code": "resource_missing",
+          "param": "id",
+          "message": "No such customer to update in this environment's mock pack."
+        }
+      }
+    },
+    {
       "method": "GET", "path": "/v1/customers", "list": "customers",
       "body": {"object": "list", "url": "/v1/customers", "has_more": false, "data": "{items}"}
     },
     {
       "method": "POST", "path": "/v1/payment_methods", "store": "payment_methods",
       "body": {
-        "id": "{id:pm_}", "object": "payment_method", "created": "{now}",
+        "id": "{id:pm_}", "object": "payment_method", "created": "{json:now}",
         "type": "card", "livemode": false, "customer": null,
         "card": {
           "brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2034,
@@ -44,8 +59,8 @@
     {
       "method": "POST", "path": "/v1/payment_intents", "store": "payment_intents",
       "body": {
-        "id": "{id:pi_}", "object": "payment_intent", "created": "{now}",
-        "amount": "{request.amount}", "currency": "{request.currency}",
+        "id": "{id:pi_}", "object": "payment_intent", "created": "{json:now}",
+        "amount": "{json:request.amount}", "currency": "{request.currency}",
         "status": "succeeded", "livemode": false, "customer": "{request.customer}",
         "client_secret": "{id:pi_}_secret_afmock",
         "charges": {"object": "list", "has_more": false, "data": []}
@@ -54,10 +69,14 @@
     {
       "method": "POST", "path": "/v1/checkout/sessions", "store": "checkout_sessions",
       "body": {
-        "id": "{id:cs_}", "object": "checkout.session", "created": "{now}",
+        "id": "{id:cs_}", "object": "checkout.session", "created": "{json:now}",
         "mode": "{request.mode}", "status": "open", "livemode": false,
         "customer": "{request.customer}", "customer_email": "{request.customer_email}",
+        "client_reference_id": "{request.client_reference_id}",
+        "subscription": null, "payment_intent": null,
         "payment_status": "unpaid", "currency": "usd", "amount_total": 0,
+        "expires_at": 1769904000,
+        "metadata": {"org_id": "{request.metadata[org_id]}"},
         "success_url": "{request.success_url}", "cancel_url": "{request.cancel_url}",
         "url": "https://checkout.stripe.com/c/pay/{id:cs_}"
       }
@@ -74,11 +93,24 @@
     {
       "method": "POST", "path": "/v1/subscriptions", "store": "subscriptions",
       "body": {
-        "id": "{id:sub_}", "object": "subscription", "created": "{now}",
+        "id": "{id:sub_}", "object": "subscription", "created": "{json:now}",
         "customer": "{request.customer}", "status": "active", "livemode": false,
-        "current_period_start": "{now}", "current_period_end": 1769904000,
-        "cancel_at_period_end": false, "canceled_at": null,
-        "items": {"object": "list", "has_more": false, "data": []},
+        "current_period_start": "{json:now}", "current_period_end": 1769904000,
+        "cancel_at_period_end": false, "canceled_at": null, "ended_at": null,
+        "items": {
+          "object": "list", "has_more": false, "url": "/v1/subscription_items",
+          "data": [
+            {
+              "id": "{id:si_}", "object": "subscription_item", "created": "{json:now}",
+              "quantity": "{json:request.items[0][quantity]|1}",
+              "price": {
+                "id": "{request.items[0][price]}", "object": "price", "active": true,
+                "currency": "usd", "type": "recurring",
+                "recurring": {"interval": "month", "interval_count": 1}
+              }
+            }
+          ]
+        },
         "latest_invoice": "{id:in_}"
       }
     },
@@ -92,10 +124,44 @@
       }
     },
     {
-      "method": "DELETE", "path": "/v1/subscriptions/{id}", "store": "subscriptions",
+      "method": "POST", "path": "/v1/subscriptions/{id}", "merge": "subscriptions",
+      "body": {
+        "id": "{id}", "object": "subscription",
+        "cancel_at_period_end": "{json:request.cancel_at_period_end}",
+        "items": {
+          "object": "list", "has_more": false, "url": "/v1/subscription_items",
+          "data": [
+            {
+              "id": "{id:si_}", "object": "subscription_item", "created": "{json:now}",
+              "quantity": "{json:request.items[0][quantity]|1}",
+              "price": {
+                "id": "{request.items[0][price]}", "object": "price", "active": true,
+                "currency": "usd", "type": "recurring",
+                "recurring": {"interval": "month", "interval_count": 1}
+              }
+            }
+          ]
+        }
+      },
+      "not_found": {
+        "error": {
+          "type": "invalid_request_error", "code": "resource_missing",
+          "message": "No such subscription to update in this environment's mock pack."
+        }
+      }
+    },
+    {
+      "method": "DELETE", "path": "/v1/subscriptions/{id}", "merge": "subscriptions",
       "body": {
         "id": "{id}", "object": "subscription", "status": "canceled",
-        "canceled_at": "{now}", "cancel_at_period_end": false, "livemode": false
+        "canceled_at": "{json:now}", "ended_at": "{json:now}",
+        "cancel_at_period_end": false, "livemode": false
+      },
+      "not_found": {
+        "error": {
+          "type": "invalid_request_error", "code": "resource_missing",
+          "message": "No such subscription to cancel in this environment's mock pack."
+        }
       }
     },
     {
@@ -105,9 +171,11 @@
     {
       "method": "POST", "path": "/v1/invoices", "store": "invoices",
       "body": {
-        "id": "{id:in_}", "object": "invoice", "created": "{now}",
-        "customer": "{request.customer}", "status": "paid", "paid": true,
+        "id": "{id:in_}", "object": "invoice", "created": "{json:now}",
+        "customer": "{request.customer}", "subscription": "{request.subscription}",
+        "status": "paid", "paid": true,
         "livemode": false, "amount_due": 0, "amount_paid": 0, "currency": "usd",
+        "period_start": "{json:now}", "period_end": 1769904000,
         "hosted_invoice_url": "https://invoice.stripe.com/i/afmock",
         "number": "AFMOCK-0001"
       }
@@ -116,14 +184,18 @@
       "method": "GET", "path": "/v1/invoices/{id}", "load": "invoices"
     },
     {
+      "method": "GET", "path": "/v1/invoices", "list": "invoices",
+      "body": {"object": "list", "url": "/v1/invoices", "has_more": false, "data": "{items}"}
+    },
+    {
       "method": "GET", "path": "/v1/prices", "list": "prices",
       "body": {"object": "list", "url": "/v1/prices", "has_more": false, "data": "{items}"}
     },
     {
       "method": "POST", "path": "/v1/prices", "store": "prices",
       "body": {
-        "id": "{id:price_}", "object": "price", "created": "{now}", "active": true,
-        "currency": "{request.currency}", "unit_amount": "{request.unit_amount}",
+        "id": "{id:price_}", "object": "price", "created": "{json:now}", "active": true,
+        "currency": "{request.currency}", "unit_amount": "{json:request.unit_amount}",
         "livemode": false, "type": "recurring",
         "recurring": {"interval": "month", "interval_count": 1}
       }
@@ -131,7 +203,7 @@
     {
       "method": "POST", "path": "/v1/billing_portal/sessions",
       "body": {
-        "id": "{id:bps_}", "object": "billing_portal.session", "created": "{now}",
+        "id": "{id:bps_}", "object": "billing_portal.session", "created": "{json:now}",
         "customer": "{request.customer}", "livemode": false,
         "return_url": "{request.return_url}",
         "url": "https://billing.stripe.com/p/session/afmock"
