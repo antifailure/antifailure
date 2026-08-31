@@ -27,6 +27,24 @@ export const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://antifailure.dev"
 ).replace(/\/$/, "");
 
+/**
+ * The origin the hosted control plane is served from.
+ *
+ * This is where "Continue with GitHub" sends a visitor, so it is the primary
+ * conversion path off this site. It was a bare constant in AuthScreen.tsx
+ * reading `https://app.dev.antifailure.dev`, the staging deployment, which
+ * carries a different OAuth application and a different database: every
+ * invited person who clicked sign in on the marketing site landed on staging.
+ *
+ * It follows SITE_URL rather than being a bare constant, and for the same
+ * reason: the fallback is production, so a plain `next build` with nothing
+ * configured produces the correct link and cannot emit "undefined/auth/github".
+ * Only a build that deliberately sets the variable points anywhere else.
+ */
+export const CONTROL_PLANE_URL = (
+  process.env.NEXT_PUBLIC_CONTROL_PLANE_URL ?? "https://app.antifailure.dev"
+).replace(/\/$/, "");
+
 /** The product name, spelled and cased exactly one way, everywhere. */
 export const SITE_NAME = "Antifailure";
 
