@@ -5,11 +5,14 @@ sidebar:
   order: 6
 ---
 
-Pushing a `v*` tag is the single largest thing anybody does to this project. It
-publishes the binary that `curl -fsSL https://antifailure.dev/install.sh | sh`
-hands to a stranger, and it deploys the hosted control plane that customers are
-signed in to. Two workflows fire on the same tag, they run in parallel, and
-neither knows the other exists.
+**The same tag deploys the hosted control plane, applies migrations to
+production before any traffic moves, and then waits on a human approval.** That
+sentence is why this page exists. A tag here is not a bookkeeping act.
+
+It also publishes the binary that `curl -fsSL https://antifailure.dev/install.sh | sh`
+hands to a stranger, and the installer follows `releases/latest`, so the
+download changes the moment the release is created. Two workflows fire on the
+same tag, they run in parallel, and neither knows the other exists.
 
 This page is the order to do it in and the thing to look at after each step.
 [Releases and how to verify one](/docs/security/releases/) is the companion
@@ -92,7 +95,7 @@ the checks behind this page still describe what is about to run. Ask, rather
 than assume:
 
 ```sh
-git diff --stat 98ee158..origin/main -- \
+git diff --stat 499d28b..origin/main -- \
   .github/workflows/release.yml .github/workflows/cd.yml \
   tools/release/ tools/sbomcheck/ tools/ldcheck/ deploy/cd/ install.sh \
   web/packages/db/migrations/
