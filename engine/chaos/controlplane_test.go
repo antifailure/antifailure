@@ -242,7 +242,14 @@ func TestTheControlPlaneIsToldWhichRepositoryAnEnvironmentBelongsTo(t *testing.T
 	srv := httptest.NewServer(plane)
 	t.Cleanup(srv.Close)
 
-	dir := chaosRepo(t)
+	// A manifest that declares its own lifetime rather than inheriting the
+	// default. The assertion is that the number the manifest says travels to
+	// the control plane, and pinning it to whatever the default happens to be
+	// makes this test fail the day somebody changes that default, which tells
+	// nobody anything about whether the field arrived.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"),
+		[]byte(strings.TrimSpace(chaosManifest)+"\nruntime:\n  ttl: 12h\n"), 0o644))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
@@ -256,8 +263,7 @@ func TestTheControlPlaneIsToldWhichRepositoryAnEnvironmentBelongsTo(t *testing.T
 	require.Equal(t, "antifailure/chaostest", got.Payload["repository"],
 		"without this the control plane cannot create the environments row at all")
 	require.Equal(t, "chaos/identity", got.Payload["branch"])
-	// 168h is the manifest default, applied by normalization, so an
-	// environment that says nothing about its lifetime still has one and the
-	// console still shows an expiry rather than an empty field.
-	require.Equal(t, float64(168*3600), got.Payload["ttl_seconds"])
+	// The lifetime the manifest declares, in seconds, which is what the
+	// control plane adds to created_at to fill the expiry the console shows.
+	require.Equal(t, float64(12*3600), got.Payload["ttl_seconds"])
 }
