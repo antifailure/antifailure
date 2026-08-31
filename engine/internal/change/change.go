@@ -354,7 +354,13 @@ func sortFacts(f []Fact) {
 	})
 }
 
-// Selected returns the checks the plan selects, in Checks order.
+// Selected returns the checks the diff selects, in Checks order, WHETHER OR
+// NOT the manifest can run them.
+//
+// This is the analyser's own answer and not an instruction to anybody. Telling
+// a runner to run these would tell it to run checks the manifest has turned
+// off, which is the one mistake the Selected and Available split exists to
+// prevent. Anything deciding whether to do work wants Runnable.
 func (p *Profile) Selected() []Check {
 	var out []Check
 	for _, s := range p.Plan {
@@ -365,7 +371,8 @@ func (p *Profile) Selected() []Check {
 	return out
 }
 
-// Selects reports whether the plan selects one check.
+// Selects reports whether the diff selects one check, ignoring availability
+// for the same reason Selected does. See Runnable before reaching for it.
 func (p *Profile) Selects(c Check) bool {
 	for _, s := range p.Plan {
 		if s.Check == c {
@@ -373,6 +380,24 @@ func (p *Profile) Selects(c Check) bool {
 		}
 	}
 	return false
+}
+
+// Runnable returns the checks that will actually run: selected by the diff and
+// configured in the manifest.
+//
+// This is the one a caller deciding whether to do work should use, and it
+// exists as a named thing so that the safe answer is the one with the obvious
+// name. The distinction is invisible in a green test and expensive in a
+// workflow: a check that is selected and unavailable is a sentence for the
+// report, never a step for a runner.
+func (p *Profile) Runnable() []Check {
+	var out []Check
+	for _, s := range p.Plan {
+		if s.Run() {
+			out = append(out, s.Check)
+		}
+	}
+	return out
 }
 
 // Gaps returns the checks the diff selects that the manifest cannot run. These

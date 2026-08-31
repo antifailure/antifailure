@@ -106,6 +106,35 @@ func TestHeadline_CountsWhatWillRunSeparatelyFromWhatIsNotConfigured(t *testing.
 	}
 }
 
+// Selected and Runnable must differ, and the difference is the whole point of
+// splitting selection from availability. A schema change selects load; this
+// manifest has load turned off. Anything telling a runner what to do has to
+// use the second answer, or it instructs a step to run a check nothing is
+// configured for.
+func TestProfile_RunnableExcludesWhatTheManifestCannotRun(t *testing.T) {
+	p := change.Analyze(change.Options{
+		Manifest: billingManifest(), Files: load(t, "migration-and-billing.diff"),
+	})
+
+	assert.Contains(t, p.Selected(), change.CheckLoad,
+		"the diff touches the schema, which load exercises")
+	assert.NotContains(t, p.Runnable(), change.CheckLoad,
+		"load is off in this manifest, so nothing may be told to run it")
+
+	// Runnable is a subset of Selected, never the other way around.
+	for _, c := range p.Runnable() {
+		assert.Contains(t, p.Selected(), c, "%s is runnable but not selected", c)
+	}
+	assert.Less(t, len(p.Runnable()), len(p.Selected()),
+		"this fixture exists to make the two differ; if they stopped differing the test proves nothing")
+
+	// And every gap is exactly the difference between them.
+	for _, g := range p.Gaps() {
+		assert.Contains(t, p.Selected(), g.Check)
+		assert.NotContains(t, p.Runnable(), g.Check)
+	}
+}
+
 // rules returns the rule that produced each fact, sorted and deduplicated.
 // Asserting on these rather than only on surfaces is what makes a
 // classification auditable: two rules can assign the same surface, and a test

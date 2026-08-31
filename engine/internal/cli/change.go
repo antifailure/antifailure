@@ -168,14 +168,21 @@ func writeChangeOutputs(e *Env, p *change.Profile) {
 		return
 	}
 	var b strings.Builder
-	var selected []string
 	for _, s := range p.Plan {
 		value := "false"
 		if s.Run() {
 			value = "true"
-			selected = append(selected, string(s.Check))
 		}
 		b.WriteString(string(s.Check) + "=" + value + "\n")
+	}
+
+	// Runnable and not Selected, because a step reads this to decide whether
+	// to do work. The two differ exactly when the manifest has a check turned
+	// off, and that is the case where naming it here would tell a runner to
+	// run something nothing is configured for.
+	var selected []string
+	for _, c := range p.Runnable() {
+		selected = append(selected, string(c))
 	}
 	sort.Strings(selected)
 	b.WriteString("selected=" + strings.Join(selected, ",") + "\n")
