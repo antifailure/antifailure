@@ -471,11 +471,35 @@ var typeMap = map[string]string{
 // the sentence can come back.
 //
 // Two of the control plane's accepted types have no engine event mapped to
-// them, deliberately. environment.queued is produced by the scheduler, which
-// runs in the control plane and never in the engine. artifact.stored belongs to
-// the uploader rather than to the environment lifecycle. Both are listed in
-// TestTheControlPlaneTypesWithNoEngineEventAreTheExpectedOnes so that a third
-// one appearing is a test failure and a decision rather than a silent gap.
+// them, and the honest reason for both is that the capability behind them is
+// not built.
+//
+// environment.queued is reserved for a control plane that schedules work. There
+// is no such component. Said plainly because the sentence here used to assert
+// one, and a reader who believes it goes looking: engine/internal/scheduler
+// exists, runs in the engine rather than in the control plane, which is the
+// opposite of what was claimed, and emits no event at all. Nothing produces
+// environment.queued, so the queued value in the environment_state enum is
+// reachable only as a column default.
+//
+// artifact.stored is reserved for an artifact uploader that reports what it
+// stored. Nothing does.
+//
+// Both are listed in TestTheControlPlaneTypesWithNoEngineEventAreTheExpectedOnes
+// so that a third appearing is a decision rather than a silent gap. That test
+// asks whether a type is MAPPED, which is a weaker question than whether
+// anything emits it, and the difference is not academic: five of the eleven
+// types this map does translate are emitted by nothing, so they pass that test
+// and are still columns that are always empty. env.sleeping is one, because
+// idle sleep is not implemented at all; runtime.idle_sleep is defaulted by
+// manifest normalization, checked by validation, printed by af explain, and
+// read by nothing that acts on it, which is the identical shape runtime.ttl had
+// before the reaper existed. The whole agent run lifecycle is three more, and
+// egress.decision is the fifth, where the data is collected and rendered
+// locally and simply never put on the bus.
+//
+// TestEveryMappedTypeHasSomethingInTheEngineThatEmitsIt is the gate for that
+// second question, and it names all five with the reason each one is unbuilt.
 func KnownTypes() []string {
 	out := make([]string, 0, len(typeMap))
 	for k := range typeMap {
