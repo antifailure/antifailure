@@ -191,7 +191,7 @@ jobs:
         # errcheck, ldcheck and the generators decide whether a build is
         # allowed to ship, and their own tests were never run here. A gate
         # nobody tests is a gate that passes everything the day it breaks.
-        run: cd tools && go test ./... -timeout 5m
+        run: cd tools && go test ./... -count=1 -timeout 5m
 
       - name: Format
         # gofmt rather than a linter with opinions. The point is that nobody
@@ -274,7 +274,7 @@ jobs:
         # The race detector always. A data race that only shows up under load
         # is the kind of bug this product exists to find, and shipping one
         # would be embarrassing.
-        run: cd engine && go test ./... -race -timeout 30m
+        run: cd engine && go test ./... -race -count=1 -timeout 30m
         env:
           # Docker is available on this runner, so the provider and runtime
           # suites run for real rather than skipping.
@@ -612,7 +612,7 @@ jobs:
           rm -rf ee
           cd engine
           go build ./...
-          go test ./internal/... -short -timeout 15m
+          go test ./internal/... -short -count=1 -timeout 15m
 
       - name: No engine package imports ee
         run: |
@@ -682,7 +682,7 @@ jobs:
           cd ee/engine
           GOWORK=off go build ./...
           GOWORK=off go vet ./...
-          GOWORK=off go test ./... -race -timeout 15m
+          GOWORK=off go test ./... -race -count=1 -timeout 15m
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
