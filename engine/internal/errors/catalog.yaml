@@ -48,8 +48,8 @@ errors:
     exit_code: 3
   - code: AF-MAN-004
     area: MAN
-    message: "'af init' needs a terminal to ask questions, and this session has none."
-    next_step: "Pass --non-interactive together with the flags listed by 'af init --help'."
+    message: "'af init' has questions to ask and this session has no terminal to ask them on."
+    next_step: "Pass --non-interactive to accept every default, and --answer id=value for anything that has no default."
     docs: reference/cli#af-init
     retryable: false
     exit_code: 2
@@ -85,14 +85,27 @@ errors:
     docs: concepts/detection
     retryable: true
     exit_code: 3
-  - code: AF-DET-003
-    planned: true
+  - code: AF-DET-004
     area: DET
-    message: "Services {first} and {second} both claim port {port}."
-    next_step: "Give one of them a different port in antifailure.yaml."
+    message: "Detection could not decide {question}, and there is no default to fall back on."
+    next_step: "Answer it with --answer {id}=<value>, or run 'af init' from a terminal so it can ask."
     docs: concepts/detection
     retryable: false
     exit_code: 3
+  - code: AF-DET-005
+    area: DET
+    message: "Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}"
+    next_step: "Re-run with --answer to override what detection read, for example --answer service.<name>.port=<port>. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above."
+    docs: concepts/detection
+    retryable: false
+    exit_code: 3
+  - code: AF-DET-006
+    area: DET
+    message: "--answer {id}=... does not name anything in this repository."
+    next_step: "Use one of: {known}"
+    docs: concepts/detection
+    retryable: false
+    exit_code: 2
   - code: AF-DET-010
     area: DET
     message: "The changed files between {base} and {head} could not be read: {detail}"

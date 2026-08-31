@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-30 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+29 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -460,6 +460,42 @@ No application could be detected in {path}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/detection](/docs/concepts/detection/) |
 
+### AF-DET-004
+
+Detection could not decide {question}, and there is no default to fall back on.
+
+**What to do.** Answer it with --answer {id}=<value>, or run 'af init' from a terminal so it can ask.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/detection](/docs/concepts/detection/) |
+
+### AF-DET-005
+
+Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}
+
+**What to do.** Re-run with --answer to override what detection read, for example --answer service.<name>.port=<port>. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/detection](/docs/concepts/detection/) |
+
+### AF-DET-006
+
+--answer {id}=... does not name anything in this repository.
+
+**What to do.** Use one of: {known}
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/detection](/docs/concepts/detection/) |
+
 ### AF-DET-010
 
 The changed files between {base} and {head} could not be read: {detail}
@@ -664,9 +700,9 @@ The manifest at {path} declares schema version {found}, which this build does no
 
 ### AF-MAN-004
 
-'af init' needs a terminal to ask questions, and this session has none.
+'af init' has questions to ask and this session has no terminal to ask them on.
 
-**What to do.** Pass --non-interactive together with the flags listed by 'af init --help'.
+**What to do.** Pass --non-interactive to accept every default, and --answer id=value for anything that has no default.
 
 | | |
 | --- | --- |

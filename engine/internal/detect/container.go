@@ -60,7 +60,9 @@ func (a *DockerAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error) 
 		out = append(out, Finding{
 			Kind: KindService, Subject: name, Value: "web",
 			Confidence: Medium, Evidence: p,
-			Extra: map[string]string{"dir": dir},
+			// A Dockerfile carries no name of its own, so this one is the
+			// directory, which the merger treats as the weakest identity.
+			Extra: map[string]string{"dir": dir, "name_from": "dir"},
 		})
 		if len(df.stages) > 1 {
 			out = append(out, Finding{
@@ -107,9 +109,15 @@ func parseDockerfile(body string) dockerfileInfo {
 	for _, raw := range logicalLines(body) {
 		if m := dockerFromRe.FindStringSubmatch(raw); m != nil {
 			info.finalBase = m[1]
+			// The canonical multi-stage build names its builder and leaves the
+			// runtime stage unnamed. Only assigning on a named stage therefore
+			// left finalStage pointing at the builder, and af init wrote
+			// 'target: build' into the manifest, so af up would have built the
+			// stage that compiles the application instead of the one that runs
+			// it. An unnamed FROM has to clear the name, not keep the last one.
+			info.finalStage = m[2]
 			if m[2] != "" {
 				info.stages = append(info.stages, m[2])
-				info.finalStage = m[2]
 			}
 			continue
 		}
@@ -250,7 +258,7 @@ func (a *ComposeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error)
 			out = append(out, Finding{
 				Kind: KindService, Subject: name, Value: "web",
 				Confidence: conf, Evidence: p, Detail: detail,
-				Extra: map[string]string{"dir": svc.buildContext},
+				Extra: map[string]string{"dir": svc.buildContext, "name_from": "compose"},
 			})
 			if svc.port != 0 {
 				out = append(out, Finding{
@@ -525,7 +533,7 @@ func (a *ProcfileAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error
 				Finding{Kind: KindService, Subject: name, Value: kind,
 					Confidence: High, Evidence: p,
 					Detail: fmt.Sprintf("%s declares the process %s.", p, procName),
-					Extra:  map[string]string{"dir": dir}},
+					Extra:  map[string]string{"dir": dir, "name_from": "procfile"}},
 				Finding{Kind: KindCommand, Subject: name, Value: command,
 					Confidence: High, Evidence: p},
 			)

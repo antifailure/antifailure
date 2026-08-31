@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/antifailure/antifailure/engine/internal/auth"
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -69,16 +70,19 @@ func (e *Env) CredentialStore() *auth.Store {
 // read, because a read from a closed or piped stdin either returns nothing
 // forever or returns end of file immediately, and both look like a hang or a
 // wrong answer to whoever is watching a CI log.
+//
+// The test is an ioctl on the descriptor, not the character device bit. That
+// bit is set for /dev/null, so `af init < /dev/null`, which is how a CI job
+// runs a command it does not intend to answer, looked interactive: every
+// question was asked into nowhere, every read returned end of file, and the
+// defaults went in silently. secret.go has always used term.IsTerminal for
+// exactly this reason and this is the same question.
 func (e *Env) Interactive() bool {
 	f, ok := e.Stdin.(*os.File)
 	if !ok {
 		return false
 	}
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // Options configure the root command.
