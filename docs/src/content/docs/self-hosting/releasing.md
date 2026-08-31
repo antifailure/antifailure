@@ -83,7 +83,26 @@ head -n 1 .changes/*.md | grep -v '^==>' | sort | uniq -c
 cat .changes/*.md
 ```
 
-## Tag and push
+**5. Nothing in the release path has moved since it was last exercised.**
+
+Everything on this page was checked against a tree, not against the idea of a
+tree. Nothing in the mechanism depends on any particular branch having landed,
+so a release can be cut at any point. What does depend on the tree is whether
+the checks behind this page still describe what is about to run. Ask, rather
+than assume:
+
+```sh
+git diff --stat 9fc46b6..origin/main -- \
+  .github/workflows/release.yml .github/workflows/cd.yml \
+  tools/release/ tools/sbomcheck/ tools/ldcheck/ deploy/cd/ install.sh \
+  web/packages/db/migrations/
+```
+
+Empty output means this page still holds. Anything in the first six paths means
+the pipeline changed and the rehearsal behind this page no longer covers it. A
+new file under `migrations/` means production is being asked to apply a
+migration nobody on this page has read, and that one is worth stopping for: a
+migration is the only part of a deploy that cannot be rolled back.
 
 ```sh
 git tag -s v0.1.2 -m "v0.1.2"
@@ -143,8 +162,30 @@ gh release view v0.1.2 --json assets --jq '[.assets[].name]'
 
 Four archives, `checksums.txt` and its bundle, `sbom.spdx.json` and its bundle,
 and `THIRD_PARTY_NOTICES.md`. Four assets is the shape of a release that
-published before the signing stage existed. Anything short of nine means a file
-the release notes tell people to fetch is not there.
+published before the signing stage existed.
+
+**If it is not nine, do this.** The release notes tell people to fetch a file
+that is not there, so the release is wrong even though every stage was green.
+
+1. Mark it immediately, before anything else. The installer is already serving
+   it and every minute counts more than the diagnosis does:
+
+   ```sh
+   gh release edit v0.1.2 --notes "Incomplete assets. Superseded shortly. Do not use."
+   ```
+
+2. Find which asset is missing and read the log of the stage that produces it.
+   A missing `.sigstore.json` means the signing stage; a missing
+   `sbom.spdx.json` means syft or `sbomcheck`; a missing archive means one of
+   the four build jobs. The stage cannot have failed, because a failure stops
+   the release, so what you are looking for is a stage that succeeded while
+   producing less than it should have. That is the same defect shape as the
+   empty bill of materials, one layer up.
+
+3. Do not re-run the publish job against the same tag. `softprops/action-gh-release`
+   would upload onto the existing release, so the tag would quietly come to mean
+   something different from what people already downloaded. Fix the cause and cut
+   the next patch, following [If a release goes out wrong](#if-a-release-goes-out-wrong).
 
 **Did the Fulcio identity binding work?** Open the log of the stage named *The
 signature verifies, and a changed byte does not*. It runs `cosign verify-blob`
@@ -267,14 +308,10 @@ the next patch immediately. If you want a version people cannot reach yet, the
 release has to be a GitHub prerelease, which `releases/latest` skips by
 definition, and `release.yml` does not currently create one.
 
-One more property of that API worth knowing before you need it. GitHub decides
-which release is latest by *"the most recent non-prerelease, non-draft release,
-sorted by the `created_at` attribute"*, where `created_at` *"is the date of the
-commit used for the release, and not the date when the release was drafted or
-published"*. So the installer follows the newest tagged **commit**, not the
-newest publish. Superseding a bad release therefore has to be a tag on a newer
-commit, which a patch off `main` always is. Tagging an older commit afterwards
-would publish a release that `latest` never moves to.
+That same API has one more property, and it decides whether a recovery works
+rather than whether a release does, so it is written out under
+[If a release goes out wrong](#if-a-release-goes-out-wrong) where you will need
+it: `latest` follows the newest tagged **commit**, not the newest publish.
 
 ### Prove the thing a stranger gets
 
@@ -309,11 +346,39 @@ curl -sS https://app.antifailure.dev/readyz
 | `sbomcheck` reports a low package count | The bill of materials describes the directory rather than the binaries | Nothing published. Read the unpack stage above it: it printed the binaries it found |
 | The tampered file was accepted | cosign is not rejecting a file that does not match its signature | Nothing published, and this is the loudest thing in the pipeline. Do not retry it |
 | `MIGRATION FAILED` | The bootstrap job returned Failed or Degraded | No traffic moved. Read the job's logs before retrying. A partly applied schema is not something the script papers over |
-| `MIGRATION DID NOT FINISH within the budget` | The job was still running after five minutes | No traffic moved, and the job itself is not dead: its `replicaTimeout` is ten minutes, twice the script's poll. Let it finish, confirm the execution succeeded, then re run the deploy, which will find the schema already up to date |
+| `MIGRATION DID NOT FINISH within the budget` | The job was still running when `deploy.sh` stopped watching | **No traffic moved and nothing was killed.** The shorter budget belongs to the watcher, not to anything that can terminate a replica. Let the job finish, confirm the execution succeeded, then re run the deploy, which will find the schema already up to date. See the note below |
 | `NEW REVISION FAILED TO START` | The revision never reached Running | Traffic never moved. The new revision is deactivated |
 | `healthy but wrong build` | The origin answers, on the previous commit | The rollout did not happen. This is the check that exists to catch exactly that, and it is doing its job |
 | `ROLLED BACK` | The deploy failed and the damage was contained | The previous revision is serving again. The job still fails, which is correct: a successful rollback is not a successful deploy |
 | `ROLLBACK DID NOT RESTORE HEALTH` | Both builds are unhealthy | This needs a person. Start at [Operations](/docs/self-hosting/operations/) |
+
+### The three migration budgets, and which one can kill something
+
+Three numbers govern the migration step and only one of them can terminate
+anything. Written down because working out which is which under pressure is
+exactly what a runbook is for.
+
+| Budget | Value | What happens when it runs out |
+| --- | --- | --- |
+| The migration's own work | measured at about a sixth of a second | Nothing. `0018` and `0019` were timed against 2000 `network_rules` rows, far more than production carries |
+| `deploy.sh`'s poll | 60 attempts five seconds apart, so five to seven minutes of wall clock | It stops watching and refuses to move traffic. **It kills nothing.** The job carries on and usually succeeds a moment later |
+| The job's `replica_timeout_in_seconds` | 600, with `replica_retry_limit = 2` | The replica is terminated. This is the only budget that can kill a migration, and it is the longest of the three |
+
+So the mismatch is the harmless way round: the shorter budget belongs to the
+observer. The failure it produces is a deploy that did not happen while the
+schema moved forward, which is recoverable by re running the deploy.
+
+The one path to 600 seconds is not work, it is waiting. `0018` takes an ACCESS
+EXCLUSIVE lock on `network_rules` and a SHARE ROW EXCLUSIVE lock on `users` for
+its foreign keys, and nothing in the migration path sets `lock_timeout`, so it
+waits for as long as another transaction holds what it needs. The old revision
+is still serving while this happens, so a long transaction over `users` is what
+would do it.
+
+Even then nothing half applies. Each migration file is one transaction and is
+recorded in the same transaction that ran it, so a terminated replica drops the
+connection, PostgreSQL rolls the file back, and it is not written down as
+applied. The retry takes the advisory lock and runs it again from the start.
 
 ### If a release goes out wrong
 
@@ -324,6 +389,29 @@ release as such on GitHub.
 
 ```sh
 gh release edit v0.1.2 --notes "Superseded by v0.1.3. Do not use."
+```
+
+**The replacement has to be tagged on a newer commit, and this is the part that
+will catch somebody.** GitHub decides which release is latest as *"the most
+recent non-prerelease, non-draft release, sorted by the `created_at`
+attribute"*, where `created_at` *"is the date of the commit used for the
+release, and not the date when the release was drafted or published"*. The
+installer follows that, so it follows the newest tagged **commit**, not the
+newest publish.
+
+A hotfix cut from an older commit therefore publishes perfectly, reports
+nothing wrong, and never reaches a single installer: `latest` stays on the bad
+release. There is no error anywhere, and it strikes at precisely the moment
+somebody is trying to pull a bad release back.
+
+A patch branched off `main` is always newer, so the ordinary path is safe. The
+case to refuse is reverting to an earlier good commit and tagging that. If the
+bad release has to be undone rather than moved past, revert the commits on
+`main` and tag the revert, so the tagged commit is still the newest one.
+
+```sh
+git log -1 --format=%cI v0.1.2      # the bad release's commit date
+git log -1 --format=%cI v0.1.3      # must be later than the line above
 ```
 
 The hosted control plane is a separate decision from the published binary. If
