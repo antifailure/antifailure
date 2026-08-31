@@ -16,6 +16,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/cli"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/edition"
 )
 
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
@@ -63,6 +64,33 @@ func TestVersion_RendersInBothFormats(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(js.stdout), &info))
 	require.Equal(t, "community", info.Edition)
 	require.NotEmpty(t, info.Platform)
+}
+
+// The edition af version reports comes from the running binary, not from a
+// build time string.
+//
+// This is the community module, so the only way to reach the other branch is to
+// attach what the enterprise binary attaches at startup. Worth doing here as
+// well as in the enterprise binary's own test: the wiring lives in this package
+// and a test in another module cannot fail in this one's CI job.
+func TestVersion_ReportsTheEditionTheBinaryDeclared(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	ctx := edition.With(context.Background(), edition.Status{Name: "enterprise", State: "active"})
+	code := cli.Execute(ctx, []string{"version", "-o", "json"}, cli.Options{
+		Stdout:  &out,
+		Stderr:  &bytes.Buffer{},
+		Stdin:   strings.NewReader(""),
+		Getenv:  func(string) string { return "" },
+		Clock:   clock.NewFake(epoch),
+		WorkDir: t.TempDir(),
+	})
+	require.Zero(t, code)
+
+	var info cli.VersionInfo
+	require.NoError(t, json.Unmarshal(out.Bytes(), &info))
+	require.Equal(t, "enterprise", info.Edition)
 }
 
 // Output must be stable for the same input. A timestamp or a duration in the
