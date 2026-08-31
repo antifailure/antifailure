@@ -180,7 +180,7 @@ function SectionRail({ activeIndex, progress }: { activeIndex: number; progress:
                 isActive ? "border-black text-black" : "border-transparent text-black/55",
               )}
             >
-              <span className="mr-1.5 font-mono text-[10px] tabular-nums text-black/30">
+              <span className="mr-1.5 font-mono text-[10px] tabular-nums text-black/60">
                 {String(index + 1).padStart(2, "0")}
               </span>
               {section.title}

@@ -244,7 +244,7 @@ function PrCheckChrome() {
           </table>
         </div>
         <div className="mt-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/35">
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/60">
             How to see it yourself
           </div>
           <p className="mt-1 font-mono text-[11px] leading-5 tracking-extra-tight text-black">
@@ -256,7 +256,7 @@ function PrCheckChrome() {
       <Hairline />
 
       <div className="px-4 py-2">
-        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/35">In the report</div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/60">In the report</div>
       </div>
       <Hairline />
       {CONTENTS.map((row, i) => (

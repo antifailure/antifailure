@@ -207,7 +207,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
                     setEmail(e.target.value);
                     setError("");
                   }}
-                  className="mt-1.5 h-12 w-full rounded-md border border-black/15 bg-white px-3 text-[14px] text-black outline-none placeholder:text-black/30 focus:border-black/35"
+                  className="mt-1.5 h-12 w-full rounded-md border border-black/15 bg-white px-3 text-[14px] text-black outline-none placeholder:text-black/55 focus:border-black/35"
                 />
 
                 {error ? (
