@@ -7,10 +7,20 @@ import type { Post } from "@/lib/blog";
  * and the Stripe pack being complete enough to run checkout, subscribe, renew
  * and cancel with signed webhooks and no network.
  *
- * The post covers five of the six modes the manifest accepts. synth, which
- * asks a model to invent a response and marks the result unverified, is not
- * one of the answers argued for here and is deliberately out of scope. Nothing
- * in this file may say there are five modes, because there are six.
+ * The manifest accepts six modes and the title says five, which is an argument
+ * the post now makes rather than a number that is wrong. synth is held out on
+ * the merits: runner/src/verdict.ts:60 maps a synthesized response to
+ * unverified, and :129 keeps it unverified even when every assertion passed,
+ * so it is the one mode whose output cannot be evidence. af-proxy/synth.go
+ * says the same from the other side, calling it an escape hatch and telling
+ * anyone without a model key to write a fixture instead. The body names it and
+ * says why, because a title that counts five while the product has six is only
+ * honest if the piece supports it.
+ *
+ * The slug is deliberately stale and must stay that way. www/lib/blog.ts says
+ * never change one after publishing, and a slug is an identifier rather than a
+ * claim: nobody reads the arithmetic in a URL bar, and rewriting one costs
+ * every link already pointing at it.
  */
 export const EGRESS_MODES: Post = {
   slug: "five-answers-to-an-outbound-call",
@@ -73,6 +83,18 @@ export const EGRESS_MODES: Post = {
           fixture and a simulator.
         </li>
       </ul>
+      <p>
+        There is a sixth mode and this post is not counting it. <strong>SYNTH</strong>{" "}
+        asks a model to invent the response, which is worth having when a
+        provider offers no sandbox and you have no fixture yet and the run
+        would otherwise stop dead. It is not an answer in the sense the other
+        five are. Anything that touches a synthesized response is reported as
+        unverified rather than passed, even when every assertion held, because
+        the reply came from a model and not from the thing under test. The
+        five above give you a result you can rely on. That one gives you a
+        shape to keep moving against, and tells you plainly that nothing you
+        just saw is evidence.
+      </p>
 
       <h2>Why stateful mocking is a different thing</h2>
       <p>
@@ -95,8 +117,8 @@ export const EGRESS_MODES: Post = {
 
       <h2>The default is the design</h2>
       <p>
-        Five modes is a configuration question. What happens to a host nobody
-        configured is a design question, and it is the one that determines
+        Choosing a mode per host is a configuration question. What happens to a
+        host nobody configured is a design question, and it is the one that determines
         whether the containment holds.
       </p>
       <p>
