@@ -100,17 +100,223 @@ cp -R "$tmp/$name/runner" "$PREFIX/runner"
 say ""
 say "Installed $VERSION to $BIN_DIR/af"
 
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *)
-    say ""
-    say "Add it to your PATH:"
-    say "  export PATH=\"$BIN_DIR:\$PATH\""
+# ---------------------------------------------------------------------------
+# Putting af where the shell will actually find it.
+#
+# This block used to be two blocks that did not talk to each other. The first
+# tested whether BIN_DIR was on PATH and, on the miss, printed an export line.
+# The second then printed three bare `af` commands to run next, unconditionally.
+# So the script knew af was unreachable and told the reader to run it three
+# times anyway, and all three said "command not found". That is the first thirty
+# seconds of the product.
+#
+# The export it printed was also session only, so a reader who did paste it lost
+# af again the moment they closed the terminal, with nothing having said that
+# would happen.
+#
+# What this deliberately does NOT do is edit a shell profile uninvited. A script
+# piped into sh has no stdin left to ask consent on, and a tool that appends to
+# somebody's ~/.zshrc because it felt entitled to is a tool people stop piping
+# into sh. So the default is to print the two lines that fix it, the permanent
+# one first, and to make every command printed after that point reachable.
+# AF_ADD_TO_PATH=1 is how to say yes in advance, which is consent given rather
+# than assumed. GitHub Actions is the exception: GITHUB_PATH exists precisely so
+# an install step can extend PATH for the steps after it, and using it changes
+# nothing outside the job.
+# ---------------------------------------------------------------------------
+
+# AF_PREFIX with no HOME set is a real combination inside a container, and the
+# script has to reach the end of this block without dereferencing HOME when it
+# is not there. An empty $home would also turn every "$home"/* pattern below
+# into /*, which matches every absolute path, so each one is guarded.
+home=${HOME:-}
+
+# The line written into a profile names $HOME rather than the expanded path, so
+# a home directory that moves does not leave a dead entry behind.
+path_ref=$BIN_DIR
+if [ -n "$home" ]; then
+  case "$BIN_DIR" in
+    "$home"/*) path_ref="\$HOME/${BIN_DIR#"$home"/}" ;;
+  esac
+fi
+export_line="export PATH=\"$path_ref:\$PATH\""
+fish_line="fish_add_path \"$path_ref\""
+
+display_path() {
+  if [ -n "$home" ]; then
+    case "$1" in
+      "$home"/*) printf '~/%s\n' "${1#"$home"/}" ;;
+      *) printf '%s\n' "$1" ;;
+    esac
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+on_path() {
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Which file a new terminal reads is a per shell question and getting it wrong
+# is worse than not answering it: a line appended to ~/.bashrc on a zsh machine
+# is a second silent failure wearing the costume of a fix.
+#
+# $SHELL is the login shell, which is the one a new terminal will start. The
+# shell running this script is sh either way, so $0 would say nothing useful.
+#
+# A container that runs this with no SHELL at all is common enough to be worth
+# the second lookup. bash in sh mode fills SHELL in from the passwd entry by
+# itself, so this only matters where /bin/sh is dash, which is Debian and every
+# image built on it.
+shell_path=${SHELL:-}
+if [ -z "$shell_path" ] && command -v getent >/dev/null 2>&1; then
+  shell_path=$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f7)
+fi
+shell_name=${shell_path##*/}
+profile=""
+profile_line=""
+case "${home:+$shell_name}" in
+  zsh)
+    profile="${ZDOTDIR:-$home}/.zshrc"
+    profile_line=$export_line
+    ;;
+  bash)
+    # macOS terminals start login shells, which read .bash_profile and never
+    # .bashrc unless something sources it. Linux terminals start interactive
+    # non login shells, which read .bashrc and never .bash_profile.
+    if [ "$os" = "darwin" ]; then
+      profile="$home/.bash_profile"
+    else
+      profile="$home/.bashrc"
+    fi
+    profile_line=$export_line
+    ;;
+  fish)
+    profile="$home/.config/fish/config.fish"
+    profile_line=$fish_line
     ;;
 esac
 
-say ""
-say "Next:"
-say "  af doctor          check this machine"
-say "  af runner install  finish the agent runner, which needs node"
-say "  af init            read your repository and write a manifest"
+# Both spellings, because a reader who added the line by hand may well have
+# written the expanded path where this writes $HOME. Missing that would append
+# a duplicate on every re-run, which is the one thing an installer must not do.
+in_profile() {
+  [ -n "$profile" ] && [ -f "$profile" ] || return 1
+  grep -qF "$BIN_DIR" "$profile" 2>/dev/null && return 0
+  grep -qF "$path_ref" "$profile" 2>/dev/null && return 0
+  return 1
+}
+
+# The indent is a parameter because these three lines appear both under a bare
+# "Next:" and as the second half of a numbered pair, and a list that does not
+# line up with the step it belongs to reads as a different list.
+next_steps() {
+  say "$1af doctor          check this machine"
+  say "$1af runner install  finish the agent runner, which needs node"
+  say "$1af init            read your repository and write a manifest"
+}
+
+wrote_profile=""
+if [ -n "${AF_ADD_TO_PATH:-}" ] && [ -n "$profile" ] && ! in_profile; then
+  mkdir -p "$(dirname "$profile")"
+  printf '\n# Added by the Antifailure installer.\n%s\n' "$profile_line" >> "$profile"
+  wrote_profile=$profile
+fi
+
+if [ -n "${GITHUB_PATH:-}" ]; then
+  # Appending is idempotent because the runner replays this file into every
+  # later step, so a second install in the same job must not add it twice.
+  grep -qxF "$BIN_DIR" "$GITHUB_PATH" 2>/dev/null \
+    || printf '%s\n' "$BIN_DIR" >> "$GITHUB_PATH"
+  say ""
+  say "Added $BIN_DIR to PATH for the rest of this job."
+  say ""
+  say "Next:"
+  next_steps "  "
+elif on_path; then
+  say ""
+  say "Next:"
+  next_steps "  "
+else
+  say ""
+  if [ -n "$wrote_profile" ]; then
+    say "Added af to your PATH in $(display_path "$wrote_profile"), so new terminals"
+    say "will find it."
+    say ""
+    say "1. This terminal started before that line existed. To use af here too:"
+    say ""
+    if [ "$shell_name" = "fish" ]; then
+      say "     $fish_line"
+    else
+      say "     $export_line"
+    fi
+  elif in_profile; then
+    say "$(display_path "$profile") already puts af on the PATH. This terminal started before"
+    say "that line existed, so it has not picked it up."
+    say ""
+    say "1. Open a new terminal, or run this in the one you are in:"
+    say ""
+    if [ "$shell_name" = "fish" ]; then
+      say "     $fish_line"
+    else
+      say "     $export_line"
+    fi
+  elif [ "$shell_name" = "fish" ]; then
+    say "That directory is not on your PATH, so running af by name will say"
+    say "\"command not found\" until it is."
+    say ""
+    say "1. This is permanent for new shells and applies to this one:"
+    say ""
+    say "     $fish_line"
+    say ""
+    say "   Or re-run the installer with AF_ADD_TO_PATH=1 to have it write that"
+    say "   into $(display_path "$profile") for you."
+  elif [ -n "$profile" ]; then
+    say "That directory is not on your PATH, so running af by name will say"
+    say "\"command not found\" until it is."
+    say ""
+    say "1. Put it there. The first command is the one that survives closing this"
+    say "   terminal. The second makes af work in the terminal you are in now."
+    say ""
+    say "     echo '$export_line' >> $(display_path "$profile")"
+    say "     $export_line"
+    say ""
+    say "   Or re-run the installer with AF_ADD_TO_PATH=1 to have it write that"
+    say "   first line for you."
+  else
+    say "That directory is not on your PATH, so running af by name will say"
+    say "\"command not found\" until it is."
+    say ""
+    say "1. This works in the terminal you are in now:"
+    say ""
+    say "     $export_line"
+    say ""
+    if [ -z "$home" ]; then
+      say "   HOME is not set, so this installer cannot tell where your shell reads"
+      say "   its startup file from. Add the same line to it to make this permanent."
+    elif [ -n "$shell_name" ]; then
+      say "   Your login shell is $shell_name, which this installer does not know how"
+      say "   to make that permanent for. Add the same line to the file it reads at"
+      say "   startup. For a POSIX shell that is usually ~/.profile."
+    else
+      say "   This installer could not tell which shell you use, because SHELL is"
+      say "   not set. Add the same line to whatever file your shell reads at"
+      say "   startup to make this permanent."
+    fi
+    if [ -n "${AF_ADD_TO_PATH:-}" ]; then
+      say ""
+      say "   AF_ADD_TO_PATH was set and this installer did not act on it, because"
+      say "   guessing at the file would leave you with a line in a file nothing"
+      say "   reads, which is worse than this message."
+    fi
+  fi
+  say ""
+  say "2. Then:"
+  say ""
+  next_steps "     "
+  say ""
+  say "Until step 1, af answers to its full path: $BIN_DIR/af"
+fi
