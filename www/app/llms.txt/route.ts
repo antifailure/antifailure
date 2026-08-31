@@ -67,6 +67,15 @@ export function GET() {
   lines.push("af down          # every resource it created, gone");
   lines.push("```");
   lines.push("");
+  lines.push(
+    "The installer puts af under ~/.antifailure and puts that on your PATH by appending",
+    "one line to the startup file the login shell reads, printing the line and naming",
+    "the file. AF_NO_MODIFY_PATH=1 declines it. The terminal that ran the installer",
+    "needs the one line it prints, because a running shell cannot see a file written a",
+    "second ago. In GitHub Actions it writes GITHUB_PATH instead and touches no",
+    "profile, so a later step finds af without a flag.",
+  );
+  lines.push("");
 
   lines.push("## What a run produces");
   lines.push("");

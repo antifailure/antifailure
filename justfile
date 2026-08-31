@@ -353,6 +353,13 @@ coverage-profile:
 coverage:
     go run ./tools/coverage -profile {{reports}}/coverage.out
 
+# -count=1 because the cache cannot see what these read.
+#
+# go test caches on the files a test opens UNDER ITS OWN MODULE. Several gates
+# here read the repository root, which is outside tools/, and tools/installsh
+# runs install.sh through sh, so nothing in the package opens it at all. A
+# deliberately broken install.sh was reported ok from cache: the only gate
+# protecting the installer went green without running.
 test-tools:
     cd tools && go test ./... -count=1 -timeout 5m
 

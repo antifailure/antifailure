@@ -191,6 +191,9 @@ jobs:
         # errcheck, ldcheck and the generators decide whether a build is
         # allowed to ship, and their own tests were never run here. A gate
         # nobody tests is a gate that passes everything the day it breaks.
+        # -count=1: the cache cannot see files these read outside tools/,
+        # and tools/installsh runs install.sh through sh, so a broken installer
+        # was reported ok from cache. See the justfile recipe.
         run: cd tools && go test ./... -count=1 -timeout 5m
 
       - name: Format

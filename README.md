@@ -26,6 +26,12 @@ af test          # agents run your workflows and return verdicts with evidence
 af down          # every resource it created, gone
 ```
 
+The installer puts `af` under `~/.antifailure` and puts that on your PATH, by
+appending one line to the startup file your login shell reads. It prints the
+line and names the file, so deleting it undoes the change, and
+`AF_NO_MODIFY_PATH=1` declines it. The terminal you ran it in gets one line to
+paste, because a running shell cannot see a file written a second ago.
+
 ## What it does
 
 **Masked data, verified.** Masking is compiled to SQL and executed in resumable chunks, deterministic so the same customer maps to the same fake customer across every table and every refresh. Then a scanner reads back every column of every table looking for anything that still parses as an email, a card, a phone number, or a key, and signs an attestation. An unverified golden cannot be branched. That is enforced in code, not in a checklist.
