@@ -44,7 +44,6 @@ export function HeroFilm() {
           enableMouseInteraction
         />
         <div className="pointer-events-none absolute inset-0 opacity-30 mix-blend-overlay noise" />
-        <div className="hero-scan pointer-events-none absolute inset-0" />
       </div>
       <Picture
         className="relative left-1/2 hidden w-[min(752px,180%)] max-w-none -translate-x-1/2 max-sm:block"

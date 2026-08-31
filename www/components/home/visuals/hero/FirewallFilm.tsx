@@ -17,13 +17,12 @@ const PATHS = [
   "M36 52 C70 52, 92 78, 128 82",
 ];
 
-export function FirewallFilm({ active, hovered }: FilmProps) {
+export function FirewallFilm({ active }: FilmProps) {
   const { ref, t } = useHeroFilmClock({
     loop: LOOP,
     active,
-    hovered,
     stillT: 0,
-    reducedT: 0,
+    reducedT: LOOP - 0.001,
   });
 
   const draw = smooth(span(t, 0.35, 1.55));

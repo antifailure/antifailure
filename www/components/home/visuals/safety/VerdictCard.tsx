@@ -170,10 +170,8 @@ export function VerdictCard() {
         <div
           className="absolute inset-0 overflow-hidden"
           style={{
-            maskImage:
-              "linear-gradient(to bottom, transparent 0%, #000 18%, #000 76%, transparent 100%)",
-            WebkitMaskImage:
-              "linear-gradient(to bottom, transparent 0%, #000 18%, #000 76%, transparent 100%)",
+            maskImage: "linear-gradient(to bottom, #000 0%, #000 72%, transparent 100%)",
+            WebkitMaskImage: "linear-gradient(to bottom, #000 0%, #000 72%, transparent 100%)",
           }}
         >
           <div
@@ -189,13 +187,6 @@ export function VerdictCard() {
             ))}
           </div>
         </div>
-        <div
-          className="pointer-events-none absolute inset-x-0 top-0"
-          style={{
-            height: u(48),
-            background: "linear-gradient(to bottom, #fff 12%, rgba(255,255,255,0) 100%)",
-          }}
-        />
         <div
           className="pointer-events-none absolute inset-x-0 bottom-0"
           style={{

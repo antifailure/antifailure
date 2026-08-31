@@ -9,13 +9,12 @@ const LOOP = 8;
 
 const STACK = ["api", "worker", "postgres"] as const;
 
-export function TwinFilm({ active, hovered }: FilmProps) {
+export function TwinFilm({ active }: FilmProps) {
   const { ref, t } = useHeroFilmClock({
     loop: LOOP,
     active,
-    hovered,
     stillT: 0,
-    reducedT: 0,
+    reducedT: LOOP - 0.001,
   });
 
   const page = easeInOut(span(t, 3.1, 4.25));
