@@ -197,11 +197,11 @@ const catalog = (await getCollection("docs")).map((page) => {
     gap: 0.5rem;
     width: 100%;
     max-width: 22rem;
-    height: 2.5rem;
+    height: 2.75rem;
     margin: 0;
     padding: 0 0.5rem 0 0.75rem;
     border: 1px solid var(--sl-color-gray-5);
-    border-radius: 3px;
+    border-radius: var(--af-radius-sm);
     background: var(--sl-color-black);
     color: var(--sl-color-gray-2);
     font: inherit;
@@ -220,7 +220,7 @@ const catalog = (await getCollection("docs")).map((page) => {
     display: flex;
     gap: 0.15rem;
     padding: 0.15rem 0.35rem;
-    border-radius: 3px;
+    border-radius: var(--af-radius-sm);
     background: var(--sl-color-gray-6);
     font-size: 0.7rem;
   }
@@ -233,7 +233,7 @@ const catalog = (await getCollection("docs")).map((page) => {
     margin: 12vh auto auto;
     padding: 0;
     border: 1px solid var(--sl-color-hairline);
-    border-radius: 3px;
+    border-radius: var(--af-radius-md);
     background: #fff;
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.12);
   }
@@ -251,7 +251,7 @@ const catalog = (await getCollection("docs")).map((page) => {
     height: 2.75rem;
     padding: 0 0.85rem;
     border: 1px solid var(--sl-color-hairline-light);
-    border-radius: 3px;
+    border-radius: var(--af-radius-sm);
     background: #fff;
     color: var(--sl-color-gray-1);
     font: inherit;
@@ -287,16 +287,16 @@ const catalog = (await getCollection("docs")).map((page) => {
     color: var(--sl-color-gray-3);
     font-size: 0.8125rem;
   }
+  /* On a phone the control kept its label and filled the bar. It used to
+     collapse to a lone 44px square sitting in an otherwise empty full-width
+     band, which reads as a row that failed to load rather than as a search
+     box, and spent a whole bar of a 812px screen saying nothing. */
   @media (max-width: 50rem) {
-    .af-search-label,
     .af-search-kbd {
       display: none;
     }
     button[data-open-modal] {
-      width: 2.5rem;
-      max-width: 2.5rem;
-      padding: 0;
-      justify-content: center;
+      max-width: none;
     }
   }
 </style>

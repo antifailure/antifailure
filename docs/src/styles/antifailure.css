@@ -97,7 +97,9 @@
 
   --sl-content-width: 47rem;
   --sl-sidebar-width: 18rem;
-  --sl-nav-height: 7.75rem;
+  /* 4rem of site header plus the documentation bar below it. Both numbers are
+     measured, not guessed; see the breakpoints at the foot of this file. */
+  --sl-nav-height: 7.95rem;
   --sl-line-height: 1.7;
   --sl-text-code: 0.9em;
 
@@ -121,22 +123,36 @@
 
   --sl-color-text: #303236;
   --sl-color-text-accent: #16660a;
-  --sl-color-bg: #ffffff;
+  /* The site's ground, not white. www paints html and body #f7f7f5 and floats
+     a white header on top of it; the documentation was pure white throughout,
+     which is the first thing you see change when you cross from
+     antifailure.dev to antifailure.dev/docs. */
+  --sl-color-bg: #f7f7f5;
   --sl-color-bg-nav: #ffffff;
   --sl-color-bg-sidebar: #ffffff;
-  --sl-color-bg-inline-code: #f2f2f0;
+  --sl-color-bg-inline-code: rgb(0 0 0 / 0.055);
   --sl-color-hairline: #e4e5e7;
   --sl-color-hairline-light: #c9cbcf;
   --sl-color-hairline-shade: #e4e5e7;
 
+  /* 44px. Starlight's default is 2rem, which is a 32px tap target on the one
+     control a phone reader cannot do without. */
+  --sl-menu-button-size: 2.75rem;
+
   --af-rule: #e4e5e7;
-  --af-surface: #f7f7f5;
+  --af-surface: #ffffff;
   --af-accent-ink: #1a7f00;
+
+  /* One radius scale, applied by role. The page was carrying six values at
+     once — 1px, 3px, 3.2px, 4px, 8px and 10px — which is what "inconsistent
+     radii" looks like when nobody chose. */
+  --af-radius-sm: 4px;
+  --af-radius-md: 8px;
 }
 
 ::selection {
-  background: #33bf00;
-  color: #000;
+  background: #39a57d;
+  color: #fff;
 }
 
 body {
@@ -162,6 +178,11 @@ body {
 /* A rule above every h2 gives the page a spine you can scan, which is most of
    what somebody does when they arrive here from an error message. */
 .sl-markdown-content h2 {
+  /* display:block, because Starlight's anchor heading leaves the h2 inline and
+     a border-top on an inline box is only as wide as its text. The rule above
+     "Top level" in the manifest reference was 146px long in a 343px column: a
+     stub next to the heading rather than the spine this is meant to be. */
+  display: block;
   margin-top: 2.75rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--af-rule);
@@ -186,16 +207,58 @@ body {
 
 /* ------------------------------------------------------- code and tables */
 
+/* Inline code, exactly as www paints it in .prose-post: a tinted fill, no
+   border, 4px. The bordered pill it used to be read as a control rather than
+   as a word, and put a second radius on the page. */
 .sl-markdown-content code:not(:where(.not-content *)) {
-  border: 1px solid var(--af-rule);
-  border-radius: 4px;
-  padding: 0.1em 0.36em;
+  border: 0;
+  border-radius: var(--af-radius-sm);
+  padding: 0.12em 0.36em;
+  /* An em, so inline code inside a heading scales with the heading instead of
+     collapsing to body size. */
+  font-size: 0.88em;
+  letter-spacing: 0;
 }
 
-.expressive-code .frame pre,
-.sl-markdown-content pre:not(:where(.not-content *)) {
-  border-radius: 10px;
-  border: 1px solid var(--af-rule);
+/* Code blocks are dark and carry their own border from the Expressive Code
+   theme; nothing here should paint a light border back over them. The rule
+   below is only a floor for the rare `pre` that Expressive Code does not
+   handle. */
+.sl-markdown-content pre:not(:where(.not-content *, .expressive-code *)) {
+  border-radius: var(--af-radius-md);
+  border: 1px solid #2b2d31;
+  background: #18191b;
+  color: #e4e5e7;
+}
+
+/* Expressive Code sets the block's own type from styleOverrides. Its inner
+   spans inherited a second 0.9em on top of that, which landed tokens at
+   12.96px on a phone — small enough to be part of the same complaint as the
+   invisible fill. */
+.expressive-code code,
+.expressive-code .ec-line span {
+  font-size: inherit;
+}
+
+/* A wide line scrolls inside its block, and says so.
+ *
+ * The same reasoning as the reference tables below: on a phone the scrollbar
+ * is invisible until you already know to scroll, so an install command cut off
+ * at the right edge reads as a broken block rather than a scrollable one. This
+ * is the standard CSS scroll shadow, in the block's own colours — the opaque
+ * cover scrolls with the content, the shadow does not, so the shadow only
+ * shows while there is something past that edge. No script, and nothing
+ * animates. */
+.expressive-code pre {
+  background-image:
+    linear-gradient(to right, #18191b 30%, transparent),
+    linear-gradient(to left, #18191b 30%, transparent),
+    linear-gradient(to right, rgb(0 0 0 / 0.55), transparent),
+    linear-gradient(to left, rgb(0 0 0 / 0.55), transparent);
+  background-position: left center, right center, left center, right center;
+  background-repeat: no-repeat;
+  background-size: 1.75rem 100%, 1.75rem 100%, 0.85rem 100%, 0.85rem 100%;
+  background-attachment: local, local, scroll, scroll;
 }
 
 /* Expressive Code paints macOS traffic lights on framed blocks. They are
@@ -314,12 +377,22 @@ body {
   border-inline-start: 1px solid var(--af-rule);
 }
 
+/* Starlight's own 0.2rem/3.2px radius on badges, selects and the sidebar's
+   controls was a seventh value nobody chose. */
+.sl-badge,
+.sl-select,
+starlight-theme-select select,
+.right-sidebar a,
+.sidebar-content a {
+  border-radius: var(--af-radius-sm);
+}
+
 /* ---------------------------------------------------------------- asides */
 
 .sl-markdown-content .starlight-aside {
   border: 1px solid var(--af-rule);
   border-inline-start: 2px solid var(--af-rule);
-  border-radius: 8px;
+  border-radius: var(--af-radius-md);
   background: var(--af-surface);
   padding: 1rem 1.15rem;
 }
@@ -356,7 +429,79 @@ body {
 :where(a, button, input, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--color-neon);
   outline-offset: 2px;
-  border-radius: 3px;
+  border-radius: var(--af-radius-sm);
+}
+
+/* ------------------------------------------------------------ tap targets
+ *
+ * Everything a thumb has to hit is held at 44px on a phone. Measured before
+ * this rule existed: the sidebar toggle was 32x32, the search button 40x40,
+ * every table-of-contents row 34-35px tall, the anchor link beside a heading
+ * 24px wide, and the two footer links 30px tall.
+ *
+ * These grow the hit area, not the type. The anchor link and the footer links
+ * take their extra height from padding so nothing on the page moves.
+ */
+@media (max-width: 50rem) {
+  /* The table of contents on a phone is a dropdown of plain links, and it is
+     how most people move around a long reference page. */
+  starlight-toc a,
+  mobile-starlight-toc a {
+    min-height: 2.75rem;
+    display: flex;
+    align-items: center;
+  }
+
+  .sl-markdown-content .sl-anchor-link {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .af-site-footer a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.75rem;
+    /* "Terms" is five characters and measured 37px wide without this. */
+    min-width: 2.75rem;
+  }
+
+  /* The wordmark keeps its 32px box so the header still matches the site's,
+     and takes the rest of the target from padding. */
+  .af-wordmark {
+    min-height: 2.75rem;
+  }
+
+  /* Expressive Code's copy button renders at 32px. It sits on top of the code
+     it copies, so it is the control most likely to be missed and the one most
+     likely to hit the code instead. */
+  .expressive-code .copy button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  /* The two calls to action on the landing page measured 40px and 33px. They
+     sit in Starlight's hero rather than in the markdown body, so they are not
+     reachable through .sl-markdown-content. */
+  .sl-link-button {
+    min-height: 2.75rem;
+  }
+
+  .sl-skip-link {
+    min-height: 2.75rem;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+/* Expressive Code's copy button and its confirmation tooltip carry a 0.2rem
+   radius, which is the 3.2px that was the odd value out in the scale. */
+.expressive-code .copy button,
+.expressive-code .copy .feedback {
+  border-radius: var(--af-radius-sm);
 }
 
 /* Nothing on this site animates on a loop. */
@@ -371,11 +516,18 @@ body {
   }
 }
 
+/* The site header drops from 4rem to 3.5rem below xl, so the nav height has
+   to as well, or everything Starlight offsets by it sits half a bar low. */
+@media (max-width: 79.99rem) {
+  :root {
+    --sl-nav-height: 7.45rem;
+  }
+}
+
 @media (max-width: 50rem) {
   :root {
     --sl-text-h1: 2rem;
-    /* 56px header plus a shorter documentation bar. */
-    --sl-nav-height: 6.75rem;
+    --sl-nav-height: 7.35rem;
   }
   .sl-markdown-content h2 {
     margin-top: 2.25rem;
