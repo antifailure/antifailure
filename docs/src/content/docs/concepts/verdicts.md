@@ -70,7 +70,7 @@ the verdict.
 | `migration_failed` | The migrations did not apply to a branch with production's shape in it. |
 | `migration_rewrite` | Postgres reported rewriting a table, which copies every row under a lock nothing can read through. |
 | `migration_lint` | Any of the six migration lint rules. The finding names the rule it broke. |
-| `plan_regression` | A query plan got worse in one of three ways: a table is now read end to end, an index is no longer used, or the planner's estimate grew. |
+| `plan_regression` | A query plan got worse in one of three plan regressions: a table is now read end to end, an index is no longer used, or the planner's estimate grew. |
 | `query_regression` | A statement runs more often, or slower, than the saved baseline did. |
 | `load_regression` | A threshold from the `load` block was exceeded. |
 | `egress_surprise` | The environment tried to reach a host the manifest does not mention. The request was refused either way; this decides whether the attempt stops the merge. |

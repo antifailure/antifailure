@@ -7,6 +7,6 @@ reported rather than removed. The help says that now, in a form that cannot
 fall behind the code, and points at `af status` and the pending list for the
 answer rather than at a sentence.
 
-`plan_regression` is described as three ways a plan can get worse rather than
+`plan_regression` is described as three plan regressions rather than
 two. `cost_increase` was named nowhere a user could read: not in the manifest
 schema, not in the generated reference, not in the verdicts guide.

@@ -26,6 +26,21 @@ import (
 // finds things that are not defects and gets deleted. This is keyed on a
 // closed Go set and a phrase per member that the reports already use, so it
 // can only fire on the thing it is about.
+//
+// This is half of the guard and tools/constcheck is the other, and the two
+// were chosen because their blind spots are opposite. constcheck parses the
+// const block through go/ast and holds the stated count, so it sees a fourth
+// constant that nobody added to PlanChanges, which nothing here can: Go cannot
+// enumerate the constants of a string type at run time. What it cannot see is
+// a rewrite that drops the count from the sentence, because then there is no
+// counted sentence left to hold. This test sees exactly that, and misses what
+// constcheck catches.
+//
+// The cost is that the prose has to use the same phrases as planTitle, which
+// is coupling, and it is deliberate and one directional: these are the same
+// sentence shown in a schema and in a report, and improving the wording in one
+// place should improve it in the other rather than let them drift. The failure
+// message says which file to change.
 func TestSchemaDescribesEveryPlanChange(t *testing.T) {
 	t.Parallel()
 

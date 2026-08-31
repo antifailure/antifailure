@@ -69,9 +69,11 @@ const (
 // list, and then does not know why their build failed on the third.
 //
 // TestSchemaDescribesEveryPlanChange holds the description to this slice, so
-// the prose cannot fall behind. A constant added here and not to this slice is
-// still invisible to that test, which is the one hole left and is the shape of
-// thing tools/constcheck exists to close.
+// the prose cannot fall behind. A constant added to the type and not to this
+// slice is invisible to that test, because Go cannot enumerate the constants
+// of a string type at run time; tools/constcheck reads the const block above
+// through go/ast and holds the count stated in the prose, which is the half
+// that closes it.
 var PlanChanges = []PlanChange{PlanNewSeqScan, PlanLostIndex, PlanCostUp}
 
 // PlanTitle is how one kind of plan regression is put to a person.
