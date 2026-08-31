@@ -69,6 +69,7 @@ gate: _reports
     run "documented manifests are valid" just manifestcheck
     run "prose reads like a person"      just prosecheck
     run "every figure has a source"      just figurecheck
+    run "the mode lists are the real one" just modecheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
     run "prose style"                    just vale
@@ -384,6 +385,11 @@ prosecheck:
 # audit came back clean. This reads the source instead.
 figurecheck:
     go run ./tools/figurecheck .
+
+# Every sentence that enumerates the egress modes enumerates the real ones,
+# read from schemas/manifest.v1.json rather than from a second copy of the list.
+modecheck:
+    go run ./tools/modecheck .
 
 # Spelling, with the project dictionary in tools/docs/dictionary.txt.
 spell:
