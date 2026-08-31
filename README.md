@@ -43,9 +43,11 @@ network namespace. Nothing leaves except through it. Each host gets a mode:
 `BLOCK` refuses with a decision you can read, `ALLOW` lets it through with a
 rate limit, `SANDBOX` swaps in test credentials and trips a wire if a live key
 ever appears, `CAPTURE` records the email or SMS into a searchable inbox your
-agents can read, and `MOCK` answers from a stateful offline pack. The Stripe
-pack is complete enough to run checkout, subscribe, renew, and cancel with
-signed webhooks and no network at all.
+agents can read, `MOCK` answers from a stateful offline pack, and `SYNTH` asks
+a model to invent a response and marks every result that touched it as
+unverified rather than passed. The Stripe pack is complete enough to run
+checkout, subscribe, renew, and cancel with signed webhooks and no network at
+all.
 
 **Agents, not scripts.** Workflows are written as sentences. The runner drives
 a real browser through the accessibility tree, logs in the way a person does

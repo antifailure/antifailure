@@ -95,7 +95,7 @@ const MIGRATION_FINDINGS: { k: string; v: string }[] = [
 
 /**
  * Every answer here is a claim this repository already makes somewhere else:
- * the trust boundary from the privacy notice, the five egress modes and the
+ * the trust boundary from the privacy notice, the six egress modes and the
  * five verdicts from the README, the provider list from "Where it runs", and
  * the licence split from the licence section. Nothing is invented for the
  * page, because an answer engine quoting a page is quoting it as fact.
@@ -114,7 +114,7 @@ const PRODUCT_FAQ: FaqItem[] = [
   {
     question: "What stops a test run from emailing real customers or charging a real card?",
     answer:
-      "Every environment gets a sidecar that owns its network namespace, and nothing leaves except through it. Each host gets a mode: BLOCK, ALLOW, SANDBOX with test credentials and a tripwire if a live key appears, CAPTURE into a searchable inbox, or MOCK from a stateful offline pack. An unlisted host fails closed.",
+      "Every environment gets a sidecar that owns its network namespace, and nothing leaves except through it. Each host gets one of six modes: BLOCK, ALLOW, SANDBOX with test credentials and a tripwire if a live key appears, CAPTURE into a searchable inbox, MOCK from a stateful offline pack, or SYNTH, which asks a model to invent a response and marks the result unverified. An unlisted host fails closed.",
   },
   {
     question: "Can a run complete with no network access at all?",

@@ -60,9 +60,13 @@ live.
 
 ## Reference
 
-Every reference page is generated from the thing it documents, so it cannot
-drift: the [command reference](/docs/reference/cli) from the command tree, the
-[manifest reference](/docs/reference/manifest) from the schema, the
-[error reference](/docs/reference/errors) from the catalogue, and the
-[transform reference](/docs/reference/transforms) from the registry. A build
-gate fails if any of them stops matching.
+Three of the four reference pages are checked against the thing they document,
+so they cannot drift: the [command reference](/docs/reference/cli) against the
+command tree, the [error reference](/docs/reference/errors) against the
+catalogue, and the [transform reference](/docs/reference/transforms) against
+the registry. A build gate fails if any of those stops matching.
+
+The [manifest reference](/docs/reference/manifest) is written by hand and no
+gate compares it to `schemas/manifest.v1.json`. The generated rendering of the
+schema is the [manifest schema page](/docs/reference/schemas/manifest-v1), and
+that is the one to trust where the two disagree.

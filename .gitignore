@@ -137,6 +137,7 @@ runner/artifacts/
 /ldcheck
 /licensegen
 /manifestcheck
+/modecheck
 /notices
 /npmaudit
 /prosecheck

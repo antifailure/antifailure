@@ -34,7 +34,7 @@ const RULES = [
   { at: 0.88, key: "sendgrid", label: "sendgrid:capture" },
   { at: 1.04, key: "slack", label: "slack:capture" },
   { at: 1.2, key: "sandbox", label: "auth0:sandbox" },
-  { at: 1.36, key: "deny", label: "*:deny" },
+  { at: 1.36, key: "deny", label: "*:block" },
 ] as const;
 
 type HitKind = "bend" | "stamp" | "fragment" | "rewrite";
