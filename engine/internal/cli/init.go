@@ -120,7 +120,15 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 		return err
 	}
 	if _, err := manifest.Parse(body, manifestPath, env.WorkDir); err != nil {
-		return fmt.Errorf("init: the generated manifest is not valid, which is a bug in Antifailure: %w", err)
+		// The refusal has to say that nothing was written. Wrapping the
+		// validator's own error let AF-MAN-002 reach the user unchanged, and
+		// its next step is "fix the reported line", which points at a file
+		// that does not exist. Writing the invalid draft instead would be
+		// worse: it gets committed, every later command fails on it, and
+		// af init then refuses to replace it without --force.
+		return aferrors.Coded(aferrors.AFDET005,
+			"path", manifestPath,
+			"detail", validationDetail(err))
 	}
 
 	if err := writeAtomic(manifestPath, body, 0o644); err != nil {
@@ -149,6 +157,22 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 	return nil
 }
 
+// validationDetail pulls the readable half out of the validator's own error.
+//
+// The validator returns AF-MAN-002 carrying the failing line and the reason.
+// That sentence is worth repeating; its next step is not, because it tells the
+// reader to edit a file 'af init' has just decided not to write.
+func validationDetail(err error) string {
+	var coded *aferrors.Error
+	if aferrors.As(err, &coded) {
+		if d := coded.Fields["detail"]; d != "" {
+			return d
+		}
+		return coded.Message()
+	}
+	return err.Error()
+}
+
 func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed map[string]string) error {
 	// A question needs somewhere to ask it. Without a terminal the read blocks
 	// forever, which in a script or a CI job looks exactly like a hang, so the
@@ -162,21 +186,32 @@ func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed ma
 		switch {
 		case given:
 		case opts.nonInteractive:
-			if q.Default == "" {
-				// A question with no default in a non interactive run cannot
-				// be guessed at. Naming the flag is what turns this into a
-				// one line fix rather than a dead end.
-				return aferrors.Coded(aferrors.AFMAN004,
-					"path", env.WorkDir)
-			}
 			answer = q.Default
-			assumed[q.ID] = answer
+			if answer != "" {
+				assumed[q.ID] = answer
+			}
 		default:
 			var err error
 			answer, err = ask(env, *q)
 			if err != nil {
 				return err
 			}
+		}
+		// One refusal for every way a question can arrive unanswered: a
+		// non interactive run with no default, an --answer with nothing after
+		// the equals sign, and a prompt somebody pressed return on when there
+		// was no default to take.
+		//
+		// Letting any of them through applied no answer, which left a web
+		// service with no port, which failed validation and told the user it
+		// was a defect in Antifailure. Two of these used to return AF-MAN-004,
+		// whose next step is "pass --non-interactive", which the run that hit
+		// it had already done. AF-DET-004 names the question and the flag that
+		// answers it instead.
+		if answer == "" && q.Default == "" {
+			return aferrors.Coded(aferrors.AFDET004,
+				"question", q.Prompt,
+				"id", q.ID)
 		}
 		applyAnswer(res.Draft, q.ID, answer)
 	}

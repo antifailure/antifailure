@@ -460,6 +460,30 @@ No application could be detected in {path}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/detection](/docs/concepts/detection/) |
 
+### AF-DET-004
+
+Detection could not decide {question}, and there is no default to fall back on.
+
+**What to do.** Answer it with --answer {id}=<value>, or run 'af init' from a terminal so it can ask.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/detection](/docs/concepts/detection/) |
+
+### AF-DET-005
+
+Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}
+
+**What to do.** This is a defect in Antifailure. Please report it with the detail above, then write the manifest by hand from the reference or re-run with --answer to override what detection guessed.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/detection](/docs/concepts/detection/) |
+
 ### AF-DET-010
 
 The changed files between {base} and {head} could not be read: {detail}
@@ -664,9 +688,9 @@ The manifest at {path} declares schema version {found}, which this build does no
 
 ### AF-MAN-004
 
-'af init' needs a terminal to ask questions, and this session has none.
+'af init' has questions to ask and this session has no terminal to ask them on.
 
-**What to do.** Pass --non-interactive together with the flags listed by 'af init --help'.
+**What to do.** Pass --non-interactive to accept every default, and --answer id=value for anything that has no default.
 
 | | |
 | --- | --- |

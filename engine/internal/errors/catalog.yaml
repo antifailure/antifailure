@@ -48,8 +48,8 @@ errors:
     exit_code: 3
   - code: AF-MAN-004
     area: MAN
-    message: "'af init' needs a terminal to ask questions, and this session has none."
-    next_step: "Pass --non-interactive together with the flags listed by 'af init --help'."
+    message: "'af init' has questions to ask and this session has no terminal to ask them on."
+    next_step: "Pass --non-interactive to accept every default, and --answer id=value for anything that has no default."
     docs: reference/cli#af-init
     retryable: false
     exit_code: 2
@@ -90,6 +90,20 @@ errors:
     area: DET
     message: "Services {first} and {second} both claim port {port}."
     next_step: "Give one of them a different port in antifailure.yaml."
+    docs: concepts/detection
+    retryable: false
+    exit_code: 3
+  - code: AF-DET-004
+    area: DET
+    message: "Detection could not decide {question}, and there is no default to fall back on."
+    next_step: "Answer it with --answer {id}=<value>, or run 'af init' from a terminal so it can ask."
+    docs: concepts/detection
+    retryable: false
+    exit_code: 3
+  - code: AF-DET-005
+    area: DET
+    message: "Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}"
+    next_step: "This is a defect in Antifailure. Please report it with the detail above, then write the manifest by hand from the reference or re-run with --answer to override what detection guessed."
     docs: concepts/detection
     retryable: false
     exit_code: 3
