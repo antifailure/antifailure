@@ -7,17 +7,35 @@ install` and `af init`, and all three answered `command not found`. The export
 it printed was session only besides, so a reader who pasted it lost `af` again
 on closing the terminal, with nothing having said that would happen.
 
-Every command the installer prints is now reachable. Where its bin directory is
-not on PATH, the next steps are numbered after the step that puts it there, the
-full path is offered for anyone who would rather not touch their PATH, and the
-line that survives closing the terminal comes first and names the file the login
-shell actually reads: `.zshrc` under `ZDOTDIR` for zsh, `.bash_profile` on macOS
-and `.bashrc` on Linux for bash, `fish_add_path` for fish, and a shell it does
-not recognise is told so rather than having a file guessed for it.
+The installer now puts `af` on the PATH rather than explaining how to. It
+appends one line to the startup file the login shell actually reads, prints that
+line and names the file, so the change is visible and deleting the line undoes
+it. `AF_NO_MODIFY_PATH=1` declines it in advance, which is the only way to ask
+when a script piped into `sh` has no stdin left to prompt on. Running the
+installer again does not add the line twice.
 
-No shell profile is written without being asked, because a script piped into
-`sh` has no stdin left to ask on. `AF_ADD_TO_PATH=1` is how to say yes in
-advance, and it appends once however often the installer runs. In GitHub Actions
-the installer writes to `GITHUB_PATH`, which the documented workflow needed and
-did not have: every step gets a fresh PATH, so `af ci` in the step after the
-install was never going to be found.
+The terminal that ran the installer cannot see a file written a second ago, so
+it ends with one line to paste that puts `af` on that shell's PATH and runs the
+first of the next steps. Every branch ends in commands that work: bare where
+PATH was set up, and the full path where it was declined, could not be written,
+or the login shell is one the installer cannot name a startup file for.
+
+zsh gets `.zshrc` under `ZDOTDIR`, bash gets `.bash_profile` on macOS and
+`.bashrc` on Linux, fish gets `fish_add_path`, and an unrecognised shell is told
+so rather than having a file guessed for it.
+
+**`af runner install`, the second command the installer prints, could not
+succeed on any machine installed this way.** It searches for a runner source
+beside the binary, at `$PREFIX/bin/runner` and
+`$PREFIX/share/antifailure/runner`. The installer put it at `$PREFIX/runner`,
+which is where `af` looks for an *installed* runner, so the command answered
+AF-AGT-004 and advised running itself. The same placement made `af runner check`
+report `ok runner` on a tree with no `node_modules`, so the real breakage
+surfaced later inside `af test`. The source now lands where the engine was
+already looking, and a half installed tree left by an earlier installer is
+cleaned up. The installer also names node and the version it needs when node is
+missing, rather than leaving that for `af runner install` to discover.
+
+In GitHub Actions the installer writes to `GITHUB_PATH` and touches no profile.
+The documented workflow needed that and did not have it: every step gets a fresh
+PATH, so `af ci` in the step after the install was never going to be found.
