@@ -48,7 +48,7 @@ export function WorkloadFilm({ active, hovered }: FilmProps) {
                   </span>
                   {row.slow ? (
                     <span style={moveStyle({ opacity: smooth(span(t, 1.4, 1.95)) })}>
-                      <Pill className="bg-[#D94841]/12 text-[#A8332C] ring-[#D94841]/25">129% slower</Pill>
+                      <Pill tone="block">129% slower</Pill>
                     </span>
                   ) : null}
                   <Meta className="tabular-nums">{row.display}</Meta>

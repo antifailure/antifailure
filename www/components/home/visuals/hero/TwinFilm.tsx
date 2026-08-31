@@ -85,15 +85,18 @@ function EnvCard({
   return (
     <div
       className={cn(
-        "flex h-full flex-col justify-between rounded-[10px] border border-black/[0.08] bg-white px-2.5 py-2",
-        dim && "bg-[#F7F7F8]",
+        "flex h-full flex-col justify-between rounded-[10px] border border-black/[0.08] px-2.5 py-2",
+        // Chosen rather than layered: bg-white is emitted after this, so as
+        // an additive class the dim card rendered the same white as a lit
+        // one and the state the prop names never reached the screen.
+        dim ? "bg-[#F7F7F8]" : "bg-white",
         className,
       )}
       style={style}
     >
       <div className="flex items-center justify-between gap-2">
         <Label>{label}</Label>
-        <Meta className={live ? "text-[#1A1A1A]" : undefined}>{live ? "live" : "idle"}</Meta>
+        <Meta strong={live}>{live ? "live" : "idle"}</Meta>
       </div>
       <div className="min-w-0">
         <div className="truncate text-[12px] tracking-extra-tight text-[#1A1A1A]">{host}</div>

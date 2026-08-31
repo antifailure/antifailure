@@ -409,7 +409,7 @@ function EvidenceColumn({ t }: { t: number }) {
             <div className="flex gap-1.5">
               <Receipt>Stripe · mock x2</Receipt>
               <Receipt>email · capture x1</Receipt>
-              <Receipt className="text-black/45">escaped · 0</Receipt>
+              <Receipt>escaped · 0</Receipt>
             </div>
           </Drawer>
           <Drawer t={t} start={DRAWER_AT[3]} height={DRAWER_H[3]} title="4 · Load">

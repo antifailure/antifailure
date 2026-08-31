@@ -7,11 +7,21 @@ const sizes = {
   xxs: "h-8 px-4 text-sm tracking-extra-tight font-medium",
 } as const;
 
+/**
+ * A theme owns the whole colour of a button, including the one case that used
+ * to be spelled as a className over `outlined`. That override happened to work:
+ * text-white is emitted after text-black, so it won. Written the other way
+ * round, a dark label over a light theme, it would have lost in silence and the
+ * label would have disappeared into the button. A theme cannot lose that race,
+ * because only one theme string is ever emitted.
+ */
 const themes = {
   filled: "bg-black text-white hover:bg-[#292929] font-medium",
   white: "bg-white text-black hover:bg-gray-new-80 font-medium",
   outlined:
     "border border-black/40 bg-black/[0.02] text-black hover:border-black",
+  "outlined-inverse":
+    "border border-white/40 bg-white/[0.02] text-white hover:border-white",
   green: "bg-[#34d59a] text-black hover:bg-[#47d18c] font-medium",
 } as const;
 

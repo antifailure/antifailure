@@ -151,9 +151,18 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                         <HeaderLink
                           href={menu.href}
                           className={cn(
-                            "relative flex h-16 items-center gap-x-1 rounded-sm px-2.5 text-[15px] font-normal leading-normal tracking-snug whitespace-pre text-black/70 transition-colors duration-200 hover:text-black",
+                            "relative flex h-16 items-center gap-x-1 rounded-sm px-2.5 text-[15px] font-normal leading-normal tracking-snug whitespace-pre transition-colors duration-200 hover:text-black",
                             index === 0 && "-ml-2.5",
-                            pathname === menu.href && "text-black",
+                            // One expression rather than a default plus an
+                            // additive override. `cn` is a plain join, so both
+                            // classes used to land on the element and the
+                            // cascade picked: text-black is emitted before
+                            // text-black/70, so the current page marker lost
+                            // and the nav marked nothing at all. hover stays in
+                            // the base because a pseudo-class outranks both and
+                            // never enters that race, which is why the nav
+                            // looked right the instant anyone touched it.
+                            pathname === menu.href ? "text-black" : "text-black/70",
                           )}
                         >
                           {menu.text}
@@ -162,9 +171,15 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                         <button
                           type="button"
                           className={cn(
-                            "group/main-nav-trigger relative flex h-16 items-center gap-x-1 rounded-sm px-2.5 text-[15px] font-normal leading-normal tracking-snug whitespace-pre text-black/70 transition-colors duration-200 hover:text-black",
-                            isActive && "text-black",
-                            open !== null && !isActive && "text-gray-new-50",
+                            "group/main-nav-trigger relative flex h-16 items-center gap-x-1 rounded-sm px-2.5 text-[15px] font-normal leading-normal tracking-snug whitespace-pre transition-colors duration-200 hover:text-black",
+                            // The same three states, chosen once. As two
+                            // additive conditionals over a default, the dimming
+                            // one worked and the emphasising one did not:
+                            // text-gray-new-50 is emitted after text-black/70
+                            // and text-black before it, so an open trigger
+                            // stayed at the resting colour while its siblings
+                            // correctly dimmed around it.
+                            isActive ? "text-black" : open !== null ? "text-gray-new-50" : "text-black/70",
                           )}
                           aria-expanded={isActive}
                           aria-haspopup="menu"
