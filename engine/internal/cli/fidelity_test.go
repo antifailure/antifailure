@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -56,8 +57,11 @@ func TestRequirementError_ReportsTheUnmeasurableOneFirst(t *testing.T) {
 func codedError(t *testing.T, err error) *aferrors.Error {
 	t.Helper()
 	require.Error(t, err)
-	coded, ok := err.(*aferrors.Error)
-	require.True(t, ok, "the failure carries no catalogue code: %v", err)
+	// errors.As rather than a type assertion, because a coded error that has
+	// been wrapped anywhere on the way up is still a coded error, and an
+	// assertion would report the wrapping as a missing code.
+	var coded *aferrors.Error
+	require.True(t, errors.As(err, &coded), "the failure carries no catalogue code: %v", err)
 	return coded
 }
 

@@ -72,8 +72,8 @@ mkdir -p site/schemas && cp schemas/*.json site/schemas/
 #
 # Two things it fixes, both of which were live for as long as the site was.
 #
-# A 404 served Microsoft's page -- their logo, their wording, a Bootstrap CDN
-# stylesheet -- while www/app/not-found.tsx sat in the build at /404.html with
+# A 404 served Microsoft's page, their logo, their wording, a Bootstrap CDN
+# stylesheet, while www/app/not-found.tsx sat in the build at /404.html with
 # nothing pointing at it. A designed page nothing routes to is the same dead
 # capability as a function with no callers, and it looked like our site had
 # been abandoned to a hosting default.
@@ -100,6 +100,7 @@ mkdir -p site/schemas && cp schemas/*.json site/schemas/
 #
 # So the redirects below are appended to whatever that file declares, and the
 # assertions afterwards fail the build if the merge loses something.
+
 # The runtime the managed function starts on, in one place because it is read by
 # two separate python blocks below and a value that lives in five literals is a
 # value somebody will change in four of them. The post-publish assertion reads
