@@ -153,6 +153,7 @@ export function LoadPage() {
   return (
     <PageShell inset>
       <PageHero
+        path="/product/load"
         eyebrow="Load"
         title="Traffic shaped like production's, sent at the twin."
         lead="The engine reads your production access log, keeps the mix of routes it actually served, and sends that mix at the twin. Every route is unsafe until the manifest names it, and every answer is a comparison against the p95 production serves that route in."
