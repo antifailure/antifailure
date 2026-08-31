@@ -445,7 +445,13 @@ func prose(root string) ([]string, error) {
 			}
 			if d.IsDir() {
 				switch d.Name() {
-				case "node_modules", ".next", "dist", ".astro", "testdata":
+				// `out` is www's static export, and it is here for the same
+				// reason as `dist`: gitignored build output holding a stale
+				// copy of prose the source has already corrected. Anyone who
+				// had run a local build got two findings citing www/out for
+				// sentences the TSX no longer contains, and a gate is only
+				// worth reading while every finding it makes is a real one.
+				case "node_modules", ".next", "out", "dist", ".astro", "testdata":
 					return fs.SkipDir
 				}
 				return nil
