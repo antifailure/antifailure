@@ -35,6 +35,7 @@ import { sql } from 'drizzle-orm'
 import type { Db } from '@antifailure/db'
 import { router, orgProcedure, audit, type OrgContext } from '../trpc.ts'
 import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
+import { capsFor, checkCostCap, environmentHoursSince } from '../costs.ts'
 import { GitHubError } from '../auth/github.ts'
 
 /**
@@ -210,6 +211,19 @@ export const createEnvironment = orgProcedure('environments.create')
        *  console offers when somebody has not chosen. */
       branch: gitRef.optional(),
       workflow: workflowFile,
+      /**
+       * The lifetime the environment will be created with, in hours, when the
+       * caller knows it. af up reads runtime.ttl from the manifest and sends
+       * it; the console does not have the manifest and omits it.
+       *
+       * Bounded here as well as by the cap, because it is a number from a
+       * client and an unbounded one would be arithmetic on infinity in the
+       * projection below. A year is far above any lifetime the caps allow, so
+       * the refusal a caller actually sees is the cap's, which names a number
+       * they can act on, rather than a validation error about a field they did
+       * not know they were sending.
+       */
+      ttlHours: z.number().positive().max(8760).optional(),
     }),
   )
   .mutation(async ({ ctx, input }) => {
@@ -237,6 +251,32 @@ export const createEnvironment = orgProcedure('environments.create')
       const quota = checkQuota(plan, 'environments', Number(row?.environments ?? 0))
       if (!quota.allowed) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: quota.reason })
+      }
+
+      // The cost caps, in environment-hours, on the same call and for the same
+      // reason: refusing after the workflow has started means the customer
+      // paid for a run this control plane was always going to reject.
+      //
+      // The quota above answers "how many at once" and this answers "how
+      // much", and an organization can sit inside the first while a loop
+      // creating and tearing down one environment at a time runs up a month of
+      // environment time in an afternoon.
+      const now = c.clock.now()
+      const used = await environmentHoursSince(
+        db, c.actor.orgId, new Date(now.getTime() - 24 * 60 * 60 * 1000), now,
+      )
+      // What this run commits to is the lifetime the environment will be
+      // created with: the engine stamps runtime.ttl on the resources at
+      // creation and the reaper enforces it, so the hours asked for here are
+      // the hours that will actually be held.
+      // Absent means the caller did not say, and the conservative reading of
+      // "unknown lifetime" is the most the plan would allow for one: reserving
+      // less would let an unstated run slip past the daily cap that a stated
+      // one of the same size is refused for.
+      const runHours = input.ttlHours ?? capsFor(plan).perRunHours
+      const cap = checkCostCap(plan, runHours, used)
+      if (!cap.allowed) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: cap.reason })
       }
 
       return { ref: input.branch ?? repo.default_branch }
