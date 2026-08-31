@@ -39,3 +39,14 @@ identity and the `statement_timeout` half, and the second against a ledger polic
 widened from SELECT to ALL. The third was watched failing in both directions,
 once with its write policy as `FOR ALL` and once with the read half of its own
 negative control left closed.
+
+One property is recorded rather than fixed. Row-level security cannot restrict a
+column, so a verified delivery may write every column of the organization it
+names, including the kill switch from 0010, and what prevents it is that every
+UPDATE on that table names its columns explicitly. Column level privileges were
+measured rather than assumed and do not express it: the narrow grant takes twenty
+api tests red because the same role runs the GitHub upsert and both kill switch
+routes, and the narrowest grant that keeps every path working is green and still
+admits the kill switch. A privilege is granted to a role and a policy admits a
+row, and there is no way to say "this column, but only on the path that policy
+admitted". The reasoning sits beside the test so the next reader has it.

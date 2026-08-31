@@ -427,6 +427,40 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     //
     // It is asserted rather than described because the day it stops being true
     // is a Postgres upgrade, and the only warning would be this going red.
+    //
+    // The other half of what that policy reaches, recorded here because there is
+    // nowhere else and because the fact belongs in the repository rather than in
+    // a review. Row-level security cannot restrict a COLUMN, so inside a
+    // withStripeCustomer transaction the application role may write every column
+    // of the organization the delivery names, including `suspended_at`, the kill
+    // switch from 0010. Nothing in the database prevents that. What prevents it
+    // is that all five UPDATE statements on `organizations` name their columns
+    // explicitly, and the sixth one somebody writes will not inherit that care.
+    //
+    // Column level UPDATE privileges look like the fix and are not, measured
+    // rather than assumed. `GRANT UPDATE (plan, updated_at)` takes twenty api
+    // tests red, because the same role runs the GitHub installation upsert,
+    // which writes `github_login`, and both kill switch routes, which write
+    // `suspended_at`, `suspended_reason` and `suspended_by`. The narrowest grant
+    // that keeps every path working is the union of all five statements, and it
+    // is green, and it still admits the kill switch: it buys `name`, `slug`,
+    // `id` and `created_at` and not the column anybody was worried about. A
+    // privilege is granted to a ROLE and a policy admits a ROW, and Postgres has
+    // no way to say "this column, but only on the path that policy admitted".
+    //
+    // What would work is a separate role for the delivery path, reached with SET
+    // LOCAL ROLE so it needs no second credential. That is not a grant, it is a
+    // migration: a role that is not `antifailure_app` matches none of these
+    // policies and sees nothing at all under FORCE ROW LEVEL SECURITY, checked
+    // rather than assumed, so every policy a delivery relies on has to be
+    // re-targeted with it. Worth doing, too large to bolt onto a review.
+    //
+    // A BEFORE UPDATE trigger comparing OLD and NEW would also work, and it is
+    // the cheaper of the two, because a trigger sees the old row and a WITH
+    // CHECK never does. Whichever is chosen, it wants reviewing on its own
+    // rather than slipping in: there is not one user trigger anywhere in this
+    // schema today, and not one column level grant either, so either would be
+    // the first of its kind here.
     await h.admin`CREATE TABLE update_sees_select_policies (id int PRIMARY KEY, v text)`
     try {
       await h.admin`INSERT INTO update_sees_select_policies VALUES (1, 'visible')`
