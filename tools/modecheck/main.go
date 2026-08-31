@@ -30,6 +30,14 @@
 //  3. Mode names following a phrase that promises the whole set, such as "each
 //     host gets a mode:". Five names after that phrase is a false claim; five
 //     names after nothing is a description. Three places.
+//
+// table.go adds a fourth, on a different surface and for every closed set the
+// schema declares rather than only the modes: a reference table cell that
+// claims to be listing a key's allowed values must list all of them. Note the
+// narrow promise, which the tool's own output repeats. It does not check every
+// closed set the schema declares, because the values are ordinary English and
+// scanning for them is not reliable. It checks the ones a document claims to
+// be listing. table.go's own comment carries the measurements behind that.
 package main
 
 import (
@@ -153,13 +161,24 @@ func run(root string, out io.Writer) error {
 		return fmt.Errorf("found no prose under %s, so this check is looking in the wrong place", root)
 	}
 
+	tree, err := loadSchema(filepath.Join(root, "schemas", "manifest.v1.json"))
+	if err != nil {
+		return err
+	}
+
 	var found []finding
+	tables := 0
 	for _, f := range files {
 		body, err := os.ReadFile(filepath.Join(root, f))
 		if err != nil {
 			return err
 		}
 		found = append(found, Check(f, string(body), modes)...)
+
+		if strings.HasSuffix(f, ".md") {
+			tables++
+			found = append(found, CheckTable(f, string(body), tree)...)
+		}
 	}
 
 	sort.Slice(found, func(i, j int) bool {
@@ -172,11 +191,17 @@ func run(root string, out io.Writer) error {
 	for _, f := range found {
 		report("%s:%d  %s\n    %s\n", f.file, f.line, f.why, f.text)
 	}
-	report("modecheck: %d files, %d modes in the schema (%s), %d false enumerations\n",
-		len(files), len(modes), strings.Join(modes, ", "), len(found))
+	// The second line states the narrower promise on purpose. This does not
+	// check every closed set the schema declares, which is not reliably
+	// possible in prose; it checks the ones a document claims to be listing.
+	report("modecheck: %d files scanned for prose about the egress modes (%s)\n",
+		len(files), strings.Join(modes, ", "))
+	report("modecheck: %d markdown files scanned for reference table cells that "+
+		"claim to list a closed set the schema declares\n", tables)
+	report("modecheck: %d false enumerations\n", len(found))
 
 	if len(found) > 0 {
-		return fmt.Errorf("%d places describe the egress modes as something they are not", len(found))
+		return fmt.Errorf("%d places describe a closed set the schema declares as something it is not", len(found))
 	}
 	return nil
 }
