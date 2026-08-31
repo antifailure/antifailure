@@ -349,7 +349,15 @@ interrupt at any point leaves something af down can clean up.`),
 				return runErr
 			}
 			if upErr != nil {
-				renderServices(e, res.Services)
+				// res is nil whenever Up failed before it had anything to
+				// report, which is every failure inside open: the state
+				// directory, the branch lock, the journal. Dereferencing it
+				// there panicked and printed a Go stack trace over the error
+				// that had just been diagnosed correctly.
+				if res != nil {
+					renderServices(e, res.Services)
+				}
+				reportStanding(cmd.Context(), e, o)
 				return upErr
 			}
 
@@ -383,6 +391,63 @@ interrupt at any point leaves something af down can clean up.`),
 	cmd.Flags().BoolVar(&live, "hud", false,
 		"Watch the run on a live dashboard, or a line per event where there is no terminal")
 	return cmd
+}
+
+// reportStanding says what a failed run left behind and how to remove it.
+//
+// A failed af up does not tear down, and that is deliberate: every resource is
+// journaled before it is created, so a failure leaves the environment standing
+// to be looked at rather than destroying the evidence, and af logs and af net
+// log read from it. The af up help text has always said so. What nothing said
+// is that it had happened. The next step on each of the forty eight codes af
+// up can exit with points at the failure, so somebody whose build failed is
+// told to read a log while four containers and a database branch sit there,
+// and on a first run they do not yet know af down exists.
+//
+// Read from the inventory rather than written into those codes. Most of them
+// fire before anything is created, where a fixed sentence would be a lie, and
+// a forty ninth would not know to carry it. Asking what is actually standing
+// is the only form that cannot go stale or overstate.
+//
+// Silent on every failure of its own. This runs while a command is already
+// failing, and a second error about the reporter would bury the first.
+func reportStanding(ctx context.Context, e *Env, o *env.Orchestrator) {
+	rt, err := o.Runtime()
+	if err != nil {
+		return
+	}
+	defer func() { _ = rt.Close() }()
+	items, err := rt.Inventory(ctx)
+	if err != nil {
+		return
+	}
+	total, running := 0, 0
+	for _, item := range items {
+		if item.EnvID != o.EnvID() {
+			continue
+		}
+		total++
+		if item.Labels["state"] == "running" {
+			running++
+		}
+	}
+	if total == 0 {
+		return
+	}
+
+	e.Out.Println("")
+	noun := "resources are"
+	if total == 1 {
+		noun = "resource is"
+	}
+	if running > 0 {
+		e.Out.Printf("  %d %s still up, %d of them running.\n", total, noun, running)
+	} else {
+		e.Out.Printf("  %d %s still up.\n", total, noun)
+	}
+	e.Out.Printf("  %s\n", e.Out.Wrap(
+		"That is on purpose: a failed run leaves the environment standing so you can look "+
+			"at it, and 'af logs' reads from it. Remove it with 'af down'.", 2))
 }
 
 func servicesJSON(services []provider.RunningService) []ServiceJSON {
