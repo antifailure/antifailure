@@ -78,7 +78,7 @@ page](/docs/self-hosting/operations/#nobody-can-sign-in) writes break-glass.
 Step 3 prints what it did:
 
 ```
-organization  acme (8c785566-21c4-4f62-bf40-526c0d7b4c1d)
+organization  acme (its new uuid)
 name          Acme
 github        acme
 audit entry   136
