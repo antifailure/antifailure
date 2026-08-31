@@ -198,7 +198,7 @@ export function FailClosedCard() {
 
   return (
     <div className="absolute inset-0 font-sans select-none" aria-hidden>
-      {/* Thread: 26,0 234×166 r12 — distinct panel, does not bleed the card */}
+      {/* Thread: 26,0 234×166 r12. Its own panel, which does not bleed the card */}
       <div
         className="absolute overflow-hidden border border-black/[0.08] bg-white"
         style={{ left: u(26), top: u(0), width: u(234), height: u(166), borderRadius: u(12) }}

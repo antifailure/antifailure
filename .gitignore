@@ -131,6 +131,7 @@ runner/artifacts/
 /dogfood
 /errcheck
 /errgen
+/figurecheck
 /gatecheck
 /ldcheck
 /licensegen

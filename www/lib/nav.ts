@@ -71,7 +71,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
     ],
     featured: [
       {
-        title: "The migration wedge",
+        title: "Migration rehearsal",
         description: "Exclusive locks, table rewrites, and query plans on production's own shape.",
         href: "/product/migrations",
         visual: "fleet",
@@ -121,7 +121,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
         visual: "twin",
       },
       {
-        title: "The migration wedge",
+        title: "Migration rehearsal",
         description: "Exclusive locks, table rewrites, and query plans on production's own shape.",
         href: "/product/migrations",
         visual: "fleet",

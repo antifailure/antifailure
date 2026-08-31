@@ -4,7 +4,7 @@ import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 import { SiteJsonLd } from "@/lib/jsonld";
-import { OG_IMAGE, SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
+import { OG_IMAGE, SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, SITE_URL, pageTitle } from "@/lib/site";
 
 const inter = Inter({
   weight: ["300", "400", "500", "600", "700"],
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     default: SITE_TITLE,
     // Pages carry their own full title, already suffixed. This template only
     // catches anything that sets a bare string.
-    template: `%s — ${SITE_NAME}`,
+    template: pageTitle("%s"),
   },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,

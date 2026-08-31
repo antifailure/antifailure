@@ -285,7 +285,7 @@ function TrafficList({ t, locked, flowing }: { t: number; locked: boolean; flowi
                 blocked ? "text-[#C43D3D]" : ok ? "text-[#4CB782]" : "text-[#C0C3C8]",
               )}
             >
-              {blocked ? `${waitS.toFixed(1)}s` : ok ? `${req.lat}ms` : "—"}
+              {blocked ? `${waitS.toFixed(1)}s` : ok ? `${req.lat}ms` : "waiting"}
             </span>
           </li>
         );

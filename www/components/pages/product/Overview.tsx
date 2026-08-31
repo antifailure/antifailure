@@ -150,7 +150,7 @@ export function OverviewPage() {
         path="/product"
         eyebrow="Product"
         title="A disposable production twin that proves whether a deployment is safe."
-        lead="Connect a repository and cloud environment. For every risky change, the platform creates an isolated production twin, fills it with safe production-shaped state, exercises it, and reports whether the deployment is safe to ship."
+        lead="Connect a repository and a cloud environment. For every risky change, Antifailure builds an isolated production twin, fills it with safe production-shaped state, exercises it, and says whether the deployment is safe to ship."
         visual={<TwinLifecycleScene />}
       />
 
@@ -251,11 +251,12 @@ export function OverviewPage() {
       </PageSection>
 
       <PageSection>
-        <PageHeading kicker="Wedge" title="<strong>Postgres migrations first.</strong> Not universal multicloud cloning." />
+        <PageHeading kicker="Scope" title="<strong>Postgres migrations first.</strong> Not universal multicloud cloning." />
         <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Exclusive locks, table rewrites, pool exhaustion, query-plan regressions, and old binaries that
-          cannot read candidate writes. Conventional tests miss them. The first complete wedge is
-          automated safety validation for risky Postgres-backed web deployments.
+          Exclusive locks, table rewrites, pool exhaustion, query-plan regressions, and old binaries
+          that cannot read candidate writes. Conventional tests miss all of them. So the first thing
+          built completely is the check for a risky Postgres-backed deployment, rather than a shallow
+          version of everything.
         </p>
 
         <div className="mt-14">
@@ -370,7 +371,7 @@ export function OverviewPage() {
       <RelatedGrid
         items={[
           { href: "/product/twins", title: "Isolated Twin", description: "How the orchestrator provisions and tears down." },
-          { href: "/product/migrations", title: "Migration Safety", description: "The first complete wedge." },
+          { href: "/product/migrations", title: "Migration Safety", description: "Locks, rewrites and plans, before it ships." },
           { href: "/docs", title: "Docs", description: "How a twin run works, end to end." },
         ]}
       />

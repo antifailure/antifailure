@@ -10,7 +10,7 @@ import {
   SITE_URL,
   absoluteUrl,
 } from "./site";
-import { breadcrumbTrail } from "./routes";
+import { breadcrumbTrail, pageName } from "./routes";
 import { postModified, type Post } from "./blog";
 
 /**
@@ -152,7 +152,7 @@ export function PageJsonLd({ path }: { path: string }) {
       itemListElement: trail.map((r, i) => ({
         "@type": "ListItem",
         position: i + 1,
-        name: r.path === "/" ? "Home" : r.title.replace(/\s+—\s+Antifailure$/, ""),
+        name: pageName(r, "label"),
         item: absoluteUrl(r.path),
       })),
     });

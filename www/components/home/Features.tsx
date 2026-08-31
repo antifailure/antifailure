@@ -16,7 +16,7 @@ export function Features() {
           <Heading
             icon="features"
             label="Safety properties"
-            title="<strong>Safety properties, not slogans.</strong> The platform answers whether this deployment is safe to ship under the conditions that actually matter."
+            title="<strong>Safety properties, not slogans.</strong> Whether this deployment is safe to ship against real data, real concurrency, real workers, and the deploy itself."
           />
           <SafetyCards className="mt-16 max-xl:mt-12 max-lg:mt-10 max-md:mt-8" />
         </div>

@@ -30,10 +30,11 @@ export function Page({
           ) : null}
         </div>
         {actions ? (
-            // max-w-full, or an actions block wider than the card -- a long
-            // error message beside a button -- is clipped by the overflow-hidden
-            // on the section and simply disappears at a phone width. shrink-0
-            // still keeps a short one from being squeezed by the title.
+            // max-w-full, or an actions block wider than the card, such as a
+            // long error message beside a button, is clipped by the
+            // overflow-hidden on the section and simply disappears at a phone
+            // width. shrink-0 still keeps a short one from being squeezed by
+            // the title.
             <div className="flex min-w-0 max-w-full shrink-0 items-center gap-2">{actions}</div>
           ) : null}
       </div>
@@ -66,10 +67,11 @@ export function Card({
             {note ? <p className="mt-0.5 text-[12px] leading-5 text-dim">{note}</p> : null}
           </div>
           {actions ? (
-            // max-w-full, or an actions block wider than the card -- a long
-            // error message beside a button -- is clipped by the overflow-hidden
-            // on the section and simply disappears at a phone width. shrink-0
-            // still keeps a short one from being squeezed by the title.
+            // max-w-full, or an actions block wider than the card, such as a
+            // long error message beside a button, is clipped by the
+            // overflow-hidden on the section and simply disappears at a phone
+            // width. shrink-0 still keeps a short one from being squeezed by
+            // the title.
             <div className="flex min-w-0 max-w-full shrink-0 items-center gap-2">{actions}</div>
           ) : null}
         </header>

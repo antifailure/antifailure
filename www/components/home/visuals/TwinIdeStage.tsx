@@ -187,7 +187,7 @@ function TwinIsolationMap() {
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[13px] tracking-tight text-black">{slot.label}</span>
                     <span className="text-[12px] tabular-nums tracking-tight text-black/40">
-                      {fill < 0.08 ? (gone ? "gone" : "—") : `${Math.round(fill * 100)}%`}
+                      {fill < 0.08 ? (gone ? "gone" : "waiting") : `${Math.round(fill * 100)}%`}
                     </span>
                   </div>
                   <span className="mt-2 block h-[3px] overflow-hidden bg-black/[0.06]">

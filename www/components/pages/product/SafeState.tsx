@@ -1,3 +1,4 @@
+import { Illustrative } from "@/components/layout/Illustrative";
 import {
   Callout,
   FeatureGrid,
@@ -39,12 +40,12 @@ const RECORDS: {
 ];
 
 const SUBSET_ROWS: { table: string; row: string; parent: string; fate: SubsetFate; reason: string }[] = [
-  { table: "users", row: "u_8f2a", parent: "—", fate: "KEEP", reason: "long-tail past_due" },
-  { table: "users", row: "u_91c0", parent: "—", fate: "KEEP", reason: "malformed created_at" },
-  { table: "users", row: "u_bb12", parent: "—", fate: "DROP", reason: "sampled out" },
+  { table: "users", row: "u_8f2a", parent: "none", fate: "KEEP", reason: "long-tail past_due" },
+  { table: "users", row: "u_91c0", parent: "none", fate: "KEEP", reason: "malformed created_at" },
+  { table: "users", row: "u_bb12", parent: "none", fate: "DROP", reason: "sampled out" },
   { table: "orders", row: "o_441", parent: "u_8f2a", fate: "KEEP", reason: "parent kept" },
   { table: "orders", row: "o_902", parent: "u_bb12", fate: "DROP", reason: "parent dropped" },
-  { table: "sessions", row: "*", parent: "—", fate: "DELETE", reason: "secrets, not masked" },
+  { table: "sessions", row: "*", parent: "none", fate: "DELETE", reason: "secrets, not masked" },
 ];
 
 const LIFECYCLE = [
@@ -366,6 +367,11 @@ export function SafeStatePage() {
             billing states, and malformed history, the records that actually break migrations, while
             volume stays bounded.
           </p>
+          <Illustrative className="mt-6">
+            Six rows of a worked example, with the ratio chosen. What a real subset keeps depends on
+            the shape of your own data. What is fixed is the rule: a dropped parent takes its
+            children, and a rare row is kept on purpose rather than sampled away.
+          </Illustrative>
           <div className="mt-8">
             <Callout label="Unverified goldens" tone="block">
               An unverified golden cannot be branched. Sanitization evidence is required before a snapshot
@@ -380,7 +386,7 @@ export function SafeStatePage() {
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             The built-in engine covers common Postgres cases: restore, subset, mask, delete credentials,
             validate distribution, then destroy. Matching a dedicated test-data platform’s connector depth
-            is not the wedge. The product output is a deployment-safety decision, not a dataset.
+            is not the point. What this returns is a decision about a deployment, not a dataset.
           </p>
         </Split>
       </PageSection>

@@ -285,7 +285,7 @@ function TokenView({
     <div className="flex min-h-[228px] font-mono text-[13px] leading-[22px] max-sm:min-h-[200px] max-sm:text-[11px] max-sm:leading-[19px]">
       {/* The gutter is dropped on a phone rather than shrunk. The code has to
           wrap at that width, and a wrapped line makes every number below it
-          point at the wrong row — a broken gutter is worse than none. */}
+          point at the wrong row, and a broken gutter is worse than none. */}
       <div className="select-none py-3.5 pl-3 pr-3 text-right text-[#565656] max-sm:hidden">
         {Array.from({ length: lines }, (_, i) => (
           <div key={i}>{i + 1}</div>

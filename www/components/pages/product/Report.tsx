@@ -371,6 +371,29 @@ export function ReportPage() {
           baseline, and the report says "no baseline" rather than inventing one.
         </p>
         <div className="mt-12 max-w-[720px] border-t border-black/10 pt-8">
+          <MonoLabel className="uppercase tracking-[0.14em] text-black/60">How close the twin got</MonoLabel>
+          <p className="mt-5 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+            The report carries an inventory of what this environment reproduced and what it did
+            not, dimension by dimension: services, data, third-party hosts, personas, runtime and
+            traffic. Every input is something the run already measured. Nothing is estimated, and
+            nothing is averaged into a single grade, because an average is how a dimension that is
+            genuinely weak disappears behind five that are not.
+          </p>
+          <p className="mt-4 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+            A component nobody could measure is named and left out of the arithmetic. It is never
+            counted as a pass. That is also why the count travels with the percentage everywhere it
+            is printed: a score drawn from four measured components and a score drawn from forty
+            are not the same claim, and a bare percentage hides which one you are reading. When
+            nothing in an environment could be measured there is no score at all, and the report
+            says so rather than printing a zero that would read like a failing grade.
+          </p>
+          <p className="mt-4 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+            Third-party fidelity is the low one today, and the report says it rather than smoothing
+            it out. One offline pack ships, and it is Stripe.
+          </p>
+        </div>
+
+        <div className="mt-12 max-w-[720px] border-t border-black/10 pt-8">
           <MonoLabel className="uppercase tracking-[0.14em]">Thresholds that exist</MonoLabel>
           <ul className="mt-5 space-y-3 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
             <li>
@@ -394,8 +417,9 @@ export function ReportPage() {
           <StatusPill tone="UNVERIFIED" />
         </div>
         <p className="mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Every workflow and report answers whether this deployment is safe to ship under the
-          conditions that actually matter. If the product becomes a bundle of tools, it has failed.
+          Every workflow and report answers one question: whether this deployment is safe to ship
+          against real data, real concurrency, real workers, and the deploy itself. If the product
+          becomes a bundle of tools, it has failed.
         </p>
       </PageSection>
 
