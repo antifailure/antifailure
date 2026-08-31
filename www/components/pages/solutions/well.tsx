@@ -16,7 +16,7 @@ export function SageWell({
   return (
     <div
       className={cn(
-        "relative min-h-[520px] overflow-hidden rounded-[32px] bg-sage px-6 py-8 max-md:min-h-[360px] max-md:px-4 max-md:py-5 md:px-10 md:py-12",
+        "relative flex min-h-[520px] flex-col justify-center overflow-hidden rounded-[32px] bg-sage px-6 py-8 max-md:min-h-[360px] max-md:px-4 max-md:py-5 md:px-10 md:py-12",
         className,
       )}
     >
@@ -222,9 +222,11 @@ function Check({ on }: { on?: boolean }) {
 function TonePill({
   tone,
   children,
+  className,
 }: {
   tone: "PASS" | "WARN" | "BLOCK";
   children: ReactNode;
+  className?: string;
 }) {
   return (
     <span
@@ -233,6 +235,7 @@ function TonePill({
         tone === "PASS" && "bg-[#E4F1EB] text-[#285D49]",
         tone === "WARN" && "bg-[#f7f7f5] text-black/70",
         tone === "BLOCK" && "bg-black text-white",
+        className,
       )}
     >
       <span
@@ -392,7 +395,7 @@ export function DashChart({
     <SageWell>
       <FloatWindow
         className={cn(
-          "relative mt-4 p-5 max-md:ml-0 max-md:mr-0",
+          "relative p-5 max-md:ml-0 max-md:mr-0",
           popupSide === "right" ? "ml-[6%] mr-[-12px]" : "mr-[6%] ml-[-12px]",
         )}
       >
@@ -490,7 +493,7 @@ export function CircularMap({
     <SageWell>
       <FloatWindow
         className={cn(
-          "mt-2 p-5 max-md:ml-0 max-md:mr-0",
+          "p-5 max-md:ml-0 max-md:mr-0",
           shift === "right" && "ml-[8%] mr-[-8px]",
           shift === "left" && "mr-[8%] ml-[-8px]",
           shift === "center" && "mx-auto",
@@ -586,7 +589,7 @@ export function TaskTable({
     <SageWell>
       <FloatWindow
         className={cn(
-          "mt-6 overflow-hidden max-md:ml-0 max-md:mr-0",
+          "overflow-hidden max-md:ml-0 max-md:mr-0",
           shift === "right" ? "ml-[4%] mr-[-10px]" : "mr-[4%] ml-[-10px]",
         )}
       >
@@ -611,7 +614,9 @@ export function TaskTable({
             )}
           >
             <span className="truncate text-[13px] text-black">{row.task}</span>
-            <TonePill tone={row.tone}>{row.status}</TonePill>
+            <TonePill tone={row.tone} className="justify-self-start">
+              {row.status}
+            </TonePill>
             <span className="flex items-center gap-2 max-md:hidden">
               <span
                 className="inline-flex size-6 items-center justify-center rounded-full text-[10px] font-medium text-white"
