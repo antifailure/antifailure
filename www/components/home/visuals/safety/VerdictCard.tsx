@@ -56,9 +56,6 @@ const ROWS: { level: Level; time: string }[] = [
   { level: "STEP", time: "4:25:46 PM" },
 ];
 
-const LOOP_SHIFT = u(ROWS.length * ROW_PITCH);
-const KEYFRAMES = `@keyframes af-verdict-stream{from{transform:translate3d(0,0,0)}to{transform:translate3d(0,-${LOOP_SHIFT},0)}}`;
-
 function LogRow({ level, time }: { level: Level; time: string }) {
   const tone = TONE[level];
   return (
@@ -103,8 +100,6 @@ export function VerdictCard() {
 
   return (
     <div className="absolute inset-0 font-sans select-none" ref={ref} aria-hidden>
-      <style>{KEYFRAMES}</style>
-
       <div
         className="absolute rounded-full bg-white"
         style={{
@@ -175,10 +170,8 @@ export function VerdictCard() {
         <div
           className="absolute inset-0 overflow-hidden"
           style={{
-            maskImage:
-              "linear-gradient(to bottom, transparent 0%, #000 18%, #000 76%, transparent 100%)",
-            WebkitMaskImage:
-              "linear-gradient(to bottom, transparent 0%, #000 18%, #000 76%, transparent 100%)",
+            maskImage: "linear-gradient(to bottom, #000 0%, #000 72%, transparent 100%)",
+            WebkitMaskImage: "linear-gradient(to bottom, #000 0%, #000 72%, transparent 100%)",
           }}
         >
           <div
@@ -187,25 +180,13 @@ export function VerdictCard() {
               paddingLeft: u(LOG_X - PANE_X),
               paddingTop: u(8),
               gap: u(ROW_PITCH - ROW_H),
-              animation: reduced ? undefined : "af-verdict-stream 54s linear infinite",
-              animationPlayState: reduced ? "paused" : "running",
             }}
           >
             {ROWS.map((row, i) => (
-              <LogRow key={`a-${i}`} level={row.level} time={row.time} />
-            ))}
-            {ROWS.map((row, i) => (
-              <LogRow key={`b-${i}`} level={row.level} time={row.time} />
+              <LogRow key={i} level={row.level} time={row.time} />
             ))}
           </div>
         </div>
-        <div
-          className="pointer-events-none absolute inset-x-0 top-0"
-          style={{
-            height: u(48),
-            background: "linear-gradient(to bottom, #fff 12%, rgba(255,255,255,0) 100%)",
-          }}
-        />
         <div
           className="pointer-events-none absolute inset-x-0 bottom-0"
           style={{

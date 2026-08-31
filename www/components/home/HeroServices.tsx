@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { MiniFilm } from "./visuals/hero";
 
-const PLAY_MS = 6400;
-const OVERLAP_MS = 500;
-const STAGGER_MS = PLAY_MS - OVERLAP_MS;
+// The gap between one film starting and the next. Each film is 8 film-seconds
+// at 1.12x, so a little over 7 real ones, and they overlap by about a second:
+// the cascade reads as five things happening rather than five things queueing.
+const STAGGER_MS = 5900;
 
 export const HERO_SERVICES = [
   {
@@ -36,32 +37,29 @@ export const HERO_SERVICES = [
 ];
 
 export function HeroServices() {
-  const [autoPlayIndex, setAutoPlayIndex] = useState(0);
-  const [trailingIndex, setTrailingIndex] = useState<number | null>(null);
-  const playIndexRef = useRef(0);
   const items = HERO_SERVICES;
 
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const current = playIndexRef.current;
-      const next = (current + 1) % items.length;
-      setTrailingIndex(current);
-      playIndexRef.current = next;
-      setAutoPlayIndex(next);
-    }, STAGGER_MS);
-    return () => window.clearInterval(id);
-  }, [items.length]);
+  // How many of the five have been started. Each film runs to its own end and
+  // holds there, so this only ever counts up, and when it reaches the last card
+  // there is nothing further to schedule.
+  //
+  // It used to be a setInterval over `(current + 1) % items.length`, which is a
+  // carousel with no end: five films cut off short of their endings and
+  // restarted from a blank frame, in rotation, for as long as the tab was open.
+  // Started once and left to rest, the five cards settle into five composed
+  // stills, which is what they were drawn to be.
+  const [startedThrough, setStartedThrough] = useState(0);
 
   useEffect(() => {
-    if (trailingIndex == null) return;
-    const id = window.setTimeout(() => setTrailingIndex(null), OVERLAP_MS);
+    if (startedThrough >= items.length - 1) return;
+    const id = window.setTimeout(() => setStartedThrough((n) => n + 1), STAGGER_MS);
     return () => window.clearTimeout(id);
-  }, [trailingIndex]);
+  }, [startedThrough, items.length]);
 
   return (
     <ul className="grid grid-cols-5 grid-rows-[auto_auto] gap-x-16 gap-y-8 max-xl:-mx-5 max-xl:flex max-xl:snap-x max-xl:snap-mandatory max-xl:scroll-px-5 max-xl:gap-x-8 max-xl:gap-y-0 max-xl:overflow-x-auto max-xl:px-5 max-xl:no-scrollbars max-md:gap-x-6">
       {items.map((item, index) => {
-        const isActive = autoPlayIndex === index || trailingIndex === index;
+        const started = index <= startedThrough;
         return (
           <li
             key={item.title}
@@ -71,7 +69,7 @@ export function HeroServices() {
               <span className="font-semibold text-black">{item.title}.</span> {item.description}
             </p>
             <span className="relative block aspect-[5/4] w-full overflow-hidden rounded-[12px] border border-black/[0.08] bg-white font-sans shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-[border-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] [@media(hover:hover)]:group-hover:border-black/[0.16]">
-              <MiniFilm kind={item.kind} active={isActive} hovered={false} />
+              <MiniFilm kind={item.kind} active={started} />
               <span
                 className="pointer-events-none absolute inset-0"
                 style={{

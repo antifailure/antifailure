@@ -7,13 +7,12 @@ const LOOP = 8;
 
 const STEPS = ["LOCK", "QUEUE", "REWRITE", "PLAN"] as const;
 
-export function MigrationFilm({ active, hovered }: FilmProps) {
+export function MigrationFilm({ active }: FilmProps) {
   const { ref, t } = useHeroFilmClock({
     loop: LOOP,
     active,
-    hovered,
     stillT: 0,
-    reducedT: 0,
+    reducedT: LOOP - 0.001,
   });
 
   const lock = smooth(span(t, 0.9, 3.05));

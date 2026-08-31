@@ -10,7 +10,7 @@
 // reading the config. Every stage was green the whole time, because no stage
 // was looking.
 //
-// Two things are checked, and they are the two ways this surface goes wrong.
+// Four things are checked, and they are the four ways this surface goes wrong.
 //
 // First, the head of every built page. A missing og:image:width is invisible
 // until somebody pastes a link into Slack, and by then it has been wrong for
@@ -23,6 +23,21 @@
 // finding defects in. A reference to an @id nothing declares is not a small
 // error, it is the whole point of the tag silently doing nothing, so the ids
 // are read out of the TypeScript and matched rather than assumed.
+//
+// Third, that the article says which page it is. The first version of this
+// markup named the three anchors and nothing else: no @id of its own, no url,
+// no headline. It passed the check above while telling an engine that an
+// article exists here without identifying it, which is the one thing the tag
+// was added to do. So the article's own identity is checked against the
+// canonical on the same page, and against the title the same head advertises.
+// Two claims about which address this is means the engine picks one.
+//
+// Fourth, that a page asking not to be indexed does not also claim to be an
+// indexable technical article. Starlight's head merge deduplicates a meta tag
+// by its name or property, which is how the 404's noindex correctly beat the
+// config's index directive, but a script tag is not a meta tag and was not
+// deduplicated. The 404 shipped saying both things in the same head. That page
+// is not an index.html, so the loop above never opened it.
 package main
 
 import (
@@ -56,6 +71,12 @@ var required = []struct{ label, needle string }{
 }
 
 var ldBlock = regexp.MustCompile(`(?s)<script type="application/ld\+json">(.*?)</script>`)
+
+var (
+	canonicalTag = regexp.MustCompile(`<link rel="canonical" href="([^"]*)"`)
+	robotsTag    = regexp.MustCompile(`<meta name="robots" content="([^"]*)"`)
+	ogTitleTag   = regexp.MustCompile(`<meta property="og:title" content="([^"]*)"`)
+)
 
 // ORG_ID, SITE_ID and SOFTWARE_ID in www/lib/jsonld.tsx. They are template
 // literals over SITE_URL rather than plain strings, which is why this reads the
@@ -139,7 +160,40 @@ func main() {
 					rel(*root, page), key, id))
 			}
 		}
+
+		// Which page is this article about? The canonical on the same page is
+		// the answer, and the article has to give the same one.
+		canonical := first(canonicalTag, html)
+		if canonical == "" {
+			problems = append(problems, fmt.Sprintf("%s: no canonical", rel(*root, page)))
+		} else {
+			for _, claim := range []struct{ key, want string }{
+				{"@id", canonical + "#techarticle"},
+				{"url", canonical},
+				{"mainEntityOfPage", canonical},
+			} {
+				got, _ := doc[claim.key].(string)
+				if got != claim.want {
+					problems = append(problems, fmt.Sprintf(
+						"%s: JSON-LD %s is %q, and the canonical on this page says it should be %q",
+						rel(*root, page), claim.key, got, claim.want))
+				}
+			}
+		}
+
+		// And a headline, which is the difference between naming the article
+		// and asserting that one exists. og:title is the same head's own answer.
+		headline, _ := doc["headline"].(string)
+		if title := first(ogTitleTag, html); title != "" && headline != title {
+			problems = append(problems, fmt.Sprintf(
+				"%s: JSON-LD headline is %q and og:title on the same page is %q",
+				rel(*root, page), headline, title))
+		}
 	}
+
+	// Every built page, not only the index.html files above, because the one
+	// this catches is the 404.
+	problems = append(problems, noindexArticles(*root, dist)...)
 
 	if len(problems) > 0 {
 		sort.Strings(problems)
@@ -159,8 +213,43 @@ func main() {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	fmt.Printf("docscheck: %d pages, %d head tags each, %d entity references all declared in www\n",
-		len(pages), len(required), len(ids))
+	fmt.Printf("docscheck: %d pages, %d head tags each, each article naming its own canonical, "+
+		"%d entity references all declared in www\n", len(pages), len(required), len(ids))
+}
+
+// first returns the single capture of re in html, or "".
+func first(re *regexp.Regexp, html string) string {
+	if m := re.FindStringSubmatch(html); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// noindexArticles finds pages that ask not to be indexed and claim to be an
+// indexable technical article in the same head. A crawler resolves the
+// contradiction whichever way it likes, and we do not get to know which.
+func noindexArticles(root, dist string) []string {
+	var problems []string
+	_ = filepath.WalkDir(dist, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".html") {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", rel(root, path), err))
+			return nil
+		}
+		html := string(body)
+		if !strings.Contains(first(robotsTag, html), "noindex") {
+			return nil
+		}
+		if ldBlock.MatchString(html) {
+			problems = append(problems, fmt.Sprintf(
+				"%s: asks not to be indexed and carries JSON-LD claiming an article", rel(root, path)))
+		}
+		return nil
+	})
+	return problems
 }
 
 // dedupe folds "page: no og:image:width" across many pages into one line with a
