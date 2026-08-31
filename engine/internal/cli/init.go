@@ -268,27 +268,29 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 			ruleRows = append(ruleRows, []string{r.Host, string(r.Mode), r.Note})
 		}
 		env.Out.Table([]Column{Col("HOST"), Col("MODE"), Flex("WHY")}, ruleRows)
-		env.Out.Printf("\n  %s\n", env.Out.S(StyleDim,
-			"Everything not listed is blocked. Nothing reaches the internet by accident."))
+		env.Out.Note(StyleDim,
+			"Everything not listed is blocked. Nothing reaches the internet by accident.")
 	}
 
 	if len(assumed) > 0 {
 		env.Out.Section("Assumed")
+		block := env.Out.Block()
 		for _, id := range SortedKeys(assumed) {
-			env.Out.Printf("  %-40s %s\n", id, assumed[id])
+			block.Add(id, assumed[id])
 		}
-		env.Out.Printf("\n  %s\n", env.Out.S(StyleDim,
-			"These were not detected with confidence. Check them before you commit."))
+		block.Flush()
+		env.Out.Note(StyleDim,
+			"These were not detected with confidence. Check them before you commit.")
 	}
 	if res.Partial {
-		env.Out.Printf("\n  %s\n", env.Out.S(StyleWarn,
-			"Detection did not finish within its budget, so the draft may be incomplete."))
+		env.Out.Note(StyleWarn,
+			"Detection did not finish within its budget, so the draft may be incomplete.")
 	}
 
 	env.Out.Section("Written")
 	env.Out.Printf("  %s\n", path)
-	env.Out.Printf("\n  Next: read it, edit anything that looks wrong, then run %s\n",
-		env.Out.S(StyleBold, "af up"))
+	env.Out.Println("")
+	env.Out.Hint("Read it, edit anything that looks wrong, then run", "af up")
 }
 
 // renderManifest writes the draft as YAML with a header that explains what the

@@ -163,7 +163,13 @@ func renderDoctor(env *Env, report DoctorReport) error {
 	if len(problems) > 0 {
 		env.Out.Section("What to do")
 		for _, c := range problems {
-			env.Out.Printf("  %s\n    %s\n", env.Out.S(StyleBold, c.Name), c.Remediation)
+			// The remediation is the reason the section exists, and it was the
+			// one thing on the page that ran off the right of the terminal: a
+			// hundred and one characters against an eighty column screen, hard
+			// wrapped mid word by the terminal at the moment somebody's machine
+			// is already not working.
+			env.Out.Printf("  %s\n    %s\n",
+				env.Out.S(StyleBold, c.Name), env.Out.Wrap(c.Remediation, 4))
 		}
 	}
 	env.Out.Println("")

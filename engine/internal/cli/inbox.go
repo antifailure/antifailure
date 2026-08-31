@@ -87,7 +87,10 @@ func newInboxListCommand(env *Env) *cobra.Command {
 				return env.Out.JSON(docs)
 			}
 			if len(msgs) == 0 {
-				env.Out.Println("Nothing has been sent yet.")
+				env.Out.Empty(
+					"Nothing has been sent yet. Mail and messages appear here as the "+
+						"environment's captured providers are asked to send them.",
+					"Drive a flow that sends one with", "af test")
 				return nil
 			}
 			rows := make([][]string, 0, len(msgs))
@@ -101,7 +104,8 @@ func newInboxListCommand(env *Env) *cobra.Command {
 				Num("#"), Col("TIME"), Col("VIA"), Col("TO"), Flex("SUBJECT"), Flex("CONTAINS"),
 			}, rows)
 			env.Out.Println("")
-			env.Out.Printf("Read one in full with: af inbox get %d\n", msgs[len(msgs)-1].Seq)
+			env.Out.Hint("Read one in full with",
+				fmt.Sprintf("af inbox get %d", msgs[len(msgs)-1].Seq))
 			return nil
 		},
 	}

@@ -56,10 +56,10 @@ without telling you which rows has told you to go and do the work yourself.`),
 				// repository's own claimcheck both take the trailing period as
 				// part of the URL, and /docs/guides/invariants/. is a 404 that
 				// somebody follows at the moment they already needed help.
-				e.Out.Println(e.Out.Wrap(
-					"  This manifest declares no invariants. They are the assertions the "+
+				e.Out.Empty(
+					"This manifest declares no invariants. They are the assertions the "+
 						"application cannot make from the outside, and they are described at "+
-						"https://antifailure.dev/docs/guides/invariants/", 2))
+						"https://antifailure.dev/docs/guides/invariants/", "", "")
 				return nil
 			}
 
@@ -86,9 +86,9 @@ without telling you which rows has told you to go and do the work yourself.`),
 			e.Out.Printf("  %d held, %d violated, %d could not be checked\n",
 				len(results)-violated-blocked, violated, blocked)
 			if blocked > 0 {
-				e.Out.Println(e.Out.Wrap(
-					"  An invariant that could not be checked has not found anything, and is "+
-						"not counted against the change.", 2))
+				e.Out.Note(StyleDim,
+					"An invariant that could not be checked has not found anything, and is "+
+						"not counted against the change.")
 			}
 			if violated > 0 {
 				return silent(failure(report))

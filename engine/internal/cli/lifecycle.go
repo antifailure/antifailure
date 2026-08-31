@@ -331,15 +331,15 @@ func renderServices(e *Env, services []provider.RunningService) {
 		return
 	}
 	for _, s := range services {
-		symbol, style := SymbolFail, StyleBad
+		symbol := SymbolFail
 		if s.Ready {
-			symbol, style = SymbolOK, StyleGood
+			symbol = SymbolOK
 		}
 		detail := s.URL
 		if detail == "" {
 			detail = s.State
 		}
-		e.Out.Status(e.Out.S(style, symbol), s.Name, detail)
+		e.Out.Status(symbol, s.Name, detail)
 		if !s.Ready && s.Detail != "" {
 			for _, line := range lastLines(s.Detail, 12) {
 				e.Out.Printf("      %s\n", e.Out.S(StyleDim, line))

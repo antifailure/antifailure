@@ -146,7 +146,8 @@ func newRunnerCheckCommand(e *Env) *cobra.Command {
 			e.Out.Status(check(e, statErr == nil), "runner", target)
 			e.Out.Status(check(e, node != ""), "node", orPlaceholder(node, "not found"))
 			if !ready {
-				e.Out.Println("\n  Install it with: af runner install")
+				e.Out.Println("")
+				e.Out.Hint("Install it with", "af runner install")
 				return &silentError{code: aferrors.ExitConfiguration}
 			}
 			return nil

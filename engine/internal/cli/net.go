@@ -148,7 +148,9 @@ in the decision, no matter where it sits in the file.`),
 			env.Out.Println("")
 
 			if len(rules) == 0 {
-				env.Out.Println("No rules. Every outbound request takes the default.")
+				// No command to offer. A policy that declares no rules is a
+				// policy doing its job, not a thing waiting to be filled in.
+				env.Out.Empty("No rules. Every outbound request takes the default.", "", "")
 				return nil
 			}
 
@@ -176,7 +178,8 @@ in the decision, no matter where it sits in the file.`),
 				}
 				env.Out.Println("")
 			}
-			env.Out.Printf("Ask about one request with: af net explain GET https://%s/\n", rules[0].Host)
+			env.Out.Hint("Ask about one request with",
+				fmt.Sprintf("af net explain GET https://%s/", rules[0].Host))
 			return nil
 		},
 	}

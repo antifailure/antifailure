@@ -115,12 +115,12 @@ func newGoldenRefreshCommand(env *Env) *cobra.Command {
 			}
 
 			env.Out.Println("")
-			env.Out.Status(env.Out.S(StyleGood, SymbolOK), res.Version,
+			env.Out.Status(SymbolOK, res.Version,
 				fmt.Sprintf("%d rows across %d tables masked in %s",
 					res.Rows, res.Tables, res.Duration.Round(time.Second)))
 			env.Out.Printf("  Verified %d columns across %d tables, %d rows sampled.\n",
 				res.Report.Columns, res.Report.Tables, res.Report.RowsSampled)
-			env.Out.Println("  Bring an environment up from it with: af up")
+			env.Out.Hint("Bring an environment up from it with", "af up")
 			return nil
 		},
 	}
@@ -155,7 +155,8 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 				return env.Out.JSON(docs)
 			}
 			if len(goldens) == 0 {
-				env.Out.Println("No goldens yet. Make one with 'af golden refresh'.")
+				env.Out.Empty("No goldens yet. A golden is the masked copy every branch is made from.",
+					"Make one with", "af golden refresh")
 				return nil
 			}
 			rows := make([][]string, 0, len(goldens))
@@ -191,7 +192,7 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 						v.Modified.Local().Format("2006-01-02 15:04"),
 						humanBytes(uint64(v.Size)))
 				}
-				env.Out.Println("  Bring one onto this machine with: af golden pull")
+				env.Out.Hint("Bring one onto this machine with", "af golden pull")
 			}
 
 			policy, policyErr := o.GoldenPolicy()

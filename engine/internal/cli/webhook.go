@@ -84,7 +84,7 @@ func newWebhookListCommand(env *Env) *cobra.Command {
 					p, len(webhook.EventNames(p)), webhook.Providers[p].SecretEnv)
 			}
 			env.Out.Println("")
-			env.Out.Println("  See one provider's events with: af webhook list stripe")
+			env.Out.Hint("See one provider's events with", "af webhook list stripe")
 			return nil
 		},
 	}

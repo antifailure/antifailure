@@ -122,12 +122,15 @@ print its contents is one screenshot away from not being a store.`),
 				return err
 			}
 			if len(names) == 0 {
-				e.Out.Printf("The store is empty.\n")
+				e.Out.Empty(
+					"The store is empty. It holds the values the manifest names but "+
+						"cannot carry, encrypted with a passphrase this machine holds.",
+					"Put one in with", "af secret set <name>")
 				return nil
 			}
 			sort.Strings(names)
 			for _, name := range names {
-				e.Out.Printf("  %s\n", name)
+				e.Out.Printf("%s%s\n", blockIndent, name)
 			}
 			return nil
 		},

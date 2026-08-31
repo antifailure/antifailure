@@ -195,7 +195,7 @@ produced, so trying it on a branch first is the way to iterate on rules.`),
 			env.Out.Status(env.Out.S(StyleGood, SymbolOK), "masked",
 				fmt.Sprintf("%d rows across %d tables in %s",
 					res.Rows, res.Tables, res.Duration.Round(time.Second)))
-			env.Out.Println("  Check it with: af mask verify")
+			env.Out.Hint("Check it with", "af mask verify")
 			return nil
 		},
 	}

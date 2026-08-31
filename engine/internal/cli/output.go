@@ -264,6 +264,10 @@ func StyleOf(symbol string) Style {
 // shifting every other line, which is the lesser of the two ugly options.
 const statusLabelWidth = 28
 
+// minDetail is the narrowest column a status detail is worth putting beside a
+// label. Below it the detail is stacked underneath instead.
+const minDetail = 24
+
 // Status prints a labelled status line.
 //
 // symbol must be one of the Symbol constants, unstyled. Passing a styled
@@ -274,19 +278,33 @@ func (o *Output) Status(symbol, label, detail string) {
 	if o.Format == FormatJSON || o.Quiet {
 		return
 	}
-	line := "  " + o.padTo(o.S(StyleOf(symbol), symbol), 5) +
-		" " + o.padTo(label, statusLabelWidth)
-	if detail != "" {
-		// The detail hangs under itself rather than running off the right
-		// edge. A check that says what is wrong in a sentence the terminal
-		// chopped in half has not said it.
-		indent := 2 + 5 + 1 + statusLabelWidth
-		if cells(label) > statusLabelWidth {
-			indent = 2 + 5 + 1 + cells(label) + 1
-		}
-		line += " " + o.S(StyleDim, o.WrapTo(detail, indent, o.Width))
+	const gutter = 2 + 5 + 1
+	if detail == "" {
+		o.note(fmt.Fprintln(o.Out, strings.TrimRight(
+			"  "+o.padTo(o.S(StyleOf(symbol), symbol), 5)+" "+label, " ")))
+		return
 	}
-	o.note(fmt.Fprintln(o.Out, strings.TrimRight(line, " ")))
+	// The detail hangs under itself rather than running off the right edge. A
+	// check that says what is wrong in a sentence the terminal chopped in half
+	// has not said it.
+	//
+	// And on a terminal narrow enough that the label column would leave the
+	// detail four columns to live in, the detail goes on its own line instead.
+	// A twenty eight column label beside a four column value is not a table,
+	// it is a margin with a word in it.
+	indent := gutter + statusLabelWidth + 1
+	if cells(label) > statusLabelWidth {
+		indent = gutter + cells(label) + 1
+	}
+	if o.Width-indent < minDetail {
+		o.note(fmt.Fprintf(o.Out, "  %s %s\n    %s\n",
+			o.padTo(o.S(StyleOf(symbol), symbol), 5), label,
+			o.S(StyleDim, o.WrapTo(detail, 4, o.Width))))
+		return
+	}
+	o.note(fmt.Fprintln(o.Out, strings.TrimRight(
+		"  "+o.padTo(o.S(StyleOf(symbol), symbol), 5)+" "+o.padTo(label, statusLabelWidth)+
+			" "+o.S(StyleDim, o.WrapTo(detail, indent, o.Width)), " ")))
 }
 
 // padTo right pads to a display width, ignoring escape sequences.
