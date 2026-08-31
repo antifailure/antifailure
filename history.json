@@ -1,0 +1,10 @@
+[
+  {
+    "checked_at": "2026-08-31T05:24:19Z",
+    "name": "staging",
+    "url": "https://app.dev.antifailure.dev",
+    "http_status": 200,
+    "ready": true,
+    "commit": "ff8930733e603264312a0f1593888463227684d3"
+  }
+]
