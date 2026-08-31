@@ -257,10 +257,7 @@ func newNetExplainCommand(env *Env) *cobra.Command {
 		Short: "Say what would happen to one request, and which rule decides it",
 		Long: strings.TrimSpace(`
 Prints the decision, the rule that made it, and every other rule that also
-matched, so a surprising answer is diagnosable rather than mysterious.
-
-  af net explain GET https://api.stripe.com/v1/charges
-  af net explain POST https://api.resend.com/emails`),
+matched, so a surprising answer is diagnosable rather than mysterious.`),
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req, err := parseRequest(args[0], args[1])

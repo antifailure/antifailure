@@ -203,7 +203,11 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	root.SetOut(opts.Stdout)
 	root.SetErr(opts.Stderr)
 
-	err := root.ExecuteContext(ctx)
+	// ExecuteContextC rather than ExecuteContext, for the command it hands
+	// back. A usage error is the one failure where the useful thing to print
+	// is not the error at all, it is what the command actually takes, and
+	// without the command there is nothing to print it from.
+	ran, err := root.ExecuteContextC(ctx)
 	if err == nil {
 		// A command that could not write what it was asked to write did not
 		// succeed. Reporting zero here tells a script that the output it just
@@ -230,10 +234,7 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	// else is ours and gets the code, cause, and next step rendering.
 	var usage *usageError
 	if aferrors.As(err, &usage) || isUsageMessage(err) {
-		// Not checked, for the same reason as Output.Error: this is the path
-		// that reports a failure, and a broken error stream leaves nothing to
-		// report it to. The exit code below is what the caller reads.
-		_, _ = fmt.Fprintln(opts.Stderr, err.Error())
+		renderUsageError(out, ran, err)
 		return int(aferrors.ExitUsage)
 	}
 	if out.Format == FormatJSON {
@@ -242,6 +243,93 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 		out.Error(err)
 	}
 	return int(aferrors.ExitCodeOf(err))
+}
+
+// renderUsageError says what the command takes, not just that it was typed
+// wrong.
+//
+// Cobra's own message for the most common mistake in this tree is "accepts 2
+// arg(s), received 1", printed alone, with no usage line and no example. It
+// names the count and nothing else: not which two arguments, not what they
+// look like, not where to find out. Every command that takes an argument
+// failed that way, which is twenty four of them.
+//
+// So the shape is the same one the error renderer uses, because it is the same
+// question being answered: what happened, what to do, where to read more.
+//
+// Writes are not checked, for the same reason as Output.Error: this is the
+// path that reports a failure, and a broken error stream leaves nowhere to
+// report that to. The exit code is what the caller reads.
+func renderUsageError(o *Output, cmd *cobra.Command, err error) {
+	name := "af"
+	if cmd != nil {
+		name = cmd.CommandPath()
+	}
+	_, _ = fmt.Fprintf(o.Err, "%s %s\n",
+		o.S(StyleBad, "Usage:"), o.Wrap(plainUsage(name, err.Error()), len("Usage: ")))
+	if cmd == nil {
+		return
+	}
+	// A command that was never named has no usage worth printing: "Takes: af
+	// [flags]" answers a question nobody asked. The list of commands is what
+	// somebody who typed a name that does not exist actually wants.
+	if cmd.Parent() == nil {
+		_, _ = fmt.Fprintf(o.Err, "  %s  %s\n",
+			o.S(StyleDim, "More:"), o.S(StyleDim, "af --help lists every command"))
+		return
+	}
+	if line := strings.TrimSpace(cmd.UseLine()); line != "" {
+		_, _ = fmt.Fprintf(o.Err, "  %s %s\n", o.S(StyleBold, "Takes:"), line)
+	}
+	// The first example only. A usage error is read in a hurry and the point
+	// is one line somebody can copy, not the catalogue that af <command>
+	// --help already holds.
+	if ex := firstExample(cmd.Example); ex != "" {
+		_, _ = fmt.Fprintf(o.Err, "  %s   %s\n", o.S(StyleBold, "Try:"), ex)
+	}
+	_, _ = fmt.Fprintf(o.Err, "  %s  %s\n",
+		o.S(StyleDim, "More:"), o.S(StyleDim, cmd.CommandPath()+" --help"))
+}
+
+// plainUsage rewrites cobra's argument count messages as English.
+//
+// "accepts 2 arg(s), received 1" names a count and nothing else: not the
+// command, not which two arguments, not what they look like. It is also not a
+// sentence. Every other message a user sees from this tool is one, and the
+// arithmetic notation in the middle of it is the tell that this particular
+// message was never written by anybody, it just leaked out of a library.
+//
+// Anything not recognised passes through unchanged rather than being mangled
+// into something that reads well and says the wrong thing.
+func plainUsage(name, msg string) string {
+	var want, got int
+	switch {
+	case matchCounts(msg, "accepts %d arg(s), received %d", &want, &got):
+		return fmt.Sprintf("%s takes %s and got %d.", name, plural(want, "argument", "arguments"), got)
+	case matchCounts(msg, "accepts at most %d arg(s), received %d", &want, &got):
+		return fmt.Sprintf("%s takes at most %s and got %d.", name, plural(want, "argument", "arguments"), got)
+	case matchCounts(msg, "requires at least %d arg(s), only received %d", &want, &got):
+		return fmt.Sprintf("%s needs at least %s and got %d.", name, plural(want, "argument", "arguments"), got)
+	case strings.HasPrefix(msg, "unknown command"):
+		return msg + ". Run 'af --help' for the ones that exist."
+	}
+	return msg
+}
+
+// matchCounts reads two numbers out of a message with a known shape.
+func matchCounts(msg, format string, a, b *int) bool {
+	n, err := fmt.Sscanf(msg, format, a, b)
+	return err == nil && n == 2
+}
+
+// firstExample is the first runnable line of a command's examples.
+func firstExample(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			return line
+		}
+	}
+	return ""
 }
 
 // isUsageMessage recognises the errors cobra produces for a command line that
@@ -381,6 +469,7 @@ recoverable by replay.`),
 		newLicenseCommand(env),
 		newVersionCommand(env),
 	)
+	attachExamples(root)
 	root.SetHelpTemplate(helpTemplate)
 	root.SetUsageTemplate(usageTemplate)
 	// A flag that does not parse is a usage error, not a failure of the

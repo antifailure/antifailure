@@ -286,11 +286,9 @@ Stores a key for anthropic or openai, replacing whatever was there.
 The key is never an argument. There is no --key flag, deliberately: a secret on
 a command line is in the shell's history file, is visible in ps to everybody
 else on the machine, and is in any recording of the terminal. So there are three
-ways to give it, and none of them put it in the argument vector:
-
-  af provider set anthropic                      asks, without echoing
-  af provider set anthropic --stdin < key.txt    reads one line
-  af provider set anthropic --from-env NAME      reads that environment variable
+ways to give it, and none of them put it in the argument vector: it is asked
+for without echoing, read as one line from stdin, or read from an environment
+variable this process already has.
 
 Rotating stores the new key and revokes the old one together. If the key given
 is the one already stored, that is reported rather than accepted quietly: it is

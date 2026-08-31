@@ -124,6 +124,19 @@ fails if it does not.
 		}
 		fmt.Fprintf(&b, "```\n%s\n```\n\n", strings.TrimSpace(c.UseLine()))
 
+		// The example goes on the page for the same reason it goes in the
+		// help text: a flag table says what the switches are called and never
+		// says what a real invocation looks like, and a reader trusts an
+		// example more than prose because it looks like something they can
+		// paste.
+		if ex := strings.TrimSpace(c.Example); ex != "" {
+			var lines []string
+			for _, l := range strings.Split(ex, "\n") {
+				lines = append(lines, strings.TrimPrefix(l, "  "))
+			}
+			fmt.Fprintf(&b, "```\n%s\n```\n\n", strings.Join(lines, "\n"))
+		}
+
 		if subs := visibleSubcommands(c); len(subs) > 0 {
 			b.WriteString("Subcommands:\n\n")
 			for _, sub := range subs {
@@ -202,4 +215,53 @@ func sentence(s string) string {
 		s += "."
 	}
 	return s
+}
+
+// Every command shows a worked example, and every example is a command that
+// exists with flags that exist.
+//
+// Held in both directions, the way the error catalogue is: a command with no
+// entry in the table fails here, and an entry naming a command that is not in
+// the tree fails here too, so the table can neither rot behind the tree nor
+// drift ahead of it.
+//
+// The reason it is worth a test at all: a flag list tells a reader what the
+// switches are called and never tells them what a real invocation looks like,
+// which is what somebody actually wants at the moment they type --help. Three
+// commands out of sixty five had an example before this, because three people
+// thought of it on three different days.
+func TestEveryCommandHasAWorkedExample(t *testing.T) {
+	root := cli.RootForDocs()
+	var commands []*cobra.Command
+	collectCommands(root, &commands)
+	require.NotEmpty(t, commands)
+
+	inTree := map[string]bool{}
+	for _, c := range commands {
+		inTree[c.CommandPath()] = true
+		require.NotEmptyf(t, strings.TrimSpace(c.Example),
+			"%s shows no example. Add one to commandExamples in examples.go", c.CommandPath())
+
+		for _, line := range strings.Split(c.Example, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			require.Truef(t, strings.HasPrefix(line+" ", c.CommandPath()+" ") || line == c.CommandPath(),
+				"%s has an example that is not an invocation of it: %q", c.CommandPath(), line)
+			// A flag in an example that the command does not have sends
+			// somebody out of the help text straight into a usage error, which
+			// is worse than showing them no example at all.
+			for _, flag := range longFlag.FindAllString(line, -1) {
+				name := strings.TrimPrefix(flag, "--")
+				require.NotNilf(t, c.Flags().Lookup(name),
+					"%s shows --%s and has no such flag", c.CommandPath(), name)
+			}
+		}
+	}
+
+	for _, path := range cli.ExampleCommandPaths() {
+		require.Truef(t, inTree[path],
+			"commandExamples has an entry for %q, which is not a command", path)
+	}
 }

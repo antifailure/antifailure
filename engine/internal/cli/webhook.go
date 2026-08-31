@@ -97,9 +97,6 @@ func newWebhookTriggerCommand(env *Env) *cobra.Command {
 		Use:   "trigger <provider> <event>",
 		Short: "Send one signed event into the environment",
 		Long: strings.TrimSpace(`
-  af webhook trigger stripe checkout.session.completed
-  af webhook trigger stripe invoice.paid --set id=in_123 --set amount_paid=4900
-
 The path is taken from the manifest's webhook_path for that provider unless
 --path says otherwise, and the signing secret from the same variable the
 application reads, so both sides agree without anybody configuring twice.`),
