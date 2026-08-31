@@ -23,7 +23,8 @@ const (
 	DefaultGoldenMaxAge  = "168h"
 	DefaultGoldenRetain  = 5
 	DefaultSubsetMaxRows = 1000000
-	DefaultTTL           = "168h"
+	DefaultTTL           = "24h"
+	DefaultMaxTTL        = "168h"
 	DefaultIdleSleep     = "30m"
 	DefaultDomain        = "localhost"
 	DefaultNamespacePfx  = "af"
@@ -520,6 +521,9 @@ func normalizeRuntime(m *schema.Manifest) {
 	}
 	if r.TTL == "" {
 		r.TTL = DefaultTTL
+	}
+	if r.MaxTTL == "" {
+		r.MaxTTL = DefaultMaxTTL
 	}
 	if r.IdleSleep == "" {
 		r.IdleSleep = DefaultIdleSleep

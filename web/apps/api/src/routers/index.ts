@@ -12,6 +12,7 @@ import { PolicyEngine, type Egress, type EgressRule, type Mode } from '@antifail
 import { router, publicProcedure, orgProcedure, audit, registerRouter, type OrgContext } from '../trpc.ts'
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLES, ROLE_PERMISSIONS, rolesWith } from '../permissions.ts'
 import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
+import { capsFor, costAttribution, environmentHoursSince } from '../costs.ts'
 import { syncMembership, SignInError } from '../auth/signin.ts'
 import { GitHubError } from '../auth/github.ts'
 import { createEnvironment, agentsRouter, loadRouter } from './dispatch.ts'
@@ -89,6 +90,45 @@ const environmentsRouter = router({
         const env = rows[0]
         if (!env) throw notFound('environment', input.envId)
         return env
+      })
+    }),
+
+  /**
+   * Where an organization's environment time went, and what is left of the
+   * daily cap.
+   *
+   * environments.view rather than billing.manage, deliberately. The person who
+   * left a branch up over a weekend is the one who can tear it down, and a
+   * number only an owner may look at is a number nobody acts on until the
+   * invoice arrives.
+   *
+   * The window is the same rolling twenty four hours the admission check uses,
+   * from the same clock and the same function, so what this page shows and
+   * what a refusal says can never disagree.
+   */
+  costs: orgProcedure('environments.view')
+    .input(z.object({ hours: z.number().int().positive().max(720).default(24) }))
+    .query(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      return c.pool.withTenant(c.tenant, async (db) => {
+        const now = c.clock.now()
+        const since = new Date(now.getTime() - input.hours * 60 * 60 * 1000)
+        const plans = await db.execute<{ plan: string }>(sql`
+          SELECT plan FROM organizations WHERE id = ${c.actor.orgId}`)
+        const plan = plans[0]?.plan || DEFAULT_PLAN
+        const caps = capsFor(plan)
+        const used = await environmentHoursSince(db, c.actor.orgId, since, now)
+        return {
+          plan,
+          windowHours: input.hours,
+          since: since.toISOString(),
+          usedHours: Math.round(used * 100) / 100,
+          caps,
+          /** Never below zero: an organization that is over reads 0 left,
+           *  not a negative allowance somebody has to interpret. */
+          remainingDayHours: Math.max(0, Math.round((caps.perDayHours - used) * 100) / 100),
+          environments: await costAttribution(db, c.actor.orgId, since, now),
+        }
       })
     }),
 

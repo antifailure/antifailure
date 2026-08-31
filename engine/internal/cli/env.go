@@ -45,6 +45,8 @@ does not, and a list that disagrees with reality is worse than no list.`),
 	}
 	cmd.AddCommand(newEnvListCommand(e))
 	cmd.AddCommand(newEnvPruneCommand(e))
+	cmd.AddCommand(newEnvReapCommand(e))
+	cmd.AddCommand(newEnvExtendCommand(e))
 	cmd.AddCommand(newEnvPullCommand(e))
 	return cmd
 }
