@@ -15,20 +15,26 @@ The first stable release. 577 commits since v0.1.1, 197 of them landings on
 
 A major version is a promise about what will keep working, so here is the
 promise, named surface by surface rather than as a blanket claim about an API.
+The standing version is at antifailure.dev/docs/reference/stability.
 
 Stable, and breaking any of these costs a major version:
 
-- **The manifest.** A manifest declaring `version: 1` keeps working. New keys
-  may be added and existing ones may gain new accepted values; a key will not
-  be removed, renamed, or given a different meaning in version 1.
-  `schemas/manifest.v1.json` is the source of truth and a test walks it against
-  the Go types so the two cannot drift.
+- **The manifest.** A manifest declaring `version: 1` keeps working. Keys may be
+  added and existing ones may gain new accepted values; a key will not be
+  removed, renamed, or given a different meaning. The promise runs backwards,
+  not forwards: an older manifest works on a newer `af`, and a manifest using a
+  key added in a later 1.x does not work on an earlier one, because the parser
+  refuses a key it does not know rather than ignoring it.
 - **The command line.** The commands, their flags, and their exit codes. A
   command will not be removed or renamed, and a flag will not change what it
   means. New commands and new flags are minor releases.
 - **`--output json`.** The documented fields of every command's JSON. Fields may
   be added, so parse for the fields you want rather than refusing unknown ones.
   A documented field will not be removed or change type.
+- **The provider interfaces.** `engine/pkg/provider` and the `engine/pkg/schema`
+  types they carry. A provider is meant to be written outside this repository
+  and each interface ships with a conformance suite, so it is an integration
+  surface and is treated as one.
 - **The error codes.** A code in the error reference keeps its meaning. Codes
   are the stable identifier for a refusal; the sentence beside one is not.
 
@@ -38,8 +44,8 @@ Explicitly not stable, and free to change in a minor release:
   versioned separately and is at 0.1.1 for that reason.
 - The control plane's HTTP API, which the console and the engine speak to each
   other and which is not a published integration surface.
-- Anything under `docs/plan/`, `tools/`, and every Go package in this
-  repository. `af` is the product; the source tree is not a library.
+- Every Go package except the two named above, and everything under
+  `engine/internal`, which is unimportable on purpose.
 - Lint rule names and their findings, which move as the rules improve. The
   stable identifier for a finding is its rule name within a release.
 - The event stream's set of types. Types are added as features land.

@@ -63,6 +63,7 @@ gate: _reports
     run "generated files are current" just _generated
     run "release stamps a real version"  just ldcheck
     run "release notes exist for the tag" just relnotes
+    run "version pins name real tags"    just tagsync
     run "error catalog and code agree"   just errcheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
@@ -372,6 +373,12 @@ ldcheck:
 # release whose notes are a heading and nothing else.
 relnotes:
     go run ./tools/relnotes .
+
+# No version pin names a tag nobody has published. The Terraform image_tag
+# defaults are live, so bumping them with the tag rather than after it points
+# the next apply at an image that does not exist.
+tagsync:
+    go run ./tools/tagsync .
 
 # Nothing in the tree looks like a live credential.
 scanrepo:

@@ -139,7 +139,7 @@ const PRODUCT_FAQ: FaqItem[] = [
   {
     question: "Is it production ready?",
     answer:
-      "Not yet. It is pre-1.0, and docs/plan/STATUS.md gives the honest answer per component rather than one claim for the whole system, marking each one proven, written, or planned.",
+      "Version 1.0 commits to the manifest schema, the command line, the documented JSON fields, the provider interfaces and the error codes, and breaking any of those costs a major version. It is a promise about interfaces, not a claim that every component is finished: docs/plan/STATUS.md still gives the honest answer per component, marking each one proven, written, or planned.",
   },
 ];
 

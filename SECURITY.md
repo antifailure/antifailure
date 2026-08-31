@@ -64,7 +64,8 @@ find out after the work.
 ## Supported versions
 
 The latest minor release of the current major line receives security fixes.
-While the project is pre-1.0, that means the latest release.
+The current major line is 1.x, so that is the latest 1.x release. Releases
+before v1.0.0 receive no fixes.
 
 ## Scope
 
