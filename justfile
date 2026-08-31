@@ -68,6 +68,7 @@ gate: _reports
     run "documented paths exist"         just claimcheck
     run "documented manifests are valid" just manifestcheck
     run "prose reads like a person"      just prosecheck
+    run "every figure has a source"      just figurecheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
     run "prose style"                    just vale
@@ -366,6 +367,14 @@ docexamples:
 # The punctuation this project does not use.
 prosecheck:
     go run ./tools/prosecheck .
+
+# Every number on the site that reads as a measurement has a stated source.
+#
+# The site rendered an invented "fid 87%" fidelity score on two product pages.
+# It was drawn client side, so curl found no "87" in the HTML and every cheap
+# audit came back clean. This reads the source instead.
+figurecheck:
+    go run ./tools/figurecheck .
 
 # Spelling, with the project dictionary in tools/docs/dictionary.txt.
 spell:

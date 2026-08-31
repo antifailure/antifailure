@@ -1,3 +1,4 @@
+import { Illustrative } from "@/components/layout/Illustrative";
 import {
   Callout,
   FeatureGrid,
@@ -366,6 +367,11 @@ export function SafeStatePage() {
             billing states, and malformed history, the records that actually break migrations, while
             volume stays bounded.
           </p>
+          <Illustrative className="mt-6">
+            Six rows of a worked example, with the ratio chosen. What a real subset keeps depends on
+            the shape of your own data. What is fixed is the rule: a dropped parent takes its
+            children, and a rare row is kept on purpose rather than sampled away.
+          </Illustrative>
           <div className="mt-8">
             <Callout label="Unverified goldens" tone="block">
               An unverified golden cannot be branched. Sanitization evidence is required before a snapshot

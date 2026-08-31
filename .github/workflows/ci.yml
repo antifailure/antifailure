@@ -770,6 +770,15 @@ jobs:
         # option is spelled.
         run: go run ./tools/prosecheck .
 
+      - name: Every figure on the site says where it came from
+        # The site rendered an invented "fid 87%" fidelity score on two product
+        # pages. Nothing in the product computes it. It survived because it is
+        # drawn client side: curl on either page finds no "87" anywhere, so
+        # every audit over the built HTML came back clean. This reads the
+        # source, where the string is a literal, and demands a written source
+        # for any percentage or "N of M" a reader can see.
+        run: go run ./tools/figurecheck .
+
       - name: Nothing in the repository looks like a live credential
         # Uses the engine's own detector, so the check and the runtime refusal
         # cannot disagree about what a credential looks like. Its own tests
