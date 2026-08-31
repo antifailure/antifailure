@@ -95,6 +95,7 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 			// check the manifest asked for, which is why it is reported
 			// separately and why it still exits non-zero.
 			inert := res.InertP95(p95Increase)
+			verdict := loadExit(res, breaches, p95Increase)
 
 			if e.Out.Format == FormatJSON {
 				doc := LoadJSON{
@@ -111,11 +112,8 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 				if err := e.Out.JSON(doc); err != nil {
 					return err
 				}
-				if len(breaches) > 0 {
-					return silent(aferrors.Coded(aferrors.AFLOD011, "count", fmt.Sprint(len(breaches))))
-				}
-				if inert {
-					return silent(aferrors.Coded(aferrors.AFLOD016, "detail", inertDetail(res)))
+				if verdict != nil {
+					return silent(verdict)
 				}
 				return nil
 			}
@@ -164,14 +162,15 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 				for _, b := range breaches {
 					e.Out.Printf("  %s %s: %s\n", e.Out.S(StyleBad, SymbolFail), b.What, b.Detail)
 				}
-				return silent(aferrors.Coded(aferrors.AFLOD011, "count", fmt.Sprint(len(breaches))))
 			}
 			if inert {
 				e.Out.Println("")
 				e.Out.Section("A threshold measured nothing")
 				e.Out.Printf("  %s p95_increase %.2f: %s\n",
 					e.Out.S(StyleBad, SymbolFail), p95Increase, inertDetail(res))
-				return silent(aferrors.Coded(aferrors.AFLOD016, "detail", inertDetail(res)))
+			}
+			if verdict != nil {
+				return silent(verdict)
 			}
 			return nil
 		},
@@ -181,6 +180,24 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 	cmd.Flags().Int64Var(&seed, "seed", 1, "Makes two runs send the same sequence")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to send at, defaulting to the checked out one")
 	return cmd
+}
+
+// loadExit is the verdict a load run exits with.
+//
+// Two ways to fail, and the second one used to be silence. A breach is a
+// threshold that was exceeded. An inert threshold is one that was in force and
+// evaluated nothing, and it exits non-zero for the reason the scenario runner
+// already does: a check that ran nothing and reported green is a check
+// everybody believes is running. A breach is reported first, because a run
+// with both has a measured regression and that is the more actionable half.
+func loadExit(res *load.Result, breaches []load.Breach, p95Increase float64) error {
+	if len(breaches) > 0 {
+		return aferrors.Coded(aferrors.AFLOD011, "count", fmt.Sprint(len(breaches)))
+	}
+	if res.InertP95(p95Increase) {
+		return aferrors.Coded(aferrors.AFLOD016, "detail", inertDetail(res))
+	}
+	return nil
 }
 
 // inertDetail says how much was measured against nothing, in the run's own

@@ -462,9 +462,10 @@ func normalizeLoad(m *schema.Manifest) {
 	if l.Thresholds.ErrorRate == 0 {
 		l.Thresholds.ErrorRate = 0.01
 	}
-	if l.Thresholds.QueryCountIncrease == 0 {
-		l.Thresholds.QueryCountIncrease = 0.2
-	}
+	// No default for query_count_increase. Nothing reads it, so filling it in
+	// put a threshold on every manifest that could not affect any verdict.
+	// Writing one is refused by the validator, which names the check that does
+	// compare statement counts.
 	for i, r := range l.SafeRoutes {
 		l.SafeRoutes[i] = normalizeRoute(r)
 	}
