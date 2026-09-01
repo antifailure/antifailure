@@ -38,5 +38,13 @@
     "http_status": 200,
     "ready": true,
     "commit": "4dcf2238683152e6638d7537cb7953bb8a20c741"
+  },
+  {
+    "checked_at": "2026-09-01T06:20:52Z",
+    "name": "staging",
+    "url": "https://app.dev.antifailure.dev",
+    "http_status": 200,
+    "ready": true,
+    "commit": "9ad9c0445f3a8e602d3d48fe37c1b56fc3fd69e6"
   }
 ]
