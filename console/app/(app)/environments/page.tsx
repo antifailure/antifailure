@@ -379,10 +379,12 @@ function Runtimes() {
                   {rows.map((r) => (
                     <Row key={`${r.name}-${r.registered}`}>
                       <Td mono>{r.name}</Td>
-                      <Td>{r.provider ?? "not reported"}</Td>
-                      <Td>{r.labels?.length ? r.labels.join(", ") : "--"}</Td>
-                      <Td numeric>{Number(r.environments).toLocaleString()}</Td>
-                      <Td>
+                      <Td label="Provider">{r.provider ?? "not reported"}</Td>
+                      <Td label="Labels">{r.labels?.length ? r.labels.join(", ") : "--"}</Td>
+                      <Td label="Environments" numeric>
+                        {Number(r.environments).toLocaleString()}
+                      </Td>
+                      <Td label="State">
                         {r.registered ? (
                           <Badge tone="pass">registered</Badge>
                         ) : (
@@ -390,7 +392,7 @@ function Runtimes() {
                         )}
                       </Td>
                       {mayManage ? (
-                        <Td>
+                        <Td label="Registration">
                           {r.registered ? (
                             <Button
                               variant="danger"
