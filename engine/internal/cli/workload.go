@@ -121,8 +121,10 @@ promise the run cannot keep.`),
 			return workloadExit(res)
 		},
 	}
+	// The list comes from the package rather than from a string here, because
+	// a help text naming three of four kinds is drift nothing catches.
 	cmd.Flags().StringVar(&kind, "kind", "",
-		"Which kind of workload: observed_load, http_scenario, browser_workflow or exploration")
+		"Which kind of workload: "+workload.KindNames())
 	cmd.Flags().StringVar(&selection, "select", "",
 		"Comma separated names from the manifest this workload runs")
 	cmd.Flags().StringVar(&duration, "duration", "",
@@ -146,14 +148,20 @@ promise the run cannot keep.`),
 	return cmd
 }
 
-// workloadExit turns a result into the process's answer.
+// workloadOutcome names why a run is not a clean pass, or reports that it is.
+//
+// One function rather than two, because the terminal has to print the same
+// answer the process exits with. Deciding it twice is how a run says pass on
+// screen and exits 7, and the person reading has no way to tell which is
+// wrong.
 //
 // The table, and the one row that differs from af test on purpose:
 //
 //	pass, flaky            0
 //	fail                   8, the same as a failing workflow
 //	blocked, unverified    7, verification failure
-//	cancelled, timed out   9, or 10 when resources are still standing
+//	cancelled, timed out   9
+//	resources still up     10, whatever the verdict was
 //	a refused knob         2, usage
 //
 // af test exits 0 on unverified and does not count blocked against a run, and
@@ -161,29 +169,59 @@ promise the run cannot keep.`),
 // green having never once reached an agent. A hosted workload is a job whose
 // exit code somebody gates on, so a run that measured nothing must not be
 // indistinguishable from a run that found nothing. The result document says
-// which it was; the exit code says only that it was not a clean pass.
-func workloadExit(res *workload.Result) error {
+// which it was; the code says only that it was not a clean pass.
+func workloadOutcome(res *workload.Result) (aferrors.Code, string, bool) {
+	// Standing resources outrank the verdict. A run that passed and left
+	// containers behind costs money for as long as nobody looks, and reporting
+	// it as clean is how nobody looks.
 	if res.Teardown != nil && len(res.Teardown.Pending) > 0 {
-		return silent(aferrors.Coded(aferrors.AFRUN030,
-			"count", fmt.Sprint(len(res.Teardown.Pending))))
+		return aferrors.AFRUN030, fmt.Sprint(len(res.Teardown.Pending)), false
 	}
 	switch res.State {
 	case workload.StateCancelled, workload.StateTimedOut:
-		return silent(aferrors.Coded(aferrors.AFWLD014, "detail", res.Detail))
+		return aferrors.AFWLD014, orDefaultDetail(res), false
 	case workload.StateFailed:
 		if res.FailureCode == string(aferrors.AFWLD002) {
-			return silent(aferrors.Coded(aferrors.AFWLD002,
-				"kind", string(res.Kind), "knobs", refusedKnobs(res.Refusals)))
+			return aferrors.AFWLD002, refusedKnobs(res.Refusals), false
 		}
-		return silent(aferrors.Coded(aferrors.AFWLD013, "detail", res.Detail))
+		return aferrors.AFWLD013, orDefaultDetail(res), false
 	}
 	switch res.Verdict {
 	case workload.VerdictFail:
-		return silent(aferrors.Coded(aferrors.AFWLD012, "detail", orDefaultDetail(res)))
+		return aferrors.AFWLD012, orDefaultDetail(res), false
 	case workload.VerdictBlocked, workload.VerdictUnverified:
-		return silent(aferrors.Coded(aferrors.AFWLD013, "detail", orDefaultDetail(res)))
+		return aferrors.AFWLD013, orDefaultDetail(res), false
 	}
-	return nil
+	return "", "", true
+}
+
+// codedOutcome builds the error a failing outcome carries.
+func codedOutcome(res *workload.Result) error {
+	code, detail, clean := workloadOutcome(res)
+	if clean {
+		return nil
+	}
+	switch code {
+	case aferrors.AFRUN030:
+		return aferrors.Coded(code, "count", detail)
+	case aferrors.AFWLD002:
+		return aferrors.Coded(code, "kind", string(res.Kind), "knobs", detail)
+	default:
+		return aferrors.Coded(code, "detail", detail)
+	}
+}
+
+// workloadExit turns a result into the process's answer.
+//
+// Silent, because the render above has already said what happened and, in JSON
+// mode, has already written the document a script is parsing. A second one
+// after it would be a second document in the same stream.
+func workloadExit(res *workload.Result) error {
+	err := codedOutcome(res)
+	if err == nil {
+		return nil
+	}
+	return silent(err)
 }
 
 func orDefaultDetail(res *workload.Result) string {
@@ -251,6 +289,13 @@ func renderWorkload(e *Env, res *workload.Result) {
 	if res.Teardown != nil {
 		e.Out.Printf("  torn down: %d removed, %d pending\n",
 			res.Teardown.Removed, len(res.Teardown.Pending))
+	}
+
+	// The code the process is about to exit with, in the words of the catalog.
+	// Without it a person reading the terminal sees a verdict and a number and
+	// has to work out which of the two meanings of "not a pass" they have.
+	if err := codedOutcome(res); err != nil {
+		e.Out.Error(err)
 	}
 
 	// Last, and on its own line, because it is the line somebody copies.

@@ -74,8 +74,23 @@ const (
 )
 
 // Kinds is every kind, in the order the control plane's enum declares them.
+//
+// Exported so the command that takes a kind lists them from here rather than
+// from a string beside the flag. A help text that names three of four kinds is
+// the kind of drift nothing catches, because nothing compares prose with a
+// switch statement.
 func Kinds() []Kind {
 	return []Kind{ObservedLoad, HTTPScenario, BrowserWorkflow, Exploration}
+}
+
+// KindNames is Kinds as a comma separated list, for a flag description or an
+// error naming what was expected.
+func KindNames() string {
+	out := make([]string, 0, len(Kinds()))
+	for _, k := range Kinds() {
+		out = append(out, string(k))
+	}
+	return strings.Join(out, ", ")
 }
 
 // legacyKinds maps the verbs the dispatch workflow used before this package
@@ -92,8 +107,8 @@ var legacyKinds = map[string]Kind{
 	"explore":  Exploration,
 }
 
-// ParseKind reads a kind, accepting the legacy dispatch verbs.
-func ParseKind(s string) (Kind, bool) {
+// parseKind reads a kind, accepting the legacy dispatch verbs.
+func parseKind(s string) (Kind, bool) {
 	s = strings.TrimSpace(s)
 	for _, k := range Kinds() {
 		if string(k) == s {
@@ -204,11 +219,11 @@ const maxSelected = 50
 // reason: a misspelled key that is dropped produces a run whose result nobody
 // can interpret.
 func Parse(req Request) (*Plan, error) {
-	kind, ok := ParseKind(req.Kind)
+	kind, ok := parseKind(req.Kind)
 	if !ok {
 		return nil, aferrors.Coded(aferrors.AFWLD001,
 			"kind", strings.TrimSpace(req.Kind),
-			"known", strings.Join(kindNames(), ", "))
+			"known", KindNames())
 	}
 
 	p := &Plan{RunID: strings.TrimSpace(req.RunID), Kind: kind}
@@ -336,14 +351,6 @@ func knobList(rs []Refusal) string {
 		out = append(out, r.Knob)
 	}
 	return strings.Join(out, ", ")
-}
-
-func kindNames() []string {
-	out := make([]string, 0, len(Kinds()))
-	for _, k := range Kinds() {
-		out = append(out, string(k))
-	}
-	return out
 }
 
 func trimmed(s string) string { return strings.TrimSpace(s) }

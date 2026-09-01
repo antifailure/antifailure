@@ -2161,7 +2161,7 @@ af workload run --kind browser_workflow --select sign-in --result result.json
 | `--branch` | - | Branch to run against, defaulting to the checked out one. |
 | `--concurrency` | - | Ceiling on requests in flight. http_scenario only. |
 | `--duration` | - | How long to send load for, as a Go duration. observed_load only. |
-| `--kind` | - | Which kind of workload: observed_load, http_scenario, browser_workflow or exploration. |
+| `--kind` | - | Which kind of workload: observed_load, http_scenario, browser_workflow, exploration. |
 | `--result` | - | Write the result document here as well as to the terminal. |
 | `--run-id` | - | The control plane's identifier for this run, echoed back in the result. |
 | `--scale` | - | Multiplier on production's rate. observed_load only. |
