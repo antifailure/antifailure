@@ -23,6 +23,7 @@ import { retentionFromEnv, startMaintenance } from './maintenance.ts'
 import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
+import { RealStripeClient, stripeConfigFrom } from './billing/index.ts'
 
 function required(name: string, ...fallbacks: string[]): string {
   for (const n of [name, ...fallbacks]) {
@@ -151,6 +152,14 @@ console.log(
 const modelPrices = pricesFrom(process.env.AF_MODEL_PRICES)
 console.log(`model prices configured for ${Object.keys(modelPrices).length} models`)
 
+// Billing, if this installation takes money. Read at start-up and said out
+// loud, because "billing is off" and "billing is on" are the two states an
+// operator most needs to be sure about, and a partially configured one is
+// reported as OFF with the missing variables named rather than starting and
+// failing on the first customer who pays.
+const stripe = stripeConfigFrom(process.env)
+console.log(stripe.summary)
+
 // Located once, here, and said out loud either way. A control plane running
 // without its console is a legitimate way to run this; a control plane that
 // silently answers 404 on every page because a COPY was dropped from a
@@ -167,6 +176,9 @@ const { app, ingestLimiter, authLimiter } = createServer({
   signInAllowlist,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
+  stripe: stripe.config
+    ? { config: stripe.config, client: new RealStripeClient(stripe.config) }
+    : null,
   modelPrices,
   consoleBuild,
   ...(emailSignIn ? { emailSignIn } : {}),

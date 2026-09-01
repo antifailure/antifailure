@@ -705,7 +705,7 @@ export function TrustBoundaryScene() {
             }}
           >
             <MonoLabel className="text-[9px] text-black/70">rpt_08f2</MonoLabel>
-            <MonoLabel className="text-[9px] text-black/45">sha256:7c1a…</MonoLabel>
+            <MonoLabel className="text-[9px]">sha256:7c1a…</MonoLabel>
             <StatusPill tone="FAIL" />
           </div>
         ) : null}

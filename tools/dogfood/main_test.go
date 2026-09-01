@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 )
@@ -207,5 +209,185 @@ func TestLeaks_SaysNothingWithoutAnEnvironment(t *testing.T) {
 	r := &runner{root: t.TempDir()}
 	if got := r.leaks(""); got != nil {
 		t.Errorf("a run that produced no environment reported %v as leaked", got)
+	}
+}
+
+// TestCopiedConstantsMatchTheEngine reads the engine's own source for the three
+// constants this file copies, and fails when a copy has drifted from it.
+//
+// This is the check that was not here. The event log directory was copied as
+// "events" while the engine wrote "logs", so readEvents found no log on every
+// run there has ever been, and everything downstream of the event stream was
+// dead while the run was still recorded green. Every unit test in this file
+// passed throughout, because they all call readLog with a path a test made.
+//
+// Two artifacts, each individually valid, jointly wrong. The only thing that
+// catches that class is a check that reads both.
+func TestCopiedConstantsMatchTheEngine(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		file  string
+		decl  string
+		local string
+	}{
+		{"StateDir", "engine/internal/env/env.go", "StateDir", stateDir},
+		{"LogDir", "engine/internal/telemetry/telemetry.go", "LogDir", logDir},
+		{"LabelEnv", "engine/internal/dockerutil/dockerutil.go", "LabelEnv", labelEnv},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join("..", "..", c.file)
+			src, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("reading %s: %v", path, err)
+			}
+			re := regexp.MustCompile(`(?m)^\s*(?:const\s+)?` + c.decl + `\s*=\s*"([^"]*)"`)
+			m := re.FindSubmatch(src)
+			if m == nil {
+				t.Fatalf("%s declares no %s = \"...\" any more, so the copy in this "+
+					"file cannot be checked against it", c.file, c.decl)
+			}
+			if got := string(m[1]); got != c.local {
+				t.Errorf("%s.%s is %q and the copy here is %q. The copy is what the "+
+					"harness reads with, so it is the harness that is wrong.",
+					c.file, c.decl, got, c.local)
+			}
+		})
+	}
+}
+
+// TestVerdicts_AllBlockedIsAFinding reads the report `af ci` actually wrote in
+// the Dogfood run of 2026-08-31, downloaded from the run's own artifact.
+//
+// That run was recorded green with no findings and all six workflows blocked,
+// which is the record this harness is supposed to prevent. A hand written
+// table would have proved that the regular expression matches a table I wrote;
+// this proves it matches the one `af ci` writes.
+func TestVerdicts_AllBlockedIsAFinding(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "blocked-run.report.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := verdicts(string(body))
+	if counts["blocked"] != 6 {
+		t.Fatalf("counted %v, want six blocked: the report's table is not being read", counts)
+	}
+	if len(counts) != 1 {
+		t.Fatalf("counted %v, want blocked alone", counts)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := &Run{Green: true}
+	(&runner{reportPath: path}).readVerdicts(run)
+	if len(run.Findings) != 1 {
+		t.Fatalf("findings %v, want one saying nothing was carried through", run.Findings)
+	}
+	if !strings.Contains(run.Findings[0], "does not count towards the streak") {
+		t.Errorf("finding does not say why it matters: %q", run.Findings[0])
+	}
+	// Blocked is the environment's problem, not the change's, so the job stays
+	// green and the finding is what keeps the run out of the streak.
+	if !run.Green {
+		t.Error("a blocked run failed the job, which teaches people to ignore it")
+	}
+}
+
+// TestVerdicts_APassIsNotAFinding is the other half. Without it the check
+// above passes against a function that appends a finding unconditionally.
+func TestVerdicts_APassIsNotAFinding(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "blocked-run.report.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One row of the real report, given the verdict it was meant to have.
+	carried := strings.Replace(string(body),
+		"| `sign-in-with-a-link` | blocked |", "| `sign-in-with-a-link` | passed |", 1)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(path, []byte(carried), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := &Run{Green: true}
+	(&runner{reportPath: path}).readVerdicts(run)
+	if len(run.Findings) != 0 {
+		t.Fatalf("findings %v, want none: one workflow reached a verdict", run.Findings)
+	}
+	if run.Verdicts["passed"] != 1 || run.Verdicts["blocked"] != 5 {
+		t.Errorf("verdicts %v, want one passed and five blocked", run.Verdicts)
+	}
+}
+
+// TestUnreadableStream_SaysWhichChecksDidNotRun is the second half of the
+// directory mismatch, and the half that was silent.
+//
+// readEvents said "No event log under ..." and stopped, which is honest about
+// the file and says nothing about the four assertions that live after the
+// early return. Two runs in CI printed that one line and the word green, and
+// what a reader took from it was that the log was missing. What was actually
+// true is that nothing had checked the budgets, the teardown, the leaked
+// resource count, or the leak sweep.
+func TestUnreadableStream_SaysWhichChecksDidNotRun(t *testing.T) {
+	run := &Run{Green: true}
+	r := &runner{root: t.TempDir()}
+	r.readEvents(run)
+
+	joined := strings.Join(run.Findings, "\n")
+	if !strings.Contains(joined, "No event log under") {
+		t.Errorf("nothing said the log was missing: %v", run.Findings)
+	}
+	for _, want := range []string{
+		"per phase budgets",
+		"torn down",
+		"leaking",
+		"leak sweep",
+		"They were not asked",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the findings do not mention %q, so a reader cannot tell a check "+
+				"that did not run from one that passed:\n%s", want, joined)
+		}
+	}
+	// Still green. The change under test did nothing wrong, and a job that
+	// fails for this is a job people learn to ignore. The findings are what
+	// keep the run out of the streak.
+	if !run.Green {
+		t.Error("an unreadable stream failed the job rather than reporting it")
+	}
+}
+
+// TestLeakCheck_NotSweptIsNotClean is the one that was genuinely silent.
+//
+// leaks() returns nil on its first line for an unnamed environment, and nil is
+// also what a clean sweep returns, so `"leaked": null` in the record meant
+// either. The environment identifier only ever comes from the event stream, so
+// with the stream unreadable every run in CI reported a clean teardown it had
+// never looked for, and printed nothing at all about it.
+func TestLeakCheck_NotSweptIsNotClean(t *testing.T) {
+	r := &runner{root: t.TempDir()}
+
+	unnamed := &Run{Green: true}
+	r.sweep(unnamed)
+	if unnamed.Swept {
+		t.Error("an unnamed environment was recorded as swept")
+	}
+	if len(unnamed.Findings) != 1 || !strings.Contains(unnamed.Findings[0], "did not run") {
+		t.Fatalf("findings %v, want one saying the sweep did not run", unnamed.Findings)
+	}
+
+	// A named environment with nothing left behind is the other value. Without
+	// this half, the check above passes against a sweep that never runs.
+	named := &Run{Green: true, Environment: "antifailure-nothing-here-000000"}
+	r.sweep(named)
+	if !named.Swept {
+		t.Error("a named environment was not recorded as swept")
+	}
+	if len(named.Findings) != 0 {
+		t.Errorf("findings %v, want none: the sweep ran and found nothing", named.Findings)
+	}
+	if len(named.Leaked) != 0 {
+		t.Errorf("leaked %v, want none", named.Leaked)
 	}
 }

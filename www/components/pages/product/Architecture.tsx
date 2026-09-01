@@ -35,7 +35,7 @@ const CONTROL_PLANE: PlaneItem[] = [
   { label: "GitHub and CI", detail: "Integrations that plan the run and attach the gate." },
   { label: "Run planning", detail: "Organization policy and which repositories may run." },
   { label: "Reports", detail: "Aggregated evidence and historical comparisons." },
-  { label: "Billing", detail: "Plans and usage. Not deployed yet; the engine runs in your CI today." },
+  { label: "Billing", detail: "Plans and the quotas they carry. It takes no money: there is no payment integration behind it." },
 ];
 
 const DATA_PLANE: PlaneItem[] = [
@@ -73,7 +73,7 @@ const ISOLATION_PLANNED = [
 
 /** What keeps a run cheap today, and what does not exist yet. */
 const COST_ROWS: [string, string][] = [
-  ["Subset", "A referential subset instead of a full copy, by default. Built."],
+  ["Subset", "A referential subset instead of a full copy. Built, and off until you name a seed table."],
   ["Cache", "Goldens are branched rather than restored per run. Built."],
   ["BYOC", "The engine runs in your own CI on your own compute. Built."],
   ["Sweep", "af env prune removes environments past a cutoff you pass. Built."],
@@ -100,11 +100,16 @@ function PlaneColumn({
     <div
       className={cn(
         "flex min-w-0 flex-col p-8 max-md:p-6",
-        tone === "control" && "bg-white",
-        tone === "data" && "bg-white",
+        // The trust boundary chip is 103px wide and centred on the divider, so
+        // it reaches 52px into each column. Against p-8 it painted its white
+        // box over the first word on both sides, and the data plane's node read
+        // "rovisioning". Only the divider side needs the air, and only where
+        // the divider exists.
+        tone === "control" && "bg-white xl:pr-16",
+        tone === "data" && "bg-white xl:pl-16",
       )}
     >
-      <MonoLabel className="uppercase tracking-[0.14em]">{kicker}</MonoLabel>
+      <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">{kicker}</MonoLabel>
       <h3 className="mt-3 text-[22px] leading-snug tracking-extra-tight text-black max-md:text-[18px]">
         {title}
       </h3>
@@ -147,7 +152,7 @@ function PlaneDiagram() {
 
           <div className="flex items-center gap-3 border-y border-black/10 px-6 py-3 xl:hidden">
             <span className="h-px min-w-0 flex-1 bg-black/12" aria-hidden />
-            <MonoLabel className="uppercase tracking-[0.12em]">trust boundary</MonoLabel>
+            <MonoLabel tone="reader" className="uppercase tracking-[0.12em]">trust boundary</MonoLabel>
             <span className="h-px min-w-0 flex-1 bg-black/12" aria-hidden />
           </div>
 
@@ -177,13 +182,13 @@ function PlaneDiagram() {
             on top of the data plane's own kicker and rendered it as
             "TOMER-HOSTED". */}
         <div className="pointer-events-none absolute top-1/2 left-1/2 z-[1] hidden -translate-x-1/2 -translate-y-1/2 border border-black/[0.08] bg-white px-2.5 py-1 xl:block">
-          <MonoLabel className="uppercase tracking-[0.12em]">trust boundary</MonoLabel>
+          <MonoLabel tone="reader" className="uppercase tracking-[0.12em]">trust boundary</MonoLabel>
         </div>
       </div>
 
       <div className="flex items-center justify-between gap-6 border-t border-black/10 bg-white px-8 py-4 max-md:flex-col max-md:items-start max-md:gap-3 max-md:px-6">
         <CheckRow ok={false}>raw snapshots · secrets · request bodies</CheckRow>
-        <MonoLabel className="uppercase tracking-[0.12em]">do not enter the control plane</MonoLabel>
+        <MonoLabel tone="reader" className="uppercase tracking-[0.12em]">do not enter the control plane</MonoLabel>
         <CheckRow ok>reports · sha256 · pass or fail</CheckRow>
       </div>
     </Stage>
@@ -211,7 +216,8 @@ export function ArchitecturePage() {
         <Illustrative>
           The split is architectural and enforced today: masking and verification run in your data
           plane, and the control plane's ingest takes events rather than records. The control plane
-          itself is not deployed yet, so this boundary has not been exercised in production.
+          is deployed at app.antifailure.dev and is invitation only, so the boundary now has a live
+          consumer on the far side of it rather than a planned one.
         </Illustrative>
       </PageSection>
 
@@ -219,7 +225,7 @@ export function ArchitecturePage() {
         <Split
           visual={
             <Panel className="rounded-[12px] bg-white p-7 max-md:p-5">
-              <MonoLabel className="uppercase tracking-[0.14em]">In force today</MonoLabel>
+              <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">In force today</MonoLabel>
               <ul className="mt-5 grid grid-cols-1 gap-3">
                 {ISOLATION_MINIMUMS.map((item) => (
                   <li key={item}>
@@ -228,7 +234,7 @@ export function ArchitecturePage() {
                 ))}
               </ul>
               <Hairline className="my-6" />
-              <MonoLabel className="uppercase tracking-[0.14em]">Designed, not yet built</MonoLabel>
+              <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">Designed, not yet built</MonoLabel>
               <ul className="mt-5 grid grid-cols-1 gap-3">
                 {ISOLATION_PLANNED.map((item) => (
                   <li key={item}>

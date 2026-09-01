@@ -16,13 +16,12 @@ const REFS = [
   { from: "sessions.uid", ok: true },
 ] as const;
 
-export function StateFilm({ active, hovered }: FilmProps) {
+export function StateFilm({ active }: FilmProps) {
   const { ref, t } = useHeroFilmClock({
     loop: LOOP,
     active,
-    hovered,
     stillT: 0,
-    reducedT: 0,
+    reducedT: LOOP - 0.001,
   });
 
   const mask = smooth(span(t, 1.05, 1.95));

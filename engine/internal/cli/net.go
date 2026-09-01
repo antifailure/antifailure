@@ -148,7 +148,9 @@ in the decision, no matter where it sits in the file.`),
 			env.Out.Println("")
 
 			if len(rules) == 0 {
-				env.Out.Println("No rules. Every outbound request takes the default.")
+				// No command to offer. A policy that declares no rules is a
+				// policy doing its job, not a thing waiting to be filled in.
+				env.Out.Empty("No rules. Every outbound request takes the default.", "", "")
 				return nil
 			}
 
@@ -176,7 +178,8 @@ in the decision, no matter where it sits in the file.`),
 				}
 				env.Out.Println("")
 			}
-			env.Out.Printf("Ask about one request with: af net explain GET https://%s/\n", rules[0].Host)
+			env.Out.Hint("Ask about one request with",
+				fmt.Sprintf("af net explain GET https://%s/", rules[0].Host))
 			return nil
 		},
 	}
@@ -254,10 +257,7 @@ func newNetExplainCommand(env *Env) *cobra.Command {
 		Short: "Say what would happen to one request, and which rule decides it",
 		Long: strings.TrimSpace(`
 Prints the decision, the rule that made it, and every other rule that also
-matched, so a surprising answer is diagnosable rather than mysterious.
-
-  af net explain GET https://api.stripe.com/v1/charges
-  af net explain POST https://api.resend.com/emails`),
+matched, so a surprising answer is diagnosable rather than mysterious.`),
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req, err := parseRequest(args[0], args[1])
@@ -448,7 +448,9 @@ question somebody asks after an incident.`),
 			}
 
 			if len(decisions) == 0 {
-				env.Out.Println("Nothing has been decided yet. Bring the environment up with 'af up' and use it.")
+				env.Out.Empty("Nothing has been decided yet. The log records every request the "+
+					"environment tried to make and what the policy did with it.",
+					"Bring the environment up with", "af up")
 				return nil
 			}
 			rows := make([][]string, 0, len(decisions))
@@ -467,7 +469,9 @@ question somebody asks after an incident.`),
 					shortTime(d.AtRaw), mark, decisionRequest(d), rule, outcomeOf(d),
 				})
 			}
-			env.Out.Table([]string{"TIME", "MODE", "REQUEST", "RULE", "OUTCOME"}, rows)
+			env.Out.Table([]Column{
+				Col("TIME"), Col("MODE"), Flex("REQUEST"), Col("RULE"), Col("OUTCOME"),
+			}, rows)
 			return nil
 		},
 	}

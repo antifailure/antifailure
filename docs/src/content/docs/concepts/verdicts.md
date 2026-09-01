@@ -69,8 +69,8 @@ the verdict.
 | `migration_lock` | How long a migration held a lock on one table. Both figures are milliseconds, compared against a sampled lower bound, so a run that breaches one really did hold the lock at least that long. `fail_ms` must not be below `warn_ms`. |
 | `migration_failed` | The migrations did not apply to a branch with production's shape in it. |
 | `migration_rewrite` | Postgres reported rewriting a table, which copies every row under a lock nothing can read through. |
-| `migration_lint` | Any of the six migration lint rules. The finding names the rule it broke. |
-| `plan_regression` | A query plan got worse: a table now read end to end, or an index no longer used. |
+| `migration_lint` | Any of the seventeen migration lint rules. The finding names the rule it broke. |
+| `plan_regression` | A query plan got worse in one of three plan regressions: a table is now read end to end, an index is no longer used, or the planner's estimate grew. |
 | `query_regression` | A statement runs more often, or slower, than the saved baseline did. |
 | `load_regression` | A threshold from the `load` block was exceeded. |
 | `egress_surprise` | The environment tried to reach a host the manifest does not mention. The request was refused either way; this decides whether the attempt stops the merge. |

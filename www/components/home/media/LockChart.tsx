@@ -28,7 +28,7 @@ export function LockChart({ state }: { state: 0 | 1 }) {
       </div>
       <div className="absolute right-8 bottom-8 grid grid-cols-3 gap-8 font-mono text-[12px] text-[#285D49]">
         <div>Lock hold {state === 0 ? "27.4s" : "0.4s"}</div>
-        <div>Blocked stmts {state === 0 ? "84" : "0"}</div>
+        <div>Blocked a session {state === 0 ? "yes" : "no"}</div>
         <div>Rewrite {state === 0 ? "yes" : "no"}</div>
       </div>
     </div>
@@ -40,8 +40,8 @@ export function LockChartMobile({ state, always }: { state: 0 | 1; always?: bool
     <div className={cn("relative w-full", !always && "hidden max-md:block", state === 0 ? "hatch-red" : "hatch-green")}>
       <div className="border-t border-gray-new-10 bg-[#CAE6D9]/90 p-5 font-mono text-[13px] text-[#285D49]">
         {state === 0
-          ? "ACCESS EXCLUSIVE on subscriptions, 27.4s, 84 queued"
-          : "Expand-and-contract, 0.4s, nothing queued"}
+          ? "ACCESS EXCLUSIVE on subscriptions, 27.4s, blocked another session"
+          : "Expand-and-contract, 0.4s, nothing blocked"}
       </div>
     </div>
   );

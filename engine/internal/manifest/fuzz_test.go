@@ -51,7 +51,7 @@ func FuzzParse(f *testing.F) {
 		}
 		// A manifest that parsed must survive being explained, because the
 		// dashboard renders it on every run.
-		_ = manifest.Explain(m)
+		_ = manifest.Explain(m, 0)
 		_ = manifest.Summary(m)
 		_ = manifest.Hosts(m)
 

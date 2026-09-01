@@ -269,7 +269,10 @@ export function createMetrics(version = 'dev'): ControlPlaneMetrics {
     ingestEvents: registry.register(
       new Counter(
         'af_ingest_events_total',
-        'Engine events by what happened to them: accepted, duplicate, or rejected. The ingestion loss SLO is that rejected stays at zero.',
+        'Engine events by what happened to them: accepted, duplicate, rejected, or unprojected. '
+        + 'The ingestion loss SLO is that rejected stays at zero. Unprojected is a subset of accepted: '
+        + 'stored, and applied to no environment row because the sender did not say which repository the '
+        + 'environment belongs to, which is an engine older than the release that started reporting it.',
       ),
     ),
     ingestBatches: registry.register(

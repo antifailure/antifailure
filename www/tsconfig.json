@@ -1,16 +1,23 @@
 {
   // Formatted the way `next build` writes it, on purpose.
   //
-  // Next rewrites this file on every build: it expands the arrays, sets
+  // Next 16 rewrites this file on every build: it expands the arrays, sets
   // "jsx" to "react-jsx", and adds the .next/dev/types include. When the
-  // committed file said something else, every www build left a dirty tree,
-  // and three separate agents reverted the same diff by hand in one day.
-  // The fourth would have committed it as their own change. Committing what
-  // the tool writes makes the build a no-op here instead, which is verified:
-  // two consecutive builds now leave the file byte identical.
+  // committed file said something else, every www build left a dirty
+  // tree, and four agents reverted the identical diff by hand in one day. The
+  // fifth would have committed it as their own change, and the sixth would
+  // have spent an afternoon on why the committed config disagreed with the
+  // tool. Committing what the tool writes makes the build a no-op here
+  // instead, verified rather than assumed: two consecutive builds leave the
+  // file byte identical and `tsc --noEmit` is clean against it.
+  //
+  // Why four people met this and described it four different ways: it is Next
+  // 16 behaviour and a stale Next 15 install does not do it at all. Every
+  // report was accurate about the tree it was made in. The variable none of
+  // them could see was inside their own node_modules, which is why this looked
+  // like flakiness and was not. Run `npm ci` before concluding anything here.
   //
   // Comments do survive the rewrite, which is why this one can be here.
-
   "compilerOptions": {
     "target": "ES2017",
     "lib": [

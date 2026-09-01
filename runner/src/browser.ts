@@ -9,6 +9,63 @@ import { chromium, type Browser, type BrowserContext, type Page as PWPage } from
 import type { Page } from './login.ts';
 import type { Snapshot } from './workflow.ts';
 
+/** The same pattern with its anchors taken off.
+ *
+ * The patterns in FIELD are anchored on purpose: an unanchored /email/ matches
+ * the newsletter box on a marketing page and /email address/ almost never
+ * does. What anchoring also excludes, and nobody noticed until this
+ * repository's own console was driven, is a field whose label carries its own
+ * hint text. A wrapping label computes ONE accessible name out of everything
+ * inside it, so
+ *
+ *     <label>Email address <input> We send a link that signs you in.</label>
+ *
+ * is named "Email address We send a link that signs you in.", the anchored
+ * pattern matches nothing at all, and the fill times out after ten seconds
+ * with an error naming the regex and not the reason.
+ */
+function unanchored(field: RegExp): RegExp {
+  return new RegExp(field.source.replace(/^\^/, '').replace(/\$$/, ''), field.flags);
+}
+
+/**
+ * The field with exactly this accessible name, or failing that the one whose
+ * name merely contains it.
+ *
+ * The exact match is waited for rather than counted, because a page that
+ * renders its form after a fetch has no fields at all for the first few
+ * hundred milliseconds, and counting would fall through to the loose pattern
+ * every time on exactly the applications where precision matters most.
+ */
+async function locate(pw: PWPage, field: RegExp, timeoutMs: number) {
+  const exact = pw.getByLabel(field).first();
+  try {
+    await exact.waitFor({ state: 'visible', timeout: timeoutMs });
+    return exact;
+  } catch {
+    return pw.getByLabel(unanchored(field)).first();
+  }
+}
+
+/** How long a page gets to finish rendering before anything reads it.
+ *
+ * An application that renders on the client has nothing on it when the
+ * document finishes parsing. This repository's own console is the case that
+ * found it: after the sign-in callback lands, the whole body text is the
+ * single word "Loading" for about a second and a half. A snapshot taken there
+ * reports a page that offers no fields and no controls at all, so two
+ * workflows signed in successfully and were then reported as having proved
+ * nothing, on a page that was a second away from showing everything they were
+ * asked to look for.
+ *
+ * networkidle rather than a fixed sleep, because the cost is then paid only by
+ * the pages that need it: a page that is already idle returns in about a
+ * millisecond, and one that is still fetching waits exactly as long as it
+ * fetches. Playwright's 500ms quiet period is the floor, which is what a
+ * served JSON document pays.
+ */
+const RENDER_MS = 10_000;
+
 /** Evidence captured from a run. */
 export interface Evidence {
   /** Video is the recording, when one was made. */
@@ -25,6 +82,16 @@ export interface Evidence {
    *  the egress policy and is worth saying so rather than leaving somebody to
    *  guess. */
   readonly failed: readonly string[];
+}
+
+/** Waits for the page to stop fetching, and gives up quietly.
+ *
+ * Swallowed rather than thrown: a page holding a socket open, or polling once
+ * a second, never goes idle at all, and those are applications this has to be
+ * able to look at. Reading a busy page is better than refusing to read it.
+ */
+async function settled(pw: PWPage): Promise<void> {
+  await pw.waitForLoadState('networkidle', { timeout: RENDER_MS }).catch(() => {});
 }
 
 /** Session is one browser, one context, one page, and its evidence. */
@@ -86,9 +153,23 @@ export class Session {
     return {
       async goto(url: string) {
         await pw.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        await settled(pw);
       },
       async fill(field: RegExp, value: string) {
-        await pw.getByLabel(field).first().fill(value, { timeout: 10_000 });
+        // Three seconds to prefer the exact name, then ten for whichever
+        // locator that settled on. The loose pattern matches everything the
+        // exact one does, so the first wait buys precision rather than
+        // reachability and does not need to be long.
+        await (await locate(pw, field, 3_000)).fill(value, { timeout: 10_000 });
+      },
+      async has(field: RegExp, timeoutMs: number) {
+        const half = Math.max(250, Math.floor(timeoutMs / 2));
+        try {
+          await (await locate(pw, field, half)).waitFor({ state: 'visible', timeout: half });
+          return true;
+        } catch {
+          return false;
+        }
       },
       async click(control: RegExp) {
         const button = pw.getByRole('button', { name: control });
@@ -128,6 +209,9 @@ export class Session {
   /** snapshot describes the page in the terms a decision is made in. */
   async snapshot(): Promise<Snapshot> {
     const pw = this.#page;
+    // Again here and not only after a navigation, because a press that starts
+    // a client side transition changes the page without one.
+    await settled(pw);
     const fields = await pw.evaluate(() => {
       // Read in the page rather than through many round trips, because a form
       // with thirty fields would otherwise cost thirty messages.

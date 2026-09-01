@@ -15,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
@@ -782,7 +783,12 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		out = append(out, provider.Resource{
 			Kind: "namespace", ID: ns.Name, EnvID: envID,
 			CreatedAt: ns.CreationTimestamp.UTC(),
-			Labels:    map[string]string{"name": ns.Name, "phase": string(ns.Status.Phase)},
+			Labels: map[string]string{
+				"name": ns.Name, "phase": string(ns.Status.Phase),
+				// Carried through so the reaper reads one shape of resource
+				// rather than talking to each runtime's own client.
+				"expires": ns.Labels[dockerutil.LabelExpires],
+			},
 		})
 		deployments, err := r.cli.AppsV1().Deployments(ns.Name).List(ctx, metav1.ListOptions{})
 		if err != nil {

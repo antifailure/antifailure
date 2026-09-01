@@ -15,9 +15,9 @@ import { cn } from "@/lib/cn";
 
 const MANIFEST = `load:
   enabled: true
-  source: access_log
+  source: otel
   source_config:
-    path: ops/access.log
+    path: traffic/production.otlp.json
   scale: 0.05
   duration: 2m
   safe_routes: ["GET /**", "POST /api/search"]
@@ -26,7 +26,11 @@ const MANIFEST = `load:
     p95_increase: 0.25
     error_rate: 0.01`;
 
-/** A shaped result, in the order the runner sorts one: worst regression first. */
+/** A shaped result, in the order the runner sorts one: worst regression first.
+ *  Baselines come from the trace export, which is why the source above is otel:
+ *  an access log line carries no duration, so a shape read from one has no p95
+ *  to compare against. POST /api/search was seen too few times in the export to
+ *  earn a baseline, which is what that row shows. */
 const ROUTES: { route: string; share: string; p95: string; base: string | null; delta: number | null }[] = [
   { route: "GET /api/subscriptions", share: "18%", p95: "412ms", base: "180ms", delta: 1.29 },
   { route: "GET /settings/billing", share: "34%", p95: "168ms", base: "150ms", delta: 0.12 },
@@ -69,7 +73,7 @@ function TrafficResult() {
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <MonoLabel className="uppercase tracking-[0.14em]">af load</MonoLabel>
-          <MonoLabel className="text-black/60">source access_log</MonoLabel>
+          <MonoLabel tone="reader">source otel</MonoLabel>
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] tracking-extra-tight text-black/55">
           <span>
@@ -156,7 +160,7 @@ export function LoadPage() {
         path="/product/load"
         eyebrow="Load"
         title="Traffic shaped like production's, sent at the twin."
-        lead="The engine reads your production access log, keeps the mix of routes it actually served, and sends that mix at the twin. Every route is unsafe until the manifest names it, and every answer is a comparison against the p95 production serves that route in."
+        lead="The engine reads your own production traffic, keeps the mix of routes it actually served, and sends that mix at the twin. Every route is unsafe until the manifest names it, and a trace export arrives carrying production's own p95 per route, so the answer is a comparison rather than a score."
         framed={false}
         visual={
           <div>
@@ -185,15 +189,44 @@ export function LoadPage() {
 
       <PageSection tone="white">
         <Split visual={<CodePanel label="antifailure.yaml">{MANIFEST}</CodePanel>}>
-          <PageHeading title="<strong>One source is connected.</strong> The others are in the schema and refused out loud." />
+          <PageHeading title="<strong>Two sources, and only one of them carries a baseline.</strong> A trace export carries a latency. A log line does not." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            A combined-format access log is the only shape source this build reads. The manifest also
-            accepts Datadog, New Relic and OpenTelemetry, and every one of them is refused at runtime
-            with a message naming what to use instead.
+            <code className="font-mono text-[15px] text-black/70">otel</code> reads an OpenTelemetry
+            trace export in OTLP/JSON, the file a collector&apos;s file exporter writes.{" "}
+            <code className="font-mono text-[15px] text-black/70">access_log</code> reads a combined
+            format log. Both are read out of the repository, so no credential and no outbound call
+            decides what traffic gets sent. A span has a start and an end, so a shape read from
+            traces arrives with production&apos;s p95 for each route in it, which is what{" "}
+            <code className="font-mono text-[15px] text-black/70">p95_increase</code> compares
+            against. A combined format line carries no duration, so an access log gives the mix, the
+            weights and the arrival rate, and no baseline to measure a regression against. Setting{" "}
+            <code className="font-mono text-[15px] text-black/70">p95_increase</code> under the log
+            is refused when the manifest is read, rather than accepted and quietly skipped.
           </p>
+          <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
+            There were four sources once. Two of them existed only in the schema and were refused
+            when a run reached them, which is worse than not offering them: a key you can set that
+            cannot work reads as a broken product rather than an unfinished one. They are gone, and
+            anything unrecognised is refused when the manifest is read, before anything is built.
+          </p>
+          {/*
+            Both refusals under one label because both really are AF-MAN-002:
+            the validator reports a path and a message, and the code carries
+            them as its detail. Giving the second one a label of its own read
+            as a second error code to anybody who had just read the first.
+          */}
           <div className="mt-8">
-            <Callout label="AF-LOD-010">
-              otel is not connected in this build; use access_log or none.
+            <Callout label="AF-MAN-002">
+              <p>
+                load.source: There is no load source called &quot;datadog&quot;. The sources that
+                read traffic are otel, an OpenTelemetry trace export, and access_log, a combined
+                format log. Both take source_config.path.
+              </p>
+              <p className="mt-4">
+                load.thresholds.p95_increase: The load source is access_log and p95_increase is
+                set. A combined format log line carries no duration, so every route read from one
+                arrives with no baseline and this threshold can never fire.
+              </p>
             </Callout>
           </div>
         </Split>
@@ -203,15 +236,16 @@ export function LoadPage() {
         <PageHeading title="<strong>A route with no baseline is never a breach.</strong> Comparing against nothing and calling the answer a regression is how a check becomes noise." />
         <p className="mt-8 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
           Thresholds are deltas against what production serves, never absolute numbers: an absolute
-          limit fails on a slow runner and says nothing about the change. A new route the log has
-          never seen is listed with its latency and no verdict, because there is nothing yet to
-          compare it to.
+          limit fails on a slow runner and says nothing about the change. A route the export saw
+          fewer than twenty times is listed with its latency and no verdict, because a percentile
+          made of three numbers is noise. When no route in a run has a baseline, the threshold
+          measured nothing and the run says so instead of reporting a clean p95.
         </p>
         <div className="mt-12 max-w-[720px]">
           <Callout label="What load does not do">
             It does not run traffic against a migration while the migration applies, and it does not
-            deploy a second version of the application to compare against. The baseline is the p95 in
-            your own access log.
+            deploy a second version of the application to compare against. The baseline is
+            production&rsquo;s own p95, read out of the trace export you point it at.
           </Callout>
         </div>
       </PageSection>

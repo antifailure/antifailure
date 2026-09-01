@@ -1,0 +1,70 @@
+---
+/**
+ * Starlight's head, plus the structured data that ties these pages to the
+ * marketing site.
+ *
+ * Without this, the ~76 indexable documentation pages declare no relationship
+ * to anything: an engine reading /docs/concepts/agents sees an article on a
+ * domain, and has no way to learn that the domain's Organization, WebSite and
+ * SoftwareApplication, all declared in www/lib/jsonld.tsx, are the same thing
+ * it is reading about. The three `@id` values below are the anchors that file
+ * publishes, so the graph closes across both builds rather than describing two
+ * unrelated properties that happen to share a hostname.
+ *
+ * This replaces a static entry in the config's `head` array, which could only
+ * say that a TechArticle exists here without saying which one: no @id, no url,
+ * no headline, no date. It also went out on the 404, so that page claimed an
+ * article and asked not to be indexed in the same head. Every field that makes
+ * the claim worth anything is per page, and the config's head array is static.
+ */
+import Default from "@astrojs/starlight/components/Head.astro";
+
+const { head, entry, lastUpdated } = Astro.locals.starlightRoute;
+
+const attrOf = (tag: string, key: string, value: string) =>
+  head.find((t) => t.tag === tag && t.attrs?.[key] === value)?.attrs;
+
+// Read the canonical Starlight already computed rather than rebuilding it from
+// Astro.url. `base` is /docs and `trailingSlash` is ignore, so reconstructing
+// it by hand is three chances to disagree with the tag on the same page.
+const canonical = attrOf("link", "rel", "canonical")?.href;
+
+// A page can set `robots: noindex` in its frontmatter, and the 404 does.
+// Claiming an indexable article on a page that just asked not to be indexed is
+// a contradiction an engine is entitled to resolve either way.
+const robots = String(attrOf("meta", "name", "robots")?.content ?? "");
+const indexable = !robots.includes("noindex");
+
+const description =
+  entry.data.description ??
+  String(attrOf("meta", "name", "description")?.content ?? "");
+
+const article =
+  typeof canonical === "string" && indexable
+    ? {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "@id": `${canonical}#techarticle`,
+        url: canonical,
+        mainEntityOfPage: canonical,
+        headline: entry.data.title,
+        ...(description ? { description } : {}),
+        ...(lastUpdated ? { dateModified: lastUpdated.toISOString() } : {}),
+        inLanguage: "en",
+        isPartOf: { "@id": "https://antifailure.dev/#website" },
+        publisher: { "@id": "https://antifailure.dev/#organization" },
+        about: { "@id": "https://antifailure.dev/#software" },
+      }
+    : null;
+---
+
+<Default><slot /></Default>
+{
+  article && (
+    <script
+      type="application/ld+json"
+      set:html={JSON.stringify(article)}
+      is:inline
+    />
+  )
+}

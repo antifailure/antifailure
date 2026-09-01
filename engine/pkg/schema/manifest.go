@@ -226,6 +226,10 @@ type EgressRule struct {
 type LoginStrategy string
 
 const (
+	// LoginNone is a persona that never signs in, for an application with no
+	// sign in at all or a workflow about a signed out visitor. The agent goes
+	// straight to the workflow's start path.
+	LoginNone      LoginStrategy = "none"
 	LoginPassword  LoginStrategy = "password"
 	LoginMagicLink LoginStrategy = "magic_link"
 	LoginEmailCode LoginStrategy = "email_code"
@@ -645,7 +649,7 @@ type Policy struct {
 	MigrationFailed PolicyLevel `json:"migration_failed,omitempty" yaml:"migration_failed,omitempty"`
 	// MigrationRewrite is a statement Postgres reported as rewriting a table.
 	MigrationRewrite PolicyLevel `json:"migration_rewrite,omitempty" yaml:"migration_rewrite,omitempty"`
-	// MigrationLint governs all six lint rules together. They are one setting
+	// MigrationLint governs all seventeen lint rules together. They are one setting
 	// because a project that wants the lint wants all of it: the rules are
 	// already scoped by table size, so the noisy case is handled by
 	// insights.large_table_rows rather than by turning a rule off.
@@ -692,12 +696,17 @@ const (
 
 // Runtime configures where and how long environments run.
 type Runtime struct {
-	Provider          RuntimeProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
-	TTL               string          `json:"ttl,omitempty" yaml:"ttl,omitempty"`
-	IdleSleep         string          `json:"idle_sleep,omitempty" yaml:"idle_sleep,omitempty"`
-	Domain            string          `json:"domain,omitempty" yaml:"domain,omitempty"`
-	NamespacePrefix   string          `json:"namespace_prefix,omitempty" yaml:"namespace_prefix,omitempty"`
-	KubeconfigContext string          `json:"kubeconfig_context,omitempty" yaml:"kubeconfig_context,omitempty"`
+	Provider RuntimeProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
+	TTL      string          `json:"ttl,omitempty" yaml:"ttl,omitempty"`
+	// MaxTTL is the furthest af env extend may push an environment's expiry,
+	// measured from when the environment was created. It is the answer to
+	// "a lifetime that can be extended forever is not a lifetime": TTL is what
+	// an environment gets without asking, MaxTTL is the most it can be given.
+	MaxTTL            string `json:"max_ttl,omitempty" yaml:"max_ttl,omitempty"`
+	IdleSleep         string `json:"idle_sleep,omitempty" yaml:"idle_sleep,omitempty"`
+	Domain            string `json:"domain,omitempty" yaml:"domain,omitempty"`
+	NamespacePrefix   string `json:"namespace_prefix,omitempty" yaml:"namespace_prefix,omitempty"`
+	KubeconfigContext string `json:"kubeconfig_context,omitempty" yaml:"kubeconfig_context,omitempty"`
 }
 
 // GitHubMode is how the GitHub integration runs.

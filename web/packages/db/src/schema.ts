@@ -552,6 +552,98 @@ export const scimGroupMembers = pgTable('scim_group_members', {
   index('scim_group_members_resource_idx').on(t.resourceId),
 ])
 
+// ---------------------------------------------------------------------------
+// Billing. See migrations/0020_billing.sql for the policies, which are the
+// interesting half: a Stripe webhook has no tenant and declares the customer
+// its verified payload named.
+// ---------------------------------------------------------------------------
+
+/** One Stripe customer per organization, keyed by the organization so that a
+ *  second one is a constraint violation rather than a double charge. */
+export const billingCustomers = pgTable('billing_customers', {
+  orgId: uuid('org_id').primaryKey(),
+  stripeCustomerId: text('stripe_customer_id').notNull(),
+  email: text('email'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** Metadata, never a card. A table of its own so that a verified delivery can
+ *  write it without holding UPDATE on the column that says which organization
+ *  a customer belongs to; see migrations/0020_billing.sql. */
+export const paymentMethods = pgTable('payment_methods', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  stripePaymentMethodId: text('stripe_payment_method_id').notNull(),
+  stripeCustomerId: text('stripe_customer_id').notNull(),
+  kind: text('kind').notNull().default('card'),
+  brand: text('brand'),
+  last4: text('last4'),
+  expMonth: integer('exp_month'),
+  expYear: integer('exp_year'),
+  detachedAt: timestamp('detached_at', { withTimezone: true }),
+  lastEventAt: timestamp('last_event_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const subscriptions = pgTable('subscriptions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  stripeSubscriptionId: text('stripe_subscription_id').notNull(),
+  stripeCustomerId: text('stripe_customer_id').notNull(),
+  /** The plan this entitles, which is what moves organizations.plan. */
+  plan: text('plan').notNull(),
+  priceId: text('price_id'),
+  /** Seats. The only number a price multiplies. */
+  quantity: integer('quantity').notNull().default(1),
+  status: text('status').notNull(),
+  currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
+  currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+  cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
+  canceledAt: timestamp('canceled_at', { withTimezone: true }),
+  /** The watermark that makes an out-of-order delivery harmless. */
+  lastEventAt: timestamp('last_event_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const invoices = pgTable('invoices', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  stripeInvoiceId: text('stripe_invoice_id').notNull(),
+  stripeCustomerId: text('stripe_customer_id').notNull(),
+  stripeSubscriptionId: text('stripe_subscription_id'),
+  number: text('number'),
+  status: text('status').notNull(),
+  // Minor units as an integer, because that is what money is.
+  amountDue: bigint('amount_due', { mode: 'number' }).notNull().default(0),
+  amountPaid: bigint('amount_paid', { mode: 'number' }).notNull().default(0),
+  currency: text('currency').notNull().default('usd'),
+  hostedInvoiceUrl: text('hosted_invoice_url'),
+  periodStart: timestamp('period_start', { withTimezone: true }),
+  periodEnd: timestamp('period_end', { withTimezone: true }),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  lastEventAt: timestamp('last_event_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** Every verified delivery, once. The primary key is the provider's own event
+ *  id, so a retry inserts nothing and nothing is applied twice. */
+export const billingEvents = pgTable('billing_events', {
+  stripeEventId: text('stripe_event_id').primaryKey(),
+  /** Null until the customer is attached to an organization. */
+  orgId: uuid('org_id'),
+  stripeCustomerId: text('stripe_customer_id').notNull(),
+  type: text('type').notNull(),
+  eventCreatedAt: timestamp('event_created_at', { withTimezone: true }).notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  outcome: text('outcome').notNull().default('unresolved'),
+  payload: jsonb('payload').notNull().default({}),
+})
+
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
@@ -562,4 +654,5 @@ export const tenantScopedTables = [
   ssoConnections, ssoConnectionSecrets, ssoDomains, ssoLoginStates,
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,
+  billingCustomers, paymentMethods, subscriptions, invoices, billingEvents,
 ] as const

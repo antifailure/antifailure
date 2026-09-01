@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
+	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -50,10 +51,15 @@ func int64Ref(n int64) *int64 { return &n }
 
 // namespaceFor builds the environment's namespace.
 func (r *Runtime) namespaceObject(envID string) *corev1.Namespace {
+	labels := labelsFor(envID, "namespace")
+	if r.ttl > 0 {
+		now := r.clock.Now()
+		labels[dockerutil.LabelExpires] = strconv.FormatInt(now.Add(r.ttl).UTC().Unix(), 10)
+	}
 	return &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   r.namespace(envID),
-			Labels: labelsFor(envID, "namespace"),
+			Labels: labels,
 		},
 	}
 }

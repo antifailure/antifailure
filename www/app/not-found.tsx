@@ -5,9 +5,46 @@ import { SiteLayout } from "@/components/layout/SiteLayout";
 import { pageTitle } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: pageTitle("Not found"),
+  // `absolute`, because the root layout appends the site name to any bare
+  // string and this title already carries it. Live production serves the site
+  // name twice on this page today, and swapping the separator alone would
+  // only have made the doubling tidier. This is the third page to fall into
+  // the trap lib/seo.ts documents, after the six moved paths, which is a good
+  // argument for the helper being the only way a title is ever written.
+  title: { absolute: pageTitle("Not found") },
   description: "That page is not here.",
+  // This `robots` is required, and removing it is worse than the redundancy it
+  // causes. The root layout declares `index: true` for the whole site, and a
+  // child's metadata is what overrides it, so deleting this key does not leave
+  // one clean tag behind: it ships `index, follow` on the 404. The check below
+  // caught exactly that within a minute of trying it.
+  //
+  // Two tags remain, `noindex` from Next's own handling of this route and
+  // `noindex, follow` from here, and they were never actually in conflict:
+  // bare `noindex` already implies `follow`, so both say the same thing. The
+  // redundancy cannot be removed from this side, only made consistent. What is
+  // asserted below is therefore the property that matters, that no robots tag
+  // on this page permits indexing, rather than a tag count nothing can hold to.
   robots: { index: false, follow: true },
+  // No canonical, and this is the strongest of the three claims on this page.
+  //
+  // The root layout sets `canonical: SITE_URL` for the whole site, so every
+  // 404 inherited it and told crawlers that this page IS the home page. That
+  // is a worse claim than either robots tag: it is not "do not index me", it
+  // is "I am something else".
+  //
+  // Google's documented behaviour makes it concrete rather than theoretical.
+  // Faced with `noindex` and a rel=canonical pointing elsewhere, it generally
+  // honours the canonical over the noindex, and its canonicalization guidance
+  // separately says to check that a canonical target does not itself carry a
+  // noindex. Both halves of that point the same way here: a 404 saying it is
+  // the home page, while also saying do not index, is an invitation to
+  // consolidate the two and to carry the noindex across with them.
+  //
+  // `null` rather than a self-referential URL, because this file is served for
+  // every mistyped path in the site under `output: "export"`. There is no one
+  // address it could name that would be true.
+  alternates: { canonical: null },
 };
 
 // Where somebody who mistyped a URL most plausibly meant to go. Deliberately

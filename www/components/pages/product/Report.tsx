@@ -108,7 +108,7 @@ const GATES: {
   {
     tone: "FAIL",
     pr: "pr/184",
-    title: "add billing_status default",
+    title: "widen plan_id to bigint",
     evidence: "checkout failed, 3 rows broke an invariant",
     merge: "Check failed, exit 1",
   },
@@ -367,11 +367,11 @@ export function ReportPage() {
           command you run rather than a section of this check. A load threshold produces a listed
           regression here and exits non-zero under{" "}
           <code className="font-mono text-[15px] text-black">af load</code>; the check's verdict comes
-          from the workflows and the invariants. A route the access log has never served carries no
-          baseline, and the report says "no baseline" rather than inventing one.
+          from the workflows and the invariants. A route the traffic source could not measure carries
+          no baseline, and the report says &ldquo;no baseline&rdquo; rather than inventing one.
         </p>
         <div className="mt-12 max-w-[720px] border-t border-black/10 pt-8">
-          <MonoLabel className="uppercase tracking-[0.14em] text-black/60">How close the twin got</MonoLabel>
+          <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">How close the twin got</MonoLabel>
           <p className="mt-5 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
             The report carries an inventory of what this environment reproduced and what it did
             not, dimension by dimension: services, data, third-party hosts, personas, runtime and
@@ -394,12 +394,13 @@ export function ReportPage() {
         </div>
 
         <div className="mt-12 max-w-[720px] border-t border-black/10 pt-8">
-          <MonoLabel className="uppercase tracking-[0.14em]">Thresholds that exist</MonoLabel>
+          <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">Thresholds that exist</MonoLabel>
           <ul className="mt-5 space-y-3 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
             <li>
-              <span className="font-mono text-[14px] text-black">p95_increase</span>, default 0.25.
-              Applied per route, against the p95 in your own access log, and never to a route with no
-              baseline.
+              <span className="font-mono text-[14px] text-black">p95_increase</span>, default 0.25
+              under a trace export. Applied per route, against production&rsquo;s own p95 for that
+              route, and never to a route with no baseline. An access log carries no durations, so
+              the manifest refuses the threshold there rather than listing one that cannot fire.
             </li>
             <li>
               <span className="font-mono text-[14px] text-black">error_rate</span>, default 0.01.

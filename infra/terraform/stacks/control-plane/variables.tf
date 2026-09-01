@@ -127,6 +127,20 @@ variable "max_replicas" {
   default = 3
 }
 
+# Connections PER REPLICA, and the stack has to set it because the number that
+# matters is this one multiplied by the replicas and compared against what the
+# database SKU allows. The module defaulted it to 10 and the stack never passed
+# it at all, so staging and production ran the same pool against servers whose
+# connection budgets differ by a factor of twenty four.
+#
+# modules/control-plane/database.tf does the multiplication and fails the plan
+# if it does not fit. Both tfvars files show their own arithmetic.
+variable "pool_max" {
+  type        = number
+  default     = 10
+  description = "Postgres connections each replica may hold. (max_replicas + min_replicas) times this, plus four for the jobs and break-glass, has to fit in what the database SKU hands a role without pg_use_reserved_connections."
+}
+
 variable "app_base_url" {
   type    = string
   default = ""

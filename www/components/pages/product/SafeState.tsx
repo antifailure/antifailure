@@ -17,6 +17,21 @@ import { cn } from "@/lib/cn";
 type MaskRule = "MASK" | "DELETE";
 type SubsetFate = "KEEP" | "DROP" | "DELETE";
 
+/**
+ * One masked record, with the values the engine actually produces.
+ *
+ * Both api_key rows read "deleted DELETE". The default rule for a key-shaped
+ * column is hash_hex, not nullify: `sk_live_51Hq` becomes `b6929ad97b7b`, a
+ * keyed hash of the same length that preserves equality and nothing else.
+ * Only session_token is nullified. Hashing is a defensible default, since a
+ * schema with a NOT NULL api_key cannot take a null, but it is not deletion
+ * and the panel said it was.
+ *
+ * The masked addresses were at invented domains, c7h0.io and d1v5.co, which
+ * anybody could register. The email transform always writes example.test,
+ * which is reserved and can never receive mail, and that is the whole point of
+ * it.
+ */
 const RECORDS: {
   id: string;
   fields: { key: string; production: string; twin: string; rule: MaskRule }[];
@@ -24,17 +39,17 @@ const RECORDS: {
   {
     id: "u_8f2a",
     fields: [
-      { key: "email", production: "ajay@acme.com", twin: "n8w1@c7h0.io", rule: "MASK" },
+      { key: "email", production: "ajay@acme.com", twin: "3z8t…@example.test", rule: "MASK" },
       { key: "session", production: "tok_live_8f2", twin: "deleted", rule: "DELETE" },
-      { key: "api_key", production: "sk_live_51Hq", twin: "deleted", rule: "DELETE" },
+      { key: "api_key", production: "sk_live_51Hq", twin: "b6929ad97b7b", rule: "MASK" },
     ],
   },
   {
     id: "u_91c0",
     fields: [
-      { key: "email", production: "lea@acme.com", twin: "p2f6@d1v5.co", rule: "MASK" },
+      { key: "email", production: "lea@acme.com", twin: "akbc…@example.test", rule: "MASK" },
       { key: "session", production: "sess_9c1a", twin: "deleted", rule: "DELETE" },
-      { key: "api_key", production: "sk_live_7Kx2", twin: "deleted", rule: "DELETE" },
+      { key: "api_key", production: "sk_live_7Kx2", twin: "7eeab1460406", rule: "MASK" },
     ],
   },
 ];
@@ -90,7 +105,7 @@ function MaskingPanel() {
         <MonoLabel className="uppercase">public.users</MonoLabel>
         <div className="flex items-center gap-2">
           <MonoLabel className="uppercase">before → after</MonoLabel>
-          <MonoLabel className="uppercase text-[#285D49]">unique</MonoLabel>
+          <MonoLabel tone="ok" className="uppercase">unique</MonoLabel>
         </div>
       </div>
       <Hairline />
@@ -127,7 +142,7 @@ function MaskingPanel() {
         <Hairline vertical className="max-xl:hidden" />
         <div className="min-w-0 flex-1 shadow-[inset_2px_0_0_#33bf00] max-xl:shadow-[inset_0_2px_0_#33bf00]">
           <div className="flex items-center justify-between px-4 py-2">
-            <MonoLabel className="uppercase text-[#285D49]">twin</MonoLabel>
+            <MonoLabel tone="ok" className="uppercase">twin</MonoLabel>
             <MonoLabel className="uppercase">sanitized</MonoLabel>
           </div>
           <Hairline />
@@ -165,14 +180,20 @@ function MaskingPanel() {
         <p className="pr-3 font-mono text-[11px] leading-5 tracking-extra-tight text-black/70 max-xl:pr-0">
           email ajay@acme.com if the card fails
         </p>
+        {/* The whole value, not the address inside it. This showed
+            "email [redacted] if the card fails", surgical redaction that keeps
+            the sentence. free_text replaces the entire field with synthetic
+            prose of the same length, which is both safer and not what was
+            drawn. This is what the transform returns for the line on the
+            left. */}
         <p className="border-l border-black/10 pl-4 font-mono text-[11px] leading-5 tracking-extra-tight text-black/70 max-xl:border-l-0 max-xl:border-t max-xl:pl-0 max-xl:pt-2">
-          email [redacted] if the card fails
+          of quickly surprises that later......
         </p>
       </div>
       <Hairline />
       <div className="flex flex-wrap gap-x-5 gap-y-1.5 px-4 py-2.5">
         <CheckRow ok>uniqueness preserved</CheckRow>
-        <CheckRow ok>tokens deleted, not masked</CheckRow>
+        <CheckRow ok>sessions deleted, keys hashed</CheckRow>
         <CheckRow ok>evidence, not records</CheckRow>
       </div>
     </Panel>
@@ -240,7 +261,7 @@ function SubsetPanel() {
     <Panel className="rounded-[12px] bg-white">
       <div className="flex items-center justify-between gap-3 px-4 py-2.5">
         <MonoLabel className="uppercase">referential subset</MonoLabel>
-        <MonoLabel className="uppercase text-[#285D49]">12% · joins valid</MonoLabel>
+        <MonoLabel tone="ok" className="uppercase">12% · joins valid</MonoLabel>
       </div>
       <Hairline />
       <div className="px-4 pt-3 pb-1">
@@ -343,7 +364,7 @@ export function SafeStatePage() {
         path="/product/safe-state"
         eyebrow="Safe State Engine"
         title="Production-shaped Postgres without production identities."
-        lead="Snapshot restore, referentially consistent subsetting, and deterministic masking inside the customer boundary. Tokens, sessions, and secrets are deleted, not disguised. The output is a sanitization evidence report, not a dataset."
+        lead="Snapshot restore, referentially consistent subsetting, and deterministic masking inside the customer boundary. A live session is deleted outright, and a key is replaced by a keyed hash that grants nothing. The output is a sanitization evidence report, not a dataset."
         visual={<MaskingPanel />}
       />
       <PageSection>
@@ -353,7 +374,7 @@ export function SafeStatePage() {
             { title: "Snapshot restore", body: "Logical restore for portability, or provider-native copy-on-write branches when supported." },
             { title: "Referential subsets", body: "Keep joins valid. Long-tail and malformed historical state stay in the subset." },
             { title: "Deterministic masking", body: "Format-preserving replacement with uniqueness preserved, inside the customer boundary." },
-            { title: "Delete, don’t mask", body: "Tokens, sessions, secrets, and credentials are deleted rather than disguised." },
+            { title: "Nothing that grants access survives", body: "A session token is deleted. A key, a secret and a password become a keyed hash of the same length that unlocks nothing." },
             { title: "Free-text PII", body: "Scan for emails, cards, phones, and keys that schema rules miss." },
             { title: "Evidence report", body: "Distribution validation, schema-drift handling, and a signed sanitization attestation." },
           ]}
@@ -363,9 +384,10 @@ export function SafeStatePage() {
         <Split visual={<SubsetPanel />}>
           <PageHeading title="<strong>A 12% subset that still joins.</strong> Dropped parents take their children. Rare rows stay." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Subsetting is the default instead of full copying. The twin keeps referential integrity, long-tail
-            billing states, and malformed history, the records that actually break migrations, while
-            volume stays bounded.
+            Subsetting is available and off by default, so a first run masks the whole database and
+            you turn subsetting on with a seed table when you want it. With it on, the twin keeps
+            referential integrity, long-tail billing states, and malformed history, the records that
+            actually break migrations, while volume stays bounded.
           </p>
           <Illustrative className="mt-6">
             Six rows of a worked example, with the ratio chosen. What a real subset keeps depends on

@@ -141,7 +141,7 @@ func (r *Runtime) create(
 	name string,
 	overrideCmd string,
 ) (string, error) {
-	labels := dockerutil.Managed(dockerutil.KindService, spec.EnvID, r.clock.Now())
+	labels := r.managed(dockerutil.KindService, spec.EnvID)
 	labels[dockerutil.LabelService] = s.Name
 	labels[dockerutil.LabelServiceKind] = s.Kind
 
@@ -247,7 +247,7 @@ func (r *Runtime) startIngress(
 		release()
 		return 0, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
-	labels := dockerutil.Managed(dockerutil.KindSidecar, spec.EnvID, r.clock.Now())
+	labels := r.managed(dockerutil.KindSidecar, spec.EnvID)
 	labels[dockerutil.LabelService] = s.Name
 
 	resp, err := r.cli.ContainerCreate(ctx,

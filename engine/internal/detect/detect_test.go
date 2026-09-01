@@ -2,6 +2,8 @@ package detect_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -9,9 +11,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"gopkg.in/yaml.v3"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/detect"
+	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -50,6 +54,25 @@ func serviceNamed(t *testing.T, m *schema.Manifest, name string) schema.Service 
 	}
 	t.Fatalf("no service named %q; found %v", name, names)
 	return schema.Service{}
+}
+
+// requireDraftValidates proves the draft would survive the validator af init
+// runs before it writes anything. A draft that fails it is never written, so
+// a detection result that cannot pass it is a detection bug, not a manifest
+// one. The fixture is materialised on disk because the validator checks that
+// the paths a service names actually exist.
+func requireDraftValidates(t *testing.T, m *schema.Manifest, files map[string]string) {
+	t.Helper()
+	root := t.TempDir()
+	for name, body := range files {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o750))
+		require.NoError(t, os.WriteFile(full, []byte(body), 0o600))
+	}
+	body, err := yaml.Marshal(m)
+	require.NoError(t, err)
+	_, err = manifest.Parse(body, "antifailure.yaml", root)
+	require.NoError(t, err, "detection produced a draft af init would refuse to write")
 }
 
 func ruleFor(t *testing.T, m *schema.Manifest, host string) schema.EgressRule {
@@ -206,6 +229,138 @@ CMD ["node", "server.js"]
 	require.Equal(t, "Dockerfile", svc.Build.Dockerfile)
 	require.Equal(t, "runner", svc.Build.Target, "the final stage is the one that ships")
 	require.Equal(t, "node server.js", svc.Command)
+}
+
+// The other multi stage shape, and by far the more common one: the builder is
+// named and the stage that ships is not. finalStage only ever assigned on a
+// named FROM, so it kept the builder's name, and af init wrote 'target: build'
+// into the manifest. af up would then have built the stage that compiles the
+// application rather than the one that runs it, which fails at the point
+// furthest from the cause.
+func TestRun_AnUnnamedFinalStageTargetsNothing(t *testing.T) {
+	t.Parallel()
+	res := run(t, "app", map[string]string{
+		"package.json": `{"name":"app","scripts":{"start":"next start"},"dependencies":{"next":"15.0.0"}}`,
+		"Dockerfile": `FROM node:22-alpine AS build
+WORKDIR /app
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+COPY --from=build /app ./
+EXPOSE 3000
+CMD ["node", "server.js"]
+`,
+	})
+	svc := serviceNamed(t, res.Draft, "app")
+	require.Equal(t, schema.BuildDockerfile, svc.Build.Strategy)
+	require.Empty(t, svc.Build.Target,
+		"the stage that ships has no name, so there is no target to name")
+}
+
+// The median containerised Node repository, and the shape af init failed on:
+// the package is not named after the directory somebody cloned it into.
+//
+// Before this, the Dockerfile produced a service named after the directory and
+// the package produced one named after itself, both web, both on port 3000.
+// The manifest validator refused the draft and af init told the user to fix a
+// line in a file it had declined to write.
+func TestRun_ADockerfileAndAPackageWithAnotherNameAreOneService(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"package.json": `{"name":"antifailure-example-next-app","scripts":{"start":"next start"},"dependencies":{"next":"16.3.3"}}`,
+		"Dockerfile": `FROM node:22-alpine AS build
+WORKDIR /app
+RUN npm run build
+
+FROM node:22-alpine
+EXPOSE 3000
+CMD ["node", "server.js"]
+`,
+	}
+	res := run(t, "next-app", files)
+
+	require.Len(t, res.Draft.Services, 1,
+		"a Dockerfile and a package.json describing one application are one service")
+	svc := serviceNamed(t, res.Draft, "antifailure-example-next-app")
+	require.Equal(t, 3000, svc.Port)
+	require.Equal(t, schema.BuildDockerfile, svc.Build.Strategy)
+	require.Equal(t, "node server.js", svc.Command,
+		"the command the image runs beats a package script of equal confidence")
+
+	// The whole point. A draft that does not validate is never written, so the
+	// draft has to validate.
+	requireDraftValidates(t, res.Draft, files)
+}
+
+// The guard. Two services declared by one source in one directory are two
+// services, and folding them would delete one from a file people commit.
+func TestRun_TwoComposeServicesOnOneBuildContextStayTwo(t *testing.T) {
+	t.Parallel()
+	res := run(t, "stack", map[string]string{
+		"docker-compose.yml": `services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+  admin:
+    build: .
+    ports:
+      - "3001:3001"
+`,
+	})
+	require.Len(t, res.Draft.Services, 2)
+	require.Equal(t, 3000, serviceNamed(t, res.Draft, "web").Port)
+	require.Equal(t, 3001, serviceNamed(t, res.Draft, "admin").Port)
+}
+
+// A Procfile names processes, not applications, so "web" loses to the package
+// name. The worker is a different role and survives on its own.
+func TestRun_AProcfileWebProcessFoldsIntoThePackageItRuns(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"package.json": `{"name":"acme-web","scripts":{"start":"next start"},"dependencies":{"next":"15.0.0"}}`,
+		"Procfile": `web: npm start
+worker: node worker.js
+`,
+	}
+	res := run(t, "myrepo", files)
+
+	require.Len(t, res.Draft.Services, 2)
+	require.Equal(t, 3000, serviceNamed(t, res.Draft, "acme-web").Port)
+	require.Equal(t, schema.ServiceWorker, serviceNamed(t, res.Draft, "worker").Kind)
+	requireDraftValidates(t, res.Draft, files)
+}
+
+// A dependency on a name that folding renamed has to follow it. Left dangling,
+// the draft names a service it does not declare and the validator refuses the
+// file af init just wrote.
+func TestRun_ADependencyOnAFoldedNameFollowsIt(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"package.json": `{"name":"acme-web","scripts":{"start":"next start"},"dependencies":{"next":"15.0.0"}}`,
+		"jobs/Dockerfile": `FROM alpine
+EXPOSE 9100
+CMD ["/bin/jobs"]
+`,
+		"docker-compose.yml": `services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+  jobs:
+    build: ./jobs
+    depends_on:
+      - web
+`,
+	}
+	res := run(t, "myrepo", files)
+
+	for _, s := range res.Draft.Services {
+		require.NotEqual(t, "web", s.Name, "the compose key lost to the package name")
+	}
+	require.Equal(t, []string{"acme-web"}, serviceNamed(t, res.Draft, "jobs").DependsOn)
+	requireDraftValidates(t, res.Draft, files)
 }
 
 func TestRun_DockerfileEntrypointAndCommandCombine(t *testing.T) {

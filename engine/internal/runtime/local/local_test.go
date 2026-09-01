@@ -1021,13 +1021,21 @@ func TestMock_RunsAStripeBillingFlowWithNoNetwork(t *testing.T) {
 		`set -e`,
 		// Whitespace is stripped first, because the response is pretty printed
 		// and sed works a line at a time.
+		//
+		// Match the id by its Stripe prefix rather than by the "id" key. A
+		// subscription nests two more ids, on the subscription item and on its
+		// price, and sed is greedy, so `.*"id":"` walks past the top level one
+		// and captures the last. The price id is empty when the request names
+		// no price, so the naive form silently extracted "" and the flow failed
+		// three steps later at the subscription read. A prefix is also stable
+		// against the pack nesting more objects later.
 		`CUS=$(curl -sS --max-time 20 -X POST https://api.stripe.com/v1/customers ` +
-			`-d 'email=buyer@example.test' | tr -d ' \n' | sed 's/.*"id":"\([^"]*\)".*/\1/')`,
+			`-d 'email=buyer@example.test' | tr -d ' \n' | sed 's/.*"\(cus_[A-Za-z0-9]*\)".*/\1/')`,
 		`echo "customer=$CUS"`,
 		`case "$CUS" in cus_*) ;; *) echo "no customer id"; exit 21;; esac`,
 		`curl -sS --max-time 20 https://api.stripe.com/v1/customers/$CUS | grep -q "$CUS" || exit 22`,
 		`SUB=$(curl -sS --max-time 20 -X POST https://api.stripe.com/v1/subscriptions ` +
-			`-d "customer=$CUS" | tr -d ' \n' | sed 's/.*"id":"\([^"]*\)".*/\1/')`,
+			`-d "customer=$CUS" | tr -d ' \n' | sed 's/.*"\(sub_[A-Za-z0-9]*\)".*/\1/')`,
 		`case "$SUB" in sub_*) ;; *) echo "no subscription id"; exit 23;; esac`,
 		`curl -sS --max-time 20 https://api.stripe.com/v1/subscriptions/$SUB | grep -q '"active"' || exit 24`,
 		`curl -sS --max-time 20 -X DELETE https://api.stripe.com/v1/subscriptions/$SUB | grep -q '"canceled"' || exit 25`,

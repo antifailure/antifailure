@@ -10,6 +10,10 @@ import { RecordingMailer } from '../src/auth/mail.ts'
 import { issueSession } from '../src/auth/session.ts'
 import type { Role } from '../src/permissions.ts'
 import { findConsoleBuild } from '../src/console/static.ts'
+import { RealStripeClient } from '../src/billing/stripe.ts'
+import type { StripeConfig } from '../src/billing/plans.ts'
+import type { Billing } from '../src/billing/index.ts'
+import { MockPack, loadPack } from './mockpack.ts'
 
 export const adminUrl =
   process.env.AF_TEST_DATABASE_URL ?? 'postgres://postgres:test@127.0.0.1:55432/antifailure'
@@ -87,6 +91,10 @@ export interface StartApiOptions {
   /** A directory holding an exported console. Undefined means the server runs
    *  without one, which is a real way to run it and has its own test. */
   consoleDir?: string
+  /** Billing, against the engine's own Stripe mock pack. Undefined means this
+   *  server takes no money, which is the self-hosted default and has its own
+   *  tests. */
+  stripe?: Billing | null
 }
 
 export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
@@ -123,6 +131,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
     ...(options.providerBases ? { providerBases: options.providerBases } : {}),
     ...(options.consoleDir ? { consoleBuild: await findConsoleBuild(options.consoleDir) } : {}),
+    stripe: options.stripe ?? null,
   })
 
   return {
@@ -138,6 +147,54 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
       await admin.end({ timeout: 5 })
     },
   }
+}
+
+/**
+ * A Stripe that behaves, without the network and without an account.
+ *
+ * The client is the one that ships. Only its transport is replaced, with a
+ * fetch that hands the request to `engine/internal/mockpack` running the
+ * product's own Stripe pack. That is deliberately not a FakeStripeClient: a
+ * fake agrees with whatever its author believed the response shape was, and
+ * this arrangement is what found five defects in the shipped pack.
+ *
+ * A request no route matches answers 501 rather than 404, because 404 is a real
+ * answer here: getSubscription reads it as "Stripe has never heard of this",
+ * and a missing ROUTE must never be mistaken for a missing OBJECT.
+ */
+export async function stripeAgainstMockPack(
+  overrides: Partial<StripeConfig> = {},
+): Promise<{ billing: Billing; pack: MockPack; config: StripeConfig }> {
+  const pack = new MockPack([await loadPack('stripe')])
+  const config: StripeConfig = {
+    secretKey: 'sk_test_afmock',
+    webhookSecret: 'whsec_afmocktestsecret',
+    prices: { team: 'price_team_afmock', enterprise: 'price_enterprise_afmock' },
+    apiBase: 'https://api.stripe.com',
+    fetch: async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+      const body = typeof init?.body === 'string' ? init.body : ''
+      const answer = pack.answer(url.hostname, method, url.pathname, body)
+      if (!answer) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              type: 'invalid_request_error',
+              message: `no mock pack route for ${method} ${url.pathname}`,
+            },
+          }),
+          { status: 501, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      return new Response(answer.body, {
+        status: answer.status,
+        headers: { 'content-type': 'application/json' },
+      })
+    },
+    ...overrides,
+  }
+  return { billing: { config, client: new RealStripeClient(config) }, pack, config }
 }
 
 export interface Org {

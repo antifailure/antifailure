@@ -60,19 +60,25 @@ gate: _reports
     fi
 
     echo "Gates"
+    run "installs match their lockfiles" just installcheck
     run "generated files are current" just _generated
     run "release stamps a real version"  just ldcheck
+    run "release publishes what it signs" just releasecheck
     run "error catalog and code agree"   just errcheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
     run "documented manifests are valid" just manifestcheck
+    run "closed sets are counted right"  just constcheck
     run "prose reads like a person"      just prosecheck
     run "every figure has a source"      just figurecheck
+    run "the mode lists are the real one" just modecheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
     run "prose style"                    just vale
     run "every link resolves"            just links
+    run "no class that never applies"    just classcheck
+    run "no animation that never stops" just motioncheck
     run "the built docs carry their head" just docscheck
     run "the site's own claims"          just seo
     run "prose stays readable"           just readability
@@ -249,8 +255,47 @@ db-down:
 
 # Install the JavaScript dependencies.
 deps:
-    npm --prefix web ci --no-audit --no-fund
-    npm --prefix runner ci --no-audit --no-fund
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Every workspace in the tree, found rather than listed. This named web and
+    # runner, which is two of the eight lockfiles here, so `just deps` on a
+    # fresh clone left www, docs, console, api, ee/web and examples/next-app
+    # uninstalled and said nothing. `just installcheck` points people at this
+    # recipe, and advice that installs a quarter of the tree is worse than none.
+    #
+    # ee/web last, because its four packages resolve @antifailure/db and
+    # @antifailure/api out of web/ with file: dependencies. `npm ci` there
+    # before web exists SUCCEEDS and leaves a tree that does not work: the links
+    # resolve to source directories whose own dependencies are absent, and
+    # `npm run typecheck` then reports five implicit-any errors inside
+    # web/packages/db/src/schema.ts, in a file nobody touched. The order is read
+    # from the lockfile rather than from this comment: a workspace whose
+    # lockfile links outside its own directory goes last.
+    #
+    # `ci` for all of them, including ee/web. ci.yml uses `install` there and
+    # this followed it until running both showed the difference: `ci` works, and
+    # `install` rewrites ee/web/package-lock.json and chmods two files in web/.
+    # The verb was never the point. The order always was.
+    linked=()
+    plain=()
+    while IFS= read -r lock; do
+      dir=${lock#./}; dir=${dir%/package-lock.json}
+      if node -e "const p=require('./$lock').packages||{};process.exit(Object.values(p).some(e=>e.link&&String(e.resolved||'').startsWith('..'))?0:1)"; then
+        linked+=("$dir")
+      else
+        plain+=("$dir")
+      fi
+    done < <(find . -name package-lock.json -not -path '*/node_modules/*' | sort)
+
+    for dir in "${plain[@]}"; do
+      echo "  $dir"
+      npm --prefix "$dir" ci --no-audit --no-fund
+    done
+    for dir in "${linked[@]}"; do
+      echo "  $dir (last, because it links into another workspace)"
+      npm --prefix "$dir" ci --no-audit --no-fund
+    done
 
 # ---------------------------------------------------------------------------
 # Build
@@ -292,7 +337,7 @@ build-release version="dev":
 test: test-engine test-tools test-web test-runner test-site-api
 
 test-engine:
-    cd engine && go test ./... -race -timeout 30m
+    cd engine && go test ./... -race -count=1 -timeout 30m
 
 # G4. The coverage thresholds in the build plan's C.5, per package.
 #
@@ -305,18 +350,27 @@ test-engine:
 # counts only what its OWN tests reached, so a package exercised end to end by
 # the conformance suite reads as untested. C.5 says the integration tests count.
 coverage-profile:
-    cd engine && go test ./... -coverpkg=./... -coverprofile=../{{reports}}/coverage.out -timeout 60m
+    cd engine && go test ./... -count=1 -coverpkg=./... -coverprofile=../{{reports}}/coverage.out -timeout 60m
 
 coverage:
     go run ./tools/coverage -profile {{reports}}/coverage.out
 
+# -count=1 because the cache cannot see what these read.
+#
+# go test caches on the files a test opens UNDER ITS OWN MODULE. Several gates
+# here read the repository root, which is outside tools/, and tools/installsh
+# runs install.sh through sh, so nothing in the package opens it at all. A
+# deliberately broken install.sh was reported ok from cache: the only gate
+# protecting the installer went green without running.
 test-tools:
-    cd tools && go test ./... -timeout 5m
+    cd tools && go test ./... -count=1 -timeout 5m
 
 test-web:
+    go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
     npm --prefix web test --workspaces --if-present
 
 test-runner:
+    go run ./tools/installcheck . runner || npm --prefix runner ci --no-audit --no-fund
     npm --prefix runner test
 
 # The marketing site's own backend: api/, one anonymous write endpoint and the
@@ -330,13 +384,19 @@ test-site-api:
 # enterprise package added later is covered without editing this or CI. Naming
 # them by hand is how two of them ended up untested.
 test-ee:
-    cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./... -race -timeout 15m
+    cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./... -race -count=1 -timeout 15m
+    # web first, because ee/web's packages resolve @antifailure/db and
+    # @antifailure/api out of web/ with file: dependencies, and `npm ci` in
+    # ee/web with web absent succeeds and leaves a tree whose typecheck fails
+    # inside web/packages/db/src/schema.ts.
+    go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    go run ./tools/installcheck . ee/web || npm --prefix ee/web ci --no-audit --no-fund
     npm --prefix ee/web run typecheck
     npm --prefix ee/web test
 
 # The fast ones, for a tight loop.
 test-short:
-    cd engine && go test ./... -short -timeout 10m
+    cd engine && go test ./... -short -count=1 -timeout 10m
 
 # ---------------------------------------------------------------------------
 # The individual gates
@@ -366,6 +426,12 @@ errcheck:
 ldcheck:
     go run ./tools/ldcheck .
 
+# The release publishes every asset it signs, and the job that signs holds the
+# token that keyless signing needs. The signing half of release.yml has never
+# run, so the first tag is its first execution.
+releasecheck:
+    go run ./tools/releasecheck .
+
 # Nothing in the tree looks like a live credential.
 scanrepo:
     go run ./tools/scanrepo .
@@ -385,6 +451,32 @@ prosecheck:
 # audit came back clean. This reads the source instead.
 figurecheck:
     go run ./tools/figurecheck .
+
+# Every sentence that enumerates the egress modes enumerates the real ones,
+# read from schemas/manifest.v1.json rather than from a second copy of the list.
+modecheck:
+    go run ./tools/modecheck .
+
+# No class on a rendered element that another class on the same element beats,
+# so it is written, reviewed, and does nothing.
+#
+# `cn` is a plain join, not tailwind-merge, so a className passed to a component
+# lands beside the component's own class rather than replacing it, and the
+# cascade picks whichever Tailwind emitted last. The site header marked the
+# current page with text-black over a text-black/70 default, lost, and marked
+# nothing at all. Reads the built HTML, so it needs a built www.
+classcheck:
+    go run ./tools/classcheck .
+
+# No UI that animates forever while the reader does nothing.
+#
+# Reads the built stylesheet and the built HTML, never the source. Two people
+# read globals.css on the same day, both saw the one infinite rule left in it,
+# and both called it harmless because nothing in that file used it. It was
+# rendered on the front page by HeroFilm.tsx. The source says which rules
+# exist; only the render says which land on an element. Needs a built www.
+motioncheck:
+    go run ./tools/motioncheck .
 
 # Spelling, with the project dictionary in tools/docs/dictionary.txt.
 spell:
@@ -450,7 +542,10 @@ links:
 seo:
     #!/usr/bin/env bash
     set -euo pipefail
-    [ -d www/node_modules ] || npm --prefix www ci --no-audit --no-fund --silent
+    # Not `[ -d www/node_modules ]`. That condition installs when nothing is
+    # there and does nothing when what is there is wrong, which is how a week of
+    # www work got verified against Next 15 while the lockfile pinned 16.
+    go run ./tools/installcheck . www || npm --prefix www ci --no-audit --no-fund --silent
     (cd www && npm run build)
     (cd www && npm run check:seo)
 
@@ -632,6 +727,18 @@ docscheck:
 manifestcheck:
     go run ./tools/manifestcheck .
 
+# A count of a closed set that lives only in Go constants must be its real
+# size.
+#
+# The schema, the error catalogue, the transform registry and the command tree
+# all have a gate because each is declared in a machine readable file. The Go
+# constants had none, and that is where the worst instance was: seventeen DDL
+# lint rules described in eight places as six. Fourteen wrong counts, every one
+# of them an understatement, which is what documentation written accurately at
+# one version and never revisited looks like.
+constcheck:
+    go run ./tools/constcheck .
+
 # This justfile runs what CI runs.
 gatecheck:
     go run ./tools/gatecheck .
@@ -698,7 +805,10 @@ typecheck:
       fi
       root=$(npm_root "$dir") || { echo "  $dir: no lockfile above it, so there is no project to check it in"; exit 1; }
       echo "  $dir"
-      [ -d "$root/node_modules" ] || npm --prefix "$root" ci --no-audit --no-fund --silent
+      # Absent OR stale. This asked only whether the directory existed, in the
+      # recipe an agent is most likely to trust after editing TypeScript, so a
+      # drifted install was typechecked against the wrong versions and passed.
+      go run ./tools/installcheck . "$root" || npm --prefix "$root" ci --no-audit --no-fund --silent
       npx --prefix "$root" tsc --noEmit -p "$cfg"
       checked=$((checked + 1))
     done < <(find . -name tsconfig.json \
@@ -723,9 +833,32 @@ typecheck:
     # too and then does the part a typecheck cannot: an import written as
     # ../lib/guard from a page two directories deep resolves through baseUrl
     # and fails in webpack with "Module not found".
-    [ -d console/node_modules ] || npm --prefix console ci --no-audit --no-fund
+    go run ./tools/installcheck . console || npm --prefix console ci --no-audit --no-fund
     NEXT_TELEMETRY_DISABLED=1 npm --prefix console run build
     echo "typecheck: $checked projects typechecked, $excused checked by another gate"
+
+# Every installed node_modules is the tree its lockfile describes.
+#
+# First in `gate`, and cheap enough to be, because it compares two files rather
+# than installing anything. It answers in milliseconds and needs no network, so
+# finding out at second two beats finding out after fifty minutes of gates that
+# were all answering about the wrong versions.
+#
+# The failure it exists for: a week of www work was verified with
+# www/node_modules holding Next 15.5.23 against a lockfile pinning 16.3.3.
+# Every build, every SEO assertion and a whole prose sweep ran against a
+# different Next major from the one CI uses, and every one of them reported
+# success in good faith. It also explains `next build` rewriting
+# www/tsconfig.json for some people and not others, which several agents chased
+# as flakiness: it is Next 16 behaviour and a stale 15 install does not do it.
+#
+# --drift-only, so a workspace nobody has installed is reported and does not
+# fail. It cannot have answered about the wrong versions, every recipe below
+# installs what it uses, and a gate that went red on a fresh worktree for a
+# directory it was about to create anyway is the false alarm that gets a check
+# deleted.
+installcheck:
+    go run ./tools/installcheck --drift-only .
 
 # G11. Two builds of one commit produce the same release artifact.
 #
@@ -779,16 +912,22 @@ _generated:
     go run ./tools/errgen
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
+    go run ./tools/notices -out THIRD_PARTY_NOTICES.md
     (cd engine && go test ./internal/policy -update-vectors)
+    (cd engine && go test ./internal/mockpack -update-vectors)
+    (cd engine && go test ./internal/webhook -update-vectors)
     (cd engine && go test ./internal/cli -update-reference)
     (cd engine && go test ./internal/events -update-schema)
     (cd engine && go test ./internal/masking -update-transforms)
     (cd engine && go test ./internal/hud -update-frames)
     git diff --exit-code -- \
+      THIRD_PARTY_NOTICES.md \
       engine/internal/errors/codes.gen.go \
       docs/src/content/docs/reference/errors.md \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
+      schemas/mockpack-vectors.json \
+      schemas/webhook-vectors.json \
       schemas/events.v1.json \
       docs/src/content/docs/reference/cli.md \
       docs/src/content/docs/reference/transforms.md \
@@ -801,7 +940,10 @@ generate:
     go run ./tools/errgen
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
+    go run ./tools/notices -out THIRD_PARTY_NOTICES.md
     cd engine && go test ./internal/policy -update-vectors
+    cd engine && go test ./internal/mockpack -update-vectors
+    cd engine && go test ./internal/webhook -update-vectors
     cd engine && go test ./internal/cli -update-reference
     cd engine && go test ./internal/events -update-schema
     cd engine && go test ./internal/masking -update-transforms

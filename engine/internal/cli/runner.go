@@ -2,12 +2,16 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +35,26 @@ func RunnerHome() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".antifailure", "runner"), nil
+}
+
+// RunnerCheckJSON is the machine readable result of af runner check.
+//
+// Per check rather than one boolean, because "complete: false" was all a
+// caller got and it does not say whether node is missing, the dependencies are,
+// or there is no runner at all, which are three different things to do next.
+type RunnerCheckJSON struct {
+	Path     string                `json:"path"`
+	Node     string                `json:"node"`
+	Complete bool                  `json:"complete"`
+	Checks   []RunnerCheckItemJSON `json:"checks"`
+}
+
+// RunnerCheckItemJSON is one question and its answer.
+type RunnerCheckItemJSON struct {
+	Name   string `json:"name"`
+	Result string `json:"result"` // ok, fail, warn or skip
+	Detail string `json:"detail"`
+	Remedy string `json:"remedy,omitempty"`
 }
 
 // RunnerInstallJSON is the machine readable result.
@@ -123,30 +147,323 @@ func newRunnerInstallCommand(e *Env) *cobra.Command {
 	return cmd
 }
 
+// runnerCheck is one question this command can answer about the runner, and
+// the answer it got.
+//
+// The remedy travels with the finding rather than being printed once at the
+// end, because the old command printed "Install it with: af runner install"
+// under every failure, including a missing node, where installing again does
+// nothing.
+type runnerCheck struct {
+	label   string
+	symbol  string
+	detail  string
+	remedy  string
+	blocker bool // a false answer here means af test cannot run at all
+}
+
+// checkRunner answers what it can about an installed runner without executing
+// any of it.
+//
+// The version this replaced stat'ed src/main.ts and called that "ok runner".
+// install.sh put the runner SOURCE at that path, so on every machine installed
+// with curl | sh this command reported ok on a tree with no node_modules, and
+// the real failure surfaced four steps later inside af test as a node error
+// about a module it could not resolve. A check somebody runs specifically to
+// find out whether the thing works must fail on that tree.
+//
+// So it reads the runner's own package.json and asks the three questions that
+// tree fails, plus the browser, which it reports separately because af runner
+// install treats a failed browser download as non fatal and af test returns
+// unverified rather than a wrong answer without one.
+//
+// What it deliberately does NOT claim: that the runner executes. Knowing that
+// needs node, a process, and a browser launch, which is what af test is. The
+// browser line says "not checked" rather than "ok" wherever the cache location
+// cannot be determined, because answering ok about something unexamined is the
+// defect being fixed rather than a smaller version of it.
+func checkRunner(ctx context.Context, target string) []runnerCheck {
+	out := []runnerCheck{}
+
+	entry := filepath.Join(target, "src", "main.ts")
+	if _, err := os.Stat(entry); err != nil {
+		return append(out, runnerCheck{
+			label: "runner", symbol: SymbolFail,
+			detail:  "no runner at " + target,
+			remedy:  "Install it with: af runner install",
+			blocker: true,
+		})
+	}
+	out = append(out, runnerCheck{label: "runner", symbol: SymbolOK, detail: target})
+
+	manifest, manifestErr := readRunnerManifest(filepath.Join(target, "package.json"))
+	if manifestErr != nil {
+		out = append(out, runnerCheck{
+			label: "dependencies", symbol: SymbolSkip,
+			detail:  "not checked: " + manifestErr.Error(),
+			blocker: false,
+		})
+	} else {
+		out = append(out, dependencyCheck(target, manifest))
+	}
+
+	out = append(out, nodeCheck(nodeVersion(ctx), manifest))
+	out = append(out, browserCheck())
+	return out
+}
+
+// runnerManifest is the part of the runner's package.json this reads. Its own
+// manifest rather than a constant here, so the requirement cannot drift from
+// the thing that declares it.
+type runnerManifest struct {
+	Engines struct {
+		Node string `json:"node"`
+	} `json:"engines"`
+	Dependencies map[string]string `json:"dependencies"`
+}
+
+func readRunnerManifest(path string) (runnerManifest, error) {
+	var m runnerManifest
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		return m, fmt.Errorf("package.json could not be read")
+	}
+	if err := json.Unmarshal(blob, &m); err != nil {
+		return m, fmt.Errorf("package.json could not be parsed")
+	}
+	return m, nil
+}
+
+// dependencyCheck is the one that would have caught the reproduced tree.
+//
+// Every declared dependency has to have a directory under node_modules. The
+// directory existing on its own is not enough: an interrupted npm install
+// leaves one behind, and a check that stops at "node_modules is there" is the
+// same shape of lie as the one that stopped at "src/main.ts is there".
+func dependencyCheck(target string, m runnerManifest) runnerCheck {
+	modules := filepath.Join(target, "node_modules")
+	if _, err := os.Stat(modules); err != nil {
+		return runnerCheck{
+			label: "dependencies", symbol: SymbolFail,
+			detail:  "node_modules is missing",
+			remedy:  "Install them with: af runner install",
+			blocker: true,
+		}
+	}
+	var missing []string
+	for name := range m.Dependencies {
+		// filepath.Join handles the scoped @scope/name form, which is two
+		// directory levels on disk rather than one.
+		if _, err := os.Stat(filepath.Join(modules, filepath.FromSlash(name))); err != nil {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return runnerCheck{
+			label: "dependencies", symbol: SymbolFail,
+			detail:  "missing " + strings.Join(missing, ", "),
+			remedy:  "Install them with: af runner install",
+			blocker: true,
+		}
+	}
+	return runnerCheck{
+		label: "dependencies", symbol: SymbolOK,
+		detail: fmt.Sprintf("%d declared, all present", len(m.Dependencies)),
+	}
+}
+
+// nodeCheck compares against the range the runner declares rather than only
+// reporting what it found. The old line printed the version and called it ok,
+// so a node too old to run the runner passed a check named after readiness.
+func nodeCheck(found string, m runnerManifest) runnerCheck {
+	want := m.Engines.Node
+	if found == "" {
+		detail := "not found"
+		if want != "" {
+			detail = "not found; the runner needs " + want
+		}
+		return runnerCheck{
+			label: "node", symbol: SymbolFail, detail: detail,
+			remedy:  "Install node from https://nodejs.org, then run af runner check again.",
+			blocker: true,
+		}
+	}
+	if want == "" {
+		return runnerCheck{label: "node", symbol: SymbolOK, detail: found}
+	}
+	ok, comparable := nodeSatisfies(found, want)
+	if !comparable {
+		// An unparsed range is reported as unparsed. Treating it as satisfied
+		// would put this back where it started.
+		return runnerCheck{
+			label: "node", symbol: SymbolSkip,
+			detail: found + ", against an unreadable requirement of " + want,
+		}
+	}
+	if !ok {
+		return runnerCheck{
+			label: "node", symbol: SymbolFail,
+			detail:  found + ", and the runner needs " + want,
+			remedy:  "Upgrade node to " + want + ", then run af runner check again.",
+			blocker: true,
+		}
+	}
+	return runnerCheck{label: "node", symbol: SymbolOK, detail: found + ", which satisfies " + want}
+}
+
+// nodeSatisfies handles the one range shape the runner declares, ">=x.y[.z]".
+// Anything else reports as not comparable rather than as satisfied, because a
+// range this cannot read is a question it did not answer.
+func nodeSatisfies(found, want string) (ok bool, comparable bool) {
+	spec, hasPrefix := strings.CutPrefix(strings.TrimSpace(want), ">=")
+	if !hasPrefix {
+		return false, false
+	}
+	got, gotOK := parseVersion(strings.TrimPrefix(found, "v"))
+	min, minOK := parseVersion(strings.TrimSpace(spec))
+	if !gotOK || !minOK {
+		return false, false
+	}
+	for i := range got {
+		if got[i] != min[i] {
+			return got[i] > min[i], true
+		}
+	}
+	return true, true
+}
+
+// parseVersion reads major, minor and patch, defaulting the parts a range like
+// ">=22.6" leaves out.
+func parseVersion(v string) ([3]int, bool) {
+	var out [3]int
+	parts := strings.Split(v, ".")
+	if len(parts) == 0 || len(parts) > 3 {
+		return out, false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return out, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
+
+// browserCheck looks for the chromium af runner install downloads.
+//
+// Not a blocker. af runner install treats a failed browser download as non
+// fatal on purpose, and a workflow that needs a page read comes back
+// unverified rather than guessed at, so a missing browser degrades the answer
+// instead of preventing one. It is still worth naming here, because finding
+// out from a run full of unverified verdicts is finding out late.
+func browserCheck() runnerCheck {
+	dir, known := playwrightBrowsers()
+	if !known {
+		return runnerCheck{
+			label: "browser", symbol: SymbolSkip,
+			detail: "not checked: this platform's browser cache location is not known here",
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return runnerCheck{
+			label: "browser", symbol: SymbolWarn,
+			detail: "no chromium in " + dir,
+			remedy: "Download it with: af runner install",
+		}
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "chromium") {
+			return runnerCheck{label: "browser", symbol: SymbolOK, detail: e.Name()}
+		}
+	}
+	return runnerCheck{
+		label: "browser", symbol: SymbolWarn,
+		detail: "no chromium in " + dir,
+		remedy: "Download it with: af runner install",
+	}
+}
+
+// playwrightBrowsers is where playwright puts what it downloads. Its own
+// environment variable wins, because a machine that sets it has moved them.
+func playwrightBrowsers() (string, bool) {
+	if p := os.Getenv("PLAYWRIGHT_BROWSERS_PATH"); p != "" {
+		return p, true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(home, "Library", "Caches", "ms-playwright"), true
+	case "linux":
+		return filepath.Join(home, ".cache", "ms-playwright"), true
+	default:
+		return "", false
+	}
+}
+
 func newRunnerCheckCommand(e *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "check",
 		Short: "Say whether the runner can run",
-		Args:  cobra.NoArgs,
+		Long: strings.TrimSpace(`
+Reports each thing af test needs from the runner separately: the source, the
+dependencies it declares, a node new enough to run it, and the browser.
+
+It does not claim the runner executes. Knowing that means starting node and
+launching a browser, which is what af test is. Anything this cannot determine
+is reported as not checked rather than as ok, because a check that answers ok
+about something it never examined is worse than one that admits the gap: this
+command used to report "ok runner" whenever src/main.ts existed, which was true
+of an install with no dependencies at all, and the real failure surfaced much
+later inside af test as a node error about a module it could not resolve.`),
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			target, err := RunnerHome()
 			if err != nil {
 				return err
 			}
-			entry := filepath.Join(target, "src", "main.ts")
-			_, statErr := os.Stat(entry)
-			node := nodeVersion(cmd.Context())
+			results := checkRunner(cmd.Context(), target)
 
-			ready := statErr == nil && node != ""
+			ready := true
+			node := ""
+			for _, r := range results {
+				if r.blocker && r.symbol != SymbolOK {
+					ready = false
+				}
+				if r.label == "node" && r.symbol != SymbolFail {
+					node = strings.SplitN(r.detail, ",", 2)[0]
+				}
+			}
+
 			if e.Out.Format == FormatJSON {
-				return e.Out.JSON(RunnerInstallJSON{
+				return e.Out.JSON(RunnerCheckJSON{
 					Path: target, Node: node, Complete: ready,
+					Checks: checksJSON(results),
 				})
 			}
-			e.Out.Status(check(e, statErr == nil), "runner", target)
-			e.Out.Status(check(e, node != ""), "node", orPlaceholder(node, "not found"))
+			for _, r := range results {
+				e.Out.Status(r.symbol, r.label, r.detail)
+			}
+			var remedies []string
+			for _, r := range results {
+				if r.symbol != SymbolOK && r.symbol != SymbolSkip && r.remedy != "" {
+					remedies = append(remedies, r.remedy)
+				}
+			}
+			if len(remedies) > 0 {
+				e.Out.Println("")
+				for _, r := range remedies {
+					e.Out.Printf("  %s\n", r)
+				}
+			}
 			if !ready {
-				e.Out.Println("\n  Install it with: af runner install")
+				e.Out.Println("")
+				e.Out.Hint("Install it with", "af runner install")
 				return &silentError{code: aferrors.ExitConfiguration}
 			}
 			return nil
@@ -154,11 +471,14 @@ func newRunnerCheckCommand(e *Env) *cobra.Command {
 	}
 }
 
-func check(e *Env, ok bool) string {
-	if ok {
-		return e.Out.S(StyleGood, SymbolOK)
+func checksJSON(results []runnerCheck) []RunnerCheckItemJSON {
+	items := make([]RunnerCheckItemJSON, 0, len(results))
+	for _, r := range results {
+		items = append(items, RunnerCheckItemJSON{
+			Name: r.label, Result: r.symbol, Detail: r.detail, Remedy: r.remedy,
+		})
 	}
-	return e.Out.S(StyleBad, SymbolFail)
+	return items
 }
 
 // runnerSource finds the runner to copy.

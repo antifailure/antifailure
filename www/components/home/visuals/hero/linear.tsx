@@ -140,9 +140,33 @@ export function StatusMoon({
   );
 }
 
-export function Meta({ children, className }: { children: ReactNode; className?: string }) {
+/**
+ * `strong` is a prop rather than a colour a call site passes, because passing
+ * one does not replace this default: `cn` joins, and every arbitrary colour is
+ * emitted before every text-black/N and in file order against another
+ * arbitrary colour, so which one survives has nothing to do with which the
+ * author wrote last. TwinFilm asked for #1A1A1A on a live environment and got
+ * this grey, so the card's live state and its idle state rendered identically.
+ */
+export function Meta({
+  children,
+  className,
+  strong,
+}: {
+  children: ReactNode;
+  className?: string;
+  strong?: boolean;
+}) {
   return (
-    <span className={cn("text-[10px] tracking-extra-tight text-[#9B9EA5]", className)}>{children}</span>
+    <span
+      className={cn(
+        "text-[10px] tracking-extra-tight",
+        strong ? "text-[#1A1A1A]" : "text-[#9B9EA5]",
+        className,
+      )}
+    >
+      {children}
+    </span>
   );
 }
 

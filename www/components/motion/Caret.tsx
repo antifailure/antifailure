@@ -7,7 +7,7 @@ export function Caret({ className = "bg-white" }: { className?: string }) {
       // without blinking at somebody who is trying to read the line it sits
       // on, and a thing that animates forever while the reader does nothing is
       // the one motion this project does not ship.
-      className={`caret-live inline-block h-[1em] w-[7px] translate-y-[2px] align-middle ${className}`}
+      className={`inline-block h-[1em] w-[7px] translate-y-[2px] align-middle ${className}`}
       aria-hidden
     />
   );

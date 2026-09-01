@@ -1252,18 +1252,21 @@
             "p95_increase": {
               "type": "number",
               "minimum": 0,
-              "default": 0.25
+              "default": 0.25,
+              "description": "How much slower than production a route may get, as a ratio. It divides a measured p95 by production's own p95 for that route, so it needs a source that carries one: the default applies under source otel, and the engine refuses this key under access_log or none, where a route arrives with no baseline and the threshold could never fire."
             },
             "error_rate": {
               "type": "number",
               "minimum": 0,
               "maximum": 1,
-              "default": 0.01
+              "default": 0.01,
+              "description": "The share of requests that may fail. Counted from the run's own responses, so it needs no baseline and works under every source."
             },
             "query_count_increase": {
               "type": "number",
               "minimum": 0,
-              "default": 0.2
+              "deprecated": true,
+              "description": "Not read by anything, and refused by the engine. A load run counts requests, not statements. The check that compares statement counts against the base branch is insights.query_regression, and how much growth fails it is insights.regression_factor."
             }
           }
         }
@@ -1357,7 +1360,7 @@
             "fail"
           ],
           "default": "warn",
-          "description": "Any of the six migration lint rules. They share one setting because the rules are already scoped by table size."
+          "description": "Any of the seventeen migration lint rules. They share one setting because the rules are already scoped by table size."
         },
         "plan_regression": {
           "type": "string",
@@ -1367,7 +1370,7 @@
             "fail"
           ],
           "default": "warn",
-          "description": "A query plan that got worse: a table now read end to end, or an index no longer used."
+          "description": "A query plan that got worse in one of three plan regressions: a table is now read end to end, an index is no longer used, or the planner's estimate grew."
         },
         "query_regression": {
           "type": "string",
@@ -1438,8 +1441,14 @@
         "ttl": {
           "type": "string",
           "pattern": "^[0-9]+(h|d)$",
+          "default": "24h",
+          "description": "How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl."
+        },
+        "max_ttl": {
+          "type": "string",
+          "pattern": "^[0-9]+(h|d)$",
           "default": "168h",
-          "description": "How long an environment lives before automatic teardown."
+          "description": "The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound."
         },
         "idle_sleep": {
           "type": "string",

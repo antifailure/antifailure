@@ -471,11 +471,58 @@ var typeMap = map[string]string{
 // the sentence can come back.
 //
 // Two of the control plane's accepted types have no engine event mapped to
-// them, deliberately. environment.queued is produced by the scheduler, which
-// runs in the control plane and never in the engine. artifact.stored belongs to
-// the uploader rather than to the environment lifecycle. Both are listed in
-// TestTheControlPlaneTypesWithNoEngineEventAreTheExpectedOnes so that a third
-// one appearing is a test failure and a decision rather than a silent gap.
+// them, and the honest reason for both is that the capability behind them is
+// not built.
+//
+// environment.queued is reserved for a control plane that schedules work. There
+// is no such component. Said plainly because the sentence here used to assert
+// one, and a reader who believes it goes looking: engine/internal/scheduler
+// exists, runs in the engine rather than in the control plane, which is the
+// opposite of what was claimed, and emits no event at all. Nothing produces
+// environment.queued, so the queued value in the environment_state enum is
+// reachable only as a column default.
+//
+// artifact.stored is reserved for an artifact uploader that reports what it
+// stored. Nothing does.
+//
+// Both are listed in TestTheControlPlaneTypesWithNoEngineEventAreTheExpectedOnes
+// so that a third appearing is a decision rather than a silent gap. That test
+// asks whether a type is MAPPED, which is a weaker question than whether
+// anything emits it, and the difference is not academic: five of the eleven
+// types this map does translate are emitted by nothing, so they pass that test
+// and are still columns that are always empty. env.sleeping is one, because
+// idle sleep is not implemented at all; runtime.idle_sleep is defaulted by
+// manifest normalization, checked by validation, printed by af explain, and
+// read by nothing that acts on it, which is the identical shape runtime.ttl had
+// before the reaper existed. The whole agent run lifecycle is three more, and
+// egress.decision is the fifth, where the data is collected and rendered
+// locally and simply never put on the bus.
+//
+// TestEveryMappedTypeHasSomethingInTheEngineThatEmitsIt is the gate for that
+// second question, and it names all five. They are not all the same kind of
+// gap, and a reader needs to know which kind, because "reserved" and
+// "abandoned" call for opposite decisions:
+//
+// env.sleeping is reserved for something never built. There is nothing to
+// abandon: no code sleeps an environment, and runtime.idle_sleep is inert.
+//
+// egress.decision is not reserved and not abandoned, it is disconnected. The
+// decisions are made, recorded, returned by Orchestrator.Decisions and rendered
+// by af net and af ci, and a consumer exists here too: internal/hud classifies
+// egress.decision as a noisy type to suppress, with a comment about an egress
+// denial being the line somebody will grep for. So the producer and the
+// consumer were both built and the wire between them was not. That is the most
+// finishable of the five and it is the one to do first if anybody does one.
+//
+// The three agent types, agent.started, agent.finished and agent.verdict, are
+// the one set where honestly nobody can tell from the code which it is. Agent
+// runs happen, and nothing anywhere consumes these types either, so there is no
+// half-built wire to point at as evidence of intent. Whether they were reserved
+// for a reporting path or drafted and dropped is not recoverable from what is
+// committed, and it is better to say so here than to pick and be wrong. The
+// next person to touch the agent runner should settle it.
+//
+// None of the five is emitted today, and the gate holds that line either way.
 func KnownTypes() []string {
 	out := make([]string, 0, len(typeMap))
 	for k := range typeMap {

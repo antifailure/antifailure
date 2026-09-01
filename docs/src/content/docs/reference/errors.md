@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Interrupted, and teardown completed cleanly. |
 | `10` | Interrupted, and resources are still recorded. Run `af down` again. |
 
-30 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+29 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -79,6 +79,30 @@ The agent runner could not be found: {detail}
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/agents](/docs/concepts/agents/) |
+
+### AF-AGT-005
+
+The {provider} key was not accepted: {detail}
+
+**What to do.** {next_step}
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/model-keys](/docs/guides/model-keys/) |
+
+### AF-AGT-006
+
+The {provider} endpoint could not be reached: {detail}
+
+**What to do.** {next_step}
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/model-keys](/docs/guides/model-keys/) |
 
 ### AF-AGT-010
 
@@ -232,7 +256,7 @@ The Dockerfile {dockerfile} for {service} is outside the build context {context}
 
 No control plane token is configured.
 
-**What to do.** Create an engine token in the control plane, then set AF_CONTROL_PLANE_TOKEN. Everything except this command works without one.
+**What to do.** Run 'af login' then 'af token create ci', and set AF_CONTROL_PLANE_TOKEN to what it prints. Everything except this command works without one.
 
 | | |
 | --- | --- |
@@ -245,6 +269,18 @@ No control plane token is configured.
 The control plane has no environment called {env}.
 
 **What to do.** Check the identifier with 'af env list', or confirm the engine that created it was sending events to this control plane.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
+
+### AF-CPL-004
+
+This machine is not signed in to {origin}.
+
+**What to do.** Run '{command}' to sign in from this terminal. Nothing else in the engine needs a sign in; only the commands that read or write your own account do.
 
 | | |
 | --- | --- |
@@ -460,6 +496,42 @@ No application could be detected in {path}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/detection](/docs/concepts/detection/) |
 
+### AF-DET-004
+
+Detection could not decide {question}, and there is no default to fall back on.
+
+**What to do.** Answer it with --answer {id}=<value>, or run 'af init' from a terminal so it can ask.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/detection](/docs/concepts/detection/) |
+
+### AF-DET-005
+
+Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}
+
+**What to do.** Re-run with --answer to override what detection read, for example --answer service.<name>.port=<port>. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/detection](/docs/concepts/detection/) |
+
+### AF-DET-006
+
+--answer {id}=... does not name anything in this repository.
+
+**What to do.** Use one of: {known}
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/detection](/docs/concepts/detection/) |
+
 ### AF-DET-010
 
 The changed files between {base} and {head} could not be read: {detail}
@@ -624,6 +696,18 @@ The scenario {scenario} proved nothing: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/load](/docs/concepts/load/) |
 
+### AF-LOD-016
+
+The p95_increase threshold proved nothing: {detail}
+
+**What to do.** The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
 ## Manifest
 
 ### AF-MAN-001
@@ -664,9 +748,9 @@ The manifest at {path} declares schema version {found}, which this build does no
 
 ### AF-MAN-004
 
-'af init' needs a terminal to ask questions, and this session has none.
+'af init' has questions to ask and this session has no terminal to ask them on.
 
-**What to do.** Pass --non-interactive together with the flags listed by 'af init --help'.
+**What to do.** Pass --non-interactive to accept every default, and --answer id=value for anything that has no default.
 
 | | |
 | --- | --- |

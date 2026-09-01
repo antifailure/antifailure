@@ -9,6 +9,12 @@ Runs use your Anthropic and OpenAI keys, not ours. You store one, you cap what
 it may spend in a month, and you rotate it when you want to. This page is about
 both places you can do that: the console, and `af provider`.
 
+This is the hosted arrangement, and it needs a control plane. To keep a key on
+your own machine instead, with no account and no hosted anything, see
+[your own model key](/docs/guides/model-keys/). That is the free and
+self-hosted path and it has no monthly cap, which is the trade: a cap is only a
+cap when something you control checks it before the money is spent.
+
 ## What is stored, and what is not
 
 The key is sealed with AES-256-GCM under a secret held outside the database,

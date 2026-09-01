@@ -30,6 +30,10 @@ and a step that leaves the report:
   run: af ci --output report.md
 ```
 
+Two steps rather than one because the installer writes its bin directory to
+`GITHUB_PATH`, which is how a step extends the PATH of the steps after it. That
+is the only reason the second step finds `af` without naming a path.
+
 `af ci` brings the environment up, reads the branch back, runs the agents, asks
 the invariants, rehearses the migrations, writes the report, and tears down
 afterwards. Teardown happens whatever the outcome, including on a
@@ -97,7 +101,8 @@ Three secrets, all optional, each with a real consequence when it is missing:
 
 `ANTHROPIC_API_KEY` lets the agents read a page. Without one they still run,
 and a workflow that needed a page read comes back unverified rather than
-guessed at.
+guessed at. On a workstation, `af model set anthropic` keeps the key out of
+your shell profile; see [your own model key](/docs/guides/model-keys/).
 
 `AF_MASKING_KEY` makes masking deterministic across machines, so two goldens
 can be compared. Left unset, every runner generates its own.

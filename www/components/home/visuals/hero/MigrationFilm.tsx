@@ -7,13 +7,12 @@ const LOOP = 8;
 
 const STEPS = ["LOCK", "QUEUE", "REWRITE", "PLAN"] as const;
 
-export function MigrationFilm({ active, hovered }: FilmProps) {
+export function MigrationFilm({ active }: FilmProps) {
   const { ref, t } = useHeroFilmClock({
     loop: LOOP,
     active,
-    hovered,
     stillT: 0,
-    reducedT: 0,
+    reducedT: LOOP - 0.001,
   });
 
   const lock = smooth(span(t, 0.9, 3.05));
@@ -34,14 +33,14 @@ export function MigrationFilm({ active, hovered }: FilmProps) {
         <div className="flex min-h-0 flex-1 flex-col justify-center rounded-[10px] border border-black/[0.08] bg-white px-2.5 py-2">
           <div className="flex items-center gap-2">
             <Meta className="w-8 shrink-0">When</Meta>
-            <Pill className="bg-[#EB5757]/10 text-[#C43D3D] ring-[#EB5757]/25">exclusive lock</Pill>
+            <Pill tone="block">exclusive lock</Pill>
           </div>
           <Bar className="mt-2" value={lock} tone={blocked ? "block" : "neutral"} />
           <Meta className="mt-1 block tabular-nums">{ticks(0, 27.4, lock)}s</Meta>
           <Hairline className="my-2" />
           <div className="flex items-center gap-2">
             <Meta className="w-8 shrink-0">Then</Meta>
-            <Pill tone={blocked ? "block" : "neutral"}>{blocked ? "84 queued" : "watching"}</Pill>
+            <Pill tone={blocked ? "block" : "neutral"}>{blocked ? "blocked a session" : "watching"}</Pill>
           </div>
         </div>
       </div>
@@ -73,7 +72,7 @@ export function MigrationFilm({ active, hovered }: FilmProps) {
           <Hairline className="my-2" />
           <div className="flex items-center gap-1.5" style={moveStyle({ opacity: found, y: (1 - found) * 5 })}>
             <Pill tone="block">FINDING</Pill>
-            <Meta className="tabular-nums">27.4s · 84 queued</Meta>
+            <Meta className="tabular-nums">27.4s · blocked a session</Meta>
           </div>
         </div>
       </div>

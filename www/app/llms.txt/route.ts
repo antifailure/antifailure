@@ -67,6 +67,15 @@ export function GET() {
   lines.push("af down          # every resource it created, gone");
   lines.push("```");
   lines.push("");
+  lines.push(
+    "The installer puts af under ~/.antifailure and puts that on your PATH by appending",
+    "one line to the startup file the login shell reads, printing the line and naming",
+    "the file. AF_NO_MODIFY_PATH=1 declines it. The terminal that ran the installer",
+    "needs the one line it prints, because a running shell cannot see a file written a",
+    "second ago. In GitHub Actions it writes GITHUB_PATH instead and touches no",
+    "profile, so a later step finds af without a flag.",
+  );
+  lines.push("");
 
   lines.push("## What a run produces");
   lines.push("");
@@ -78,10 +87,11 @@ export function GET() {
     "  or a key, and signs an attestation. An unverified golden cannot be branched, and",
     "  that is enforced in code rather than in a checklist.",
     "- A sealed network. Every environment gets a sidecar that owns its network",
-    "  namespace. Each host gets one of five modes: BLOCK refuses with a readable",
+    "  namespace. Each host gets one of six modes: BLOCK refuses with a readable",
     "  decision, ALLOW passes with a rate limit, SANDBOX swaps in test credentials and",
     "  trips a wire if a live key appears, CAPTURE records mail and SMS into a",
-    "  searchable inbox, MOCK answers from a stateful offline pack.",
+    "  searchable inbox, MOCK answers from a stateful offline pack, and SYNTH asks a",
+    "  model to invent a response and marks the result unverified.",
     "- Agent verdicts. Workflows are written as sentences. The runner drives a real",
     "  browser through the accessibility tree, signs in the way a person does, and",
     "  returns pass, fail, flaky, blocked or unverified with a video, a trace and",

@@ -31,6 +31,13 @@ type result struct {
 // runCLI executes the command line with substituted streams, which is what
 // makes every command testable without a process and without touching the
 // real filesystem outside a temporary directory.
+// prose collapses the line breaks the renderer inserted, so that a test
+// asserting what a message SAYS is not also asserting where the terminal
+// happened to be eighty columns wide. A phrase split across a wrap is the same
+// phrase to a reader and a different string to strings.Contains, and a test
+// that cannot tell those apart fails every time the wrapping improves.
+func prose(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 func runCLI(t *testing.T, workDir string, env map[string]string, args ...string) result {
 	t.Helper()
 	var out, errW bytes.Buffer
@@ -198,7 +205,7 @@ func TestEnvPull_SaysWhatIsMissingRatherThanFailingToConnect(t *testing.T) {
 	require.Contains(t, got.stderr, "AF_CONTROL_PLANE_TOKEN")
 	// And it has to say that this is the only thing that needs one, so nobody
 	// concludes the product requires a hosted service.
-	require.Contains(t, strings.ToLower(got.stderr), "without one")
+	require.Contains(t, prose(strings.ToLower(got.stderr)), "without one")
 }
 
 // A token must never be sent to a plain HTTP host that is not this machine.
@@ -259,7 +266,7 @@ egress:
 	require.Contains(t, got.stdout, "api.stripe.com")
 	// The whole point: a default nobody set is shown with its resolved value.
 	require.Contains(t, got.stdout, "default      block")
-	require.Contains(t, got.stdout, "lifetime     168h")
+	require.Contains(t, got.stdout, "lifetime     24h")
 }
 
 func TestExplain_JSONFormIsTheNormalizedManifest(t *testing.T) {
@@ -403,6 +410,168 @@ func TestInit_RefusesToPromptWithNoTerminal(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("af init blocked waiting for input that will never arrive")
 	}
+}
+
+// The install path's third command, on the median containerised Node
+// repository: a Dockerfile beside a package.json whose name is not the
+// directory name. This produced two services on one port, the manifest
+// validator refused the draft, and the user was told to fix a line in a file
+// af init had declined to write.
+func TestInit_ADockerfileAndAMismatchedPackageNameProduceOneService(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "package.json"), []byte(
+		`{"name":"antifailure-example-next-app","scripts":{"start":"next start"},"dependencies":{"next":"16.3.3"}}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(
+		"FROM node:22-alpine AS build\nRUN npm run build\n\nFROM node:22-alpine\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]\n"), 0o600))
+
+	got := runCLI(t, dir, nil, "init", "-o", "json", "--non-interactive")
+	require.Zero(t, got.code, got.stderr)
+	var report cli.InitReport
+	require.NoError(t, json.Unmarshal([]byte(got.stdout), &report))
+	require.Equal(t, []string{"antifailure-example-next-app"}, report.Services)
+
+	// The failure was not that two services were reported. It was that nothing
+	// was written, so the file has to exist and af explain has to accept it.
+	require.FileExists(t, filepath.Join(dir, "antifailure.yaml"))
+	explained := runCLI(t, dir, nil, "explain")
+	require.Zero(t, explained.code, explained.stderr)
+}
+
+// An error that instructs the reader to do the thing they just did is a dead
+// end. --non-interactive used to answer a question it could not default with
+// "pass --non-interactive".
+func TestInit_AQuestionWithNoDefaultNamesTheFlagThatAnswersIt(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"no default to fall back on", []string{"init", "--non-interactive"}},
+		{"an answer with nothing after the equals", []string{"init", "--non-interactive", "--answer", "service.svc.port="}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"),
+				[]byte("FROM alpine\nCMD [\"/bin/app\"]\n"), 0o600))
+			// The service is named after the directory, which t.TempDir picks,
+			// so the question id is derived rather than written down.
+			args := append([]string{}, tc.args...)
+			for i, a := range args {
+				args[i] = strings.ReplaceAll(a, "service.svc.", "service."+filepath.Base(dir)+".")
+			}
+
+			got := runCLI(t, dir, nil, args...)
+			require.NotZero(t, got.code)
+			require.Contains(t, got.stderr, "AF-DET-004")
+			require.Contains(t, got.stderr, "--answer service."+filepath.Base(dir)+".port=")
+			require.NotContains(t, got.stderr, "Pass --non-interactive",
+				"the run already passed it")
+			require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
+		})
+	}
+}
+
+// And the flag the message names has to work, or the message is still a dead
+// end one step further along.
+func TestInit_TheFlagTheRefusalNamesActuallyAnswersTheQuestion(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"),
+		[]byte("FROM alpine\nCMD [\"/bin/app\"]\n"), 0o600))
+
+	got := runCLI(t, dir, nil, "init", "--non-interactive",
+		"--answer", "service."+filepath.Base(dir)+".port=8080")
+	require.Zero(t, got.code, got.stderr)
+	body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+	require.NoError(t, err)
+	require.Contains(t, string(body), "port: 8080")
+}
+
+// /dev/null has the character device bit set, so the old terminal test said
+// yes to it. `af init < /dev/null`, which is how a CI job runs a command it
+// does not intend to answer, asked every question into nowhere, read end of
+// file for each one, and took the defaults silently. On a question with no
+// default it then wrote nothing and blamed Antifailure for the invalid draft.
+func TestInit_DevNullIsNotATerminal(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"),
+		[]byte("FROM alpine\nCMD [\"/bin/app\"]\n"), 0o600))
+
+	devNull, err := os.Open(os.DevNull)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = devNull.Close() })
+
+	var out, errW bytes.Buffer
+	done := make(chan int, 1)
+	go func() {
+		done <- cli.Execute(context.Background(), []string{"init"}, cli.Options{
+			Stdout: &out, Stderr: &errW, Stdin: devNull,
+			Getenv:  func(string) string { return "" },
+			Clock:   clock.NewFake(epoch),
+			WorkDir: dir,
+		})
+	}()
+	select {
+	case code := <-done:
+		require.NotZero(t, code)
+		require.Contains(t, errW.String(), "AF-MAN-004")
+		require.NotContains(t, out.String(), "Which port",
+			"a question was asked into a stream nobody is reading")
+	case <-time.After(20 * time.Second):
+		t.Fatal("af init blocked on input that will never arrive")
+	}
+	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
+}
+
+// Two Dockerfiles in different directories both exposing 3000 is a real
+// repository, not a detection mistake, so the draft is correctly refused. What
+// made the refusal a dead end was that the flag it named reached nothing:
+// detection only raises a question about what it is unsure of, and a port read
+// straight out of an EXPOSE line has no question, so --answer had nothing to
+// bind to and was silently discarded.
+func TestInit_TheRemedyForAnInvalidDraftActuallyChangesTheDraft(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for name, port := range map[string]string{"a": "3000", "b": "3000"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, name), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name, "Dockerfile"),
+			[]byte("FROM alpine\nEXPOSE "+port+"\nCMD [\"/bin/"+name+"\"]\n"), 0o600))
+	}
+
+	refused := runCLI(t, dir, nil, "init", "--non-interactive")
+	require.NotZero(t, refused.code)
+	require.Contains(t, refused.stderr, "AF-DET-005")
+	require.Contains(t, prose(refused.stderr), "nothing was written")
+	require.Contains(t, prose(refused.stderr), "--answer service.<name>.port=<port>")
+	require.NotContains(t, prose(refused.stderr), "Fix the reported line",
+		"there is no file to fix a line in")
+	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
+
+	// The whole point of naming a remedy is that following it works.
+	fixed := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.b.port=3001")
+	require.Zero(t, fixed.code, fixed.stderr)
+	body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+	require.NoError(t, err)
+	require.Contains(t, string(body), "port: 3001")
+}
+
+// An --answer that binds to nothing used to be dropped in silence, which turns
+// a typo into a repeat of the original refusal with no clue what changed.
+func TestInit_AnAnswerThatNamesNothingIsRefusedWithTheOnesThatDo(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "package.json"),
+		[]byte(`{"name":"acme-web","scripts":{"start":"next start"},"dependencies":{"next":"15.0.0"}}`), 0o600))
+
+	got := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.typo.port=3001")
+	require.NotZero(t, got.code)
+	require.Contains(t, got.stderr, "AF-DET-006")
+	require.Contains(t, got.stderr, "service.acme-web.port",
+		"the refusal has to name the id that would have worked")
+	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
 }
 
 func TestInit_AnswerFlagAvoidsAPrompt(t *testing.T) {

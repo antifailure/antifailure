@@ -15,13 +15,12 @@ const JOURNEYS = [
 /** Nothing named these safe, so nothing sent them. */
 const STEPS = ["POST /billing/upgrade", "POST /api/payments", "DELETE /api/seats"] as const;
 
-export function WorkloadFilm({ active, hovered }: FilmProps) {
+export function WorkloadFilm({ active }: FilmProps) {
   const { ref, t } = useHeroFilmClock({
     loop: LOOP,
     active,
-    hovered,
     stillT: 0,
-    reducedT: 0,
+    reducedT: LOOP - 0.001,
   });
 
   const fill = smooth(span(t, 0.45, 1.85));
@@ -48,7 +47,7 @@ export function WorkloadFilm({ active, hovered }: FilmProps) {
                   </span>
                   {row.slow ? (
                     <span style={moveStyle({ opacity: smooth(span(t, 1.4, 1.95)) })}>
-                      <Pill className="bg-[#D94841]/12 text-[#A8332C] ring-[#D94841]/25">129% slower</Pill>
+                      <Pill tone="block">129% slower</Pill>
                     </span>
                   ) : null}
                   <Meta className="tabular-nums">{row.display}</Meta>

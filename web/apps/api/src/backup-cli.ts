@@ -20,6 +20,7 @@ import { writeFile } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { backup, rehearse, restore } from './backup.ts'
 import { breakGlass, parseRole, BreakGlassRefused } from './breakglass.ts'
+import { createOrganization, BootstrapRefused } from './bootstrap-org.ts'
 
 function usage(): never {
   console.error(`af-control-plane-backup <command>
@@ -46,6 +47,19 @@ function usage(): never {
             --max-restore-seconds it measures and gates nothing, which is right
             against a production database: its size is not a constant, so a
             budget set once fires on growth rather than on a regression.
+
+  create-org --url <admin connection string>
+            --org <slug> [--name <display name>] [--github-login <login>]
+            [--dry-run]
+            Creates the first organization on a control plane nobody has
+            installed the GitHub App on yet. A tenant normally begins with an
+            installation, and on a self-hosted control plane there is not one
+            yet, so without this every sign-in lands with no organization and
+            nothing in the console can be reached. It creates no account and
+            grants no role: sign in through GitHub afterwards, then use
+            break-glass to make yourself the owner. Naming --github-login the
+            account you will later install the App on lets that installation
+            adopt this organization instead of creating a second one.
 
   break-glass --url <admin connection string>
             --org <slug or id> --github-login <login>
@@ -212,6 +226,41 @@ try {
       break
     }
 
+    case 'create-org': {
+      const result = await createOrganization({
+        adminUrl: required(argv, 'url'),
+        slug: required(argv, 'org'),
+        name: flag(argv, 'name'),
+        githubLogin: flag(argv, 'github-login'),
+        dryRun: argv.includes('--dry-run'),
+        operator: operatorName(),
+      })
+
+      console.log(`organization  ${result.slug}${result.orgId ? ` (${result.orgId})` : ''}`)
+      console.log(`name          ${result.name}`)
+      console.log(`github        ${result.githubLogin ?? 'not set'}`)
+      if (!result.applied) {
+        console.log('')
+        console.log('DRY RUN. Nothing was written.')
+        console.log('Run it again without --dry-run to apply it.')
+        break
+      }
+      if (!result.created) {
+        console.log('')
+        console.log('It was already there, so nothing changed. The name and the GitHub login')
+        console.log('are left exactly as they are, in case an installation has adopted it.')
+        break
+      }
+      console.log(`audit entry   ${result.auditSeq}`)
+      console.log('')
+      console.log('The organization exists and has no members, which grants nobody anything.')
+      console.log('Sign in through GitHub so your account exists, then:')
+      console.log('')
+      console.log(`  af-control-plane-backup break-glass --url <admin> --org ${result.slug} \\`)
+      console.log('    --github-login <your login> --role owner --reason "first owner"')
+      break
+    }
+
     case 'break-glass': {
       const dryRun = argv.includes('--dry-run')
       const result = await breakGlass({
@@ -252,7 +301,7 @@ try {
   // An argument the operator can fix is exit 2, the same as a missing flag,
   // rather than 1. At three in the morning the difference between "you typed
   // the wrong thing" and "the database refused" is most of the diagnosis.
-  if (err instanceof BreakGlassRefused) {
+  if (err instanceof BreakGlassRefused || err instanceof BootstrapRefused) {
     console.error(err.message)
     process.exit(2)
   }

@@ -48,8 +48,8 @@ errors:
     exit_code: 3
   - code: AF-MAN-004
     area: MAN
-    message: "'af init' needs a terminal to ask questions, and this session has none."
-    next_step: "Pass --non-interactive together with the flags listed by 'af init --help'."
+    message: "'af init' has questions to ask and this session has no terminal to ask them on."
+    next_step: "Pass --non-interactive to accept every default, and --answer id=value for anything that has no default."
     docs: reference/cli#af-init
     retryable: false
     exit_code: 2
@@ -85,14 +85,27 @@ errors:
     docs: concepts/detection
     retryable: true
     exit_code: 3
-  - code: AF-DET-003
-    planned: true
+  - code: AF-DET-004
     area: DET
-    message: "Services {first} and {second} both claim port {port}."
-    next_step: "Give one of them a different port in antifailure.yaml."
+    message: "Detection could not decide {question}, and there is no default to fall back on."
+    next_step: "Answer it with --answer {id}=<value>, or run 'af init' from a terminal so it can ask."
     docs: concepts/detection
     retryable: false
     exit_code: 3
+  - code: AF-DET-005
+    area: DET
+    message: "Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}"
+    next_step: "Re-run with --answer to override what detection read, for example --answer service.<name>.port=<port>. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above."
+    docs: concepts/detection
+    retryable: false
+    exit_code: 3
+  - code: AF-DET-006
+    area: DET
+    message: "--answer {id}=... does not name anything in this repository."
+    next_step: "Use one of: {known}"
+    docs: concepts/detection
+    retryable: false
+    exit_code: 2
   - code: AF-DET-010
     area: DET
     message: "The changed files between {base} and {head} could not be read: {detail}"
@@ -605,6 +618,20 @@ errors:
     docs: guides/workflows
     retryable: false
     exit_code: 8
+  - code: AF-AGT-005
+    area: AGT
+    message: "The {provider} key was not accepted: {detail}"
+    next_step: "{next_step}"
+    docs: guides/model-keys
+    retryable: false
+    exit_code: 4
+  - code: AF-AGT-006
+    area: AGT
+    message: "The {provider} endpoint could not be reached: {detail}"
+    next_step: "{next_step}"
+    docs: guides/model-keys
+    retryable: true
+    exit_code: 5
   - code: AF-NET-011
     area: NET
     message: "No message matching {match} arrived within {timeout}."
@@ -702,6 +729,13 @@ errors:
     area: LOD
     message: "The scenario {scenario} proved nothing: {detail}"
     next_step: "A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
+  - code: AF-LOD-016
+    area: LOD
+    message: "The p95_increase threshold proved nothing: {detail}"
+    next_step: "The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone."
     docs: concepts/load
     retryable: false
     exit_code: 3
@@ -825,7 +859,7 @@ errors:
     planned: true
     area: CP
     message: "The control plane rejected this engine's token."
-    next_step: "Create a new engine token in the control plane and set AF_CONTROL_PLANE_TOKEN to it. The old one was revoked, expired, or belongs to a different control plane."
+    next_step: "Run 'af token create ci' and set AF_CONTROL_PLANE_TOKEN to what it prints. The old one was revoked, expired, or belongs to a different control plane."
     docs: self-hosting/control-plane
     retryable: false
     exit_code: 4
@@ -924,7 +958,7 @@ errors:
   - code: AF-CPL-001
     area: CPL
     message: "No control plane token is configured."
-    next_step: "Create an engine token in the control plane, then set AF_CONTROL_PLANE_TOKEN. Everything except this command works without one."
+    next_step: "Run 'af login' then 'af token create ci', and set AF_CONTROL_PLANE_TOKEN to what it prints. Everything except this command works without one."
     docs: self-hosting/control-plane
     retryable: false
     exit_code: 3
@@ -943,3 +977,10 @@ errors:
     docs: self-hosting/control-plane
     retryable: true
     exit_code: 5
+  - code: AF-CPL-004
+    area: CPL
+    message: "This machine is not signed in to {origin}."
+    next_step: "Run '{command}' to sign in from this terminal. Nothing else in the engine needs a sign in; only the commands that read or write your own account do."
+    docs: self-hosting/control-plane
+    retryable: false
+    exit_code: 4

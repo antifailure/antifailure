@@ -75,10 +75,6 @@ jobs:
       # thing this repository could do, and the shape is what the rules are
       # about, not the rows.
       AF_STAGING_DATABASE_URL: postgres://postgres:staging@127.0.0.1:5433/antifailure
-      # Recorded, so the spend is zero. A cassette miss refuses rather than
-      # falling back to a live call or to the deterministic planner, which is
-      # what makes "zero" a fact rather than an intention.
-      AF_MODEL_MODE: replay
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -295,12 +291,6 @@ jobs:
       fail-fast: false
       matrix:
         manifest: [examples/orders-api, examples/go-api, examples/rails-shop]
-
-    env:
-      # Same cassette rule as above. The one job in this repository that spends
-      # money on a model is the existing nightly smoke, and this file does not
-      # add a second.
-      AF_MODEL_MODE: replay
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

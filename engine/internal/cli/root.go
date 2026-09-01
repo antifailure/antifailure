@@ -9,14 +9,18 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"text/template"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"golang.org/x/term"
 
 	"github.com/antifailure/antifailure/engine/internal/auth"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/redact"
+	"github.com/antifailure/antifailure/engine/internal/secrets"
 )
 
 // Version information, set by the linker at release time.
@@ -49,6 +53,23 @@ type Env struct {
 	// Credentials is where the personal token lives. Nil means this
 	// platform's own store; read through CredentialStore, never directly.
 	Credentials *auth.Store
+	// Progress is the status line a long run reports through, built on first
+	// use and closed once at the end of Execute. Nothing outside the lifecycle
+	// helpers should touch it.
+	Progress *Progress
+	// Ring is the OS credential store model keys are kept in. Nil means this
+	// platform's own; read through Keyring, never directly, for the same
+	// reason Credentials is: on macOS the real one is the login keychain and a
+	// test that could reach past this would write to the developer's.
+	Ring secrets.Keyring
+}
+
+// Keyring is the credential store a model key is written to and read from.
+func (e *Env) Keyring() secrets.Keyring {
+	if e.Ring != nil {
+		return e.Ring
+	}
+	return secrets.NewSystemKeyring()
 }
 
 // CredentialStore is where af login put the token.
@@ -69,16 +90,19 @@ func (e *Env) CredentialStore() *auth.Store {
 // read, because a read from a closed or piped stdin either returns nothing
 // forever or returns end of file immediately, and both look like a hang or a
 // wrong answer to whoever is watching a CI log.
+//
+// The test is an ioctl on the descriptor, not the character device bit. That
+// bit is set for /dev/null, so `af init < /dev/null`, which is how a CI job
+// runs a command it does not intend to answer, looked interactive: every
+// question was asked into nowhere, every read returned end of file, and the
+// defaults went in silently. secret.go has always used term.IsTerminal for
+// exactly this reason and this is the same question.
 func (e *Env) Interactive() bool {
 	f, ok := e.Stdin.(*os.File)
 	if !ok {
 		return false
 	}
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // Options configure the root command.
@@ -91,6 +115,11 @@ type Options struct {
 	// WorkDir overrides the working directory. Tests set it; the binary does
 	// not, and reads the process directory instead.
 	WorkDir string
+	// Keyring overrides the OS credential store. Tests set it so that storing
+	// a model key cannot reach the developer's real keychain. A ring that
+	// reports secrets.ErrKeyringUnavailable is how a machine with no
+	// credential store at all is modelled.
+	Keyring secrets.Keyring
 	// Extra are commands contributed by a binary that embeds this one.
 	//
 	// It exists so that the enterprise binary's own commands appear in af
@@ -164,6 +193,12 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 
 	out := NewOutput(opts.Stdout, opts.Stderr)
 	out.Color = DetectColor(opts.Stdout, opts.Getenv)
+	// Decided here, once, for the same reason colour is: every command asks
+	// the Output how wide a line may be, and a command that measured the
+	// terminal for itself would be a command that disagrees with its sibling
+	// about where the right margin is.
+	out.Width = DetectWidth(opts.Stdout, opts.Getenv)
+	out.TTY = DetectTTY(opts.Stdout, opts.Getenv)
 
 	env := &Env{
 		Out:         out,
@@ -173,6 +208,7 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 		Stdin:       opts.Stdin,
 		WorkDir:     opts.WorkDir,
 		Credentials: opts.Credentials,
+		Ring:        opts.Keyring,
 	}
 	if env.WorkDir == "" {
 		wd, err := os.Getwd()
@@ -198,7 +234,19 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	root.SetOut(opts.Stdout)
 	root.SetErr(opts.Stderr)
 
-	err := root.ExecuteContext(ctx)
+	// ExecuteContextC rather than ExecuteContext, for the command it hands
+	// back. A usage error is the one failure where the useful thing to print
+	// is not the error at all, it is what the command actually takes, and
+	// without the command there is nothing to print it from.
+	ran, err := root.ExecuteContextC(ctx)
+	// Closed here rather than in each command, because the status line is a
+	// goroutine rewriting the last line of the terminal and every path out of
+	// every command has to stop it. Eleven commands build an orchestrator; the
+	// one that forgot would leave a line being rewritten underneath whatever
+	// was printed next, including the error that ended the run.
+	if env.Progress != nil {
+		env.Progress.Close()
+	}
 	if err == nil {
 		// A command that could not write what it was asked to write did not
 		// succeed. Reporting zero here tells a script that the output it just
@@ -225,10 +273,7 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	// else is ours and gets the code, cause, and next step rendering.
 	var usage *usageError
 	if aferrors.As(err, &usage) || isUsageMessage(err) {
-		// Not checked, for the same reason as Output.Error: this is the path
-		// that reports a failure, and a broken error stream leaves nothing to
-		// report it to. The exit code below is what the caller reads.
-		_, _ = fmt.Fprintln(opts.Stderr, err.Error())
+		renderUsageError(out, ran, err)
 		return int(aferrors.ExitUsage)
 	}
 	if out.Format == FormatJSON {
@@ -237,6 +282,93 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 		out.Error(err)
 	}
 	return int(aferrors.ExitCodeOf(err))
+}
+
+// renderUsageError says what the command takes, not just that it was typed
+// wrong.
+//
+// Cobra's own message for the most common mistake in this tree is "accepts 2
+// arg(s), received 1", printed alone, with no usage line and no example. It
+// names the count and nothing else: not which two arguments, not what they
+// look like, not where to find out. Every command that takes an argument
+// failed that way, which is twenty four of them.
+//
+// So the shape is the same one the error renderer uses, because it is the same
+// question being answered: what happened, what to do, where to read more.
+//
+// Writes are not checked, for the same reason as Output.Error: this is the
+// path that reports a failure, and a broken error stream leaves nowhere to
+// report that to. The exit code is what the caller reads.
+func renderUsageError(o *Output, cmd *cobra.Command, err error) {
+	name := "af"
+	if cmd != nil {
+		name = cmd.CommandPath()
+	}
+	_, _ = fmt.Fprintf(o.Err, "%s %s\n",
+		o.S(StyleBad, "Usage:"), o.Wrap(plainUsage(name, err.Error()), len("Usage: ")))
+	if cmd == nil {
+		return
+	}
+	// A command that was never named has no usage worth printing: "Takes: af
+	// [flags]" answers a question nobody asked. The list of commands is what
+	// somebody who typed a name that does not exist actually wants.
+	if cmd.Parent() == nil {
+		_, _ = fmt.Fprintf(o.Err, "  %s  %s\n",
+			o.S(StyleDim, "More:"), o.S(StyleDim, "af --help lists every command"))
+		return
+	}
+	if line := strings.TrimSpace(cmd.UseLine()); line != "" {
+		_, _ = fmt.Fprintf(o.Err, "  %s %s\n", o.S(StyleBold, "Takes:"), line)
+	}
+	// The first example only. A usage error is read in a hurry and the point
+	// is one line somebody can copy, not the catalogue that af <command>
+	// --help already holds.
+	if ex := firstExample(cmd.Example); ex != "" {
+		_, _ = fmt.Fprintf(o.Err, "  %s   %s\n", o.S(StyleBold, "Try:"), ex)
+	}
+	_, _ = fmt.Fprintf(o.Err, "  %s  %s\n",
+		o.S(StyleDim, "More:"), o.S(StyleDim, cmd.CommandPath()+" --help"))
+}
+
+// plainUsage rewrites cobra's argument count messages as English.
+//
+// "accepts 2 arg(s), received 1" names a count and nothing else: not the
+// command, not which two arguments, not what they look like. It is also not a
+// sentence. Every other message a user sees from this tool is one, and the
+// arithmetic notation in the middle of it is the tell that this particular
+// message was never written by anybody, it just leaked out of a library.
+//
+// Anything not recognised passes through unchanged rather than being mangled
+// into something that reads well and says the wrong thing.
+func plainUsage(name, msg string) string {
+	var want, got int
+	switch {
+	case matchCounts(msg, "accepts %d arg(s), received %d", &want, &got):
+		return fmt.Sprintf("%s takes %s and got %d.", name, plural(want, "argument", "arguments"), got)
+	case matchCounts(msg, "accepts at most %d arg(s), received %d", &want, &got):
+		return fmt.Sprintf("%s takes at most %s and got %d.", name, plural(want, "argument", "arguments"), got)
+	case matchCounts(msg, "requires at least %d arg(s), only received %d", &want, &got):
+		return fmt.Sprintf("%s needs at least %s and got %d.", name, plural(want, "argument", "arguments"), got)
+	case strings.HasPrefix(msg, "unknown command"):
+		return msg + ". Run 'af --help' for the ones that exist."
+	}
+	return msg
+}
+
+// matchCounts reads two numbers out of a message with a known shape.
+func matchCounts(msg, format string, a, b *int) bool {
+	n, err := fmt.Sscanf(msg, format, a, b)
+	return err == nil && n == 2
+}
+
+// firstExample is the first runnable line of a command's examples.
+func firstExample(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			return line
+		}
+	}
+	return ""
 }
 
 // isUsageMessage recognises the errors cobra produces for a command line that
@@ -371,15 +503,17 @@ recoverable by replay.`),
 		newCICommand(env),
 		newRunnerCommand(env),
 		newSecretCommand(env),
+		newModelCommand(env),
 		newProviderCommand(env),
+		newTokenCommand(env),
 		newLoginCommand(env),
 		newLogoutCommand(env),
 		newWhoamiCommand(env),
 		newLicenseCommand(env),
 		newVersionCommand(env),
 	)
-	root.SetHelpTemplate(helpTemplate)
-	root.SetUsageTemplate(usageTemplate)
+	attachExamples(root)
+	setHelpRendering(root, env.Out)
 	// A flag that does not parse is a usage error, not a failure of the
 	// command, and the exit code has to say so.
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
@@ -424,7 +558,87 @@ func WithSignals(ctx context.Context) (context.Context, func() bool, func()) {
 	return ctx, second, stop
 }
 
-const helpTemplate = `{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
+// setHelpRendering makes the help and usage pages fit the terminal.
+//
+// Two problems, one mechanism. Cobra prints Long verbatim, so the width of
+// every help page in this tool was whatever the person who wrote it happened
+// to have; and it pads its flag table and its command list without wrapping
+// either. At forty columns the terminal breaks all three mid word, and at two
+// hundred they are a ribbon down the left of an empty screen.
+//
+// The templates are compiled here, with their own function map, rather than
+// through cobra.AddTemplateFunc. That function writes to a package level map
+// shared by every command tree in the process, which the race detector catches
+// the moment two Executes overlap, and which would have a second Execute's
+// terminal width silently deciding the layout of the first one's help. An
+// embedding binary is entitled to run this more than once.
+func setHelpRendering(root *cobra.Command, out *Output) {
+	funcs := template.FuncMap{
+		"trimTrailingWhitespaces": func(s string) string {
+			return strings.TrimRight(s, " \t\n")
+		},
+		// Long is wrapped at render time rather than rewritten, because the
+		// generated command reference reads it directly and must keep the
+		// paragraphs the author wrote rather than one terminal's idea of where
+		// they end. An indented paragraph is left alone: those are the command
+		// tours and worked fragments, where the alignment is the meaning.
+		"wrapped": func(s string) string {
+			var paras []string
+			for _, para := range strings.Split(strings.TrimSpace(s), "\n\n") {
+				if strings.HasPrefix(para, " ") || strings.Contains(para, "\n ") {
+					paras = append(paras, para)
+					continue
+				}
+				paras = append(paras, out.Wrap(para, 0))
+			}
+			return strings.Join(paras, "\n\n")
+		},
+		// pflag already has the wrapped form of a flag table and cobra's
+		// template simply never called it. Trailing spaces come off each line
+		// because pflag pads the name column to a fixed width and, when it
+		// wraps, leaves that padding on a line with nothing after it:
+		// invisible on a screen and a diff full of whitespace anywhere the
+		// help text is captured.
+		"flags": func(set *pflag.FlagSet) string {
+			lines := strings.Split(set.FlagUsagesWrapped(out.Width), "\n")
+			for i := range lines {
+				lines[i] = strings.TrimRight(lines[i], " ")
+			}
+			return strings.TrimRight(strings.Join(lines, "\n"), "\n")
+		},
+		// The command list has no wrapped form in cobra at all.
+		"commands": func(c *cobra.Command) string {
+			var b strings.Builder
+			for _, sub := range c.Commands() {
+				if !sub.IsAvailableCommand() && sub.Name() != "help" {
+					continue
+				}
+				pad := sub.NamePadding() - len(sub.Name()) + 1
+				if pad < 1 {
+					pad = 1
+				}
+				label := "  " + sub.Name() + strings.Repeat(" ", pad)
+				b.WriteString(label)
+				b.WriteString(out.Wrap(sub.Short, len(label)))
+				b.WriteByte('\n')
+			}
+			return strings.TrimRight(b.String(), "\n")
+		},
+	}
+	help := template.Must(template.New("help").Funcs(funcs).Parse(helpTemplate))
+	usage := template.Must(template.New("usage").Funcs(funcs).Parse(usageTemplate))
+
+	// Set on the root only. Cobra walks up to the parent for both, so every
+	// command in the tree renders through these.
+	root.SetHelpFunc(func(c *cobra.Command, _ []string) {
+		_ = help.Execute(c.OutOrStdout(), c)
+	})
+	root.SetUsageFunc(func(c *cobra.Command) error {
+		return usage.Execute(c.OutOrStderr(), c)
+	})
+}
+
+const helpTemplate = `{{with (or .Long .Short)}}{{. | wrapped | trimTrailingWhitespaces}}
 
 {{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`
 
@@ -438,16 +652,16 @@ Aliases:
 Examples:
 {{.Example}}{{end}}{{if .HasAvailableSubCommands}}
 
-Commands:{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+Commands:
+{{commands .}}{{end}}{{if .HasAvailableLocalFlags}}
 
 Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+{{flags .LocalFlags}}{{end}}{{if .HasAvailableInheritedFlags}}
 
 Global flags:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableSubCommands}}
+{{flags .InheritedFlags}}{{end}}{{if .HasAvailableSubCommands}}
 
-Run "{{.CommandPath}} [command] --help" for more about a command.{{end}}
+{{wrapped (printf "Run '%s [command] --help' for more about a command." .CommandPath)}}{{end}}
 `
 
 // RootForDocs builds the command tree for the reference generator.

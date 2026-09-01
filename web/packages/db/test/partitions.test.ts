@@ -268,6 +268,15 @@ describe('reading a partition out', { skip: has ? false : 'no database' }, () =>
     h = await setup()
     org = await seedTenant(h.admin, 'archive')
     await apply(h.admin, { now: month, monthsAhead: 0 })
+    // readPartition reads a whole partition rather than one tenant's rows,
+    // because archiving a month is what it is for. Every other test here scopes
+    // its assertions by org_id and does not care what else is in the table;
+    // this one counts everything in the partition, so it owns the partition or
+    // it counts somebody else's rows. seedTenant makes a new org per run, so
+    // without this the rows accumulate and the count grows by 25 each time:
+    // green on a fresh database, red on the second run, and the failure blames
+    // pagination for what is a fixture problem.
+    await h.admin`DELETE FROM events_2035_04`
     for (let i = 0; i < 25; i++) {
       await h.admin`
         INSERT INTO events (org_id, idempotency_key, env_id, type, occurred_at, sequence)
@@ -276,6 +285,9 @@ describe('reading a partition out', { skip: has ? false : 'no database' }, () =>
     }
   })
   after(async () => {
+    // Leave the partition as it was found, so a later suite counting this
+    // month does not inherit these 25 rows.
+    await h.admin`DELETE FROM events_2035_04`
     await h.close()
   })
 

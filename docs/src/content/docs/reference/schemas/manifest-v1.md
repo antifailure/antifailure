@@ -331,10 +331,10 @@ What each class of finding does to the pull request check. A finding at 'fail' f
 | `load_regression` | `ignore`, `warn`, `fail` | no | A load threshold from the load block being exceeded. Defaults to `warn`. |
 | `masking` | `ignore`, `warn`, `fail` | no | The environment's own branch read back with something in it that still parses as real data. Defaults to `fail`. |
 | `migration_failed` | `ignore`, `warn`, `fail` | no | A migration that did not apply to a branch with production's shape in it. A migration that fails here is one that would have failed in production. Defaults to `fail`. |
-| `migration_lint` | `ignore`, `warn`, `fail` | no | Any of the six migration lint rules. They share one setting because the rules are already scoped by table size. Defaults to `warn`. |
+| `migration_lint` | `ignore`, `warn`, `fail` | no | Any of the seventeen migration lint rules. They share one setting because the rules are already scoped by table size. Defaults to `warn`. |
 | `migration_lock` | object | no | How long a migration may hold a lock on a table. Both figures are compared against a sampled lower bound, so a breach really did hold the lock at least that long. |
 | `migration_rewrite` | `ignore`, `warn`, `fail` | no | A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through. Defaults to `warn`. |
-| `plan_regression` | `ignore`, `warn`, `fail` | no | A query plan that got worse: a table now read end to end, or an index no longer used. Defaults to `warn`. |
+| `plan_regression` | `ignore`, `warn`, `fail` | no | A query plan that got worse in one of three plan regressions: a table is now read end to end, an index is no longer used, or the planner's estimate grew. Defaults to `warn`. |
 | `query_regression` | `ignore`, `warn`, `fail` | no | A statement that runs more often, or slower, than the saved baseline did. Needs a baseline to compare against. Defaults to `warn`. |
 
 ## Probe
@@ -376,9 +376,10 @@ Where and how long the environment runs. The provider decides the machinery; the
 | `domain` | string | no | Wildcard domain for environment hostnames. Defaults to localhost, which needs no DNS at all. Defaults to `localhost`. Max length 253. |
 | `idle_sleep` | string | no | How long an environment may sit idle before it is scaled to zero. It wakes on the next request. Defaults to `30m`. Matches `^[0-9]+(m\|h)$`. |
 | `kubeconfig_context` | string | no | Which kubeconfig context to use. Naming it prevents an environment landing on whatever cluster happened to be current. Max length 253. |
+| `max_ttl` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to `168h`. Matches `^[0-9]+(h\|d)$`. |
 | `namespace_prefix` | string | no | Prefix for Kubernetes namespaces. Defaults to `af`. Max length 40. |
 | `provider` | `local`, `kubernetes` | no | Defaults to `local`. |
-| `ttl` | string | no | How long an environment lives before automatic teardown. Defaults to `168h`. Matches `^[0-9]+(h\|d)$`. |
+| `ttl` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to `24h`. Matches `^[0-9]+(h\|d)$`. |
 
 ## Service
 

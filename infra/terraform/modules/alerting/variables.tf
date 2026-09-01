@@ -82,9 +82,9 @@ variable "probe_url" {
   }
 }
 
-variable "database_sku" {
-  type        = string
-  description = "The flexible server's SKU, used only to look up max_connections for the connection alert's threshold. A metric alert cannot divide one series by another, so the eighty percent has to be computed here."
+variable "usable_connections" {
+  type        = number
+  description = "What the server will hand a role WITHOUT pg_use_reserved_connections: max_connections less reserved_connections and superuser_reserved_connections. Passed from the control-plane module rather than derived here, because the alert's threshold and the application's own connection ceiling have to come from the same number. A metric alert cannot divide one series by another, so the percentage of it has to be computed at plan time."
 }
 
 variable "min_replicas" {

@@ -34,6 +34,14 @@ jobs:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
 
+      # The installer tests start a real zsh, because which profile file a shell
+      # reads is the whole subject and a run that never starts one has not
+      # tested it. macOS ships zsh; this runner does not. The tests refuse
+      # rather than skip when CI is set, so a missing zsh fails loudly here
+      # instead of passing quietly.
+      - name: The shell the installer tests drive
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
       - name: Generated files are current
         # The error catalog and the sidecar's packaged source are generated and
         # checked in. A drift between the generator and what is committed is
@@ -48,10 +56,19 @@ jobs:
         # Both are rendered from the schemas, and a page that has drifted from
         # the contract it documents is worse than no page: it is a wrong answer
         # that looks authoritative.
+        #
+        # THIRD_PARTY_NOTICES.md is here because it was the one generated file
+        # nothing compared. Its generator ran in exactly one place, release.yml,
+        # which writes it into the published artifact rather than checking it,
+        # so the committed copy drifted 49 modules behind with every step green.
+        # A release published a fresh file while this repository carried a stale
+        # one, and the stale one is what a legal review opens. No release job
+        # can see that half of it, because it never reads the committed copy.
         run: |
           go run ./tools/errgen
           go run ./tools/proxysrc
           go run ./tools/schemadoc .
+          go run ./tools/notices -out THIRD_PARTY_NOTICES.md
           (cd engine && go test ./internal/policy -update-vectors)
           (cd engine && go test ./internal/cli -update-reference)
           (cd engine && go test ./internal/events -update-schema)
@@ -81,6 +98,18 @@ jobs:
         # them reported itself as "dev". No stage of the pipeline could have
         # caught it: each did exactly what it was asked.
         run: go run ./tools/ldcheck .
+
+      - name: The release publishes what it signs
+        # The signing and bill of materials half of release.yml has never
+        # run: v0.1.0 and v0.1.1 both predate it, so the first tag is the
+        # first execution and the first look at the result is after it is
+        # published. This asks the three questions that are silent in the
+        # wrong direction there. The loudest is that
+        # softprops/action-gh-release defaults `fail_on_unmatched_files` to
+        # false, so a `files:` pattern matching nothing is a warning in the
+        # log and a green step, and the release goes out short an asset
+        # looking finished.
+        run: go run ./tools/releasecheck .
 
       - name: The one command runs what this workflow runs
         # CONTRIBUTING.md promises that a green `just gate` means a green CI.
@@ -191,7 +220,10 @@ jobs:
         # errcheck, ldcheck and the generators decide whether a build is
         # allowed to ship, and their own tests were never run here. A gate
         # nobody tests is a gate that passes everything the day it breaks.
-        run: cd tools && go test ./... -timeout 5m
+        # -count=1: the cache cannot see files these read outside tools/,
+        # and tools/installsh runs install.sh through sh, so a broken installer
+        # was reported ok from cache. See the justfile recipe.
+        run: cd tools && go test ./... -count=1 -timeout 5m
 
       - name: Format
         # gofmt rather than a linter with opinions. The point is that nobody
@@ -274,7 +306,7 @@ jobs:
         # The race detector always. A data race that only shows up under load
         # is the kind of bug this product exists to find, and shipping one
         # would be embarrassing.
-        run: cd engine && go test ./... -race -timeout 30m
+        run: cd engine && go test ./... -race -count=1 -timeout 30m
         env:
           # Docker is available on this runner, so the provider and runtime
           # suites run for real rather than skipping.
@@ -362,6 +394,12 @@ jobs:
             console/package-lock.json
             api/package-lock.json
 
+      # For classcheck below, which reads the built HTML this job produces.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
       - run: npm ci --no-audit --no-fund
         working-directory: www
 
@@ -371,6 +409,24 @@ jobs:
         # proof is the production export itself.
         run: npm run build
         working-directory: www
+
+      - name: No class that never applies
+        # `cn` is a plain join rather than tailwind-merge, so a className passed
+        # to a component lands beside the component's own class and the cascade
+        # picks whichever Tailwind emitted last. The site header marked the
+        # current page with text-black over a text-black/70 default, lost, and
+        # marked nothing at all for as long as the header has existed. It reads
+        # the built HTML, so it runs here, after the build above.
+        run: go run ./tools/classcheck .
+
+      - name: No animation that never stops
+        # If a piece of UI animates on an infinite loop while the user does
+        # nothing, it is wrong. Reads the built stylesheet and HTML rather than
+        # the source, because a rule existing is not an element carrying it:
+        # `.hero-scan` was read in the source twice and called harmless, and
+        # was scanning behind the front page headline the whole time. Runs
+        # here, after the build above.
+        run: go run ./tools/motioncheck .
 
       - name: The crawl surfaces the site claims to have
         # Sitemap, robots, canonicals, OpenGraph, structured data, the markdown
@@ -612,7 +668,7 @@ jobs:
           rm -rf ee
           cd engine
           go build ./...
-          go test ./internal/... -short -timeout 15m
+          go test ./internal/... -short -count=1 -timeout 15m
 
       - name: No engine package imports ee
         run: |
@@ -682,7 +738,7 @@ jobs:
           cd ee/engine
           GOWORK=off go build ./...
           GOWORK=off go vet ./...
-          GOWORK=off go test ./... -race -timeout 15m
+          GOWORK=off go test ./... -race -count=1 -timeout 15m
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -783,6 +839,19 @@ jobs:
         # site and every documentation gate was green.
         run: go run ./tools/manifestcheck .
 
+      - name: A count of a closed set is its real size
+        # None of the gates above knows how many of anything there are. The
+        # schema, the error catalogue, the transform registry and the command
+        # tree each have one because each is declared in a machine readable
+        # file. The sets declared as Go constants had none, and that is where
+        # the worst instance was living: seventeen DDL lint rules, every one of
+        # which becomes a pull request finding, described in eight places as
+        # six. Fourteen wrong counts and not one overstatement, which is the
+        # signature of a sentence written accurately at one version and never
+        # revisited. It stays invisible because an understatement produces a
+        # happy user who never learns the feature exists.
+        run: go run ./tools/constcheck .
+
       - name: The prose reads like a person wrote it
         # The build plan asks for vale with "a custom rule that flags em dashes
         # and double hyphens in prose". This is that rule. Em dashes are the
@@ -800,6 +869,18 @@ jobs:
         # source, where the string is a literal, and demands a written source
         # for any percentage or "N of M" a reader can see.
         run: go run ./tools/figurecheck .
+
+      - name: The mode lists on the site are the modes the engine has
+        # The firewall product page's own section title read "Simulate,
+        # capture, mock, or deny". Two of those four words are not modes and
+        # four real ones were missing, on a page in the sitemap that returns
+        # 200 to anybody. Separately, synth reached the schema and the proxy
+        # and nothing that describes them, so the README, llms.txt, the
+        # product FAQ, the route metadata behind the JSON-LD and a published
+        # blog post had all settled on five. The complete list is declared in
+        # schemas/manifest.v1.json, so this is a claim a machine can check
+        # rather than one a reviewer has to notice.
+        run: go run ./tools/modecheck .
 
       - name: Nothing in the repository looks like a live credential
         # Uses the engine's own detector, so the check and the runtime refusal

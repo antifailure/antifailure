@@ -159,15 +159,23 @@ func blockingLocks(all []LockHold) []LockHold {
 	return out
 }
 
+// planTitle is how one kind of plan regression is put to a person.
+//
+// A case per constant rather than a default, because a default is how a fourth
+// kind of regression would silently render as the third: correct looking
+// prose, describing something that did not happen. The empty string is the
+// visible failure that a wrong sentence is not, and the test over PlanChanges
+// catches it before anybody sees it.
 func planTitle(k PlanChange) string {
 	switch k {
 	case PlanNewSeqScan:
 		return "a table is now read end to end"
 	case PlanLostIndex:
 		return "an index is no longer used"
-	default:
+	case PlanCostUp:
 		return "the planner's estimate grew"
 	}
+	return ""
 }
 
 // duration prints milliseconds the way somebody reads them: a migration that

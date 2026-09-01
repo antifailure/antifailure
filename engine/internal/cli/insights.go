@@ -30,9 +30,6 @@ during it. The plans on that branch are compared before and after, which is how
 a sequential scan appearing where an index scan was gets found. And the queries
 this environment ran are compared against a report saved on the base branch.
 
-  af insights --save baseline.json     on main
-  af insights --baseline baseline.json on the branch
-
 Where the migrations take something away, the previous release is built and run
 against the migrated branch as well, because a rolling deploy leaves both
 releases talking to the same database for the length of the window and nothing

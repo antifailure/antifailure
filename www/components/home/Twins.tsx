@@ -62,8 +62,14 @@ export function Twins() {
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <TwinIdeStage />
+            {/* "The four phases ... are real" asserted a named model. There
+                is none: no four-phase entity exists in the engine, and
+                /product/twins names four differently, Plan, Provision, Run and
+                Close. What is real is the order the work happens in and the
+                three seals, each of which a conformance behaviour proves. */}
             <Illustrative className="mt-6">
-              The four phases and the containment seals are real. The percentages are a shaped run.
+              The order is real, and so are the containment seals: build, restore safe state,
+              contain, destroy. The percentages are a shaped run.
             </Illustrative>
           </div>
           <ul className="mt-10 grid grid-cols-3 gap-x-16 max-xl:mt-8 max-xl:grid-cols-1 max-xl:gap-y-7 max-lg:mt-10">

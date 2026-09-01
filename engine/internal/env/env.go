@@ -38,7 +38,9 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/lock"
+	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
+	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/runtime/k8s"
@@ -63,6 +65,17 @@ type Options struct {
 	Manifest *schema.Manifest
 	// Branch is the source control branch this environment is for.
 	Branch string
+	// Repository is owner/name, spelled the way the forge spells it.
+	//
+	// Reported on every lifecycle event and used for nothing locally, because
+	// the control plane cannot hold an environment without it: its
+	// environments table joins repositories on a NOT NULL column. Empty is a
+	// real state, not a bug, and means this engine is running somewhere with
+	// no forge to ask, such as a checkout with no remote.
+	Repository string
+	// PullRequest is the number of the pull request this environment is for,
+	// or zero when it is a branch rather than a proposal.
+	PullRequest int
 	// Clock is the time source.
 	Clock clock.Clock
 	// Progress receives human readable lines, already redacted.
@@ -185,6 +198,14 @@ func trimForName(s string, max int) string {
 // EnvID reports the identifier this orchestrator works on.
 func (o *Orchestrator) EnvID() string { return o.envID }
 
+// Branch reports the branch the environment is keyed on.
+//
+// Exported so that a command can say where it is, rather than printing the
+// identifier alone: the identifier is the branch with the punctuation taken
+// out and a hash on the end, which is not something a reader can check against
+// the branch they think they are on.
+func (o *Orchestrator) Branch() string { return o.opts.Branch }
+
 // buildRoot is the tree images are built from.
 func (o *Orchestrator) buildRoot() string {
 	if o.opts.BuildRoot != "" {
@@ -305,6 +326,20 @@ func (s *session) close() {
 // open acquires the lock and every provider, in the order that lets a failure
 // leave the least behind.
 func (o *Orchestrator) open(ctx context.Context, command string) (*session, error) {
+	return o.openLocking(ctx, command, o.envID)
+}
+
+// openLocking opens a session holding a named lock rather than this
+// orchestrator's environment lock.
+//
+// The reaper is why this is a parameter. It holds one session and destroys
+// several environments through it, taking each environment's own lock as it
+// goes, so the session itself must not already hold one of them: with the
+// environment lock, a reaper run from a checkout of a branch whose environment
+// had expired would find that environment locked, by itself, and skip the one
+// environment it was most certainly meant to take. It takes a lock named for
+// the sweep instead, which also stops two sweeps from running at once.
+func (o *Orchestrator) openLocking(ctx context.Context, command, lockName string) (*session, error) {
 	s := &session{}
 	stateDir := filepath.Join(o.opts.Root, StateDir)
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
@@ -313,7 +348,7 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 
 	// The lock comes first. Two af up runs on one branch would otherwise race
 	// on the same container names and both fail in ways neither explains.
-	l, err := lock.Acquire(filepath.Join(stateDir, o.envID+".lock"), o.opts.Clock, command)
+	l, err := lock.Acquire(filepath.Join(stateDir, lockName+".lock"), o.opts.Clock, command)
 	if err != nil {
 		return nil, err
 	}
@@ -397,29 +432,10 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 		registry = extension.Default
 	}
 
-	local := []secrets.Source{
-		&secrets.EnvSource{
-			Label: "this shell's environment",
-			Getenv: func(name string) (string, bool) {
-				v := getenv(name)
-				return v, v != ""
-			},
-		},
-		secrets.NewDotEnvSource(filepath.Join(o.opts.Root, ".env")),
-		secrets.NewFileStore(
-			filepath.Join(o.opts.Root, ".antifailure", "secrets.enc"),
-			secrets.StorePassphrase(getenv),
-		),
-		// Last of the local sources, and only where the platform has one. A
-		// keyring entry is the long lived default on a workstation; everything
-		// above it is a way to override that for one run.
-		secrets.NewKeyringSource(secrets.NewSystemKeyring(), secrets.DefaultKeyringService),
-	}
-	// Anything an enterprise build registered comes after every local source,
-	// for the same reason the keyring comes after .env: a company secret
-	// manager is the default the local ones exist to override. With nothing
-	// registered this appends nothing and the chain is unchanged.
-	return secrets.NewChain(append(local, secrets.Registered(registry)...)...)
+	// One constructor, shared with af explain and with model key resolution, so
+	// that a command whose job is to say where a value will come from cannot
+	// describe a different chain than the one that resolves it.
+	return secrets.LocalChain(o.opts.Root, getenv, registry, secrets.NewSystemKeyring())
 }
 
 // resolveSecrets looks up everything the manifest declares.
@@ -604,7 +620,7 @@ func (o *Orchestrator) mockPacks() ([]string, error) {
 // Only when a rule actually asks for one. An environment with no synth rule
 // gets no key, because handing a credential to a container that has no use for
 // it is a credential in one more place for no reason.
-func (o *Orchestrator) modelEnv() []string {
+func (o *Orchestrator) modelEnv(ctx context.Context) []string {
 	if o.opts.Manifest.Egress == nil {
 		return nil
 	}
@@ -619,23 +635,22 @@ func (o *Orchestrator) modelEnv() []string {
 		return nil
 	}
 
-	getenv := o.opts.Getenv
-	if getenv == nil {
-		getenv = os.Getenv
+	// Resolved through the chain rather than read straight out of the process
+	// environment. It read only the environment, which meant a key stored with
+	// 'af model set' was found by every other part of the engine and then not
+	// by the one place a synth rule actually spends it, and the symptom was a
+	// synth rule refusing with "set ANTHROPIC_API_KEY" to somebody who had.
+	cfg, err := model.Resolve(ctx, o.secretChain())
+	if err != nil || cfg == nil {
+		return nil
 	}
-	var out []string
-	for _, name := range []string{
-		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AF_MODEL",
-		"ANTHROPIC_BASE_URL", "OPENAI_BASE_URL",
-	} {
-		if v := getenv(name); v != "" {
-			out = append(out, name+"="+v)
-			if strings.HasSuffix(name, "_API_KEY") {
-				o.opts.Redactor.Register(v)
-			}
-		}
-	}
-	return out
+	// One provider's key rather than every key that happens to be set. The
+	// sidecar picks the first provider it has a key for, in this same order, so
+	// the second one could never have been used, and this function's own rule
+	// is that a credential handed to a container with no use for it is a
+	// credential in one more place for no reason.
+	o.opts.Redactor.Register(cfg.Key.Reveal())
+	return cfg.Environment()
 }
 
 // needsInspection reports whether any rule requires reading inside TLS.
@@ -658,6 +673,33 @@ func needsInspection(e *schema.Egress) bool {
 		}
 	}
 	return eng.InspectsHost("probe.invalid", 443)
+}
+
+// ttl is how long an environment this orchestrator creates may live.
+//
+// runtime.ttl is normalized at load, so a manifest that says nothing arrives
+// here carrying the default rather than an empty string. A manifest that is
+// somehow absent, which is every command that inventories a machine rather
+// than acting on a repository, gets zero: nothing it creates has a lifetime
+// because it creates nothing.
+//
+// This value was declared, validated, defaulted and printed by af explain for
+// as long as the manifest has existed, and read by nothing. Until the reaper,
+// every environment lived until somebody remembered it.
+func (o *Orchestrator) ttl() time.Duration {
+	m := o.opts.Manifest
+	if m == nil || m.Runtime == nil {
+		return 0
+	}
+	d, err := manifest.ParseDuration(m.Runtime.TTL)
+	if err != nil {
+		// Unreachable through a loaded manifest: validation rejects a ttl that
+		// is not a duration before anything gets here. Zero rather than a
+		// panic, because the consequence of being wrong is an environment with
+		// no expiry, and the consequence of a panic is af up crashing.
+		return 0
+	}
+	return d
 }
 
 // newRuntime builds the runtime the manifest asked for.
@@ -686,7 +728,9 @@ func (o *Orchestrator) newRuntime() (provider.Runtime, error) {
 	}
 	switch kind {
 	case schema.RuntimeLocal:
-		return local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+		return local.New(local.Options{
+			Clock: o.opts.Clock, Redactor: o.opts.Redactor, TTL: o.ttl(),
+		})
 	case schema.RuntimeKubernetes:
 		return o.newKubernetesRuntime(cfg)
 	default:
@@ -724,6 +768,7 @@ func (o *Orchestrator) newKubernetesRuntime(cfg *schema.Runtime) (provider.Runti
 		// cold cache is a quarter of an hour to be told what is running.
 		ResolveProxyImage: o.resolveProxyImage,
 	}
+	opts.TTL = o.ttl()
 	if cfg != nil {
 		opts.Context = cfg.KubeconfigContext
 		opts.NamespacePrefix = cfg.NamespacePrefix
@@ -989,6 +1034,28 @@ func (o *Orchestrator) checkPolicy(ctx context.Context) error {
 }
 
 // Up brings the environment up.
+//
+// THE RESULT IS NIL WHEN open FAILS, and that is the whole of the contract
+// worth knowing here. open is the state directory, the branch lock and the
+// journal, so every failure touching those returns before result is assigned
+// and the caller gets (nil, err).
+//
+// Three of the four callers are safe only because they read the result on the
+// SUCCESS path, after checking the error, where result is always the value
+// assigned below. That is a real invariant and it was written down nowhere, so
+// it survived as folklore until af up read Services off the nil on its FAILURE
+// path and printed a Go stack trace over an AF-RUN-040 it had already
+// diagnosed correctly. The fifth caller is the one this comment is for, and
+// the fifth caller is always somebody who was not there for that.
+//
+// The fix that removes the class rather than describing it is to assign result
+// at the top, before open, so it is never nil and the error path always
+// carries the environment id, which is what af up needs in order to say what
+// the failure left standing. It is deliberately not done here. cli/ci.go
+// checks `if up != nil` and then reads URL and Golden, so a non-nil result
+// with empty fields would send it down a branch it currently skips, and
+// deciding what it should do there is a real change rather than a mechanical
+// one. Whoever takes it should start with that caller.
 func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	started := o.opts.Clock.Now()
 	s, err := o.open(ctx, "af up")
@@ -1016,7 +1083,8 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// Emitted through the bus rather than written anywhere directly, because
 	// the bus is where redaction happens and a second path is a second thing to
 	// remember to redact.
-	o.event(s, events.EnvCreating, "creating "+o.envID, events.F("branch", o.opts.Branch))
+	o.event(s, events.EnvCreating, "creating "+o.envID,
+		append(o.identity(), startedField(started))...)
 	// Registered after s.close, so it runs before it: defers unwind last in
 	// first out and the bus has to still be open for the last event to reach a
 	// sink. Reading the named results is what makes this cover every return in
@@ -1027,11 +1095,13 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 			// and the pull request comment can say why without parsing a
 			// sentence written for a terminal.
 			o.eventErr(s, events.EnvFailed, rerr.Error(),
-				events.F("code", string(codeOf(rerr))))
+				append(o.identity(),
+					startedField(started), events.F("code", string(codeOf(rerr))))...)
 			return
 		}
 		o.event(s, events.EnvReady, o.envID+" is ready",
-			readyFields(result, "local", o.opts.Clock.Since(started).Seconds())...)
+			append(append(o.identity(), startedField(started)),
+				readyFields(result, "local", o.opts.Clock.Since(started).Seconds())...)...)
 	}()
 
 	// Before anything is created, so that a refusal costs nothing. Checking
@@ -1192,7 +1262,7 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		},
 	}
 	spec.SandboxCredentials = resolved.Sidecar
-	spec.ModelEnv = o.modelEnv()
+	spec.ModelEnv = o.modelEnv(ctx)
 
 	// The resolved values reach the services here rather than in the spec
 	// builder, because the lookup is per environment and the builder runs per
@@ -1905,26 +1975,65 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 	defer s.close()
 	ctx = s.tel.StartCommand(ctx, "af down")
 
-	td := &Teardown{EnvID: o.envID}
 	o.event(s, events.EnvDestroying, "removing "+o.envID)
+	td := o.teardown(ctx, s, o.envID)
 
-	rt, err := s.runtime.Down(ctx, o.envID)
+	// Ordering, and it is load bearing rather than stylistic: the replay inside
+	// teardown can append to td.Pending, and the event below reports
+	// len(td.Pending). Emitting first would publish a count taken before the
+	// last thing that can change it.
+	// Emitted before observe and before the return, so it is still inside the
+	// session and the bus is still open. A teardown that left resources behind
+	// still says destroyed, with the count, because the environment is gone as
+	// far as anybody looking at it is concerned and the pending list is what
+	// says otherwise.
+	o.event(s, events.EnvDestroyed, "removed "+o.envID,
+		append(o.identity(),
+			events.F("removed", td.Removed), events.F("pending", len(td.Pending)))...)
+
+	o.observe(ctx, extension.LifecycleEvent{
+		Repository: o.opts.Manifest.Name,
+		EnvID:      o.envID,
+		Kind:       "environment.torn_down",
+	})
+	return td, nil
+}
+
+// teardown removes one environment and everything recorded against it.
+//
+// Separate from Down and taking the environment id rather than reading
+// o.envID, because the reaper tears down an environment this orchestrator did
+// not create and cannot name: an environment id is a project and a branch run
+// through a hash, and there is no way back from the id to the branch. Down
+// passes its own id and gets what it always got.
+//
+// The three steps and their order are the whole contract. The runtime sweep
+// asks the daemon what carries this environment's labels, which covers
+// everything running and nothing else. The database goes second, because a
+// service still running against a database that has been taken away produces a
+// page of connection errors that has nothing to do with why the environment
+// went away. The journal goes last, and only after the sweep, because the two
+// find different things: the journal knows what was recorded, which covers a
+// resource created in the instant before a crash, a resource at a provider
+// with no daemon to sweep, and every kind no sweep looks for. Running both and
+// merging what each leaves behind is the only combination in which neither gap
+// is silent.
+func (o *Orchestrator) teardown(ctx context.Context, s *session, envID string) *Teardown {
+	td := &Teardown{EnvID: envID}
+
+	rt, err := s.runtime.Down(ctx, envID)
 	td.Removed += rt.Removed
 	td.Pending = append(td.Pending, rt.Pending...)
 	if err != nil {
 		td.Pending = append(td.Pending, provider.PendingResource{
-			Kind: "runtime", ID: o.envID, Reason: err.Error(),
+			Kind: "runtime", ID: envID, Reason: err.Error(),
 		})
 	}
 	o.progress(fmt.Sprintf("removed %d runtime resources", rt.Removed))
 
-	// The database goes last, because a service still running against a
-	// database that has been taken away produces a page of connection errors
-	// in the logs that has nothing to do with why the environment went away.
-	branch := provider.Branch{EnvID: o.envID}
-	if err := s.dbProv.Destroy(ctx, branch); err != nil {
+	if err := s.dbProv.Destroy(ctx, provider.Branch{EnvID: envID}); err != nil {
 		td.Pending = append(td.Pending, provider.PendingResource{
-			Kind: "database", ID: o.envID, Reason: err.Error(),
+			Kind: "database", ID: envID, Reason: err.Error(),
 		})
 	} else {
 		td.Removed++
@@ -1935,41 +2044,10 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 	// their own so the sweep above does not see them. They exist only while
 	// that check is running, which means they are here for exactly the case
 	// that matters: a run somebody interrupted.
-	o.rollingDown(ctx, s, td)
+	o.rollingDown(ctx, s, envID, td)
 
-	// Last, and only after the sweep, because the two find different things.
-	//
-	// The sweep asks the daemon what carries this environment's labels, which
-	// covers everything running and nothing else. The journal knows what was
-	// recorded, which covers a resource created in the instant before a crash,
-	// a resource at a provider with no daemon to sweep, and every kind no sweep
-	// looks for. Running both and merging what each leaves behind is the only
-	// combination in which neither gap is silent.
-	//
-	// Until this call existed the journal was written and never read: Replay,
-	// NewRegistry and Commit each had zero callers in the engine, so the
-	// compensating half of "everything that is created has a recorded,
-	// compensating deletion" had never run.
-	o.reconcile(ctx, s, td)
-
-	// Ordering, and it is load bearing rather than stylistic: the replay above
-	// can append to td.Pending, and the event below reports len(td.Pending).
-	// Emitting first would publish a count taken before the last thing that can
-	// change it.
-	// Emitted before observe and before the return, so it is still inside the
-	// session and the bus is still open. A teardown that left resources behind
-	// still says destroyed, with the count, because the environment is gone as
-	// far as anybody looking at it is concerned and the pending list is what
-	// says otherwise.
-	o.event(s, events.EnvDestroyed, "removed "+o.envID,
-		events.F("removed", td.Removed), events.F("pending", len(td.Pending)))
-
-	o.observe(ctx, extension.LifecycleEvent{
-		Repository: o.opts.Manifest.Name,
-		EnvID:      o.envID,
-		Kind:       "environment.torn_down",
-	})
-	return td, nil
+	o.reconcile(ctx, s, envID, td)
+	return td
 }
 
 // observe reports a lifecycle event to whatever is registered.

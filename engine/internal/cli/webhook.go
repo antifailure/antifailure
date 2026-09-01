@@ -79,12 +79,14 @@ func newWebhookListCommand(env *Env) *cobra.Command {
 				return env.Out.JSON(all)
 			}
 			env.Out.Section("Webhook providers")
+			block := env.Out.Block()
 			for _, p := range webhook.Names() {
-				env.Out.Printf("  %-8s %d events, signed with %s\n",
-					p, len(webhook.EventNames(p)), webhook.Providers[p].SecretEnv)
+				block.Addf(p, "%d events, signed with %s",
+					len(webhook.EventNames(p)), webhook.Providers[p].SecretEnv)
 			}
+			block.Flush()
 			env.Out.Println("")
-			env.Out.Println("  See one provider's events with: af webhook list stripe")
+			env.Out.Hint("See one provider's events with", "af webhook list stripe")
 			return nil
 		},
 	}
@@ -97,9 +99,6 @@ func newWebhookTriggerCommand(env *Env) *cobra.Command {
 		Use:   "trigger <provider> <event>",
 		Short: "Send one signed event into the environment",
 		Long: strings.TrimSpace(`
-  af webhook trigger stripe checkout.session.completed
-  af webhook trigger stripe invoice.paid --set id=in_123 --set amount_paid=4900
-
 The path is taken from the manifest's webhook_path for that provider unless
 --path says otherwise, and the signing secret from the same variable the
 application reads, so both sides agree without anybody configuring twice.`),

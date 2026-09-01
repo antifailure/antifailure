@@ -43,6 +43,11 @@ function inputsFor(org: Org): Record<string, unknown> {
     'environments.list': { limit: 10 },
     'environments.get': { envId: org.envId },
     'environments.teardown': { envId: org.envId },
+    // Named rather than left to its default, because a route with no entry here
+    // drops out of the matrix, which is the hole this file exists to close. The
+    // window is bounded at 720 hours by the schema; 24 is the default and the
+    // only value the console asks for.
+    'environments.costs': { hours: 24 },
     // The dispatch verbs. This fixture has no GitHub App installation, so a
     // role that holds the permission reaches the handler and gets
     // PRECONDITION_FAILED, which is what the matrix accepts and what proves the
@@ -89,6 +94,16 @@ function inputsFor(org: Org): Record<string, unknown> {
     'tokens.list': {},
     'tokens.revoke': { id: '00000000-0000-0000-0000-000000000000' },
     'org.status': {},
+    'subscriptions.current': {},
+    'subscriptions.invoices': { limit: 10 },
+    'subscriptions.checkout': {
+      plan: 'team', seats: 1,
+      successUrl: 'https://app.test/billing/done',
+      cancelUrl: 'https://app.test/billing',
+    },
+    'subscriptions.portal': { returnUrl: 'https://app.test/billing' },
+    'subscriptions.cancel': { reason: 'testing the matrix' },
+    'subscriptions.reconcile': {},
     'org.suspend': { reason: 'testing the matrix' },
     'org.resume': {},
   }

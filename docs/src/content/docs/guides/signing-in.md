@@ -14,7 +14,7 @@ $ af login
 
   Your code is  BCDF-GHJK
 
-  Approve it at https://app.dev.antifailure.dev/device
+  Approve it at https://app.antifailure.dev/device
 
   Waiting for approval...
 
@@ -28,7 +28,7 @@ Then:
 $ af whoami
   somebody in antifailure
   role           admin
-  control plane  https://app.dev.antifailure.dev
+  control plane  https://app.antifailure.dev
   scopes         environments.view, runs.view, events.write
   expires        2026-11-26T04:12:09Z
   credential     the operating system keyring, under "antifailure"
@@ -62,16 +62,24 @@ af login --scope providers.write
 ```
 
 The scopes that exist are `environments.view`, `runs.view`, `events.write`,
-`providers.view` and `providers.write`. A name that is not one of those is
-refused in the terminal, before a code is printed, rather than producing a token
-that cannot do the thing you asked for.
+`providers.view`, `providers.write` and `tokens.manage`. A name that is not one
+of those is refused in the terminal, before a code is printed, rather than
+producing a token that cannot do the thing you asked for.
 
 What you asked for is shown on the screen where the login is approved, so nobody
-grants provider-key management without reading the words.
+grants provider-key management or the ability to mint a credential without
+reading the words.
 
 `providers.write` lets a terminal store, rotate, remove and cap a key. There is
 no scope that reads one back, and there is no route that would serve it. See
 [Your own provider keys](/docs/guides/provider-keys/).
+
+`tokens.manage` lets a terminal mint, list and revoke the engine tokens a CI job
+presents. It is what running your own control plane needs, and it is the reason the two lists
+differ: a token from a plain `af login` cannot make another credential, and
+neither can an engine token, so only a person who is an owner or an admin right
+now can mint one. See [Connecting an
+engine](/docs/self-hosting/control-plane/#connecting-an-engine).
 
 Scope is decided by the control plane from a closed list and is recorded when
 the login starts, so approving cannot widen it and asking for something that
@@ -115,7 +123,7 @@ grant needs a person, by design.
 
 ```
 $ af logout
-  Removed the credential for https://app.dev.antifailure.dev.
+  Removed the credential for https://app.antifailure.dev.
   The token is revoked, so a copy of it is no longer valid anywhere.
 ```
 
@@ -140,7 +148,7 @@ The short code is the point. Run `af login --no-browser`, read the code off
 this terminal, and approve it in a browser anywhere else, including a phone.
 
 ```
-af login --no-browser --control-plane https://app.dev.antifailure.dev
+af login --no-browser
 ```
 
 The code contains no character that is easy to misread: no `O` or `0`, no `I`,

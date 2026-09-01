@@ -14,6 +14,10 @@ const (
 	AFAGT003 Code = "AF-AGT-003"
 	// The agent runner could not be found: {detail}
 	AFAGT004 Code = "AF-AGT-004"
+	// The {provider} key was not accepted: {detail}
+	AFAGT005 Code = "AF-AGT-005"
+	// The {provider} endpoint could not be reached: {detail}
+	AFAGT006 Code = "AF-AGT-006"
 	// Invariant {invariant} did not finish within {timeout}.
 	AFAGT010 Code = "AF-AGT-010"
 	// Invariant {invariant} is not read only.
@@ -57,6 +61,8 @@ const (
 	AFCPL002 Code = "AF-CPL-002"
 	// The control plane could not be reached: {detail}
 	AFCPL003 Code = "AF-CPL-003"
+	// This machine is not signed in to {origin}.
+	AFCPL004 Code = "AF-CPL-004"
 
 	// Database
 	// The database provider {provider} is not registered in this build.
@@ -111,8 +117,14 @@ const (
 	AFDET001 Code = "AF-DET-001"
 	// Detection stopped after {budget} with partial results.
 	AFDET002 Code = "AF-DET-002"
-	// Services {first} and {second} both claim port {port}.
-	AFDET003 Code = "AF-DET-003"
+	// Detection could not decide {question}, and there is no default to
+	// fall back on.
+	AFDET004 Code = "AF-DET-004"
+	// Detection produced a draft that is not a valid manifest, so nothing
+	// was written and {path} does not exist: {detail}
+	AFDET005 Code = "AF-DET-005"
+	// --answer {id}=... does not name anything in this repository.
+	AFDET006 Code = "AF-DET-006"
 	// The changed files between {base} and {head} could not be read:
 	// {detail}
 	AFDET010 Code = "AF-DET-010"
@@ -172,6 +184,8 @@ const (
 	AFLOD014 Code = "AF-LOD-014"
 	// The scenario {scenario} proved nothing: {detail}
 	AFLOD015 Code = "AF-LOD-015"
+	// The p95_increase threshold proved nothing: {detail}
+	AFLOD016 Code = "AF-LOD-016"
 
 	// Manifest
 	// No antifailure.yaml was found in {path} or any parent directory.
@@ -181,8 +195,8 @@ const (
 	// The manifest at {path} declares schema version {found}, which this
 	// build does not understand.
 	AFMAN003 Code = "AF-MAN-003"
-	// 'af init' needs a terminal to ask questions, and this session has
-	// none.
+	// 'af init' has questions to ask and this session has no terminal to
+	// ask them on.
 	AFMAN004 Code = "AF-MAN-004"
 	// The manifest at {path} is larger than the {limit} limit.
 	AFMAN005 Code = "AF-MAN-005"
@@ -366,6 +380,24 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
+	AFAGT005: {
+		Code:      AFAGT005,
+		Area:      "AGT",
+		Message:   "The {provider} key was not accepted: {detail}",
+		NextStep:  "{next_step}",
+		Docs:      "guides/model-keys",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFAGT006: {
+		Code:      AFAGT006,
+		Area:      "AGT",
+		Message:   "The {provider} endpoint could not be reached: {detail}",
+		NextStep:  "{next_step}",
+		Docs:      "guides/model-keys",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
 	AFAGT010: {
 		Code:      AFAGT010,
 		Area:      "AGT",
@@ -487,7 +519,7 @@ var catalog = map[Code]Entry{
 		Code:      AFCP002,
 		Area:      "CP",
 		Message:   "The control plane rejected this engine's token.",
-		NextStep:  "Create a new engine token in the control plane and set AF_CONTROL_PLANE_TOKEN to it. The old one was revoked, expired, or belongs to a different control plane.",
+		NextStep:  "Run 'af token create ci' and set AF_CONTROL_PLANE_TOKEN to what it prints. The old one was revoked, expired, or belongs to a different control plane.",
 		Docs:      "self-hosting/control-plane",
 		Retryable: false,
 		ExitCode:  ExitAuth,
@@ -496,7 +528,7 @@ var catalog = map[Code]Entry{
 		Code:      AFCPL001,
 		Area:      "CPL",
 		Message:   "No control plane token is configured.",
-		NextStep:  "Create an engine token in the control plane, then set AF_CONTROL_PLANE_TOKEN. Everything except this command works without one.",
+		NextStep:  "Run 'af login' then 'af token create ci', and set AF_CONTROL_PLANE_TOKEN to what it prints. Everything except this command works without one.",
 		Docs:      "self-hosting/control-plane",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
@@ -518,6 +550,15 @@ var catalog = map[Code]Entry{
 		Docs:      "self-hosting/control-plane",
 		Retryable: true,
 		ExitCode:  ExitProvider,
+	},
+	AFCPL004: {
+		Code:      AFCPL004,
+		Area:      "CPL",
+		Message:   "This machine is not signed in to {origin}.",
+		NextStep:  "Run '{command}' to sign in from this terminal. Nothing else in the engine needs a sign in; only the commands that read or write your own account do.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: false,
+		ExitCode:  ExitAuth,
 	},
 	AFDB001: {
 		Code:      AFDB001,
@@ -708,14 +749,32 @@ var catalog = map[Code]Entry{
 		Retryable: true,
 		ExitCode:  ExitConfiguration,
 	},
-	AFDET003: {
-		Code:      AFDET003,
+	AFDET004: {
+		Code:      AFDET004,
 		Area:      "DET",
-		Message:   "Services {first} and {second} both claim port {port}.",
-		NextStep:  "Give one of them a different port in antifailure.yaml.",
+		Message:   "Detection could not decide {question}, and there is no default to fall back on.",
+		NextStep:  "Answer it with --answer {id}=<value>, or run 'af init' from a terminal so it can ask.",
 		Docs:      "concepts/detection",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFDET005: {
+		Code:      AFDET005,
+		Area:      "DET",
+		Message:   "Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}",
+		NextStep:  "Re-run with --answer to override what detection read, for example --answer service.<name>.port=<port>. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above.",
+		Docs:      "concepts/detection",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDET006: {
+		Code:      AFDET006,
+		Area:      "DET",
+		Message:   "--answer {id}=... does not name anything in this repository.",
+		NextStep:  "Use one of: {known}",
+		Docs:      "concepts/detection",
+		Retryable: false,
+		ExitCode:  ExitUsage,
 	},
 	AFDET010: {
 		Code:      AFDET010,
@@ -906,6 +965,15 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
+	AFLOD016: {
+		Code:      AFLOD016,
+		Area:      "LOD",
+		Message:   "The p95_increase threshold proved nothing: {detail}",
+		NextStep:  "The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
 	AFMAN001: {
 		Code:      AFMAN001,
 		Area:      "MAN",
@@ -936,8 +1004,8 @@ var catalog = map[Code]Entry{
 	AFMAN004: {
 		Code:      AFMAN004,
 		Area:      "MAN",
-		Message:   "'af init' needs a terminal to ask questions, and this session has none.",
-		NextStep:  "Pass --non-interactive together with the flags listed by 'af init --help'.",
+		Message:   "'af init' has questions to ask and this session has no terminal to ask them on.",
+		NextStep:  "Pass --non-interactive to accept every default, and --answer id=value for anything that has no default.",
 		Docs:      "reference/cli#af-init",
 		Retryable: false,
 		ExitCode:  ExitUsage,

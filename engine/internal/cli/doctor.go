@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/state"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -163,7 +164,13 @@ func renderDoctor(env *Env, report DoctorReport) error {
 	if len(problems) > 0 {
 		env.Out.Section("What to do")
 		for _, c := range problems {
-			env.Out.Printf("  %s\n    %s\n", env.Out.S(StyleBold, c.Name), c.Remediation)
+			// The remediation is the reason the section exists, and it was the
+			// one thing on the page that ran off the right of the terminal: a
+			// hundred and one characters against an eighty column screen, hard
+			// wrapped mid word by the terminal at the moment somebody's machine
+			// is already not working.
+			env.Out.Printf("  %s\n    %s\n",
+				env.Out.S(StyleBold, c.Name), env.Out.Wrap(c.Remediation, 4))
 		}
 	}
 	env.Out.Println("")
@@ -237,6 +244,8 @@ func RunDoctor(ctx context.Context, env *Env, p Prober) DoctorReport {
 		checkKernelIsolation,
 		checkProxyEnvironment,
 		checkGit,
+		checkModelKey,
+		checkLeftoverEnvironments,
 	}
 	report := DoctorReport{
 		OK:       true,
@@ -250,6 +259,75 @@ func RunDoctor(ctx context.Context, env *Env, p Prober) DoctorReport {
 		report.Checks = append(report.Checks, r)
 	}
 	return report
+}
+
+// pruneCutoff is the age af env prune treats as stale by default, so that this
+// check and that command cannot disagree about which environments are old.
+const pruneCutoff = 24 * time.Hour
+
+// checkLeftoverEnvironments counts what this machine is still holding.
+//
+// af env prune exists for exactly this, and until now the only thing that named
+// it was af env list, which is itself a command nobody is ever pointed at. So
+// the way to learn that leftovers accumulate was to read the whole command
+// reference, which means for practical purposes nobody learned it. Doctor is
+// where it belongs: it is the command the quickstart says to run first, it is
+// the one people run when something is wrong, and it already reports disk.
+//
+// Measured rather than assumed to be rare. The machine this was written on was
+// holding five environments from failed runs, the oldest forty one hours, none
+// of them running and all of them holding a database branch and a network.
+//
+// A failure to look is a skip, not a warning. The daemon being unreachable is
+// already reported by the Docker check above, and saying it twice trains
+// somebody to read past both.
+func checkLeftoverEnvironments(ctx context.Context, env *Env, _ Prober) CheckResult {
+	r := CheckResult{Name: "Leftover environments"}
+	r.Remediation = "Remove them with 'af env prune', which takes anything older than a day, " +
+		"or one at a time with 'af down --branch <branch>'. 'af env list' shows what is held."
+
+	envs, err := listEnvironments(ctx, env)
+	if err != nil {
+		r.Status = CheckSkip
+		r.Detail = "nothing could be counted, because the runtime did not answer"
+		return r
+	}
+	status, detail := leftoverVerdict(envs, env.Clock.Now())
+	r.Status, r.Detail = status, detail
+	return r
+}
+
+// leftoverVerdict decides what the count means, separately from reading it.
+//
+// Split out because the interesting cases are about ages, and reaching them
+// through the runtime would mean leaving real environments lying around on the
+// machine running the tests for a day, which is both slow and the exact fault
+// this check reports.
+func leftoverVerdict(envs []environment, now time.Time) (CheckStatus, string) {
+	if len(envs) == 0 {
+		return CheckPass, "none are being held"
+	}
+	stale := 0
+	oldest := time.Duration(0)
+	for _, e := range envs {
+		age := now.Sub(e.Oldest)
+		if age > oldest {
+			oldest = age
+		}
+		if age > pruneCutoff {
+			stale++
+		}
+	}
+	if stale == 0 {
+		// Held is not the same as leaked. An environment somebody is working in
+		// right now is the normal state, and warning about it would make this
+		// check noise on the machine of anybody actually using the product.
+		return CheckPass, fmt.Sprintf("%s being held, the oldest %s old",
+			plural(len(envs), "environment", "environments"), humanAge(oldest))
+	}
+	return CheckWarn, fmt.Sprintf(
+		"%s older than a day, out of %d being held; the oldest is %s old",
+		plural(stale, "environment", "environments"), len(envs), humanAge(oldest))
 }
 
 func checkDocker(ctx context.Context, _ *Env, p Prober) CheckResult {
@@ -481,6 +559,81 @@ func checkProxyEnvironment(_ context.Context, _ *Env, p Prober) CheckResult {
 	r.Status = CheckPass
 	r.Detail = strings.Join(set, ", ") + " are set and will be honoured for builds"
 	r.Remediation = "No action needed. The proxy is used for builds and image pulls. It is never used from inside an environment, whose only egress path is the sidecar."
+	return r
+}
+
+// checkModelKey reports what the agents will plan with.
+//
+// Doctor is what somebody runs first and it said nothing at all about the
+// model, which left the single most confusing thing about this product
+// undiscoverable: whether a run will read pages with a model or fall back to
+// the deterministic planner. Somebody with a typo in a variable name got a
+// green doctor and a run that quietly planned deterministically.
+//
+// No key is a PASS and not a warning. Running without one is a supported mode:
+// workflows still run, still drive a real browser and still produce a verdict.
+// A warning would say the opposite, and the whole reason this product works
+// with no credential at all is worth stating rather than flagging.
+//
+// It does not make a call. Doctor is run constantly, often on a laptop with no
+// network, and a check that spent money every time would be a check people
+// turn off. 'af model test' is the one that proves the key, and this names it.
+func checkModelKey(ctx context.Context, env *Env, _ Prober) CheckResult {
+	r := CheckResult{Name: "Model key"}
+
+	cfg, err := model.Resolve(ctx, modelChain(env))
+	if err != nil {
+		// A source that failed, which is almost always a locked keyring or a
+		// wrong passphrase. Reported rather than read as "no key", because
+		// those look identical from here and only one of them is a problem.
+		r.Status = CheckWarn
+		r.Detail = "a configured source could not be read: " + err.Error()
+		r.Remediation = "Run 'af model show' to see which source failed. Until it is fixed, a key stored there cannot be found and runs will use the deterministic planner."
+		return r
+	}
+
+	if cfg == nil {
+		r.Status = CheckPass
+		r.Detail = "none set, so agents use the deterministic planner"
+		r.Remediation = "No action needed. Running without a model key is supported: workflows still drive a real browser and still produce a verdict. To have agents read pages and decide what a person would do next, store your own key with 'af model set anthropic'."
+		return r
+	}
+
+	detail := fmt.Sprintf("%s/%s from %s", cfg.Provider.Name, cfg.Model, cfg.Source)
+	switch {
+	case cfg.ThroughControlPlane():
+		detail += ", through your control plane"
+	case cfg.Custom():
+		detail += ", at " + cfg.BaseURL
+	}
+	r.Detail = detail
+
+	// Said before anything about verification, because it is the more expensive
+	// mistake of the two. A key that is never tested costs a run; a cap somebody
+	// believes in and that is not applied costs whatever the month costs.
+	if origin := uncappedControlPlane(env, cfg); origin != "" {
+		r.Status = CheckWarn
+		r.Detail = detail + ", not capped"
+		r.Remediation = fmt.Sprintf(
+			"This key goes straight to the provider, so a monthly cap set with "+
+				"'af provider budget' on %s is not in force. Run 'af model show' for how to "+
+				"route through the control plane instead, or keep this key and know there is "+
+				"no ceiling on it.", origin)
+		return r
+	}
+
+	if rec := model.ReadRecord(env.WorkDir, cfg.Fingerprint); rec != nil {
+		r.Status = CheckPass
+		r.Detail = detail + ", verified " + rec.VerifiedAt.Format("2006-01-02")
+		r.Remediation = "No action needed. Run 'af model test' again to re-check the key."
+		return r
+	}
+	// Present and never proven. A warning rather than a pass, because a key
+	// that is set and revoked is indistinguishable from a working one here and
+	// the difference costs somebody a whole run to discover.
+	r.Status = CheckWarn
+	r.Detail = detail + ", never verified"
+	r.Remediation = "Run 'af model test'. It makes one cheap call and says exactly what is wrong when the key is revoked, out of credit, or pointed at a model the key cannot use."
 	return r
 }
 

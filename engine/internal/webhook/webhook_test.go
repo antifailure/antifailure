@@ -174,3 +174,52 @@ func TestNames_AreStableAndCoverTheFlowsThatNeedThem(t *testing.T) {
 	}
 	require.Nil(t, webhook.EventNames("nonesuch"))
 }
+
+func TestBuild_TwoEventsInOneSecondHaveDifferentIdentifiers(t *testing.T) {
+	t.Parallel()
+	// A Stripe webhook handler must be idempotent on the event id, because
+	// Stripe retries. The id used to be "evt_afmock" plus the unix second, so a
+	// subscription created and an invoice paid in the same second carried the
+	// SAME id, and a correct handler dropped the second as a repeat of the
+	// first. That is invisible until somebody builds the integration this
+	// simulator exists for, which is exactly what it exists for.
+	at := time.Unix(1767225600, 0).UTC()
+	signing := webhook.SecretFor("env-1", "stripe")
+
+	seen := map[string]string{}
+	for _, eventType := range webhook.EventNames("stripe") {
+		event, err := webhook.Build("stripe", eventType, signing, nil, at)
+		require.NoError(t, err)
+		var envelope struct {
+			ID string `json:"id"`
+		}
+		require.NoError(t, json.Unmarshal(event.Body, &envelope))
+		require.NotContains(t, seen, envelope.ID,
+			"%s and %s were signed in the same second and share the id %s",
+			eventType, seen[envelope.ID], envelope.ID)
+		seen[envelope.ID] = eventType
+	}
+	require.Len(t, seen, len(webhook.EventNames("stripe")))
+}
+
+func TestBuild_TheSameEventTwiceKeepsItsIdentifier(t *testing.T) {
+	t.Parallel()
+	// The fixed clock exists so two runs of one workflow produce the same
+	// output and can be compared. Making the identifier unique must not cost
+	// that, so it is a digest of the event rather than a counter: the same
+	// event with the same payload at the same instant is the same event, and an
+	// application dropping the repeat is behaving correctly.
+	at := time.Unix(1767225600, 0).UTC()
+	signing := webhook.SecretFor("env-1", "stripe")
+
+	first, err := webhook.Build("stripe", "invoice.paid", signing, map[string]any{"id": "in_1"}, at)
+	require.NoError(t, err)
+	second, err := webhook.Build("stripe", "invoice.paid", signing, map[string]any{"id": "in_1"}, at)
+	require.NoError(t, err)
+	require.Equal(t, string(first.Body), string(second.Body))
+
+	// A different payload is a different event.
+	other, err := webhook.Build("stripe", "invoice.paid", signing, map[string]any{"id": "in_2"}, at)
+	require.NoError(t, err)
+	require.NotEqual(t, string(first.Body), string(other.Body))
+}

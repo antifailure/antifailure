@@ -21,6 +21,28 @@ These work on every command.
 | `-q`, `--quiet` | `false` | Print only what was asked for. |
 | `-v`, `--verbose` | `false` | Print the underlying cause of an error. |
 
+## How output adapts
+
+Text output is stable for the same input. There are no timestamps and no
+durations in it, so a snapshot test, a diff and two CI logs of the same run
+compare cleanly. Timestamps live in `--output json`, where a machine
+wants them.
+
+What does vary is layout, and only where there is a terminal to lay anything
+out on. Colour, width and the live status line under a long run are decided
+once, from the output stream, when the command starts.
+
+| Variable | What it does |
+| --- | --- |
+| `NO_COLOR` | Any non-empty value turns colour off. It wins over everything, including `AF_FORCE_COLOR`. |
+| `AF_FORCE_COLOR` | Any non-empty value turns colour on for a stream that is not a terminal, for a CI system that renders escape codes. |
+| `AF_WIDTH` | Lay output out at this many columns rather than measuring the terminal. Clamped to between 40 and 200. |
+
+A stream that is not a terminal, a pipe, a file, or a CI log, is laid out at 80
+columns and carries no escape sequences. That is what keeps the output of a
+piped run identical from one machine to the next. `TERM=dumb` is
+treated the same way.
+
 ## Commands
 
 ### `af change`
@@ -39,10 +61,6 @@ which checks exercise which files, and what it cannot see. And a path no rule
 recognises selects every check rather than none, because the cost of the two
 mistakes is not the same.
 
-  af change                          against the base branch this job names
-  af change --base origin/main       against a ref you choose
-  af change --diff pr.patch          against a diff you already have
-
 In a GitHub Actions job it writes one output per check, so a later step can
 skip work this change does not need.
 
@@ -52,6 +70,14 @@ because nothing is configured to run it.
 
 ```
 af change [flags]
+```
+
+```
+# Against the base branch this job names.
+af change
+# Against a ref you choose, or a diff you already have.
+af change --base origin/main
+af change --diff pr.patch
 ```
 
 | Flag | Default | What it does |
@@ -86,6 +112,12 @@ change.
 af ci [flags]
 ```
 
+```
+# What CI runs: up, migrate, test, load, gate, report, down.
+af ci
+af ci --report report.json --keep
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--baseline` | - | Compare queries and plans against a report saved on the base branch. |
@@ -110,20 +142,37 @@ same attention and yields nothing.
 af doctor
 ```
 
+```
+af doctor
+af doctor -o json
+```
+
 ### `af down`
 
 Remove the environment and everything it created.
 
-Replay the journal in reverse and delete every resource the environment
-created: database branches, containers, volumes, and networks.
+Replay the journal in reverse and delete what this environment recorded
+creating. Every resource is journaled before it is made, so what teardown
+removes is what was actually created rather than what a list somebody
+maintained remembers to look for.
 
 Teardown never stops at the first failure. A provider that is unreachable must
-not strand the other resources, so each is attempted and anything that could
-not be removed stays recorded for the next run. Exit code 10 means resources
-are still pending.
+not strand the other resources, so each is attempted, and two things survive
+the run: anything that could not be removed, and anything this build has no way
+to delete, which is left recorded rather than forgotten. Both are named
+individually in the output, and exit code 10 means resources are still pending.
+
+So the answer to what this is about to remove is not a sentence here. It is
+'af status' for what is running and the pending list this prints for whatever
+it could not reach.
 
 ```
 af down [flags]
+```
+
+```
+af down
+af down --branch feature/checkout
 ```
 
 | Flag | Default | What it does |
@@ -142,11 +191,47 @@ does not, and a list that disagrees with reality is worse than no list.
 af env
 ```
 
+```
+af env list
+```
+
 Subcommands:
 
+- [`af env extend`](#af-env-extend) Keep an environment past its lifetime, up to its maximum.
 - [`af env list`](#af-env-list) List the environments this machine is holding.
 - [`af env prune`](#af-env-prune) Remove environments older than a cutoff.
 - [`af env pull`](#af-env-pull) Read an environment's record from the control plane.
+- [`af env reap`](#af-env-reap) Remove the environments whose lifetime has ended.
+
+### `af env extend`
+
+Keep an environment past its lifetime, up to its maximum.
+
+Moves an environment's expiry, so a sweep does not take one you are still
+using.
+
+There is a bound, and it is the point. No extension may take an environment
+past runtime.max_ttl measured from when it was CREATED, not from now, so
+extending repeatedly cannot walk the limit forward. Asking for more than the
+maximum grants the maximum and says so rather than failing, because being given
+less time than you asked for silently is how you come back to an environment
+that is gone.
+
+```
+af env extend <environment> [flags]
+```
+
+```
+# The ceiling is measured from when the environment was created, so
+# extending twice does not buy twice the time.
+af env extend af-orders-feature-checkout-05ca6c --for 2h
+af env extend af-orders-feature-checkout-05ca6c --for 2h --reason 'debugging the failing checkout'
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--for` | `4h0m0s` | How long from now the environment should live. |
+| `--reason` | - | Why, recorded with the extension. |
 
 ### `af env list`
 
@@ -154,6 +239,11 @@ List the environments this machine is holding.
 
 ```
 af env list
+```
+
+```
+af env list
+af env list -o json
 ```
 
 ### `af env prune`
@@ -170,6 +260,12 @@ at it is the kind of help nobody wants.
 
 ```
 af env prune [flags]
+```
+
+```
+# Nothing is removed until you drop --dry-run.
+af env prune --dry-run
+af env prune --older-than 24h
 ```
 
 | Flag | Default | What it does |
@@ -197,9 +293,49 @@ engine tokens.
 af env pull <environment> [flags]
 ```
 
+```
+af env pull af-orders-feature-checkout-05ca6c
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--control-plane` | - | The control plane to read from (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af env reap`
+
+Remove the environments whose lifetime has ended.
+
+Removes every environment on this machine that has passed the lifetime it was
+created with, and nothing else.
+
+The lifetime is read off each environment's own resources, stamped there when
+it was created from that repository's runtime.ttl. It is never taken from the
+manifest this command was run with, so a repository with a two hour lifetime
+cannot remove another project's week long environment on the same machine.
+
+Three things are never removed. An environment whose resources state no
+lifetime, which is everything created before this feature existed: use
+'af env prune --older-than' for those, where a person names the cutoff. An
+environment something is running against, which is deferred to the next sweep
+rather than pulled out from under a command. And anything that is not an
+environment, such as the shared sidecar image.
+
+An environment you are still using can be kept with 'af env extend'.
+
+```
+af env reap [flags]
+```
+
+```
+# Only environments past the lifetime they were created with, and
+# nothing is removed until you drop --dry-run.
+af env reap --dry-run
+af env reap
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--dry-run` | `false` | Print what would be removed without removing it. |
 
 ### `af explain`
 
@@ -211,6 +347,11 @@ one line answer.
 
 ```
 af explain
+```
+
+```
+af explain
+af explain -o json
 ```
 
 ### `af explore`
@@ -231,6 +372,12 @@ and every finding arrives with the command that replays it.
 
 ```
 af explore [flags]
+```
+
+```
+# Agents go at a goal with no workflow written for it.
+af explore
+af explore --emit-workflow checkout.yaml
 ```
 
 | Flag | Default | What it does |
@@ -271,6 +418,12 @@ not fully reproduced.
 af fidelity [flags]
 ```
 
+```
+# An inventory of the copy against the thing it is a copy of.
+af fidelity
+af fidelity -o json
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to inventory, defaulting to the checked out one. |
@@ -288,6 +441,10 @@ than by remembering to check.
 
 ```
 af golden
+```
+
+```
+af golden list
 ```
 
 Subcommands:
@@ -317,6 +474,11 @@ bring an environment up at all, which is worse than the disk it saved.
 af golden gc [flags]
 ```
 
+```
+af golden gc
+af golden gc --keep 3
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch context to use, defaulting to the checked out one. |
@@ -328,6 +490,10 @@ List the goldens that exist.
 
 ```
 af golden list [flags]
+```
+
+```
+af golden list
 ```
 
 | Flag | Default | What it does |
@@ -355,6 +521,11 @@ skipped it would make the store a way to get an unverified database branched.
 af golden pull [version] [flags]
 ```
 
+```
+af golden pull
+af golden pull gv_20260830044013_74234e98
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch context to use, defaulting to the checked out one. |
@@ -365,6 +536,10 @@ Copy production, mask it, verify it, and publish it.
 
 ```
 af golden refresh [flags]
+```
+
+```
+af golden refresh
 ```
 
 | Flag | Default | What it does |
@@ -386,6 +561,10 @@ here at all.
 af golden verify <version> [flags]
 ```
 
+```
+af golden verify gv_20260830044013_74234e98
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch context to use, defaulting to the checked out one. |
@@ -405,6 +584,10 @@ link should not have to parse HTML to find it.
 af inbox
 ```
 
+```
+af inbox list
+```
+
 Subcommands:
 
 - [`af inbox get`](#af-inbox-get) Show one message in full.
@@ -419,6 +602,10 @@ Show one message in full.
 af inbox get <number> [flags]
 ```
 
+```
+af inbox get 1
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to read, defaulting to the checked out one. |
@@ -429,6 +616,11 @@ List what the environment sent.
 
 ```
 af inbox list [flags]
+```
+
+```
+af inbox list
+af inbox list --to ada@example.com --limit 5
 ```
 
 | Flag | Default | What it does |
@@ -449,6 +641,12 @@ slow machine and fails on a fast one.
 
 ```
 af inbox wait [flags]
+```
+
+```
+# Blocks until the message arrives, or the timeout runs out.
+af inbox wait --to ada@example.com
+af inbox wait --subject 'Verify your email' --timeout 60s
 ```
 
 | Flag | Default | What it does |
@@ -473,13 +671,33 @@ Anything detection is not sure about becomes a question rather than a silent
 guess, because a manifest you have to audit is worth less than one you can
 read.
 
+A service is identified by the directory it is built and run from, not by its
+name, because every source spells the name differently: a Dockerfile and a
+language analyzer use the directory, a compose file uses its own key, a
+Procfile uses the process name, and a package manifest uses the package. One
+application described by several of those is one service, and the name it keeps
+comes from the source that identifies an application best, a package manifest
+ahead of a compose key ahead of a Procfile process ahead of the directory.
+Where one source declares two services in a directory, which is what a compose
+file with a web and an admin container on one build context is, they stay two.
+
+--answer settles a question, and also overrides a value detection read with
+confidence, which is how you separate two services a repository really does
+have on one port. An id naming nothing is refused with the ids that would have
+worked rather than dropped in silence.
+
 ```
 af init [flags]
 ```
 
+```
+af init
+af init --non-interactive --answer database.present=yes
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--answer` | - | Answer a question without a prompt, as id=value. Repeatable. |
+| `--answer` | - | Answer a question, or override a detected value, as id=value. Repeatable. |
 | `--force` | `false` | Overwrite an existing manifest instead of merging into it. |
 | `--non-interactive` | `false` | Do not ask questions; accept every default and report what was assumed. |
 
@@ -497,9 +715,6 @@ during it. The plans on that branch are compared before and after, which is how
 a sequential scan appearing where an index scan was gets found. And the queries
 this environment ran are compared against a report saved on the base branch.
 
-  af insights --save baseline.json     on main
-  af insights --baseline baseline.json on the branch
-
 Where the migrations take something away, the previous release is built and run
 against the migrated branch as well, because a rolling deploy leaves both
 releases talking to the same database for the length of the window and nothing
@@ -512,6 +727,14 @@ nothing.
 
 ```
 af insights [flags]
+```
+
+```
+# Rehearses the migration against a branch of the golden.
+af insights
+# Save a report on the base branch, compare against it on this one.
+af insights --save baseline.json
+af insights --baseline baseline.json
 ```
 
 | Flag | Default | What it does |
@@ -547,6 +770,10 @@ without telling you which rows has told you to go and do the work yourself.
 af invariants [flags]
 ```
 
+```
+af invariants
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to ask, defaulting to the checked out one. |
@@ -570,6 +797,10 @@ runtime clusters, enterprise secret managers, and billing.
 af license
 ```
 
+```
+af license status
+```
+
 Subcommands:
 
 - [`af license install`](#af-license-install) Install an enterprise license key.
@@ -584,6 +815,10 @@ Install an enterprise license key.
 af license install <key>
 ```
 
+```
+af license install AF-LICENSE-KEY
+```
+
 ### `af license remove`
 
 Remove the installed license key.
@@ -592,9 +827,17 @@ Remove the installed license key.
 af license remove
 ```
 
+```
+af license remove
+```
+
 ### `af license status`
 
 What this installation is licensed for.
+
+```
+af license status
+```
 
 ```
 af license status
@@ -617,6 +860,10 @@ is a generator that charges four hundred cards.
 af load
 ```
 
+```
+af load smoke
+```
+
 Subcommands:
 
 - [`af load run`](#af-load-run) Run the full load profile.
@@ -629,6 +876,12 @@ Run the full load profile.
 
 ```
 af load run [flags]
+```
+
+```
+# A weighted mix, not one endpoint at a fixed rate.
+af load run
+af load run --duration 60s --scale 2
 ```
 
 | Flag | Default | What it does |
@@ -657,6 +910,11 @@ scenario that names an undeclared route is blocked rather than run.
 af load scenario [flags]
 ```
 
+```
+af load scenario
+af load scenario --only checkout --concurrency 20
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to send at, defaulting to the checked out one. |
@@ -670,6 +928,10 @@ Send a short burst, to check the environment answers under any load at all.
 
 ```
 af load smoke [flags]
+```
+
+```
+af load smoke
 ```
 
 | Flag | Default | What it does |
@@ -707,6 +969,11 @@ Run af logout to remove it from this machine and revoke it everywhere.
 af login [flags]
 ```
 
+```
+af login
+af login --control-plane https://app.antifailure.dev --no-browser
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--control-plane` | - | The control plane to sign in to (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
@@ -731,6 +998,10 @@ a token is dead when it is not.
 af logout [flags]
 ```
 
+```
+af logout
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--control-plane` | - | The control plane to sign out of (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
@@ -747,6 +1018,11 @@ this is the command people paste into issues.
 
 ```
 af logs [service] [flags]
+```
+
+```
+af logs
+af logs web --tail 100
 ```
 
 | Flag | Default | What it does |
@@ -767,6 +1043,10 @@ column called customer_notes, means the notes ship.
 
 ```
 af mask
+```
+
+```
+af mask plan
 ```
 
 Subcommands:
@@ -790,6 +1070,11 @@ produced, so trying it on a branch first is the way to iterate on rules.
 af mask apply [flags]
 ```
 
+```
+# Rewrites this environment's data in place.
+af mask apply
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to mask, defaulting to the checked out one. |
@@ -800,6 +1085,10 @@ Show what masking would do, column by column.
 
 ```
 af mask plan [flags]
+```
+
+```
+af mask plan
 ```
 
 | Flag | Default | What it does |
@@ -818,6 +1107,11 @@ want to keep.
 
 ```
 af mask preview [flags]
+```
+
+```
+af mask preview
+af mask preview --table users --rows 5
 ```
 
 | Flag | Default | What it does |
@@ -841,9 +1135,179 @@ produces data that looks masked and is not, and none of them announces itself.
 af mask verify [flags]
 ```
 
+```
+af mask verify
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to check, defaulting to the checked out one. |
+
+### `af model`
+
+The model key the agents use on this machine.
+
+The agents can read a page and decide what a person would do next, which takes a
+model. The key is yours: it is stored on this machine, the call goes straight to
+the provider, and nothing hosted is involved.
+
+With no key the deterministic planner runs instead. That is a supported mode,
+not a broken one: workflows still run, still drive a real browser and still
+produce a verdict. The model is what turns a workflow written as a sentence into
+one the runner follows without being told every field.
+
+  af model show     what is configured, and what a run will use
+  af model test     prove the key works, with one cheap call
+  af model set      store a key, without it touching the command line
+  af model rm       remove a stored key
+
+If you have a control plane, 'af provider' is the better place for a key: it
+seals it, caps what may be spent on it per month, and checks that cap before the
+key is ever decrypted. This command is the one that needs nothing but a terminal.
+
+```
+af model
+```
+
+```
+af model show
+```
+
+Subcommands:
+
+- [`af model rm`](#af-model-rm) Remove a stored key.
+- [`af model set`](#af-model-set) Store a key, without it touching the command line.
+- [`af model show`](#af-model-show) What is configured, and what a run will use.
+- [`af model test`](#af-model-test) Prove the key works, with one cheap call.
+
+### `af model rm`
+
+Remove a stored key.
+
+Removes the key from every place this command can write it, not from the first
+one that answers. A key left in the encrypted store after the keyring entry was
+removed is a key the next run silently uses, which is the exact failure somebody
+is trying to prevent when they type this.
+
+It cannot remove a key from a shell you exported it in or from a .env file, and
+it says so when one is still there rather than reporting a removal that changed
+nothing.
+
+Removing a key that is not there is not an error. This is a command people run
+in a hurry, and a retry after a timeout must not report failure for reaching the
+state you asked for.
+
+This does not reach the provider. If the key leaked, revoke it at Anthropic or
+OpenAI as well: removing it here stops this machine using it and stops nobody
+else.
+
+```
+af model rm <provider>
+```
+
+```
+af model rm anthropic
+```
+
+### `af model set`
+
+Store a key, without it touching the command line.
+
+Stores a key in the system keyring where this platform has one, and in the
+encrypted local store where it does not.
+
+The key is never an argument. There is no --key flag, deliberately: a secret on
+a command line is written to your shell's history file, is visible in ps to
+every other user on the machine, and is captured by any recording of the
+terminal. So there are three ways to give it, and none of them put it in the
+argument vector:
+
+  af model set anthropic                      asks, without echoing
+  af model set anthropic --stdin < key.txt    reads one line
+  af model set anthropic --from-env NAME      reads that environment variable
+
+Where it lands is reported rather than assumed, because the two places are not
+equivalent. macOS gates the keychain on the login keychain, Linux on the session
+keyring daemon, and Windows on the user's credentials. The encrypted local store
+is a file, and it is only as strong as the passphrase protecting it.
+
+This does not reach the provider. Storing a key here does not create one and
+removing it does not revoke one.
+
+```
+af model set <provider> [flags]
+```
+
+```
+# The key is read from the environment or from stdin, so it never
+# reaches the command line or the shell history.
+af model set anthropic --from-env ANTHROPIC_API_KEY
+af model set anthropic --stdin < key.txt
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--from-env` | - | Read the key from this environment variable instead of asking. |
+| `--stdin` | `false` | Read the key from standard input, one line. |
+
+### `af model show`
+
+What is configured, and what a run will use.
+
+Reports the provider, the model, the endpoint, where the key was found and when
+it was last proven to work.
+
+It does not show the key and there is no flag that would. The fingerprint
+answers the question this is usually asked to answer, which is whether the key
+here is the one you think it is, and it answers it without either person having
+to read a secret out loud.
+
+"Where it came from" is worth as much as the rest together. A key exported in
+one shell and a key in the keyring look identical from a run's point of view
+until they disagree, and then the only useful sentence is which one won.
+
+```
+af model show
+```
+
+```
+af model show
+af model show -o json
+```
+
+### `af model test`
+
+Prove the key works, with one cheap call.
+
+Sends one completion of a single token and reports what came back.
+
+A real call rather than a check of the key's shape, because a well formed key
+that was revoked this morning passes every shape check there is. It costs a
+fraction of a cent, which is the point: this is meant to be run whenever you are
+unsure, and a check people avoid because of the price is a check nobody runs.
+
+What it can tell apart matters more than that it runs. A revoked key, an empty
+balance, a model name that does not exist, a throttle, a provider outage and an
+endpoint nothing answers on all fail, they all have different fixes, and being
+told only that the call failed sends you to the wrong one first.
+
+On success it writes down that this exact key worked, and 'af model show'
+reports it. Rotating the key discards that, because a previous key's success
+says nothing about the new one.
+
+```
+af model test [flags]
+```
+
+```
+# One cheap call, so a broken key is found here and not mid run.
+af model test
+af model test --timeout 10s
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--timeout` | `30s` | How long to wait for the endpoint, which a local model may need more of. |
 
 ### `af net`
 
@@ -855,6 +1319,10 @@ needing an environment to be running.
 
 ```
 af net
+```
+
+```
+af net policy
 ```
 
 Subcommands:
@@ -870,11 +1338,13 @@ Say what would happen to one request, and which rule decides it.
 Prints the decision, the rule that made it, and every other rule that also
 matched, so a surprising answer is diagnosable rather than mysterious.
 
-  af net explain GET https://api.stripe.com/v1/charges
-  af net explain POST https://api.resend.com/emails
-
 ```
 af net explain <method> <url>
+```
+
+```
+af net explain GET https://api.stripe.com/v1/charges
+af net explain POST https://api.resend.com/emails
 ```
 
 ### `af net log`
@@ -892,6 +1362,11 @@ question somebody asks after an incident.
 af net log [flags]
 ```
 
+```
+af net log
+af net log --blocked --limit 20
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--blocked` | `false` | Show only requests that were refused. |
@@ -906,6 +1381,10 @@ Rules are printed most specific first, which is the order they are evaluated
 in. An exact host beats a wildcard, a longer path beats a shorter one, and an
 explicit method beats any, so where a rule sits in this list is where it sits
 in the decision, no matter where it sits in the file.
+
+```
+af net policy
+```
 
 ```
 af net policy
@@ -938,6 +1417,12 @@ up. The baseline is torn down unless --keep says otherwise.
 af oracle [flags]
 ```
 
+```
+# Runs this change beside the version it replaces and diffs both.
+af oracle
+af oracle --baseline origin/main --fail-on any
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--baseline` | - | Revision to compare against, overriding oracle.base_ref. |
@@ -968,6 +1453,10 @@ seeing the words.
 af provider
 ```
 
+```
+af provider list
+```
+
 Subcommands:
 
 - [`af provider budget`](#af-provider-budget) Cap what may be spent on a provider this month.
@@ -994,6 +1483,10 @@ A cap of zero is allowed and means exactly that: spend nothing on this provider.
 af provider budget <provider> <usd> [flags]
 ```
 
+```
+af provider budget anthropic 50
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
@@ -1011,6 +1504,10 @@ whether the key here is the one you think it is.
 
 ```
 af provider list [flags]
+```
+
+```
+af provider list
 ```
 
 | Flag | Default | What it does |
@@ -1035,6 +1532,10 @@ reaching the state they asked for.
 af provider rm <provider> [flags]
 ```
 
+```
+af provider rm anthropic
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
@@ -1048,11 +1549,9 @@ Stores a key for anthropic or openai, replacing whatever was there.
 The key is never an argument. There is no --key flag, deliberately: a secret on
 a command line is in the shell's history file, is visible in ps to everybody
 else on the machine, and is in any recording of the terminal. So there are three
-ways to give it, and none of them put it in the argument vector:
-
-  af provider set anthropic                      asks, without echoing
-  af provider set anthropic --stdin < key.txt    reads one line
-  af provider set anthropic --from-env NAME      reads that environment variable
+ways to give it, and none of them put it in the argument vector: it is asked
+for without echoing, read as one line from stdin, or read from an environment
+variable this process already has.
 
 Rotating stores the new key and revokes the old one together. If the key given
 is the one already stored, that is reported rather than accepted quietly: it is
@@ -1061,6 +1560,14 @@ key.
 
 ```
 af provider set <provider> [flags]
+```
+
+```
+# The key is read from the environment or stdin, never from a flag,
+# so it does not land in shell history.
+af provider set anthropic
+af provider set anthropic --stdin
+af provider set anthropic --from-env ANTHROPIC_API_KEY
 ```
 
 | Flag | Default | What it does |
@@ -1082,6 +1589,10 @@ release should run.
 af runner
 ```
 
+```
+af runner check
+```
+
 Subcommands:
 
 - [`af runner check`](#af-runner-check) Say whether the runner can run.
@@ -1090,6 +1601,21 @@ Subcommands:
 ### `af runner check`
 
 Say whether the runner can run.
+
+Reports each thing af test needs from the runner separately: the source, the
+dependencies it declares, a node new enough to run it, and the browser.
+
+It does not claim the runner executes. Knowing that means starting node and
+launching a browser, which is what af test is. Anything this cannot determine
+is reported as not checked rather than as ok, because a check that answers ok
+about something it never examined is worse than one that admits the gap: this
+command used to report "ok runner" whenever src/main.ts existed, which was true
+of an install with no dependencies at all, and the real failure surfaced much
+later inside af test as a node error about a module it could not resolve.
+
+```
+af runner check
+```
 
 ```
 af runner check
@@ -1101,6 +1627,11 @@ Put the runner where af test will find it.
 
 ```
 af runner install [flags]
+```
+
+```
+af runner install
+af runner install --skip-browser
 ```
 
 | Flag | Default | What it does |
@@ -1128,6 +1659,10 @@ encrypted.
 af secret
 ```
 
+```
+af secret list
+```
+
 Subcommands:
 
 - [`af secret list`](#af-secret-list) List the names in the store.
@@ -1145,12 +1680,20 @@ print its contents is one screenshot away from not being a store.
 af secret list
 ```
 
+```
+af secret list
+```
+
 ### `af secret rm`
 
 Remove a value from the store.
 
 ```
 af secret rm <name>
+```
+
+```
+af secret rm STRIPE_SECRET_KEY
 ```
 
 ### `af secret set`
@@ -1167,6 +1710,12 @@ process list, and in the CI log of whatever ran it.
 af secret set <name> [flags]
 ```
 
+```
+# Prompts for the value, or reads it from stdin. Never a flag.
+af secret set STRIPE_SECRET_KEY
+af secret set STRIPE_SECRET_KEY --stdin
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--stdin` | `false` | Read the value from stdin rather than prompting. |
@@ -1179,6 +1728,11 @@ Show what is running for this branch.
 af status [flags]
 ```
 
+```
+af status
+af status -o json
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to report on, defaulting to the checked out one. |
@@ -1189,6 +1743,10 @@ Collect a redacted diagnostic bundle.
 
 ```
 af support
+```
+
+```
+af support bundle
 ```
 
 Subcommands:
@@ -1208,6 +1766,12 @@ is a bug nobody fixes.
 
 ```
 af support bundle [flags]
+```
+
+```
+# Redacted on the way in, with a list of what it included.
+af support bundle
+af support bundle --output af-support.zip
 ```
 
 | Flag | Default | What it does |
@@ -1231,6 +1795,11 @@ people learn to ignore the results. Only a real failure exits non zero.
 af test [flags]
 ```
 
+```
+af test
+af test --only checkout --headed
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--attempts` | `2` | How many times to try a workflow before deciding. |
@@ -1238,6 +1807,107 @@ af test [flags]
 | `--headed` | `false` | Show the browser rather than running it hidden. |
 | `--only` | - | Run just these workflows, by name. |
 | `--runner` | - | Path to the runner's entry point. |
+
+### `af token`
+
+Engine tokens, which is what CI and a self-hosted engine present.
+
+An engine token is what goes in AF_CONTROL_PLANE_TOKEN. It belongs to the
+organization rather than to you, so it keeps working after you leave, and it
+carries no identity: it can send events and read an environment back, and it
+cannot reach a key, a member, or another token.
+
+These commands need a token that asked for the capability:
+
+  af login --scope tokens.manage
+
+A token from a plain af login cannot mint one, which is deliberate. A credential
+that can make more credentials is a credential worth stealing twice.
+
+```
+af token
+```
+
+```
+af token list
+```
+
+Subcommands:
+
+- [`af token create`](#af-token-create) Mint an engine token and show it once.
+- [`af token list`](#af-token-list) What engine tokens exist, and when each was last used.
+- [`af token rm`](#af-token-rm) Revoke an engine token.
+
+### `af token create`
+
+Mint an engine token and show it once.
+
+Mints a token and prints it. Only its hash is stored, so this is the one and
+only time it can be read: there is no command and no screen that will show it
+again. If you lose it, mint another and revoke this one.
+
+The name is a label you will read in a list months from now, so name it after
+where it is going rather than after today.
+
+```
+af token create <name> [flags]
+```
+
+```
+# Shown once, at creation. There is no command that prints it again.
+af token create ci
+af token create ci --control-plane https://app.antifailure.dev
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af token list`
+
+What engine tokens exist, and when each was last used.
+
+Shows every engine token, revoked ones included. A revoked one is shown rather
+than hidden, because the question this is usually asked is whether the token
+that stopped working is the one you revoked.
+
+It does not show a token and there is no flag that would. The prefix is what
+tells two of them apart, and it is what af token rm accepts.
+
+```
+af token list [flags]
+```
+
+```
+af token list
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
+
+### `af token rm`
+
+Revoke an engine token.
+
+Revokes a token immediately. Anything presenting it stops being accepted on the
+next request rather than at the end of a cache window.
+
+Takes the prefix af token list shows, or the full id. Running it twice is not an
+error: the second run says it was already revoked, because during an incident
+the same command gets run twice and the second must not read as a new problem.
+
+```
+af token rm <id or prefix> [flags]
+```
+
+```
+af token rm afe_1a2b3c4d
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
 
 ### `af up`
 
@@ -1254,6 +1924,11 @@ interrupt at any point leaves something af down can clean up.
 af up [flags]
 ```
 
+```
+af up
+af up --rebuild --hud
+```
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to create the environment for, defaulting to the checked out one. |
@@ -1266,6 +1941,11 @@ Print the version, commit, and edition.
 
 ```
 af version [flags]
+```
+
+```
+af version
+af version --short
 ```
 
 | Flag | Default | What it does |
@@ -1287,6 +1967,10 @@ that cannot get past the application's own verification simulates nothing.
 af webhook
 ```
 
+```
+af webhook list
+```
+
 Subcommands:
 
 - [`af webhook list`](#af-webhook-list) List the providers and events that can be sent.
@@ -1300,12 +1984,14 @@ List the providers and events that can be sent.
 af webhook list
 ```
 
+```
+af webhook list
+af webhook list stripe
+```
+
 ### `af webhook trigger`
 
 Send one signed event into the environment.
-
-af webhook trigger stripe checkout.session.completed
-  af webhook trigger stripe invoice.paid --set id=in_123 --set amount_paid=4900
 
 The path is taken from the manifest's webhook_path for that provider unless
 --path says otherwise, and the signing secret from the same variable the
@@ -1313,6 +1999,11 @@ application reads, so both sides agree without anybody configuring twice.
 
 ```
 af webhook trigger <provider> <event> [flags]
+```
+
+```
+af webhook trigger stripe checkout.session.completed
+af webhook trigger stripe invoice.paid --set id=in_123 --set amount_paid=4900
 ```
 
 | Flag | Default | What it does |
@@ -1338,6 +2029,11 @@ and reporting it would tell somebody they have access they do not have.
 
 ```
 af whoami [flags]
+```
+
+```
+af whoami
+af whoami --offline
 ```
 
 | Flag | Default | What it does |

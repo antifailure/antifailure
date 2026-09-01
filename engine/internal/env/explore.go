@@ -11,6 +11,7 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/explore"
+	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -148,6 +149,36 @@ func (o *Orchestrator) goalDocs(opts ExploreOptions) []goalDoc {
 	return out
 }
 
+// runnerEnvironment is what the runner subprocess receives.
+//
+// This process's environment, plus the model key if one resolved from anywhere
+// the engine can see. Appended rather than substituted, so a key that was
+// already exported is passed through untouched and the two agree by
+// construction: the process environment is the first source the chain asks, so
+// a resolved key from a lower source is only ever added where there was none.
+//
+// Unlike the environment a service receives, this is a pass-through. The runner
+// is af's own subprocess running on this machine, not a container in the
+// preview environment, and it needs node's own configuration, a home directory
+// and a browser cache. The rule that a service gets only what the manifest
+// declares is about isolating the application under test and does not apply to
+// the tool driving it.
+func (o *Orchestrator) runnerEnvironment(ctx context.Context) []string {
+	env := os.Environ()
+
+	cfg, err := model.Resolve(ctx, o.secretChain())
+	if err != nil || cfg == nil {
+		// A key that cannot be resolved is not a reason to fail a run. With no
+		// key the deterministic planner runs, which is a supported mode, and
+		// stopping here would turn a locked keyring into a failed test suite.
+		return env
+	}
+	// Registered before it is handed over, so that nothing the runner prints
+	// on the way to AF-AGT-003 can carry it into an error message.
+	o.opts.Redactor.Register(cfg.Key.Reveal())
+	return append(env, cfg.Environment()...)
+}
+
 // invokeRunner runs the runner over the document boundary and returns what it
 // wrote.
 //
@@ -176,6 +207,13 @@ func (o *Orchestrator) invokeRunner(
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.Dir = o.opts.Root
+	// The runner inherited this process's environment and nothing else, which
+	// meant a model key was only ever reachable by exporting a variable. A key
+	// in the keyring or the encrypted store resolved correctly everywhere the
+	// engine looked and then never reached the one process that needed it, so
+	// 'af model set' would have been a command that stored a key and changed
+	// nothing about a run.
+	cmd.Env = o.runnerEnvironment(ctx)
 
 	// A non zero exit with a readable document is a result the caller decides
 	// about, so the error is deliberately dropped. Only silence is fatal.

@@ -17,13 +17,13 @@ export function Migrations() {
           <Heading
             icon="migrations"
             label="Migration Safety"
-            title="<strong>Migration Safety.</strong> Catch exclusive locks before they take checkout down. The strongest lock held per table, what queued behind it, and how the plans moved."
+            title="<strong>Migration Safety.</strong> Catch exclusive locks before they take checkout down. The strongest lock held per table, whether another session was left waiting on it, and how the plans moved."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <MigrationBento />
             <Illustrative label="Example finding" className="mt-6">
               One migration rehearsed, with the numbers chosen. What is measured is the strongest
-              lock mode and its hold time, what queued behind it, whether the table was rewritten,
+              lock mode and its hold time, whether another session was left waiting on it, whether the table was rewritten,
               and the query plans before and after.
             </Illustrative>
           </div>

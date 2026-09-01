@@ -100,6 +100,22 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     reason: 'Setting a monthly cap. The same human cadence as storing a key, and it writes an audit entry each time.',
   },
 
+  // `af token`. The mint is the tightest write on this server: it is the one
+  // call that hands back a usable credential, so a loop against it is either a
+  // mistake or somebody filling the table.
+  'POST /v1/tokens': {
+    rate: 1, burst: 5, key: 'token',
+    reason: 'Minting an engine token. A person does this once when they set CI up and again when they rotate it; five at once covers a fumbled retry and nothing about a person needs more.',
+  },
+  'GET /v1/tokens': {
+    rate: 5, burst: 50, key: 'token',
+    reason: 'af token list. One query, and the read somebody runs before deciding which token to revoke, so it is as generous as the other reads.',
+  },
+  'DELETE /v1/tokens/:token': {
+    rate: 1, burst: 10, key: 'token',
+    reason: 'Revoking a token, usually because it leaked. Same shape as removing a provider key and deliberately not tighter, for the same reason: this is the call somebody makes in a hurry.',
+  },
+
   // ---------------------------------------------------------------------------
   // The console.
   //
@@ -203,6 +219,10 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   'POST /webhooks/github': {
     rate: 20, burst: 200, key: 'ip',
     reason: 'GitHub sends bursts when an installation changes, and a delivery lost to a rate limit is an installation this control plane never learns about. The signature check runs before any work, so an unsigned flood is cheap to refuse.',
+  },
+  'POST /webhooks/stripe': {
+    rate: 20, burst: 200, key: 'ip',
+    reason: 'Stripe sends a burst when a billing period rolls over and every subscription renews at once, and a delivery lost to a rate limit is a payment this control plane never learns about. The signature check runs before any work, so an unsigned flood is cheap to refuse.',
   },
   'POST /v1/events': {
     rate: 200, burst: 2000, key: 'token',

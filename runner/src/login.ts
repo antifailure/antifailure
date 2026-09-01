@@ -60,6 +60,11 @@ export interface Page {
   goto(url: string): Promise<void>;
   /** fill types into the field with an accessible name matching the pattern. */
   fill(field: RegExp, value: string): Promise<void>;
+  /** has answers whether that field is on the page right now, without
+   *  throwing. It is what lets the sign-in path be searched rather than
+   *  assumed: a fill against the wrong page costs ten seconds and reports a
+   *  regex, and this costs the caller's own budget and reports a path. */
+  has(field: RegExp, timeoutMs: number): Promise<boolean>;
   /** click presses the control whose accessible name matches. */
   click(control: RegExp): Promise<void>;
   /** waitForAny resolves with the first pattern that appears, or null on a
@@ -116,8 +121,97 @@ export const FIELD = {
 
 export const CONTROL = {
   signIn: /^(sign in|log in|login|continue|submit|next)$/i,
-  sendLink: /^(send (magic )?link|email me a link|continue with email|send code)$/i,
+  /** The button that asks for a link or a code.
+   *
+   * The list used to be four literal strings and it did not include "Send a
+   * sign-in link", which is what this repository's own console says and what
+   * a great many applications say. The article and the qualifier are the part
+   * that gets written differently every time, so they are optional here
+   * rather than enumerated: send / email / get / request, optionally "me",
+   * optionally an article, optionally what kind of link it is, then link or
+   * code.
+   */
+  sendLink:
+    /^((send|email|get|request)( me)?( a| the)?( magic| sign.?in| log.?in| one.?time)? (link|code)|continue with email)$/i,
 } as const;
+
+/** Where a sign-in form lives, in the order worth trying.
+ *
+ * This used to be the single string '/login', with a signInPath option that
+ * nothing passed, so the path was hardcoded while looking configurable. It
+ * held for as long as every application under test had a /login, and this
+ * repository's own control plane stopped being one: its console is a static
+ * export with a file per route, /login is not a route, and the request lands
+ * on the 404 page. Every Dogfood run since the console was folded into the
+ * API reported all six workflows blocked with a ten second timeout waiting
+ * for an email field, on a page whose entire text was "That page is not
+ * here".
+ *
+ * The workflow's own start path goes first, ahead of this list, because an
+ * application that answers every protected route with its sign-in screen is
+ * the common shape and is the one this repository has. '/' comes last, for
+ * the application whose front door is its home page.
+ */
+export const SIGN_IN_PATHS = [
+  '/login', '/signin', '/sign-in', '/auth/login', '/users/sign_in', '/',
+] as const;
+
+/** How long each candidate path gets to show the field before the next is
+ *  tried. Six candidates at this budget is under fifteen seconds in the worst
+ *  case, which is the case where no sign-in form exists anywhere and the run
+ *  is about to be reported blocked regardless. */
+const PROBE_MS = 2_000;
+
+/**
+ * Navigate to wherever this application's sign-in form actually is, and say
+ * whether one was found.
+ *
+ * The page is left on the candidate that answered, so the caller fills the
+ * form it just found rather than navigating again.
+ */
+async function openSignIn(
+  page: Page, baseURL: string, first: string | undefined, wanted: RegExp,
+): Promise<{ readonly path: string | null; readonly tried: readonly string[] }> {
+  const tried: string[] = [];
+  const candidates = first ? [first, ...SIGN_IN_PATHS] : [...SIGN_IN_PATHS];
+  for (const path of candidates) {
+    if (tried.includes(path)) continue;
+    tried.push(path);
+    await page.goto(join(baseURL, path));
+    if (await page.has(wanted, PROBE_MS)) return { path, tried };
+  }
+  return { path: null, tried };
+}
+
+/** watermark is the highest sequence the inbox holds right now.
+ *
+ * Read before the button is pressed, and it is the whole correctness of a
+ * retry. `waitFor` deliberately looks at what already arrived before it waits,
+ * because the message is usually captured before anybody starts waiting for
+ * it. That is right for a message that need only exist, and wrong for one that
+ * has to be NEW: a magic link is single use, so a second attempt that matches
+ * the first attempt's message follows a token the first attempt already spent
+ * and the application answers "This sign-in link is no longer valid."
+ *
+ * It was a race rather than a certainty, which is why it survived: whether the
+ * fresh message had landed by the first poll decided it. Driving this
+ * repository's own six workflows produced two that signed in and four that did
+ * not, from one code path, in one run.
+ *
+ * A floor rather than a filter on time, because the sequence is the only thing
+ * that orders two messages captured in the same millisecond.
+ */
+async function watermark(inbox: InboxSource, floor: number): Promise<number> {
+  try {
+    const messages = await inbox.list(200);
+    return messages.reduce((highest, m) => (m.seq > highest ? m.seq : highest), floor);
+  } catch {
+    // An inbox that cannot be read here cannot be read a moment later either,
+    // and waitFor says so far better than this could. Carrying on with the
+    // caller's floor keeps the diagnosis in the one place that has it.
+    return floor;
+  }
+}
 
 /** signIn drives one persona through its strategy. */
 export async function signIn(
@@ -142,7 +236,23 @@ export async function signIn(
     return { ok: true, blocked: false, detail: 'This persona does not sign in through a form.' };
   }
 
-  await page.goto(join(options.baseURL, options.signInPath ?? '/login'));
+  // An sms code is asked for by number and everything else by address, so the
+  // field that says "this is the sign-in form" differs by strategy.
+  const wanted = persona.login === 'sms_code' ? FIELD.phone : FIELD.email;
+  const found = await openSignIn(page, options.baseURL, options.signInPath, wanted);
+  if (found.path === null) {
+    // The environment's problem rather than the change's, and named by path
+    // rather than by regex. A run that says which addresses were tried is one
+    // somebody can fix; a run that says `locator.fill: Timeout 10000ms` is one
+    // somebody reruns.
+    return {
+      ok: false, blocked: true,
+      detail:
+        `No sign-in form was found for ${persona.name}. Tried ${found.tried.join(', ')} ` +
+        `on ${options.baseURL}, and none of them showed a field labelled for an ` +
+        `${persona.login === 'sms_code' ? 'phone number' : 'email address'}.`,
+    };
+  }
 
   switch (persona.login) {
     case 'password':
@@ -191,13 +301,16 @@ async function signInWithLink(
       detail: `The persona ${persona.name} signs in by magic link, and no inbox is available to read it from.`,
     };
   }
+  // Before the button, never after. A message already in the inbox is not the
+  // answer to a request that has not been made yet.
+  const floor = await watermark(inbox, after);
   await page.fill(FIELD.email, persona.email);
   await page.click(CONTROL.sendLink);
 
   const want: Match = { to: persona.email, hasLink: true };
   let message: Message;
   try {
-    message = await waitFor(inbox, want, { timeoutMs, after });
+    message = await waitFor(inbox, want, { timeoutMs, after: floor });
   } catch (err) {
     return {
       ok: false, blocked: true,
@@ -237,12 +350,15 @@ async function signInWithCode(
     };
   }
 
+  // Before the button, for the reason on watermark. A one time code is spent
+  // the same way a link is.
+  const floor = await watermark(inbox, after);
   await page.fill(persona.login === 'sms_code' ? FIELD.phone : FIELD.email, recipient);
   await page.click(CONTROL.sendLink);
 
   let message: Message;
   try {
-    message = await waitFor(inbox, { to: recipient, hasCode: true }, { timeoutMs, after });
+    message = await waitFor(inbox, { to: recipient, hasCode: true }, { timeoutMs, after: floor });
   } catch (err) {
     return { ok: false, blocked: true, detail: err instanceof Error ? err.message : String(err) };
   }

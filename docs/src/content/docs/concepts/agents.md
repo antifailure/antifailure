@@ -46,6 +46,25 @@ It is worth it for the flows that matter and wasteful for a unit test.
 what the verdict is decided against. Without it, an agent that clicked around
 and got nowhere can be reported as having finished.
 
+Afterwards is the word to read twice. An expectation is checked against the page
+the workflow ends on, so naming something that is only on the page it starts
+from asks for a page that cannot exist, and the workflow can never pass however
+well it works. A sign-in workflow expects the signed in state, not the button it
+pressed to get there.
+
+With no model key, the check is made against the page's visible text. Two
+consequences worth knowing before you write one:
+
+- A sentence about your product ("the totals are right") usually shares no word
+  with the page, so it can be neither confirmed nor contradicted, and the run
+  comes back `unverified` rather than passing. Name what the page says.
+- A placeholder is not visible text. `filter by action` inside an empty input is
+  what a browser shows and not what it reports, so an expectation naming one
+  never matches. Name a heading, a label, or a value instead.
+
+A model key removes both limits, because the model reads the page rather than
+matching words against it.
+
 ## Budgets
 
 ```yaml
@@ -78,13 +97,25 @@ AF-AGT-003 The agent runner produced no readable output: exited with status 1.
 `af runner check` verifies it can start before you need it, and `af doctor`
 includes that check.
 
+## The model
+
+A model reads the page and decides what a person would do next. The key is
+yours and it stays on your machine. See
+[your own model key](/docs/guides/model-keys/) for storing one, proving it
+works, pointing it at a local model, and what does and does not leave the
+machine when it is used.
+
+With no key the deterministic planner runs instead, which is a supported mode
+rather than a broken one: workflows still drive a real browser and still
+produce a verdict.
+
 ## Recording what the model answered
 
-A model reads the page and decides what a person would do next. That is what
-makes a workflow written as a sentence work, and it is also the only part of a
-run that is not deterministic: the same page can produce a different plan
+Asking a model is the only part of a run that is not deterministic: the same page can produce a different plan
 twice, so a check that asks a model on every pull request is a check that can
-change its answer with nothing in the repository changing.
+change its answer with nothing in the repository changing. That is what makes a
+workflow written as a sentence work, and it is also what makes it worth
+pinning.
 
 Recording fixes both that and the bill. Point the runner at a directory and
 every prompt and answer is written to it, one readable JSON file per exchange.

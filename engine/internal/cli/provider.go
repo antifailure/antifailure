@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/antifailure/antifailure/engine/internal/auth"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
 // knownProviders is checked here so a typo is caught before a key is read from
@@ -117,9 +118,12 @@ func providerSessionFor(e *Env, flag string) (providerSession, error) {
 	store := e.CredentialStore()
 	cred, err := store.Load(origin)
 	if errors.Is(err, auth.ErrNotSignedIn) {
-		return providerSession{}, fmt.Errorf(
-			"not signed in to %s. Run: af login --control-plane %s --scope providers.write",
-			origin, origin)
+		// The scope is named rather than left to the generic next step,
+		// because a sign in without providers.write succeeds and then fails
+		// here again on the next command, which reads as the fix not working.
+		return providerSession{}, aferrors.Coded(aferrors.AFCPL004,
+			"origin", origin,
+			"command", "af login --control-plane "+origin+" --scope providers.write")
 	}
 	if err != nil {
 		return providerSession{}, err
@@ -223,20 +227,26 @@ whether the key here is the one you think it is.`),
 
 				stored := "not set"
 				if key != nil {
-					stored = "••••••••" + key.Last4
+					// Asterisks rather than bullet characters, for the reason
+					// the status symbols are ASCII: this is read in CI logs and
+					// pasted into pull request comments as often as it is read
+					// on a terminal, and a bullet is not guaranteed in either.
+					stored = "********" + key.Last4
 				}
 				// A provider with no budget row cannot spend anything. Said as
 				// "none, so nothing may be spent" rather than as a dash,
 				// because a dash reads as "unlimited" and it is the opposite.
 				cap := "none, so nothing may be spent"
-				spent := "—"
+				spent := "not tracked"
 				if budget != nil {
 					cap = fmt.Sprintf("%.2f USD", budget.CapUSD)
 					spent = fmt.Sprintf("%.2f USD", budget.SpentUSD)
 				}
 				rows = append(rows, []string{p, stored, cap, spent})
 			}
-			e.Out.Table([]string{"Provider", "Key", "Monthly cap", "Spent"}, rows)
+			e.Out.Table([]Column{
+				Col("PROVIDER"), Flex("KEY"), Num("MONTHLY CAP"), Num("SPENT"),
+			}, rows)
 			return nil
 		},
 	}
@@ -280,11 +290,9 @@ Stores a key for anthropic or openai, replacing whatever was there.
 The key is never an argument. There is no --key flag, deliberately: a secret on
 a command line is in the shell's history file, is visible in ps to everybody
 else on the machine, and is in any recording of the terminal. So there are three
-ways to give it, and none of them put it in the argument vector:
-
-  af provider set anthropic                      asks, without echoing
-  af provider set anthropic --stdin < key.txt    reads one line
-  af provider set anthropic --from-env NAME      reads that environment variable
+ways to give it, and none of them put it in the argument vector: it is asked
+for without echoing, read as one line from stdin, or read from an environment
+variable this process already has.
 
 Rotating stores the new key and revokes the old one together. If the key given
 is the one already stored, that is reported rather than accepted quietly: it is

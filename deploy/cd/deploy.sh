@@ -12,12 +12,15 @@
 #      one. A revision that cannot start never reaches a user.
 #   3. Shift traffic.
 #   4. Check the public origin, including which commit answers.
-#   5. On any failure after step 2, put traffic back on the revision that was
+#   5. Deactivate every revision this deploy superseded except one, and prove
+#      what is left fits in the database's connection budget.
+#   6. On any failure after step 2, put traffic back on the revision that was
 #      serving before and deactivate the new one.
 #
-# Step 5 is only fast because the app runs in Multiple revision mode: the old
+# Step 6 is only fast because the app runs in Multiple revision mode: the old
 # revision is still up with no traffic, so the way back is one API call rather
-# than a rebuild.
+# than a rebuild. Step 5 exists because that is true of exactly ONE old
+# revision and this script used to keep every one of them.
 #
 # WHAT THIS DOES NOT DO. It does not roll migrations back. A schema change that
 # applied and a revision that was reverted leave the old code running against
@@ -39,6 +42,150 @@ BASE_URL="${6:?public origin}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 say() { printf '\n=== %s\n' "$*"; }
+
+# What the database keeps back for tools that are not the application: the
+# bootstrap job's migration connection, the maintenance job's, a break-glass
+# session, and a backup or restore run. Each of those opens with max: 1, and
+# all four can overlap during a release.
+TOOL_CONNECTIONS=4
+
+# ---------------------------------------------------------------------------
+# Reaping the revisions a deploy superseded.
+#
+# A revision at zero traffic is NOT idle, and this script used to say it was:
+# "they cost nothing at zero traffic". In Multiple revision mode an active
+# revision keeps min_replicas running whether or not any request reaches it,
+# and each of those replicas is a whole control plane process holding a
+# Postgres pool of AF_POOL_MAX and running the five minute housekeeping sweep
+# against the same database forever.
+#
+# What that cost, measured: forty six deploys to staging left forty six active
+# revisions and forty six running replicas against a B1ms server with thirty
+# five non-reserved connection slots, and /readyz answered
+#
+#   remaining connection slots are reserved for roles with privileges of the
+#   "pg_use_reserved_connections" role
+#
+# One revision is kept, because one is all step 6 ever shifts back onto. Going
+# further back than the release before this one is a redeploy either way: the
+# image is still in the registry and the schema has moved on.
+# ---------------------------------------------------------------------------
+reap_superseded() {
+  local keep_new="$1" keep_previous="$2" reaped=0 revision
+
+  say "reaping revisions superseded by $keep_new (keeping $keep_previous to roll back onto)"
+  # --query on the server rather than a client-side filter, so a listing that
+  # grows to the hundred revisions Container Apps retains is still one page.
+  for revision in $(az containerapp revision list -n "$APP" -g "$RG" \
+    --query "[?properties.active].name" -o tsv 2>/dev/null || true); do
+    [ "$revision" = "$keep_new" ] && continue
+    [ "$revision" = "$keep_previous" ] && continue
+    # Deliberately tolerant. A revision that cannot be deactivated is a
+    # connection this deploy did not reclaim, not a reason to fail a release
+    # that is already serving; assert_connection_budget below is what decides
+    # whether the result is safe.
+    if az containerapp revision deactivate -n "$APP" -g "$RG" --revision "$revision" -o none 2>/dev/null; then
+      reaped=$((reaped + 1))
+    else
+      echo "could not deactivate $revision; it is still holding its connections"
+    fi
+  done
+  say "deactivated $reaped superseded revision(s)"
+}
+
+# ---------------------------------------------------------------------------
+# The connection arithmetic, measured rather than assumed.
+#
+# Every number here is read back from the running system instead of predicted,
+# because every one of them has already been wrong once: the pool size is an
+# environment variable somebody can edit in a portal, the replica count is
+# whatever the platform scaled to, and the connection budget is a server
+# parameter derived from a SKU. The product of three numbers nobody checks is
+# how a control plane runs out of connection slots without a single line of
+# code changing.
+#
+# The budget subtracts BOTH reserved settings, which is the part the alert in
+# infra/terraform/modules/alerting/database.tf originally got wrong. Postgres
+# refuses an ordinary role at max_connections minus reserved_connections minus
+# superuser_reserved_connections, not at max_connections, and on a B1ms those
+# are 50, 5 and 10: the application gets 35, not 50.
+#
+# This runs AFTER the reap and after traffic has moved, so it never blocks a
+# healthy release from serving. What it does is fail the run loudly, so that a
+# shape which cannot fit is an error in a deploy log rather than a 503 at the
+# next traffic peak.
+# ---------------------------------------------------------------------------
+read_db_param() {
+  az postgres flexible-server parameter show -g "$RG" -s "$1" -n "$2" \
+    --query value -o tsv 2>/dev/null || echo ""
+}
+
+assert_connection_budget() {
+  local server pool_max replicas used budget max_conn reserved su_reserved
+
+  server="$(az postgres flexible-server list -g "$RG" --query "[0].name" -o tsv 2>/dev/null || true)"
+  if [ -z "$server" ] || [ "$server" = "None" ]; then
+    # Said out loud rather than skipped silently. An installation whose database
+    # is not in this resource group is a supported shape; a check that quietly
+    # passes because it found nothing to check is not.
+    say "no flexible server in $RG: cannot check the connection budget from here"
+    return 0
+  fi
+
+  max_conn="$(read_db_param "$server" max_connections)"
+  reserved="$(read_db_param "$server" reserved_connections)"
+  su_reserved="$(read_db_param "$server" superuser_reserved_connections)"
+  if [ -z "$max_conn" ]; then
+    say "could not read max_connections from $server: the connection budget is unchecked"
+    return 0
+  fi
+  budget=$((max_conn - ${reserved:-0} - ${su_reserved:-0} - TOOL_CONNECTIONS))
+
+  pool_max="$(az containerapp show -n "$APP" -g "$RG" \
+    --query "properties.template.containers[0].env[?name=='AF_POOL_MAX'].value | [0]" -o tsv 2>/dev/null || true)"
+  # Unset means the application's own default, which main.ts states as 10. The
+  # fallback is written here rather than assumed, so a variable that goes
+  # missing cannot make this check compute zero and pass.
+  if [ -z "$pool_max" ] || [ "$pool_max" = "None" ]; then
+    pool_max=10
+  fi
+
+  # Replicas actually RUNNING across every active revision, summed rather than
+  # counted, because this is the number that was wrong: one serving revision
+  # does not mean one process, and a revision at zero traffic still runs
+  # min_replicas of them.
+  #
+  # Read into a variable and summed separately rather than piped straight into
+  # awk. Under `set -o pipefail` a pipeline takes the worst status in it, and a
+  # failing `az` inside a command substitution then kills this script through
+  # `set -e` with no message at all and the deploy's exit code, which is how a
+  # transient API error would turn into an unexplained red release.
+  local listing
+  listing="$(az containerapp revision list -n "$APP" -g "$RG" \
+    --query "[?properties.active].properties.replicas" -o tsv 2>/dev/null || true)"
+  if [ -z "$listing" ]; then
+    say "could not list $APP's revisions: the connection budget is unchecked"
+    return 0
+  fi
+  replicas="$(printf '%s\n' "$listing" | awk 'BEGIN { n = 0 } /^[0-9]+$/ { n += $1 } END { print n }')"
+  if [ -z "$replicas" ] || [ "$replicas" -eq 0 ]; then
+    say "no running replicas reported for $APP: the connection budget is unchecked"
+    return 0
+  fi
+
+  used=$((replicas * pool_max))
+  say "connection budget: $replicas running replica(s) x $pool_max pooled = $used against $budget usable ($max_conn max_connections, less ${reserved:-0} reserved, ${su_reserved:-0} superuser reserved, $TOOL_CONNECTIONS for tools)"
+
+  if [ "$used" -gt "$budget" ]; then
+    echo "::error title=Connection budget exceeded::$APP can open $used connections to $server, which has $budget for it. Lower pool_max in infra/terraform/stacks/control-plane, lower max_replicas, or move to a SKU with more max_connections."
+    say "THE DEPLOY IS SERVING AND ITS CONNECTION ARITHMETIC DOES NOT FIT."
+    echo "This is the shape that took staging down: replicas x pool_max above what"
+    echo "the server will hand out, so the next scale-up answers /readyz with"
+    echo "'remaining connection slots are reserved'. Nothing is rolled back here,"
+    echo "because rolling back does not shrink the number."
+    exit 1
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # What is serving right now. Captured BEFORE anything changes, because it is
@@ -141,13 +288,13 @@ az containerapp ingress traffic set -n "$APP" -g "$RG" --revision-weight "$NEW=1
 say "post-deploy health gate on $BASE_URL"
 if "$HERE/health-gate.sh" "$BASE_URL" "$COMMIT" 40 3; then
   say "DEPLOYED: $BASE_URL is serving $COMMIT from $NEW"
-  # Old revisions are left active rather than deactivated. They cost nothing at
-  # zero traffic, and they are what the next rollback shifts back onto.
+  reap_superseded "$NEW" "$PREVIOUS"
+  assert_connection_budget
   exit 0
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Back.
+# 6. Back.
 # ---------------------------------------------------------------------------
 say "HEALTH GATE FAILED AFTER PROMOTION. Rolling back to $PREVIOUS"
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -97,6 +98,20 @@ func orchestratorWithManifest(env2 *Env, branch string) (*env.Orchestrator, *sch
 	return orchestratorWithManifest2(env2, lifecycleOptions{branch: branch})
 }
 
+// progressFor returns the status line a run reports through, remembering it on
+// the Env so that the command can close it when the run ends.
+//
+// On the Env rather than returned alongside the orchestrator, because every
+// one of the eleven commands that builds an orchestrator would otherwise have
+// to thread a second value through, and the one that forgot would leave a
+// goroutine rewriting a line under whatever the command printed next.
+func progressFor(e *Env) *Progress {
+	if e.Progress == nil {
+		e.Progress = NewProgress(e.Out, e.Clock)
+	}
+	return e.Progress
+}
+
 func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestrator, *schema.Manifest, error) {
 	branch, rebuild := opts.branch, opts.rebuild
 	path, err := manifest.Find(env2.WorkDir)
@@ -115,6 +130,7 @@ func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestra
 	r := redact.New()
 	o, err := env.New(env.Options{
 		Root: root, Manifest: m, Branch: branch, Clock: env2.Clock,
+		Repository: currentRepository(env2, root), PullRequest: currentPullRequest(env2),
 		Rebuild: rebuild, Redactor: r, Verbose: env2.Out.Verbose, Getenv: env2.Getenv,
 		Progress: func(line string) {
 			// Progress is prose, not data, so it is suppressed in JSON mode
@@ -123,7 +139,7 @@ func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestra
 			if opts.silent {
 				return
 			}
-			env2.Out.Printf("  %s\n", r.String(line))
+			progressFor(env2).Step(r.String(line))
 		},
 	})
 	if err != nil {
@@ -156,6 +172,74 @@ func currentBranch(root string) string {
 		return "default"
 	}
 	return branch
+}
+
+// currentRepository is owner/name for whatever this checkout is.
+//
+// The control plane keys environments on it, and a repository it has never
+// heard of is created from this name, so getting it wrong invents a row rather
+// than failing loudly. Both sources here are therefore exact rather than
+// guessed: GITHUB_REPOSITORY is literally the string GitHub uses, and the
+// origin remote's last two path segments are what every forge puts there.
+//
+// Empty when there is neither, which is a real state and not an error. Somebody
+// trying the tool in a directory with no remote gets an environment that runs;
+// what they do not get is a row in a hosted console they are not using.
+func currentRepository(e *Env, root string) string {
+	if r := strings.TrimSpace(e.Getenv("GITHUB_REPOSITORY")); r != "" {
+		return r
+	}
+	out, err := exec.Command("git", "-C", root, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	return repoFromRemote(strings.TrimSpace(string(out)))
+}
+
+// repoFromRemote pulls owner/name out of a git remote URL.
+//
+// The last two path segments and nothing else, which is what makes this safe
+// on the form CI actually produces. A GitHub Actions checkout rewrites origin
+// to https://x-access-token:<token>@github.com/owner/name, and any parser that
+// kept more of the URL than this would put a live credential on the event
+// stream. Taking the tail can only ever yield two path segments.
+func repoFromRemote(url string) string {
+	url = strings.TrimSuffix(url, ".git")
+	url = strings.TrimSuffix(url, "/")
+	// Colons become separators so that the scp form git@host:owner/name and
+	// the URL forms all reduce to the same list of segments, ports and
+	// credentials included, and all of them are then thrown away.
+	parts := strings.Split(strings.ReplaceAll(url, ":", "/"), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	owner, name := parts[len(parts)-2], parts[len(parts)-1]
+	if owner == "" || name == "" || strings.Contains(owner, "@") {
+		return ""
+	}
+	return owner + "/" + name
+}
+
+// currentPullRequest is the pull request number this run is for, or zero.
+//
+// GITHUB_REF is refs/pull/<n>/merge on a pull_request event and something else
+// on every other trigger, so the shape is checked rather than assumed. Zero
+// means a branch build, which is most of them.
+func currentPullRequest(e *Env) int {
+	ref := strings.TrimSpace(e.Getenv("GITHUB_REF"))
+	rest, ok := strings.CutPrefix(ref, "refs/pull/")
+	if !ok {
+		return 0
+	}
+	number, _, ok := strings.Cut(rest, "/")
+	if !ok {
+		return 0
+	}
+	n, err := strconv.Atoi(number)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // dashboard is the live view attached to a run, or nothing.
@@ -263,7 +347,7 @@ interrupt at any point leaves something af down can clean up.`),
 			if live {
 				view = attachDashboard(e, o)
 			} else {
-				e.Out.Section("Bringing up " + o.EnvID())
+				e.Out.Subject("Bringing up "+o.EnvID(), "branch "+o.Branch())
 			}
 
 			var res *env.Result
@@ -279,7 +363,15 @@ interrupt at any point leaves something af down can clean up.`),
 				return runErr
 			}
 			if upErr != nil {
-				renderServices(e, res.Services)
+				// res is nil whenever Up failed before it had anything to
+				// report, which is every failure inside open: the state
+				// directory, the branch lock, the journal. Dereferencing it
+				// there panicked and printed a Go stack trace over the error
+				// that had just been diagnosed correctly.
+				if res != nil {
+					renderServices(e, res.Services)
+				}
+				reportStanding(cmd.Context(), e, o)
 				return upErr
 			}
 
@@ -315,6 +407,63 @@ interrupt at any point leaves something af down can clean up.`),
 	return cmd
 }
 
+// reportStanding says what a failed run left behind and how to remove it.
+//
+// A failed af up does not tear down, and that is deliberate: every resource is
+// journaled before it is created, so a failure leaves the environment standing
+// to be looked at rather than destroying the evidence, and af logs and af net
+// log read from it. The af up help text has always said so. What nothing said
+// is that it had happened. The next step on each of the forty eight codes af
+// up can exit with points at the failure, so somebody whose build failed is
+// told to read a log while four containers and a database branch sit there,
+// and on a first run they do not yet know af down exists.
+//
+// Read from the inventory rather than written into those codes. Most of them
+// fire before anything is created, where a fixed sentence would be a lie, and
+// a forty ninth would not know to carry it. Asking what is actually standing
+// is the only form that cannot go stale or overstate.
+//
+// Silent on every failure of its own. This runs while a command is already
+// failing, and a second error about the reporter would bury the first.
+func reportStanding(ctx context.Context, e *Env, o *env.Orchestrator) {
+	rt, err := o.Runtime()
+	if err != nil {
+		return
+	}
+	defer func() { _ = rt.Close() }()
+	items, err := rt.Inventory(ctx)
+	if err != nil {
+		return
+	}
+	total, running := 0, 0
+	for _, item := range items {
+		if item.EnvID != o.EnvID() {
+			continue
+		}
+		total++
+		if item.Labels["state"] == "running" {
+			running++
+		}
+	}
+	if total == 0 {
+		return
+	}
+
+	e.Out.Println("")
+	noun := "resources are"
+	if total == 1 {
+		noun = "resource is"
+	}
+	if running > 0 {
+		e.Out.Printf("  %d %s still up, %d of them running.\n", total, noun, running)
+	} else {
+		e.Out.Printf("  %d %s still up.\n", total, noun)
+	}
+	e.Out.Printf("  %s\n", e.Out.Wrap(
+		"That is on purpose: a failed run leaves the environment standing so you can look "+
+			"at it, and 'af logs' reads from it. Remove it with 'af down'.", 2))
+}
+
 func servicesJSON(services []provider.RunningService) []ServiceJSON {
 	out := make([]ServiceJSON, 0, len(services))
 	for _, s := range services {
@@ -331,15 +480,15 @@ func renderServices(e *Env, services []provider.RunningService) {
 		return
 	}
 	for _, s := range services {
-		symbol, style := SymbolFail, StyleBad
+		symbol := SymbolFail
 		if s.Ready {
-			symbol, style = SymbolOK, StyleGood
+			symbol = SymbolOK
 		}
 		detail := s.URL
 		if detail == "" {
 			detail = s.State
 		}
-		e.Out.Status(e.Out.S(style, symbol), s.Name, detail)
+		e.Out.Status(symbol, s.Name, detail)
 		if !s.Ready && s.Detail != "" {
 			for _, line := range lastLines(s.Detail, 12) {
 				e.Out.Printf("      %s\n", e.Out.S(StyleDim, line))
@@ -358,26 +507,45 @@ func lastLines(s string, n int) []string {
 	return lines
 }
 
+// newDownCommand builds `af down`.
+//
+// The Long text says "including" rather than opening a colon. It used to read
+// "every resource the environment created:" and then name four things, and the
+// journal records fourteen kinds. A colon after "every resource" promises the
+// whole list, so a reader could reasonably conclude the other ten kinds are
+// left behind: golden versions, images, ZFS datasets, Kubernetes namespaces
+// and deployments, DNS records, storage objects, webhook registrations,
+// sandbox objects and runner processes. All of them are torn down, because
+// teardown replays whatever the journal holds rather than a list written here.
+// This text is generated into the command reference, so the false promise
+// reached the documentation too.
 func newDownCommand(e *Env) *cobra.Command {
 	var branch string
 	cmd := &cobra.Command{
 		Use:   "down",
 		Short: "Remove the environment and everything it created",
 		Long: strings.TrimSpace(`
-Replay the journal in reverse and delete every resource the environment
-created: database branches, containers, volumes, and networks.
+Replay the journal in reverse and delete what this environment recorded
+creating. Every resource is journaled before it is made, so what teardown
+removes is what was actually created rather than what a list somebody
+maintained remembers to look for.
 
 Teardown never stops at the first failure. A provider that is unreachable must
-not strand the other resources, so each is attempted and anything that could
-not be removed stays recorded for the next run. Exit code 10 means resources
-are still pending.`),
+not strand the other resources, so each is attempted, and two things survive
+the run: anything that could not be removed, and anything this build has no way
+to delete, which is left recorded rather than forgotten. Both are named
+individually in the output, and exit code 10 means resources are still pending.
+
+So the answer to what this is about to remove is not a sentence here. It is
+'af status' for what is running and the pending list this prints for whatever
+it could not reach.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			o, err := orchestrator(e, branch, false)
 			if err != nil {
 				return err
 			}
-			e.Out.Section("Tearing down " + o.EnvID())
+			e.Out.Subject("Tearing down "+o.EnvID(), "branch "+o.Branch())
 			td, downErr := o.Down(cmd.Context())
 			if downErr != nil {
 				return downErr
@@ -396,9 +564,14 @@ are still pending.`),
 			} else {
 				e.Out.Println("")
 				e.Out.Printf("  %d resources removed.\n", td.Removed)
+				// The reason is wrapped because it carries a provider's own
+				// error text, which is the longest string on this page and the
+				// only one a person has to read carefully: this is the list of
+				// what teardown could not remove.
 				for _, p := range td.Pending {
-					e.Out.Printf("  %s %s/%s: %s\n",
-						e.Out.S(StyleBad, SymbolFail), p.Kind, p.ID, p.Reason)
+					head := fmt.Sprintf("  %s %s/%s: ",
+						e.Out.S(StyleBad, SymbolFail), p.Kind, p.ID)
+					e.Out.Printf("%s%s\n", head, e.Out.Wrap(p.Reason, cells(head)))
 				}
 			}
 			if len(td.Pending) > 0 {
@@ -433,9 +606,16 @@ func newStatusCommand(e *Env) *cobra.Command {
 					Proxied: res.Proxied, Services: servicesJSON(res.Services),
 				})
 			}
-			e.Out.Section(res.EnvID)
+			// The branch, not only the environment identifier. The identifier
+			// is the branch with the punctuation taken out and a hash on the
+			// end, which nobody can check against the branch they think they
+			// are on, and running on the wrong branch is the most common way
+			// to be confused by this tool. The directory is deliberately not
+			// here: it is in the reader's own shell prompt, and an absolute
+			// path is a single unbreakable word that no wrapping can rescue.
+			e.Out.Subject(res.EnvID, "branch "+o.Branch())
 			if len(res.Services) == 0 {
-				e.Out.Println("Nothing is running for this branch. Bring it up with 'af up'.")
+				e.Out.Empty("Nothing is running for this branch.", "Bring it up with", "af up")
 				return nil
 			}
 			renderServices(e, res.Services)

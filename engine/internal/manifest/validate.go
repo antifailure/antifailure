@@ -903,6 +903,7 @@ func (v *validator) load(m *schema.Manifest) {
 			fmt.Sprintf("The load source is %s and no path is configured.", l.Source),
 			"Set source_config.path to the file the traffic is read from.")
 	}
+	v.loadThresholds(l)
 
 	for i := range l.Scenarios {
 		sc := l.Scenarios[i]
@@ -924,6 +925,62 @@ func (v *validator) load(m *schema.Manifest) {
 		if sc.Sessions < 0 || sc.Iterations < 0 {
 			v.add(base, "A scenario cannot run a negative number of times.", "")
 		}
+	}
+}
+
+// loadThresholds refuses a threshold that cannot fire.
+//
+// The same judgement that removed Datadog and New Relic from the load sources:
+// a key somebody can set that cannot work reads as a broken product rather
+// than an unfinished one, and it is worse than not offering the key at all,
+// because the run goes green having checked nothing and nobody looks at a
+// green check. The scenario runner already exits non-zero when a journey
+// proved nothing, for the same reason.
+//
+// Only a threshold somebody wrote is refused. normalizeLoad sets p95_increase
+// on every manifest, so refusing its own default would make access_log
+// unusable rather than honest. A run under the default reports the inertness
+// instead, from the numbers it actually measured.
+func (v *validator) loadThresholds(l *schema.Load) {
+	t := l.Thresholds
+	if t == nil {
+		return
+	}
+
+	// p95_increase divides a measured p95 by a per route baseline, and only a
+	// trace export carries one. A combined format log line has no duration in
+	// it, and the default shape has no production behind it, so under either
+	// every route arrives with HasBaseline false and Breaches skips all of
+	// them.
+	if t.P95Increase > 0 && declaredAt(v.doc, "load.thresholds.p95_increase") {
+		switch l.Source {
+		case schema.LoadAccessLog:
+			v.add("load.thresholds.p95_increase",
+				"The load source is access_log and p95_increase is set.",
+				"A combined format log line carries no duration, so every route read from one "+
+					"arrives with no baseline and this threshold can never fire. Read the traffic "+
+					"with source: otel, which carries production's own p95 for each route, or "+
+					"remove the threshold and judge the run on error_rate.")
+		case "", schema.LoadNone:
+			v.add("load.thresholds.p95_increase",
+				"The load source is none and p95_increase is set.",
+				"With no source the shape is a default that exercises the root, and there is no "+
+					"production behind it to be a baseline, so this threshold can never fire. Set "+
+					"source: otel to read production's own p95 for each route, or remove the "+
+					"threshold and judge the run on error_rate.")
+		}
+	}
+
+	// query_count_increase is worse than inert under one source: nothing has
+	// ever read it. It reached the schema, the Go type and the normalizer, and
+	// no load run counts statements, so it has never affected any verdict. The
+	// check it describes exists under a different name.
+	if t.QueryCountIncrease > 0 && declaredAt(v.doc, "load.thresholds.query_count_increase") {
+		v.add("load.thresholds.query_count_increase",
+			"Nothing measures query_count_increase.",
+			"A load run counts requests, not statements. The check that compares statement "+
+				"counts against the base branch is insights.query_regression, and how much "+
+				"growth fails it is insights.regression_factor. Set it there and remove this.")
 	}
 }
 
@@ -1143,10 +1200,25 @@ func (v *validator) runtime(m *schema.Manifest) {
 	if r == nil {
 		return
 	}
-	for field, val := range map[string]string{"ttl": r.TTL, "idle_sleep": r.IdleSleep} {
+	for field, val := range map[string]string{
+		"ttl": r.TTL, "max_ttl": r.MaxTTL, "idle_sleep": r.IdleSleep,
+	} {
 		if _, err := ParseDuration(val); err != nil {
 			v.add("runtime."+field, fmt.Sprintf("The value %q is not a duration.", val), "")
 		}
+	}
+	// A maximum below the default lifetime would mean every environment was
+	// born already past the furthest point it could ever be extended to, so
+	// af env extend could only ever refuse. Caught here rather than clamped,
+	// because the manifest says two things that cannot both be true and the
+	// author is the only one who knows which they meant.
+	ttl, ttlErr := ParseDuration(r.TTL)
+	maxTTL, maxErr := ParseDuration(r.MaxTTL)
+	if ttlErr == nil && maxErr == nil && maxTTL < ttl {
+		v.add("runtime.max_ttl",
+			fmt.Sprintf("The maximum lifetime %q is shorter than the lifetime %q.", r.MaxTTL, r.TTL),
+			"Set max_ttl to at least ttl. It is the furthest af env extend may push an "+
+				"environment's expiry, so a value below ttl leaves nothing to extend.")
 	}
 	if r.Provider == schema.RuntimeKubernetes && r.Domain == DefaultDomain {
 		v.add("runtime.domain",
@@ -1445,6 +1517,38 @@ func validateCronField(f string, lo, hi int) error {
 		}
 	}
 	return nil
+}
+
+// declaredAt reports whether a dotted path was actually written in the
+// document.
+//
+// nodeAt cannot answer this: it deliberately falls back to the containing
+// mapping when a key is absent, so that a problem about a missing key can
+// still point at a line. That fallback makes it useless for asking whether
+// somebody set a value, and the difference matters wherever normalization
+// fills a field in. A default the engine chose is not a promise the author
+// made, and refusing one as though it were would fail every manifest.
+func declaredAt(doc *yaml.Node, dotted string) bool {
+	if doc == nil || dotted == "" {
+		return false
+	}
+	n := doc
+	if n.Kind == yaml.DocumentNode && len(n.Content) > 0 {
+		n = n.Content[0]
+	}
+	for _, seg := range splitPath(dotted) {
+		n = mapValue(n, seg.key)
+		if n == nil {
+			return false
+		}
+		if seg.index >= 0 {
+			if n.Kind != yaml.SequenceNode || seg.index >= len(n.Content) {
+				return false
+			}
+			n = n.Content[seg.index]
+		}
+	}
+	return true
 }
 
 // nodeAt resolves a dotted path such as services[1].port to its YAML node, so

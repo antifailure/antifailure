@@ -11,7 +11,7 @@ export function DevtoolsPage() {
         title="Schema changes on large tables."
         paragraphs={[
           "The flagship wedge, felt first by teams whose users notice p99 immediately.",
-          "Measure lock duration, blocked statements, and whether old instances can still read the new schema.",
+          "Measure the strongest lock held per table, how long it was held, whether another session was left waiting on it, and how the query plans moved.",
           "Start with Postgres volume, plans, and pools, then expand.",
         ]}
         visual={

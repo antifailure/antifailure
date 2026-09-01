@@ -60,7 +60,27 @@ export function openApiDocument(): Record<string, unknown> {
                         envId: { type: 'string' },
                         sequence: { type: 'integer', minimum: 0 },
                         occurredAt: { type: 'string', format: 'date-time' },
-                        payload: { type: 'object', additionalProperties: true },
+                        payload: {
+                          type: 'object',
+                          additionalProperties: true,
+                          description:
+                            'Type specific. An environment.* event should carry repository ' +
+                            '(owner/name) and branch on EVERY event and not only the first, ' +
+                            'because the environment row is created from whichever event ' +
+                            'arrives first and an event that cannot name its repository ' +
+                            'cannot create one. started_at is when the environment began ' +
+                            'existing, which is not when the event fired: usage and the expiry ' +
+                            'are measured from it, so an environment reported ready after its ' +
+                            'build is still billed for the build. ttl_seconds is the declared ' +
+                            'lifetime, added to that instant to give the expiry.',
+                          properties: {
+                            repository: { type: 'string', description: 'owner/name.' },
+                            branch: { type: 'string' },
+                            pull_request: { type: 'integer', minimum: 1 },
+                            started_at: { type: 'string', format: 'date-time' },
+                            ttl_seconds: { type: 'number', minimum: 1 },
+                          },
+                        },
                       },
                     },
                   },
@@ -70,7 +90,12 @@ export function openApiDocument(): Record<string, unknown> {
           },
         },
         responses: {
-          '202': { description: 'Every event was accepted or was a duplicate.' },
+          '202': {
+            description:
+              'Every event was accepted or was a duplicate. An accepted event that changed no ' +
+              'environment row carries a note saying why, and is counted in unprojected; it is ' +
+              'stored either way.',
+          },
           '207': { description: 'Some events were rejected. The outcomes array says which and why.' },
           '401': { description: 'The token is not valid.' },
           '413': { description: 'The batch is larger than the limit.' },

@@ -38,7 +38,22 @@ file it came from, so you can check the reasoning rather than trust it.
 
 Anything detection is not sure about becomes a question rather than a silent
 guess, because a manifest you have to audit is worth less than one you can
-read.`),
+read.
+
+A service is identified by the directory it is built and run from, not by its
+name, because every source spells the name differently: a Dockerfile and a
+language analyzer use the directory, a compose file uses its own key, a
+Procfile uses the process name, and a package manifest uses the package. One
+application described by several of those is one service, and the name it keeps
+comes from the source that identifies an application best, a package manifest
+ahead of a compose key ahead of a Procfile process ahead of the directory.
+Where one source declares two services in a directory, which is what a compose
+file with a web and an admin container on one build context is, they stay two.
+
+--answer settles a question, and also overrides a value detection read with
+confidence, which is how you separate two services a repository really does
+have on one port. An id naming nothing is refused with the ids that would have
+worked rather than dropped in silence.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runInit(cmd.Context(), env, initOptions{
@@ -53,7 +68,7 @@ read.`),
 	cmd.Flags().BoolVar(&force, "force", false,
 		"Overwrite an existing manifest instead of merging into it")
 	cmd.Flags().StringArrayVar(&answers, "answer", nil,
-		"Answer a question without a prompt, as id=value. Repeatable.")
+		"Answer a question, or override a detected value, as id=value. Repeatable.")
 	return cmd
 }
 
@@ -112,6 +127,9 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 			return err
 		}
 	}
+	if err := applyRemainingAnswers(res, opts); err != nil {
+		return err
+	}
 
 	// The draft is normalized and validated before it is written, so af init
 	// can never produce a file that af up then refuses.
@@ -120,7 +138,15 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 		return err
 	}
 	if _, err := manifest.Parse(body, manifestPath, env.WorkDir); err != nil {
-		return fmt.Errorf("init: the generated manifest is not valid, which is a bug in Antifailure: %w", err)
+		// The refusal has to say that nothing was written. Wrapping the
+		// validator's own error let AF-MAN-002 reach the user unchanged, and
+		// its next step is "fix the reported line", which points at a file
+		// that does not exist. Writing the invalid draft instead would be
+		// worse: it gets committed, every later command fails on it, and
+		// af init then refuses to replace it without --force.
+		return aferrors.Coded(aferrors.AFDET005,
+			"path", manifestPath,
+			"detail", validationDetail(err))
 	}
 
 	if err := writeAtomic(manifestPath, body, 0o644); err != nil {
@@ -149,6 +175,22 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 	return nil
 }
 
+// validationDetail pulls the readable half out of the validator's own error.
+//
+// The validator returns AF-MAN-002 carrying the failing line and the reason.
+// That sentence is worth repeating; its next step is not, because it tells the
+// reader to edit a file 'af init' has just decided not to write.
+func validationDetail(err error) string {
+	var coded *aferrors.Error
+	if aferrors.As(err, &coded) {
+		if d := coded.Fields["detail"]; d != "" {
+			return d
+		}
+		return coded.Message()
+	}
+	return err.Error()
+}
+
 func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed map[string]string) error {
 	// A question needs somewhere to ask it. Without a terminal the read blocks
 	// forever, which in a script or a CI job looks exactly like a hang, so the
@@ -162,15 +204,10 @@ func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed ma
 		switch {
 		case given:
 		case opts.nonInteractive:
-			if q.Default == "" {
-				// A question with no default in a non interactive run cannot
-				// be guessed at. Naming the flag is what turns this into a
-				// one line fix rather than a dead end.
-				return aferrors.Coded(aferrors.AFMAN004,
-					"path", env.WorkDir)
-			}
 			answer = q.Default
-			assumed[q.ID] = answer
+			if answer != "" {
+				assumed[q.ID] = answer
+			}
 		default:
 			var err error
 			answer, err = ask(env, *q)
@@ -178,7 +215,56 @@ func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed ma
 				return err
 			}
 		}
-		applyAnswer(res.Draft, q.ID, answer)
+		// One refusal for every way a question can arrive unanswered: a
+		// non interactive run with no default, an --answer with nothing after
+		// the equals sign, and a prompt somebody pressed return on when there
+		// was no default to take.
+		//
+		// Letting any of them through applied no answer, which left a web
+		// service with no port, which failed validation and told the user it
+		// was a defect in Antifailure. Two of these used to return AF-MAN-004,
+		// whose next step is "pass --non-interactive", which the run that hit
+		// it had already done. AF-DET-004 names the question and the flag that
+		// answers it instead.
+		if answer == "" && q.Default == "" {
+			return aferrors.Coded(aferrors.AFDET004,
+				"question", q.Prompt,
+				"id", q.ID)
+		}
+		_ = applyAnswer(res.Draft, q.ID, answer)
+	}
+	return nil
+}
+
+// applyRemainingAnswers applies every --answer detection did not turn into a
+// question, and refuses one that reaches nothing.
+//
+// Detection only asks about what it is unsure of, so a value it read with
+// confidence has no question and used to be unreachable from the command line.
+// That made AF-DET-005 a dead end of the same shape as the ones this change
+// exists to close: two Dockerfiles in different directories both exposing 3000
+// is a real repository, the draft is correctly refused, and the remedy the
+// refusal named did nothing at all because there was no question to answer.
+func applyRemainingAnswers(res *detect.Result, opts initOptions) error {
+	answered := map[string]bool{}
+	for _, q := range res.Questions {
+		answered[q.ID] = true
+	}
+	ids := make([]string, 0, len(opts.answers))
+	for id := range opts.answers {
+		if !answered[id] {
+			ids = append(ids, id)
+		}
+	}
+	// The map iterates in a random order and this can refuse, so sort it or
+	// which id a repository with two bad answers is told about is a coin flip.
+	sort.Strings(ids)
+	for _, id := range ids {
+		if !applyAnswer(res.Draft, id, opts.answers[id]) {
+			return aferrors.Coded(aferrors.AFDET006,
+				"id", id,
+				"known", strings.Join(answerIDs(res.Draft), ", "))
+		}
 	}
 	return nil
 }
@@ -213,34 +299,56 @@ func ask(env *Env, q detect.Question) (string, error) {
 }
 
 // applyAnswer writes one answer into the draft.
-func applyAnswer(m *schema.Manifest, id, answer string) {
+// It reports whether the answer reached anything. A caller that passed an id
+// naming no service has to hear about it: an --answer silently discarded is
+// the same dead end as an error naming a remedy that does nothing, one layer
+// further in, and AF-DET-005 tells people to reach for this flag.
+func applyAnswer(m *schema.Manifest, id, answer string) bool {
 	if answer == "" {
-		return
+		return false
 	}
 	switch {
 	case strings.HasPrefix(id, "service.") && strings.HasSuffix(id, ".port"):
 		name := strings.TrimSuffix(strings.TrimPrefix(id, "service."), ".port")
 		port, err := strconv.Atoi(answer)
 		if err != nil || port <= 0 || port > 65535 {
-			return
+			return false
 		}
+		applied := false
 		for i := range m.Services {
 			if m.Services[i].Name == name {
 				m.Services[i].Port = port
+				applied = true
 			}
 		}
+		return applied
 	case strings.HasPrefix(id, "service.") && strings.HasSuffix(id, ".command"):
 		name := strings.TrimSuffix(strings.TrimPrefix(id, "service."), ".command")
+		applied := false
 		for i := range m.Services {
 			if m.Services[i].Name == name {
 				m.Services[i].Command = answer
+				applied = true
 			}
 		}
+		return applied
 	case id == "database.present":
 		if strings.EqualFold(answer, "no") {
 			m.Database = &schema.Database{Provider: schema.DBDocker, Version: 17}
 		}
+		return true
 	}
+	return false
+}
+
+// answerIDs lists every id --answer accepts for this repository, so a refusal
+// can name them rather than referring the reader to the manual.
+func answerIDs(m *schema.Manifest) []string {
+	ids := []string{"database.present"}
+	for _, s := range m.Services {
+		ids = append(ids, "service."+s.Name+".port", "service."+s.Name+".command")
+	}
+	return ids
 }
 
 func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, path string) {
@@ -257,7 +365,9 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 		}
 		rows = append(rows, []string{s.Name, string(s.Kind), port, where, s.Command})
 	}
-	env.Out.Table([]string{"SERVICE", "KIND", "PORT", "PATH", "COMMAND"}, rows)
+	env.Out.Table([]Column{
+		Col("SERVICE"), Col("KIND"), Num("PORT"), Col("PATH"), Flex("COMMAND"),
+	}, rows)
 
 	if len(res.Draft.Egress.Rules) > 0 {
 		env.Out.Section("Network policy")
@@ -265,28 +375,30 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 		for _, r := range res.Draft.Egress.Rules {
 			ruleRows = append(ruleRows, []string{r.Host, string(r.Mode), r.Note})
 		}
-		env.Out.Table([]string{"HOST", "MODE", "WHY"}, ruleRows)
-		env.Out.Printf("\n  %s\n", env.Out.S(StyleDim,
-			"Everything not listed is blocked. Nothing reaches the internet by accident."))
+		env.Out.Table([]Column{Col("HOST"), Col("MODE"), Flex("WHY")}, ruleRows)
+		env.Out.Note(StyleDim,
+			"Everything not listed is blocked. Nothing reaches the internet by accident.")
 	}
 
 	if len(assumed) > 0 {
 		env.Out.Section("Assumed")
+		block := env.Out.Block()
 		for _, id := range SortedKeys(assumed) {
-			env.Out.Printf("  %-40s %s\n", id, assumed[id])
+			block.Add(id, assumed[id])
 		}
-		env.Out.Printf("\n  %s\n", env.Out.S(StyleDim,
-			"These were not detected with confidence. Check them before you commit."))
+		block.Flush()
+		env.Out.Note(StyleDim,
+			"These were not detected with confidence. Check them before you commit.")
 	}
 	if res.Partial {
-		env.Out.Printf("\n  %s\n", env.Out.S(StyleWarn,
-			"Detection did not finish within its budget, so the draft may be incomplete."))
+		env.Out.Note(StyleWarn,
+			"Detection did not finish within its budget, so the draft may be incomplete.")
 	}
 
 	env.Out.Section("Written")
 	env.Out.Printf("  %s\n", path)
-	env.Out.Printf("\n  Next: read it, edit anything that looks wrong, then run %s\n",
-		env.Out.S(StyleBold, "af up"))
+	env.Out.Println("")
+	env.Out.Hint("Read it, edit anything that looks wrong, then run", "af up")
 }
 
 // renderManifest writes the draft as YAML with a header that explains what the
