@@ -81,6 +81,12 @@ func fixture(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(stage, "runner", "package.json"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The lockfile is part of what a release archive promises, and the
+	// installer refuses an archive without it, so the fixture has to carry one
+	// or every test here would be testing that refusal instead.
+	if err := os.WriteFile(filepath.Join(stage, "runner", "package-lock.json"), []byte("{\"lockfileVersion\": 3}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	tarball := name() + ".tar.gz"
 	cmd := exec.Command("tar", "-C", dir, "-czf", filepath.Join(dir, tarball), name())
@@ -133,6 +139,10 @@ type session struct {
 	stubs    string
 	fixtures string
 	root     string
+	// hidden accumulates tools removed from this session's PATH, so a test
+	// about a machine missing all three sha256 tools can hide them one call at
+	// a time and have the third hiding keep the first two.
+	hidden []string
 }
 
 func newSession(t *testing.T) *session {

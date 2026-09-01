@@ -65,33 +65,78 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 say "Downloading $name"
 fetch "$base/$name.tar.gz" "$tmp/$name.tar.gz" || die "could not download $base/$name.tar.gz"
 
-# The checksum is checked rather than assumed. A download over a hijacked
-# network is exactly the thing a tool that runs unreviewed code should not
-# shrug at.
-if fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null; then
-  expected=$(grep " $name.tar.gz\$" "$tmp/checksums.txt" | awk '{print $1}' | head -1)
-  if [ -n "$expected" ]; then
-    if command -v shasum >/dev/null 2>&1; then
-      actual=$(shasum -a 256 "$tmp/$name.tar.gz" | awk '{print $1}')
-    elif command -v sha256sum >/dev/null 2>&1; then
-      actual=$(sha256sum "$tmp/$name.tar.gz" | awk '{print $1}')
-    else
-      actual=""
-      say "warning: no sha256 tool was found, so the download was not verified"
-    fi
-    if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
-      die "the download does not match its published checksum; refusing to install"
-    fi
-    [ -n "$actual" ] && say "Checksum verified"
-  fi
+# The checksum is checked rather than assumed, and a check that cannot be done
+# refuses rather than passing.
+#
+# This block used to fail open four separate ways, every one of them ending in
+# an installed binary: a checksums.txt that did not download printed a warning
+# and carried on, an archive not named inside one printed NOTHING at all and
+# carried on, a machine with no sha256 tool printed a warning and carried on,
+# and a mismatch was the only case that stopped. Three of those four are the
+# same defect wearing different clothes, and it is the worst kind to have here:
+# the step whose entire job is to establish trust reporting success having
+# established nothing, at the exact moment the reader is deciding whether to run
+# unreviewed code. The README says the download is checked. It has to be true
+# every time, or it is worth less than not saying it.
+#
+# Refusing costs almost nobody: every release publishes checksums.txt as a
+# gated asset, macOS has shasum, coreutils and busybox both have sha256sum, and
+# openssl is on nearly everything else. There is deliberately no variable that
+# turns this off, because an escape hatch is how a fail open comes back.
+fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null \
+  || die "the checksums for $VERSION could not be downloaded from $base/checksums.txt, so this download cannot be verified; refusing to install"
+
+expected=$(grep " $name.tar.gz\$" "$tmp/checksums.txt" | awk '{print $1}' | head -1)
+[ -n "$expected" ] \
+  || die "$name.tar.gz is not named in $base/checksums.txt, so this download cannot be verified; refusing to install"
+
+# Three tools rather than two. openssl reports either "SHA256(f)= hash" or
+# "SHA2-256(f)= hash" depending on its major version, so the hash is taken as
+# the last field rather than by matching the label.
+if command -v shasum >/dev/null 2>&1; then
+  actual=$(shasum -a 256 "$tmp/$name.tar.gz" | awk '{print $1}')
+elif command -v sha256sum >/dev/null 2>&1; then
+  actual=$(sha256sum "$tmp/$name.tar.gz" | awk '{print $1}')
+elif command -v openssl >/dev/null 2>&1; then
+  actual=$(openssl dgst -sha256 "$tmp/$name.tar.gz" | awk '{print $NF}')
 else
-  say "warning: no checksum file was published for $VERSION"
+  die "no sha256 tool was found, so this download cannot be verified; install one of shasum, sha256sum or openssl and run this again"
 fi
 
-tar -C "$tmp" -xzf "$tmp/$name.tar.gz"
+[ -n "$actual" ] \
+  || die "the sha256 tool on this machine produced no hash, so this download cannot be verified; refusing to install"
+[ "$actual" = "$expected" ] \
+  || die "the download does not match its published checksum; refusing to install"
+say "Checksum verified"
+
+# Everything below unpacks and places what the archive holds, and every step of
+# it reports its own failure.
+#
+# It used to let `set -e` deliver somebody else's error, which turned out not to
+# be true either. `A || { B && C; }` is an AND-OR list, and this machine's
+# /bin/sh does not apply -e to it at all: with no af inside the archive, cp
+# printed "No such file or directory" and the script went on to print
+# "Installed $VERSION to $BIN_DIR/af", write the profile line, and exit 0. So a
+# release assembled wrong reported a successful install of a file that was not
+# there. Each step is an explicit `if !` now, for that reason.
+tar -C "$tmp" -xzf "$tmp/$name.tar.gz" 2>/dev/null \
+  || die "$name.tar.gz could not be unpacked, although it matched its published checksum; the release archive is damaged, so please report it at https://github.com/$REPO/issues"
+
+# The archive is checked against what it promises before anything is placed. A
+# hash proves the bytes arrived intact; it says nothing about the release having
+# been assembled with every file in it, and that is a mistake made at build time
+# rather than in transit, so the hash cannot see it.
+for want in af runner/src/main.ts runner/package.json runner/package-lock.json; do
+  [ -e "$tmp/$name/$want" ] \
+    || die "$name.tar.gz unpacked with no $want in it, so this release is incomplete; refusing to install, and please report it at https://github.com/$REPO/issues"
+done
+
 mkdir -p "$BIN_DIR" "$PREFIX"
-install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null \
-  || { cp "$tmp/$name/af" "$BIN_DIR/af" && chmod 0755 "$BIN_DIR/af"; }
+if ! install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null; then
+  cp "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null \
+    && chmod 0755 "$BIN_DIR/af" 2>/dev/null \
+    || die "af could not be written to $BIN_DIR; check that you can write to it, or set AF_PREFIX to somewhere you can"
+fi
 
 # The runner source travels with the binary rather than being fetched later,
 # and it lands where `af runner install` looks for it.
@@ -115,7 +160,8 @@ install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null \
 # changes; the file just goes where the engine was already looking.
 rm -rf "$PREFIX/share/antifailure/runner"
 mkdir -p "$PREFIX/share/antifailure"
-cp -R "$tmp/$name/runner" "$PREFIX/share/antifailure/runner"
+cp -R "$tmp/$name/runner" "$PREFIX/share/antifailure/runner" 2>/dev/null \
+  || die "the runner could not be written to $PREFIX/share/antifailure; check that you can write to it, or set AF_PREFIX to somewhere you can"
 
 # A tree left at the old location by an earlier installer is a source with no
 # dependencies, and af test finds it before it finds anything else. Removing it
