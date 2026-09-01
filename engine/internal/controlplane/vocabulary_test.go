@@ -96,9 +96,32 @@ func TestEveryMappedTypeIsOneTheControlPlaneAccepts(t *testing.T) {
 // that can, and it exists because environment.sleeping is mapped, passes here,
 // and is still a column that is always empty.
 func TestTheControlPlaneTypesWithNoEngineEventAreTheExpectedOnes(t *testing.T) {
-	// Neither has an engine event mapped to it, and neither is built. See the
-	// comment on KnownTypes in sink.go for what each is reserved for.
-	expected := []string{"artifact.stored", "environment.queued"}
+	// None of these has an engine event mapped to it. The first two are
+	// reserved for capabilities that are not built; see the comment on
+	// KnownTypes in sink.go.
+	//
+	// The three workload types are a different case and it is worth being
+	// precise about which, because "reserved" and "half built" call for
+	// opposite decisions. They are the callback half of Workload Studio, and
+	// the OTHER half is built and running: the control plane holds workload
+	// definitions, immutable versions and runs, it dispatches the customer's
+	// workflow to start one, and it projects all three of these into run state,
+	// route metrics, threshold verdicts and evidence, with tests per arrival
+	// ordering. What is missing is the engine emitting them.
+	//
+	// So this is a wire with a live consumer and no producer, which is the same
+	// shape egress.decision is in below and the opposite of environment.queued.
+	// The engine change is bounded and named rather than vague: claim the run
+	// waiting for the environment through POST /v1/workloads/claim, emit
+	// workload.started when it begins, heartbeat while it runs, and emit
+	// workload.finished carrying the result document the control plane's
+	// decoder already reads. Until that lands, a Studio run is dispatched, is
+	// visible, and ends as `abandoned` at its deadline, which is the control
+	// plane saying it never heard rather than claiming anything about the work.
+	expected := []string{
+		"artifact.stored", "environment.queued",
+		"workload.cancelled", "workload.finished", "workload.started",
+	}
 
 	produced := map[string]bool{}
 	for _, to := range controlplane.MappedTypes() {

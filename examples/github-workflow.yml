@@ -33,9 +33,12 @@ on:
         required: true
         default: up
         type: choice
-        options: [up, agents, load]
+        options: [up, down, agents, load, scenario, explore]
       workflows:
-        description: Comma separated workflow names for agents. Empty means all of them.
+        description: >-
+          Comma separated names selected out of this manifest: workflows for
+          agents, scenarios for scenario, goals for explore. Empty means all of
+          them, where the command has such a default.
         required: false
         default: ''
       duration:
@@ -44,6 +47,17 @@ on:
         default: ''
       scale:
         description: Multiplier on production's rate, for load.
+        required: false
+        default: ''
+      seed:
+        description: >-
+          Replays the same schedule or the same wander. A whole number for
+          scenario and any string for explore, because that is what each
+          command's own --seed takes.
+        required: false
+        default: ''
+      concurrency:
+        description: Ceiling on requests in flight, for scenario.
         required: false
         default: ''
 
@@ -108,6 +122,8 @@ jobs:
           AF_WORKFLOWS: ${{ inputs.workflows }}
           AF_DURATION: ${{ inputs.duration }}
           AF_SCALE: ${{ inputs.scale }}
+          AF_SEED: ${{ inputs.seed }}
+          AF_CONCURRENCY: ${{ inputs.concurrency }}
           # Bring your own key. Without one the agents still run; workflows
           # that need a page read come back unverified rather than guessed at.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -145,6 +161,32 @@ jobs:
               if [ -n "$AF_DURATION" ]; then args+=(--duration "$AF_DURATION"); fi
               if [ -n "$AF_SCALE" ]; then args+=(--scale "$AF_SCALE"); fi
               af load run ${args[@]+"${args[@]}"}
+              ;;
+            scenario)
+              args=()
+              IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
+              for name in "${names[@]:-}"; do
+                if [ -n "$name" ]; then args+=(--only "$name"); fi
+              done
+              if [ -n "$AF_SEED" ]; then args+=(--seed "$AF_SEED"); fi
+              if [ -n "$AF_CONCURRENCY" ]; then args+=(--concurrency "$AF_CONCURRENCY"); fi
+              af load scenario ${args[@]+"${args[@]}"}
+              ;;
+            explore)
+              args=()
+              IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
+              for name in "${names[@]:-}"; do
+                if [ -n "$name" ]; then args+=(--only "$name"); fi
+              done
+              if [ -n "$AF_SEED" ]; then args+=(--seed "$AF_SEED"); fi
+              af explore ${args[@]+"${args[@]}"}
+              ;;
+            down)
+              # No branch flag, for the same reason 'up' has none: the dispatch
+              # ran on the branch the environment belongs to. Teardown exits 10
+              # when something could not be removed, which has to fail this job
+              # rather than read as a clean teardown in the control plane.
+              af down
               ;;
             *)
               af ci --output report.md

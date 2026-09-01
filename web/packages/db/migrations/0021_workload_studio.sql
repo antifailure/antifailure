@@ -152,12 +152,14 @@ CREATE TABLE workload_versions (
   UNIQUE (workload_id, version),
   CONSTRAINT workload_versions_positive CHECK (version >= 1),
   CONSTRAINT workload_versions_digest_shape CHECK (body_digest ~ '^[0-9a-f]{64}$'),
-  -- A promotion has to name what it was promoted from, and an authored version
-  -- has to name nothing. Without this a promoted version could claim no
-  -- provenance and read in the console as though somebody wrote it.
+  -- An authored version may not claim provenance it does not have. The other
+  -- direction is deliberately NOT constrained: a promotion can arrive from an
+  -- exploration document a person ran locally and pasted in, which has no run
+  -- in this database to point at. Requiring one would have made the only
+  -- promotion path that works today impossible, and the version would still be
+  -- honestly labelled `promoted`.
   CONSTRAINT workload_versions_provenance CHECK (
-    (source = 'promoted' AND promoted_from_run_id IS NOT NULL)
-    OR (source = 'authored' AND promoted_from_run_id IS NULL)
+    source = 'promoted' OR promoted_from_run_id IS NULL
   )
 );
 CREATE INDEX workload_versions_workload_idx ON workload_versions (workload_id, version DESC);

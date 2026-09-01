@@ -29,6 +29,9 @@ export const PERMISSIONS = [
   'audit.export',
   'runtimes.manage',
   'tokens.manage',
+  'workloads.view',
+  'workloads.edit',
+  'workloads.run',
 ] as const
 
 export type Permission = (typeof PERMISSIONS)[number]
@@ -57,6 +60,10 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'audit.export': 'Export the audit log, and verify its hash chain.',
   'runtimes.manage': 'Register, tag, and remove runtimes.',
   'tokens.manage': 'Create and revoke the tokens engines use to send events.',
+  'workloads.view': 'See workload definitions, their versions, and what their runs measured.',
+  'workloads.edit':
+    'Create a workload, add a version to one, archive one, and promote an exploration into a workflow.',
+  'workloads.run': 'Start, cancel, and retry a workload run.',
 }
 
 /**
@@ -77,6 +84,15 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
  *
  * A viewer can read the audit log but not export it. Reading is oversight;
  * exporting produces a file of who did what that leaves the system.
+ *
+ * Workloads are three permissions rather than one, and rather than being folded
+ * into agents.run and load.run. Reading a workload's history is oversight and a
+ * viewer gets it. Authoring a definition and starting a run are different acts
+ * on different days: a definition is a thing somebody edits and reviews, and a
+ * run costs money and moves an environment. Folding them into the two existing
+ * run permissions would have meant a role could start a browser workload and
+ * not a load workload, which is a distinction about the engine's internals
+ * rather than about anything an organization decides.
  */
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   owner: [...PERMISSIONS],
@@ -85,13 +101,15 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'masking.edit', 'masking.approve', 'network.edit', 'network.approve',
     'agents.run', 'load.run', 'members.manage',
     'audit.read', 'audit.export', 'runtimes.manage', 'tokens.manage',
+    'workloads.view', 'workloads.edit', 'workloads.run',
   ],
   member: [
     'environments.view', 'environments.create', 'environments.teardown',
     'masking.edit', 'network.edit', 'agents.run', 'load.run',
     'audit.read',
+    'workloads.view', 'workloads.edit', 'workloads.run',
   ],
-  viewer: ['environments.view', 'audit.read'],
+  viewer: ['environments.view', 'audit.read', 'workloads.view'],
 }
 
 export function roleHas(role: Role, permission: Permission): boolean {
