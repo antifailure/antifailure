@@ -1,0 +1,261 @@
+/** Shared SVG drawings. Thin-line isometric and plot primitives. */
+
+import type { ReactNode } from "react";
+
+const MONO = "var(--font-geist-mono), ui-monospace, monospace";
+const VB_W = 420;
+const VB_H = 280;
+
+function DrawWell({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-0 w-full flex-1 items-center justify-center px-2 py-3">{children}</div>
+  );
+}
+
+function labelWidth(text: string) {
+  return Math.max(56, text.length * 6.8 + 16);
+}
+
+function BoxedLabel({
+  x,
+  y,
+  text,
+  accent = false,
+}: {
+  x: number;
+  y: number;
+  text: string;
+  accent?: boolean;
+}) {
+  const padX = 8;
+  const w = labelWidth(text);
+  const h = 16;
+  const clampedX = Math.max(8, Math.min(VB_W - w - 8, x));
+  const clampedY = Math.max(6, Math.min(VB_H - h - 6, y));
+  return (
+    <g>
+      <rect
+        x={clampedX}
+        y={clampedY}
+        width={w}
+        height={h}
+        fill={accent ? "rgba(51,191,0,0.14)" : "#f7f7f5"}
+        stroke={accent ? "#33bf00" : "rgba(0,0,0,0.35)"}
+      />
+      <text
+        x={clampedX + padX}
+        y={clampedY + 11.5}
+        fill="rgba(0,0,0,0.78)"
+        fontSize="8"
+        fontFamily={MONO}
+        letterSpacing="0.12em"
+      >
+        {text}
+      </text>
+    </g>
+  );
+}
+
+export function IsoStack({
+  planes,
+}: {
+  planes: { label: string; accent?: boolean }[];
+}) {
+  const ph = 28;
+  const skew = 32;
+  const planeW = 220;
+  const gap = 50;
+  const stackH = ph + (planes.length - 1) * gap;
+  const top = Math.round((VB_H - stackH) / 2);
+  const labelX = 16;
+  const labelColW = 112;
+  const originX = labelX + labelColW + 20;
+  return (
+    <DrawWell>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        {planes.map((plane, i) => {
+          const y = top + i * gap;
+          const x = originX + i * 8;
+          const pw = planeW - i * 6;
+          const fill = plane.accent ? "rgba(51,191,0,0.1)" : "rgba(255,255,255,0.7)";
+          const stroke = plane.accent ? "#33bf00" : "rgba(0,0,0,0.45)";
+          const midY = y + ph / 2;
+          const leaderStart = labelX + labelWidth(plane.label) + 4;
+          const dropX = x + pw + skew - 14;
+          return (
+            <g key={plane.label}>
+              <BoxedLabel x={labelX} y={midY - 8} text={plane.label} accent={plane.accent} />
+              <line
+                x1={leaderStart}
+                y1={midY}
+                x2={x - 4}
+                y2={midY}
+                stroke="rgba(0,0,0,0.28)"
+                strokeDasharray="2 3"
+              />
+              <path
+                d={`M${x} ${y} L${x + pw} ${y} L${x + pw + skew} ${y + ph} L${x + skew} ${y + ph} Z`}
+                fill={fill}
+                stroke={stroke}
+                strokeWidth="1.1"
+              />
+              {i < planes.length - 1 ? (
+                <line
+                  x1={dropX}
+                  y1={y + ph}
+                  x2={dropX + 8}
+                  y2={y + gap}
+                  stroke="rgba(0,0,0,0.28)"
+                  strokeWidth="1"
+                  strokeDasharray="2 3"
+                />
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+    </DrawWell>
+  );
+}
+
+export function IsoRings() {
+  return (
+    <DrawWell>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        <ellipse cx="210" cy="140" rx="148" ry="56" fill="none" stroke="rgba(0,0,0,0.22)" strokeWidth="1" strokeDasharray="5 5" />
+        <ellipse cx="210" cy="140" rx="96" ry="36" fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth="1" />
+        <ellipse cx="210" cy="140" rx="42" ry="16" fill="rgba(51,191,0,0.12)" stroke="#33bf00" strokeWidth="1.2" />
+        <rect x="204" y="134" width="12" height="12" fill="#111" />
+        <BoxedLabel x={210 - labelWidth("PROD") / 2} y={44} text="PROD" />
+        <BoxedLabel x={210 - labelWidth("TWIN") / 2} y={220} text="TWIN" accent />
+      </svg>
+    </DrawWell>
+  );
+}
+
+export function IsoTwoPlanes({
+  top,
+  bottom,
+  callout,
+}: {
+  top: string;
+  bottom: string;
+  callout: string;
+}) {
+  const topW = labelWidth(top);
+  const botW = labelWidth(bottom);
+  const callW = labelWidth(callout);
+  return (
+    <DrawWell>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        <BoxedLabel x={210 - topW / 2} y={28} text={top} />
+        <path d="M88 56 L312 56 L352 90 L128 90 Z" fill="rgba(255,255,255,0.75)" stroke="rgba(0,0,0,0.4)" />
+        <line x1="210" y1="90" x2="210" y2="154" stroke="rgba(0,0,0,0.3)" strokeDasharray="2 3" />
+        <BoxedLabel x={Math.min(VB_W - callW - 16, 236)} y={112} text={callout} />
+        <path d="M72 154 L328 154 L374 196 L118 196 Z" fill="rgba(51,191,0,0.08)" stroke="#33bf00" />
+        <BoxedLabel x={210 - botW / 2} y={216} text={bottom} accent />
+      </svg>
+    </DrawWell>
+  );
+}
+
+export function DiamondSchematic({
+  nodes,
+}: {
+  nodes: { label: string; cmd?: string }[];
+}) {
+  const [n, e, s, w] = nodes;
+  const placements = [
+    { x: 210, y: 38, item: n, labelX: 210 - labelWidth(n.label) / 2, labelY: 8, cmdX: 210, cmdY: 56 },
+    { x: 338, y: 140, item: e, labelX: 348, labelY: 108, cmdX: 368, cmdY: 164 },
+    { x: 210, y: 232, item: s, labelX: 210 - labelWidth(s.label) / 2, labelY: 252, cmdX: 210, cmdY: 218 },
+    { x: 82, y: 140, item: w, labelX: 10, labelY: 108, cmdX: 52, cmdY: 164 },
+  ];
+  return (
+    <DrawWell>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        <circle cx="210" cy="140" r="84" fill="none" stroke="rgba(0,0,0,0.12)" />
+        <circle cx="210" cy="140" r="56" fill="none" stroke="rgba(0,0,0,0.12)" />
+        <path d="M210 70 L270 140 L210 210 L150 140 Z" fill="rgba(255,255,255,0.5)" stroke="rgba(0,0,0,0.5)" />
+        <path d="M204 134 L216 146 M216 134 L204 146" stroke="rgba(0,0,0,0.45)" strokeWidth="1.2" />
+        {placements.map((p) => (
+          <g key={p.item.label}>
+            <circle cx={p.x} cy={p.y} r="4" fill="#111" />
+            <BoxedLabel x={p.labelX} y={p.labelY} text={p.item.label} />
+            {p.item.cmd ? (
+              <text
+                x={p.cmdX}
+                y={p.cmdY}
+                textAnchor="middle"
+                fill="#33bf00"
+                fontSize="9"
+                fontFamily={MONO}
+              >
+                {p.item.cmd}
+              </text>
+            ) : null}
+          </g>
+        ))}
+      </svg>
+    </DrawWell>
+  );
+}
+
+export function LockPlot({
+  peak,
+  peakLabel,
+  tone = "fail",
+}: {
+  peak: number;
+  peakLabel: string;
+  tone?: "fail" | "pass";
+}) {
+  const color = tone === "fail" ? "#C43D3D" : "#33bf00";
+  const points =
+    tone === "fail"
+      ? "24,148 48,146 76,142 108,132 140,72 176,36 212,32 248,36 284,76 320,140 356,146 392,148"
+      : "24,146 76,142 140,136 176,128 212,124 248,128 284,136 320,142 392,146";
+  return (
+    <DrawWell>
+      <svg viewBox="0 0 420 180" className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        {[36, 68, 100, 132].map((y) => (
+          <line key={y} x1="20" y1={y} x2="400" y2={y} stroke="rgba(0,0,0,0.08)" />
+        ))}
+        <polyline fill="none" stroke={color} strokeWidth="1.6" points={points} />
+        <text x="24" y="22" fill={color} fontSize="12" fontFamily={MONO}>
+          {peakLabel}
+        </text>
+        <text x="24" y="172" fill="rgba(0,0,0,0.4)" fontSize="9" fontFamily={MONO}>
+          {peak}s hold
+        </text>
+      </svg>
+    </DrawWell>
+  );
+}
+
+export function KeepBar({ kept }: { kept: number }) {
+  return (
+    <svg viewBox="0 0 360 44" className="w-full" aria-hidden>
+      <rect x="0" y="18" width="360" height="12" fill="rgba(0,0,0,0.08)" />
+      <rect x="0" y="18" width={360 * kept} height="12" fill="#33bf00" />
+      <text x="0" y="12" fill="rgba(0,0,0,0.5)" fontSize="9" fontFamily={MONO}>
+        {Math.round(kept * 100)}% kept · joins valid
+      </text>
+    </svg>
+  );
+}
+
+export function BypassSchematic() {
+  return (
+    <DrawWell>
+      <svg viewBox="0 0 360 160" className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        <rect x="36" y="48" width="116" height="64" fill="none" stroke="rgba(0,0,0,0.45)" />
+        <BoxedLabel x={66} y={72} text="TWIN" />
+        <line x1="152" y1="80" x2="228" y2="80" stroke="#C43D3D" strokeDasharray="3 3" />
+        <path d="M220 72 L240 80 L220 88" fill="none" stroke="#C43D3D" />
+        <circle cx="268" cy="80" r="16" fill="none" stroke="#C43D3D" />
+        <path d="M258 70 L278 90 M278 70 L258 90" stroke="#C43D3D" />
+      </svg>
+    </DrawWell>
+  );
+}

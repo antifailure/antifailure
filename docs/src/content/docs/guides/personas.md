@@ -39,6 +39,7 @@ is reserved for fictional use, for the same reason.
 
 | Strategy | How the agent signs in |
 | --- | --- |
+| `none` | Does not sign in at all, for an application with no sign in or a page that is public. |
 | `password` | Types the password. |
 | `magic_link` | Waits for the mail, opens the link. |
 | `email_code` | Waits for the mail, reads the code. |
@@ -46,9 +47,16 @@ is reserved for fictional use, for the same reason.
 | `totp` | Types the password, then generates the code from the enrolled secret. |
 | `session` | Does not sign in through a form. |
 
-Everything except `password` depends on capture mode: a magic link that was
-really emailed is a link the agent cannot read, and a real address receiving it
-is a person getting mail from a pull request.
+Everything except `none` and `password` depends on capture mode: a magic link
+that was really emailed is a link the agent cannot read, and a real address
+receiving it is a person getting mail from a pull request.
+
+A persona set to `none` has no account, so nothing is created for it and your
+application does not need anywhere to put one. That is the shape an API with no
+sign in has, and until it was actually run, such a manifest was refused with
+"no users table could be found" for an account that was never going to be used.
+A workflow still has to name a persona, because a workflow runs as somebody
+even when that somebody is a visitor who never signed in.
 
 ## Where personas come from
 

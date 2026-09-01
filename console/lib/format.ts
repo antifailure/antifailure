@@ -31,26 +31,27 @@ export function when(value: string | Date | null | undefined): string {
 }
 
 /**
- * How long ago, or how long until. It goes beside an absolute time, never
- * instead of one, because a relative time cannot be compared with a log line.
+ * How far away in time, in the direction it actually lies. It goes beside an
+ * absolute time, never instead of one.
  *
- * The forward direction is not decoration. Every screen in this console used
- * to show only times that had already happened, so a future instant came out
- * of the abs() below as "-1h ago", which is not a phrase. The Load area shows
- * a run's deadline, which is the first time in this product a person is asked
- * to read a moment that has not arrived, and "Gives up at -1h ago" is worse
- * than no answer: it reads as a rendering fault rather than as a time.
+ * It says "in 30d" as well as "30d ago", and that is a fix rather than a
+ * flourish. This was written when every caller passed something that had
+ * already happened: a creation, an occurrence, a rotation. The Math.abs guards
+ * chose the right unit for a negative interval and then printed the number
+ * still signed, with "ago" after it, so the first caller to pass a future date
+ * rendered "-30d ago". That caller is the renewal date on the Plan page, which
+ * is the line telling somebody paying for this when they will next be charged.
  */
 export function ago(value: string | Date | null | undefined): string {
   if (!value) return "";
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  const signed = Math.round((Date.now() - d.getTime()) / 1000);
-  const ahead = signed < 0;
-  const say = (n: number, unit: string) => (ahead ? `in ${n}${unit}` : `${n}${unit} ago`);
-  const s = Math.abs(signed);
-  if (s < 60) return ahead ? "in under a minute" : "just now";
-  const m = Math.round(s / 60);
+  const s = Math.round((Date.now() - d.getTime()) / 1000);
+  if (Math.abs(s) < 60) return "just now";
+  // Decided once, from the sign, before any rounding can lose it.
+  const past = s > 0;
+  const say = (n: number, unit: string) => (past ? `${n}${unit} ago` : `in ${n}${unit}`);
+  const m = Math.abs(Math.round(s / 60));
   if (m < 60) return say(m, "m");
   const h = Math.round(m / 60);
   if (h < 48) return say(h, "h");

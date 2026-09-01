@@ -77,18 +77,43 @@ personas:
     # persona that cannot sign in blocks its workflow forever, and blocked does
     # not count against a change, so it would have sat there looking like a
     # feature.
+    #
+    # `none` then had a second cost, found the same way. The engine provisioned
+    # every persona before the agents ran, and provisioning insisted on
+    # somewhere to write the account, so this example refused with "no users
+    # table could be found" against a schema of customers and orders. A persona
+    # that never signs in has no account to create, and the engine knows that
+    # now, so nothing here has to invent a users table to satisfy it.
     login: none
 
+# What the agents do, and what they deliberately do not do here.
+#
+# This service answers JSON and serves no HTML at all, so there is no form for
+# an agent to fill and no button for it to press. The browser renders the
+# response as text and the agent reads it, which makes a workflow here a read
+# and a judgement rather than a drive. That is the honest shape for an API, and
+# writing a workflow that claimed to place an order through a page that does
+# not exist would be a test of nothing: the run would come back blocked forever
+# while looking like a feature. The write path is covered below by the oracle
+# probe named place-an-order, which sends the POST, and by the invariants,
+# which then ask the data whether it survived.
+#
+# The expectations name words that are actually in the response. Without a
+# model key the runner checks them against the text on the page, and a sentence
+# about the product ("the customer list is not empty") shares no word with a
+# JSON body, so it can be neither confirmed nor contradicted and the run comes
+# back unverified. That is the honest answer and not a useful one. This example
+# said exactly that until somebody ran it.
 workflows:
-  - name: place-an-order
+  - name: read-the-customer-list
     description: >-
-      As the returning customer, look at the customer list, place an order for
-      2599 cents, and check that it appears with the right total.
+      As the returning customer, open the customer list and check that both
+      seeded customers are in it, each with the name the branch holds.
     persona: returning-customer
     start_path: /customers
     expect:
-      - "the customer list is not empty"
-      - "the new order is returned with a total of 2599"
+      - "Ada Lovelace"
+      - "Grace Hopper"
     tags: [smoke]
 
 # Run this change beside the version it replaces, on the same data, and report

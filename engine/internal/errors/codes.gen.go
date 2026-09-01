@@ -184,6 +184,8 @@ const (
 	AFLOD014 Code = "AF-LOD-014"
 	// The scenario {scenario} proved nothing: {detail}
 	AFLOD015 Code = "AF-LOD-015"
+	// The p95_increase threshold proved nothing: {detail}
+	AFLOD016 Code = "AF-LOD-016"
 
 	// Manifest
 	// No antifailure.yaml was found in {path} or any parent directory.
@@ -316,6 +318,8 @@ const (
 	// {kind} {name} was not created by this runtime, so it was not
 	// removed.
 	AFRUN045 Code = "AF-RUN-045"
+	// AF_PORT_RANGE_START is set to {value}, which is not a port number.
+	AFRUN046 Code = "AF-RUN-046"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -963,6 +967,15 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
+	AFLOD016: {
+		Code:      AFLOD016,
+		Area:      "LOD",
+		Message:   "The p95_increase threshold proved nothing: {detail}",
+		NextStep:  "The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
 	AFMAN001: {
 		Code:      AFMAN001,
 		Area:      "MAN",
@@ -1327,7 +1340,7 @@ var catalog = map[Code]Entry{
 		Code:      AFRUN009,
 		Area:      "RUN",
 		Message:   "No free port was found in the range {range} to publish the environment on.",
-		NextStep:  "Free a port in that range, or set runtime.port_from in the manifest to a range that is clear.",
+		NextStep:  "Free a port in that range, or set AF_PORT_RANGE_START to the first port of a range that is clear.",
 		Docs:      "guides/local-runtime",
 		Retryable: true,
 		ExitCode:  ExitFailure,
@@ -1419,6 +1432,15 @@ var catalog = map[Code]Entry{
 		Message:   "{kind} {name} was not created by this runtime, so it was not removed.",
 		NextStep:  "Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns.",
 		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN046: {
+		Code:      AFRUN046,
+		Area:      "RUN",
+		Message:   "AF_PORT_RANGE_START is set to {value}, which is not a port number.",
+		NextStep:  "Set it to the first port of a free range, between {limit}, or unset it to use the default.",
+		Docs:      "guides/local-runtime",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},

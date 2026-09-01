@@ -189,7 +189,13 @@ export async function completeSignIn(
     { githubIds: [user.id] },
   )
 
-  const logins = orgs.map((o) => o.login.toLowerCase())
+  // The user's own login belongs in this list, and leaving it out was a whole
+  // tenant nobody could enter. Installing the App on a personal account
+  // creates an organization keyed on that login exactly as an organization
+  // installation does, but /user/orgs never returns your own account, so the
+  // rows existed, the installation was live, and every sign-in by the one
+  // person entitled to it landed in no organization at all.
+  const logins = [...new Set([user.login.toLowerCase(), ...orgs.map((o) => o.login.toLowerCase())])]
 
   // Membership is granted only where an installation exists. Belonging to a
   // GitHub organization is not by itself a reason to see another company's
@@ -201,8 +207,13 @@ export async function completeSignIn(
   const installed = await pool.withoutTenant(
     async (db) =>
       logins.length
-        ? await db.execute<{ org_id: string; installation_id: string; account_login: string }>(sql`
-            SELECT org_id, installation_id, account_login FROM github_installations
+        ? await db.execute<{
+            org_id: string
+            installation_id: string
+            account_login: string
+            account_type: string
+          }>(sql`
+            SELECT org_id, installation_id, account_login, account_type FROM github_installations
             WHERE lower(account_login) = ANY(${sql.param(logins)}::text[])
               AND suspended_at IS NULL`)
         : [],
@@ -220,6 +231,12 @@ export async function completeSignIn(
       userId,
       login: user.login,
       label: user.name || user.login,
+      // A GitHub login names a user or an organization and never both, so an
+      // installation on an account of type User whose login is this person's
+      // is their own account and nobody else's.
+      personalAccount:
+        row.account_type === 'User' &&
+        row.account_login.toLowerCase() === user.login.toLowerCase(),
     })
   }
 
@@ -266,7 +283,7 @@ export async function completeSignIn(
  * about the second organization should not discard the membership already
  * established for the first.
  */
-async function grantMembership(
+export async function grantMembership(
   pool: Pool,
   clock: Clock,
   github: GitHubClient,
@@ -277,6 +294,8 @@ async function grantMembership(
     userId: string
     login: string
     label: string
+    /** The installation is on this person's own GitHub account. */
+    personalAccount: boolean
   },
 ): Promise<void> {
   // The role comes from GitHub rather than from a constant here.
@@ -291,9 +310,17 @@ async function grantMembership(
   // An organization owner becomes an admin rather than an owner, for the reason
   // syncMembership gives further down: owner also holds billing, and that is
   // this application's decision rather than GitHub's.
-  const upstream = await github
-    .roleIn(input.installationId, input.orgLogin, input.login)
-    .catch(() => null)
+  //
+  // A personal account is not asked about, because there is nothing to ask.
+  // /orgs/<login> is not an organization when <login> is a person, so roleIn
+  // can only fail, and a null here would make the account holder a plain
+  // member of their own tenant with nobody holding billing.manage: the exact
+  // dead end described below, reached by a different road. They installed the
+  // App on their own account, which is the strongest evidence of
+  // administration GitHub has to offer about it.
+  const upstream: 'admin' | 'member' | null = input.personalAccount
+    ? 'admin'
+    : await github.roleIn(input.installationId, input.orgLogin, input.login).catch(() => null)
   const fromGitHub: Role = upstream === 'admin' ? 'admin' : 'member'
 
   await pool.withTenant({ orgId: input.orgId, userId: input.userId }, async (db) => {

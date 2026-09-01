@@ -39,6 +39,7 @@ import {
   type StripeEvent,
 } from '../src/billing/webhook.ts'
 import { PLANS, planForPrice, planForStatus, stripeConfigFrom } from '../src/billing/plans.ts'
+import { RealStripeClient } from '../src/billing/stripe.ts'
 import {
   available, startApi, seedOrg, signInAs, callProcedure, errorCode, dropOrg,
   stripeAgainstMockPack, type ApiHarness, type Org, type SignedIn,
@@ -333,6 +334,37 @@ describe('the configuration', () => {
   })
 })
 
+describe('the subscription collection boundary', () => {
+  it('keeps valid subscriptions when another element is malformed or belongs to another customer', async () => {
+    const requested: string[] = []
+    const client = new RealStripeClient({
+      secretKey: 'sk_test',
+      webhookSecret: 'whsec_test',
+      prices: { team: 'price_team', enterprise: 'price_enterprise' },
+      fetch: async (input) => {
+        requested.push(input instanceof Request ? input.url : String(input))
+        return new Response(JSON.stringify({
+          object: 'list',
+          has_more: false,
+          data: [
+            subscriptionObject({ id: 'sub_good', customer: 'cus_right' }),
+            null,
+            { object: 'subscription', customer: 'cus_right' },
+            subscriptionObject({ id: 'sub_other', customer: 'cus_wrong' }),
+          ],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      },
+    })
+
+    const subscriptions = await client.listSubscriptions('cus_right', 50)
+    assert.deepEqual(subscriptions.map((subscription) => subscription.id), ['sub_good'])
+    const url = new URL(requested[0]!)
+    assert.equal(url.searchParams.get('customer'), 'cus_right')
+    assert.equal(url.searchParams.get('status'), 'all')
+    assert.equal(url.searchParams.get('limit'), '50')
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Everything that needs a database
 // ---------------------------------------------------------------------------
@@ -558,7 +590,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     await dropOrg(h.admin, o.orgId)
   })
 
-  it('ordering: the webhook never arrives, and reconciling fixes it', async () => {
+  it('ordering: the webhook never arrives, and the reachable reconcile route discovers it', async () => {
     // Nothing in a webhook handler can fix a webhook that was not made. This is
     // the only thing that can, and it has to be reachable by a person rather
     // than only by a sweep nobody can trigger during an incident.
@@ -586,17 +618,17 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     )
     const atStripe = (await at.json()) as { id: string }
 
-    // The control plane knows about the row but never received the event that
-    // would have told it the plan. This is what a lost delivery leaves behind.
-    await h.admin`
-      INSERT INTO subscriptions (
-        org_id, stripe_subscription_id, stripe_customer_id, plan, status, last_event_at)
-      VALUES (${o.orgId}, ${atStripe.id}, ${customerId}, 'free', 'incomplete',
-              ${new Date(h.clock.now().getTime() - 3600_000)})`
+    // No local subscription row. That is what a genuinely lost creation event
+    // leaves behind, and it is the case a reconciler that only reads local ids
+    // can never discover.
     assert.equal(await planOf(o.orgId), 'free')
 
-    const { reconcile } = await import('../src/billing/store.ts')
-    const result = await reconcile(h.pool, h.clock, billing.config, billing.client, o.orgId)
+    const session = await signInAs(h, o, 'owner')
+    const response = await callProcedure(h, session, 'subscriptions.reconcile', 'mutation', {})
+    assert.equal(response.status, 200, JSON.stringify(response.body))
+    const result = (response.body as {
+      result: { data: { checked: number; changed: number; notes: string[] } }
+    }).result.data
     assert.equal(result.checked, 1)
     assert.equal(result.changed >= 1, true, `nothing changed: ${result.notes.join('; ')}`)
     assert.equal(await planOf(o.orgId), 'team', 'reconciling did not fix the missed delivery')

@@ -292,7 +292,7 @@ function EgressLedger() {
           {COLUMNS.reduce((n, col) => n + col.count, 0)} attempts
         </span>
       </div>
-      <div className="flex items-center gap-4 border-b border-black/[0.06] bg-[#FAFAFB] px-3.5 py-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-black/[0.06] bg-[#FAFAFB] px-3.5 py-2">
         {COLUMNS.map((col) => (
           <span key={col.title} className="flex items-center gap-1.5 text-[12px] tracking-tight text-[#6B6F76]">
             <ColIcon kind={col.icon} />

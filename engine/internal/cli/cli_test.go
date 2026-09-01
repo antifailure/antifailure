@@ -309,6 +309,51 @@ func TestDoctor_ReportsEveryCheckWithARemediation(t *testing.T) {
 	}
 }
 
+// TestDoctor_PortCheckReportsTheRangeAFPortRangeStartNames is the doctor half of
+// the variable's wiring.
+//
+// The remediation named AF_PORT_RANGE_START from the day it was written and
+// nothing anywhere read it, so a user who followed the advice moved nothing and
+// the check went on reporting the range they had just left. It also reported on
+// the databases alone, which is not the range `af up` publishes a service on.
+func TestDoctor_PortCheckReportsTheRangeAFPortRangeStartNames(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, t.TempDir(), map[string]string{"AF_PORT_RANGE_START": "51000"},
+		"doctor", "-o", "json")
+	var report cli.DoctorReport
+	require.NoError(t, json.Unmarshal([]byte(got.stdout), &report))
+	ports := doctorCheck(t, report, "Local ports")
+	require.Contains(t, ports.Detail, "51000", "the databases range must move with the variable")
+	require.Contains(t, ports.Detail, "54000", "the published services range must move with it too")
+	require.Contains(t, ports.Remediation, "AF_PORT_RANGE_START")
+}
+
+// A value that cannot be a port is refused rather than ignored, because
+// ignoring it leaves the user looking at the range they were moving away from
+// with nothing on the screen to explain why.
+func TestDoctor_PortCheckRefusesARangeStartThatIsNotAPort(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, t.TempDir(), map[string]string{"AF_PORT_RANGE_START": "half past two"},
+		"doctor", "-o", "json")
+	var report cli.DoctorReport
+	require.NoError(t, json.Unmarshal([]byte(got.stdout), &report))
+	ports := doctorCheck(t, report, "Local ports")
+	require.Equal(t, cli.CheckFail, ports.Status)
+	require.Contains(t, ports.Detail, "AF-RUN-046")
+	require.Contains(t, ports.Detail, "half past two")
+}
+
+func doctorCheck(t *testing.T, report cli.DoctorReport, name string) cli.CheckResult {
+	t.Helper()
+	for _, c := range report.Checks {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("doctor reported no check named %q", name)
+	return cli.CheckResult{}
+}
+
 func TestDoctor_ExitsNonZeroWhenACheckFails(t *testing.T) {
 	t.Parallel()
 	// The disk check runs against the working directory, so a directory that
