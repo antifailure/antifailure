@@ -1003,7 +1003,7 @@ errors:
   - code: AF-WLD-002
     area: WLD
     message: "The {kind} kind cannot set {knobs}."
-    next_step: "Remove it from the workload version. The command a {kind} runs has no flag for it, so honouring it would be a promise the run cannot keep."
+    next_step: "Remove it from the workload version. The command that kind runs has no flag for it, so honouring it would be a promise the run cannot keep."
     docs: concepts/workloads
     retryable: false
     exit_code: 2

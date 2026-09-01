@@ -299,6 +299,15 @@ func renderWorkload(e *Env, res *workload.Result) {
 	}
 
 	// Last, and on its own line, because it is the line somebody copies.
+	//
+	// Not printed for a refused request, and that is the point of the whole
+	// package rather than a detail of its rendering: nothing ran, so there is
+	// no run to reproduce, and offering a command under the words "reproduce
+	// this run" would be offering a different run than the one that was asked
+	// for, with the refused knob quietly gone.
+	if len(res.Refusals) > 0 {
+		return
+	}
 	e.Out.Println("")
 	e.Out.Println("Reproduce this run:")
 	e.Out.Printf("  %s\n", res.Reproduce.Command)

@@ -1278,7 +1278,7 @@ There is no workload kind called {kind}.
 
 The {kind} kind cannot set {knobs}.
 
-**What to do.** Remove it from the workload version. The command a {kind} runs has no flag for it, so honouring it would be a promise the run cannot keep.
+**What to do.** Remove it from the workload version. The command that kind runs has no flag for it, so honouring it would be a promise the run cannot keep.
 
 | | |
 | --- | --- |

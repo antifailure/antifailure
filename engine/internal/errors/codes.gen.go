@@ -1541,7 +1541,7 @@ var catalog = map[Code]Entry{
 		Code:      AFWLD002,
 		Area:      "WLD",
 		Message:   "The {kind} kind cannot set {knobs}.",
-		NextStep:  "Remove it from the workload version. The command a {kind} runs has no flag for it, so honouring it would be a promise the run cannot keep.",
+		NextStep:  "Remove it from the workload version. The command that kind runs has no flag for it, so honouring it would be a promise the run cannot keep.",
 		Docs:      "concepts/workloads",
 		Retryable: false,
 		ExitCode:  ExitUsage,
