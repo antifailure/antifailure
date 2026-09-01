@@ -33,7 +33,7 @@ them with.
 | `checksums.txt.sigstore.json` | A signature over `checksums.txt`, with the certificate that made it |
 | `sbom.spdx.json` | An SPDX bill of materials, read out of the built binaries |
 | `sbom.spdx.json.sigstore.json` | A signature over the bill of materials |
-| `THIRD_PARTY_NOTICES.md` | Attribution, generated from what is actually linked |
+| `THIRD_PARTY_NOTICES.md` | Attribution, generated from what is actually linked, as the union over all four platforms |
 
 Only `checksums.txt` is signed rather than each archive. That is deliberate.
 `checksums.txt` names every archive by its hash, so one signature covers all of

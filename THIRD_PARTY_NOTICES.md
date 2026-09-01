@@ -3,7 +3,7 @@
 Antifailure is MIT licensed, except for the `ee/` directory, which is
 licensed under the Antifailure Enterprise License. This file lists the
 dependencies the binary links, and is generated from them rather than
-maintained by hand, so it cannot go stale.
+maintained by hand.
 
 The list is the union over every platform a release publishes, because
 one release ships all of them and a module can be linked on one platform
@@ -12,8 +12,11 @@ people on every other one.
 
 Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64.
 
-Run `go run ./tools/notices > THIRD_PARTY_NOTICES.md` to regenerate it.
-CI checks that what is committed is what the generator produces.
+Run `just generate` to regenerate it. `just _generated` and CI both
+regenerate it and fail on a difference, so a stale copy cannot be
+committed. It used to go stale anyway, because for a long time the
+generator ran only while building a release and nothing compared its
+output against this file.
 
 ## Go modules (89)
 
