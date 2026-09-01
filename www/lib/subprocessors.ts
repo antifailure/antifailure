@@ -84,24 +84,39 @@ export const SUBPROCESSORS: Subprocessor[] = [
 ];
 
 /**
- * Vendors a reviewer will ask about that are deliberately not on the list.
+ * Vendors a reviewer will ask about that are not on the list above.
  *
  * Naming them is cheaper than answering the question four times, and it is the
  * half of a subprocessor page that is usually missing: a list of who you use
  * says nothing about whether you looked for the rest.
+ *
+ * TWO OF THESE USED TO CLAIM THE STRONGER OF TWO DIFFERENT THINGS, and the
+ * distinction is the whole reason this comment exists. "This deployment sends
+ * nothing to Stripe" and "this software cannot send anything to Stripe" are
+ * different promises. The first is about configuration and the second is about
+ * code, and the entries for payment and for email made the second one while the
+ * repository contained a real Stripe client and a real Resend mailer, each one
+ * environment variable away from active.
+ *
+ * The rule this page now follows: say what is true of the CODE, which anybody
+ * can check by reading it, and describe the configuration as a named condition
+ * rather than asserting a state of the deployment. A statement about which
+ * variables are set on a server is one no reader can verify and one that stops
+ * being true the day somebody sets them, which is precisely how these two came
+ * to be wrong.
  */
 export const NOT_ENGAGED: [string, string][] = [
   [
-    "Payment processors",
-    "There is no billing. No payment processor is integrated, no card details reach any system here, and the only Stripe code in the repository is an offline simulator used to contain a customer application's own calls.",
+    "Payment processors, and the condition on that",
+    "No card details reach any system here, and none can: checkout and the billing portal are pages Stripe hosts, so a card is entered on Stripe's own form and this product never sees one. That part is unconditional. What is conditional is the rest: the control plane contains a real Stripe client, and it is active when AF_STRIPE_SECRET_KEY and AF_STRIPE_WEBHOOK_SECRET are set. Where they are, Stripe processes an organization's plan, subscription and invoice records and is a subprocessor for that deployment. Where they are not, the billing routes refuse and name the missing variables, and nothing reaches Stripe at all. The control plane says which of the two it is on the first line it logs at startup. This entry used to say there was no billing and that the only Stripe code was an offline simulator, which was true when it was written and stopped being true when the billing work landed.",
   ],
   [
-    "Email and messaging providers",
-    "Nothing in the product can send email or a message. Providers such as Resend, SendGrid, Postmark, Amazon SES, Twilio, and Slack appear only as destinations the side-effect firewall intercepts, so the message is recorded locally and never delivered.",
+    "Email and messaging providers, and the condition on that",
+    "Two different things share this heading and only one of them is conditional. A customer application's own outbound message, to Resend, SendGrid, Postmark, Amazon SES, Twilio or Slack, is intercepted by the side-effect firewall, recorded locally and never delivered, and that is unconditional. Separately, the control plane itself can send one kind of mail, a sign-in link, through Resend, and that path is active when AF_RESEND_API_KEY, AF_MAIL_FROM and a public URL are all set. Where they are, Resend receives the address the link is sent to and is a subprocessor for that deployment; setting some of the three and not all of them stops the process at startup rather than half enabling it. This entry used to say nothing in the product could send a message, which described the firewall correctly and the control plane's own mail not at all.",
   ],
   [
     "Analytics and error tracking",
-    "This site loads no analytics and no third-party script. There is no Sentry, no Datadog, no PostHog, no Google Analytics. The control plane exposes metrics for an operator to scrape and exports nothing.",
+    "No third party sees anything. There is no Sentry, no Datadog, no PostHog, no Google Analytics, and this site loads no script from another origin. What it does do is count page views itself: a channel from a closed list, a page shape from a closed list, and a random identifier that lives in sessionStorage for one browsing session and cannot join two visits. The referrer and the URL are turned into those bounded values in your browser and never sent. There is no cookie, and the counter turns itself off if you have set Global Privacy Control or Do Not Track. The control plane exposes metrics for an operator to scrape and exports nothing.",
   ],
   [
     "Other model providers",
