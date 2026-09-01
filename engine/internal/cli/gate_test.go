@@ -368,3 +368,61 @@ func exitCodeOfSilent(t *testing.T, err error) aferrors.ExitCode {
 	require.True(t, aferrors.As(err, &quiet), "expected a silent failure, got %v", err)
 	return quiet.ExitCode()
 }
+
+// A run in which every workflow was blocked is not a passing run.
+//
+// The defect this covers shipped in both of this repository's own answers. The
+// control plane's dogfood job reported "6 workflows could not be carried
+// through" and exited zero on every run, and the example corpus reported
+// "Nothing ran" and went green, so a whole nightly could be green having
+// verified nothing about any application.
+func TestWorkflowsUnverified_EveryWorkflowBlockedIsAFinding(t *testing.T) {
+	run := report.Run{Workflows: []report.Workflow{
+		{Name: "sign-in", Verdict: report.VerdictBlocked},
+		{Name: "place-an-order", Verdict: report.VerdictUnverified},
+	}}
+	f := workflowsUnverifiedFinding(run, defaultGate())
+	require.NotNil(t, f, "a run that verified nothing must produce a finding")
+	require.Equal(t, report.LevelFail, f.Level, "the default has to be the one that does not lie")
+	require.Contains(t, f.Title, "No workflow reached a verdict")
+}
+
+// A manifest that declares no workflows is the same fact wearing a hat.
+func TestWorkflowsUnverified_NoWorkflowsAtAllIsAlsoAFinding(t *testing.T) {
+	f := workflowsUnverifiedFinding(report.Run{}, defaultGate())
+	require.NotNil(t, f)
+	require.Contains(t, f.Title, "No workflows ran")
+}
+
+// One verdict about the application is enough to clear it.
+//
+// The per workflow rule is untouched by this: five blocked workflows beside one
+// that failed is a run that tested the application, and the failure is what it
+// reports. Charging the five to the application is the mistake this must not
+// start making while fixing the other one.
+func TestWorkflowsUnverified_OneRealVerdictIsEnough(t *testing.T) {
+	for _, verdict := range []string{report.VerdictPass, report.VerdictFail, report.VerdictFlaky} {
+		run := report.Run{Workflows: []report.Workflow{
+			{Name: "blocked-one", Verdict: report.VerdictBlocked},
+			{Name: "real-one", Verdict: verdict},
+		}}
+		require.Nil(t, workflowsUnverifiedFinding(run, defaultGate()),
+			"a %s verdict is a verdict about the application", verdict)
+	}
+}
+
+// A project with no workflows yet can say so, and have that recorded.
+func TestWorkflowsUnverified_IgnoreTurnsItOff(t *testing.T) {
+	gate := defaultGate()
+	gate.WorkflowsUnverified = report.LevelIgnore
+	require.Nil(t, workflowsUnverifiedFinding(report.Run{}, gate))
+}
+
+// An unreadable verdict is blocked, so a runner ahead of this engine cannot
+// make a run look verified by naming an outcome this build does not know.
+func TestWorkflowsUnverified_AnUnknownVerdictDoesNotCount(t *testing.T) {
+	run := report.Run{Workflows: []report.Workflow{
+		{Name: "from-the-future", Verdict: "materialised"},
+	}}
+	require.NotNil(t, workflowsUnverifiedFinding(run, defaultGate()))
+}

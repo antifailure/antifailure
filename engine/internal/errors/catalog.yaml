@@ -646,6 +646,13 @@ errors:
     docs: guides/model-keys
     retryable: true
     exit_code: 5
+  - code: AF-AGT-007
+    area: AGT
+    message: "No workflow reached a verdict about the application: {detail}"
+    next_step: "Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet."
+    docs: concepts/verdicts
+    retryable: false
+    exit_code: 9
   - code: AF-NET-011
     area: NET
     message: "No message matching {match} arrived within {timeout}."

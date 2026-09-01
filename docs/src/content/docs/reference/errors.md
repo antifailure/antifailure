@@ -104,6 +104,18 @@ The {provider} endpoint could not be reached: {detail}
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/model-keys](/docs/guides/model-keys/) |
 
+### AF-AGT-007
+
+No workflow reached a verdict about the application: {detail}
+
+**What to do.** Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet.
+
+| | |
+| --- | --- |
+| Exit code | `9` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+
 ### AF-AGT-010
 
 Invariant {invariant} did not finish within {timeout}.

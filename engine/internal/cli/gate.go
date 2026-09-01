@@ -34,6 +34,8 @@ const (
 	ruleEgressSurprise   = "egress_surprise"
 	ruleMasking          = "masking"
 	ruleCleanup          = "cleanup"
+
+	ruleWorkflowsUnverified = "workflows_unverified"
 )
 
 // migrationFindings turns an insights run into findings and the section that
@@ -220,6 +222,48 @@ func egressFinding(e *report.Egress, p report.Policy) *report.Finding {
 	}
 }
 
+// workflowsUnverifiedFinding is a whole run that reached no verdict about the
+// application.
+//
+// The per workflow rule is deliberately untouched: one blocked workflow is a
+// gap in our tooling and is never counted against the application, because an
+// incomplete environment must not be indistinguishable from a broken one.
+//
+// This is the other claim, and the two were being conflated. A run in which
+// every workflow was blocked has not declined to blame the application; it has
+// not looked at it, and exiting zero tells the pipeline that it did. Both of
+// this repository's own answers were the wrong half of that: `af ci` on the
+// control plane reported "6 workflows could not be carried through" and exited
+// zero on every run, and the whole example corpus reported "Nothing ran" and
+// went green.
+//
+// Counted from the workflows rather than from the count of results, so a
+// manifest that declares none lands here too. That is the same failure wearing
+// a different hat: nothing was tested either way.
+func workflowsUnverifiedFinding(run report.Run, p report.Policy) *report.Finding {
+	if p.WorkflowsUnverified == report.LevelIgnore {
+		return nil
+	}
+	if !run.NothingVerified() {
+		return nil
+	}
+	title := "No workflow reached a verdict about the application."
+	detail := "Every workflow was blocked or proved nothing either way, so this run " +
+		"says nothing about whether the application works."
+	if len(run.Workflows) == 0 {
+		title = "No workflows ran, so nothing about the application was checked."
+		detail = "The manifest declares no workflows, so there was nothing to carry through."
+	}
+	return &report.Finding{
+		Rule: ruleWorkflowsUnverified, Level: p.WorkflowsUnverified,
+		Count: len(run.Workflows), Where: "the workflows",
+		Title: title, Detail: detail,
+		Fix: "Read the workflow rows for what stopped each one. If the project has no " +
+			"workflows yet, set policy.workflows_unverified to warn so the choice is " +
+			"recorded rather than assumed.",
+	}
+}
+
 // maskingFinding is the environment's own branch reading back with something
 // in it that still parses as real data.
 func maskingFinding(v *report.Verification, p report.Policy) *report.Finding {
@@ -301,6 +345,8 @@ func gateError(f report.Finding) error {
 		return aferrors.Coded(aferrors.AFRUN030, "count", strconv.Itoa(f.Count))
 	case ruleLoadRegression:
 		return aferrors.Coded(aferrors.AFLOD011, "count", strconv.Itoa(f.Count))
+	case ruleWorkflowsUnverified:
+		return aferrors.Coded(aferrors.AFAGT007, "detail", f.Detail)
 	default:
 		// Every migration finding, including the seventeen lint rules, which have
 		// rule names of their own.
