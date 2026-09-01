@@ -69,12 +69,23 @@ export { CALLBACK_AUDIENCE }
 export class ExchangeRefused extends Error {
   readonly reason: string
   readonly status: 401 | 403 | 429
+  /** How long to wait, for the one refusal that is worth retrying. Carried
+   *  rather than guessed at the route, because a Retry-After that disagrees
+   *  with the limiter tells a client to come back at the wrong moment, and the
+   *  client that obeys it is refused a second time for being early. */
+  readonly retryAfterSeconds: number | undefined
 
-  constructor(reason: string, status: 401 | 403 | 429, message: string) {
+  constructor(
+    reason: string,
+    status: 401 | 403 | 429,
+    message: string,
+    retryAfterSeconds?: number,
+  ) {
     super(message)
     this.name = 'ExchangeRefused'
     this.reason = reason
     this.status = status
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
@@ -202,6 +213,7 @@ export async function exchangeWorkflowIdentity(
       429,
       `Too many exchanges for ${repository}. Retry in ${verdict.retryAfterSeconds} seconds. ` +
         'A job needs one credential, so this usually means a loop rather than a build.',
+      verdict.retryAfterSeconds,
     )
   }
 
@@ -603,8 +615,13 @@ export function registerWorkflowIdentityRoutes(app: Hono, deps: WorkflowIdentity
       })
     } catch (err) {
       if (err instanceof ExchangeRefused) {
-        if (err.status === 429) c.header('retry-after', '30')
-        return c.json({ error: err.message, reason: err.reason }, err.status)
+        if (err.retryAfterSeconds !== undefined) {
+          c.header('retry-after', String(err.retryAfterSeconds))
+        }
+        return c.json(
+          { error: err.message, reason: err.reason, retryAfterSeconds: err.retryAfterSeconds },
+          err.status,
+        )
       }
       if (err instanceof TokenRefused) {
         // Safe to return in full: every reason is something the workflow author

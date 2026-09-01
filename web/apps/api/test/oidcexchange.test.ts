@@ -30,7 +30,7 @@ import {
   type KeyObject,
 } from 'node:crypto'
 import { ACTIONS_ISSUER, ActionsKeys, CALLBACK_AUDIENCE, TokenRefused } from '../src/github/oidc.ts'
-import { OIDC_TOKEN_TTL_MS } from '../src/github/exchange.ts'
+import { OIDC_TOKEN_TTL_MS, repositoryLimiter } from '../src/github/exchange.ts'
 import { FakeClock } from '../src/clock.ts'
 import { sql as rawSql } from 'drizzle-orm'
 import { CSRF_HEADER } from '../src/auth/session.ts'
@@ -284,13 +284,19 @@ describe(
     // Calling
     // -----------------------------------------------------------------------
 
-    async function exchange(token: string): Promise<{ status: number; json: Record<string, unknown> }> {
+    async function exchange(
+      token: string,
+    ): Promise<{ status: number; json: Record<string, unknown>; retryAfter: string | null }> {
       const res = await api.fetch('/v1/auth/github-oidc', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ token }),
       })
-      return { status: res.status, json: (await res.json()) as Record<string, unknown> }
+      return {
+        status: res.status,
+        json: (await res.json()) as Record<string, unknown>,
+        retryAfter: res.headers.get('retry-after'),
+      }
     }
 
     /** A real CLI token with the scopes and role asked for, obtained the way
@@ -830,12 +836,40 @@ describe(
     test('one repository cannot mint credentials in a loop', async () => {
       await claim(repository)
       let refused: Record<string, unknown> | null = null
+      let refusedHeader: string | null = null
       for (let i = 0; i < 60 && !refused; i += 1) {
         const res = await exchange(identityToken({ repository, runId: i + 1 }, api.clock.now()))
-        if (res.status === 429) refused = res.json
+        if (res.status === 429) {
+          refused = res.json
+          refusedHeader = res.retryAfter
+        }
       }
       assert.ok(refused, 'the per-repository bound never refused anything')
       assert.equal(refused.reason, 'rate_limited')
+      // The wait the limiter actually computed, not a number chosen at the
+      // route. A Retry-After that disagrees with the limiter sends an obedient
+      // client back early, where it is refused again for being early.
+      const wait = Number(refused.retryAfterSeconds)
+      assert.ok(wait >= 1, `retryAfterSeconds was ${wait}, which means retry at once`)
+      assert.equal(
+        refusedHeader,
+        String(wait),
+        'the Retry-After header and the body disagree about when to come back',
+      )
+      // And against the limiter's own arithmetic rather than only against
+      // itself. Asserting the header equals the body passes just as well when
+      // both are a constant somebody typed at the route, and a Retry-After that
+      // disagrees with the bucket sends an obedient client back early, where it
+      // is refused again for being early. A second limiter of the same shape,
+      // drained the same way, says what the number has to be.
+      const reference = repositoryLimiter(new FakeClock())
+      let expected = 0
+      for (let i = 0; i < 60 && expected === 0; i += 1) {
+        const v = reference.take('same-repository-every-time')
+        if (!v.allowed) expected = v.retryAfterSeconds
+      }
+      assert.ok(expected >= 1, 'the reference limiter never refused, so this proves nothing')
+      assert.equal(wait, expected, 'the wait is not the one this limiter would compute')
     })
 
     // -----------------------------------------------------------------------
