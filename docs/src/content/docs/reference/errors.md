@@ -226,6 +226,18 @@ The build context for {service} holds more than {count} files; {path} is where t
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/build](/docs/guides/build/) |
 
+### AF-BLD-005
+
+The build for service {service} failed after {duration}, and its Dockerfile is {dockerfile} inside a build context rooted at the repository.
+
+**What to do.** If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/manifest](/docs/reference/manifest/) |
+
 ### AF-BLD-010
 
 No build strategy could be detected for {service}.
