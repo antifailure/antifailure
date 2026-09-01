@@ -206,14 +206,21 @@ or two is ordinary. Much longer than that is usually the token above.
 | Verdict | Means |
 | --- | --- |
 | `pass` | Everything that was evaluated held. |
-| `fail` | At least one thing was evaluated and did not hold. |
+| `fail` | At least one thing was evaluated and did not hold, and it stops a merge. |
 | `flaky` | The same check answered differently on repeat. |
+| `warn` | A real finding that does not stop a merge. |
 | `blocked` | The work never reached the application, so nothing measured is a judgement about it. |
 | `unverified` | It finished and nothing could be evaluated, so it proved nothing either way. |
 
-**`flaky`, `blocked` and `unverified` are not passes**, and the console never
-draws them as one. If you are gating anything on a result, gate on `pass`
-rather than on the absence of `fail`.
+**Only `pass` is a pass**, and the console never draws any of the other five as
+one. If you are gating anything on a result, gate on `pass` rather than on the
+absence of `fail`.
+
+Four of them are drawn in the same amber, and two pairs of those mean opposite
+things, so the console puts a sentence under the badge rather than leaving the
+colour to carry it. `flaky` and `warn` mean something was looked at and
+something was found. `blocked` and `unverified` mean nothing was looked at. The
+first pair is a finding about your change; the second is a gap in the run.
 
 When a recorded verdict disagrees with the thresholds under it, a pass over
 something that broke, or came back flaky, or was never evaluated, the console

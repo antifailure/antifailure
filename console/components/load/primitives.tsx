@@ -70,8 +70,11 @@ export function KindMark({ kind, className = "" }: { kind: Kind; className?: str
  * neutral. A blocked run rendered as unremarkable is the whole failure this
  * product has already had once.
  *
- * `flaky` is amber and not green, which is the point of it being here at all.
- * A check that answers differently on repeat has found something.
+ * Three of the six are amber, and two of those three are amber for opposite
+ * reasons. `flaky` and `warn` mean we looked and found something; `blocked` and
+ * `unverified` mean we did not look. Colour cannot carry that difference and is
+ * not asked to: the sentence under the badge does, through VerdictNote, which
+ * renders for every verdict except the two that need no explanation.
  */
 export function verdictTone(v: Verdict): Tone {
   if (v === "pass") return "pass";

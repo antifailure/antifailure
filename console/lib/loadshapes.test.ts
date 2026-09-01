@@ -155,13 +155,53 @@ function columnNames(source: string | null, constant: string): string[] {
 // ---------------------------------------------------------------------------
 
 describe('the console knows exactly the values the database can send', { skip: noSchema }, () => {
-  test('the five verdicts, and flaky is one of them', () => {
-    assert.deepEqual(Object.keys(VERDICT_FACTS).sort(), enumValues(initSql, 'verdict_value'))
-    // Named on its own as well as counted, because this is the value that was
-    // missing. A count of five with the wrong five would pass the line above.
+  /**
+   * Values the console knows before the migration declares them.
+   *
+   * `warn` is a run verdict the engine produces and `verdict_value` is the
+   * WORKFLOW vocabulary, so a run judged `warn` currently decodes to null and
+   * renders as "No verdict". studio-persist-fixes is adding it to the enum.
+   * The console learns it now so nothing shows that finding as an absence in
+   * the window between, and this list is how the exception stays visible
+   * rather than becoming a permanent hole in an exact assertion.
+   *
+   * It is designed to expire loudly. The moment the migration carries a value
+   * named here, the assertion below FAILS and names the one line to delete.
+   * That red is deliberate: an exception that quietly outlives its reason is
+   * the gate weakening itself, which is exactly what this file exists to stop.
+   */
+  const PENDING = ['warn']
+
+  test('the verdicts, and flaky and warn are among them', () => {
+    const declared = enumValues(initSql, 'verdict_value')
+    const landed = PENDING.filter((v) => declared.includes(v))
+    assert.deepEqual(
+      landed,
+      [],
+      `verdict_value now declares ${landed.join(', ')}. Delete it from PENDING in this file ` +
+        `and let the exact assertion below stand on its own.`,
+    )
+    assert.deepEqual(Object.keys(VERDICT_FACTS).sort(), [...declared, ...PENDING].sort())
+
+    // Named on their own as well as counted, because these are the values that
+    // were missing. A count with the wrong members would pass the line above.
     assert.equal(verdictOf('flaky'), 'flaky')
     assert.equal(VERDICT_FACTS.flaky.conclusive, true)
-    assert.notEqual(VERDICT_FACTS.flaky.label, VERDICT_FACTS.pass.label)
+    assert.equal(verdictOf('warn'), 'warn')
+    assert.equal(VERDICT_FACTS.warn.conclusive, true)
+    for (const v of ['flaky', 'warn'] as const) {
+      assert.notEqual(VERDICT_FACTS[v].label, VERDICT_FACTS.pass.label)
+      assert.notEqual(VERDICT_FACTS[v].label, VERDICT_FACTS.fail.label)
+    }
+  })
+
+  test('warn says it is a finding, and blocked says the opposite', () => {
+    // Both draw amber and they mean opposite things: warn is we looked and
+    // found something, blocked is we did not look. Colour cannot carry that,
+    // so the sentence has to, and these two must not be interchangeable.
+    assert.match(VERDICT_FACTS.warn.meaning, /found/)
+    assert.match(VERDICT_FACTS.blocked.meaning, /never reached/)
+    assert.notEqual(VERDICT_FACTS.warn.meaning, VERDICT_FACTS.blocked.meaning)
   })
 
   test('a verdict nothing declares is refused rather than guessed at', () => {

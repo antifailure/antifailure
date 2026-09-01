@@ -180,16 +180,28 @@ export const KIND_FACTS: Record<
 /**
  * The product's five words, and no sixth.
  *
- * FIVE. `verdict_value` in migration 0001 declares pass, fail, flaky, blocked
- * and unverified, and every one of them can land on a run and on a threshold.
- * A four word type was the defect this file was reworked to fix: `flaky` fell
- * through the decoder, `verdictOf` answered null, and a run that had found
- * something rendered as "No verdict". An absence shown where there is a
- * finding is wrong in the worst direction, because nobody investigates a blank.
+ * SIX, and the sixth is the interesting one. `verdict_value` in migration 0001
+ * declares five: pass, fail, flaky, blocked and unverified. The ENGINE has a
+ * sixth for a RUN, `warn`, which report.go calls "a real finding about the
+ * change that does not stop the merge", and the column holding a run's verdict
+ * is typed as the WORKFLOW vocabulary. So a run the engine judged `warn`
+ * decodes to null on the control plane and renders as "No verdict".
+ *
+ * That is the third instance of one shape in this feature. `flaky` was missing
+ * from this type, which is what this file was reworked to fix. `timed_out` was
+ * a state the projection could not reach, so a run that hit its own timeout was
+ * recorded as succeeded. And now `warn`. They are not three bugs: every
+ * vocabulary in this system exists twice and nothing checked that the two
+ * agreed, which is why the test beside this file reads each enum out of the
+ * migration that declares it rather than out of a list somebody typed.
+ *
+ * `warn` is here BEFORE the enum carries it, deliberately, so nothing renders
+ * it as an absence in the window while the migration catches up. The test
+ * knows it is pending by name and fails the moment that stops being true.
  */
-export type Verdict = "pass" | "fail" | "flaky" | "blocked" | "unverified";
+export type Verdict = "pass" | "fail" | "flaky" | "warn" | "blocked" | "unverified";
 
-const VERDICTS = new Set<string>(["pass", "fail", "flaky", "blocked", "unverified"]);
+const VERDICTS = new Set<string>(["pass", "fail", "flaky", "warn", "blocked", "unverified"]);
 
 export function verdictOf(v: unknown): Verdict | null {
   return typeof v === "string" && VERDICTS.has(v) ? (v as Verdict) : null;
@@ -223,6 +235,12 @@ export const VERDICT_FACTS: Record<
     conclusive: true,
     meaning:
       "The same check answered differently on repeat. That is a finding rather than a fluke: a result nobody can rely on is not a result. Flaky is not a pass.",
+  },
+  warn: {
+    label: "Warn",
+    conclusive: true,
+    meaning:
+      "A real finding about the change that does not stop the merge. Something was looked at and something was found, which is why this is not a pass, and it was not judged bad enough to block, which is why it is not a failure.",
   },
   blocked: {
     label: "Blocked",

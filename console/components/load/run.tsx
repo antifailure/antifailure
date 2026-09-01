@@ -381,13 +381,16 @@ export function RunView({
               {run.detail}
             </p>
           ) : null}
-          {/* What decided the verdict, named off the rows that decided it.
-              A load run that sent traffic and failed a threshold arrives with
-              an EMPTY detail, because the engine writes one only when nothing
-              was sent. Without this the header of a failing load run is a red
-              badge and nothing else: the reader knows something broke and is
-              told nothing about what. */}
-          {decided ? (
+          {/* The fallback, and only the fallback.
+              The engine now names the breach in the manifest's own units, so
+              `detail` is the explanation whenever there is one and this must
+              not restate it in different words beside it. It is kept because
+              the engine's own sentence is written per kind and only the mix
+              path was fixed: a run that fails with no detail is still
+              reachable, and a red verdict with nothing next to it is the worst
+              version of a failure state. The pair is exhaustive by
+              construction, so the header cannot be a bare badge. */}
+          {run.detail === null && decided ? (
             <p className="mt-2 max-w-[70ch] text-pretty text-[12.5px] leading-6 text-ink">
               {decided}
             </p>
