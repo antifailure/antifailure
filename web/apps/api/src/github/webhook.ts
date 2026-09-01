@@ -40,6 +40,13 @@ export interface DeliveryDeps {
   /** Where the organization event goes. Never null: the recorder does nothing
    *  when analytics is unconfigured, so no call site has to check. */
   analytics: Analytics
+  /**
+   * Drops the cached installation token, when there is a cache to drop from.
+   *
+   * Optional because the webhook has to work with no App configured, which is
+   * every self-hosted control plane that has not created one yet.
+   */
+  forgetTokens?: (installationId: number) => void
 }
 
 /** What one delivery did, for the response and for a log line. */
@@ -86,11 +93,12 @@ export async function handleDelivery(
   /**
    * What this handler needs that is not the delivery itself.
    *
-   * AN OBJECT RATHER THAN TWO MORE POSITIONAL PARAMETERS, and the reason is
-   * that both arrived within a day of each other on different branches and
-   * collided on the same line. `github` is how adoptInstaller reaches GitHub;
-   * `analytics` is where the organization event goes. Neither is a property of
-   * the delivery, both are collaborators, and a sixth positional argument is
+   * AN OBJECT RATHER THAN MORE POSITIONAL PARAMETERS, and the reason is
+   * that three of these arrived within a day of each other on different
+   * branches and collided on the same line. `github` is how adoptInstaller
+   * reaches GitHub; `analytics` is where the organization event goes;
+   * `forgetTokens` drops the cached installation token. None is a property of
+   * the delivery, all are collaborators, and a sixth positional argument is
    * where the next one goes wrong silently: a null in the wrong slot compiles.
    */
   deps: DeliveryDeps,
@@ -110,6 +118,25 @@ export async function handleDelivery(
       if (typeof id !== 'number' || !account?.login) {
         return { event, action, handled: false, detail: 'no installation in the payload' }
       }
+      // Every `installation` action changes what a token minted for it is
+      // worth, so the cached one is dropped before any of them is handled.
+      //
+      // This is the fix for an hour of wrong answers that a person actually
+      // sat through. An installation token is cached for its full hour, GitHub
+      // invalidates the outstanding ones the moment a grant changes, and
+      // `new_permissions_accepted` is that moment. On 2026-08-31 the Actions
+      // write grant was accepted at 00:38:54Z against a process that had
+      // minted a token at 00:35:58Z, so the console answered 403 until roughly
+      // 01:36Z while the permission it was complaining about had already been
+      // granted. Nothing invalidated the token, because `forget` had no
+      // callers anywhere in the tree.
+      //
+      // Unconditional across the actions rather than matched to
+      // `new_permissions_accepted` alone: suspend, unsuspend and deleted all
+      // change what the token can do, `created` can arrive for an id a failed
+      // earlier attempt already cached, and dropping a token that did not need
+      // dropping costs one mint.
+      deps.forgetTokens?.(id)
       if (action === 'deleted') {
         await forgetInstallation(pool, account.login, id)
         return { event, action, handled: true, detail: `installation ${id} removed` }

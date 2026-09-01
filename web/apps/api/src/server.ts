@@ -173,6 +173,10 @@ export interface ServerOptions {
    * unset means the real key set.
    */
   actionsKeys?: ActionsKeys
+  /** Drops a cached installation token, so the webhook can invalidate one the
+   *  moment GitHub says the installation changed. Absent when no App is
+   *  configured, which is when there is no cache to drop from. */
+  forgetInstallationToken?: (installationId: number) => void
   /** Stripe, when this installation takes money. Null is the self-hosted
    *  default: the billing routes answer PRECONDITION_FAILED naming the
    *  variables, and the webhook endpoint refuses every delivery rather than
@@ -1523,10 +1527,11 @@ export function createServer(options: ServerOptions) {
         ? null
         : await handleDelivery(options.pool, clock, event, payload, {
             // Named fields rather than positions, for the reason the comment
-            // above gives: two optional collaborators on one call is where a
+            // above gives: three optional collaborators on one call is where a
             // value in the wrong slot still type checks.
             github: options.github,
             analytics,
+            forgetTokens: options.forgetInstallationToken,
           })
 
       const detail = outcome.handled ? outcome.detail : (installation?.detail ?? outcome.detail)

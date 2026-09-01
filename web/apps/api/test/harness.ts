@@ -137,6 +137,9 @@ export interface StartApiOptions {
    * somebody runs the suite.
    */
   actionsJwks?: () => string
+  /** Drops a cached installation token. Undefined means no App is configured,
+   *  which is when there is no cache for the webhook to drop from. */
+  forgetInstallationToken?: (installationId: number) => void
 }
 
 /**
@@ -209,6 +212,9 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     hostedRequiredPlan: options.hostedRequiredPlan ?? null,
     githubAppInstallUrl: options.githubAppInstallUrl,
     githubApi: options.githubApi ?? null,
+    ...(options.forgetInstallationToken
+      ? { forgetInstallationToken: options.forgetInstallationToken }
+      : {}),
     ...(options.actionsJwks
       ? {
           actionsKeys: new ActionsKeys(clock, {
