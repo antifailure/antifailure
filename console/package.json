@@ -2,6 +2,7 @@
   "name": "@antifailure/console",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "The control plane's web application, served by the control plane itself.",
   "license": "MIT",
   "scripts": {

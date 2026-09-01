@@ -33,6 +33,7 @@ import {
   hasLatency,
   inspectRun,
   isRunning,
+  isTerminal,
   retryRun,
   verdictContradiction,
   type RunDetail,
@@ -234,7 +235,7 @@ export function RunView({
                 {stopRequested ? "Stopping" : "Stop this run"}
               </Button>
             ) : null}
-            {canRun && !isRunning(run.state) && run.supersededBy === null ? (
+            {canRun && isTerminal(run.state) && run.supersededBy === null ? (
               <Button
                 busy={acting === "retry"}
                 onClick={async () => {
