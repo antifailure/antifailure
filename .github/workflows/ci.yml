@@ -56,10 +56,19 @@ jobs:
         # Both are rendered from the schemas, and a page that has drifted from
         # the contract it documents is worse than no page: it is a wrong answer
         # that looks authoritative.
+        #
+        # THIRD_PARTY_NOTICES.md is here because it was the one generated file
+        # nothing compared. Its generator ran in exactly one place, release.yml,
+        # which writes it into the published artifact rather than checking it,
+        # so the committed copy drifted 49 modules behind with every step green.
+        # A release published a fresh file while this repository carried a stale
+        # one, and the stale one is what a legal review opens. No release job
+        # can see that half of it, because it never reads the committed copy.
         run: |
           go run ./tools/errgen
           go run ./tools/proxysrc
           go run ./tools/schemadoc .
+          go run ./tools/notices -out THIRD_PARTY_NOTICES.md
           (cd engine && go test ./internal/policy -update-vectors)
           (cd engine && go test ./internal/cli -update-reference)
           (cd engine && go test ./internal/events -update-schema)
