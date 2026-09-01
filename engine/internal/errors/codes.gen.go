@@ -105,6 +105,9 @@ const (
 	AFDB020 Code = "AF-DB-020"
 	// {provider} rejected the admin token used to create personas.
 	AFDB021 Code = "AF-DB-021"
+	// No table that looks like a users table was found, so there is
+	// nowhere to create the personas that sign in.
+	AFDB022 Code = "AF-DB-022"
 	// Migrations failed on the branch: {detail}
 	AFDB030 Code = "AF-DB-030"
 	// The migration finding {rule} fails this project's policy: {detail}
@@ -705,6 +708,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/personas",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFDB022: {
+		Code:      AFDB022,
+		Area:      "DB",
+		Message:   "No table that looks like a users table was found, so there is nowhere to create the personas that sign in.",
+		NextStep:  "Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.",
+		Docs:      "guides/personas",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFDB030: {
 		Code:      AFDB030,

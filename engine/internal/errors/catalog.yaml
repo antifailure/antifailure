@@ -274,6 +274,13 @@ errors:
     docs: guides/personas
     retryable: false
     exit_code: 4
+  - code: AF-DB-022
+    area: DB
+    message: "No table that looks like a users table was found, so there is nowhere to create the personas that sign in."
+    next_step: "Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed."
+    docs: guides/personas
+    retryable: false
+    exit_code: 3
   - code: AF-DB-031
     area: DB
     message: "The migration finding {rule} fails this project's policy: {detail}"

@@ -446,6 +446,18 @@ Personas cannot be provisioned because {provider} creates users only through its
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/personas](/docs/guides/personas/) |
 
+### AF-DB-022
+
+No table that looks like a users table was found, so there is nowhere to create the personas that sign in.
+
+**What to do.** Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/personas](/docs/guides/personas/) |
+
 ### AF-DB-030
 
 Migrations failed on the branch: {detail}

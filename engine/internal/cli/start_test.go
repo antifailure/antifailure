@@ -324,14 +324,22 @@ database:
 	}
 }
 
-// A manifest naming masking rules that are not on disk cannot make a golden,
-// and it is worth knowing before af up rather than during af golden refresh.
+// An absent masking file is not a defect, and this test says so because the
+// first version of it asserted the opposite and was wrong.
 //
-// This is the rung that was written as a check on the field being empty, which
-// could never have fired: the manifest normaliser fills masking_rules in with
-// masking.yaml whenever nothing said otherwise, so every loaded manifest names
-// one. The question that can be answered is whether the file is there.
-func TestMaskingRulesThatAreNotOnDiskBlock(t *testing.T) {
+// The reasoning that produced the wrong version was sound as far as it went:
+// the normaliser fills masking_rules in with masking.yaml, so every loaded
+// manifest names one, and the answerable question is whether the file is there.
+// What it never checked is what the engine DOES about it. env/golden.go treats
+// os.IsNotExist on that path as "use the built in rules" and says in its own
+// comment that a missing file is the common case. So the rung called every
+// freshly initialised repository broken, since af init names the default path
+// and writes no file.
+//
+// Found by running af init and then af start on an ordinary Express app rather
+// than by reading either. What the rung reports now is which rules would apply,
+// which is true either way and is not visible from the manifest alone.
+func TestAnAbsentMaskingFileIsReportedRatherThanBlamed(t *testing.T) {
 	dir := t.TempDir()
 	writeManifest(t, dir, startManifest+`
 database:
@@ -341,19 +349,23 @@ database:
 	e, _ := startEnv(t, dir)
 
 	g := stageNamed(t, firstRun(t.Context(), e, startProbeFor(t, t.TempDir())), "a golden")
-	if g.state != StageBlocked {
-		t.Errorf("a manifest naming absent masking rules is %q, want blocked: %s", g.state, g.detail)
+	if g.state == StageBlocked {
+		t.Errorf("an absent masking file is reported as blocking, which is what af init writes "+
+			"on every first run: %s", g.detail)
 	}
-	if !strings.Contains(g.detail, "masking.yaml") {
-		t.Errorf("the detail %q does not name the file that is missing", g.detail)
+	if !strings.Contains(g.detail, "built in rules") {
+		t.Errorf("the detail %q does not say which rules would apply", g.detail)
 	}
 
-	// And with the file there it goes back to being the rung this command
-	// declines to answer, rather than staying red.
+	// And with a file there it names the file instead, so the two states are
+	// distinguishable rather than both reading as fine.
 	write(t, dir, "masking.yaml", "version: 1\nrules: []\n")
 	g = stageNamed(t, firstRun(t.Context(), e, startProbeFor(t, t.TempDir())), "a golden")
+	if !strings.Contains(g.detail, "masking.yaml") {
+		t.Errorf("with the rules present the detail %q does not name them", g.detail)
+	}
 	if g.state != StageUnchecked {
-		t.Errorf("with the rules present the golden rung is %q, want unchecked: %s", g.state, g.detail)
+		t.Errorf("the golden rung is %q, want unchecked either way: %s", g.state, g.detail)
 	}
 }
 

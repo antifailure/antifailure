@@ -483,27 +483,29 @@ func goldenState(e *Env, m *schema.Manifest, root string) stage {
 		s.why, s.command = "", ""
 		return s
 	}
-	// The manifest always names a masking rules file, because normalize fills
-	// in masking.yaml when nothing said otherwise. So the question worth asking
-	// is whether the named file is there, which decides whether af golden
-	// refresh can produce anything, and asking whether the field is empty would
-	// have been a check that could never fire.
+	// Reported, not judged. The first version of this rung called an absent
+	// masking file a blocker, which was a false finding and the one thing a
+	// gate cannot afford: env/golden.go reads that path and treats
+	// os.IsNotExist as "use the built in rules", saying in its own comment that
+	// a missing file is the common case and not an error. So a manifest that
+	// af init has just written, which names masking.yaml by way of the
+	// normaliser's default and does not create it, was reported as broken on
+	// every first run.
+	//
+	// What is worth saying is which rules a branch would be masked by, because
+	// the two are different and neither is visible from the manifest alone: the
+	// file names a path whether or not anybody wrote one.
 	rules := m.Database.MaskingRules
 	path := rules
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(root, rules)
 	}
+	s.state = StageUnchecked
 	if _, err := os.Stat(path); err != nil {
-		s.state = StageBlocked
-		s.detail = "the masking rules at " + short(e.WorkDir, path) + " are not there"
-		s.prose = "A golden is the masked copy every branch is made from, and the rules say " +
-			"what is masked. The manifest names " + rules + " and there is no such file, " +
-			"so af golden refresh has nothing to compile."
-		s.why, s.command = "", "af init"
+		s.detail = "masked by the built in rules, since " + rules + " is not there"
 		return s
 	}
-	s.state = StageUnchecked
-	s.detail = "masked by " + rules + "; whether one exists was not checked"
+	s.detail = "masked by " + rules + "; whether a golden exists was not checked"
 	return s
 }
 
