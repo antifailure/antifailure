@@ -127,6 +127,39 @@ func TestUp_RefusesTheDashboardAndJSONTogether(t *testing.T) {
 	require.Contains(t, errW.String()+out.String(), "--hud")
 }
 
+// Up returns a nil result on every path that fails before an environment
+// exists, which is a good many of them: a lock another af up already holds, an
+// unresolved secret, an egress rule that will not compile, a state directory it
+// cannot create. Rendering the services off that nil result dereferenced it, so
+// the command a first run is most likely to fail on answered with a
+// segmentation fault and a Go stack trace instead of the diagnosed error it had
+// already built.
+//
+// Found by running two af up commands at once on one repository, which is an
+// ordinary thing to do by accident. The fixture here is the deterministic
+// version of the same branch: a state directory that cannot be created because
+// a file is already sitting on its name.
+func TestUp_AFailureBeforeAnEnvironmentExistsIsReportedRatherThanPanicking(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"),
+		[]byte("version: 1\nname: svc\nservices:\n  - name: svc\n    kind: web\n    port: 9000\n    command: /bin/svc\negress:\n  default: block\n"), 0o600))
+	// A file where the state directory has to go, so MkdirAll fails and Up
+	// returns AF-RUN-040 with no result at all.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".antifailure"), []byte("not a directory"), 0o600))
+
+	var out, errW bytes.Buffer
+	code := Execute(context.Background(), []string{"up"}, Options{
+		Stdout: &out, Stderr: &errW, Stdin: strings.NewReader(""),
+		Getenv: func(string) string { return "" },
+		Clock:  clock.New(), WorkDir: dir,
+	})
+
+	require.NotZero(t, code)
+	require.Contains(t, errW.String(), "AF-RUN-040",
+		"the diagnosed error is what the user needs, and it existed the whole time")
+	require.NotContains(t, out.String()+errW.String(), "panic:")
+}
+
 // failingWriter refuses everything, the way a full disk or a closed pipe does.
 type failingWriter struct{ err error }
 
