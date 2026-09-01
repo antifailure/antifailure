@@ -97,9 +97,16 @@ func seedSpec(t *testing.T, o *Orchestrator, seed string) (spec specHooks) {
 	require.NoError(t, err)
 	rules, hash, err := o.rules()
 	require.NoError(t, err)
-	s := o.seedGoldenSpec(nil, seed, key, rules, hash)
+	// The real digest rather than a literal, because it is what the call site
+	// passes and it is signed into the attestation. A seeded golden stamped
+	// with a provenance nothing else computes is one selection can never match.
+	prov, err := o.provenanceOf()
+	require.NoError(t, err)
+	s := o.seedGoldenSpec(nil, seed, key, rules, hash, prov.digest())
 	require.NotNil(t, s.Mask, "the seeded golden must carry a mask hook")
 	require.NotNil(t, s.Verify, "the seeded golden must carry a verify hook")
+	require.Equal(t, prov.digest(), s.Provenance,
+		"a golden published with no provenance is one pickGolden can never choose")
 	return specHooks{mask: s.Mask, verify: s.Verify}
 }
 

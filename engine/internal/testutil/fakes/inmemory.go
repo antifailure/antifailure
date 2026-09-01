@@ -77,6 +77,7 @@ func (d *InMemoryDatabase) RefreshGolden(ctx context.Context, spec provider.Gold
 		ID:          fmt.Sprintf("gv_inmemory_%04d", d.seq),
 		CreatedAt:   time.Date(2026, 1, 1, 0, 0, d.seq, 0, time.UTC),
 		RulesHash:   spec.RulesHash,
+		Provenance:  spec.Provenance,
 		Verified:    true,
 		Attestation: att,
 	}
