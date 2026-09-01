@@ -14,7 +14,11 @@ export default defineConfig({
   vite: { plugins: [tailwindcss()] },
   site: "https://antifailure.dev",
   base: "/docs",
-  trailingSlash: "ignore",
+  // Static Web Apps canonicalizes documentation routes without a trailing
+  // slash. Emitting the same form here keeps the sitemap, canonical, og:url,
+  // and final response URL identical instead of making every indexed URL take
+  // a redirect before it can be read.
+  trailingSlash: "never",
   integrations: [
     starlight({
       title: "Antifailure",

@@ -64,6 +64,94 @@ else
   mkdir -p site/docs && cp -R docs/dist/. site/docs/
 fi
 
+# The documentation's sitemap, canonical, OpenGraph URL and TechArticle used
+# to agree on a trailing slash that the live host immediately removed with a
+# 301. Parse the assembled output and require one identity that is also the URL
+# the sitemap publishes. Presence-only checks cannot see that mismatch.
+python3 - <<'DOCIDENTITY' || exit 1
+import glob, json, os, sys
+import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
+
+
+class Head(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.canonical = None
+        self.og_url = None
+        self.in_json = False
+        self.json_text = []
+        self.json_blocks = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "link" and attrs.get("rel") == "canonical":
+            self.canonical = attrs.get("href")
+        if tag == "meta" and attrs.get("property") == "og:url":
+            self.og_url = attrs.get("content")
+        if tag == "script" and attrs.get("type") == "application/ld+json":
+            self.in_json = True
+            self.json_text = []
+
+    def handle_data(self, data):
+        if self.in_json:
+            self.json_text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self.in_json:
+            self.in_json = False
+            self.json_blocks.append("".join(self.json_text))
+
+
+problems = []
+canonicals = set()
+for filename in glob.glob("site/docs/**/*.html", recursive=True):
+    if filename.endswith("/404.html"):
+        continue
+    parser = Head()
+    with open(filename, encoding="utf-8") as f:
+        parser.feed(f.read())
+    if not parser.canonical:
+        problems.append(f"{filename}: no canonical")
+        continue
+    canonicals.add(parser.canonical)
+    if parser.canonical.endswith("/"):
+        problems.append(f"{filename}: canonical redirects at the live host: {parser.canonical}")
+    if parser.og_url != parser.canonical:
+        problems.append(f"{filename}: og:url {parser.og_url!r} != canonical {parser.canonical!r}")
+    articles = []
+    for raw in parser.json_blocks:
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as err:
+            problems.append(f"{filename}: JSON-LD does not parse: {err}")
+            continue
+        nodes = value.get("@graph", []) if isinstance(value, dict) else []
+        nodes = nodes if nodes else [value]
+        articles.extend(node for node in nodes if isinstance(node, dict) and node.get("@type") == "TechArticle")
+    if not any(
+        article.get("url") == parser.canonical
+        and article.get("@id") == parser.canonical + "#techarticle"
+        for article in articles
+    ):
+        problems.append(f"{filename}: no TechArticle matching {parser.canonical}")
+
+sitemap = ET.parse("site/docs/sitemap-0.xml")
+published = {node.text for node in sitemap.iter() if node.tag.endswith("loc")}
+if canonicals != published:
+    problems.append(
+        "documentation sitemap and page canonicals differ: "
+        f"not published={sorted(canonicals - published)}, no page={sorted(published - canonicals)}"
+    )
+
+if problems:
+    print("documentation identity is inconsistent:")
+    for problem in problems:
+        print("  " + problem)
+    sys.exit(1)
+print(f"documentation identity: {len(canonicals)} pages match their sitemap and TechArticle")
+DOCIDENTITY
+
 # The addresses that live outside both builds.
 cp install.sh site/install.sh
 mkdir -p site/schemas && cp schemas/*.json site/schemas/
