@@ -1,12 +1,12 @@
 "use client";
 
 import { Badge, Empty, Row, Table, TableWrap, Td, Th, When } from "@/components/ui";
+import { bytes } from "@/lib/format";
 import { RouteCell, Stat } from "@/components/load/primitives";
 import {
   AVAILABILITY_FACTS,
   REASON_NOTES,
   VERDICT_FACTS,
-  bytes,
   count,
   duration,
   increase,
@@ -368,12 +368,12 @@ export function Thresholds({ thresholds }: { thresholds: ThresholdVerdict[] }) {
                 {t.scope ?? <span className="font-sans text-dim">everything it sent</span>}
               </Td>
               {numeric ? (
-                <Td label="Threshold" numeric>
+                <Td label="Threshold" numeric className="whitespace-nowrap">
                   {measured(t.measure, t.threshold)}
                 </Td>
               ) : null}
               {numeric ? (
-                <Td label="Observed" numeric>
+                <Td label="Observed" numeric className="whitespace-nowrap">
                   {/* "not measured" only where there was a number to measure.
                       every_request_succeeded and status_in have no threshold at
                       all, so an empty cell there is the column not applying
@@ -548,10 +548,10 @@ export function Routes({ routes }: { routes: RouteMetric[] }) {
                     count(r.errors)
                   )}
                 </Td>
-                <Td label="p95" numeric>
+                <Td label="p95" numeric className="whitespace-nowrap">
                   {ms(r.latency.p95Ms)}
                 </Td>
-                <Td label="Baseline p95" numeric>
+                <Td label="Baseline p95" numeric className="whitespace-nowrap">
                   {r.baselineP95Ms === null ? (
                     <span className="text-dim">--</span>
                   ) : (

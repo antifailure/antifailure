@@ -28,6 +28,15 @@ import { LIST_CAP, type Windowed } from "@/lib/load";
  * there is no way to ask for "the ones after this", so a second request is a
  * second look at the same list from the top, and appending it would repeat
  * every row already on screen.
+ *
+ * And `reload` does NOT blank the table. That distinction is the one the
+ * shared `useApi` gets wrong and which cost this area a rework: it sets
+ * `data: null` on every refresh, so a table already showing rows drops to a
+ * skeleton and comes back. Against a fixture answering in a millisecond the
+ * gap is shorter than a frame; at four hundred milliseconds, an ordinary
+ * hosted round trip, it is a flash of nothing every time somebody starts a
+ * run. A dependency changing IS a new subject and does blank, because the rows
+ * on screen are then about something else.
  */
 interface Windowing<T> {
   status: "loading" | "ready" | "error";
@@ -38,11 +47,11 @@ interface Windowing<T> {
   /** The window is as wide as the control plane will answer, so `more` here
    *  means "there may be more" rather than "there are more". */
   atCap: boolean;
-  /** A wider window is being fetched over rows that are already on screen,
-   *  which must not be replaced by a skeleton. */
+  /** A fetch is in flight over rows that are already on screen, which must not
+   *  be replaced by a skeleton. */
   widening: boolean;
-  /** The wider window failed. The rows already loaded stay, because throwing
-   *  away what you have because the next request failed is a worse answer than
+  /** That fetch failed. The rows already loaded stay, because throwing away
+   *  what you have because the next request failed is a worse answer than
    *  showing it. */
   widenError: string | null;
   widen: () => void;
@@ -63,21 +72,33 @@ export function useWindow<T>(
   }>({ status: "loading", items: [], error: null, more: false, limit: initialLimit });
   const [widening, setWidening] = useState(false);
   const [widenError, setWidenError] = useState<string | null>(null);
-  const [nonce, setNonce] = useState(0);
 
   const alive = useRef(true);
   const run = useRef(fetch);
   run.current = fetch;
+  /** How wide the window on screen is, read inside a fetch rather than out of
+   *  state, so a reload after a widen asks for the width the reader is looking
+   *  at rather than dropping them back to fifty. */
+  const width = useRef(initialLimit);
+  /** Whether anything has ever loaded. A refresh over an empty error state has
+   *  nothing to preserve, so it is allowed to show the skeleton again. */
+  const loaded = useRef(false);
 
-  useEffect(() => {
-    alive.current = true;
-    setState({ status: "loading", items: [], error: null, more: false, limit: initialLimit });
-    setWidenError(null);
-    setWidening(false);
+  const fetchAt = useCallback((limit: number, blank: boolean) => {
+    width.current = limit;
+    if (blank) {
+      setState({ status: "loading", items: [], error: null, more: false, limit });
+      setWidenError(null);
+    } else {
+      setWidening(true);
+      setWidenError(null);
+    }
     run
-      .current(initialLimit)
+      .current(limit)
       .then((page) => {
         if (!alive.current) return;
+        loaded.current = true;
+        width.current = page.limit;
         setState({
           status: "ready",
           items: page.items,
@@ -85,49 +106,38 @@ export function useWindow<T>(
           more: page.more,
           limit: page.limit,
         });
+        setWidenError(null);
       })
       .catch((e: unknown) => {
         if (!alive.current) return;
-        setState({
-          status: "error",
-          items: [],
-          error:
-            e instanceof ApiError
-              ? e
-              : new ApiError("The control plane could not be reached.", 0, "NETWORK"),
-          more: false,
-          limit: initialLimit,
-        });
-      });
-    return () => {
-      alive.current = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, nonce, initialLimit]);
-
-  const widen = useCallback(() => {
-    setWidening(true);
-    setWidenError(null);
-    run
-      .current(LIST_CAP)
-      .then((page) => {
-        if (!alive.current) return;
-        setState({
-          status: "ready",
-          items: page.items,
-          error: null,
-          more: page.more,
-          limit: page.limit,
-        });
-      })
-      .catch((e: unknown) => {
-        if (!alive.current) return;
-        setWidenError(e instanceof Error ? e.message : "The wider list did not load.");
+        const err =
+          e instanceof ApiError
+            ? e
+            : new ApiError("The control plane could not be reached.", 0, "NETWORK");
+        if (blank || !loaded.current) {
+          setState({ status: "error", items: [], error: err, more: false, limit });
+        } else {
+          // Keep the rows. Only the claim that they are current changes.
+          setWidenError(err.message);
+        }
       })
       .finally(() => {
         if (alive.current) setWidening(false);
       });
   }, []);
+
+  useEffect(() => {
+    alive.current = true;
+    loaded.current = false;
+    setWidening(false);
+    fetchAt(initialLimit, true);
+    return () => {
+      alive.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, initialLimit]);
+
+  const widen = useCallback(() => fetchAt(LIST_CAP, false), [fetchAt]);
 
   return {
     status: state.status,
@@ -138,7 +148,10 @@ export function useWindow<T>(
     widening,
     widenError,
     widen,
-    reload: useCallback(() => setNonce((n) => n + 1), []),
+    // Not a blanking reload. Somebody who has just started a run is looking at
+    // the table it is about to appear in, and replacing it with a skeleton to
+    // fetch one more row is the defect this hook exists to not have.
+    reload: useCallback(() => fetchAt(width.current, false), [fetchAt]),
   };
 }
 

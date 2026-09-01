@@ -102,7 +102,12 @@ function Start({
       note="Dispatches your own workflow in your own repository, against an environment that is already up."
     >
       {environments.status === "error" && environments.error ? (
-        <LoadError error={environments.error} retry={environments.reload} />
+        <LoadError
+          error={environments.error}
+          retry={environments.reload}
+          reading="this organization's environments"
+          needs="environments.view"
+        />
       ) : environments.status === "loading" || environments.data === null ? (
         <TableSkeleton rows={2} cols={3} />
       ) : (
@@ -255,7 +260,15 @@ function Start({
  * sends rather than a new version, because a form somebody opened and closed
  * is the ordinary case and a history full of identical entries is noise.
  */
-function NewVersion({ detail, onSaved }: { detail: WorkloadDetail; onSaved: () => void }) {
+function NewVersion({
+  detail,
+  onSaved,
+  onDone,
+}: {
+  detail: WorkloadDetail;
+  onSaved: () => void;
+  onDone: () => void;
+}) {
   const session = useSessionContext();
   const csrf = session.data?.csrfToken ?? "";
   const head = detail.versions[0] ?? null;
@@ -267,10 +280,7 @@ function NewVersion({ detail, onSaved }: { detail: WorkloadDetail; onSaved: () =
   const promoted = head?.body?.kind === "browser_workflow" && head.body.manifestBlock !== null;
 
   return (
-    <Card
-      title="Add a version"
-      note="A version is immutable. Changing what this runs writes a new one beside it."
-    >
+    <div className="border-b border-rule">
       <form
         className="px-4 py-4"
         onSubmit={async (e) => {
@@ -295,6 +305,7 @@ function NewVersion({ detail, onSaved }: { detail: WorkloadDetail; onSaved: () =
             );
             setNotes("");
             onSaved();
+            if (saved.created) onDone();
           } catch (err) {
             setError(err instanceof Error ? err.message : "That did not work.");
           } finally {
@@ -309,7 +320,7 @@ function NewVersion({ detail, onSaved }: { detail: WorkloadDetail; onSaved: () =
               className={inputClass}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="four times production's rate"
+              placeholder="why this changed"
             />
           </Field>
         </div>
@@ -349,7 +360,7 @@ function NewVersion({ detail, onSaved }: { detail: WorkloadDetail; onSaved: () =
 
         <KnobNotes kind={detail.workload.kind} />
       </form>
-    </Card>
+    </div>
   );
 }
 
@@ -416,7 +427,7 @@ function Versions({ versions }: { versions: Version[] }) {
                 <p className="px-4 pt-4 text-[11px] font-medium uppercase tracking-[0.08em] text-dim">
                   What v{v.version} says
                 </p>
-                <BodyView body={v.body} />
+                <BodyView body={v.body} manifest />
                 {v.bodyDigest ? (
                   <p className="px-4 pb-4 text-[12px] leading-5 text-dim">
                     Digest{" "}
@@ -435,16 +446,22 @@ function Versions({ versions }: { versions: Version[] }) {
   );
 }
 
-function RunsFor({
-  slug,
+/**
+ * Every run of this workload.
+ *
+ * The window is opened by the view above rather than here, so that starting a
+ * run can refresh this table without changing a dependency. A dependency
+ * change is a new subject and blanks to a skeleton, which is right when the
+ * slug changes and wrong when somebody has just pressed Start and is watching
+ * for their run to appear.
+ */
+function RunsCard({
+  state,
   onOpen,
-  nonce,
 }: {
-  slug: string;
+  state: ReturnType<typeof useWindow<RunRow>>;
   onOpen: (runId: string) => void;
-  nonce: number;
 }) {
-  const state = useWindow<RunRow>((limit) => listRuns({ slug, limit }), [slug, nonce]);
   return (
     <Card title="Runs" note="Every run of this workload, newest first.">
       {state.status === "error" && state.error ? (
@@ -585,7 +602,8 @@ export function WorkloadDetailView({
   // useLive rather than useApi: a reload must not blank a screen that is
   // already showing a definition, and a failed reload must not throw it away.
   const state = useLive<WorkloadDetail | null>(() => getWorkload(slug), [slug]);
-  const [nonce, setNonce] = useState(0);
+  const runs = useWindow<RunRow>((limit) => listRuns({ slug, limit }), [slug]);
+  const [editing, setEditing] = useState(false);
 
   if (state.status === "error" && state.error) {
     return (
@@ -665,20 +683,36 @@ export function WorkloadDetailView({
       </Card>
 
       {canRun ? (
-        <Start detail={detail} onStarted={() => setNonce((n) => n + 1)} />
+        <Start detail={detail} onStarted={runs.reload} />
       ) : (
         <Denied what="Start a run" />
       )}
 
-      <RunsFor slug={detail.workload.slug} onOpen={onOpenRun} nonce={nonce} />
+      <RunsCard state={runs} onOpen={onOpenRun} />
 
-      {canEdit ? (
-        <NewVersion detail={detail} onSaved={state.reload} />
-      ) : (
-        <Denied what="Add a version" />
-      )}
-
-      <Card title="Versions" note="Immutable, and a run records which one it used.">
+      <Card
+        title="Versions"
+        note="Immutable, and a run records which one it used. Changing what this runs writes a new one beside them."
+        actions={
+          canEdit ? (
+            <Button onClick={() => setEditing((e) => !e)}>
+              {editing ? "Cancel" : "Add a version"}
+            </Button>
+          ) : undefined
+        }
+      >
+        {editing ? (
+          <NewVersion detail={detail} onSaved={state.reload} onDone={() => setEditing(false)} />
+        ) : null}
+        {/* Said rather than left as an absent button. Somebody sent a link to a
+            workload who finds no way to change it cannot tell whether the
+            product lacks the feature or their role lacks the permission. */}
+        {canEdit ? null : (
+          <p className="border-b border-rule px-4 py-2.5 text-[12.5px] leading-6 text-muted">
+            Your role can read these and cannot add one. An owner or an admin can change it on the
+            Members page.
+          </p>
+        )}
         <Versions versions={detail.versions} />
       </Card>
 
@@ -745,6 +779,7 @@ export function NewWorkload({ onCreated }: { onCreated: (slug: string) => void }
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [slugTouched, setSlugTouched] = useState(false);
   const draft = useBodyDraft(kind, null);
 
   const slugError =
@@ -761,7 +796,12 @@ export function NewWorkload({ onCreated }: { onCreated: (slug: string) => void }
   return (
     <div className="border-b border-rule">
       {repositories.status === "error" && repositories.error ? (
-        <LoadError error={repositories.error} retry={repositories.reload} />
+        <LoadError
+          error={repositories.error}
+          retry={repositories.reload}
+          reading="the repositories this organization has connected"
+          needs="environments.view"
+        />
       ) : repositories.status === "loading" || repositories.data === null ? (
         <TableSkeleton rows={2} cols={3} />
       ) : repositories.data.length === 0 ? (
@@ -846,12 +886,15 @@ export function NewWorkload({ onCreated }: { onCreated: (slug: string) => void }
                 <Field
                   label="Short name"
                   hint="How it is addressed. It appears in the address bar and cannot be changed."
-                  error={slugError}
+                  error={slugTouched ? slugError : null}
                 >
                   <input
                     className={inputClass}
                     value={slug}
-                    onChange={(e) => setSlug(e.target.value)}
+                    onChange={(e) => {
+                      setSlug(e.target.value);
+                      setSlugTouched(true);
+                    }}
                     placeholder="checkout-friday"
                   />
                 </Field>

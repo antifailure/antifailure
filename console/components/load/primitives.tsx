@@ -126,7 +126,13 @@ export function VerdictNote({ verdict }: { verdict: Verdict | null }) {
   if (verdict === null) return null;
   const fact = VERDICT_FACTS[verdict];
   if (verdict === "pass" || verdict === "fail") return null;
-  return <p className="mt-2 max-w-[64ch] text-[12.5px] leading-6 text-muted">{fact.meaning}</p>;
+  // The same measure as the state sentence it sits under, or the two wrap at
+  // different widths and read as two different columns of text.
+  return (
+    <p className="mt-2 max-w-[70ch] text-pretty text-[12.5px] leading-6 text-muted">
+      {fact.meaning}
+    </p>
+  );
 }
 
 /* -------------------------------------------------------------------------

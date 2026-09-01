@@ -37,7 +37,6 @@ import {
   STATE_FACTS,
   VERDICT_FACTS,
   bodyToInput,
-  bytes,
   duration,
   increase,
   isRunning,
@@ -60,6 +59,7 @@ import {
   type RunResult,
   type ThresholdVerdict,
 } from '../../../../console/lib/loadshapes.ts'
+import { ago } from '../../../../console/lib/format.ts'
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url))
 
@@ -691,7 +691,6 @@ describe('formatting', () => {
   test('a missing measurement is a dash and never a zero', () => {
     assert.equal(ms(null), '--')
     assert.equal(percent(null), '--')
-    assert.equal(bytes(null), '--')
     assert.equal(duration(null), '--')
   })
 
@@ -709,9 +708,49 @@ describe('formatting', () => {
     assert.equal(duration(125_000), '2m 5s')
   })
 
-  test('a size is in the units the runner that made it would have printed', () => {
-    assert.equal(bytes(512), '512 B')
-    assert.equal(bytes(4096), '4.0 KiB')
-    assert.equal(bytes(5_242_880), '5.0 MiB')
+})
+
+// ---------------------------------------------------------------------------
+// A time that has not happened yet
+// ---------------------------------------------------------------------------
+
+describe('a relative time', () => {
+  // `ago` lives in console/lib/format.ts and is shared by six screens, and it
+  // is tested from here because the Load area is what reached the half of it
+  // that had never been exercised. Every other screen shows times that have
+  // already happened; a run's deadline is the first instant in this product a
+  // person is asked to read before it arrives, and the abs() in the old
+  // version rendered it as "-1h ago".
+  //
+  // Offsets from the real clock rather than a fixed date, so the arithmetic is
+  // deterministic without a fake clock this module has no way to inject.
+  const inMinutes = (n: number) => new Date(Date.now() + n * 60_000)
+
+  test('the past reads as the past', () => {
+    assert.equal(ago(inMinutes(-30)), '30m ago')
+    assert.equal(ago(inMinutes(-180)), '3h ago')
+    assert.equal(ago(inMinutes(-60 * 24 * 3)), '3d ago')
+    assert.equal(ago(inMinutes(-0.2)), 'just now')
+  })
+
+  test('the future reads as the future, and never as a negative number', () => {
+    assert.equal(ago(inMinutes(30)), 'in 30m')
+    assert.equal(ago(inMinutes(180)), 'in 3h')
+    assert.equal(ago(inMinutes(60 * 24 * 3)), 'in 3d')
+    assert.equal(ago(inMinutes(0.2)), 'in under a minute')
+  })
+
+  test('nothing it can produce starts with a minus sign', () => {
+    // The property, not a list of the cases that happened to be checked above.
+    for (let m = -4000; m <= 4000; m += 7) {
+      const said = ago(inMinutes(m))
+      assert.ok(!said.includes('-'), `ago at ${m} minutes said ${JSON.stringify(said)}`)
+    }
+  })
+
+  test('an absent or unreadable time says nothing rather than guessing', () => {
+    assert.equal(ago(null), '')
+    assert.equal(ago(undefined), '')
+    assert.equal(ago('not a date'), '')
   })
 })

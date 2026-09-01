@@ -93,9 +93,16 @@ function Timeline({ run }: { run: RunDetail["run"] }) {
           <span className="text-muted">not yet</span>
         )}
       </Fact>
-      <Fact label={isRunning(run.state) ? "Gives up at" : "Deadline was"}>
-        <When value={run.deadlineAt} />
-      </Fact>
+      {/* Only where it still means something. While a run is going it is the
+          moment it stops being late and starts being abandoned, and on an
+          abandoned run it is the moment that happened. On a run that reported,
+          it is a deadline nothing came near and printing it invites a reader to
+          work out whether it mattered. */}
+      {isRunning(run.state) || run.state === "abandoned" ? (
+        <Fact label={isRunning(run.state) ? "Gives up at" : "The deadline passed"}>
+          <When value={run.deadlineAt} />
+        </Fact>
+      ) : null}
     </Facts>
   );
 }
@@ -198,10 +205,15 @@ export function RunView({
       ) : null}
 
       <Card
-        title="Run"
+        title={run.workloadSlug ? `Run of ${run.workloadSlug}` : "Run"}
         note={run.id}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {run.workloadSlug ? (
+              <Button onClick={() => onOpenWorkload(run.workloadSlug as string)}>
+                Open the workload
+              </Button>
+            ) : null}
             {canRun && isRunning(run.state) ? (
               <Button
                 variant="danger"
@@ -269,21 +281,14 @@ export function RunView({
             <VerdictBadge verdict={run.verdict} />
             <StateBadge state={run.state} />
             {run.kind ? <KindMark kind={run.kind} /> : null}
-            {run.workloadSlug ? (
-              <button
-                type="button"
-                onClick={() => onOpenWorkload(run.workloadSlug as string)}
-                className="text-[13px] text-ink underline decoration-[rgba(16,16,16,0.25)] underline-offset-4 hover:decoration-ink"
-              >
-                {run.workloadSlug}
-              </button>
-            ) : null}
           </div>
 
           {/* Both sentences, because state and verdict are two answers and
               neither implies the other. A run that succeeded and failed every
               threshold needs the second sentence to make sense of the first. */}
-          <p className="mt-2 max-w-[70ch] text-[12.5px] leading-6 text-muted">
+          {/* text-pretty, because these two sit one under the other at the same
+              measure and the second one's last line was a single word. */}
+          <p className="mt-2 max-w-[70ch] text-pretty text-[12.5px] leading-6 text-muted">
             {STATE_FACTS[run.state].meaning}
           </p>
           <VerdictNote verdict={run.verdict} />

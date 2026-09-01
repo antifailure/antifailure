@@ -73,8 +73,16 @@ function Selection({ names, noun }: { names: string[]; noun: string }) {
  *
  * A knob the version does not set is shown as the command's own default rather
  * than as a blank or a zero. An absent duration is not a duration of nothing.
+ *
+ * `manifest` is off by default and that is the interesting part. A promoted
+ * workflow's version carries the block somebody has to paste into their
+ * repository, and the screen that shows the head version already gives that
+ * block a card of its own with a heading that says to go and do it. Rendering
+ * it here as well printed the same twenty lines twice on one page, which reads
+ * as two different blocks until you compare them. It stays on for the version
+ * history, where each entry is the only place its own block appears.
  */
-export function BodyView({ body }: { body: Body | null }) {
+export function BodyView({ body, manifest = false }: { body: Body | null; manifest?: boolean }) {
   if (body === null) {
     return (
       <Empty title="This version cannot be read">
@@ -154,8 +162,8 @@ export function BodyView({ body }: { body: Body | null }) {
           <Selection names={body.select} noun={knobs.selects} />
         </Fact>
       </Facts>
-      {body.manifestBlock ? <ManifestBlock block={body.manifestBlock} /> : null}
-      {body.dropped.length > 0 ? <Dropped dropped={body.dropped} /> : null}
+      {manifest && body.manifestBlock ? <ManifestBlock block={body.manifestBlock} /> : null}
+      {manifest && body.dropped.length > 0 ? <Dropped dropped={body.dropped} /> : null}
     </>
   );
 }
@@ -320,6 +328,10 @@ export interface BodyDraft {
   body: Body | null;
   /** Keyed by field so the message sits under the control that is wrong. */
   errors: Partial<Record<keyof Draft, string>>;
+  /** The same, narrowed to fields somebody has actually typed in. A form that
+   *  opens with a red "Name at least one goal" under a box nobody has reached
+   *  is telling a person they got something wrong before they started. */
+  visible: Partial<Record<keyof Draft, string>>;
   /** True when the draft is exactly what it started as, so a save would add a
    *  version identical to the head. The control plane answers that with "that
    *  is what the latest version already says" rather than a new version, and
@@ -338,6 +350,7 @@ export interface BodyDraft {
  */
 export function useBodyDraft(kind: Kind, initial: Body | null): BodyDraft {
   const [draft, setDraft] = useState<Draft>(() => draftOf(initial));
+  const [touched, setTouched] = useState<Partial<Record<keyof Draft, true>>>({});
   const start = draftOf(initial);
   const carried =
     initial !== null && initial.kind === "browser_workflow"
@@ -384,11 +397,20 @@ export function useBodyDraft(kind: Kind, initial: Body | null): BodyDraft {
     }
   }
 
+  const visible: Partial<Record<keyof Draft, string>> = {};
+  for (const key of Object.keys(errors) as (keyof Draft)[]) {
+    if (touched[key]) visible[key] = errors[key];
+  }
+
   return {
     draft,
-    set: (patch) => setDraft((d) => ({ ...d, ...patch })),
+    set: (patch) => {
+      setDraft((d) => ({ ...d, ...patch }));
+      setTouched((t) => ({ ...t, ...(Object.fromEntries(Object.keys(patch).map((k) => [k, true])) as Partial<Record<keyof Draft, true>>) }));
+    },
     body,
     errors,
+    visible,
     unchanged:
       draft.duration === start.duration &&
       draft.scale === start.scale &&
@@ -401,11 +423,18 @@ export function useBodyDraft(kind: Kind, initial: Body | null): BodyDraft {
 /**
  * The fields a kind actually has.
  *
- * Rendered from the knob table rather than by hand per kind, so a kind cannot
- * grow a control the command has no flag for by somebody copying a block.
+ * An error is drawn under a field only once somebody has typed in that field.
+ * The draft knows which ones those are, so opening a form does not paint it
+ * red, and changing an unrelated control does not either. That is the shape of
+ * a validator written for the submit handler and pointed at the first render
+ * by accident.
+ *
+ * Nothing here needs a reveal-on-submit, because the button that submits is
+ * disabled while the body is invalid: there is no press to reveal anything on.
  */
 export function BodyFields({ kind, draft }: { kind: Kind; draft: BodyDraft }): ReactNode {
   const knobs = KNOBS[kind];
+  const shown = (key: keyof BodyDraft["errors"]) => draft.visible[key] ?? null;
   return (
     <>
       {knobs.select !== "no" ? (
@@ -416,7 +445,7 @@ export function BodyFields({ kind, draft }: { kind: Kind; draft: BodyDraft }): R
               ? `Comma separated names out of the manifest. Required: running everything it declares would change what this workload does the day somebody adds one.`
               : (knobs.emptyMeans ?? undefined)
           }
-          error={draft.errors.select ?? null}
+          error={shown("select")}
         >
           <input
             className={inputClass}
@@ -428,7 +457,7 @@ export function BodyFields({ kind, draft }: { kind: Kind; draft: BodyDraft }): R
       ) : null}
 
       {knobs.duration ? (
-        <Field label="Duration" hint="Seconds." error={draft.errors.duration ?? null}>
+        <Field label="Duration" hint="Seconds." error={shown("duration")}>
           <input
             className={inputClass}
             inputMode="numeric"
@@ -443,7 +472,7 @@ export function BodyFields({ kind, draft }: { kind: Kind; draft: BodyDraft }): R
         <Field
           label="Scale"
           hint="A multiplier on production's rate."
-          error={draft.errors.scale ?? null}
+          error={shown("scale")}
         >
           <input
             className={inputClass}
@@ -459,7 +488,7 @@ export function BodyFields({ kind, draft }: { kind: Kind; draft: BodyDraft }): R
         <Field
           label="Concurrency"
           hint="Ceiling on requests in flight."
-          error={draft.errors.concurrency ?? null}
+          error={shown("concurrency")}
         >
           <input
             className={inputClass}
@@ -479,7 +508,7 @@ export function BodyFields({ kind, draft }: { kind: Kind; draft: BodyDraft }): R
               ? "A whole number. The same seed plans the same schedule."
               : "Any string. The same seed walks the same way."
           }
-          error={draft.errors.seed ?? null}
+          error={shown("seed")}
         >
           <input
             className={inputClass}

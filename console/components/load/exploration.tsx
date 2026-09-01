@@ -86,10 +86,10 @@ export function Promote({
   }
 
   return (
-    <Card
-      title="Promote an exploration"
-      note="Compiles what an agent found into a workflow your manifest can run."
-    >
+    // No title on this card. It is the whole of its page and the page heading
+    // already says this; a card repeating its own page's title is the shape of
+    // a screen assembled out of parts that were never read together.
+    <Card>
       <div className="border-b border-rule px-4 py-3">
         <p className="max-w-[74ch] text-[12.5px] leading-6 text-muted">
           This does not produce load. <code className="font-mono">af explore</code> drives a real
@@ -101,7 +101,12 @@ export function Promote({
       </div>
 
       {repositories.status === "error" && repositories.error ? (
-        <LoadError error={repositories.error} retry={repositories.reload} />
+        <LoadError
+          error={repositories.error}
+          retry={repositories.reload}
+          reading="the repositories this organization has connected"
+          needs="environments.view"
+        />
       ) : repositories.status === "loading" || repositories.data === null ? (
         <TableSkeleton rows={2} cols={2} />
       ) : repositories.data.length === 0 ? (

@@ -29,17 +29,27 @@ export function LoadError({
   error,
   retry,
   back,
+  reading = "workloads and their runs",
+  needs = "workloads.view",
 }: {
   error: ApiError;
   retry?: () => void;
   back?: ReactNode;
+  /** What the call that failed was fetching, and which permission it needs.
+   *  Defaulted to the workloads themselves because that is most of this area,
+   *  and overridden where it is not: the promotion screen reads the connected
+   *  repositories, and telling somebody they need workloads.view when the
+   *  refusal came from environments.view sends them to ask for the wrong
+   *  thing. */
+  reading?: string;
+  needs?: string;
 }) {
   const denied = error.status === 403 || error.code === "FORBIDDEN";
   const missing = error.status === 404 || error.code === "NOT_FOUND";
   const disconnected = error.status === 0 || error.code === "NETWORK";
 
   const title = denied
-    ? "Your role cannot see workloads"
+    ? `Your role cannot see ${reading}`
     : missing
       ? "That is not here"
       : disconnected
@@ -47,7 +57,7 @@ export function LoadError({
         : "That did not load";
 
   const body = denied
-    ? "Reading workloads and their runs needs a role that holds workloads.view. Every role except viewer holds it, and an owner or an admin can change yours on the Members page."
+    ? `Reading ${reading} needs a role that holds ${needs}. An owner or an admin can change yours on the Members page.`
     : missing
       ? "The address names a workload or a run that does not exist, or one that belongs to another organization. A workload that has been archived is not here either."
       : disconnected

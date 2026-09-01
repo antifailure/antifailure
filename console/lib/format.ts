@@ -30,19 +30,31 @@ export function when(value: string | Date | null | undefined): string {
   });
 }
 
-/** How long ago, for the cases where recency is the question being asked. It
- *  goes beside an absolute time, never instead of one. */
+/**
+ * How long ago, or how long until. It goes beside an absolute time, never
+ * instead of one, because a relative time cannot be compared with a log line.
+ *
+ * The forward direction is not decoration. Every screen in this console used
+ * to show only times that had already happened, so a future instant came out
+ * of the abs() below as "-1h ago", which is not a phrase. The Load area shows
+ * a run's deadline, which is the first time in this product a person is asked
+ * to read a moment that has not arrived, and "Gives up at -1h ago" is worse
+ * than no answer: it reads as a rendering fault rather than as a time.
+ */
 export function ago(value: string | Date | null | undefined): string {
   if (!value) return "";
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  const s = Math.round((Date.now() - d.getTime()) / 1000);
-  if (Math.abs(s) < 60) return "just now";
+  const signed = Math.round((Date.now() - d.getTime()) / 1000);
+  const ahead = signed < 0;
+  const say = (n: number, unit: string) => (ahead ? `in ${n}${unit}` : `${n}${unit} ago`);
+  const s = Math.abs(signed);
+  if (s < 60) return ahead ? "in under a minute" : "just now";
   const m = Math.round(s / 60);
-  if (Math.abs(m) < 60) return `${m}m ago`;
+  if (m < 60) return say(m, "m");
   const h = Math.round(m / 60);
-  if (Math.abs(h) < 48) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
+  if (h < 48) return say(h, "h");
+  return say(Math.round(h / 24), "d");
 }
 
 export function usd(value: number | null | undefined): string {

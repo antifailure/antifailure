@@ -1262,16 +1262,6 @@ export function duration(msValue: number | null): string {
   return msValue < 60_000 ? ms(msValue) : seconds(msValue / 1000);
 }
 
-/** A size, or "--". Binary units, because that is what a file listing on the
- *  runner that produced it would have said. */
-export function bytes(value: number | null): string {
-  if (value === null) return "--";
-  const units = ["B", "KiB", "MiB", "GiB"];
-  let n = value;
-  let i = 0;
-  while (n >= 1024 && i < units.length - 1) {
-    n /= 1024;
-    i += 1;
-  }
-  return `${i === 0 ? n : n.toFixed(1)} ${units[i]}`;
-}
+// No bytes() here. `console/lib/format.ts` already has one, and two
+// declarations of one idea are two things that can drift apart while both look
+// authoritative. The evidence table imports that one.
