@@ -8,8 +8,14 @@ releases page.
 
 ## v1.0.0
 
-The first stable release. 577 commits since v0.1.1, 197 of them landings on
-`main`, over the four days from 26 August 2026.
+The first stable release, and the first since v0.1.1 on 26 August 2026.
+
+No commit count here on purpose. One was written down, and it was 577 with 197
+landings over four days, and it had drifted to 812 and 238 over seven before
+anybody looked. A figure in an unreleased section counts a tree that is still
+moving, so it is wrong from the moment it is written until the tag freezes it,
+and nothing checks it: `just figurecheck` reads the documentation and this file
+is not documentation.
 
 ### What 1.0 means, and what it does not
 

@@ -92,6 +92,13 @@ release](/docs/security/releases/) to the version at the top of the changelog.
 first: a tag whose section is missing or empty fails the release job, and by
 then the tag is pushed.
 
+Read the section you are about to publish for figures. Anything counted out of
+the tree, commits, landings, pages, days, is counted against a tree that was
+still moving when it was written, and `just figurecheck` does not read this
+file. The v1.0.0 section carried a commit count that had drifted by 40 percent
+before anybody looked. Either re-count it against the commit you are tagging or
+take it out.
+
 Nothing reads the fragments under `.changes/`, so they are the raw material and
 not the notes. Gather them into the changelog section by hand:
 
