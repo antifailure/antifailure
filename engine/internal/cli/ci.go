@@ -75,7 +75,8 @@ change.`),
 			// and names an environment, so refusing after building one is
 			// refusing after doing part of what was refused.
 			if fork := forkGate(e); fork.Refused {
-				return skippedRun(e, forkRun(e, branch, docsBase, fork), commentPath(e, output))
+				announceComment(e)
+				return skippedRun(e, forkRun(e, branch, docsBase, fork), output)
 			}
 
 			o, m, err := orchestratorWithManifest(e, branch)
@@ -86,7 +87,7 @@ change.`),
 			// here rather than at each of the three places a report is
 			// written, so the two exits from this command cannot disagree
 			// about whether there is a comment.
-			output = commentPath(e, output)
+			announceComment(e)
 			gate := report.Configure(m.Policy)
 			run := report.Run{
 				Environment: o.EnvID(), Branch: branchName(e, branch),

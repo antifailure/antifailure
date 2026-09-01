@@ -343,98 +343,127 @@ func TestForkGate_CoversEveryCommandThatTouchesAnEnvironment(t *testing.T) {
 // whatever the manifest said, and the workflow's own step posts whatever it
 // finds at that path.
 //
-// The stale file case is the one worth having a test for. `af change --write
-// report.md` runs BEFORE `af ci --report report.md` in the template, so a
-// version of this that merely skipped af ci's write would leave the change
-// analysis on disk and comment that instead. `comment: false` producing a
-// comment with the wrong contents is worse than the bug.
-func TestComment_FalseLeavesNoCommentToPost(t *testing.T) {
+// It is answered with a STEP OUTPUT rather than by suppressing the file, and
+// the first version of this did suppress the file. `github-lifecycle` caught
+// why that breaks: the hosted publish step builds its payload with
+// `jq --rawfile markdown report.md` while being gated on
+// `hashFiles('report.json')`, so a missing report.md does not skip that step,
+// it makes it FAIL. `comment: false` would have turned a quiet run into a red
+// one. The report is also the job summary and the payload a control plane is
+// sent; the setting means do not comment, not do not produce a report.
+func commentEnv(t *testing.T, dir string, actions bool) (map[string]string, string) {
+	t.Helper()
+	out := filepath.Join(dir, "outputs.txt")
+	env := prEnv(forkEvent(t, dir, "acme/shop"))
+	env["GITHUB_OUTPUT"] = out
+	if actions {
+		env["GITHUB_ACTIONS"] = "true"
+	}
+	return env, out
+}
+
+func outputs(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	require.NoError(t, err, "the engine has to write the answer somewhere the workflow can read it")
+	return string(body)
+}
+
+func TestComment_FalseTellsTheWorkflowNotToComment(t *testing.T) {
 	dir := forkRepo(t, "always", "always")
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"),
 		[]byte(strings.Replace(forkManifest("always"), "  mode: actions",
 			"  mode: actions\n  comment: false", 1)), 0o644))
 
-	out := filepath.Join(dir, "report.md")
-	require.NoError(t, os.WriteFile(out, []byte("<!-- antifailure:report -->\nstale\n"), 0o644),
-		"what af change --write left in the earlier step")
-
+	report := filepath.Join(dir, "report.md")
+	env, out := commentEnv(t, dir, true)
 	var stdout, stderr bytes.Buffer
-	env := prEnv(forkEvent(t, dir, "acme/shop"))
-	env["GITHUB_ACTIONS"] = "true"
-	Execute(context.Background(), []string{"ci", "--report", out}, Options{
+	Execute(context.Background(), []string{"ci", "--report", report}, Options{
 		Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader(""),
 		Getenv: func(k string) string { return env[k] },
 		Clock:  clock.New(), WorkDir: dir,
 	})
 
-	_, err := os.Stat(out)
-	require.True(t, os.IsNotExist(err),
-		"comment: false has to leave nothing for the workflow's comment step to find, "+
-			"including what an earlier step wrote")
+	require.Contains(t, outputs(t, out), "comment=false")
 	require.Contains(t, strings.Join(strings.Fields(stdout.String()+stderr.String()), " "),
 		"github.comment: false",
-		"a report that is not written has to say it was not written, or it reads as a crash")
+		"a decision nobody prints is a decision nobody can debug")
 }
 
-// The other direction, so the test above is not passing because af ci never
-// writes anything.
-func TestComment_TrueStillWritesTheReport(t *testing.T) {
+// The report file SURVIVES comment: false. This is the assertion that pins the
+// correction: suppressing it broke the hosted publish step, which reads
+// report.md while being gated on report.json.
+func TestComment_FalseStillLeavesTheReportOnDisk(t *testing.T) {
 	dir := forkRepo(t, "never", "never")
-	out := filepath.Join(dir, "report.md")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"),
+		[]byte(strings.Replace(forkManifest("never"), "  mode: actions",
+			"  mode: actions\n  comment: false", 1)), 0o644))
 
+	report := filepath.Join(dir, "report.md")
+	env, _ := commentEnv(t, dir, true)
+	env["GITHUB_EVENT_PATH"] = forkEvent(t, dir, "stranger/shop")
 	var stdout, stderr bytes.Buffer
-	env := prEnv(forkEvent(t, dir, "stranger/shop"))
-	env["GITHUB_ACTIONS"] = "true"
-	Execute(context.Background(), []string{"ci", "--report", out}, Options{
+	Execute(context.Background(), []string{"ci", "--report", report}, Options{
 		Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader(""),
 		Getenv: func(k string) string { return env[k] },
 		Clock:  clock.New(), WorkDir: dir,
 	})
 
-	body, err := os.ReadFile(out)
-	require.NoError(t, err)
+	body, err := os.ReadFile(report)
+	require.NoError(t, err,
+		"the report is the job summary and the control plane's payload too; "+
+			"a step that reads a file somebody deleted fails rather than skipping")
 	require.Contains(t, string(body), "antifailure:report")
 }
 
-// Outside Actions the setting is silent, because it is about a comment on a
-// pull request and `--report` on a workstation is somebody asking for a file
-// with a flag. A manifest reaching past an explicit flag to answer a question
-// nobody asked is its own kind of surprise.
-func TestComment_FalseDoesNotReachPastTheFlagOnAWorkstation(t *testing.T) {
+// comment: true is written too, not just omitted. A key that appears only when
+// it is false reads as an empty string in a workflow expression, and an empty
+// string is not "true" to somebody debugging at eleven at night. This is the
+// same argument writeChangeOutputs already makes for the plan.
+func TestComment_TrueIsWrittenRatherThanLeftOut(t *testing.T) {
+	dir := forkRepo(t, "never", "never")
+	env, out := commentEnv(t, dir, true)
+	env["GITHUB_EVENT_PATH"] = forkEvent(t, dir, "stranger/shop")
+	var stdout, stderr bytes.Buffer
+	Execute(context.Background(), []string{"ci"}, Options{
+		Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader(""),
+		Getenv: func(k string) string { return env[k] },
+		Clock:  clock.New(), WorkDir: dir,
+	})
+	require.Contains(t, outputs(t, out), "comment=true")
+}
+
+// af change writes the file that gets posted when nothing else runs, and it is
+// the step the workflow's condition reads, so it answers the same question.
+func TestComment_AfChangeAnswersTheSameQuestion(t *testing.T) {
 	dir := forkRepo(t, "always", "always")
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"),
 		[]byte(strings.Replace(forkManifest("always"), "  mode: actions",
 			"  mode: actions\n  comment: false", 1)), 0o644))
-
-	out := filepath.Join(dir, "report.md")
+	report := filepath.Join(dir, "report.md")
+	env, out := commentEnv(t, dir, true)
 	var stdout, stderr bytes.Buffer
-	Execute(context.Background(), []string{"ci", "--report", out}, Options{
+	Execute(context.Background(), []string{"change", "--write", report}, Options{
+		Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader(""),
+		Getenv: func(k string) string { return env[k] },
+		Clock:  clock.New(), WorkDir: dir,
+	})
+	require.Contains(t, outputs(t, out), "comment=false")
+	_, err := os.Stat(report)
+	require.NoError(t, err, "and its file survives too")
+}
+
+// Outside Actions the setting is silent, because it is about a comment on a
+// pull request and there is no GITHUB_OUTPUT to answer into.
+func TestComment_IsSilentOnAWorkstation(t *testing.T) {
+	dir := forkRepo(t, "always", "always")
+	report := filepath.Join(dir, "report.md")
+	var stdout, stderr bytes.Buffer
+	Execute(context.Background(), []string{"ci", "--report", report}, Options{
 		Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader(""),
 		Getenv: func(string) string { return "" },
 		Clock:  clock.New(), WorkDir: dir,
 	})
-	_, err := os.Stat(out)
-	require.NoError(t, err, "no GITHUB_ACTIONS, so there is no comment for the setting to be about")
-}
-
-// af change writes the same file in the earlier step, so it obeys the same
-// setting. This is the half that a fix confined to af ci would miss.
-func TestComment_FalseAlsoSilencesTheChangeAnalysis(t *testing.T) {
-	dir := forkRepo(t, "always", "always")
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"),
-		[]byte(strings.Replace(forkManifest("always"), "  mode: actions",
-			"  mode: actions\n  comment: false", 1)), 0o644))
-
-	out := filepath.Join(dir, "report.md")
-	var stdout, stderr bytes.Buffer
-	Execute(context.Background(), []string{"change", "--write", out}, Options{
-		Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader(""),
-		Getenv: func(k string) string {
-			return map[string]string{"GITHUB_ACTIONS": "true"}[k]
-		},
-		Clock: clock.New(), WorkDir: dir,
-	})
-	_, err := os.Stat(out)
-	require.True(t, os.IsNotExist(err),
-		"af change --write is what actually puts the first comment on a pull request")
+	_, err := os.Stat(report)
+	require.NoError(t, err)
 }

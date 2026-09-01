@@ -173,7 +173,16 @@ jobs:
 
       - name: Leave the report on the pull request
         # Always, because the report of a failing run is the one worth reading.
-        if: always() && hashFiles('report.md') != ''
+        #
+        # Except when the manifest says not to. `github.comment: false` is
+        # answered by the engine, which is the half that reads the manifest,
+        # and arrives here as a step output. Gating the step rather than
+        # suppressing report.md is deliberate: the file is also the job
+        # summary and the payload a control plane is sent, and a step that
+        # reads a file somebody deleted fails rather than skipping.
+        if: >-
+          always() && hashFiles('report.md') != ''
+          && steps.change.outputs.comment != 'false'
         uses: actions/github-script@v7
         with:
           script: |

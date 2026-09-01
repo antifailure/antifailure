@@ -39,9 +39,11 @@ approval until the next push. Without that line the instruction to add a label
 was itself a claim nothing acted on.
 
 Two more settings in the same block, found in the same pass. `github.comment:
-false` was never consulted, so turning comments off left them on; `af change
---write` and `af ci --report` now both honour it inside GitHub Actions, and the
-report file an earlier step wrote is removed rather than left to be posted.
+false` was never consulted, so turning comments off left them on. Both `af
+change` and `af ci` now write `comment=false` to `GITHUB_OUTPUT` and the
+workflow's comment step is gated on it. The report files are still written:
+the setting means do not comment, not do not produce a report, and the same
+`report.md` is the job summary and the payload a control plane is sent.
 And nothing reads `github.teardown_on`, which cannot be fixed rather than
 stated: teardown is unconditional in a workflow, and the control plane never
 reads your manifest. `af explain`, the guide and the reference now say so

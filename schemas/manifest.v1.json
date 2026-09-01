@@ -1494,7 +1494,7 @@
         "comment": {
           "type": "boolean",
           "default": true,
-          "description": "Whether to maintain a single comment on the pull request. It is updated in place rather than appended, so a busy pull request does not accumulate twenty bot comments. Set false and neither af change nor af ci writes the report file the workflow posts, when they run inside GitHub Actions."
+          "description": "Whether to maintain a single comment on the pull request. It is updated in place rather than appended, so a busy pull request does not accumulate twenty bot comments. Set false and af change and af ci write comment=false to GITHUB_OUTPUT for the workflow to gate its comment step on. The report files are still written, because the report is also the job summary and the payload a control plane is sent."
         },
         "fork_policy": {
           "type": "string",

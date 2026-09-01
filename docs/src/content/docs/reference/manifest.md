@@ -226,12 +226,13 @@ the base branch falls back to `label` and says so. See
 The control plane applies `label` behaviour to every repository regardless of
 what this says, and cannot do otherwise, for the reason in the next paragraph.
 
-**`comment: false`** stops `af change --write` and `af ci --report` writing the
-file your workflow posts, when they run inside GitHub Actions. It removes a
-file an earlier step already wrote, because a suppressed comment that leaves
-the change analysis behind would comment the wrong thing rather than nothing.
-Outside Actions the flag wins, since there is no pull request for the setting
-to be about.
+**`comment: false`** makes `af change` and `af ci` write `comment=false` to
+`GITHUB_OUTPUT`, and the workflow's comment step is gated on it. The report
+files are still written. That is the distinction the setting draws: do not
+comment, not do not produce a report. The same `report.md` is the job summary
+and the payload a control plane is sent, and a publish step that reads a file
+somebody deleted fails rather than skipping. Outside GitHub Actions there is no
+pull request for the setting to be about and nothing changes.
 
 **`mode` and `teardown_on` are read by `af explain` only**, and that is worth
 being blunt about rather than leaving somebody to find out by setting one.

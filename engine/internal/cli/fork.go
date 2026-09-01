@@ -249,22 +249,50 @@ func commentEnabled(e *Env) bool {
 	return *m.GitHub.Comment
 }
 
-// commentPath is the file a report should be written to, or empty when the
-// manifest has asked for no comment.
+// announceComment tells the workflow whether to leave a comment.
 //
-// It removes a file that is already there, which is not tidiness. The workflow
-// writes the change analysis to the same path in an earlier step and posts
-// whatever it finds, so leaving a stale file behind would turn `comment: false`
-// into "comment, with the wrong contents", which is worse than the bug being
-// fixed.
-func commentPath(e *Env, output string) string {
-	if output == "" || commentEnabled(e) {
-		return output
+// A STEP OUTPUT rather than suppressing the report file, and the first version
+// of this did suppress the file. `github-lifecycle` caught why that is wrong
+// and the reason is concrete rather than stylistic: the hosted publish step
+// builds its payload with `jq --rawfile markdown report.md` while being gated
+// on `hashFiles('report.json')`, so a missing report.md does not skip that
+// step, it makes it fail. `comment: false` would have turned a quiet run into
+// a red one, which is the opposite of what somebody setting it asked for.
+//
+// The wider principle, which is why this is the better shape anyway:
+// `comment: false` means DO NOT COMMENT, not DO NOT PRODUCE A REPORT. The
+// report is consumed by the job summary, by the control plane and by anybody
+// reading the artifact, and none of those is a comment. Deciding in the engine
+// and gating in the workflow keeps the setting meaning what it says and leaves
+// every consumer intact.
+//
+// The precedent is `af change`, which already writes its plan to GITHUB_OUTPUT
+// at writeChangeOutputs, so a workflow step can read a decision the engine
+// made. Written on every run including when it is true, for the same reason
+// that function gives: a key that appears only when it is false reads as an
+// empty string in a workflow expression, and an empty string is not `true` to
+// somebody debugging at eleven at night.
+func announceComment(e *Env) {
+	path := e.Getenv("GITHUB_OUTPUT")
+	if path == "" {
+		return
 	}
-	if err := os.Remove(output); err != nil && !os.IsNotExist(err) {
-		e.Out.Printf("  could not remove %s, which github.comment: false asked for: %v\n", output, err)
-		return ""
+	value := "true"
+	if !commentEnabled(e) {
+		value = "false"
+		e.Out.Printf("  no comment will be left, because the manifest sets github.comment: false\n")
 	}
-	e.Out.Printf("  no comment written, because the manifest sets github.comment: false\n")
-	return ""
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644) //nolint:gosec // the runner chose this path
+	if err != nil {
+		// Said rather than swallowed. A workflow reading an output nobody
+		// wrote sees an empty string, and the condition below treats anything
+		// that is not "false" as a comment, so the failure is toward leaving
+		// one. That is the safe direction and it is still worth reporting.
+		e.Out.Printf("  could not write comment to GITHUB_OUTPUT: %v\n", err)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	if _, wErr := f.WriteString("comment=" + value + "\n"); wErr != nil {
+		e.Out.Printf("  could not write comment to GITHUB_OUTPUT: %v\n", wErr)
+	}
 }
