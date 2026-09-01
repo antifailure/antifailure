@@ -905,6 +905,7 @@ _generated:
     go run ./tools/errgen
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
+    go run ./tools/notices -out THIRD_PARTY_NOTICES.md
     (cd engine && go test ./internal/policy -update-vectors)
     (cd engine && go test ./internal/mockpack -update-vectors)
     (cd engine && go test ./internal/webhook -update-vectors)
@@ -913,6 +914,7 @@ _generated:
     (cd engine && go test ./internal/masking -update-transforms)
     (cd engine && go test ./internal/hud -update-frames)
     git diff --exit-code -- \
+      THIRD_PARTY_NOTICES.md \
       engine/internal/errors/codes.gen.go \
       docs/src/content/docs/reference/errors.md \
       engine/internal/proxyimage/sources.gen.go \
@@ -931,6 +933,7 @@ generate:
     go run ./tools/errgen
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
+    go run ./tools/notices -out THIRD_PARTY_NOTICES.md
     cd engine && go test ./internal/policy -update-vectors
     cd engine && go test ./internal/mockpack -update-vectors
     cd engine && go test ./internal/webhook -update-vectors

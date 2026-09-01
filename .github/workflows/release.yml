@@ -79,7 +79,17 @@ jobs:
         # hand. MIT does not require a NOTICE file, but the Apache licensed
         # dependencies still require attribution, and a stale list attributes
         # the wrong people.
-        run: go run ./tools/notices > THIRD_PARTY_NOTICES.md
+        #
+        # This overwrites the committed copy, so what a release publishes has
+        # always been the fresh one. For a long time that was the only place
+        # the generator ran, which meant the committed file was free to drift
+        # and did: it was 49 modules behind by the time anybody looked, and it
+        # is what a reader of the repository sees. ci.yml now regenerates it on
+        # every pull request and fails on a difference, so this step and that
+        # one should agree. It stays here anyway, because a release that
+        # depends on a gate having run is a release that ships whatever the
+        # gate missed.
+        run: go run ./tools/notices -out THIRD_PARTY_NOTICES.md
 
       - name: Checksums
         run: |
