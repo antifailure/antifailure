@@ -79,7 +79,12 @@ export function Twins() {
                 <h3 className="mt-3 text-base font-medium tracking-tight text-black max-lg:mt-2.5 max-lg:text-[14px]">
                   {item.title}
                 </h3>
-                <p className="mt-2 text-base tracking-tight text-gray-new-50 max-lg:text-[14px] max-md:mt-1.5">
+                {/* gray-new-50 measured 3.85:1 on the page ground, and the max-lg step
+                    put this at 14px on a phone. Both are floors this project sets
+                    for itself and both were missed on the same line. These three are
+                    claims about what the twin cannot do, so they are prose a reader
+                    is meant to finish rather than labels inside a drawing. */}
+                <p className="mt-2 text-base tracking-tight text-gray-new-40 max-lg:text-[15px] max-md:mt-1.5 max-md:text-base">
                   {item.description}
                 </p>
               </li>
