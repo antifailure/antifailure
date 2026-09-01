@@ -688,7 +688,7 @@ export function PAR01() {
           { label: "CLEANUP" },
         ]}
       />
-      <p className="mt-auto pt-2 font-mono text-[11px] text-black/45">outbound-only · short-lived mTLS</p>
+      <p className="mt-auto pt-2 font-mono text-[11px] text-black/45">outbound-only · bearer token over TLS</p>
     </FigureFrame>
   );
 }
