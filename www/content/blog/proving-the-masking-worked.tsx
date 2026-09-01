@@ -104,6 +104,16 @@ export const MASKING_ATTESTATION: Post = {
         advance.
       </p>
       <p>
+        Every column, and a sample of the rows. The scan takes up to two
+        thousand rows per column by default and the attestation records the
+        number it used, so what it proves is bounded and the bound is written
+        down. That is a deliberate trade and it is worth saying out loud rather
+        than leaving in the code: the failure this is built to catch is a rule
+        that missed a column entirely, which shows up in the first hundred rows,
+        and a full read of a wide schema turns seconds into minutes. A single
+        real value hiding in one row out of a million is not what this finds.
+      </p>
+      <p>
         It then signs an attestation, which turns the result into something that
         can be checked later rather than a line in a log that scrolled past.
       </p>
