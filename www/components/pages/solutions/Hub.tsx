@@ -64,7 +64,7 @@ export function SolutionsHubPage() {
 
       <RelatedGrid
         items={[
-          { href: "/signup", title: "Sign up", description: "Join the waitlist." },
+          { href: "/signup", title: "Request access", description: "Invitation only. Join the list if you have not been invited." },
           { href: "/product/migrations", title: "Migration Safety", description: "The failure mode these teams feel first." },
           { href: "/product", title: "Product", description: "How a twin run actually decides." },
         ]}

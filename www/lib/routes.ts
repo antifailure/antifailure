@@ -290,14 +290,24 @@ export const ROUTES: readonly Route[] = [
     parent: "/terms",
   },
 
-  // Utility. Real pages, deliberately not in the index: they are a waitlist
-  // form with nothing to rank for, and indexing them spends crawl budget that
-  // belongs to the product pages.
+  // Utility. Real pages, deliberately not in the index: a sign-in form and a
+  // waitlist have nothing to rank for, and indexing them spends crawl budget
+  // that belongs to the product pages.
+  //
+  // These two entries said "Join the waitlist" and "There is no hosted control
+  // plane yet" for as long as there was one. The pages themselves had already
+  // been corrected, so an invited customer following the header got a tab, a
+  // bookmark and a shared link all telling them they were being turned away,
+  // while the page under them offered a working GitHub button. The title is the
+  // one piece of copy a person reads before the page renders and the only piece
+  // that survives being sent to somebody else, so it is the last place a stale
+  // claim should be allowed to sit.
   {
     path: "/signin",
-    title: pageTitle("Join the waitlist"),
-    description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
-    summary: "Waitlist form.",
+    title: pageTitle("Sign in"),
+    description:
+      "The hosted control plane is invitation only while it is in development. Sign in with GitHub if your account has been invited.",
+    summary: "Sign in to the hosted control plane, or ask to be told when it opens.",
     section: "utility",
     indexable: false,
     priority: 0.1,
@@ -305,9 +315,10 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/signup",
-    title: pageTitle("Join the waitlist"),
-    description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
-    summary: "Waitlist form.",
+    title: pageTitle("Request access"),
+    description:
+      "The hosted control plane is invitation only while it is in development. Sign in with GitHub if you have been invited, or leave an address and we will tell you when it opens. The engine is open source and runs on your own machine today.",
+    summary: "Ask for access to the hosted control plane. The engine needs none of it.",
     section: "utility",
     indexable: false,
     priority: 0.1,

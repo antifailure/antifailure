@@ -92,7 +92,7 @@ export function PageHero({
             {actions ?? (
               <>
                 <Button href="/signup" theme="filled">
-                  Get started
+                  Request access
                 </Button>
                 <Button href="/docs" theme="outlined">
                   Read the docs

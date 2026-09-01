@@ -33,7 +33,7 @@ const SHEETS: Record<
     points: [
       "Planned open-source surface: customer agent, local CLI, Postgres adapter, sanitization, egress gateway, simulators, cleanup controller.",
       "The installer is one command and the engine runs entirely on your machine.",
-      "Join the waitlist if you want the control plane to connect a repo.",
+      "The hosted control plane is invitation only. Request access if you want it to connect a repository.",
     ],
     cta: "cli",
   },
@@ -138,7 +138,7 @@ export function ContentSheet({
             href="/signup"
             className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-full bg-black text-[13px] font-medium text-white"
           >
-            Sign up
+            Request access
           </a>
         ) : null}
         {sheet.cta === "migration" ? (
