@@ -143,6 +143,7 @@ function inputsFor(org: Org): Record<string, unknown> {
     'deletion.advance': {},
     'deletion.cancel': {},
     'deletion.destroyExport': {},
+    'account.context': {},
     // Deliberately not anybody's login, for the same reason.
     'account.close': { confirm: 'not-your-login' },
   }
