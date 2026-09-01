@@ -181,6 +181,19 @@ workflows:
       - "Repository"
       - "Branch"
       - "State"
+      # The one word on this page that exists only when the table rendered, and
+      # the reason this workflow now means anything. The three above are all
+      # chrome: "Repository" and "Branch" label the fields of the "Ask for an
+      # environment" form and "State" heads a column of the runtimes table, so
+      # renaming the `environments` table out from under the page left every
+      # one of them on screen and the workflow passed over a card reading
+      # "That did not load".
+      #
+      # On its own rather than in a phrase, and that is forced. The checker
+      # takes the meaningful words of an expectation and needs two thirds of
+      # them, so "Branch State Created" scores two out of three on the broken
+      # page and passes. One word that is absent scores zero.
+      - "Created"
     tags: [smoke]
 
   - name: open-a-run
@@ -193,6 +206,13 @@ workflows:
       - "Recent runs"
       - "Environment"
       - "Verdicts"
+      # Two column headings the runs table alone carries, for the reason given
+      # on `Created` above. "Recent runs" is a card title, "Environment" labels
+      # a field of the "Start a run" form, and "Verdicts" is in this page's own
+      # lede, "A run with failing verdicts is one that found something", so all
+      # three survived the table being renamed away and the workflow passed
+      # over a card reading "That did not load".
+      - "Kind Started"
     tags: [smoke]
 
   - name: edit-a-network-policy
@@ -215,6 +235,17 @@ workflows:
       # branched golden is proposed and none is approved, so the effective
       # policy is empty and says so.
       - "None of these is being enforced anywhere until it is approved"
+      # A column heading the approval queue alone carries, so that the workflow
+      # breaks when the queue does. Everything else it names is chrome: two
+      # card titles and a card note, all of which render whether or not the
+      # rules loaded, so renaming `network_rules` away left the page showing
+      # "That did not load" twice and the workflow still passed.
+      #
+      # This does tie the workflow to the golden holding at least one proposed
+      # rule. That is the right dependency rather than a fragile one: an empty
+      # queue means the page cannot show what this workflow says it shows, and
+      # saying so is better than passing over it.
+      - "Scope"
     tags: [policy]
 
   - name: read-the-audit-log
@@ -245,6 +276,9 @@ workflows:
       # role is asserted through the sentence the console shows exactly when
       # the propose form and the approve column are withheld.
       - "Approving an egress change needs owner or admin"
+      # The queue's own heading, for the reason on the owner's workflow above.
+      # The viewer sees the same table without its Approve column.
+      - "Scope"
     tags: [policy, rbac]
 
 invariants:
