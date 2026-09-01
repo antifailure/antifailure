@@ -895,6 +895,10 @@ export function DataRetentionPage() {
                 "The audit log",
                 "Entries about an organization are removed with the organization. They are not removed individually, for the chaining reason above.",
               ],
+              [
+                "A person who asks to be removed",
+                "Their personal fields are erased and the account row is kept. The row is kept by choice, not because the database refuses: the audit log references it with ON DELETE SET NULL and the delete would succeed. What it would also do is set a column that is inside the hash chain to null, so every entry that person ever wrote would stop hashing to its recorded hash and the organization's audit log would report itself as altered. Erasing the fields removes the personal data; deleting the row would remove the ability to prove nothing else had been changed.",
+              ],
             ]}
           />
         </div>

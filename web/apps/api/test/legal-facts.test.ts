@@ -252,9 +252,23 @@ describe('the deletion wording matches what the schema actually does', () => {
   const IRREMOVABLE = [
     /cannot be removed/i,
     /cannot be deleted/i,
-    /the row is retained so the audit/i,
     /refuses to delete a person/i,
   ]
+  // `/the database refuses/` was in this list and is not, because a substring
+  // cannot tell a claim from its negation. The accurate sentence on the page
+  // reads "not because the database refuses", and the pattern matched it, so
+  // the gate refused the true wording and would have pushed whoever hit it
+  // toward the false one. That is worse than not gating the phrase at all.
+  //
+  // A lookbehind would paper over this one sentence and fail on the next
+  // phrasing. The three patterns left are ones whose negations nobody writes:
+  // there is no natural sentence containing "cannot be removed" that means the
+  // row can be. This is the boundary the header calls out, met in practice.
+  // NOT in that list, deliberately: wording that says the row is KEPT, or
+  // retained, or not removed by choice. That is the weak claim and it is the
+  // true one. An earlier version matched "the row is retained so the audit",
+  // which would have refused the accurate sentence and pushed whoever hit it
+  // toward the inaccurate one, which is the opposite of the point.
 
   /** What the migrations say happens to an audit entry when its actor goes. */
   async function onDeleteForActor(): Promise<string | null> {
