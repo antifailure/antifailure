@@ -165,7 +165,15 @@ is a bug nobody fixes.`),
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&out, "output", "o", "", "Where to write the bundle")
+	// --archive rather than --output, and no shorthand, for the reason set out
+	// at the same line in oracle.go. Proven rather than reasoned about:
+	// `af support bundle -o json` wrote a zip archive to a file called `json`
+	// and exited 0, while BundleJSON below could never be reached.
+	//
+	// --archive rather than --report, because what this writes is a zip and
+	// naming it after what it is beats matching a sibling's word for something
+	// else.
+	cmd.Flags().StringVar(&out, "archive", "", "Where to write the bundle")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to collect, defaulting to the checked out one")
 	return cmd
 }

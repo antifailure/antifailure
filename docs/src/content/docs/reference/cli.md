@@ -1429,7 +1429,7 @@ af oracle --baseline origin/main --fail-on any
 | `--branch` | - | Branch to compare, defaulting to the checked out one. |
 | `--fail-on` | - | Lowest severity that fails the command: none, minor, major, or critical. |
 | `--keep` | `false` | Leave the baseline environment up, for looking at a difference. |
-| `-o`, `--output` | - | Write the report here as well as to the terminal. |
+| `--report` | - | Write the report here as well as to the terminal. |
 
 ### `af provider`
 
@@ -1803,13 +1803,13 @@ af support bundle [flags]
 ```
 # Redacted on the way in, with a list of what it included.
 af support bundle
-af support bundle --output af-support.zip
+af support bundle --archive af-support.zip
 ```
 
 | Flag | Default | What it does |
 | --- | --- | --- |
+| `--archive` | - | Where to write the bundle. |
 | `--branch` | - | Branch to collect, defaulting to the checked out one. |
-| `-o`, `--output` | - | Where to write the bundle. |
 
 ### `af test`
 

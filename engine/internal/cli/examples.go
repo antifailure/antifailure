@@ -180,7 +180,7 @@ var commandExamples = map[string]string{
 	"af support bundle": "" +
 		"# Redacted on the way in, with a list of what it included.\n" +
 		"af support bundle\n" +
-		"af support bundle --output af-support.zip",
+		"af support bundle --archive af-support.zip",
 	"af test": "" +
 		"af test\n" +
 		"af test --only checkout --headed",
