@@ -18,6 +18,8 @@ const (
 	AFAGT005 Code = "AF-AGT-005"
 	// The {provider} endpoint could not be reached: {detail}
 	AFAGT006 Code = "AF-AGT-006"
+	// No workflow reached a verdict about the application: {detail}
+	AFAGT007 Code = "AF-AGT-007"
 	// Invariant {invariant} did not finish within {timeout}.
 	AFAGT010 Code = "AF-AGT-010"
 	// Invariant {invariant} is not read only.
@@ -399,6 +401,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/model-keys",
 		Retryable: true,
 		ExitCode:  ExitProvider,
+	},
+	AFAGT007: {
+		Code:      AFAGT007,
+		Area:      "AGT",
+		Message:   "No workflow reached a verdict about the application: {detail}",
+		NextStep:  "Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet.",
+		Docs:      "concepts/verdicts",
+		Retryable: false,
+		ExitCode:  ExitInterruptedClean,
 	},
 	AFAGT010: {
 		Code:      AFAGT010,

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Every budget names a step some phase or step actually produces.
@@ -390,4 +392,97 @@ func TestLeakCheck_NotSweptIsNotClean(t *testing.T) {
 	if len(named.Leaked) != 0 {
 		t.Errorf("leaked %v, want none", named.Leaked)
 	}
+}
+
+// The nightly corpus is every example, and only examples that exist.
+//
+// Both halves have been wrong at once. The matrix named examples/orders-api and
+// examples/rails-shop, neither of which has ever been a directory, and left out
+// examples/django-api and examples/next-app, which have manifests and had never
+// been run by anything. Nothing read the matrix value either, so all three legs
+// ran the repository root under three example names.
+//
+// A name with nothing behind it is worse than a missing one: the leg is titled
+// after an example and reports on something else, or skips and reports success
+// over nothing at all.
+func TestTheNightlyCorpusIsEveryExample(t *testing.T) {
+	root := filepath.Join("..", "..")
+
+	var workflow struct {
+		Jobs map[string]struct {
+			Strategy struct {
+				Matrix struct {
+					Manifest []string `yaml:"manifest"`
+				} `yaml:"matrix"`
+			} `yaml:"strategy"`
+		} `yaml:"jobs"`
+	}
+	body, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "dogfood.yml"))
+	if err != nil {
+		t.Fatalf("could not read the workflow: %v", err)
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatalf("could not parse the workflow: %v", err)
+	}
+	named := workflow.Jobs["nightly"].Strategy.Matrix.Manifest
+	if len(named) == 0 {
+		t.Fatal("the nightly job names no manifests, so the corpus runs on nothing")
+	}
+
+	inMatrix := map[string]bool{}
+	for _, m := range named {
+		inMatrix[m] = true
+		if _, err := os.Stat(filepath.Join(root, m, "antifailure.yaml")); err != nil {
+			t.Errorf("the nightly matrix names %s and %s/antifailure.yaml does not exist, "+
+				"so that leg is named after an example it cannot run", m, m)
+		}
+	}
+
+	found, err := filepath.Glob(filepath.Join(root, "examples", "*", "antifailure.yaml"))
+	if err != nil {
+		t.Fatalf("could not look for examples: %v", err)
+	}
+	if len(found) == 0 {
+		t.Fatal("no example carries a manifest, which cannot be right")
+	}
+	for _, m := range found {
+		dir := filepath.ToSlash(filepath.Join("examples", filepath.Base(filepath.Dir(m))))
+		if !inMatrix[dir] {
+			t.Errorf("%s has a manifest and the nightly matrix leaves it out, "+
+				"so nothing has ever run it", dir)
+		}
+	}
+}
+
+// The nightly makes a golden before it asks for one.
+//
+// It never did, and the first scheduled run in the repository's history reached
+// `af ci` and got AF-DB-012 on all three legs. The control plane job refreshes
+// one in a step of its own; this job has no such step, so the refresh has to
+// come through the harness. Either shape satisfies this, because what matters
+// is that a golden exists and not which line makes it.
+func TestTheNightlyMakesAGoldenBeforeItRunsThePipeline(t *testing.T) {
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "dogfood.yml"))
+	if err != nil {
+		t.Fatalf("could not read the workflow: %v", err)
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatalf("could not parse the workflow: %v", err)
+	}
+
+	for _, s := range workflow.Jobs["nightly"].Steps {
+		if strings.Contains(s.Run, "--refresh-golden") ||
+			strings.Contains(s.Run, "golden refresh") {
+			return
+		}
+	}
+	t.Error("no step in the nightly job refreshes a golden, so every leg reaches " +
+		"af ci with none and fails with AF-DB-012")
 }
