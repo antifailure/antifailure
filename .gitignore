@@ -126,6 +126,7 @@ runner/artifacts/
 # line here and no reason recorded for not having one, and
 # TestNoCompiledBinaryIsTracked remains the backstop for when one lands anyway.
 /azguard
+/changecheck
 /claimcheck
 /classcheck
 /constcheck
