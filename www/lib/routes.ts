@@ -101,7 +101,7 @@ export const ROUTES: readonly Route[] = [
     path: "/product/load",
     title: pageTitle("Load"),
     description:
-      "Traffic shaped like production's own, read from a trace export or an access log, sent at the twin and compared against the p95 production serves each route in.",
+      "Traffic shaped like production's own, read from a trace export or an access log, sent at the twin and compared against the p95 a trace export carries for each route.",
     summary:
       "Where the traffic shape comes from, which routes are sent, and what a regression is measured against.",
     section: "product",

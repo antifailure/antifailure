@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "next dev -p 3100",
     "build": "next build",
+    "test": "node --test lib/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

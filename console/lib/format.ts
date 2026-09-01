@@ -30,19 +30,32 @@ export function when(value: string | Date | null | undefined): string {
   });
 }
 
-/** How long ago, for the cases where recency is the question being asked. It
- *  goes beside an absolute time, never instead of one. */
+/**
+ * How far away in time, in the direction it actually lies. It goes beside an
+ * absolute time, never instead of one.
+ *
+ * It says "in 30d" as well as "30d ago", and that is a fix rather than a
+ * flourish. This was written when every caller passed something that had
+ * already happened: a creation, an occurrence, a rotation. The Math.abs guards
+ * chose the right unit for a negative interval and then printed the number
+ * still signed, with "ago" after it, so the first caller to pass a future date
+ * rendered "-30d ago". That caller is the renewal date on the Plan page, which
+ * is the line telling somebody paying for this when they will next be charged.
+ */
 export function ago(value: string | Date | null | undefined): string {
   if (!value) return "";
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   const s = Math.round((Date.now() - d.getTime()) / 1000);
   if (Math.abs(s) < 60) return "just now";
-  const m = Math.round(s / 60);
-  if (Math.abs(m) < 60) return `${m}m ago`;
+  // Decided once, from the sign, before any rounding can lose it.
+  const past = s > 0;
+  const say = (n: number, unit: string) => (past ? `${n}${unit} ago` : `in ${n}${unit}`);
+  const m = Math.abs(Math.round(s / 60));
+  if (m < 60) return say(m, "m");
   const h = Math.round(m / 60);
-  if (Math.abs(h) < 48) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
+  if (h < 48) return say(h, "h");
+  return say(Math.round(h / 24), "d");
 }
 
 export function usd(value: number | null | undefined): string {

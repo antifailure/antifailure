@@ -385,6 +385,32 @@ type Breach struct {
 	Detail   string  `json:"detail"`
 }
 
+// InertP95 reports a p95_increase threshold that was evaluated against
+// nothing.
+//
+// Breaches skips every route with no baseline, which is right: comparing
+// against nothing and calling the answer a regression is how a check becomes
+// noise. But when NO route has one, the whole threshold was inert, and a run
+// that reports green having compared nothing is a check everybody believes is
+// running. The manifest refuses the combination that guarantees this, so what
+// reaches here is the case the manifest cannot see: the default p95_increase
+// under a source that carries no durations, or a trace export whose routes
+// were all too thin to earn a baseline.
+//
+// A run that sent nothing is a different problem and says so elsewhere, so it
+// is not reported as an inert threshold as well.
+func (r *Result) InertP95(p95Increase float64) bool {
+	if p95Increase <= 0 || len(r.Routes) == 0 {
+		return false
+	}
+	for _, route := range r.Routes {
+		if route.HasBaseline {
+			return false
+		}
+	}
+	return true
+}
+
 // Breaches reports which thresholds a result exceeded.
 //
 // A route with no baseline is never a breach. Comparing against nothing and

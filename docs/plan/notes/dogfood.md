@@ -77,11 +77,16 @@ copied a real customer's database into a public runner would be the single
 worst thing this repository could do, and what the masking rules are about is
 the schema's shape rather than anybody's rows.
 
-**On a schedule**, the corpus, with a load smoke. Both jobs set
-`AF_MODEL_MODE=replay`, so the spend is zero and stays zero: a cassette miss
-refuses rather than calling a model or quietly falling back to the
-deterministic planner. The one job in this repository that spends money on a
-model is the nightly smoke that already existed.
+**On a schedule**, the corpus, with a load smoke. Neither job sets a model key,
+and no job in this repository does, so the spend is zero because there is
+nothing to spend it with: the agents run on the deterministic planner. Both
+jobs used to set `AF_MODEL_MODE=replay` and to claim that a cassette miss
+refuses rather than falling back to that planner. Nothing has ever read
+`AF_MODEL_MODE`, the variables the runner reads are `AF_MODEL_CASSETTE` and
+`AF_MODEL_CASSETTE_MODE`, no recording exists at any revision to replay, and
+the nightly smoke that was said to spend money on a model is not in this
+repository either. Three claims and a spend control, none of them real. The
+variable is gone.
 
 **The comment job** is the only one in the file that can write, and it is
 skipped entirely for a pull request from a fork, because a token that can post

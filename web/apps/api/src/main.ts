@@ -26,6 +26,7 @@ import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
 import { RealStripeClient, stripeConfigFrom } from './billing/index.ts'
+import { githubAppInstallUrlFrom, hostedRequiredPlanFrom } from './hosted.ts'
 
 function required(name: string, ...fallbacks: string[]): string {
   for (const n of [name, ...fallbacks]) {
@@ -173,6 +174,27 @@ console.log(`model prices configured for ${Object.keys(modelPrices).length} mode
 const stripe = stripeConfigFrom(process.env)
 console.log(stripe.summary)
 
+let hostedRequiredPlan
+let githubAppInstallUrl
+try {
+  hostedRequiredPlan = hostedRequiredPlanFrom(process.env.AF_HOSTED_REQUIRED_PLAN)
+  githubAppInstallUrl = githubAppInstallUrlFrom(process.env.AF_GITHUB_APP_INSTALL_URL)
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err))
+  process.exit(2)
+}
+if (hostedRequiredPlan && !stripe.config) {
+  console.error(
+    'AF_HOSTED_REQUIRED_PLAN is set but billing is off. Configure all four Stripe variables so an organization can satisfy the gate.',
+  )
+  process.exit(2)
+}
+console.log(
+  hostedRequiredPlan
+    ? `hosted access requires the ${hostedRequiredPlan} plan`
+    : 'no hosted plan gate: this installation serves every plan',
+)
+
 // Located once, here, and said out loud either way. A control plane running
 // without its console is a legitimate way to run this; a control plane that
 // silently answers 404 on every page because a COPY was dropped from a
@@ -192,6 +214,8 @@ const { app, ingestLimiter, authLimiter } = createServer({
   stripe: stripe.config
     ? { config: stripe.config, client: new RealStripeClient(stripe.config) }
     : null,
+  hostedRequiredPlan,
+  githubAppInstallUrl,
   modelPrices,
   consoleBuild,
   githubApi,

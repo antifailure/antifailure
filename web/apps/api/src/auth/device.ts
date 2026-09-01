@@ -434,6 +434,7 @@ export interface CliIdentity {
    *  rather than to "a terminal". */
   userId: string
   role: string
+  plan: string
   scopes: string[]
   expiresAt: Date | null
   tokenPrefix: string
@@ -491,8 +492,9 @@ export async function identify(
       name: string | null
       slug: string
       role: string
+      plan: string
     }>(sql`
-      SELECT u.github_login, u.name, o.slug, m.role
+      SELECT u.github_login, u.name, o.slug, o.plan, m.role
       FROM users u
       JOIN members m ON m.user_id = u.id AND m.org_id = ${found.org_id}::uuid
       JOIN organizations o ON o.id = m.org_id
@@ -509,6 +511,7 @@ export async function identify(
       orgSlug: row.slug,
       userId: found.user_id!,
       role: row.role,
+      plan: row.plan,
       scopes: found.scopes,
       expiresAt: found.expires_at ? asDate(found.expires_at) : null,
       tokenPrefix: found.prefix,

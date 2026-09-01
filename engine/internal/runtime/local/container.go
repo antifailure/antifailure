@@ -205,10 +205,22 @@ func ingressName(envID, service string) string {
 
 // startIngress publishes a service on the host's loopback.
 //
-// The order is load bearing: the container is created on the edge network with
-// the port binding, then attached to the inner network, and only then started.
-// Started first, the forwarder cannot resolve the service's name yet and exits
-// immediately, which looks exactly like a service that never came up.
+// The port was reserved before any service started, so that the service could
+// be told its own address, and the daemon binds it here, after that service has
+// been built and started. Anything else on the machine can take it in between,
+// which is the half of the race the allocator cannot close and this loop is the
+// other half of. A conflict is retried on a fresh port rather than reported,
+// because the situation is transient by construction and reporting it turns a
+// port bump into a failed `af up`. Anything that is not a conflict, a
+// permission refusal or an unreachable daemon, surfaces on the first attempt
+// rather than being retried into a longer wait for the same answer.
+//
+// A retry moves the address, and the containers already created were told the
+// old one in AF_PUBLIC_URL and AF_ENV_URL, so those two go stale. That is worth
+// it against the whole environment failing, and it is as far as the staleness
+// reaches: the address `af up` prints comes from this function's answer and the
+// one `af status` prints is read back off the forwarder itself, so only a
+// variable baked into a container at creation can name the port that was lost.
 func (r *Runtime) startIngress(
 	ctx context.Context,
 	spec provider.EnvSpec,
@@ -229,23 +241,62 @@ func (r *Runtime) startIngress(
 		}
 	}
 
-	// The port was reserved before any service started, so that the service
-	// could be told its own address. Falling back to allocating one here keeps
-	// a caller that did not reserve working.
+	// Falling back to allocating one here keeps a caller that did not reserve
+	// working.
 	hostPort, reserved := spec.PublicPorts[s.Name]
-	if !reserved {
-		var err error
-		hostPort, err = r.ports.Free()
-		if err != nil {
+	for attempt := 0; ; attempt++ {
+		if !reserved {
+			var err error
+			hostPort, err = r.ports.Free()
+			if err != nil {
+				return 0, err
+			}
+		}
+		err := r.createIngress(ctx, spec, s, nets, name, hostPort)
+		if err == nil {
+			// Written back so that the caller's own record of the address, and
+			// every service created after this one, name the port the daemon
+			// actually bound rather than the one that was asked for.
+			if spec.PublicPorts != nil {
+				spec.PublicPorts[s.Name] = hostPort
+			}
+			return hostPort, nil
+		}
+		if !dockerutil.IsPortTaken(err) {
+			r.ports.Release(hostPort)
 			return 0, err
 		}
+		// Not released: something else on the machine holds it, so handing it
+		// out again is the one thing that cannot work. The next attempt asks
+		// the allocator for a port it has not handed out and the kernel says
+		// nothing is listening on.
+		if attempt >= dockerutil.PortRetries {
+			return 0, err
+		}
+		reserved = false
 	}
-	release := func() { r.ports.Release(hostPort) }
+}
 
+// createIngress makes one attempt to publish a service on hostPort.
+//
+// The order is load bearing: the container is created on the edge network with
+// the port binding, then attached to the inner network, and only then started.
+// Started first, the forwarder cannot resolve the service's name yet and exits
+// immediately, which looks exactly like a service that never came up.
+//
+// A failed attempt leaves nothing behind, because the name is deterministic and
+// the next attempt's create would collide with the container this one made.
+func (r *Runtime) createIngress(
+	ctx context.Context,
+	spec provider.EnvSpec,
+	s provider.ServiceSpec,
+	nets networks,
+	name string,
+	hostPort int,
+) error {
 	port, err := nat.NewPort("tcp", strconv.Itoa(s.Port))
 	if err != nil {
-		release()
-		return 0, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
+		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 	labels := r.managed(dockerutil.KindSidecar, spec.EnvID)
 	labels[dockerutil.LabelService] = s.Name
@@ -273,21 +324,26 @@ func (r *Runtime) startIngress(
 			EndpointsConfig: map[string]*network.EndpointSettings{nets.edge: {}},
 		}, nil, name)
 	if err != nil {
-		release()
-		return 0, aferrors.Wrap(err, aferrors.AFRUN040,
+		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("creating the forwarder for %s: %v", s.Name, err))
 	}
+	remove := func() {
+		// Without cancellation, because the context that failed the attempt is
+		// often the one that was cancelled, and a container left created holds
+		// the name against every retry after it.
+		_ = dockerutil.RemoveContainer(context.WithoutCancel(ctx), r.cli, resp.ID)
+	}
 	if err := r.cli.NetworkConnect(ctx, nets.inner, resp.ID, &network.EndpointSettings{}); err != nil {
-		release()
-		return 0, aferrors.Wrap(err, aferrors.AFRUN040,
+		remove()
+		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("attaching the forwarder for %s: %v", s.Name, err))
 	}
 	if err := r.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		release()
-		return 0, aferrors.Wrap(err, aferrors.AFRUN040,
+		remove()
+		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("starting the forwarder for %s: %v", s.Name, err))
 	}
-	return hostPort, nil
+	return nil
 }
 
 // publishedPort reads the host port out of a port map.
