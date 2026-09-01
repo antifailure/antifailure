@@ -11,7 +11,7 @@
 // row while Stripe kept billing the card would pass every test that only looked
 // at the database.
 
-import { after, before, beforeEach, describe, it } from 'node:test'
+import { after, afterEach, before, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   available,
@@ -80,6 +80,21 @@ describe(
     beforeEach(async () => {
       org = await seedOrg(h.admin, 'deleting')
       owner = await signInAs(h, org, 'owner')
+    })
+
+    /**
+     * Each test takes its organization with it.
+     *
+     * Not tidiness. `resumeDeletions` acts on every due record in the database,
+     * so a record left behind by one test is picked up by the next test's
+     * sweep, and the counters it returns become facts about the whole database
+     * rather than about the thing under test. Leaving the subscription rows
+     * behind is worse: the mock pack hands out identifiers from a counter, and
+     * two tests that both create one collide on
+     * `subscriptions_stripe_subscription_id_key`.
+     */
+    afterEach(async () => {
+      await dropOrg(h.admin, org.orgId)
     })
 
     async function request(
@@ -342,10 +357,14 @@ describe(
       await resumeDeletions(deps)
       assert.ok(await orgExists(), 'the deletion purged while the customer was still entitled')
 
-      const still = await callProcedure(h, owner, 'deletion.status', 'query', {})
-      const view = data<{ deletion: DeletionView }>(still.body).deletion
-      assert.equal(view.step, 'await_entitlement_end')
-      assert.equal(new Date(view.waitingUntil!).getTime(), extended)
+      // Read from the record rather than through the route. The clock has just
+      // moved five days, which is well past the twelve hour idle timeout, so
+      // every session issued before it has stopped resolving. That is correct
+      // behaviour and it is a trap for any test that moves a fake clock by
+      // days and then makes a request.
+      const still = await record()
+      assert.equal(still.credentials_revoked_at, null)
+      assert.equal(new Date(String(still.entitlement_ends_at)).getTime(), extended)
 
       // And a delivery that SHORTENS the period is ignored, because being late
       // costs a day and being early breaks something somebody paid for.
@@ -353,11 +372,9 @@ describe(
         UPDATE subscriptions SET current_period_end = ${new Date(recorded)}
         WHERE org_id = ${org.orgId} AND stripe_subscription_id = ${subscriptionId}`
       await resumeDeletions(deps)
-      const unchanged = await callProcedure(h, owner, 'deletion.status', 'query', {})
-      assert.equal(
-        new Date(data<{ deletion: DeletionView }>(unchanged.body).deletion.waitingUntil!).getTime(),
-        extended,
-      )
+      const unchanged = await record()
+      assert.equal(new Date(String(unchanged.entitlement_ends_at)).getTime(), extended)
+      assert.equal(unchanged.credentials_revoked_at, null)
     })
 
     it('a control plane with a live subscription and no Stripe refuses to go on', async () => {
@@ -642,11 +659,8 @@ describe(
       assert.equal(data<{ deletion: DeletionView | null }>(body).deletion, null)
     })
 
-    // Cleanup for the cases that did not reach the purge.
-    after(async () => {
-      const rows = await h.admin<{ org_id: string }[]>`
-        SELECT DISTINCT org_id FROM organization_deletions`
-      for (const row of rows) await dropOrg(h.admin, row.org_id)
-    })
+    // Nothing to sweep up here any more: every test drops its own organization
+    // in afterEach, which is what keeps one test's leftover record out of the
+    // next test's sweep.
   },
 )
