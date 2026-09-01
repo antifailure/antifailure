@@ -69,7 +69,12 @@ func main() {
 		return
 	}
 
-	added, err := git(root, "diff", "--name-only", "--diff-filter=AM", base, head, "--", ".changes")
+	// Added, not modified. A branch that edits a fragment somebody else
+	// landed has not described its own change, and accepting a modification
+	// hands a free pass to every other path in the same branch. That was not
+	// hypothetical: the first run of this gate's own proof passed because an
+	// unrelated commit in the range had corrected a category heading.
+	added, err := git(root, "diff", "--name-only", "--diff-filter=A", base, head, "--", ".changes")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "changecheck: reading .changes: %v\n", err)
 		os.Exit(1)
