@@ -155,11 +155,15 @@ export async function buildExport(
     paths: string[] | null
     methods: string[] | null
     rate_limit: string | null
+    credential: string | null
+    fixtures: string | null
+    webhook_path: string | null
     note: string | null
     position: number
     approved_at: Date | string | null
   }>(sql`
-    SELECT repository_id, host, mode, paths, methods, rate_limit, note, position, approved_at
+    SELECT repository_id, host, mode, paths, methods, rate_limit, credential, fixtures,
+           webhook_path, note, position, approved_at
     FROM network_rules ORDER BY position, host`)
 
   const goldens = await db.execute<{
@@ -338,6 +342,12 @@ export async function buildExport(
         paths: n.paths,
         methods: n.methods,
         rateLimit: n.rate_limit,
+        // The NAME of the environment variable holding the sandbox
+        // credential, per the manifest schema, never its value. No secret
+        // reaches this control plane, so there is none here to leave out.
+        credential: n.credential,
+        fixtures: n.fixtures,
+        webhookPath: n.webhook_path,
         note: n.note,
         approved: n.approved_at !== null,
       })),
@@ -609,6 +619,9 @@ export function egressYaml(
     paths: string[] | null
     methods: string[] | null
     rate_limit: string | null
+    credential: string | null
+    fixtures: string | null
+    webhook_path: string | null
     note: string | null
   }[],
 ): string {
@@ -631,6 +644,13 @@ export function egressYaml(
       out.push(`      methods: [${rule.methods.map(scalar).join(', ')}]`)
     }
     if (rule.rate_limit) out.push(`      rate_limit: ${scalar(rule.rate_limit)}`)
+    // Every remaining key the manifest schema defines for an egress rule.
+    // Dropping one would make the exported policy quietly different from the
+    // one that was enforced, which is worse than not exporting it at all: the
+    // file still looks complete.
+    if (rule.credential) out.push(`      credential: ${scalar(rule.credential)}`)
+    if (rule.fixtures) out.push(`      fixtures: ${scalar(rule.fixtures)}`)
+    if (rule.webhook_path) out.push(`      webhook_path: ${scalar(rule.webhook_path)}`)
     if (rule.note) out.push(`      note: ${quoted(rule.note)}`)
     out.push('')
   }

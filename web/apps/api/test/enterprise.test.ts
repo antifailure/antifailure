@@ -665,8 +665,11 @@ describe(
           VALUES (${org.orgId}, ${org.repoId}, 'users', 'email', 'email',
                   ${'the address a real person reads'})`
         await h.admin`
-          INSERT INTO network_rules (org_id, repository_id, host, mode, note, approved_at)
-          VALUES (${org.orgId}, ${org.repoId}, 'api.stripe.com', 'mock', 'payments', now())`
+          INSERT INTO network_rules (org_id, repository_id, host, mode, note, paths, methods,
+                                     rate_limit, credential, fixtures, webhook_path, approved_at)
+          VALUES (${org.orgId}, ${org.repoId}, 'api.stripe.com', 'mock', 'payments',
+                  ARRAY['/v1/charges'], ARRAY['POST'], '10/s', 'STRIPE_SANDBOX_KEY',
+                  'fixtures/stripe.json', '/webhooks/stripe', now())`
         await h.admin`
           INSERT INTO engine_tokens (org_id, name, token_hash, prefix)
           VALUES (${org.orgId}, 'ci', ${Buffer.from('a-secret-hash')}, 'afe_ci')`
@@ -728,6 +731,19 @@ describe(
         assert.match(file, /^ {2}default: block$/m)
         assert.match(file, /^ {4}- host: api\.stripe\.com$/m)
         assert.match(file, /^ {6}mode: mock$/m)
+        // Every key the manifest schema defines for an egress rule. A file
+        // missing one is a policy that is quietly different from the one that
+        // was enforced, and it still looks complete.
+        assert.match(file, /^ {6}paths: \[\/v1\/charges\]$/m)
+        assert.match(file, /^ {6}methods: \[POST\]$/m)
+        assert.match(file, /^ {6}rate_limit: "10\/s"$/m)
+        // The NAME of the variable holding the credential, which is what the
+        // schema defines and what the engine reads. No secret reaches this
+        // control plane, so there is none here to leave out.
+        assert.match(file, /^ {6}credential: STRIPE_SANDBOX_KEY$/m)
+        assert.match(file, /^ {6}fixtures: fixtures\/stripe\.json$/m)
+        assert.match(file, /^ {6}webhook_path: \/webhooks\/stripe$/m)
+        assert.match(file, /^ {6}note: "payments"$/m)
       })
 
       it('says what it left out, and records that it was taken', async () => {
