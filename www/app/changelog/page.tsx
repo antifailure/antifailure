@@ -213,24 +213,27 @@ function CategoryLabel({ category }: { category: Category }) {
 
 function Prose({ block, first }: { block: Block; first: boolean }) {
   const spacing = first ? "" : "mt-5";
+  // The same `overflow-wrap: anywhere` the inline code carries, on the prose
+  // that holds it, because a bare address in a sentence is one word to the
+  // browser exactly as a metric name is. `antifailure.dev/docs/enterprise/
+  // licensing,` is 296px in a 280px column at 320, and ran to the screen edge
+  // with its trailing comma against the glass. The code span's own rule cannot
+  // help there: this token is not in a code span.
+  //
+  // It is on the block rather than on a wrapper so that it also fixes the
+  // block's min-content width, which is what a grid measures when it decides
+  // how wide a column has to be.
+  const prose = `${spacing} max-w-[720px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40 [overflow-wrap:anywhere] max-md:text-[16px]`;
   if (block.kind === "ul") {
     return (
-      <ul
-        className={`${spacing} max-w-[720px] list-disc space-y-3 pl-5 text-[17px] leading-7 tracking-extra-tight text-gray-new-40 marker:text-black/30 max-md:text-[16px]`}
-      >
+      <ul className={`${prose} list-disc space-y-3 pl-5 marker:text-black/30`}>
         {block.items.map((item, index) => (
           <li key={index}>{item.map(renderSpan)}</li>
         ))}
       </ul>
     );
   }
-  return (
-    <p
-      className={`${spacing} max-w-[720px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40 max-md:text-[16px]`}
-    >
-      {block.spans.map(renderSpan)}
-    </p>
-  );
+  return <p className={prose}>{block.spans.map(renderSpan)}</p>;
 }
 
 function renderSpan(span: Span, index: number): ReactNode {
