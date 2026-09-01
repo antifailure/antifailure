@@ -104,6 +104,10 @@ export interface StripeClient {
    *  error. */
   getSubscription(id: string): Promise<StripeSubscription | null>
 
+  /** Every subscription Stripe holds for one customer. This is the recovery
+   *  path when the creation webhook never arrived and no local row exists yet. */
+  listSubscriptions(customerId: string, limit: number): Promise<StripeSubscription[]>
+
   /** Cancels at the end of the paid period. */
   cancelSubscription(id: string): Promise<StripeSubscription>
 
@@ -195,6 +199,33 @@ export class RealStripeClient implements StripeClient {
     // sweep at the first bad row instead of fixing the rest.
     if (found === null) return null
     return subscriptionOf(found)
+  }
+
+  async listSubscriptions(customerId: string, limit: number): Promise<StripeSubscription[]> {
+    const query = new URLSearchParams({
+      customer: customerId,
+      status: 'all',
+      limit: String(limit),
+    })
+    const page = await this.get(`/v1/subscriptions?${query.toString()}`)
+    if (page === null || !Array.isArray(page.data)) return []
+
+    const out: StripeSubscription[] = []
+    for (const item of page.data) {
+      // One malformed subscription must not hide the other subscriptions. The
+      // identifier and customer are strict inside subscriptionOf; this boundary
+      // contains that failure to the one element that caused it.
+      if (item === null || typeof item !== 'object') continue
+      try {
+        const subscription = subscriptionOf(item as Record<string, unknown>)
+        // Stripe applies the customer filter. Checking it again means a broken
+        // proxy or simulator cannot attach another customer's subscription.
+        if (subscription.customerId === customerId) out.push(subscription)
+      } catch {
+        continue
+      }
+    }
+    return out
   }
 
   async cancelSubscription(id: string): Promise<StripeSubscription> {
