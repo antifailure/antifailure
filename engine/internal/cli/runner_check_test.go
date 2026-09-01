@@ -45,7 +45,53 @@ func installedTree(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Join(dir, "node_modules", "playwright"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// A tree af runner install produced carries the lockfile it installed from,
+	// because copyTree copies it and npm ci needs it.
+	if err := os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{"lockfileVersion":3}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return dir
+}
+
+// Every release up to and including v0.1.1 shipped an archive with no
+// package-lock.json in it, checked by downloading the published one and listing
+// it, so `npm install` resolved playwright's ^1.49.0 afresh on each machine.
+// Every dependency is present on such a tree and nobody knows which versions,
+// which is a different answer from the pinned one and has to read differently.
+func TestATreeInstalledWithNoLockfileIsNotReportedAsPinned(t *testing.T) {
+	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", t.TempDir())
+	dir := installedTree(t)
+	if err := os.Remove(filepath.Join(dir, "package-lock.json")); err != nil {
+		t.Fatal(err)
+	}
+	deps := find(t, checkRunner(t.Context(), dir), "dependencies")
+
+	if deps.symbol != SymbolWarn {
+		t.Errorf("dependencies reported %q on an unpinned tree, want warn", deps.symbol)
+	}
+	if deps.blocker {
+		t.Error("an unpinned tree is treated as a blocker, but the runner does run")
+	}
+	if !strings.Contains(deps.detail, "package-lock.json") {
+		t.Errorf("detail %q does not name what is missing", deps.detail)
+	}
+	if !strings.Contains(deps.remedy, "af runner install") {
+		t.Errorf("remedy %q does not say what to do", deps.remedy)
+	}
+}
+
+// And the pinned tree says so, rather than saying the same thing as the
+// unpinned one with a different symbol nobody reads.
+func TestAPinnedTreeSaysWhatPinnedIt(t *testing.T) {
+	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", t.TempDir())
+	deps := find(t, checkRunner(t.Context(), installedTree(t)), "dependencies")
+
+	if deps.symbol != SymbolOK {
+		t.Errorf("dependencies reported %q on a pinned tree, want ok", deps.symbol)
+	}
+	if !strings.Contains(deps.detail, "pinned by package-lock.json") {
+		t.Errorf("detail %q does not say the tree is pinned", deps.detail)
+	}
 }
 
 func find(t *testing.T, results []runnerCheck, label string) runnerCheck {

@@ -58,12 +58,17 @@ type RunnerCheckItemJSON struct {
 }
 
 // RunnerInstallJSON is the machine readable result.
+//
+// Dependencies says how they were resolved rather than only that they were,
+// because "installed" is true of both a pinned tree and one npm resolved from
+// the ^ ranges this morning, and those are different trees.
 type RunnerInstallJSON struct {
-	Path     string `json:"path"`
-	Files    int    `json:"files"`
-	Node     string `json:"node"`
-	Browser  string `json:"browser"`
-	Complete bool   `json:"complete"`
+	Path         string `json:"path"`
+	Files        int    `json:"files"`
+	Node         string `json:"node"`
+	Browser      string `json:"browser"`
+	Dependencies string `json:"dependencies"` // locked or unlocked
+	Complete     bool   `json:"complete"`
 }
 
 func newRunnerCommand(e *Env) *cobra.Command {
@@ -110,11 +115,10 @@ func newRunnerInstallCommand(e *Env) *cobra.Command {
 			// on the first run, because the first run is somebody's pull
 			// request check and a two minute download inside it looks like a
 			// hang.
-			if err := runIn(cmd.Context(), target, "npm", "install", "--no-audit", "--no-fund"); err != nil {
-				return aferrors.Wrap(err, aferrors.AFAGT004,
-					"detail", "npm install failed: "+err.Error())
+			locked, err := installDependencies(cmd.Context(), e, target)
+			if err != nil {
+				return err
 			}
-			e.Out.Println("  dependencies installed")
 
 			browser := "skipped"
 			if !skipBrowser {
@@ -135,7 +139,8 @@ func newRunnerInstallCommand(e *Env) *cobra.Command {
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(RunnerInstallJSON{
 					Path: target, Files: copied, Node: node,
-					Browser: browser, Complete: browser == "chromium",
+					Browser: browser, Dependencies: lockState(locked),
+					Complete: browser == "chromium",
 				})
 			}
 			e.Out.Printf("\n  Ready. %s will find it without a flag.\n", e.Out.S(StyleBold, "af test"))
@@ -145,6 +150,52 @@ func newRunnerInstallCommand(e *Env) *cobra.Command {
 	cmd.Flags().StringVar(&from, "from", "", "Copy from this directory rather than the one beside the engine")
 	cmd.Flags().BoolVar(&skipBrowser, "skip-browser", false, "Do not download the browser")
 	return cmd
+}
+
+// installDependencies resolves the runner's dependencies, and reports whether
+// the tree it produced is the one the release was tested with.
+//
+// `npm install` was what this ran, and it resolves the ^ ranges in package.json
+// afresh every time. playwright ^1.49.0 was 1.49.0 when the runner was written
+// and is whatever npm serves today, so two people installing one release of
+// Antifailure got two different browsers driving their tests, and a failure one
+// of them saw was not reproducible by the other. `npm ci` installs exactly what
+// package-lock.json names and refuses if the lockfile and the manifest
+// disagree, which is the whole point of shipping the lockfile.
+//
+// The fallback is deliberately loud rather than silent. A source tree with no
+// lockfile still installs, because refusing would strand somebody pointing
+// --from at a checkout they are editing, but it says the tree is not pinned
+// instead of printing the same "dependencies installed" line for both. A
+// message that reads the same whether or not the guarantee holds is how nobody
+// finds out it stopped holding.
+func installDependencies(ctx context.Context, e *Env, target string) (locked bool, err error) {
+	lockfile := filepath.Join(target, "package-lock.json")
+	if _, statErr := os.Stat(lockfile); statErr == nil {
+		if runErr := runIn(ctx, target, "npm", "ci", "--no-audit", "--no-fund"); runErr != nil {
+			return false, aferrors.Wrap(runErr, aferrors.AFAGT004,
+				"detail", "npm ci failed: "+runErr.Error())
+		}
+		e.Out.Println("  dependencies installed, pinned by package-lock.json")
+		return true, nil
+	}
+	if runErr := runIn(ctx, target, "npm", "install", "--no-audit", "--no-fund"); runErr != nil {
+		return false, aferrors.Wrap(runErr, aferrors.AFAGT004,
+			"detail", "npm install failed: "+runErr.Error())
+	}
+	e.Out.Printf("  %s dependencies installed, and NOT pinned: %s has no package-lock.json,\n"+
+		"    so npm resolved the version ranges in package.json as they are today. Another\n"+
+		"    machine installing the same release can get a different tree.\n",
+		e.Out.S(StyleWarn, SymbolWarn), target)
+	return false, nil
+}
+
+// lockState is the JSON spelling of the same fact.
+func lockState(locked bool) string {
+	if locked {
+		return "locked"
+	}
+	return "unlocked"
 }
 
 // runnerCheck is one question this command can answer about the runner, and
@@ -267,9 +318,23 @@ func dependencyCheck(target string, m runnerManifest) runnerCheck {
 			blocker: true,
 		}
 	}
+	// Present is not the same as pinned, and this command exists because
+	// "present" was being reported as readiness once already. A tree installed
+	// from a release archive that shipped no lockfile has every dependency and
+	// no idea which versions they are, so it says so rather than reporting the
+	// same ok as a pinned one. A warning rather than a failure: the runner does
+	// run, it just runs something nobody chose.
+	if _, err := os.Stat(filepath.Join(target, "package-lock.json")); err != nil {
+		return runnerCheck{
+			label: "dependencies", symbol: SymbolWarn,
+			detail: fmt.Sprintf("%d declared, all present, and not pinned: no package-lock.json",
+				len(m.Dependencies)),
+			remedy: "Reinstall from a release that ships the lockfile: af runner install",
+		}
+	}
 	return runnerCheck{
 		label: "dependencies", symbol: SymbolOK,
-		detail: fmt.Sprintf("%d declared, all present", len(m.Dependencies)),
+		detail: fmt.Sprintf("%d declared, all present, pinned by package-lock.json", len(m.Dependencies)),
 	}
 }
 
