@@ -65,7 +65,6 @@ var notAPath = map[string]string{
 
 	".gate-reports/": "created by `just gate` when it runs and gitignored, so it is a place output goes rather than something the repository contains",
 
-	"antifailure/antifailure-foss": "a GitHub repository name, not a path in this checkout",
 
 	"THIRD_PARTY_NOTICES.md": "generated at release time from what is actually linked, so it is deliberately absent from the tree",
 }

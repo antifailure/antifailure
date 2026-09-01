@@ -50,7 +50,7 @@ paste, because a running shell cannot see a file written a second ago.
 curl -fsSL https://antifailure.dev/install.sh | sh
 ```
 
-The installer downloads the release for your platform, checks it against the published checksum, and puts `af` and its runner under `~/.antifailure`. It is POSIX sh rather than bash, so it works in an Alpine container as well as on a laptop.
+The installer downloads the release for your platform, refuses to install it unless it matches the published checksum, and puts `af` and its runner under `~/.antifailure`. There is no path through that check that installs an unverified archive: a missing `checksums.txt`, a `checksums.txt` with no line for your platform's archive, and a machine with neither `shasum` nor `sha256sum` all stop the install rather than warning and carrying on. It is POSIX sh rather than bash, so it works in an Alpine container as well as on a laptop.
 
 Check that your machine has what the engine needs:
 
@@ -148,4 +148,4 @@ Every commit is signed with `git commit -s` per the Developer Certificate of Ori
 
 This repository is MIT licensed, except for the `ee/` directory, which is licensed under the Antifailure Enterprise License (see [ee/LICENSE.md](ee/LICENSE.md)).
 
-The `ee/` directory is never compiled into the community binary, images, or Helm chart. Those are built from `antifailure/antifailure-foss`, a generated mirror of this repository with `ee/` deleted, so the boundary is proved by the community build passing green rather than asserted in a comment.
+The `ee/` directory is never compiled into the community binary, images, or Helm chart, and the boundary is proved by the community build passing green rather than asserted in a comment. The proof is run in place rather than in a mirror: the `edition boundary` job in `.github/workflows/ci.yml` deletes `ee`, then builds and tests the engine from what is left, and then inspects the binary it shipped for enterprise package paths. `.dockerignore` keeps `ee` out of the image build context.
