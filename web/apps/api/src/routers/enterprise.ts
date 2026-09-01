@@ -804,13 +804,20 @@ export const accountRouter = router({
   /**
    * Closes the account of whoever is asking.
    *
-   * NOT a row delete, and the name says so. `audit_entries.actor_user_id`
-   * references `users` with NO ACTION, so Postgres refuses to remove anybody
-   * who has ever done anything, and that is deliberate: an audit log whose
-   * subject can erase themselves from it is not an audit log. Nulling the
-   * column instead is not available either, because UPDATE on that table is
-   * revoked to make it append-only and because the column is inside the hash
-   * chain.
+   * NOT a row delete, and the name says so. This is the product CHOOSING not to
+   * delete, not the database refusing: `audit_entries.actor_user_id` is
+   * `ON DELETE SET NULL`, declared in `0001_init.sql` and never altered, so a
+   * delete would SUCCEED and null the actor on every entry that person ever
+   * wrote, silently and all at once. An audit log whose subject can erase
+   * themselves from it is not an audit log. Nulling the column deliberately is
+   * not available either, because UPDATE on that table is revoked to make it
+   * append-only and because the column is inside the hash chain.
+   *
+   * The choice is not the weaker one. `actor_label` is a copy taken at the time
+   * and sits inside the hash chain, so deleting the user row would not remove
+   * the person from the log at all. It would only break the link back to the
+   * account. A guard fails the build if anything under `src/` deletes from
+   * `users`, which is what holds this until the constraint itself is tightened.
    *
    * So this erases the personal data on the row, removes the memberships and
    * revokes the sessions, and leaves a row with nothing personal in it that the
