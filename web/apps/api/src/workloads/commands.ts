@@ -37,7 +37,7 @@ import type { Db } from '@antifailure/db'
 
 export type CommandKind = 'environment.teardown' | 'workload.cancel'
 
-export type CommandState =
+type CommandState =
   | 'pending'
   | 'claimed'
   | 'acknowledged'
@@ -77,9 +77,9 @@ export const COMMAND_TTL_MS = 6 * 60 * 60 * 1000
  * provider that is retrying, short enough that an engine killed mid-teardown
  * does not strand the command for the rest of its life.
  */
-export const COMMAND_LEASE_MS = 15 * 60 * 1000
+const COMMAND_LEASE_MS = 15 * 60 * 1000
 
-export interface CreateCommand {
+interface CreateCommand {
   orgId: string
   kind: CommandKind
   environmentId?: string | null
@@ -157,7 +157,7 @@ export async function recordDispatch(
     WHERE id = ${commandId} AND state IN ('pending', 'claimed')`)
 }
 
-export interface ClaimedCommand {
+interface ClaimedCommand {
   id: string
   kind: CommandKind
   envId: string | null
@@ -251,7 +251,7 @@ export async function claimCommands(
   }))
 }
 
-export type CommandOutcome = 'done' | 'failed'
+type CommandOutcome = 'done' | 'failed'
 
 /**
  * The runtime saying what happened.

@@ -43,7 +43,7 @@ const MAX_ROUTES = 500
 const MAX_THRESHOLDS = 200
 const MAX_EVIDENCE = 100
 
-export interface Skipped {
+interface Skipped {
   routes: number
   thresholds: number
   evidence: number
@@ -62,7 +62,7 @@ export interface DecodedReport {
 
 /** The columns workload_run_results holds, already narrowed to the ones this
  *  kind is allowed to fill. The CHECK in the migration refuses the rest. */
-export interface Aggregate {
+interface Aggregate {
   requests: number | null
   failures: number | null
   errorRate: number | null
@@ -87,7 +87,7 @@ export interface Aggregate {
   refusedRoutes: string[]
 }
 
-export interface RouteMetric {
+interface RouteMetric {
   route: string
   sent: number
   errors: number
@@ -100,7 +100,7 @@ export interface RouteMetric {
   p95Increase: number | null
 }
 
-export interface ThresholdVerdict {
+interface ThresholdVerdict {
   name: string
   scope: string | null
   measure: string
@@ -110,7 +110,7 @@ export interface ThresholdVerdict {
   detail: string | null
 }
 
-export interface Evidence {
+interface Evidence {
   kind: string
   label: string | null
   availability: (typeof AVAILABILITY)[number]

@@ -66,15 +66,17 @@ export const TERMINAL_STATES = [
   'abandoned',
 ] as const
 
-export const OPEN_STATES = ['requested', 'accepted', 'running'] as const
-
-export type RunState = (typeof TERMINAL_STATES)[number] | (typeof OPEN_STATES)[number]
+type RunState =
+  | (typeof TERMINAL_STATES)[number]
+  | 'requested'
+  | 'accepted'
+  | 'running'
 
 // ---------------------------------------------------------------------------
 // Deadline resolution
 // ---------------------------------------------------------------------------
 
-export interface Resolution {
+interface Resolution {
   abandoned: number
 }
 
@@ -97,7 +99,11 @@ export async function resolveOverdueRuns(db: Db, now: Date): Promise<Resolution>
     UPDATE workload_runs SET
       state = 'abandoned',
       finished_at = ${now.toISOString()}::timestamptz,
-      failure_code = COALESCE(failure_code, 'AF-CPL-NOREPORT'),
+      -- No failure_code, deliberately. That column carries the code the ENGINE
+      -- reported, from engine/internal/errors/catalog.yaml, and this is the one
+      -- outcome no engine reported at all. An invented code that looks like a
+      -- catalogued one is the worst error identifier this product can produce:
+      -- somebody searches the errors reference for it and finds nothing.
       detail = COALESCE(detail,
         'No engine reported on this run before its deadline. It may have run: what is missing is ' ||
         'the report, not necessarily the work.'),
@@ -140,7 +146,7 @@ export async function findWorkload(db: Db, slug: string): Promise<WorkloadRow | 
   return rows[0] ?? null
 }
 
-export interface VersionRow extends Record<string, unknown> {
+interface VersionRow extends Record<string, unknown> {
   id: string
   version: number
   body: Record<string, unknown>
@@ -259,36 +265,6 @@ export async function readRun(db: Db, runId: string): Promise<RunRow | null> {
   return rows[0] ?? null
 }
 
-/**
- * 23505, the unique violation, wherever the driver buried it.
- *
- * Used only OUTSIDE a transaction. Inside one it is nearly useless, and the
- * reason is worth writing down because it is a property of this whole codebase
- * rather than of this file.
- *
- * postgres.js records the first failed query of a transaction in `uncaughtError`
- * and rethrows it after the callback returns, whatever the callback did about
- * it. So catching a constraint violation inside `withTenant`, rolling back to a
- * savepoint and carrying on does not work: the recovery runs, the later
- * statements succeed, and the transaction still rejects with the original
- * error. Measured, not assumed: a savepoint around the insert below recovered
- * correctly and the caller still received the PostgresError.
- *
- * The consequence is that every collision this code has to turn into a sentence
- * has to be a collision it never causes. That is what ON CONFLICT DO NOTHING is
- * for below, and it is why the read-back is not an optimisation but the only
- * way to tell the two collisions apart.
- */
-export function uniqueViolation(error: unknown): string | null {
-  let cur: unknown = error
-  for (let depth = 0; depth < 8 && cur; depth += 1) {
-    const e = cur as { code?: string; constraint_name?: string; cause?: unknown }
-    if (e.code === '23505') return e.constraint_name ?? 'unknown'
-    cur = e.cause
-  }
-  return null
-}
-
 export interface StartInput {
   orgId: string
   workloadId: string
@@ -334,9 +310,17 @@ export async function startRun(db: Db, input: StartInput): Promise<StartOutcome>
   const deadline = new Date(input.now.getTime() + RUN_DEADLINE_MS).toISOString()
 
   // ON CONFLICT DO NOTHING with no target, so it covers BOTH unique indexes:
-  // the request key and the one live run per workload per environment. Naming
-  // one of them would leave the other raising, and a raised statement cannot be
-  // recovered from inside this transaction at all. See uniqueViolation above.
+  // the request key and the one live run per workload per environment.
+  //
+  // Not a catch, and the reason is a property of this whole codebase rather
+  // than of this file. postgres.js records the first failed query of a
+  // transaction and rethrows it after the callback returns, whatever the
+  // callback did about it, so catching a constraint violation inside
+  // `withTenant`, rolling back to a savepoint and carrying on does not work:
+  // the recovery runs, the later statements succeed, and the transaction still
+  // rejects with the original error. Measured, not assumed. So every collision
+  // this code turns into a sentence has to be one it never causes, and the read
+  // back below is the only way to tell the two apart.
   const inserted = await db.execute<{ id: string }>(sql`
     INSERT INTO workload_runs (
       org_id, workload_id, workload_version_id, environment_id,

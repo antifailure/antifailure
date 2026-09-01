@@ -92,14 +92,24 @@ export const workloadsRouter = router({
         return db.execute(sql`
           SELECT ${workloadColumns},
                  (SELECT count(*) FROM workload_runs wr WHERE wr.workload_id = w.id) AS runs,
-                 (SELECT wr.state::text FROM workload_runs wr
-                   WHERE wr.workload_id = w.id ORDER BY wr.requested_at DESC LIMIT 1) AS last_state,
-                 (SELECT wr.verdict::text FROM workload_runs wr
-                   WHERE wr.workload_id = w.id ORDER BY wr.requested_at DESC LIMIT 1) AS last_verdict,
-                 (SELECT wr.requested_at FROM workload_runs wr
-                   WHERE wr.workload_id = w.id ORDER BY wr.requested_at DESC LIMIT 1) AS last_run_at
+                 latest.state AS last_state,
+                 latest.verdict AS last_verdict,
+                 latest.requested_at AS last_run_at
           FROM workloads w
           JOIN repositories r ON r.id = w.repository_id
+          -- One LATERAL rather than three correlated subqueries, and not only
+          -- because it is one index lookup instead of three. Three independent
+          -- ORDER BY ... LIMIT 1 subqueries can each pick a different row when
+          -- two runs share a requested_at, so the state, the verdict and the
+          -- time would describe up to three different runs and the row would
+          -- read as a run that never happened.
+          LEFT JOIN LATERAL (
+            SELECT wr.state::text AS state, wr.verdict::text AS verdict, wr.requested_at
+            FROM workload_runs wr
+            WHERE wr.workload_id = w.id
+            ORDER BY wr.requested_at DESC, wr.id DESC
+            LIMIT 1
+          ) latest ON true
           WHERE (${input.includeArchived} OR w.archived_at IS NULL)
             AND (${input.repository ?? null}::text IS NULL OR r.full_name = ${input.repository ?? null})
             AND (${input.kind ?? null}::text IS NULL OR w.kind::text = ${input.kind ?? null})

@@ -119,17 +119,17 @@ const exploration = z
   })
   .strict()
 
-export const WORKLOAD_BODY_SCHEMAS = {
+const WORKLOAD_BODY_SCHEMAS = {
   observed_load: observedLoad,
   http_scenario: httpScenario,
   browser_workflow: browserWorkflow,
   exploration,
 } as const
 
-export type ObservedLoadBody = z.infer<typeof observedLoad>
-export type HttpScenarioBody = z.infer<typeof httpScenario>
-export type BrowserWorkflowBody = z.infer<typeof browserWorkflow>
-export type ExplorationBody = z.infer<typeof exploration>
+type ObservedLoadBody = z.infer<typeof observedLoad>
+type HttpScenarioBody = z.infer<typeof httpScenario>
+type BrowserWorkflowBody = z.infer<typeof browserWorkflow>
+type ExplorationBody = z.infer<typeof exploration>
 
 export type WorkloadBody =
   | ObservedLoadBody
@@ -137,7 +137,7 @@ export type WorkloadBody =
   | BrowserWorkflowBody
   | ExplorationBody
 
-export interface ParsedBody {
+interface ParsedBody {
   body: WorkloadBody
   digest: string
 }
