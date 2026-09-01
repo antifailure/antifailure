@@ -60,6 +60,28 @@ permissions:
   contents: read
   # Only to leave the report. Nothing here needs write access to the code.
   pull-requests: write
+  # The workflow's own identity, so this job can prove to the hosted control
+  # plane which repository, run and commit it is, and get a credential scoped to
+  # exactly that. There is no repository secret to paste and nothing here holds
+  # a long lived token.
+  #
+  # GitHub does NOT grant this to a pull request job running on a fork, which is
+  # what keeps a fork away from every secret: the exchange below simply fails
+  # there, and the control plane says the commit needs a maintainer's approval.
+  # Delete this line if you do not use the hosted control plane; nothing else
+  # needs it.
+  id-token: write
+
+# The hosted control plane's address, as a repository variable rather than a
+# secret, because it is a URL and not a credential. Unset means this repository
+# does not use one: the two steps that talk to it are skipped and the job
+# comments for itself, which is the self-hosted and no-account path.
+#
+# At the job level rather than on the step, because a step's own `env` block is
+# not readable from that step's own `if`, so a step that both defines the
+# variable and gates on it gates on an empty string forever.
+env:
+  AF_CONTROL_PLANE: ${{ vars.AF_CONTROL_PLANE }}
 
 jobs:
   preview:
@@ -147,13 +169,78 @@ jobs:
               af load run ${args[@]+"${args[@]}"}
               ;;
             *)
-              af ci --report report.md
+              af ci --report report.md --report-json report.json
               ;;
           esac
 
+      # The hosted control plane, if there is one.
+      #
+      # Two calls and no secret. The first proves this job's identity to the
+      # control plane and gets back a credential good for THIS commit and
+      # nothing else; the second posts the report. The control plane then
+      # publishes one check run and maintains one comment, both fenced on the
+      # commit, so a push that lands while this is running cannot end up
+      # reporting the old commit's result under the new one.
+      #
+      # AF_CONTROL_PLANE unset skips both steps, and the job comments for itself
+      # below. That is the self-hosted and no-account path and it stays working.
+      - name: Tell the control plane what this commit did
+        id: publish
+        if: always() && env.AF_CONTROL_PLANE != '' && hashFiles('report.json') != ''
+        env:
+          # ACTIONS_ID_TOKEN_REQUEST_URL and _TOKEN are put in the environment by
+          # the runner itself for any job with id-token: write, so they are used
+          # below without being declared here. Declaring them would read them at
+          # expression time, which is before the runner sets them.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # The identity token, asked for with the audience the control plane
+          # expects. Without an audience GitHub mints one for the repository
+          # owner's URL, which every workflow in the organization can get, and a
+          # credential that any workflow can obtain is not a credential.
+          identity=$(curl -sS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=antifailure-control-plane" |
+            sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+          if [ -z "$identity" ]; then
+            echo "GitHub would not mint a workflow identity token."
+            echo "On a pull request from a fork it never will, which is deliberate."
+            exit 0
+          fi
+
+          token=$(curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/callback-token" \
+            -H "Authorization: Bearer ${identity}" \
+            -H 'content-type: application/json' \
+            -d "{\"head_sha\":\"${HEAD_SHA}\"}" |
+            sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+          if [ -z "$token" ]; then
+            echo "The control plane did not issue a callback credential for ${HEAD_SHA}."
+            exit 0
+          fi
+
+          # jq is on every GitHub-hosted runner. The report and the Markdown go
+          # in as JSON values rather than being pasted into a string, because a
+          # report contains quotes, newlines and backslashes and a hand built
+          # body would be malformed on the first interesting run.
+          jq -n --arg sha "$HEAD_SHA" \
+                --rawfile markdown report.md \
+                --slurpfile report report.json \
+                '{head_sha: $sha, markdown: $markdown, report: $report[0]}' > payload.json
+
+          curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/report" \
+            -H "Authorization: Bearer ${token}" \
+            -H 'content-type: application/json' \
+            --data-binary @payload.json
+          echo "handled=true" >> "$GITHUB_OUTPUT"
+
       - name: Leave the report on the pull request
         # Always, because the report of a failing run is the one worth reading.
-        if: always() && hashFiles('report.md') != ''
+        #
+        # Skipped when the control plane took the report, because it maintains a
+        # comment of its own with the commit fenced into it, and two writers
+        # sharing one pull request is two comments or one that flaps between two
+        # commits' results.
+        if: always() && hashFiles('report.md') != '' && steps.publish.outputs.handled != 'true'
         uses: actions/github-script@v7
         with:
           script: |
