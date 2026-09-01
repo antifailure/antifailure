@@ -47,7 +47,13 @@ import (
 // documents are the trees whose Markdown prose is checked.
 // examples is here because an example's README is documentation a user reads
 // before anything else: it is the first prose most people meet.
-var documents = []string{"docs/src/content/docs", "examples", "."}
+// `.changes` is here because a fragment is not a working note: `just changelog`
+// assembles them into the published CHANGELOG.md, so a separator that this gate
+// exists to keep out of the documentation reaches a release note by a route the
+// gate could not see. Measured before it was added rather than after: all 119
+// fragments that existed at the time were already clean, so this closes a hole
+// without changing anybody's file.
+var documents = []string{"docs/src/content/docs", "examples", ".changes", "."}
 
 // sources are the trees whose TypeScript carries copy rather than only code.
 //
