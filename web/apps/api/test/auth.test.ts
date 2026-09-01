@@ -896,6 +896,40 @@ describe('sessions', { skip: hasDatabase ? false : 'no Postgres' }, () => {
       'a cutoff from a broken clock deleted a session the database still considers live',
     )
   })
+
+  it('is housekeeping, so the sweep never changes who is signed in', async () => {
+    // The claim main.ts makes about this: expiry is enforced when a session is
+    // resolved, so a sweeper that is late costs table size and nothing else.
+    // Nothing tested it, and it is the claim that decides whether a sweep
+    // racing a request can log somebody out.
+    //
+    // Both orderings of the two events, on one session, in the only sequence
+    // that can hold them both:
+    const member = await signInAs(h, org, 'member', 'housekeeping')
+    h.clock.advance(ABSOLUTE_LIFETIME_MS + 1000)
+
+    // EXPIRED THEN RESOLVED, with the row still there. Already refused, by the
+    // read rather than by the sweeper.
+    assert.equal(
+      await resolveSession(h.pool, h.clock, member.token),
+      null,
+      'an expired session resolved while its row was still in the table',
+    )
+    const [present] = await h.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sessions WHERE token_hash = ${hashToken(member.token)}`
+    assert.equal(present!.n, 1, 'the row was gone before the sweep, so this proves nothing')
+
+    // SWEPT THEN RESOLVED. The row goes, and the answer does not move.
+    await sweepSessions(h.pool, h.clock)
+    const [gone] = await h.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sessions WHERE token_hash = ${hashToken(member.token)}`
+    assert.equal(gone!.n, 0, 'the sweep left an expired session behind')
+    assert.equal(
+      await resolveSession(h.pool, h.clock, member.token),
+      null,
+      'the answer changed when the row was removed',
+    )
+  })
 })
 
 describe('membership sync', { skip: hasDatabase ? false : 'no Postgres' }, () => {
