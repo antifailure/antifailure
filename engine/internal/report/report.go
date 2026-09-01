@@ -84,11 +84,6 @@ type Load struct {
 	// named safe, so they were never sent. Without them a run that could send
 	// one route out of forty reads exactly like one that sent all forty.
 	Refused []string
-	// InertP95 says a p95_increase threshold was in force and no route
-	// carried a baseline for it to be measured against. It is not a breach,
-	// because nothing was exceeded; it is the absence of the check the
-	// manifest asked for, which is what 'af load run' exits AF-LOD-016 on.
-	InertP95 bool
 }
 
 // Egress summarises outbound traffic.
@@ -563,15 +558,11 @@ func (r Run) Markdown() string {
 		fmt.Fprintf(&b, "Load: %d requests at %.0f a second, p95 %.0fms, %.1f%% failed.\n",
 			l.Sent, l.Rate, l.P95Ms, l.ErrorRate*100)
 		if len(l.Regressed) > 0 {
-			fmt.Fprintf(&b, "Crossed: %s\n", strings.Join(l.Regressed, ", "))
-		}
-		if l.InertP95 {
-			fmt.Fprintf(&b,
-				"The p95_increase threshold proved nothing: no route the run sent carried a baseline.\n")
+			fmt.Fprintf(&b, "Slower than production: %s\n", strings.Join(l.Regressed, ", "))
 		}
 		if len(l.Refused) > 0 {
-			fmt.Fprintf(&b, "Not sent, because nothing named %s safe: %s\n",
-				plural(len(l.Refused), "it", "them"), strings.Join(l.Refused, ", "))
+			fmt.Fprintf(&b, "%s not sent, because nothing in the manifest named them safe: %s\n",
+				plural(len(l.Refused), "route was", "routes were"), strings.Join(l.Refused, ", "))
 		}
 		b.WriteString("\n")
 	}

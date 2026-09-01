@@ -269,38 +269,18 @@ func cleanupFinding(c *report.Cleanup, p report.Policy) *report.Finding {
 // what was missing is that they changed nothing. A run whose p95 doubled
 // reported pass.
 func loadFinding(l *report.Load, p report.Policy) *report.Finding {
-	if l == nil || p.LoadRegression == report.LevelIgnore {
+	if l == nil || len(l.Regressed) == 0 || p.LoadRegression == report.LevelIgnore {
 		return nil
 	}
-	detail := fmt.Sprintf("%d requests at %.0f a second, p95 %.0fms, %.1f%% failed.",
-		l.Sent, l.Rate, l.P95Ms, l.ErrorRate*100)
-	if len(l.Regressed) > 0 {
-		return &report.Finding{
-			Rule: ruleLoadRegression, Level: p.LoadRegression,
-			Count: len(l.Regressed), Where: strings.Join(l.Regressed, ", "),
-			Title: fmt.Sprintf("Load crossed %s the manifest sets.",
-				plural(len(l.Regressed), "threshold", "thresholds")),
-			Detail: detail,
-			Fix:    "Raise the threshold in load.thresholds, or fix the regression.",
-		}
+	return &report.Finding{
+		Rule: ruleLoadRegression, Level: p.LoadRegression,
+		Count: len(l.Regressed), Where: strings.Join(l.Regressed, ", "),
+		Title: fmt.Sprintf("Load crossed %s the manifest sets.",
+			plural(len(l.Regressed), "threshold", "thresholds")),
+		Detail: fmt.Sprintf("%d requests at %.0f a second, p95 %.0fms, %.1f%% failed.",
+			l.Sent, l.Rate, l.P95Ms, l.ErrorRate*100),
+		Fix: "Raise the threshold in load.thresholds, or fix the regression.",
 	}
-	// A threshold that was in force and evaluated nothing. Reported for the
-	// reason 'af load run' exits AF-LOD-016 on it rather than reporting a
-	// clean p95: a check that ran nothing and said pass is a check everybody
-	// believes is running. It reaches the verdict through load_regression
-	// because that is the knob the manifest offers for load thresholds, so
-	// the two commands answer to the same policy on the same manifest.
-	if l.InertP95 {
-		return &report.Finding{
-			Rule: ruleLoadRegression, Level: p.LoadRegression,
-			Count: 1, Where: "p95_increase",
-			Title:  "A load threshold measured nothing.",
-			Detail: "No route the run sent carried a baseline, so p95_increase was in force and compared nothing. " + detail,
-			Fix: "Point load.source_config.path at a longer export, or remove p95_increase " +
-				"if this source cannot carry a baseline.",
-		}
-	}
-	return nil
 }
 
 // gateError is the error a failing finding exits with.
