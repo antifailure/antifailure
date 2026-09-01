@@ -77,7 +77,10 @@ export const subscriptionsRouter = router({
       /** Whether this control plane can take money at all, so a screen can say
        *  so rather than showing a button that always fails. */
       configured: c.stripe !== null,
-      plans: PAID_PLANS,
+      plans: c.hostedRequiredPlan
+        ? PAID_PLANS.filter((plan) => plan === c.hostedRequiredPlan)
+        : PAID_PLANS,
+      hostedRequiredPlan: c.hostedRequiredPlan,
     }
   }),
 
@@ -122,6 +125,12 @@ export const subscriptionsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       const billing = billingOf(c)
+      if (c.hostedRequiredPlan && input.plan !== c.hostedRequiredPlan) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: `This hosted control plane sells only the ${c.hostedRequiredPlan} plan.`,
+        })
+      }
 
       const state = await c.pool.withTenant(c.tenant, async (db) =>
         readBillingState(db, c.actor.orgId),

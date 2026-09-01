@@ -95,6 +95,7 @@ gate: _reports
     run "the other platforms lint"       just lint-platforms
     run "control plane"                  just test-web
     run "the site API"                   just test-site-api
+    run "the console"                    just test-console
     run "runner"                         just test-runner
     run "edition boundary"               just edition
     run "enterprise"                     just test-ee
@@ -379,6 +380,22 @@ test-runner:
 test-site-api:
     npm --prefix api ci --no-audit --no-fund
     npm --prefix api test
+
+# The console's own unit tests.
+#
+# console/ is a separate npm project with its own lockfile, not one of web/'s
+# workspaces, so `npm test --workspaces` never reaches it and a test file added
+# there would be decoration. This recipe is what makes it a gate.
+#
+# It exists because gatecheck refused the ci.yml step that introduced it, which
+# is this file's promise working: a gate is the command AND the directory it
+# runs in, so CI running `npm test` in console while nothing here did was the
+# drift the comment at the top of this file says cannot happen. Before the
+# build, as in CI, because it is seconds against minutes and a failure here is
+# about the code rather than about Next.
+test-console:
+    go run ./tools/installcheck . console || npm --prefix console ci --no-audit --no-fund
+    npm --prefix console test
 
 # Fanned out over ee/web's workspaces rather than naming each package, so an
 # enterprise package added later is covered without editing this or CI. Naming

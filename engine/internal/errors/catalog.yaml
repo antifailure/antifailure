@@ -468,10 +468,17 @@ errors:
     docs: guides/kubernetes-runtime
     retryable: false
     exit_code: 3
+  - code: AF-RUN-046
+    area: RUN
+    message: "AF_PORT_RANGE_START is set to {value}, which is not a port number."
+    next_step: "Set it to the first port of a free range, between {limit}, or unset it to use the default."
+    docs: guides/local-runtime
+    retryable: false
+    exit_code: 3
   - code: AF-RUN-009
     area: RUN
     message: "No free port was found in the range {range} to publish the environment on."
-    next_step: "Free a port in that range, or set runtime.port_from in the manifest to a range that is clear."
+    next_step: "Free a port in that range, or set AF_PORT_RANGE_START to the first port of a range that is clear."
     docs: guides/local-runtime
     retryable: true
     exit_code: 1
@@ -729,6 +736,13 @@ errors:
     area: LOD
     message: "The scenario {scenario} proved nothing: {detail}"
     next_step: "A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
+  - code: AF-LOD-016
+    area: LOD
+    message: "The p95_increase threshold proved nothing: {detail}"
+    next_step: "The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone."
     docs: concepts/load
     retryable: false
     exit_code: 3

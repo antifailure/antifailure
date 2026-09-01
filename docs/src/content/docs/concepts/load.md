@@ -77,11 +77,20 @@ noise people turn off.
 ### Access logs
 
 A combined format line has no duration in it, so routes read from a log have no
-baseline and `p95_increase` has nothing to measure. Everything else works: the
-mix, the relative weights and the arrival rate, which is counted from the
-timestamps rather than assumed. When no line carries a readable timestamp the
-report says the arrival rate was assumed rather than presenting a guess as
-production's number.
+baseline and `p95_increase` has nothing to measure. The manifest refuses the
+combination rather than accepting it and staying quiet, and no default fills
+the threshold in under this source, so a run here is judged on `error_rate`
+alone and says as much.
+
+```
+load.thresholds.p95_increase: The load source is access_log and p95_increase
+is set.
+```
+
+Everything else works: the mix, the relative weights and the arrival rate,
+which is counted from the timestamps rather than assumed. When no line carries
+a readable timestamp the report says the arrival rate was assumed rather than
+presenting a guess as production's number.
 
 ## Safe and unsafe routes
 
@@ -212,6 +221,30 @@ baseline is production's own p95 for that route, which comes from the traffic
 source, so a route the source could not measure is never a breach. Absolute
 numbers are deliberately not used: they fail on a slow CI runner and tell you
 nothing about the change.
+
+Which means the threshold needs a source that carries durations, and only
+`otel` does. Setting it under `access_log` or `none` is refused by the
+manifest, and the default is not applied there either: a threshold the report
+lists and no route can be measured against is a check everybody believes is
+running.
+
+```
+AF-LOD-016 The p95_increase threshold proved nothing: no baseline for any of
+the 4 routes the run sent, so nothing was compared.
+```
+
+That is the case the manifest cannot see. A trace export whose every route was
+seen fewer than twenty times arrives with no baseline anywhere, so the
+threshold was in force and evaluated nothing, and the run exits non-zero rather
+than reporting a clean p95. Point `source_config.path` at a longer export.
+
+`error_rate: 0.01` is counted from the run's own responses, so it needs no
+baseline and applies under every source.
+
+There is no `query_count_increase`. It was in the schema, nothing ever read it,
+and a manifest that sets it is now refused by name. The check it describes is
+`insights.query_regression`, and how much growth fails it is
+`insights.regression_factor`.
 
 ## Aborting
 

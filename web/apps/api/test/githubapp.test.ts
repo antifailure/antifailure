@@ -265,7 +265,7 @@ describe('what a delivery writes', {
       action: 'created',
       installation,
       repositories: [{ id: 1, full_name: 'delivery-test-org/app', private: true, default_branch: 'main' }],
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     assert.equal(out.handled, true)
 
     const [org] = await api.admin<{ id: string; slug: string }[]>`
@@ -291,7 +291,7 @@ describe('what a delivery writes', {
       action: 'new_permissions_accepted',
       installation,
       repositories: [{ id: 1, full_name: 'delivery-test-org/app' }],
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     const rows = await api.admin<{ n: number }[]>`
       SELECT count(*)::int AS n FROM organizations WHERE github_login = 'delivery-test-org'`
     assert.equal(rows[0]!.n, 1)
@@ -303,7 +303,7 @@ describe('what a delivery writes', {
       installation,
       repositories_added: [{ id: 2, full_name: 'delivery-test-org/docs' }],
       repositories_removed: [],
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     const [added] = await api.admin<{ full_name: string }[]>`
       SELECT full_name FROM repositories WHERE full_name = 'delivery-test-org/docs'`
     assert.ok(added)
@@ -313,7 +313,7 @@ describe('what a delivery writes', {
       installation,
       repositories_added: [],
       repositories_removed: [{ id: 2, full_name: 'delivery-test-org/docs' }],
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     // THE ROW IS STILL THERE. A repository removed from an installation has
     // runs, verdicts and artifacts that happened, and deleting it cascades them
     // away. The history of what this product found is the product.
@@ -329,7 +329,7 @@ describe('what a delivery writes', {
       installation,
       repositories_added: [{ id: 2, full_name: 'delivery-test-org/docs' }],
       repositories_removed: [],
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     const [row] = await api.admin<{ archived_at: Date | null }[]>`
       SELECT archived_at FROM repositories WHERE full_name = 'delivery-test-org/docs'`
     assert.equal(row!.archived_at, null)
@@ -340,7 +340,7 @@ describe('what a delivery writes', {
     // consequence is identical. What is kept is the answer to "when did they
     // uninstall", which is the first question anybody asks about a customer
     // who left.
-    await handleDelivery(api.pool, clock, 'installation', { action: 'deleted', installation }, api.analytics)
+    await handleDelivery(api.pool, clock, 'installation', { action: 'deleted', installation }, { github: api.github, analytics: api.analytics })
     const [row] = await api.admin<{ suspended_at: Date | null }[]>`
       SELECT suspended_at FROM github_installations WHERE installation_id = 900123`
     assert.ok(row, 'the installation row was deleted')
@@ -348,7 +348,7 @@ describe('what a delivery writes', {
   })
 
   test('reinstalling clears the suspension', async () => {
-    await handleDelivery(api.pool, clock, 'installation', { action: 'created', installation }, api.analytics)
+    await handleDelivery(api.pool, clock, 'installation', { action: 'created', installation }, { github: api.github, analytics: api.analytics })
     const [row] = await api.admin<{ suspended_at: Date | null }[]>`
       SELECT suspended_at FROM github_installations WHERE installation_id = 900123`
     assert.equal(row!.suspended_at, null)
@@ -363,7 +363,7 @@ describe('what a delivery writes', {
       action: 'created',
       installation: { id: 900999, account: { login: 'other-org', type: 'Organization' } },
       repositories: [{ id: 9, full_name: 'delivery-test-org/app' }],
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
 
     const rows = await api.admin<{ slug: string }[]>`
       SELECT o.slug FROM repositories r JOIN organizations o ON o.id = r.org_id
@@ -396,7 +396,7 @@ describe('what a delivery writes', {
         default_branch: 'trunk',
         owner: { login: 'delivery-test-org', type: 'Organization' },
       },
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     assert.equal(out.handled, true, out.detail)
 
     const [row] = await api.admin<{ full_name: string; default_branch: string }[]>`
@@ -418,7 +418,7 @@ describe('what a delivery writes', {
         full_name: 'delivery-test-org/second',
         owner: { login: 'delivery-test-org', type: 'Organization' },
       },
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     assert.equal(out.handled, true, out.detail)
     const [row] = await api.admin<{ full_name: string }[]>`
       SELECT full_name FROM repositories WHERE full_name = 'delivery-test-org/second'`
@@ -430,7 +430,7 @@ describe('what a delivery writes', {
       action: 'edited',
       installation: { id: 900123, node_id: 'x' },
       repository: { id: 79, full_name: 'nobody/nothing' },
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     assert.equal(out.handled, false)
     assert.match(out.detail, /no repository/)
   })
@@ -445,7 +445,7 @@ describe('what a delivery writes', {
         full_name: 'delivery-test-org/second',
         owner: { login: 'delivery-test-org', type: 'Organization' },
       },
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     const [row] = await api.admin<{ archived_at: Date | null }[]>`
       SELECT archived_at FROM repositories WHERE full_name = 'delivery-test-org/second'`
     assert.ok(row, 'the row was deleted rather than archived')
@@ -456,19 +456,19 @@ describe('what a delivery writes', {
     // GitHub retries a 5xx. Answering 500 to an event that will be refused
     // identically every time is a retry storm.
     for (const event of ['push', 'pull_request', 'member', 'organization', 'star']) {
-      const out = await handleDelivery(api.pool, clock, event, { action: 'created' }, api.analytics)
+      const out = await handleDelivery(api.pool, clock, event, { action: 'created' }, { github: api.github, analytics: api.analytics })
       assert.equal(out.handled, false, event)
       assert.ok(out.detail.length > 0, event)
     }
   })
 
   test('a ping is acknowledged, because that is what GitHub sends first', async () => {
-    const out = await handleDelivery(api.pool, clock, 'ping', {}, api.analytics)
+    const out = await handleDelivery(api.pool, clock, 'ping', {}, { github: api.github, analytics: api.analytics })
     assert.equal(out.handled, true)
   })
 
   test('a payload with no installation is answered rather than throwing', async () => {
-    const out = await handleDelivery(api.pool, clock, 'installation', { action: 'created' }, api.analytics)
+    const out = await handleDelivery(api.pool, clock, 'installation', { action: 'created' }, { github: api.github, analytics: api.analytics })
     assert.equal(out.handled, false)
     assert.match(out.detail, /no installation/)
   })
@@ -485,7 +485,7 @@ describe('what a delivery writes', {
     // suspend-then-repository. The owner suspends the App; a `repository`
     // delivery from before the suspension is retried afterwards. The retry must
     // not restore access the owner took away.
-    await handleDelivery(api.pool, clock, 'installation', { action: 'suspend', installation }, api.analytics)
+    await handleDelivery(api.pool, clock, 'installation', { action: 'suspend', installation }, { github: api.github, analytics: api.analytics })
     await handleDelivery(api.pool, clock, 'repository', {
       action: 'edited',
       installation: { id: 900123, node_id: 'x' },
@@ -495,7 +495,7 @@ describe('what a delivery writes', {
         full_name: 'delivery-test-org/renamed',
         owner: { login: 'delivery-test-org', type: 'Organization' },
       },
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     const [row] = await api.admin<{ suspended_at: Date | null }[]>`
       SELECT suspended_at FROM github_installations WHERE installation_id = 900123`
     assert.notEqual(
@@ -509,13 +509,13 @@ describe('what a delivery writes', {
     // deleted-then-installation_repositories. Same shape, different event, and
     // it is the one that carries the full installation object, so it looked
     // most like a legitimate reason to write the row.
-    await handleDelivery(api.pool, clock, 'installation', { action: 'deleted', installation }, api.analytics)
+    await handleDelivery(api.pool, clock, 'installation', { action: 'deleted', installation }, { github: api.github, analytics: api.analytics })
     await handleDelivery(api.pool, clock, 'installation_repositories', {
       action: 'added',
       installation,
       repositories_added: [{ id: 2, full_name: 'delivery-test-org/docs' }],
       repositories_removed: [],
-    }, api.analytics)
+    }, { github: api.github, analytics: api.analytics })
     const [row] = await api.admin<{ suspended_at: Date | null }[]>`
       SELECT suspended_at FROM github_installations WHERE installation_id = 900123`
     assert.notEqual(row!.suspended_at, null, 'an uninstalled App was reconnected by a repository list')
@@ -530,13 +530,13 @@ describe('what a delivery writes', {
     // The other half, so the fix above cannot be "never clear it". These are
     // the two deliveries that mean the installation is live again, and they are
     // the only two allowed to say so.
-    await handleDelivery(api.pool, clock, 'installation', { action: 'unsuspend', installation }, api.analytics)
+    await handleDelivery(api.pool, clock, 'installation', { action: 'unsuspend', installation }, { github: api.github, analytics: api.analytics })
     const [unsuspended] = await api.admin<{ suspended_at: Date | null }[]>`
       SELECT suspended_at FROM github_installations WHERE installation_id = 900123`
     assert.equal(unsuspended!.suspended_at, null)
 
-    await handleDelivery(api.pool, clock, 'installation', { action: 'suspend', installation }, api.analytics)
-    await handleDelivery(api.pool, clock, 'installation', { action: 'created', installation }, api.analytics)
+    await handleDelivery(api.pool, clock, 'installation', { action: 'suspend', installation }, { github: api.github, analytics: api.analytics })
+    await handleDelivery(api.pool, clock, 'installation', { action: 'created', installation }, { github: api.github, analytics: api.analytics })
     const [reinstalled] = await api.admin<{ suspended_at: Date | null }[]>`
       SELECT suspended_at FROM github_installations WHERE installation_id = 900123`
     assert.equal(reinstalled!.suspended_at, null)

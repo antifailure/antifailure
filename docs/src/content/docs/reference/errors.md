@@ -696,6 +696,18 @@ The scenario {scenario} proved nothing: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/load](/docs/concepts/load/) |
 
+### AF-LOD-016
+
+The p95_increase threshold proved nothing: {detail}
+
+**What to do.** The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
 ## Manifest
 
 ### AF-MAN-001
@@ -1058,7 +1070,7 @@ Service {service} exited with code {code} during startup.
 
 No free port was found in the range {range} to publish the environment on.
 
-**What to do.** Free a port in that range, or set runtime.port_from in the manifest to a range that is clear.
+**What to do.** Free a port in that range, or set AF_PORT_RANGE_START to the first port of a range that is clear.
 
 | | |
 | --- | --- |
@@ -1173,6 +1185,18 @@ This runtime cannot do that: {detail}
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
+### AF-RUN-046
+
+AF_PORT_RANGE_START is set to {value}, which is not a port number.
+
+**What to do.** Set it to the first port of a free range, between {limit}, or unset it to use the default.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/local-runtime](/docs/guides/local-runtime/) |
 
 ## Secrets
 

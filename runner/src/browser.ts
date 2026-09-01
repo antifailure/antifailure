@@ -47,6 +47,25 @@ async function locate(pw: PWPage, field: RegExp, timeoutMs: number) {
   }
 }
 
+/** How long a page gets to finish rendering before anything reads it.
+ *
+ * An application that renders on the client has nothing on it when the
+ * document finishes parsing. This repository's own console is the case that
+ * found it: after the sign-in callback lands, the whole body text is the
+ * single word "Loading" for about a second and a half. A snapshot taken there
+ * reports a page that offers no fields and no controls at all, so two
+ * workflows signed in successfully and were then reported as having proved
+ * nothing, on a page that was a second away from showing everything they were
+ * asked to look for.
+ *
+ * networkidle rather than a fixed sleep, because the cost is then paid only by
+ * the pages that need it: a page that is already idle returns in about a
+ * millisecond, and one that is still fetching waits exactly as long as it
+ * fetches. Playwright's 500ms quiet period is the floor, which is what a
+ * served JSON document pays.
+ */
+const RENDER_MS = 10_000;
+
 /** Evidence captured from a run. */
 export interface Evidence {
   /** Video is the recording, when one was made. */
@@ -63,6 +82,16 @@ export interface Evidence {
    *  the egress policy and is worth saying so rather than leaving somebody to
    *  guess. */
   readonly failed: readonly string[];
+}
+
+/** Waits for the page to stop fetching, and gives up quietly.
+ *
+ * Swallowed rather than thrown: a page holding a socket open, or polling once
+ * a second, never goes idle at all, and those are applications this has to be
+ * able to look at. Reading a busy page is better than refusing to read it.
+ */
+async function settled(pw: PWPage): Promise<void> {
+  await pw.waitForLoadState('networkidle', { timeout: RENDER_MS }).catch(() => {});
 }
 
 /** Session is one browser, one context, one page, and its evidence. */
@@ -124,6 +153,7 @@ export class Session {
     return {
       async goto(url: string) {
         await pw.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        await settled(pw);
       },
       async fill(field: RegExp, value: string) {
         // Three seconds to prefer the exact name, then ten for whichever
@@ -179,6 +209,9 @@ export class Session {
   /** snapshot describes the page in the terms a decision is made in. */
   async snapshot(): Promise<Snapshot> {
     const pw = this.#page;
+    // Again here and not only after a navigation, because a press that starts
+    // a client side transition changes the page without one.
+    await settled(pw);
     const fields = await pw.evaluate(() => {
       // Read in the page rather than through many round trips, because a form
       // with thirty fields would otherwise cost thirty messages.

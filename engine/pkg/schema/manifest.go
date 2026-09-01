@@ -226,6 +226,10 @@ type EgressRule struct {
 type LoginStrategy string
 
 const (
+	// LoginNone is a persona that never signs in, for an application with no
+	// sign in at all or a workflow about a signed out visitor. The agent goes
+	// straight to the workflow's start path.
+	LoginNone      LoginStrategy = "none"
 	LoginPassword  LoginStrategy = "password"
 	LoginMagicLink LoginStrategy = "magic_link"
 	LoginEmailCode LoginStrategy = "email_code"

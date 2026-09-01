@@ -102,6 +102,7 @@ export interface AuthenticatedEngine {
   orgId: string
   tokenId: string
   tokenName: string
+  plan: string
 }
 
 /**
@@ -156,7 +157,7 @@ export async function authenticateEngine(
   // table returns exactly the row being presented. Without it the lookup runs
   // with no tenant, the table is invisible, and every token is refused: a
   // failure that looks identical to correct rejection of a bad token.
-  return pool.withoutTenant(async (db) => {
+  const engine = await pool.withoutTenant(async (db) => {
     const rows = await db.execute<{
       id: string
       org_id: string
@@ -177,6 +178,14 @@ export async function authenticateEngine(
       UPDATE engine_tokens SET last_used_at = ${clock.now().toISOString()} WHERE id = ${row.id}`)
     return { orgId: row.org_id, tokenId: row.id, tokenName: row.name }
   }, { engineTokenHash: hash })
+  if (!engine) return null
+
+  const plan = await pool.withTenant({ orgId: engine.orgId }, async (db) => {
+    const rows = await db.execute<{ plan: string }>(sql`
+      SELECT plan FROM organizations WHERE id = ${engine.orgId}::uuid`)
+    return rows[0]?.plan ?? 'free'
+  })
+  return { ...engine, plan }
 }
 
 /**

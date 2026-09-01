@@ -180,6 +180,18 @@ export interface Reconciliation {
  * The Stripe calls happen BEFORE the transaction opens. A transaction held
  * across a network call to a third party is a transaction whose length is
  * decided by that third party.
+ *
+ * WHY THIS TAKES STRIPE'S PERIOD END AND ORGANIZATION DELETION DOES NOT. The
+ * two rules look like two authors disagreeing and they are one decision, so
+ * they are written down on both sides rather than in neither. Reconciliation
+ * is REPAIR: it runs because local state is presumed wrong, so the remote
+ * answer wins outright, and that is the whole point of the route. Revoking an
+ * entitlement is the opposite question, and the deletion state machine takes
+ * the LATER of Stripe's answer and the local row on purpose. A response that
+ * omits the period, or carries a stale one, would otherwise shorten the wait
+ * and cut off an organization that is still paid up. Being late to revoke
+ * costs a day of access somebody already bought. Being early takes away access
+ * somebody is still entitled to, and there is no symmetric mistake to make.
  */
 export async function reconcile(
   pool: Pool,
@@ -192,60 +204,47 @@ export async function reconcile(
   const read = await pool.withTenant({ orgId }, async (db) => ({
     customer: await db.execute<{ stripe_customer_id: string }>(sql`
       SELECT stripe_customer_id FROM billing_customers WHERE org_id = ${orgId}::uuid`),
-    subscriptions: await db.execute<{ stripe_subscription_id: string }>(sql`
-      SELECT stripe_subscription_id FROM subscriptions
-      WHERE org_id = ${orgId}::uuid ORDER BY created_at DESC LIMIT 50`),
   }))
   const customerId = read.customer[0]?.stripe_customer_id
   if (!customerId) {
     return { checked: 0, changed: 0, notes: ['this organization has no Stripe customer'] }
   }
-  const known = read.subscriptions
-
-  const invoices = await client
-    .listInvoices(customerId, 50)
-    .then((list) => ({ list, error: null as string | null }))
-    .catch((err: unknown) => ({
-      list: [],
-      error: err instanceof Error ? err.message : String(err),
-    }))
-
-  const fetched = await Promise.all(
-    known.map(async (row) => ({
-      id: row.stripe_subscription_id,
-      // Errors are carried rather than thrown, so one unreachable subscription
-      // does not abandon the others. A sweep that stops at the first failure
-      // reconciles the rows before the broken one and never the rest.
-      result: await client
-        .getSubscription(row.stripe_subscription_id)
-        .then((s) => ({ subscription: s, error: null as string | null }))
-        .catch((err: unknown) => ({
-          subscription: null,
-          error: err instanceof Error ? err.message : String(err),
-        })),
-    })),
-  )
+  // Ask Stripe for the collection rather than asking only about local ids. A
+  // missing customer.subscription.created webhook leaves no local id to query,
+  // which made the old reconciliation unable to recover the exact outage it
+  // claimed to handle.
+  const [subscriptions, invoices] = await Promise.all([
+    client
+      .listSubscriptions(customerId, 50)
+      .then((list) => ({ list, error: null as string | null }))
+      .catch((err: unknown) => ({
+        list: [],
+        error: err instanceof Error ? err.message : String(err),
+      })),
+    client
+      .listInvoices(customerId, 50)
+      .then((list) => ({ list, error: null as string | null }))
+      .catch((err: unknown) => ({
+        list: [],
+        error: err instanceof Error ? err.message : String(err),
+      })),
+  ])
 
   return pool.withTenant({ orgId }, async (db) => {
     const notes: string[] = []
     let changed = 0
-    for (const { id, result } of fetched) {
-      if (result.error) {
-        notes.push(`${id}: Stripe could not be asked (${result.error})`)
-        continue
-      }
-      if (!result.subscription) {
-        notes.push(`${id}: Stripe has no such subscription; the row was left alone`)
-        continue
-      }
+    if (subscriptions.error) {
+      notes.push(`subscriptions could not be read from Stripe (${subscriptions.error})`)
+    }
+    for (const subscription of subscriptions.list) {
       // The event time is now, because this is what Stripe believes now. That
       // advances the watermark past any delivery still in flight, which is
       // correct: a webhook describing an older state must not undo this.
       const written = await writeSubscription(
-        db, clock, config, orgId, result.subscription, clock.now(), analytics,
+        db, clock, config, orgId, subscription, clock.now(), analytics,
       )
       if (written.outcome === 'applied') changed += 1
-      notes.push(`${id}: ${result.subscription.status}, ${written.detail}`)
+      notes.push(`${subscription.id}: ${subscription.status}, ${written.detail}`)
     }
 
     // Invoices too, and for the same reason. A missed invoice.paid delivery is
@@ -261,10 +260,10 @@ export async function reconcile(
       notes.push(`${invoices.list.length} invoices read from Stripe`)
     }
 
-    if (known.length > 0) {
+    if (!subscriptions.error) {
       notes.push(await recomputePlan(db, clock, orgId, analytics))
     }
-    return { checked: known.length, changed, notes }
+    return { checked: subscriptions.list.length, changed, notes }
   })
 }
 

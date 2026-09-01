@@ -11,9 +11,23 @@
 // would pass just as well with the policies removed.
 
 import { after, before, describe, it } from 'node:test'
+import { readdir, readFile } from 'node:fs/promises'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { sql } from 'drizzle-orm'
-import { available, setup, seedTenant, dropTenant, pgError, type Harness, type Fixture } from './harness.ts'
+import { createPool } from '../src/client.ts'
+import {
+  available,
+  appUrl,
+  connectTimeoutSeconds,
+  setup,
+  seedTenant,
+  dropTenant,
+  pgError,
+  type Harness,
+  type Fixture,
+} from './harness.ts'
 
 const hasDatabase = await available()
 
@@ -349,6 +363,195 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     assert.ok(emails.includes(`${bob.slug}@example.test`), 'bob cannot read his own user row')
   })
 
+  it('a declared identity does not survive its transaction onto the next borrower', async () => {
+    // The whole of the webhook design rests on this one property. The policies
+    // in 0013 and 0020 do not key on the tenant, they key on a name the caller
+    // declares, so a declared name left behind on a pooled connection is read
+    // by whoever borrows it next and it reaches another company's rows. Proven
+    // in this repository rather than assumed: `lock_timeout` and
+    // `statement_timeout` were found leaking off a migration connection the
+    // same night this suite was written, so the failure mode is live here.
+    //
+    // max: 1 is the point of the test. With a larger pool the second query can
+    // land on a connection that never carried the setting, and the assertion
+    // passes for the wrong reason.
+    const one = createPool({ url: appUrl(), max: 1, connectTimeoutSeconds })
+    try {
+      await one.withTenant({ orgId: alice.orgId, userId: alice.userId }, async (db) =>
+        db.execute(sql`SELECT 1`),
+      )
+      await one.withGitHubAccount('some-account', async (db) => db.execute(sql`SELECT 1`))
+      await one.withStripeCustomer('cus_declared_by_a_delivery', async (db) =>
+        db.execute(sql`SELECT 1`),
+      )
+
+      // Every setting the pool declares, read out of the pool's own source
+      // rather than listed here. A hand-written list goes stale the next time a
+      // policy keys on something new, and the new one is exactly the one that
+      // would leak unnoticed.
+      //
+      // pg_settings is NOT the way to ask this and looked like it was. A custom
+      // GUC set through set_config is a placeholder and never appears there, so
+      // the query returned nothing whether or not anything had leaked: a green
+      // check over a subject it never examined.
+      const source = await readFile(new URL('../src/client.ts', import.meta.url), 'utf8')
+      const declared = [...new Set(source.match(/'antifailure\.[a-z_]+'/g) ?? [])].map((q) =>
+        q.slice(1, -1),
+      )
+      assert.ok(declared.length >= 10, `found only ${declared.length} settings in client.ts`)
+
+      for (const name of declared) {
+        const [row] = await one.sql<{ left: string | null }[]>`
+          SELECT current_setting(${name}, true) AS left`
+        assert.ok(
+          row?.left === null || row?.left === '',
+          `${name} outlived its transaction on a pooled connection, carrying ${row?.left}`,
+        )
+      }
+
+      // The timeouts too, for the same reason and because that is the shape the
+      // leak actually took here.
+      const [timeout] = await one.sql<{ statement_timeout: string }[]>`SHOW statement_timeout`
+      assert.equal(
+        timeout?.statement_timeout,
+        '0',
+        'statement_timeout outlived its transaction on a pooled connection',
+      )
+    } finally {
+      await one.close()
+    }
+  })
+
+  it("an update's new row must satisfy the SELECT policies, not only the WITH CHECK", async () => {
+    // Written here because it could not be written where it belongs. The right
+    // place is a comment beside `stripe_delivery_moves_plan` in 0020, and a
+    // migration that has already been applied cannot be edited: the runner
+    // compares a digest and refuses, because databases that ran the old text
+    // would never receive the new text.
+    //
+    // What the next person to edit that policy needs to know: Postgres applies
+    // the table's SELECT policies to the NEW row of an UPDATE as well, with no
+    // RETURNING clause needed. So on `organizations`, where the delivery has a
+    // SELECT policy keyed on the same customer, weakening the UPDATE policy's
+    // WITH CHECK removes a real defence and breaks nothing visible, because the
+    // read half goes on catching the escape. Establishing that took a table of
+    // its own: rewriting the real policy with `WITH CHECK (true)` and watching
+    // the escape still fail proves only that something stopped it.
+    //
+    // It is asserted rather than described because the day it stops being true
+    // is a Postgres upgrade, and the only warning would be this going red.
+    //
+    // The other half of what that policy reaches, recorded here because there is
+    // nowhere else and because the fact belongs in the repository rather than in
+    // a review. Row-level security cannot restrict a COLUMN, so inside a
+    // withStripeCustomer transaction the application role may write every column
+    // of the organization the delivery names, including `suspended_at`, the kill
+    // switch from 0010. Nothing in the database prevents that. What prevents it
+    // is that all five UPDATE statements on `organizations` name their columns
+    // explicitly, and the sixth one somebody writes will not inherit that care.
+    //
+    // Column level UPDATE privileges look like the fix and are not, measured
+    // rather than assumed. `GRANT UPDATE (plan, updated_at)` takes twenty api
+    // tests red, because the same role runs the GitHub installation upsert,
+    // which writes `github_login`, and both kill switch routes, which write
+    // `suspended_at`, `suspended_reason` and `suspended_by`. The narrowest grant
+    // that keeps every path working is the union of all five statements, and it
+    // is green, and it still admits the kill switch: it buys `name`, `slug`,
+    // `id` and `created_at` and not the column anybody was worried about. A
+    // privilege is granted to a ROLE and a policy admits a ROW, and Postgres has
+    // no way to say "this column, but only on the path that policy admitted".
+    //
+    // What would work is a separate role for the delivery path, reached with SET
+    // LOCAL ROLE so it needs no second credential. That is not a grant, it is a
+    // migration: a role that is not `antifailure_app` matches none of these
+    // policies and sees nothing at all under FORCE ROW LEVEL SECURITY, checked
+    // rather than assumed, so every policy a delivery relies on has to be
+    // re-targeted with it. Worth doing, too large to bolt onto a review.
+    //
+    // A BEFORE UPDATE trigger comparing OLD and NEW would also work, and it is
+    // the cheaper of the two, because a trigger sees the old row and a WITH
+    // CHECK never does. Whichever is chosen, it wants reviewing on its own
+    // rather than slipping in: there is not one user trigger anywhere in this
+    // schema today, and not one column level grant either, so either would be
+    // the first of its kind here.
+    await h.admin`CREATE TABLE update_sees_select_policies (id int PRIMARY KEY, v text)`
+    try {
+      await h.admin`INSERT INTO update_sees_select_policies VALUES (1, 'visible')`
+      await h.admin`ALTER TABLE update_sees_select_policies ENABLE ROW LEVEL SECURITY`
+      await h.admin`ALTER TABLE update_sees_select_policies FORCE ROW LEVEL SECURITY`
+      await h.admin`GRANT SELECT, UPDATE ON update_sees_select_policies TO antifailure_app`
+      await h.admin`
+        CREATE POLICY reads ON update_sees_select_policies
+          FOR SELECT TO antifailure_app USING (v = 'visible')`
+      // Deliberately the widest an UPDATE policy can be. Nothing in this policy
+      // refuses anything, so whatever refuses the write below is the other half.
+      //
+      // FOR UPDATE and not FOR ALL, which is the shape `stripe_delivery_moves_plan`
+      // has and is load bearing here: FOR ALL is a SELECT policy too, so writing
+      // it that way would widen the read half to `true` as well and the defence
+      // this test is about would disappear. The first version of this test did
+      // exactly that and went red, which is how the dependency was found.
+      await h.admin`
+        CREATE POLICY writes ON update_sees_select_policies
+          FOR UPDATE TO antifailure_app USING (true) WITH CHECK (true)`
+
+      const err = await h.pool
+        .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+          await db.execute(sql`UPDATE update_sees_select_policies SET v = 'hidden' WHERE id = 1`)
+        })
+        .then(
+          () => null,
+          (e: unknown) => pgError(e),
+        )
+      assert.ok(
+        err,
+        'an update moved a row out of what the SELECT policy admits, so that defence is gone',
+      )
+      assert.equal(err.code, '42501', `expected a policy refusal, got ${err.code}: ${err.message}`)
+
+      // The negative control, so this is a property of the SELECT policy rather
+      // than of the table. With the read half open, the same write succeeds.
+      await h.admin`DROP POLICY reads ON update_sees_select_policies`
+      await h.admin`
+        CREATE POLICY reads ON update_sees_select_policies
+          FOR SELECT TO antifailure_app USING (true)`
+      await h.pool.withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+        await db.execute(sql`UPDATE update_sees_select_policies SET v = 'hidden' WHERE id = 1`)
+      })
+      const [row] = await h.admin<{ v: string }[]>`
+        SELECT v FROM update_sees_select_policies WHERE id = 1`
+      assert.equal(row?.v, 'hidden', 'the control write was refused too, so the test proves nothing')
+    } finally {
+      await h.admin`DROP TABLE IF EXISTS update_sees_select_policies`
+    }
+  })
+
+  it('a tenant cannot record a delivery in the billing ledger', async () => {
+    // billing_events grants the tenant SELECT and UPDATE and deliberately no
+    // INSERT policy, because the primary key is the payment provider's own
+    // event id: a tenant able to insert could claim the id of an event that has
+    // not arrived yet, and the real delivery would then look like a retry and
+    // be dropped. Narrowing the verb is what makes that impossible rather than
+    // unlikely, and nothing else in the suite would notice it widening.
+    const err = await h.pool
+      .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+        await db.execute(sql`
+          INSERT INTO billing_events (
+            stripe_event_id, org_id, stripe_customer_id, type, event_created_at)
+          VALUES ('evt_claimed_before_it_arrived', ${bob.orgId}, 'cus_bob', 'invoice.paid', now())`)
+      })
+      .then(
+        () => null,
+        (e: unknown) => pgError(e),
+      )
+    assert.ok(err, 'a tenant wrote a row into the billing ledger')
+    assert.equal(
+      err.code,
+      '42501',
+      `expected the insert to be refused for insufficient privilege, got ${err.code}: ${err.message}`,
+    )
+  })
+
   it('a session is readable only by the user who owns it, or by presenting its token', async () => {
     const token = Buffer.from('a'.repeat(64), 'hex')
     await h.admin`
@@ -377,5 +580,193 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     assert.equal(resolved[0]!.user_id, alice.userId)
 
     await h.admin`DELETE FROM sessions WHERE token_hash = ${token}`
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// The convention that stands in for a privilege we cannot express
+// ---------------------------------------------------------------------------
+//
+// Deliberately outside the describe above, and with no database skip. This one
+// reads source text rather than rows, so a machine with no Postgres must still
+// run it. A suite that skips reads as a suite that passed.
+
+/** Where the reader looks. A statement outside these trees is invisible to it. */
+const SOURCE_ROOTS = ['web', 'console', 'ee']
+const SOURCE_SKIP = new Set(['node_modules', '.next', 'dist', '.git', 'coverage', '.astro'])
+
+async function typescriptFiles(dir: string): Promise<string[]> {
+  const found: string[] = []
+  let entries
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return found
+  }
+  for (const entry of entries) {
+    if (SOURCE_SKIP.has(entry.name)) continue
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) found.push(...(await typescriptFiles(full)))
+    else if (/\.tsx?$/.test(entry.name)) found.push(full)
+  }
+  return found
+}
+
+/**
+ * Replaces every `${...}` with one placeholder, counting braces so an object
+ * literal inside an interpolation does not end it early.
+ *
+ * This is what separates the two cases. `SET plan = ${input.plan}` becomes
+ * `SET plan = @`, which still names its column. `SET ${assignments}` becomes
+ * `SET @`, which names nothing, and that is the shape being refused.
+ */
+function withoutInterpolations(text: string): string {
+  let out = ''
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '$' && text[i + 1] === '{') {
+      let depth = 1
+      let j = i + 2
+      while (j < text.length && depth > 0) {
+        if (text[j] === '{') depth += 1
+        else if (text[j] === '}') depth -= 1
+        j += 1
+      }
+      out += '@'
+      i = j - 1
+    } else {
+      out += text[i]
+    }
+  }
+  return out
+}
+
+// An UPDATE naming the table directly, with an optional alias. The alias group
+// refuses to match the SET keyword itself, or a statement with no alias would be
+// read as one aliased to that keyword and its clause would be missed.
+//
+// This comment is worded around the statement shape rather than quoting it, and
+// that is the gate working rather than a workaround. The first run of this test
+// refused the sentence that used to sit here, which quoted the shape to explain
+// it. Rewording costs one sentence; excluding this file would have cost the
+// ability to catch a test that writes the table unqualified.
+const PLAIN_UPDATE = /\bUPDATE\s+(?:ONLY\s+)?organizations\b(?:\s+(?!SET\b)(?:AS\s+)?[a-z_]\w*)?\s+SET\b/gi
+// The upsert, which is an UPDATE on this table whose name sits next to INSERT
+// rather than next to UPDATE. Missing this shape would miss the GitHub
+// installation path, which is one of the five.
+const UPSERT_UPDATE =
+  /\bINSERT\s+INTO\s+organizations\b[\s\S]{0,600}?\bON\s+CONFLICT\b[\s\S]{0,200}?\bDO\s+UPDATE\s+SET\b/gi
+// The query builder takes an object, so what it writes is decided at run time
+// and cannot be read here at all. There are none today. One appearing is the
+// thing this test exists to notice, so it is refused rather than parsed.
+const BUILDER_UPDATE = /\.update\(\s*organizations\b/g
+
+interface OrgUpdate {
+  where: string
+  columns: string[]
+  clause: string
+}
+
+describe('every UPDATE on organizations names its columns', () => {
+  it('refuses a statement whose SET clause is assembled rather than written', async () => {
+    // WHY THIS IS A GATE AND NOT A COMMENT. Row-level security admits a whole
+    // ROW, so inside a withStripeCustomer transaction the application role may
+    // write every column of the organization a delivery names, `suspended_at`
+    // included, which is the kill switch from 0010. See the comment beside the
+    // SELECT policy test above for why a column privilege cannot express that
+    // and what actually would. Until one of those lands, the only thing
+    // standing between a payment provider's callback and the kill switch is
+    // that every statement writing this table names the columns it writes.
+    // That was a convention holding by care, and the next statement somebody
+    // writes does not inherit care.
+    //
+    // WHAT THIS CANNOT SEE, because a gate that certifies less than its name
+    // suggests is worse than none:
+    //
+    //   - It enforces that columns are NAMED, not WHICH columns. A statement on
+    //     the delivery path naming `suspended_at` passes this and still clears
+    //     the kill switch. Only the role split or the trigger closes that.
+    //   - It reads source text, not the SQL Postgres runs. A statement built at
+    //     run time out of strings, or reaching the database by some route other
+    //     than a tagged template or the query builder, is invisible to it.
+    //   - A statement whose TABLE name is interpolated, the shape
+    //     `sql.identifier(table)` used elsewhere in this suite, is invisible for
+    //     the same reason.
+    //   - It covers `organizations` alone. That is deliberate: this table is
+    //     where the row the policy admits carries the kill switch. Every other
+    //     table is a larger conversation and a larger false positive surface.
+    //   - It cannot tell code from a comment, so prose containing this exact
+    //     statement shape would be refused. That direction is chosen: a false
+    //     positive costs somebody a rewording, and a false negative costs the
+    //     thing the test is for.
+    const root = fileURLToPath(new URL('../../../../', import.meta.url))
+
+    const updates: OrgUpdate[] = []
+    let sawPlain = false
+    let sawUpsert = false
+
+    for (const dir of SOURCE_ROOTS) {
+      for (const file of await typescriptFiles(join(root, dir))) {
+        const text = await readFile(file, 'utf8')
+        const where = (index: number) =>
+          `${relative(root, file)}:${text.slice(0, index).split('\n').length}`
+
+        for (const pattern of [PLAIN_UPDATE, UPSERT_UPDATE]) {
+          pattern.lastIndex = 0
+          let match: RegExpExecArray | null
+          while ((match = pattern.exec(text)) !== null) {
+            if (pattern === PLAIN_UPDATE) sawPlain = true
+            else sawUpsert = true
+            const after = text.slice(match.index + match[0].length)
+            // The clause ends at the next keyword that cannot be part of it, or
+            // at the end of the template literal.
+            const end = after.search(/\b(WHERE|RETURNING|FROM)\b|`|;/i)
+            const clause = withoutInterpolations(after.slice(0, end < 0 ? 200 : end))
+            const columns: string[] = []
+            let named = true
+            for (const assignment of clause.split(',')) {
+              const trimmed = assignment.trim()
+              if (!trimmed) continue
+              const column = /^"?([a-z_][a-z0-9_]*)"?\s*=/i.exec(trimmed)
+              if (column) columns.push(column[1]!)
+              else named = false
+            }
+            if (columns.length === 0) named = false
+            if (!named) {
+              updates.push({
+                where: where(match.index),
+                columns,
+                clause: clause.trim().replace(/\s+/g, ' ').slice(0, 80),
+              })
+            }
+          }
+        }
+
+        BUILDER_UPDATE.lastIndex = 0
+        let builder: RegExpExecArray | null
+        while ((builder = BUILDER_UPDATE.exec(text)) !== null) {
+          updates.push({
+            where: where(builder.index),
+            columns: [],
+            clause: 'the query builder, whose set() takes an object decided at run time',
+          })
+        }
+      }
+    }
+
+    // Both readers still match something. Without this the test passes when a
+    // regex stops matching, a walker root is renamed, or the extension filter
+    // changes, which is a green over a subject it never examined. Asserted as
+    // "each shape occurs" rather than as a count, so adding a sixth legitimate
+    // statement does not go red.
+    assert.ok(sawPlain, 'found no UPDATE on organizations at all; this reader has stopped reading')
+    assert.ok(sawUpsert, 'found no upsert on organizations; the ON CONFLICT reader has stopped reading')
+
+    assert.deepEqual(
+      updates.map((u) => `${u.where}  ${u.clause}`),
+      [],
+      'these statements write organizations without naming their columns, so what they write ' +
+        'is decided at run time and the kill switch is reachable from any path that reaches them',
+    )
   })
 })
