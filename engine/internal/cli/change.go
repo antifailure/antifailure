@@ -72,6 +72,10 @@ because nothing is configured to run it.`),
 				}
 			}
 			writeChangeOutputs(e, profile)
+			// Beside the plan, because this step is the one whose file gets
+			// posted when nothing else runs, so its own comment step needs the
+			// same answer af ci gives.
+			announceComment(e)
 
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(profile)

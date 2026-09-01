@@ -27,7 +27,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # Full history, for the same reason the secrets job takes it. `just
+      # test-tools` below runs claimcheck's own tests, and two of them resolve
+      # the control plane image tag the self-hosting pages pin back to the
+      # commit it was built from. That commit is reachable from main and a
+      # depth-1 checkout cannot see it, so the tests failed here while the
+      # claimcheck binary passed in the job that had the history. They fail
+      # rather than skip on purpose: a check that cannot find its answer and
+      # reports green is the false green this repository has produced twice.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -824,7 +833,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # Full history. claimcheck resolves the control plane image tag the
+      # self-hosting pages pin back to the commit it was built from, and then
+      # asks whether the files those pages tell an operator to run exist in
+      # that commit's tree. A shallow checkout has no such commit, and the
+      # check FAILS rather than skipping when it cannot find one: an absent
+      # answer read as a satisfied condition is how this repository has
+      # produced false green twice already.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -855,6 +872,13 @@ jobs:
         # had the same shape with AF_PORT_RANGE_START. The control plane has had
         # this check since config-docs.test.ts; the engine never did.
         run: go run ./tools/varcheck .
+
+      - name: STATUS.md keeps the rule it states about itself
+        # STATUS.md is the answer this project gives to "does it do X yet", and
+        # it opens by naming the states a row may carry. Four rows carried a
+        # word outside that set, in three different spellings, one of which
+        # (`built`) is not a point on the scale at all. Nothing read the file.
+        run: go run ./tools/statuscheck .
 
       - name: The manifests in the documentation are ones the engine accepts
         # The gates above read style, spelling, links and repository paths. None

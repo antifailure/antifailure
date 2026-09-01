@@ -28,8 +28,22 @@ export type Cause =
    *  could not sign in, a fixture with no route, a message that never arrived. */
   | 'environment-incomplete'
   /** The workflow touched a response a model invented, so the result cannot be
-   *  trusted either way. */
+   *  trusted either way. Produced by the ENGINE and not here: the proxy is
+   *  what knows a response was synthesized, and the runner drives a browser
+   *  and never sees the application's own outbound calls. */
   | 'synthesized-response'
+  /** Nothing on the page contradicted what was expected and nothing confirmed
+   *  it either, so the run proved nothing.
+   *
+   *  This used to be reported as `synthesized-response`, which was the wrong
+   *  name for it and cost more than a name. It meant the one cause that maps
+   *  to unverified was already spoken for by a condition with nothing to do
+   *  with a synthesized response, so the promise that touching one comes back
+   *  unverified had a mapping, a test, and a producer that fires on something
+   *  else entirely. Two different things, two different remedies: this one is
+   *  answered by setting a model key or writing an expectation whose words
+   *  appear on the page. */
+  | 'page-unreadable'
   /** An exploration ran to the end of its budget and observed the
    *  application. Findings, if there were any, are attached to it. */
   | 'explored'
@@ -58,6 +72,7 @@ const VERDICT_FOR_CAUSE: Record<Cause, Verdict> = {
   'runner-failure': 'blocked',
   'environment-incomplete': 'blocked',
   'synthesized-response': 'unverified',
+  'page-unreadable': 'unverified',
 };
 
 /** One attempt at a workflow. */
@@ -112,7 +127,12 @@ export function classify(attempts: readonly Attempt[]): Outcome {
   const blocking = attempts.find(
     (a) => a.cause === 'runner-failure' || a.cause === 'environment-incomplete',
   );
-  const synthesized = attempts.find((a) => a.cause === 'synthesized-response');
+  // Either reason a workflow proved nothing. Both are unverified and neither
+  // becomes a pass because a retry got luckier, which is the same argument
+  // that keeps a blocked attempt from being washed out by one.
+  const unproven = attempts.find(
+    (a) => a.cause === 'synthesized-response' || a.cause === 'page-unreadable',
+  );
 
   if (anyPassed && anyFailed) {
     return {
@@ -126,11 +146,11 @@ export function classify(attempts: readonly Attempt[]): Outcome {
       reproduction: [],
     };
   }
-  if (anyPassed && synthesized) {
+  if (anyPassed && unproven) {
     return {
       verdict: 'unverified',
-      cause: 'synthesized-response',
-      detail: synthesized.detail,
+      cause: unproven.cause,
+      detail: unproven.detail,
       attempts,
       reproduction: [],
     };

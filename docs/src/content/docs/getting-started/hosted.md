@@ -37,7 +37,7 @@ no migration credential at all.
 docker run --rm \
   -e AF_MIGRATION_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
-  ghcr.io/antifailure/control-plane:v0.1.1 node bootstrap.mjs
+  ghcr.io/antifailure/control-plane:main-b53906a node bootstrap.mjs
 
 # 2. Serve.
 docker run \
@@ -45,11 +45,17 @@ docker run \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
   -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/github/callback \
-  -p 8080:8080 ghcr.io/antifailure/control-plane:v0.1.1
+  -p 8080:8080 ghcr.io/antifailure/control-plane:main-b53906a
 ```
 
 On Kubernetes, the chart in `deploy/helm/antifailure-control-plane` runs step 1
 as a Job before the Deployment rolls.
+
+The tag names the commit the image was built from, and every push to `main`
+publishes one. Do not run `:latest` or `:v0.1.1`: they are the same image and it
+predates this page. [Which tag to
+run](/docs/self-hosting/control-plane/#which-tag-to-run) has the details and the
+command that lists what is published.
 
 ## Do not skip step 1, and do not trust a 200
 

@@ -65,14 +65,15 @@ provider can rely on, so `max_branches` states it:
 ```
 
 Reaching it fails with `AF-DB-006`, naming the limit, rather than hanging or
-returning an unexplained 422. Set it to what your plan actually allows. Set
-`github.teardown_on` as well, so a merged pull request gives its branch back:
+returning an unexplained 422. Set it to what your plan actually allows.
 
-```yaml
-github:
-  mode: actions
-  teardown_on: [closed, merged]
-```
+Nothing else is needed to stay under it. A branch is given back when the
+environment is torn down, and teardown is not a setting: `af ci` tears down
+whatever the outcome, including on a failed job and including on a cancelled
+one. This page used to tell you to set `github.teardown_on` here, which was
+wrong twice over, since that key is
+[read by nothing](/docs/reference/manifest/#github) and the values it named
+were not ones the schema accepts.
 
 ## What a free tier will and will not hold
 

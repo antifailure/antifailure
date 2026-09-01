@@ -70,6 +70,7 @@ gate: _reports
     run "documented paths exist"         just claimcheck
     run "the sidebar order is chosen"    just sidebarcheck
     run "spoken variables are documented" just varcheck
+    run "STATUS keeps its own rule"      just statuscheck
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
     run "prose reads like a person"      just prosecheck
@@ -761,6 +762,16 @@ varcheck:
 # pages, and On-call came before Standing up production.
 sidebarcheck:
     go run ./tools/sidebarcheck .
+
+# STATUS.md keeps the rule it states about itself.
+#
+# That file opens by saying every component carries one of a fixed set of
+# states and nothing else, and four rows carried a word outside the set, in
+# three different spellings. It is the page this project points at when
+# somebody asks whether a thing works yet, so a word in it that nobody defined
+# is an answer nobody can check, and nothing read it before this.
+statuscheck:
+    go run ./tools/statuscheck .
 
 # The built documentation carries its head, and its entity graph resolves.
 #

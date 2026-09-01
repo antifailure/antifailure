@@ -152,11 +152,12 @@ runner/artifacts/
 /release
 /releasecheck
 /reltar
-/schemadoc
 /sbomcheck
 /scanrepo
+/schemadoc
 /sidebarcheck
 /site
+/statuscheck
 /varcheck
 /vulncheck
 /walkthrough
