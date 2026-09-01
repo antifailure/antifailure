@@ -126,10 +126,28 @@ tar -C "$tmp" -xzf "$tmp/$name.tar.gz" 2>/dev/null \
 # hash proves the bytes arrived intact; it says nothing about the release having
 # been assembled with every file in it, and that is a mistake made at build time
 # rather than in transit, so the hash cannot see it.
-for want in af runner/src/main.ts runner/package.json runner/package-lock.json; do
+#
+# Only the files without which the install does not work. The runner's
+# package-lock.json is checked separately below and NOT required, and the
+# distinction is not a softening: this script ships on every push to main,
+# independently of release.yml, so it runs against releases that were built
+# before it existed. Every archive up to and including v0.1.1 shipped no
+# lockfile, and requiring one here would have refused `AF_VERSION=v0.1.1 curl |
+# sh` outright, turning a dependency pinning defect into an installer that
+# installs nothing. Refuse what cannot be verified; say what is missing where
+# the thing still works.
+for want in af runner/src/main.ts runner/package.json; do
   [ -e "$tmp/$name/$want" ] \
     || die "$name.tar.gz unpacked with no $want in it, so this release is incomplete; refusing to install, and please report it at https://github.com/$REPO/issues"
 done
+
+# Said loudly and once, rather than silently or fatally. Without the lockfile
+# `af runner install` resolves the version ranges in package.json afresh, so the
+# runner this release was tested with is not the runner it runs, and two people
+# installing one release get two different trees. af runner check reports the
+# same thing about the installed tree.
+unpinned=0
+[ -e "$tmp/$name/runner/package-lock.json" ] || unpinned=1
 
 mkdir -p "$BIN_DIR" "$PREFIX"
 if ! install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null; then
@@ -172,6 +190,12 @@ fi
 
 say ""
 say "Installed $VERSION to $BIN_DIR/af"
+if [ "$unpinned" = 1 ]; then
+  say ""
+  say "warning: $VERSION shipped no runner/package-lock.json, so af runner install"
+  say "will resolve the runner's dependency ranges as they are today rather than"
+  say "installing what this release was tested with. af runner check reports it."
+fi
 
 # ---------------------------------------------------------------------------
 # Putting af where the shell will actually find it.

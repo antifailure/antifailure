@@ -166,18 +166,45 @@ func TestAnArchiveWithNoRunnerIsRefused(t *testing.T) {
 	refuses(t, s, "no runner")
 }
 
-// The lockfile is what makes two people installing one release get one tree.
-// Without it npm resolves the ^ ranges afresh, so the runner a release was
-// tested with is not the runner it runs. Shipping it is a release assembly
-// promise, and this is where the installer holds the release to it.
-func TestAnArchiveWithNoRunnerLockfileIsRefused(t *testing.T) {
+// The lockfile is what makes two people installing one release get one tree,
+// and its absence is said out loud rather than either passed over or refused.
+//
+// Not refused on purpose, and the reason is the one that decides where the line
+// between "warn" and "die" goes in this script. install.sh ships on every push
+// to main, independently of release.yml, so it runs against releases built
+// before it existed, and every archive up to and including v0.1.1 shipped no
+// lockfile. Requiring one would have turned a dependency pinning defect into an
+// installer that refuses to install anything at all until the next tag. Refuse
+// what cannot be VERIFIED; say plainly what is missing where the thing still
+// works.
+func TestAnArchiveWithNoRunnerLockfileInstallsAndSaysSo(t *testing.T) {
 	s := newSession(t)
 	repack(t, s, func(stage string) {
 		if err := os.Remove(filepath.Join(stage, "runner", "package-lock.json")); err != nil {
 			t.Fatal(err)
 		}
 	})
-	refuses(t, s, "package-lock.json")
+	out, err := s.run()
+	if err != nil {
+		t.Fatalf("an archive with no lockfile refused to install:\n%s", out)
+	}
+	if _, statErr := os.Stat(filepath.Join(s.binDir(), "af")); statErr != nil {
+		t.Errorf("af was not installed: %v", statErr)
+	}
+	if !strings.Contains(out, "package-lock.json") {
+		t.Errorf("nothing said the release shipped no lockfile:\n%s", out)
+	}
+	if !strings.Contains(out, "af runner install") {
+		t.Errorf("the warning does not say what it will affect:\n%s", out)
+	}
+}
+
+// And an archive that has one says nothing about it, so the warning means
+// something when it appears.
+func TestAnArchiveWithALockfileSaysNothingAboutOne(t *testing.T) {
+	s := newSession(t)
+	out := s.install()
+	absent(t, out, "shipped no runner/package-lock.json")
 }
 
 // The happy path still says it verified, in words, so the reader can tell a
