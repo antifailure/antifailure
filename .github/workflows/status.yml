@@ -21,6 +21,20 @@ name: status
 
 on:
   schedule:
+    # Five minutes is what this ASKS for and not what it gets. GitHub drops
+    # scheduled runs under load on the shared runners, hard: observed deliveries
+    # on this repository have been three to six hours apart, not five minutes.
+    # The number is left here because a lower cadence request does not buy a
+    # more reliable one, and because asking for five and receiving five hours is
+    # strictly better than asking for an hour and receiving five.
+    #
+    # Nothing downstream believes it. `page.jq` measures the interval from the
+    # readings themselves and prints that, saying in the rendered page that the
+    # figure comes from the data rather than from this line, and the staleness
+    # threshold is three times the OBSERVED interval. So a throttled schedule
+    # makes the page coarser and never makes it wrong. If this page ever needs a
+    # real five minute cadence, it needs a runner that is not GitHub's free
+    # scheduler, and that is a hosting decision rather than a cron edit.
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
   # The probe never runs on a push. These two triggers exist only for the

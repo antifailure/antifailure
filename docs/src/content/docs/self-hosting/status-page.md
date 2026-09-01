@@ -252,24 +252,33 @@ site's own web fonts, so the type is the reader's system stack with the site's
 type scale and tracking applied over it, and every colour is copied by value
 from the console's palette.
 
-## The two steps left for a person
+## The step left for a person
 
-Neither of these can be done from inside this repository, the same way nothing
-in `deploy.yml` can set the static site's publish token. Both are one person's
-action, once, and everything either one depends on is already built and
-running.
+This cannot be done from inside the repository, the same way nothing in
+`deploy.yml` can set the static site's publish token. It is one person's
+action, once, and everything it depends on is already built and running.
 
 **Turn on Pages.** Settings > Pages > Build and deployment > Deploy from a
 branch > branch `status-data`, folder `/ (root)` > Save. The page appears at
-`https://antifailure.github.io/antifailure/` within a minute or two of the
-next probe. That address needs nothing else: the page carries its own
-stylesheet and asks for no other file, so serving it under a path prefix
-changes nothing about how it renders. Until this is done the workflow still
-runs, still writes `status-data`, and the record is still readable with
-`git log` or by cloning that branch. There is simply no public URL.
+`https://<owner>.github.io/<repository>/` within a minute or two of the next
+probe. That address needs nothing else: the page carries its own stylesheet
+and asks for no other file, so serving it under a path prefix changes nothing
+about how it renders. Until this is done the workflow still runs, still writes
+`status-data`, and the record is still readable with `git log` or by cloning
+that branch. There is simply no public URL.
 
-**Optionally, point a subdomain at it.** A `CNAME` for `status` in the
-`antifailure.dev` zone, targeting `antifailure.github.io`, plus the same name
+That paragraph is written for somebody standing up their own copy, because
+that is who this page is for. For the Antifailure deployment itself the step
+is **done**: Pages is enabled, https is enforced, and the page is live at
+<https://antifailure.github.io/antifailure/>.
+
+One thing to be clear about, because the name reads like one: `status-data` is
+not a separate repository. It is an orphan branch inside this one, with no
+common ancestor with `main`, rewritten by `status.yml` on every probe. There
+is one repository.
+
+**Optionally, point a subdomain at it.** This one is still open for the
+Antifailure deployment. A `CNAME` for `status` in the `antifailure.dev` zone, targeting `antifailure.github.io`, plus the same name
 entered under Settings > Pages > Custom domain, which writes a `CNAME` file
 into `status-data`. The probe only ever stages `history.json`, `daily.json`
 and `index.html`, so that file survives every push it makes.
