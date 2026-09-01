@@ -93,6 +93,13 @@ interface Resolution {
  * an engine still believes it holds it and then acknowledged afterwards. The
  * projection refuses to move a terminal run, so a late report lands as a note
  * rather than as a resurrection.
+ *
+ * THE SENTENCE DEPENDS ON WHAT HAPPENED TO THE LEASE, and it has to, because
+ * since the engine stopped reporting on a run it had lost, a run somebody took
+ * and a run whose engine died read identically here. Both are silence at the
+ * deadline. The counts on the row are the only thing that separates them, and a
+ * console that renders `detail` and nothing else should still get the true
+ * sentence rather than the generic one. See migration 0025.
  */
 export async function resolveOverdueRuns(db: Db, now: Date): Promise<Resolution> {
   const rows = await db.execute<{ id: string }>(sql`
@@ -104,9 +111,26 @@ export async function resolveOverdueRuns(db: Db, now: Date): Promise<Resolution>
       -- outcome no engine reported at all. An invented code that looks like a
       -- catalogued one is the worst error identifier this product can produce:
       -- somebody searches the errors reference for it and finds nothing.
-      detail = COALESCE(detail,
-        'No engine reported on this run before its deadline. It may have run: what is missing is ' ||
-        'the report, not necessarily the work.'),
+      detail = COALESCE(detail, CASE
+        WHEN lease_takeovers > 0 AND unheld_reports > 0 THEN
+          'This run changed hands: another engine claimed it after the first engine''s lease ' ||
+          'expired, and the first engine then tried to end it and was refused. So the first ' ||
+          'engine did reach the end of its work and tried to say so, and the engine holding the ' ||
+          'run is the one that said nothing before the deadline. It may have run: what is ' ||
+          'missing is the report, not necessarily the work.'
+        WHEN lease_takeovers > 0 THEN
+          'This run changed hands: another engine claimed it after the first engine''s lease ' ||
+          'expired, and then neither of them reported before the deadline. It may have run, on ' ||
+          'either runner: what is missing is the report, not necessarily the work.'
+        WHEN accepted_at IS NULL THEN
+          'No engine ever claimed this run and none reported on it before its deadline. The ' ||
+          'dispatch may never have reached an engine, or an engine may have been handed the run ' ||
+          'directly and never got its report back. It may have run: what is missing is the ' ||
+          'report, not necessarily the work.'
+        ELSE
+          'No engine reported on this run before its deadline. It may have run: what is missing ' ||
+          'is the report, not necessarily the work.'
+        END),
       lease_holder = NULL,
       lease_expires_at = NULL,
       updated_at = ${now.toISOString()}::timestamptz
@@ -248,6 +272,17 @@ export interface RunRow extends Record<string, unknown> {
   cancel_requested_at: Date | string | null
   cancelled_at: Date | string | null
   dispatched_at: Date | string | null
+  /** How many times the lease moved to a different engine, and when the last
+   *  one was. Zero on the ordinary run: a first claim is not a takeover and
+   *  neither is a re-claim by the same holder. */
+  lease_takeovers: number
+  lease_lost_at: Date | string | null
+  /** How many terminal events arrived from an engine that does not hold this
+   *  run and were refused, and when the last one was. A number above zero says
+   *  the engine that lost the run is ALIVE and stood down correctly, which is
+   *  what distinguishes it from one that died. */
+  unheld_reports: number
+  unheld_report_at: Date | string | null
 }
 
 export const runColumns = sql`
@@ -257,7 +292,8 @@ export const runColumns = sql`
   wr.failure_code, wr.detail, wr.reproduce_command, wr.manifest_digest,
   wr.requested_at, wr.accepted_at, wr.started_at,
   wr.finished_at, wr.deadline_at, wr.cancel_requested_at, wr.cancelled_at,
-  wr.dispatched_at`
+  wr.dispatched_at, wr.lease_takeovers, wr.lease_lost_at,
+  wr.unheld_reports, wr.unheld_report_at`
 
 export const runJoins = sql`
   FROM workload_runs wr
@@ -388,6 +424,19 @@ export async function startRun(db: Db, input: StartInput): Promise<StartOutcome>
  * before the claim that was supposed to precede it. Refusing the claim then
  * would leave a running run with no lease and no heartbeat, and it would be
  * abandoned at its deadline while the work was going fine.
+ *
+ * A claim that takes the run from SOMEBODY ELSE is counted, and that count is
+ * the only thing that later distinguishes a run somebody took from a run whose
+ * engine died. Both go quiet and both end as `abandoned`, because an engine that
+ * has lost its lease correctly stops reporting rather than ending a run another
+ * engine is running. See migration 0025.
+ *
+ * A re-claim by the SAME holder is not a takeover. That is a runner that
+ * restarted and asked again, and its own report is still the only one there will
+ * be. The holder is a token identifier, so two runners sharing one token cannot
+ * be told apart here: that is a real limit and it is recorded rather than
+ * papered over, because the fix for it is a per-process identity in the claim
+ * and that is an engine change, not this one.
  */
 export async function claimRun(
   db: Db,
@@ -412,6 +461,14 @@ export async function claimRun(
     UPDATE workload_runs wr SET
       state = CASE WHEN wr.state = 'requested' THEN 'accepted'::workload_run_state ELSE wr.state END,
       accepted_at = COALESCE(wr.accepted_at, ${now}::timestamptz),
+      -- The right hand side reads the OLD holder, which is the whole point:
+      -- this is a takeover only when somebody else was holding it.
+      lease_takeovers = wr.lease_takeovers + CASE
+        WHEN wr.lease_holder IS NOT NULL AND wr.lease_holder <> ${input.holder} THEN 1
+        ELSE 0 END,
+      lease_lost_at = CASE
+        WHEN wr.lease_holder IS NOT NULL AND wr.lease_holder <> ${input.holder}
+        THEN ${now}::timestamptz ELSE wr.lease_lost_at END,
       lease_holder = ${input.holder},
       lease_expires_at = ${leaseUntil}::timestamptz,
       updated_at = ${now}::timestamptz

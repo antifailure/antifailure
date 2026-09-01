@@ -247,7 +247,7 @@ export async function ingest(
         continue
       }
 
-      const note = await applyToProjection(db, clock, engine.orgId, event)
+      const note = await applyToProjection(db, clock, engine, event)
       outcomes.push(note === null
         ? { id: event.id, status: 'accepted' }
         : { id: event.id, status: 'accepted', note })
@@ -355,14 +355,22 @@ const STATE_FOR: Record<string, string> = {
 async function applyToProjection(
   db: Db,
   clock: Clock,
-  orgId: string,
+  engine: AuthenticatedEngine,
   event: IncomingEvent,
 ): Promise<string | null> {
+  const orgId = engine.orgId
   // A workload event is about a run rather than about an environment, so it is
   // keyed on the run identifier this control plane minted rather than on the
   // engine's env_id, and it goes to its own projection.
+  //
+  // The TOKEN travels with it, and not for authorization: this batch is already
+  // authenticated and scoped to the organization. It travels because it is the
+  // same string `claimRun` writes into `lease_holder`, so it is what says
+  // whether the sender still holds the run it is reporting on. A terminal event
+  // from an engine that lost the run used to end it, and destroy the report of
+  // the engine that had taken it over.
   if (isWorkloadEvent(event.type)) {
-    return projectWorkloadEvent(db, clock, orgId, event)
+    return projectWorkloadEvent(db, clock, orgId, engine.tokenId, event)
   }
 
   const state = STATE_FOR[event.type]

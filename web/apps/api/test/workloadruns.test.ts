@@ -33,7 +33,7 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID, createHash } from 'node:crypto'
-import { RUN_DEADLINE_MS } from '../src/workloads/store.ts'
+import { RUN_DEADLINE_MS, RUN_LEASE_MS } from '../src/workloads/store.ts'
 import {
   available, startApi, seedOrg, signInAs, callProcedure, errorCode, dropOrg,
   type ApiHarness, type Org, type SignedIn,
@@ -49,6 +49,10 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
   let other: Org
   let owner: SignedIn
   let token: string
+  /** A second engine in the SAME organization, which is what a lease takeover
+   *  needs: two engines polling one environment. `otherToken` belongs to
+   *  another organization and can never see these runs at all. */
+  let secondToken: string
   let otherToken: string
 
   before(async () => {
@@ -66,6 +70,10 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
     await h.admin`
       INSERT INTO engine_tokens (org_id, name, token_hash, prefix)
       VALUES (${org.orgId}, 'ci', ${createHash('sha256').update(token).digest()}, 'aft_run')`
+    secondToken = `aft_${randomUUID().replace(/-/g, '')}`
+    await h.admin`
+      INSERT INTO engine_tokens (org_id, name, token_hash, prefix)
+      VALUES (${org.orgId}, 'ci-2', ${createHash('sha256').update(secondToken).digest()}, 'aft_2nd')`
     otherToken = `aft_${randomUUID().replace(/-/g, '')}`
     await h.admin`
       INSERT INTO engine_tokens (org_id, name, token_hash, prefix)
@@ -142,6 +150,25 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
       SELECT state::text AS state, verdict::text AS verdict, detail
       FROM workload_runs WHERE id = ${runId}`
     return rows[0]!
+  }
+
+  /** What the row records about the lease, which is what tells a run somebody
+   *  took from a run whose engine died. */
+  async function leaseOf(runId: string): Promise<{
+    holder: string | null; takeovers: number; lostAt: Date | null
+    unheld: number; unheldAt: Date | null
+  }> {
+    const rows = await h.admin<{
+      lease_holder: string | null; lease_takeovers: number; lease_lost_at: Date | null
+      unheld_reports: number; unheld_report_at: Date | null
+    }[]>`
+      SELECT lease_holder, lease_takeovers, lease_lost_at, unheld_reports, unheld_report_at
+      FROM workload_runs WHERE id = ${runId}`
+    const r = rows[0]!
+    return {
+      holder: r.lease_holder, takeovers: Number(r.lease_takeovers), lostAt: r.lease_lost_at,
+      unheld: Number(r.unheld_reports), unheldAt: r.unheld_report_at,
+    }
   }
 
   /** Claims a run the way an engine on a runner does. */
@@ -771,6 +798,304 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
     // engine stops rather than reporting at the end into nothing.
     assert.equal(stranger.status, 409)
     assert.match(JSON.stringify(await stranger.json()), /not held by this token/)
+  })
+
+  // -------------------------------------------------------------------------
+  // A lost lease, one test per ordering
+  //
+  // A lease is fifteen minutes and a heartbeat extends it. Miss enough of them
+  // and a SECOND engine polling the same environment claims the run and starts
+  // doing the work. The statement that ends a run used to be gated on the run's
+  // STATE alone, so the FIRST engine's terminal event ended it, and the second
+  // engine's report then arrived against a terminal row and was refused as a
+  // note. The measurements of the engine that actually did the work were
+  // destroyed by the engine that had lost it.
+  //
+  // The engine side closed the near end: an engine told 409 by its heartbeat
+  // stops reporting. This is the far end, which the engine cannot reach, because
+  // an engine that never got an ANSWER to a heartbeat never learns it lost
+  // anything. Every cell below is an arrival order, not a variation on one.
+  //
+  //   second claims, then first reports  the first is refused; the second's
+  //                                      report still lands, whole
+  //   lease expires, nobody reclaims     the original engine still reports. An
+  //                                      expired lease is not a lost one
+  //   terminal, then the lease expires   already terminal; nothing to take
+  //   both engines report                exactly one ends it, and it is the
+  //                                      holder, in either arrival order
+  //   neither reports                    abandoned, saying it changed hands
+  //   nobody ever claimed it             any token may end it, and a run nobody
+  //                                      claimed says so when it is abandoned
+  // -------------------------------------------------------------------------
+
+  it('ordering: a second engine claims, then the first reports, and the second is not lost', async () => {
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+
+    const first = await claim(target.envId, token)
+    assert.equal(first.body.run.runId, runId)
+
+    // The first engine goes quiet for longer than a lease. Nothing here says it
+    // died: a runner behind a flaky network misses heartbeats and keeps working.
+    h.clock.advance(RUN_LEASE_MS + 60_000)
+    const second = await claim(target.envId, secondToken)
+    assert.equal(second.body.run?.runId, runId, 'the second engine did not take the expired lease')
+
+    const took = await leaseOf(runId)
+    assert.equal(
+      took.takeovers, 1,
+      'the lease moved to a different engine and nothing recorded it. An abandoned run that ' +
+      'changed hands then reads exactly like one whose only engine died.',
+    )
+    assert.ok(took.lostAt, 'a takeover was counted with no time on it')
+
+    // Now the first engine finishes and says so. It has NOT been told it lost
+    // anything, because it never got an answer to a heartbeat.
+    const refused = await send([
+      event({
+        type: 'workload.cancelled', sequence: 4,
+        payload: {
+          workload_run_id: runId, kind: 'observed_load', outcome: 'failed',
+          detail: 'the first engine stopped', result: { requests: 1 },
+        },
+      }),
+    ], token)
+    assert.equal(refused.status, 202)
+
+    // The state FIRST, and the note after, because this assertion is the whole
+    // defect and the note is a courtesy. A test that checked the note first
+    // would die on an undefined string and say so instead of saying that a run
+    // somebody else is running was just ended.
+    const still = await stateOf(runId)
+    assert.equal(
+      still.state, 'accepted',
+      'AN ENGINE THAT NO LONGER HOLDS THIS RUN JUST ENDED IT. The engine that took the lease ' +
+      'may be running the work right now, and its report will arrive against a terminal row and ' +
+      'be refused as a note. Its measurements are gone. This is the ordering the lease check on ' +
+      'the terminal statement exists to refuse.',
+    )
+    assert.equal(still.detail, null, 'a refused report wrote its detail onto the run anyway')
+
+    // Stored and refused, not rejected. The event is kept whole; what it may not
+    // do is end a run somebody else is running.
+    assert.equal(refused.body.outcomes[0].status, 'accepted')
+    assert.match(
+      String(refused.body.outcomes[0].note),
+      /held by another engine/,
+      `the refusal was not explained to the sender: ${JSON.stringify(refused.body.outcomes[0])}`,
+    )
+
+    const counted = await leaseOf(runId)
+    assert.equal(
+      counted.unheld, 1,
+      'a terminal event from an engine that does not hold the run was refused and NOT counted. ' +
+      'Without the count, an abandoned run that changed hands is indistinguishable from one ' +
+      'whose only engine died, which is the whole reason this column exists.',
+    )
+    assert.ok(counted.unheldAt, 'a refused report was counted with no time on it')
+
+    // AND THE POINT OF ALL OF IT: the engine that actually holds the run reports,
+    // and every measurement lands.
+    const landed = await send([
+      event({
+        type: 'workload.finished', sequence: 9,
+        payload: {
+          workload_run_id: runId, kind: 'observed_load', outcome: 'succeeded', verdict: 'pass',
+          result: { requests: 1200, failures: 3, achieved_rate: 40, p95_ms: 61 },
+          routes: [{ route: 'GET /checkout', sent: 1200, errors: 3, p95_ms: 61 }],
+        },
+      }),
+    ], secondToken)
+    assert.equal(landed.status, 202)
+    assert.equal(landed.body.outcomes[0].note, undefined, JSON.stringify(landed.body.outcomes[0]))
+
+    const done = await stateOf(runId)
+    assert.equal(done.state, 'succeeded')
+    assert.equal(done.verdict, 'pass')
+    const [result] = await h.admin<{ requests: number; p95_ms: number }[]>`
+      SELECT requests, p95_ms FROM workload_run_results WHERE workload_run_id = ${runId}`
+    assert.equal(
+      Number(result!.requests), 1200,
+      'THE MEASUREMENTS OF THE ENGINE THAT ACTUALLY RAN THE WORK WERE LOST. This is the data ' +
+      'loss the lease check exists to prevent: the engine that lost the run ended it, and the ' +
+      'engine that had it reported into a terminal row.',
+    )
+    assert.equal(Number(result!.p95_ms), 61)
+    const routes = await h.admin<{ route: string }[]>`
+      SELECT route FROM workload_route_metrics WHERE workload_run_id = ${runId}`
+    assert.equal(routes.length, 1)
+    // The refusal is still on the row afterwards. It is a fact about what
+    // happened to this run, not a transient.
+    assert.equal((await leaseOf(runId)).unheld, 1)
+
+    // AND A CONSOLE CAN READ ALL OF IT. Columns a console cannot reach answer
+    // nothing: the whole point of these four is that somebody looking at a run
+    // can tell it changed hands, and a fact that stops at the table is a fact
+    // nobody has. Asserted here rather than assumed from `runColumns`.
+    const inspected: Answer = await callProcedure(h, owner, 'workloads.inspect', 'query', { runId })
+    assert.equal(inspected.status, 200, JSON.stringify(inspected.body))
+    const seen = inspected.body.result.data.run
+    assert.equal(Number(seen.lease_takeovers), 1, JSON.stringify(seen))
+    assert.ok(seen.lease_lost_at, 'the console cannot see when the lease was taken')
+    assert.equal(Number(seen.unheld_reports), 1, JSON.stringify(seen))
+    assert.ok(seen.unheld_report_at, 'the console cannot see when the refused report arrived')
+  })
+
+  it('ordering: a lease that expired and nobody took is still the holder\'s to report on', async () => {
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+    await claim(target.envId, token)
+
+    // Past the lease and nowhere near the deadline. NOBODY reclaims it.
+    h.clock.advance(RUN_LEASE_MS + 60_000)
+
+    const reported = await send([
+      event({
+        type: 'workload.finished', sequence: 9,
+        payload: {
+          workload_run_id: runId, kind: 'observed_load', outcome: 'succeeded', verdict: 'pass',
+          result: { requests: 700, p95_ms: 12 },
+        },
+      }),
+    ], token)
+    assert.equal(reported.body.outcomes[0].note, undefined, JSON.stringify(reported.body.outcomes[0]))
+    assert.equal((await stateOf(runId)).state, 'succeeded')
+
+    // An expired lease is not a lost one, and this is the assertion that keeps
+    // the guard from being too strict. Until another engine actually takes the
+    // run, the original engine's word is still the only word there will be, and
+    // refusing it here would abandon runs that finished.
+    const lease = await leaseOf(runId)
+    assert.equal(lease.takeovers, 0)
+    assert.equal(lease.unheld, 0)
+    const [result] = await h.admin<{ requests: number }[]>`
+      SELECT requests FROM workload_run_results WHERE workload_run_id = ${runId}`
+    assert.equal(Number(result!.requests), 700)
+  })
+
+  it('ordering: the terminal event arrives first, and then there is no lease left to take', async () => {
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+    await claim(target.envId, token)
+
+    await send([
+      event({
+        type: 'workload.finished', sequence: 9,
+        payload: {
+          workload_run_id: runId, kind: 'observed_load', outcome: 'succeeded', verdict: 'pass',
+          result: { requests: 90 },
+        },
+      }),
+    ], token)
+    assert.equal((await stateOf(runId)).state, 'succeeded')
+    // The terminal statement clears the lease with the state, so there is
+    // nothing for a second engine to find.
+    assert.equal((await leaseOf(runId)).holder, null)
+
+    h.clock.advance(RUN_LEASE_MS + 60_000)
+    const second = await claim(target.envId, secondToken)
+    assert.equal(second.body.run, null, 'a finished run was handed to a second engine')
+    assert.equal((await leaseOf(runId)).takeovers, 0)
+  })
+
+  it('ordering: both engines report, and only the one holding the run ends it', async () => {
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+    await claim(target.envId, token)
+    h.clock.advance(RUN_LEASE_MS + 60_000)
+    await claim(target.envId, secondToken)
+
+    // The holder first this time, which is the other arrival order from the
+    // test above. The first engine's report is then late AND unheld, and it must
+    // still change nothing.
+    const holder = await send([
+      event({
+        type: 'workload.finished', sequence: 9,
+        payload: {
+          workload_run_id: runId, kind: 'observed_load', outcome: 'succeeded', verdict: 'pass',
+          result: { requests: 1200 },
+        },
+      }),
+    ], secondToken)
+    assert.equal(holder.body.outcomes[0].note, undefined, JSON.stringify(holder.body.outcomes[0]))
+
+    const loser = await send([
+      event({
+        type: 'workload.finished', sequence: 9,
+        payload: {
+          workload_run_id: runId, kind: 'observed_load', outcome: 'failed', verdict: 'fail',
+          detail: 'the first engine stopped', result: { requests: 4 },
+        },
+      }),
+    ], token)
+    // Refused for being late rather than for the lease, because the terminal
+    // statement already cleared the holder. Either sentence is correct here and
+    // the assertion is on what was NOT changed.
+    assert.match(loser.body.outcomes[0].note, /already succeeded|held by another engine/)
+
+    const state = await stateOf(runId)
+    assert.equal(state.state, 'succeeded')
+    assert.equal(state.verdict, 'pass')
+    const rows = await h.admin<{ requests: number }[]>`
+      SELECT requests FROM workload_run_results WHERE workload_run_id = ${runId}`
+    assert.equal(rows.length, 1, 'a second report wrote a second result row')
+    assert.equal(Number(rows[0]!.requests), 1200)
+  })
+
+  it('ordering: neither engine reports, and the abandoned run says it changed hands', async () => {
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+    await claim(target.envId, token)
+    h.clock.advance(RUN_LEASE_MS + 60_000)
+    await claim(target.envId, secondToken)
+
+    h.clock.advance(RUN_DEADLINE_MS + 60_000)
+    await callProcedure(h, owner, 'workloads.runs', 'query', { limit: 5 })
+
+    const state = await stateOf(runId)
+    assert.equal(state.state, 'abandoned')
+    // NOT the generic sentence. Since an engine that lost a run stops reporting,
+    // a run somebody took and a run whose engine died are both silence at the
+    // deadline, and this row is the only thing that separates them.
+    assert.match(
+      String(state.detail), /changed hands/,
+      'an abandoned run that changed hands is telling the reader the same thing as one whose ' +
+      'only engine died, which is the distinction the engine side can no longer make.',
+    )
+    assert.equal((await leaseOf(runId)).takeovers, 1)
+  })
+
+  it('ordering: a run nobody ever claimed may be ended by the engine that has it, and says so if not', async () => {
+    // The no-holder arm, and it is deliberate rather than lax: a run handed to
+    // an engine by --run-id is never claimed, and an engine's spool can land the
+    // terminal event before the claim that was supposed to precede it. Refusing
+    // those would abandon runs that finished.
+    const ran = await define('observed_load', { durationSeconds: 30 })
+    const ranId = (await start(ran)).body.result.data.runId
+    assert.equal((await leaseOf(ranId)).holder, null)
+    const reported = await send([
+      event({
+        type: 'workload.finished', sequence: 9,
+        payload: {
+          workload_run_id: ranId, kind: 'observed_load', outcome: 'succeeded', verdict: 'pass',
+          result: { requests: 55 },
+        },
+      }),
+    ], secondToken)
+    assert.equal(reported.body.outcomes[0].note, undefined, JSON.stringify(reported.body.outcomes[0]))
+    assert.equal((await stateOf(ranId)).state, 'succeeded')
+    assert.equal((await leaseOf(ranId)).unheld, 0)
+
+    // And the same run left alone is abandoned saying nobody took it, which is a
+    // different fault to chase from an engine that took it and died: this one is
+    // the dispatch, not the runner.
+    const idle = await define('observed_load', { durationSeconds: 30 })
+    const idleId = (await start(idle)).body.result.data.runId
+    h.clock.advance(RUN_DEADLINE_MS + 60_000)
+    await callProcedure(h, owner, 'workloads.runs', 'query', { limit: 5 })
+    const state = await stateOf(idleId)
+    assert.equal(state.state, 'abandoned')
+    assert.match(String(state.detail), /No engine ever claimed this run/)
   })
 
   // -------------------------------------------------------------------------
