@@ -146,6 +146,45 @@ function inputsFor(org: Org): Record<string, unknown> {
     'account.context': {},
     // Deliberately not anybody's login, for the same reason.
     'account.close': { confirm: 'not-your-login' },
+    // Studio. Every read and every write here names something that is
+    // deliberately not in this fixture, so the handler is reached and answers
+    // NOT_FOUND, which is what the matrix accepts as proof that the permission
+    // gate let the call through. What each route then does is proved in
+    // workloads.test.ts against a fixture built for it.
+    'workloads.list': { limit: 10, includeArchived: false },
+    'workloads.get': { slug: 'nothing-defined-here' },
+    'workloads.runs': { limit: 10 },
+    'workloads.inspect': { runId: '00000000-0000-0000-0000-000000000000' },
+    'workloads.addVersion': { slug: 'nothing-defined-here', body: { select: [] } },
+    'workloads.archive': { slug: 'nothing-defined-here' },
+    'workloads.start': { slug: 'nothing-defined-here', envId: org.envId },
+    'workloads.cancel': { runId: '00000000-0000-0000-0000-000000000000' },
+    'workloads.retry': { runId: '00000000-0000-0000-0000-000000000000' },
+    // Three roles hold workloads.edit, so the second and third to run get
+    // BAD_REQUEST for a slug that is already taken. The matrix accepts that as
+    // the gate having let the call through, which is all it claims to test.
+    'workloads.create': {
+      repository: org.repository,
+      slug: 'matrix',
+      name: 'Matrix',
+      kind: 'browser_workflow',
+      body: { select: ['sign-up'] },
+    },
+    // A real exploration document, so the compiler runs rather than the route
+    // refusing at its own boundary. A repeat is the same digest and answers
+    // created: false, which is a 200 and not a side effect.
+    'workloads.promote': {
+      repository: org.repository,
+      exploration: {
+        name: 'matrix promotion',
+        goal: 'reach the billing page',
+        seed: 'matrix',
+        reached: true,
+        journey: [{ kind: 'goto', url: 'http://env.test/pricing' }],
+        findings: [],
+        missing: [],
+      },
+    },
   }
 }
 

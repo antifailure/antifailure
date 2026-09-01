@@ -23,8 +23,12 @@ import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
 import { capsFor, costAttribution, environmentHoursSince } from '../costs.ts'
 import { syncMembership, SignInError } from '../auth/signin.ts'
 import { GitHubError } from '../auth/github.ts'
-import { createEnvironment, agentsRouter, loadRouter } from './dispatch.ts'
+import {
+  createEnvironment, agentsRouter, loadRouter, dispatch, installationFor, workflowFile,
+} from './dispatch.ts'
 import { runtimesRouter } from './runtimes.ts'
+import { workloadsRouter } from './workloads.ts'
+import { expireOverdueCommands } from '../workloads/commands.ts'
 import { billingRouter } from './billing.ts'
 import { subscriptionsRouter } from './subscriptions.ts'
 
@@ -59,6 +63,13 @@ const environmentsRouter = router({
     .query(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       return c.pool.withTenant(c.tenant, async (db) => {
+        // Housekeeping on a read, and the same shape workloads.list uses. A
+        // teardown that expired has to stop reading as though it were still
+        // going, and every policy on runtime_commands keys on current_org(), so
+        // a sweeper with no tenant set would match nothing and report success.
+        // One indexed update against a partial index holding only the commands
+        // that can still expire, so it costs nothing when there is nothing.
+        await expireOverdueCommands(db, { now: c.clock.now() })
         const rows = await db.execute<EnvironmentRow>(sql`
           SELECT e.id, e.env_id, e.branch, e.pull_request, e.state, e.preview_url,
                  e.runtime, e.golden_version, e.created_at, e.updated_at, e.expires_at,
@@ -90,6 +101,13 @@ const environmentsRouter = router({
     .query(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       return c.pool.withTenant(c.tenant, async (db) => {
+        // Housekeeping on a read, and the same shape workloads.list uses. A
+        // teardown that expired has to stop reading as though it were still
+        // going, and every policy on runtime_commands keys on current_org(), so
+        // a sweeper with no tenant set would match nothing and report success.
+        // One indexed update against a partial index holding only the commands
+        // that can still expire, so it costs nothing when there is nothing.
+        await expireOverdueCommands(db, { now: c.clock.now() })
         const rows = await db.execute<EnvironmentRow>(sql`
           SELECT e.id, e.env_id, e.branch, e.pull_request, e.state, e.preview_url,
                  e.runtime, e.golden_version, e.created_at, e.updated_at, e.expires_at,
@@ -160,7 +178,11 @@ const environmentsRouter = router({
    * `af down`, rather than reporting a cleanup that never happened.
    */
   teardown: orgProcedure('environments.teardown')
-    .input(z.object({ envId: z.string(), reason: z.string().max(500).optional() }))
+    .input(z.object({
+      envId: z.string(),
+      reason: z.string().max(500).optional(),
+      workflow: workflowFile,
+    }))
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       return c.pool.withTenant(c.tenant, async (db) => {
@@ -1104,6 +1126,7 @@ export const appRouter = router({
   audit: auditRouter,
   members: membersRouter,
   runtimes: runtimesRouter,
+  workloads: workloadsRouter,
   billing: billingRouter,
   tokens: tokensRouter,
   org: orgRouter,

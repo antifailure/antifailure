@@ -28,6 +28,8 @@ import { sql } from 'drizzle-orm'
 import type { Db, Pool } from '@antifailure/db'
 import type { Clock } from './clock.ts'
 import type { RateLimiter } from './ratelimit.ts'
+import { isWorkloadEvent, projectWorkloadEvent } from './workloads/projection.ts'
+import { acknowledgeTeardownFromEvent } from './workloads/commands.ts'
 
 /** The event types the control plane understands. An event of any other type
  *  is stored but changes nothing, so an older control plane can ingest a newer
@@ -254,7 +256,7 @@ export async function ingest(
         continue
       }
 
-      const note = await applyToProjection(db, clock, engine.orgId, event)
+      const note = await applyToProjection(db, clock, engine, event)
       outcomes.push(note === null
         ? { id: event.id, status: 'accepted' }
         : { id: event.id, status: 'accepted', note })
@@ -362,9 +364,24 @@ const STATE_FOR: Record<string, string> = {
 async function applyToProjection(
   db: Db,
   clock: Clock,
-  orgId: string,
+  engine: AuthenticatedEngine,
   event: IncomingEvent,
 ): Promise<string | null> {
+  const orgId = engine.orgId
+  // A workload event is about a run rather than about an environment, so it is
+  // keyed on the run identifier this control plane minted rather than on the
+  // engine's env_id, and it goes to its own projection.
+  //
+  // The TOKEN travels with it, and not for authorization: this batch is already
+  // authenticated and scoped to the organization. It travels because it is the
+  // same string `claimRun` writes into `lease_holder`, so it is what says
+  // whether the sender still holds the run it is reporting on. A terminal event
+  // from an engine that lost the run used to end it, and destroy the report of
+  // the engine that had taken it over.
+  if (isWorkloadEvent(event.type)) {
+    return projectWorkloadEvent(db, clock, orgId, engine.tokenId, event)
+  }
+
   const state = STATE_FOR[event.type]
   if (!state || !event.envId) return null
 
@@ -390,9 +407,13 @@ async function applyToProjection(
   const tornDownAt = state === 'torn_down' ? event.occurredAt : null
 
   if (repository === null || branch === null) {
-    return advanceExisting(db, orgId, event.envId, {
+    const note = await advanceExisting(db, orgId, event.envId, {
       state, sequence, previewUrl, runtime, golden, ttl, tornDownAt, cameUp, now,
     })
+    if (note === null && state === 'torn_down') {
+      await acknowledgeTeardown(db, clock, event.envId)
+    }
+    return note
   }
 
   const repositoryId = await repositoryIdFor(db, orgId, repository)
@@ -451,7 +472,38 @@ async function applyToProjection(
                           ELSE environments.torn_down_at END,
       updated_at = ${now}::timestamptz`)
 
+  if (state === 'torn_down') {
+    await acknowledgeTeardown(db, clock, event.envId)
+  }
   return null
+}
+
+/**
+ * Closes the loop on a teardown somebody asked for.
+ *
+ * This is the whole reason `environments.teardown` is now a durable command
+ * rather than a column update, and it is the acknowledgement that works with
+ * the engine exactly as it ships today. `af down` emits `env.destroyed`, the
+ * control plane sink maps that to `environment.torn_down`, and this turns the
+ * pending command into "the runtime says it is gone". No new engine client, no
+ * polling, no second callback channel: the event the engine already sends is
+ * the receipt.
+ *
+ * A teardown nothing asked for acknowledges nothing and costs one indexed
+ * update against a partial index, which is the common case: most environments
+ * are torn down by `af ci` at the end of a pull request rather than by somebody
+ * pressing a button.
+ */
+async function acknowledgeTeardown(db: Db, clock: Clock, envId: string): Promise<void> {
+  const rows = await db.execute<{ id: string }>(sql`
+    SELECT id FROM environments WHERE env_id = ${envId}`)
+  const environmentId = rows[0]?.id
+  if (!environmentId) return
+  await acknowledgeTeardownFromEvent(db, {
+    environmentId,
+    now: clock.now(),
+    detail: 'the engine reported the environment torn down',
+  })
 }
 
 interface Advance {

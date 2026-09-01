@@ -270,6 +270,25 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     reason: 'Polled by af env pull and by a CI step, not by a loop.',
   },
 
+  // Studio, for an engine. All four are polls, so the numbers are about how
+  // often a poll is reasonable rather than about how expensive the query is.
+  'POST /v1/workloads/claim': {
+    rate: 2, burst: 20, key: 'token',
+    reason: 'An engine asks what is waiting for the environment it is on, once when it starts and again between commands. Two a second is far above that; the burst covers several environments starting together at the top of a CI queue.',
+  },
+  'POST /v1/workloads/runs/:runId/heartbeat': {
+    rate: 2, burst: 30, key: 'token',
+    reason: 'Extends a lease that lasts fifteen minutes, so a healthy engine sends one every minute or two. The burst covers several runs on one token heartbeating together, and refusing one would strand a run that is going perfectly well.',
+  },
+  'POST /v1/commands/claim': {
+    rate: 2, burst: 20, key: 'token',
+    reason: 'The same poll shape as claiming a run, on the same cadence. A teardown that waits an extra poll is late by seconds; a refused poll on a tight limit is a teardown that waits for the next job.',
+  },
+  'POST /v1/commands/:id/ack': {
+    rate: 2, burst: 30, key: 'token',
+    reason: 'One per command carried out, in bursts when an engine claimed several. Deliberately not tighter than the claim: an acknowledgement that is refused turns a completed teardown into one that looks unconfirmed.',
+  },
+
   // The application API. One limit for the whole surface rather than per
   // procedure: these are reads and small writes made by a browser with a
   // session, and the thing worth bounding is a runaway page rather than any
