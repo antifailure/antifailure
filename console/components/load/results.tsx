@@ -226,11 +226,19 @@ export function Breaches({ breaches }: { breaches: Breach[] }) {
           {breaches.map((b, i) => (
             <Row key={`${b.what}-${i}`}>
               <Td mono>{b.what}</Td>
+              {/* Both as percentages, because both are fractions today:
+                  `Result.Breaches` takes a p95 increase ratio and an error
+                  rate fraction, and those are the only two breaches it
+                  produces. Printing 1.314 beside a detail line that says
+                  "131 percent slower" makes a reader do the arithmetic twice
+                  to check the page agrees with itself. If the engine ever adds
+                  a breach whose limit is a duration, this is where it breaks
+                  and it will be obvious. */}
               <Td label="Limit" numeric>
-                {b.limit === null ? "--" : b.limit}
+                {percent(b.limit)}
               </Td>
               <Td label="Measured" numeric>
-                {b.measured === null ? "--" : b.measured}
+                {percent(b.measured)}
               </Td>
               <Td label="Detail" className="max-w-[44ch]">
                 {b.detail ?? "--"}

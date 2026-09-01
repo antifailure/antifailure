@@ -111,7 +111,7 @@ function Sources({ kind, onOpen }: { kind: SourceKind | null; onOpen: (id: strin
             <thead>
               <tr>
                 <Th>Name</Th>
-                <Th>Source</Th>
+                <Th>Provenance</Th>
                 <Th>Repository</Th>
                 <Th numeric>Runs</Th>
                 <Th>Last run</Th>
@@ -123,7 +123,7 @@ function Sources({ kind, onOpen }: { kind: SourceKind | null; onOpen: (id: strin
                   <Td>
                     <CellLink href={`/load?source=${encodeURIComponent(s.id)}`}>{s.name}</CellLink>
                   </Td>
-                  <Td label="Source">
+                  <Td label="Provenance">
                     <Provenance kind={s.kind} />
                   </Td>
                   <Td label="Repository">{s.repository ?? "--"}</Td>

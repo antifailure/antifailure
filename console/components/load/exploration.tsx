@@ -238,18 +238,26 @@ export function Explorations() {
       {/* Said before the table, not after it. Somebody arriving at the Load
           page and seeing "exploration" will assume it is a third kind of
           traffic unless told otherwise in the first sentence they read. */}
-      <p className="border-b border-rule px-4 py-3 text-[12.5px] leading-6 text-muted">
-        This does not produce load. `af explore` drives a real browser and
-        compiles what it reached into a workflow for your manifest, which{" "}
+      <div className="border-b border-rule px-4 py-3">
+        <p className="max-w-[74ch] text-[12.5px] leading-6 text-muted">
+          This does not produce load. <code className="font-mono">af explore</code> drives a real
+          browser and compiles what it reached into a workflow for your manifest, which{" "}
+          <code className="font-mono">af test</code> runs. It is here because it is the other way a
+          route nobody wrote down gets found, and a discovery is worth nothing until somebody
+          commits it.
+        </p>
+        {/* Its own line rather than a link inside the sentence. An inline link
+            in running prose is 17px tall and cannot be made 44 without
+            breaking the line box, so the honest fix is to stop making it
+            inline. It reads better too: the sentence explains, the link acts,
+            and neither is doing the other's job. */}
         <a
-          className="text-ink underline decoration-[rgba(16,16,16,0.25)] underline-offset-4 hover:decoration-ink"
+          className="mt-1 inline-flex min-h-11 items-center gap-1.5 text-[12.5px] text-ink underline decoration-[rgba(16,16,16,0.25)] underline-offset-4 hover:decoration-ink"
           href="/runs"
         >
-          af test runs
+          See the workflow runs
         </a>
-        . It is here because it is the other way a route nobody wrote down gets
-        found, and a discovery is worth nothing until somebody commits it.
-      </p>
+      </div>
 
       {state.status === "error" && state.error ? (
         <LoadError error={state.error} retry={state.reload} />
