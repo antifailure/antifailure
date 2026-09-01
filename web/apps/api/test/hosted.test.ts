@@ -4,7 +4,9 @@ import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { githubAppInstallUrlFrom, hostedRequiredPlanFrom } from '../src/hosted.ts'
 import { hashEngineToken } from '../src/ingest.ts'
+import { fileURLToPath } from 'node:url'
 import {
+  adminUrl,
   available,
   callProcedure,
   dropOrg,
@@ -34,6 +36,72 @@ describe('the hosted plan configuration', () => {
     )
     assert.throws(() => githubAppInstallUrlFrom('javascript:alert(1)'), /must be an https/)
     assert.throws(() => githubAppInstallUrlFrom('https://example.com/install'), /must be an https/)
+  })
+})
+
+describe('starting up with the gate set', {
+  skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL',
+}, () => {
+  /**
+   * Runs the real entry point as a subprocess and reports how it ended.
+   *
+   * A start-up refusal is a gate, and a gate nobody has watched fail is
+   * decoration. The refusals below cannot be reached from createServer,
+   * because they are decisions main.ts makes about its own environment before
+   * it builds one, so the only honest way to check them is to run it.
+   */
+  async function start(env: Record<string, string>): Promise<{ code: number | null; out: string }> {
+    const { spawn } = await import('node:child_process')
+    const url = new URL('../src/main.ts', import.meta.url)
+    const child = spawn(process.execPath, [fileURLToPath(url)], {
+      env: {
+        ...process.env,
+        AF_DATABASE_URL: adminUrl,
+        AF_MIGRATION_DATABASE_URL: adminUrl,
+        AF_GITHUB_CLIENT_ID: 'id',
+        AF_GITHUB_CLIENT_SECRET: 'secret',
+        AF_GITHUB_REDIRECT_URI: 'https://app.test/auth/github/callback',
+        AF_MIGRATE: '0',
+        AF_PORT: '0',
+        ...env,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let out = ''
+    child.stdout.on('data', (c) => { out += String(c) })
+    child.stderr.on('data', (c) => { out += String(c) })
+    return await new Promise((resolve) => {
+      // A refusal that never arrives would otherwise hang the suite, and a
+      // process still listening is itself the failure being tested for.
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL')
+        resolve({ code: null, out })
+      }, 30_000)
+      child.on('exit', (code) => {
+        clearTimeout(timer)
+        child.kill('SIGKILL')
+        resolve({ code, out })
+      })
+    })
+  }
+
+  it('refuses to start when the gate is set and billing is off', async () => {
+    // The combination nobody could satisfy: every request refused, and the
+    // billing path that resolves the refusal unable to take money. Saying so
+    // once at start-up beats saying it to every customer.
+    const { code, out } = await start({ AF_HOSTED_REQUIRED_PLAN: 'enterprise' })
+    assert.equal(code, 2, `expected a refusal, got ${code}: ${out}`)
+    assert.match(out, /AF_HOSTED_REQUIRED_PLAN is set but billing is off/)
+  })
+
+  it('refuses a plan it does not sell and an installation address it cannot trust', async () => {
+    const plan = await start({ AF_HOSTED_REQUIRED_PLAN: 'team' })
+    assert.equal(plan.code, 2, plan.out)
+    assert.match(plan.out, /must be enterprise or unset/)
+
+    const url = await start({ AF_GITHUB_APP_INSTALL_URL: 'https://example.com/install' })
+    assert.equal(url.code, 2, url.out)
+    assert.match(url.out, /must be an https:\/\/github\.com\/apps/)
   })
 })
 
