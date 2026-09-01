@@ -2,7 +2,6 @@ package env
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/antifailure/antifailure/engine/internal/personas"
@@ -67,7 +66,7 @@ func (o *Orchestrator) provisionPersonas(
 		// the missing table is a fact about the application rather than a
 		// problem with it. Refusing here is what stopped examples/go-api, a
 		// JSON API with no sign in, from ever running its one workflow.
-		if errors.Is(err, personas.ErrNoUsersTable) && !personas.AnyNeedsAccount(list) {
+		if personas.NoAccountNeeded(err, list) {
 			o.progress("no persona signs in, so no accounts were created")
 			return nil, nil
 		}

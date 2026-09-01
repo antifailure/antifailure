@@ -273,20 +273,30 @@ func (p PasswordPolicy) Validate(password string) error {
 // never executed.
 var ErrNoUsersTable = errors.New("no users table could be found")
 
-// NeedsAccount reports whether a persona has to exist before an agent can use
-// it.
-func NeedsAccount(p schema.Persona) bool {
-	return p.Login != schema.LoginNone
-}
-
-// AnyNeedsAccount reports whether provisioning has anything to create.
-func AnyNeedsAccount(list []schema.Persona) bool {
+// NoAccountNeeded reports whether a provisioning failure is one a run can carry
+// on past.
+//
+// True for exactly one situation, and it is the situation where there was
+// nothing to do in the first place: nowhere to write an account, and no persona
+// that needs one written. Any other error, and any list holding a persona that
+// signs in, is fatal, because then the accounts really are missing and the
+// agents really will be refused.
+func NoAccountNeeded(err error, list []schema.Persona) bool {
+	if !errors.Is(err, ErrNoUsersTable) {
+		return false
+	}
 	for _, p := range list {
-		if NeedsAccount(p) {
-			return true
+		if needsAccount(p) {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+// needsAccount reports whether a persona has to exist before an agent can use
+// it. Only `none` does not: it is the strategy that never signs in.
+func needsAccount(p schema.Persona) bool {
+	return p.Login != schema.LoginNone
 }
 
 // Result is what a provisioning run produced.

@@ -53,8 +53,8 @@ export default async function Page() {
       {rows.length === 0 ? (
         <div className="empty">
           <strong>No customers yet</strong>
-          The migration seeds two. An empty table here usually means the
-          migration did not run, so start with <code>af logs web migration</code>.
+          The migration puts customers here, so an empty table usually means it
+          did not run. Start with <code>af logs web migration</code>.
         </div>
       ) : (
         <div className="scroller">
