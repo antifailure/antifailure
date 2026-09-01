@@ -109,6 +109,10 @@ type hostedReporter struct {
 	// stopped is why the work was stopped from here, so the result can say
 	// which of the two it was rather than "the run was cancelled".
 	stopped string
+	// leaseLost records that the control plane no longer holds this run for
+	// this engine, which is the one condition under which nothing more is
+	// reported. See Finish.
+	leaseLost bool
 	// beating is closed to stop the heartbeat.
 	beating chan struct{}
 	wg      sync.WaitGroup
@@ -278,9 +282,11 @@ func (h *hostedReporter) beat(ctx context.Context, work context.Context, cancel 
 			// terminal event is what says so.
 			return
 		case <-ticker.C():
-			if reason := h.tick(ctx); reason != "" {
+			reason, lost := h.tick(ctx)
+			if reason != "" {
 				h.mu.Lock()
 				h.stopped = reason
+				h.leaseLost = lost
 				h.mu.Unlock()
 				cancel()
 				return
@@ -291,35 +297,68 @@ func (h *hostedReporter) beat(ctx context.Context, work context.Context, cancel 
 
 // tick is one heartbeat and one look for a cancel.
 //
-// It returns the sentence to stop the work with, or empty to keep going. Two
-// things stop it and they are different sentences, which is why this returns
-// prose rather than a boolean: a lease that was taken and a cancel somebody
-// pressed lead a reader to different places.
-func (h *hostedReporter) tick(ctx context.Context) string {
+// It returns the sentence to stop the work with, or empty to keep going, and
+// whether the reason was a lost lease. Two things stop the work and they are
+// different sentences, which is why this returns prose rather than a boolean: a
+// lease that was taken and a cancel somebody pressed lead a reader to different
+// places. The boolean beside it is not a duplicate of the sentence; it decides
+// whether anything more is reported at all.
+func (h *hostedReporter) tick(ctx context.Context) (string, bool) {
 	if err := h.client.Heartbeat(ctx, h.runID); err != nil {
 		var lost *controlplane.LeaseLost
 		if errors.As(err, &lost) {
-			return "the control plane says this engine no longer holds the run: " + lost.Error()
+			return "the control plane says this engine no longer holds the run: " + lost.Error(), true
 		}
 		// Everything else is the network. A heartbeat that could not be sent
 		// says nothing about whether the work is going well, and stopping a
 		// healthy run because a dashboard is unreachable is the failure this
 		// package's soft-failure rule exists to prevent.
 		h.warn("a heartbeat could not be sent: " + err.Error())
-		return ""
+		return "", false
 	}
 
 	commands, err := h.client.ClaimCommands(ctx, h.envID, hostedCommandBatch)
 	if err != nil {
 		h.warn("the pending commands could not be read: " + err.Error())
-		return ""
+		return "", false
 	}
 	for _, c := range commands {
 		if c.Kind == controlplane.CommandCancelWorkload && c.WorkloadRunID == h.runID {
-			return "a cancel was requested in the control plane"
+			return "a cancel was requested in the control plane", false
 		}
 	}
-	return ""
+	return "", false
+}
+
+// LeaseLost reports that this engine no longer holds the run it was working on.
+//
+// THE ONE CONDITION UNDER WHICH THIS ENGINE STOPS TALKING, and it is not
+// caution, it is standing.
+//
+// A 409 from the heartbeat means one of three things: the run finished, the run
+// was cancelled, or the lease was taken after it expired. In the first two this
+// engine's terminal event would move nothing, because the control plane refuses
+// to move a run that is already terminal. In the third another engine has
+// claimed the run and may be running it right now, and the terminal statement
+// on the other side is gated on the run's STATE and not on who holds it. So a
+// cancelled event sent from here would end that engine's run, and its report,
+// arriving later against a row that is already terminal, would be refused as a
+// note. Its measurements would be lost.
+//
+// So the expected value of speaking is zero in two cases and a lost report in
+// the third. The control plane's own 409 says it in four words: stop and claim
+// again. Not stop and report.
+//
+// Nothing is lost locally. The result document still carries everything,
+// including the sentence saying why the run stopped, and the workflow still
+// uploads it.
+func (h *hostedReporter) LeaseLost() bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.leaseLost
 }
 
 // StoppedBy is why this reporter stopped the work, or empty when it did not.
@@ -338,7 +377,7 @@ func (h *hostedReporter) StoppedBy() string {
 // refused knob, because a run this engine says nothing about is a run the
 // control plane can only call abandoned two hours later.
 func (h *hostedReporter) Finish(ctx context.Context, res *workload.Result) {
-	if !h.Reporting() {
+	if !h.Reporting() || h.silenced() {
 		h.Close()
 		return
 	}
@@ -366,7 +405,7 @@ func (h *hostedReporter) Finish(ctx context.Context, res *workload.Result) {
 //
 // No measurements travel, because there are none. What travels is the sentence.
 func (h *hostedReporter) Failed(ctx context.Context, detail string) {
-	if !h.Reporting() {
+	if !h.Reporting() || h.silenced() {
 		h.Close()
 		return
 	}
@@ -378,6 +417,21 @@ func (h *hostedReporter) Failed(ctx context.Context, detail string) {
 		"detail":          detail,
 	})
 	h.Close()
+}
+
+// silenced reports whether this engine has lost the standing to say how the run
+// ended, and says so on the terminal when it has.
+//
+// Said out loud rather than swallowed. A run that stops reporting is otherwise
+// indistinguishable from one that crashed, and the person reading the job log
+// is the only one who can see the difference.
+func (h *hostedReporter) silenced() bool {
+	if !h.LeaseLost() {
+		return false
+	}
+	h.warn("this run is not being reported, because this engine no longer holds it and " +
+		"another may be running it now. The result document is still written and uploaded.")
+	return true
 }
 
 // emit hands one event to the control plane sink and delivers it now.

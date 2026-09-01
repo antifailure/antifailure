@@ -516,11 +516,11 @@ func drain(c chan struct{}) {
 // already have taken this run. Carrying on would have two engines measuring one
 // environment and reporting over each other, so the work stops.
 //
-// The report still goes out. Whether it lands is the control plane's decision
-// and it has already made it: a terminal statement that moves no row writes no
-// results, so a report about a run somebody else finished is a note rather than
-// a second answer.
-func TestALostLeaseStopsTheWorkAndTheRunStillReports(t *testing.T) {
+// And then this engine says nothing at all, which is the half that is easy to
+// get backwards. See LeaseLost for why: the terminal statement on the other
+// side is gated on the run's state rather than on who holds it, so a report
+// from an engine that has lost the run ends it for whoever now has it.
+func TestALostLeaseStopsTheWorkAndTheEngineThenSaysNothing(t *testing.T) {
 	f, url := newFakePlane(t)
 	f.set(func(p *fakePlane) { p.claim = runningRun("observed_load") })
 	h, fake, _ := reporterFor(t, url)
@@ -542,10 +542,62 @@ func TestALostLeaseStopsTheWorkAndTheRunStillReports(t *testing.T) {
 	noteHostedStop(res, h.StoppedBy())
 	h.Finish(context.Background(), res)
 
-	sent := f.sent()
-	require.Len(t, sent, 2, "a run whose lease was taken said nothing about how it ended")
-	require.Equal(t, "workload.cancelled", sent[1].Type)
-	require.Contains(t, sent[1].Payload["detail"], "no longer holds the run")
+	// AND SAYS NOTHING MORE, which is the half that took a second look.
+	//
+	// The first version reported the run cancelled, and that is wrong in a way
+	// no test on this side would have shown: the control plane's terminal
+	// statement is gated on the run's STATE and not on who holds the lease, so
+	// an engine that has lost the run can still end it. If another engine has
+	// claimed it and is running it, this one's cancelled event terminates it,
+	// and the real engine's report arrives against a terminal row and is
+	// refused as a note. Its measurements are gone.
+	//
+	// The 409 says what to do in four words: stop and claim again. Not report.
+	require.Len(t, f.sent(), 1,
+		"an engine that no longer holds the run reported how it ended, which ends the run "+
+			"for whoever does hold it and throws away their measurements")
+	require.Equal(t, "workload.started", f.sent()[0].Type)
+	require.True(t, h.LeaseLost())
+
+	// Nothing is lost locally: the document still says exactly what happened.
+	require.Contains(t, res.Detail, "no longer holds the run")
+}
+
+// The silence is narrow. Every other way a run can stop still reports.
+//
+// Worth its own cell because "when in doubt say nothing" is the wrong lesson to
+// draw from the test above, and it is the easy one to draw: a reporter that
+// went quiet on any heartbeat failure would abandon every run on a flaky
+// network, which is the defect this whole file closes.
+func TestOnlyALostLeaseSilencesTheReport(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		state workload.State
+		stop  func(*fakePlane)
+	}{
+		{"a cancel pressed in the console", workload.StateCancelled, func(p *fakePlane) {
+			p.commands = `{"commands":[{"id":"c1","kind":"workload.cancel","envId":"pr-42",` +
+				`"workloadRunId":"` + testRunID + `","payload":{},"attempts":1}]}`
+		}},
+		{"a heartbeat the control plane never answered", workload.StateSucceeded, func(p *fakePlane) {
+			p.heartbeat = http.StatusBadGateway
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f, url := newFakePlane(t)
+			f.set(func(p *fakePlane) { p.claim = runningRun("observed_load") })
+			h, fake, _ := reporterFor(t, url)
+
+			h.Claim(context.Background(), "", workload.ObservedLoad)
+			h.Start(context.Background(), workload.ObservedLoad)
+			f.set(c.stop)
+			beatOnce(t, f, fake)
+
+			require.False(t, h.LeaseLost(), "this stop is not a lost lease and was read as one")
+			h.Finish(context.Background(), resultFor(c.state, workload.VerdictBlocked))
+			require.Len(t, f.sent(), 2, "the run stopped and said nothing about how")
+		})
+	}
 }
 
 // A heartbeat the control plane never answers is not a lost lease.

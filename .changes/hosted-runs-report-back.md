@@ -22,7 +22,13 @@ laptop cannot take the next queued run away from CI.
 
 A cancel pressed in the console now reaches a run that is already going, and
 stops it. So does a lease taken by another engine, which is what happens after
-a run has gone quiet long enough for somebody else to pick it up.
+a run has gone quiet long enough for somebody else to pick it up. In that one
+case the engine stops and then says nothing more, because the control plane's
+terminal statement is gated on the run's state rather than on who holds it: a
+report from an engine that has lost the run would end it for whoever now has
+it, and their measurements would arrive against a finished row and be refused.
+The result document is still written and uploaded, so nothing is lost on the
+machine that did the work.
 
 A test reads the control plane's report decoder and checks that every field it
 reaches for inside the run's aggregate is a field the engine's own struct tags

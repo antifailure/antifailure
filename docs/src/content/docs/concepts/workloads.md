@@ -154,9 +154,14 @@ draws cannot disagree. A report that cannot be delivered is spooled to disk
 rather than dropped, and the next `af` command on that machine sends it.
 
 A cancel pressed in the console reaches the run on the same minute tick, stops
-the work, and is reported as cancelled. So is a lease taken by another engine,
-which is what happens when a run went quiet long enough for somebody else to
-pick it up.
+the work, and is reported as cancelled.
+
+A lease taken by another engine also stops the work, and is the one case where
+nothing more is reported. That happens when a run went quiet long enough for
+somebody else to pick it up, and it means this engine no longer has any standing
+to say how the run ended: another engine may be running it right now, and a
+report from here would end it for them. The result document is still written and
+still uploaded, so nothing is lost where the work happened.
 
 `--run-id` is for reproducing one particular hosted run by hand. Passing it
 claims nothing, deliberately: an engine reproducing a run on a laptop must not
