@@ -26,9 +26,8 @@ www/components/home/visuals/hero/WorkloadFilm.tsx	34%	a route share in the hero 
 www/components/home/visuals/hero/WorkloadFilm.tsx	27%	a route share in the hero film's example access log, invented to make a production-shaped route mix concrete.
 www/components/home/visuals/hero/WorkloadFilm.tsx	18%	a route share in the hero film's example access log, invented to make a production-shaped route mix concrete.
 www/components/home/visuals/hero/WorkloadFilm.tsx	129%	the regression the hero film reports against its own invented baseline. Not a measured result.
-www/components/pages/product/Load.tsx	18%	an example route share. The page captions this panel: the routes, latencies and shares are written.
-www/components/pages/product/Load.tsx	34%	an example route share. The page captions this panel: the routes, latencies and shares are written.
-www/components/pages/product/Load.tsx	27%	an example route share. The page captions this panel: the routes, latencies and shares are written.
-www/components/pages/product/Load.tsx	9%	an example route share. The page captions this panel: the routes, latencies and shares are written.
-www/components/pages/product/Report.tsx	1 of 4	the check count in the example GitHub check panel. The page captions it as one shaped run whose numbers were chosen.
+www/components/pages/figures/product.tsx	18%	an example route share. The page marks the figure illustrative and captions the panel: the routes, latencies and shares are written.
+www/components/pages/figures/product.tsx	34%	an example route share. The page marks the figure illustrative and captions the panel: the routes, latencies and shares are written.
+www/components/pages/figures/product.tsx	27%	an example route share. The page marks the figure illustrative and captions the panel: the routes, latencies and shares are written.
+www/components/pages/figures/product.tsx	9%	an example route share. The page marks the figure illustrative and captions the panel: the routes, latencies and shares are written.
 www/components/pages/product/SafeState.tsx	12%	the ratio of the six row worked example beside it, captioned on the page as chosen. What a real subset keeps depends on the customer's own data; the rule it demonstrates is the part that is fixed.

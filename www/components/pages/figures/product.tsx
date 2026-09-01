@@ -481,26 +481,36 @@ export function PFW06() {
   );
 }
 
-const ROUTES = [
-  ["GET /api/subscriptions", "18%", "412ms", "180ms", 1.29],
-  ["GET /settings/billing", "34%", "168ms", "150ms", 0.12],
-  ["GET /", "27%", "44ms", "41ms", 0.07],
-  ["POST /api/search", "9%", "228ms", "—", null],
-] as const;
+/** A shaped result, worst regression first, and an object per row rather than
+ *  a tuple on purpose. figurecheck masks a bracketed run containing a percent
+ *  sign, because that is also how a Tailwind arbitrary value is written, so
+ *  `["GET /", "27%"]` is invisible to it and `{ share: "27%" }` is not. As
+ *  tuples these four shares silently left the gate's view and their rows in
+ *  figure-exemptions.tsv went stale, which is how the absence showed up.
+ *
+ *  POST /api/search was seen too few times in the export to earn a baseline,
+ *  which is what its row shows. */
+const ROUTES: { route: string; share: string; p95: string; base: string | null; delta: number | null }[] = [
+  { route: "GET /api/subscriptions", share: "18%", p95: "412ms", base: "180ms", delta: 1.29 },
+  { route: "GET /settings/billing", share: "34%", p95: "168ms", base: "150ms", delta: 0.12 },
+  { route: "GET /", share: "27%", p95: "44ms", base: "41ms", delta: 0.07 },
+  { route: "POST /api/search", share: "9%", p95: "228ms", base: null, delta: null },
+];
 
 export function PLD01() {
   return (
     <FigureFrame id="P-LD-01">
       <div className="flex items-center justify-between">
         <FigLabel>af load</FigLabel>
-        <span className="font-mono text-[11px] text-black/40">source access_log · 17.8/s</span>
+        <span className="font-mono text-[11px] text-black/40">source otel · 17.8/s</span>
       </div>
       <ul className="mt-4 flex-1 font-mono text-[11px]">
-        {ROUTES.map(([route, share, p95, base, delta]) => (
+        {ROUTES.map(({ route, share, p95, base, delta }) => (
           <li key={route} className="flex items-baseline justify-between gap-3 border-b border-black/8 py-1.5">
             <span className="min-w-0 truncate">{route}</span>
             <span className="text-black/40">{share}</span>
             <span>{p95}</span>
+            <span className="hidden text-black/40 sm:inline">{base ?? "no base"}</span>
             <span
               className={cn(
                 "tabular-nums",
@@ -522,7 +532,7 @@ export function PLD01() {
 export function PLD02({ source }: { source: string }) {
   return (
     <FigureFrame id="P-LD-02" dark>
-      <FigCmd>$ af load</FigCmd>
+      <FigCmd dark>$ af load</FigCmd>
       <pre className="mt-3 flex-1 overflow-x-auto font-mono text-[12px] leading-5 tracking-extra-tight text-white/70">
         {source}
       </pre>
