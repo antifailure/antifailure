@@ -810,8 +810,21 @@ jobs:
         # without its prerequisites. The script is the shared part.
         run: ./tools/release/reproducible.sh
 
-  secrets:
-    name: no credentials in the tree
+  # This job is named for what it checks, not for its most important step.
+  #
+  # It used to be called "no credentials in the tree", and the credential scan
+  # was the LAST of nine steps. A job stops at its first failure, so when an em
+  # dash failed prosecheck at step eight, `scanrepo` never executed and the
+  # check reported FAILED under a name that makes a security claim. Two agents
+  # read that as a credential in the tree and escalated. Neither reading was
+  # possible to check from the summary, because the absence of a step looks
+  # exactly like its failure.
+  #
+  # A false credential alarm is expensive twice: it burns an escalation now,
+  # and it teaches the next reader to discount the one that matters. So the
+  # scan is its own job below, and this one no longer claims to be it.
+  documents:
+    name: the documents and the site tell the truth
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -881,6 +894,25 @@ jobs:
         # schemas/manifest.v1.json, so this is a claim a machine can check
         # rather than one a reviewer has to notice.
         run: go run ./tools/modecheck .
+
+  # Alone, and deliberately so.
+  #
+  # This is the only step in this job, which is what makes its result mean what
+  # its name says: green here is "the scanner ran and found nothing", never
+  # "the scanner never ran". It also means a prose failure can no longer stop
+  # the credential scan from happening at all, which is the half of the old
+  # arrangement that actually mattered.
+  credentials:
+    name: no credentials in the tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
 
       - name: Nothing in the repository looks like a live credential
         # Uses the engine's own detector, so the check and the runtime refusal
