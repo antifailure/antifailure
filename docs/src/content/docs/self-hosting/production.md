@@ -240,11 +240,14 @@ rather than failing quietly.
 Subscribe to events: **Installation**, **Installation repositories**,
 **Repository**, **Pull request**, **Workflow run**, **Check run**.
 
-The last three are the pull request lifecycle. **Pull request** is what opens a
-check on a commit and closes it when the pull request does; **Workflow run**
+The last four are the pull request lifecycle. **Pull request** is what opens a
+check on a commit and closes it when the pull request does. **Workflow run**
 binds the check to the Actions run, which is the only route this control plane
-has into the machine holding the environment; **Check run** is the Re-run
-button. Each is handled in `web/apps/api/src/github/lifecycle.ts`.
+has into the machine holding the environment. **Check run** and **Check suite**
+are the two Re-run buttons: GitHub sends the first when somebody re-runs one
+check and the second when they re-run all of them from the checks page, so
+subscribing to only one leaves the other doing nothing at all. Each is handled
+in `web/apps/api/src/github/lifecycle.ts`.
 
 **Push** is still deliberately absent: nothing handles it, and an event nobody
 consumes is delivery-log noise that makes a real failed delivery harder to find.
