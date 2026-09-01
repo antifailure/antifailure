@@ -72,7 +72,7 @@ export function MarketplacesPage() {
         items={[
           { title: "Both sides of the market", body: "Buyers and sellers restored together, so a match has something to match against." },
           { title: "Run the workers", body: "Matching, notify, and settle against clone-local queues." },
-          { title: "Contain partners", body: "Outbound webhooks store a preview. Production hostnames never resolve." },
+          { title: "Contain partners", body: "Each partner host carries its own mode in the manifest, so the ones the twin simulates and the ones it refuses are written down rather than assumed." },
         ]}
         visual={
           <CircularMap

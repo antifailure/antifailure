@@ -47,7 +47,7 @@ export function DevtoolsPage() {
             rows={[
               { id: "LCK", label: "ACCESS EXCLUSIVE on subscriptions", kind: "lock", status: "BLOCK", tone: "BLOCK", bar: 18 },
               { id: "P99", label: "Checkout p99 820ms → 6.9s", kind: "p99", status: "REGRESS", tone: "BLOCK", bar: 22 },
-              { id: "POOL", label: "84 connections waited", kind: "pool", status: "PRESSURE", tone: "WARN", bar: 46 },
+              { id: "POOL", label: "Pool pressure during migrate-and-serve", kind: "pool", status: "PRESSURE", tone: "WARN", bar: 46 },
               { id: "PLAN", label: "Seq Scan events · 410ms", kind: "plan", status: "REGRESS", tone: "BLOCK", bar: 30 },
               { id: "RB", label: "Old app cannot decode events.v2", kind: "rollback", status: "UNSAFE", tone: "BLOCK", bar: 14 },
             ]}
@@ -97,7 +97,7 @@ export function DevtoolsPage() {
         kicker="The wedge"
         title="Locks, plans, and rollback feasibility before it ships."
         items={[
-          { title: "Lock duration", body: "Measured together with the statements it blocks." },
+          { title: "Lock duration", body: "The strongest mode held per table, how long it was held, and whether another session waited on it." },
           { title: "Schema coexistence", body: "Whether old instances can still read the new schema shows up here first." },
           { title: "Users notice p99 immediately", body: "Large tables plus frequent schema change." },
         ]}
@@ -107,7 +107,7 @@ export function DevtoolsPage() {
             rows={[
               { task: "Apply migration", status: "BLOCK", tone: "BLOCK", who: "M", date: "27.4s" },
               { task: "Checkout p99", status: "Regressed", tone: "BLOCK", who: "C", date: "6.9s" },
-              { task: "Pool wait", status: "84 conns", tone: "WARN", who: "P", date: "wait" },
+              { task: "Pool pressure", status: "Under load", tone: "WARN", who: "P", date: "wait" },
               { task: "Rollback", status: "Unsafe", tone: "BLOCK", who: "R", date: "no" },
             ]}
           />

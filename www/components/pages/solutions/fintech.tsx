@@ -21,11 +21,11 @@ export function FintechPage() {
             tab="Side-Effect Firewall"
             rail="NOTES"
             rows={[
-              { id: "CHG-184", label: "POST /v1/charges $49.00", kind: "stripe", status: "SIM", tone: "PASS", bar: 88 },
-              { id: "MAIL-91", label: "Order #4182 receipt", kind: "email", status: "HOLD", tone: "WARN", bar: 64 },
-              { id: "WH-220", label: "slack.hooks · store only", kind: "hook", status: "PREVIEW", tone: "WARN", bar: 40 },
+              { id: "CHG-184", label: "POST /v1/charges $49.00", kind: "stripe", status: "MOCK", tone: "PASS", bar: 88 },
+              { id: "MAIL-91", label: "Order #4182 receipt", kind: "email", status: "CAPTURE", tone: "WARN", bar: 64 },
+              { id: "WH-220", label: "slack.hooks · store only", kind: "hook", status: "CAPTURE", tone: "WARN", bar: 40 },
               { id: "DNS-018", label: "api.prod.internal", kind: "dns", status: "BLOCK", tone: "BLOCK", bar: 8 },
-              { id: "TCP-443", label: "unknown destination", kind: "tcp", status: "DENY", tone: "BLOCK", bar: 6 },
+              { id: "TCP-443", label: "unknown destination", kind: "tcp", status: "BLOCK", tone: "BLOCK", bar: 6 },
             ]}
             overlay={{
               title: "Fail closed",
@@ -50,9 +50,9 @@ export function FintechPage() {
         kicker="Simulators, not live processors"
         title="Charging a card from a twin is an existential failure."
         items={[
-          { title: "Clone-local Stripe", body: "Payment creation is stored in a clone-local ledger. Nothing charges." },
-          { title: "Email captured", body: "SendGrid and similar sinks render and store. Nothing is delivered." },
-          { title: "Fail closed", body: "Unknown processors and production API hostnames are blocked and ledgered." },
+          { title: "The mode is set per host", body: "block, allow, capture, mock, sandbox or synth, written against the host in antifailure.yaml." },
+          { title: "Nothing leaves without a rule", body: "Egress defaults to block, so a processor nobody configured is refused on its first run rather than passed through." },
+          { title: "The ledger records the decision", body: "Each attempt is stored with the mode that decided it, so the reason a request never left is readable afterwards." },
         ]}
         visual={
           <DashChart
@@ -83,8 +83,8 @@ export function FintechPage() {
         visual={
           <CircularMap
             shift="left"
-            tabs={["SIMULATE", "CAPTURE", "DENY"]}
-            active="DENY"
+            tabs={["MOCK", "CAPTURE", "BLOCK"]}
+            active="BLOCK"
             rings={[
               { label: "Stripe", r: 40 },
               { label: "Email", r: 32 },
@@ -99,9 +99,9 @@ export function FintechPage() {
         kicker="Existential failure"
         title="Not a warning. A failed containment model."
         items={[
-          { title: "Live processor", body: "Charging a live processor from a twin is a failed containment model." },
-          { title: "Real inbox", body: "Emailing a real customer from a twin is a failed containment model." },
-          { title: "Production webhook", body: "Invoking a production webhook from a twin is a failed containment model." },
+          { title: "There is no warning level for this", body: "A twin that reaches a live processor has not failed a check. Its containment did not hold." },
+          { title: "The customer finds out", body: "A real card, a real inbox and a real partner endpoint are the three places a contained run becomes somebody else's incident." },
+          { title: "So the default refuses", body: "A host with no rule against it is blocked, which is the only default that stays safe as the integration list grows." },
         ]}
         visual={
           <TaskTable

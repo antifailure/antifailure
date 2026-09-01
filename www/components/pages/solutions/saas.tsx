@@ -69,7 +69,7 @@ export function SaasPage() {
         items={[
           { title: "Unit, integration, and a manual staging check", body: "A change can pass all three and still fail in production." },
           { title: "Tenant shape, concurrency, and schema coexistence", body: "The twin reproduces all three, then reports whether the deploy is safe." },
-          { title: "Old + new", body: "Application instances still running while the new column lands." },
+          { title: "Old + new", body: "The previous release runs against the new schema, so a column it can no longer select is a finding and not a rollback." },
         ]}
         visual={
           <CircularMap
@@ -89,8 +89,8 @@ export function SaasPage() {
         kicker="The run"
         title="Pass, warning, or block on the pull request, then destroy the twin."
         items={[
-          { title: "Restore", body: "Referential subset of orgs, seats, subscriptions, invoices." },
-          { title: "Mask", body: "Account identifiers replaced inside the customer boundary." },
+          { title: "Restore", body: "The subset comes back first, so every step after it runs against rows that still join." },
+          { title: "Mask", body: "Identifiers are replaced before anything reads them, and the raw snapshot never leaves the customer's cloud." },
           { title: "Exercise", body: "Checkout, upgrades, and seat changes at production-shaped concurrency." },
         ]}
         visual={
