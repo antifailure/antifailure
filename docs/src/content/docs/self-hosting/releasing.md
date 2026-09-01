@@ -46,11 +46,55 @@ Everything here is read only. Run it all.
 ```sh
 SHA=$(git rev-parse origin/main)
 gh run list --commit "$SHA" --workflow ci.yml
+gh run list --commit "$SHA" --json workflowName,conclusion,status \
+  --jq '.[] | "\(.workflowName)\t\(.status)\t\(.conclusion)"'
 ```
+
+Read the second command's output rather than counting checks. **Do not assert a
+number.** The count has been wrong every time somebody has quoted one: it was
+"seven" in a briefing while `ci.yml` alone had nine jobs, and splitting the
+credential scan into its own job took that to ten. Enumerate what actually ran
+on that sha and require every entry to be `success`.
+
+A `cancelled` entry is resolved by WORKFLOW, not by trigger. A scheduled run can
+cancel a push-triggered run of the same workflow on the same commit, which
+leaves a cancelled row that is not a failure. Look at which workflow it belongs
+to and whether another run of that same workflow succeeded on that sha.
 
 `cd.yml`'s first job polls for that same CI conclusion and gives up after
 twenty minutes. If CI has not finished when you tag, the tag's deploy fails on
 a timeout rather than on anything real.
+
+**1a. `just gate` is not the bar, and cannot be met as written.**
+
+The bar is CI green on the sha, above. `just gate` is the local approximation of
+it and is deliberately a superset: `coverage` is in `gate` and CI does not run
+it at all. `coverage` reads a profile that `coverage-profile` writes, and
+`coverage-profile` is NOT in `gate` because producing it needs the whole engine
+suite against a Docker daemon and a Postgres and takes the better part of an
+hour. `tools/gatecheck` exempts it by name with that reason recorded.
+
+So a clean checkout runs `just gate` and gets one red, `coverage`, over a
+profile nobody made. That is the documented exception and not a defect. Either
+run it first, or read the gate's other lines and ignore that one:
+
+```sh
+just coverage-profile   # about an hour, needs Docker and a Postgres
+just coverage
+```
+
+Nothing else in `gate` is excused. A criterion nobody can meet is one people
+learn to skip, which is why this paragraph exists rather than a rule saying
+"all gates green" that is false on a fresh clone.
+
+**1b. Every branch that landed reached CI before it landed.**
+
+Pushing a `w-*` or `prep-*` branch to this repository runs NOTHING. `ci.yml`
+triggers on `push` to `main` and on `pull_request`, and no other branch triggers
+any workflow. A branch that was merged without a pull request has therefore
+never been through CI, and the tag's commit is the first run of it. Open a draft
+pull request per branch before landing, so that its first CI run is not on
+`main`.
 
 **2. The `main` deploy of that commit has finished.**
 
