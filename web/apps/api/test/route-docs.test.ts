@@ -35,6 +35,7 @@ const srcDir = path.join(here, '..', 'src')
 const repoRoot = path.join(here, '..', '..', '..', '..')
 const docsDir = path.join(repoRoot, 'docs', 'src', 'content', 'docs')
 const consoleAppDir = path.join(repoRoot, 'console', 'app')
+const apiRefPath = path.join(docsDir, 'reference', 'api.md')
 
 /** Every path the server registers, read from the source rather than a list. */
 async function registeredRoutes(): Promise<Set<string>> {
@@ -160,6 +161,40 @@ function served(documented: string, routes: Set<string>): boolean {
   return false
 }
 
+/** The patterns reference/api.md names, method stripped.
+ *
+ *  The page enumerates FAMILIES rather than routes: `/trpc/*`, `/v1/*`,
+ *  `/auth/*`. That is the right way to write it, so this reads it that way
+ *  rather than demanding a row per route, and a finding is a family nobody
+ *  mentioned rather than thirty three lines of noise. */
+async function documentedPatterns(): Promise<string[]> {
+  const text = await readFile(apiRefPath, 'utf8')
+  const out = new Set<string>()
+  for (const m of text.matchAll(/`(?:GET|POST|PUT|PATCH|DELETE)?\s*(\/[A-Za-z0-9/_*.:-]*)`/g)) {
+    out.add(m[1]!)
+  }
+  return [...out]
+}
+
+function covered(route: string, patterns: string[]): boolean {
+  return patterns.some((p) => {
+    if (p === route) return true
+    if (!p.endsWith('/*')) return false
+    return route.startsWith(p.slice(0, -1))
+  })
+}
+
+// The families reference/api.md does not mention, as of 2026-09-01.
+//
+// This is a register of a known gap, not an exemption, and the difference is
+// the second assertion below: an entry that STOPS being missing fails just as
+// loudly as a new one appearing. So it cannot rot into a permanent allowance,
+// and the change that documents these routes is forced to empty this list in
+// the same commit. geo-contract owns the page and is fixing the content; this
+// exists so the gap cannot grow while that lands, and so it cannot be
+// forgotten once it has.
+const KNOWN_UNDOCUMENTED = ['/webhooks/', '/byok/', '/console/api/']
+
 describe('the HTTP paths the documentation names', () => {
   it('are all paths the server serves', async () => {
     const routes = new Set([...(await registeredRoutes()), ...(await consoleRoutes())])
@@ -191,6 +226,45 @@ describe('the HTTP paths the documentation names', () => {
     assert.ok(pages.has('/device'), 'the console scan did not find the device approval page')
     const documented = await documentedPaths()
     assert.ok(documented.size >= 4, `the documentation scan found only ${documented.size} paths`)
+  })
+
+  it('names every route family the server serves', async () => {
+    const patterns = await documentedPatterns()
+    const routes = await registeredRoutes()
+    const missing = [...routes]
+      .filter((r) => !covered(r, patterns))
+      .filter((r) => !KNOWN_UNDOCUMENTED.some((k) => r.startsWith(k)))
+      .sort()
+    assert.deepEqual(
+      missing,
+      [],
+      `the server serves these and reference/api.md names no pattern covering them:\n  ${missing.join('\n  ')}\n` +
+        `A reader takes that page as the API surface, so a route missing from it does not exist as far as anybody outside this repository is concerned.`,
+    )
+  })
+
+  it('has no stale entry in the known-undocumented register', async () => {
+    // The half that stops the register above becoming a permanent exemption.
+    // When the page grows a pattern covering one of these, this fails and the
+    // entry has to go, in the same change.
+    const patterns = await documentedPatterns()
+    const routes = await registeredRoutes()
+    const stale = KNOWN_UNDOCUMENTED.filter((k) => {
+      const matching = [...routes].filter((r) => r.startsWith(k))
+      return matching.length > 0 && matching.every((r) => covered(r, patterns))
+    })
+    assert.deepEqual(
+      stale,
+      [],
+      `reference/api.md now documents these, so remove them from KNOWN_UNDOCUMENTED:\n  ${stale.join('\n  ')}`,
+    )
+  })
+
+  it('reads patterns out of the page at all, so a broken scan cannot pass quietly', async () => {
+    const patterns = await documentedPatterns()
+    assert.ok(patterns.length >= 6, `only ${patterns.length} patterns were read from reference/api.md`)
+    assert.ok(patterns.includes('/trpc/*'), 'the scan did not find the /trpc family')
+    assert.ok(patterns.includes('/health'), 'the scan did not find /health')
   })
 
   it('rejects a path that is not a segment prefix of any route', async () => {
