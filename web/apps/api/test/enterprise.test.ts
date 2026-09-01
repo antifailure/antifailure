@@ -746,6 +746,41 @@ describe(
         assert.match(file, /^ {6}note: "payments"$/m)
       })
 
+      /**
+       * A note that fights the quoting.
+       *
+       * The writer here is thirty lines of string building rather than a YAML
+       * library, which is the right trade for a value set this small and closed
+       * and the wrong one if the escaping is guessed at. A comma would end a
+       * flow sequence, a double quote would end the scalar, and a backslash
+       * would eat the character after it.
+       *
+       * Both exported files were also parsed with the engine's own types,
+       * `masking.Rule` through `masking.NewRuleSet` and `schema.Egress`, with
+       * every field arriving intact. That is not repeated here because it needs
+       * the Go toolchain; what is asserted here is the byte the parser then has
+       * to read.
+       */
+      it('quotes a note that would otherwise break the file', async () => {
+        const org2 = await seedOrg(h.admin, 'quoting')
+        const owner2 = await signInAs(h, org2, 'owner')
+        await h.admin`
+          INSERT INTO network_rules (org_id, repository_id, host, mode, note, approved_at)
+          VALUES (${org2.orgId}, ${org2.repoId}, 'api.example.test', 'capture',
+                  ${'payments, a "quoted" word and a back\\slash'}, now())`
+        try {
+          const { body } = await callProcedure(h, owner2, 'exports.organization', 'mutation', {})
+          const doc = data<{ files: Record<string, string> }>(body)
+          const file = doc.files[`repositories/${org2.repository}/egress.yaml`]!
+          assert.match(
+            file,
+            /^ {6}note: "payments, a \\"quoted\\" word and a back\\\\slash"$/m,
+          )
+        } finally {
+          await dropOrg(h.admin, org2.orgId)
+        }
+      })
+
       it('says what it left out, and records that it was taken', async () => {
         const { body } = await callProcedure(h, owner, 'exports.organization', 'mutation', {})
         const doc = data<{ notIncluded: { what: string; why: string }[] }>(body)
