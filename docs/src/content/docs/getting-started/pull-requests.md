@@ -62,8 +62,12 @@ github:
   mode: actions
   comment: true
   fork_policy: label
-  teardown_on: [closed, merged]
 ```
+
+Three keys rather than four. There is a `teardown_on` as well, and it is
+[read by nothing](/docs/reference/manifest/#github): teardown happens whatever
+you put there, so setting it would only teach you to trust a line that does not
+work.
 
 `mode: actions` runs everything inside the workflow. The environment lives for
 the length of the job, which suits a repository that wants preview checks
@@ -116,7 +120,18 @@ refused before anything starts.
 `fork_policy: label` is the default and the right starting point. A pull
 request from a fork runs code somebody outside your organisation wrote, against
 an environment holding a masked copy of your data. Nothing runs until a
-maintainer adds the label, which is a person deciding.
+maintainer adds the `antifailure:allow` label, which is a person deciding.
+
+`af ci` refuses before it names an environment, and leaves a comment saying the
+check did not run and what would make it. Adding the label starts the check
+again, which is why the template subscribes to `labeled` as well as to the
+usual four: a workflow that does not listen for the label will not notice the
+approval until the next push.
+
+The policy is read from the base branch rather than from the pull request,
+because the manifest is a file in the repository and the pull request's copy of
+it belongs to the contributor. [The full picture](/docs/guides/github/#forks),
+including what GitHub itself withholds from a fork and what it does not.
 
 Related: [the full GitHub configuration](/docs/guides/github/),
 [scheduling](/docs/concepts/scheduling/).

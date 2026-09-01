@@ -306,10 +306,18 @@ export const ROUTES: readonly Route[] = [
   // Utility. Real pages, deliberately not in the index: they are a waitlist
   // form with nothing to rank for, and indexing them spends crawl budget that
   // belongs to the product pages.
+  //
+  // Both descriptions used to say "There is no hosted control plane yet",
+  // which was true when it was written and had become the opposite of what the
+  // page under it says: AuthScreen offers sign-in with GitHub above a line
+  // reading "The hosted control plane is invitation only", and
+  // app.antifailure.dev answers. These strings are the meta description, so
+  // the contradiction was served to every crawler and every link preview while
+  // the visible page was correct. Nothing read them.
   {
     path: "/signin",
     title: pageTitle("Join the waitlist"),
-    description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
+    description: "The hosted control plane is invitation only while it is in private beta. Sign in with GitHub if you have been invited, or join the waitlist.",
     summary: "Waitlist form.",
     section: "utility",
     indexable: false,
@@ -319,7 +327,7 @@ export const ROUTES: readonly Route[] = [
   {
     path: "/signup",
     title: pageTitle("Join the waitlist"),
-    description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
+    description: "The hosted control plane is invitation only while it is in private beta. Sign in with GitHub if you have been invited, or join the waitlist.",
     summary: "Waitlist form.",
     section: "utility",
     indexable: false,

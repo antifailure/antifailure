@@ -68,6 +68,7 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "STATUS keeps its own rule"      just statuscheck
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
     run "prose reads like a person"      just prosecheck
@@ -722,6 +723,16 @@ forbidden:
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
+
+# STATUS.md keeps the rule it states about itself.
+#
+# That file opens by saying every component carries one of a fixed set of
+# states and nothing else, and four rows carried a word outside the set, in
+# three different spellings. It is the page this project points at when
+# somebody asks whether a thing works yet, so a word in it that nobody defined
+# is an answer nobody can check, and nothing read it before this.
+statuscheck:
+    go run ./tools/statuscheck .
 
 # The built documentation carries its head, and its entity graph resolves.
 #
