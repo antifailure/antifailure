@@ -379,7 +379,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
   }
 
   async function deliver(raw: string) {
-    return handleStripeDelivery(h.pool, h.clock, billing.config, eventOf(raw))
+    return handleStripeDelivery(h.pool, h.clock, billing.config, eventOf(raw), h.analytics)
   }
 
   // -------------------------------------------------------------------------
@@ -540,7 +540,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     // The organization catches up. Attaching resolves what was waiting.
     const { attachCustomer } = await import('../src/billing/store.ts')
     const attached = await h.pool.withTenant({ orgId: o.orgId }, async (db) =>
-      attachCustomer(db, h.clock, billing.config, o.orgId, { id: customerId, email: null }),
+      attachCustomer(db, h.clock, billing.config, o.orgId, { id: customerId, email: null }, h.analytics),
     )
     assert.equal(attached.created, true)
     assert.equal(attached.resolved, 1, 'the waiting event was not replayed')
@@ -596,7 +596,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     assert.equal(await planOf(o.orgId), 'free')
 
     const { reconcile } = await import('../src/billing/store.ts')
-    const result = await reconcile(h.pool, h.clock, billing.config, billing.client, o.orgId)
+    const result = await reconcile(h.pool, h.clock, billing.config, billing.client, o.orgId, h.analytics)
     assert.equal(result.checked, 1)
     assert.equal(result.changed >= 1, true, `nothing changed: ${result.notes.join('; ')}`)
     assert.equal(await planOf(o.orgId), 'team', 'reconciling did not fix the missed delivery')

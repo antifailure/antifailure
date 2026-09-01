@@ -5,6 +5,7 @@ import { useChrome } from "./Chrome";
 import { LogoMark } from "./icons";
 import { CONTROL_PLANE_URL } from "@/lib/site";
 import { joinWaitlist, rememberedEmail } from "@/lib/waitlist";
+import { waitlistSubmitted } from "@/lib/analytics";
 
 function GitHubMark({ className }: { className?: string }) {
   return (
@@ -86,6 +87,9 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
     setBusy(true);
     setError("");
     const result = await joinWaitlist(email, mode);
+    // Same shape as the dialog: the outcome, attributed to the channel the
+    // session started on.
+    waitlistSubmitted(result.ok ? (result.alreadyJoined ? "already" : "joined") : "refused");
     setBusy(false);
     if (!result.ok) {
       setError(result.message);

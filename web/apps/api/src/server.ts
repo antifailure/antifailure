@@ -409,6 +409,49 @@ export function createServer(options: ServerOptions) {
     return c.body(metrics.registry.render())
   })
 
+  /**
+   * Records a completed sign-in.
+   *
+   * Detached from whatever transaction the sign-in used, and that is the one
+   * place in this subsystem where the "same transaction as the thing it
+   * describes" rule is deliberately broken. The sign-in exchange spans several
+   * transactions across two modules, so there is no single one to join; and if
+   * there were, this is the path where a failed analytics insert would keep
+   * somebody out of their own account. Losing the event is the cheaper failure
+   * and it is counted either way.
+   *
+   * first_time is read from the age of the user row rather than from a session
+   * count, because sessions are swept when they expire, so a member returning
+   * after a month would read as new and the number would be quietly inflated.
+   * A user row is created during the exchange that issues the first session, so
+   * a row younger than five minutes is a first sign-in; five minutes is far
+   * above any exchange and far below any return visit.
+   */
+  async function recordSignIn(
+    method: 'github' | 'email_link' | 'device' | 'sso',
+    userId: string,
+    orgId: string | null,
+  ): Promise<void> {
+    const created = await options.pool
+      .withoutTenant(
+        (db) =>
+          db.execute<{ created_at: Date | string }>(
+            rawSql`SELECT created_at FROM users WHERE id = ${userId}::uuid`,
+          ),
+        { signinUserId: userId },
+      )
+      .catch(() => [])
+    const at = created[0]?.created_at
+    const ageMs = at ? clock.now().getTime() - new Date(at).getTime() : Number.POSITIVE_INFINITY
+
+    await analytics.recordDetached(options.pool, {
+      name: 'identity.signed_in',
+      occurredAt: clock.now(),
+      orgId,
+      payload: { method, first_time: ageMs < 5 * 60 * 1000 },
+    })
+  }
+
   // Resolving the browser's session, for the routes that need one outside tRPC.
   async function sessionFrom(cookie: string | undefined) {
     const token = readCookie(cookie, SESSION_COOKIE)
@@ -493,6 +536,7 @@ export function createServer(options: ServerOptions) {
       })
 
       c.header('set-cookie', sessionCookie(issued.token, issued.expiresAt, secure))
+      await recordSignIn('github', result.userId, decision.orgId)
       const base = options.appBaseUrl ?? '/'
       const target = safeRedirect(result.redirectTo) ?? '/'
       const landing = new URL(target, base.endsWith('/') ? base : `${base}/`)
@@ -614,6 +658,7 @@ export function createServer(options: ServerOptions) {
           replacing: existing ?? undefined,
         })
         c.header('set-cookie', sessionCookie(issued.token, issued.expiresAt, secure))
+        await recordSignIn('email_link', result.userId, result.orgId)
         const base = options.appBaseUrl ?? '/'
         const target = result.redirectTo ?? '/'
         return c.redirect(new URL(target, base.endsWith('/') ? base : `${base}/`).toString(), 302)
@@ -982,6 +1027,7 @@ export function createServer(options: ServerOptions) {
 
     try {
       const result = await saveKey(options.pool, clock, options.sealingKey, {
+        analytics,
         orgId: caller.orgId,
         provider,
         key,
@@ -1064,6 +1110,7 @@ export function createServer(options: ServerOptions) {
     }
     try {
       const budget = await setBudget(options.pool, clock, {
+        analytics,
         orgId: caller.orgId,
         provider,
         capUsd: cap,
@@ -1109,6 +1156,7 @@ export function createServer(options: ServerOptions) {
     const name = typeof body.name === 'string' ? body.name : ''
     try {
       const made = await mintEngineToken(options.pool, clock, {
+        analytics,
         orgId: caller.orgId,
         name,
         actorUserId: caller.userId,
@@ -1309,7 +1357,7 @@ export function createServer(options: ServerOptions) {
 
     const event = c.req.header('x-github-event') ?? 'unknown'
     try {
-      const outcome = await handleDelivery(options.pool, clock, event, payload)
+      const outcome = await handleDelivery(options.pool, clock, event, payload, analytics)
       return c.json(outcome, 200)
     } catch (err) {
       // A real failure on our side. 500 is right here and the retry is wanted:
@@ -1368,7 +1416,7 @@ export function createServer(options: ServerOptions) {
     }
 
     try {
-      const outcome = await handleStripeDelivery(options.pool, clock, billing.config, event)
+      const outcome = await handleStripeDelivery(options.pool, clock, billing.config, event, analytics)
       return c.json(outcome, 200)
     } catch (err) {
       // A real failure on our side, and the retry is wanted: a database that
@@ -1426,7 +1474,7 @@ export function createServer(options: ServerOptions) {
     if (!events) return c.json({ error: 'The body needs an events array.' }, 400)
 
     try {
-      const result = await ingest(options.pool, clock, ingestLimiter, engine, events)
+      const result = await ingest(options.pool, clock, ingestLimiter, engine, events, analytics)
       countIngestion(metrics, result, events)
       // 207 when some were rejected, so a caller that only checks the status
       // still learns that the batch was not wholly accepted.
@@ -1599,6 +1647,7 @@ export function createServer(options: ServerOptions) {
     mountConsole(app, {
       pool: options.pool,
       clock,
+      analytics,
       secureCookies: secure,
       sealingKey: options.sealingKey ?? null,
       build: options.consoleBuild ?? {

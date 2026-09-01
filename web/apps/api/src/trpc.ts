@@ -11,7 +11,7 @@
 // in two places is a rule that survives one of them being refactored away.
 
 import { initTRPC, TRPCError } from '@trpc/server'
-import type { Pool, Tenant } from '@antifailure/db'
+import type { Db, Pool, Tenant } from '@antifailure/db'
 import { appendAudit, type AuditInput } from '@antifailure/db'
 import type { Permission, Role } from './permissions.ts'
 import { permits } from './permissions.ts'
@@ -19,6 +19,7 @@ import type { Clock } from './clock.ts'
 import type { GitHubClient } from './auth/github.ts'
 import type { Billing } from './billing/index.ts'
 import type { Analytics } from './analytics/record.ts'
+import { CATALOG } from './analytics/catalog.ts'
 
 /** Who is making the request, once the session cookie has been resolved. */
 export interface Actor {
@@ -200,6 +201,37 @@ export async function audit(
   })
 }
 
+
+/**
+ * Records that a capability was used.
+ *
+ * Beside audit() and taking the same transaction, for the same reason: a funnel
+ * step recorded against a change that rolled back is a step that did not
+ * happen. One line at each call site so that instrumenting a new mutation is
+ * cheap enough that people do it, because the alternative is an adoption chart
+ * that only covers whichever features somebody remembered.
+ *
+ * The feature name is the only thing recorded. Not what changed, not which
+ * repository, not which rule: the audit log holds that and is the right place
+ * for it, and an analytics store kept for years to draw graphs from is not.
+ */
+export async function adopted(
+  db: Parameters<typeof appendAudit>[0],
+  ctx: OrgContext,
+  feature: Feature,
+): Promise<void> {
+  await ctx.analytics.record(db as unknown as Db, {
+    name: 'adoption.feature_used',
+    occurredAt: ctx.clock.now(),
+    orgId: ctx.actor.orgId,
+    payload: { feature },
+  })
+}
+
+/** The features the catalog counts. Narrowed from the catalog itself, so a
+ *  name that is not in the enum is a compile error at the call site rather than
+ *  a rejection at run time that nobody sees. */
+export type Feature = (typeof CATALOG)['adoption.feature_used']['payload']['feature']['values'][number]
 
 // The scope a request concerns, read off its input.
 //

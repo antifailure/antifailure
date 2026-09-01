@@ -28,6 +28,8 @@ import { sql } from 'drizzle-orm'
 import type { Db, Pool } from '@antifailure/db'
 import type { Clock } from './clock.ts'
 import type { RateLimiter } from './ratelimit.ts'
+import type { Analytics } from './analytics/record.ts'
+import { durationBucket, runKind, runtimeClass, verdictValue } from './analytics/normalize.ts'
 
 /** The event types the control plane understands. An event of any other type
  *  is stored but changes nothing, so an older control plane can ingest a newer
@@ -190,6 +192,15 @@ export async function ingest(
   limiter: RateLimiter,
   engine: AuthenticatedEngine,
   events: IncomingEvent[],
+  /**
+   * Where the engine's events become analytics.
+   *
+   * Passed in rather than reached for, so a test can prove what a batch records
+   * without a second server, and so this module has one place that decides
+   * whether analytics happens at all: the recorder does nothing when no
+   * surrogate secret is configured, and every call site is unchanged.
+   */
+  analytics: Analytics,
 ): Promise<IngestResult> {
   if (events.length === 0) {
     return { accepted: 0, duplicates: 0, rejected: 0, unprojected: 0, outcomes: [] }
@@ -239,7 +250,7 @@ export async function ingest(
         continue
       }
 
-      const note = await applyToProjection(db, clock, engine.orgId, event)
+      const note = await applyToProjection(db, clock, engine.orgId, event, analytics)
       outcomes.push(note === null
         ? { id: event.id, status: 'accepted' }
         : { id: event.id, status: 'accepted', note })
@@ -349,7 +360,31 @@ async function applyToProjection(
   clock: Clock,
   orgId: string,
   event: IncomingEvent,
+  analytics: Analytics,
 ): Promise<string | null> {
+  // Validation first, because a verdict is not an environment lifecycle event
+  // and would otherwise fall out of this function before being counted.
+  //
+  // Reached only for an event the INSERT above actually inserted, so a resent
+  // batch does not count a run twice and this needs no idempotency of its own.
+  // NOTHING IN THE ENGINE EMITS verdict.recorded TODAY: agent.verdict is one of
+  // the five types engine/internal/controlplane/vocabulary_test.go names as
+  // mapped and emitted by nothing. This is the control plane's half, ready for
+  // the day the engine's half exists, and until then the validation funnel is
+  // honestly empty rather than quietly missing.
+  if (event.type === 'verdict.recorded') {
+    await analytics.record(db, {
+      name: 'validation.run_finished',
+      occurredAt: new Date(event.occurredAt),
+      orgId,
+      payload: {
+        kind: runKind(event.payload?.kind ?? event.payload?.workflow_kind),
+        verdict: verdictValue(event.payload?.value),
+      },
+    })
+    return null
+  }
+
   const state = STATE_FOR[event.type]
   if (!state || !event.envId) return null
 
@@ -377,12 +412,12 @@ async function applyToProjection(
   if (repository === null || branch === null) {
     return advanceExisting(db, orgId, event.envId, {
       state, sequence, previewUrl, runtime, golden, ttl, tornDownAt, cameUp, now,
-    })
+    }, analytics)
   }
 
   const repositoryId = await repositoryIdFor(db, orgId, repository)
 
-  await db.execute(sql`
+  const applied = await db.execute<ProjectionRow>(sql`
     INSERT INTO environments (
       org_id, repository_id, env_id, branch, pull_request, state, last_sequence,
       preview_url, runtime, golden_version, created_at, updated_at, expires_at, torn_down_at)
@@ -434,9 +469,95 @@ async function applyToProjection(
                           THEN GREATEST(EXCLUDED.torn_down_at,
                                         LEAST(environments.created_at, EXCLUDED.created_at))
                           ELSE environments.torn_down_at END,
-      updated_at = ${now}::timestamptz`)
+      updated_at = ${now}::timestamptz
+    -- xmax is zero on a row this statement INSERTED and non-zero on one it
+    -- updated. That is what makes environment.created countable exactly once:
+    -- every lifecycle event of a run reaches this statement, so counting on the
+    -- event type would count creating and ready and sleeping as three
+    -- environments, and counting on a deterministic identifier would need a
+    -- timestamp that does not move, which created_at does because it converges
+    -- to the LEAST of everything seen.
+    RETURNING (xmax = 0) AS created, created_at, torn_down_at, runtime`)
+
+  await countEnvironment(db, analytics, {
+    orgId, envId: event.envId, row: applied[0], runtime, declaredLifetime: ttl !== null,
+    isTeardown: state === 'torn_down',
+  })
 
   return null
+}
+
+interface ProjectionRow extends Record<string, unknown> {
+  created: boolean
+  created_at: Date | string
+  torn_down_at: Date | string | null
+  runtime: string | null
+}
+
+/**
+ * The two environment events, from what the projection statement actually did.
+ *
+ * Deliberately driven by the row rather than by the incoming event. The row is
+ * where the ordering has already been resolved: created_at is the LEAST of
+ * every occurred_at seen and torn_down_at is clamped to it, so a duration
+ * computed here cannot be negative and cannot depend on which lifecycle event
+ * happened to arrive first.
+ *
+ * The teardown carries a deterministic identifier, because unlike creation
+ * there is no xmax to ask. A resent teardown recomputes the same identifier and
+ * the same torn_down_at, so it collides and is dropped. Two DIFFERENT teardown
+ * times for one environment would be counted twice, and that is an engine
+ * reporting a teardown twice with different clocks, which the projection
+ * already treats as an anomaly.
+ */
+interface Counted {
+  orgId: string
+  envId: string
+  row: ProjectionRow | undefined
+  runtime: string | null
+  declaredLifetime: boolean
+  /** Whether the event being applied is the teardown itself. A later event
+   *  about an environment that is already down would otherwise re-record the
+   *  teardown on every batch: harmless, because the identifier below makes it a
+   *  duplicate, and a statement per event for nothing. */
+  isTeardown: boolean
+}
+
+async function countEnvironment(db: Db, analytics: Analytics, c: Counted): Promise<void> {
+  const { row } = c
+  if (!row) return
+
+  if (row.created) {
+    await analytics.record(db, {
+      name: 'environment.created',
+      occurredAt: asDate(row.created_at),
+      orgId: c.orgId,
+      payload: {
+        runtime_class: runtimeClass(c.runtime ?? row.runtime),
+        declared_lifetime: c.declaredLifetime,
+      },
+    })
+  }
+
+  if (c.isTeardown && row.torn_down_at !== null) {
+    const down = asDate(row.torn_down_at)
+    await analytics.record(db, {
+      name: 'environment.torn_down',
+      // The environment and the instant, so two environments torn down in the
+      // same millisecond are two events and a resent teardown is one.
+      eventId: `env-down:${c.envId}:${down.getTime()}`,
+      occurredAt: down,
+      orgId: c.orgId,
+      payload: {
+        duration: durationBucket(down.getTime() - asDate(row.created_at).getTime()),
+        runtime_class: runtimeClass(c.runtime ?? row.runtime),
+      },
+    })
+  }
+}
+
+function asDate(v: Date | string): Date {
+  return v instanceof Date ? v : new Date(v)
 }
 
 interface Advance {
@@ -471,8 +592,9 @@ async function advanceExisting(
   orgId: string,
   envId: string,
   a: Advance,
+  analytics: Analytics,
 ): Promise<string | null> {
-  const updated = await db.execute<{ id: string }>(sql`
+  const updated = await db.execute<ProjectionRow & { id: string }>(sql`
     UPDATE environments SET
       state = ${a.state}::environment_state,
       last_sequence = ${a.sequence},
@@ -488,8 +610,17 @@ async function advanceExisting(
                           ELSE torn_down_at END,
       updated_at = ${a.now}
     WHERE org_id = ${orgId} AND env_id = ${envId} AND last_sequence < ${a.sequence}
-    RETURNING id`)
-  if (updated.length > 0) return null
+    -- created is false by construction: this statement is an UPDATE and cannot
+    -- create the row. It is selected anyway so the shape matches the upsert's
+    -- and countEnvironment has one contract rather than two.
+    RETURNING id, false AS created, created_at, torn_down_at, runtime`)
+  if (updated.length > 0) {
+    await countEnvironment(db, analytics, {
+      orgId, envId, row: updated[0], runtime: a.runtime,
+      declaredLifetime: a.ttl !== null, isTeardown: a.state === 'torn_down',
+    })
+    return null
+  }
 
   const existing = await db.execute<{ id: string }>(sql`
     SELECT id FROM environments WHERE org_id = ${orgId} AND env_id = ${envId}`)

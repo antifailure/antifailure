@@ -5,6 +5,8 @@ import postgres from 'postgres'
 import { createPool, migrate, type Pool } from '@antifailure/db'
 import { createServer } from '../src/server.ts'
 import { FakeClock } from '../src/clock.ts'
+import type { Clock } from '../src/clock.ts'
+import { createAnalytics } from '../src/analytics/record.ts'
 import { FakeGitHub } from '../src/auth/fakegithub.ts'
 import { RecordingMailer } from '../src/auth/mail.ts'
 import { issueSession } from '../src/auth/session.ts'
@@ -126,6 +128,22 @@ export const TEST_ANALYTICS_SECRET = Buffer.from(
   '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
   'hex',
 )
+
+/**
+ * A recorder for a suite that calls a producer directly rather than through the
+ * server.
+ *
+ * The real one, with the real key. Not a stub: a stub would let a producer that
+ * writes a payload the catalog refuses pass every one of these suites, which is
+ * the exact defect the closed schema exists to make impossible.
+ */
+export function testAnalytics(clock: Clock = new FakeClock()) {
+  return createAnalytics({
+    secret: TEST_ANALYTICS_SECRET,
+    clock,
+    counters: { events: { inc() {} }, rejections: { inc() {} } },
+  })
+}
 
 export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
   const admin = postgres(adminUrl, {

@@ -22,6 +22,7 @@
 import { sql } from 'drizzle-orm'
 import type { Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
+import type { Analytics } from '../analytics/record.ts'
 import { verifySignature } from './app.ts'
 
 export class WebhookError extends Error {}
@@ -61,6 +62,7 @@ export async function handleDelivery(
   clock: Clock,
   event: string,
   payload: Record<string, unknown>,
+  analytics: Analytics,
 ): Promise<WebhookOutcome> {
   const action = typeof payload.action === 'string' ? payload.action : null
   const installation = payload.installation as
@@ -92,7 +94,7 @@ export async function handleDelivery(
       // `live` here and nowhere else. This is the only event that means the
       // installation exists right now, so it is the only one allowed to clear a
       // suspension. See rememberInstallation.
-      const orgId = await rememberInstallation(pool, clock, account, id, { live: true })
+      const orgId = await rememberInstallation(pool, clock, account, id, analytics, { live: true })
       await rememberRepositories(pool, clock, account.login, orgId, repos)
       return {
         event,
@@ -108,7 +110,7 @@ export async function handleDelivery(
       if (typeof id !== 'number' || !account?.login) {
         return { event, action, handled: false, detail: 'no installation in the payload' }
       }
-      const orgId = await rememberInstallation(pool, clock, account, id)
+      const orgId = await rememberInstallation(pool, clock, account, id, analytics)
       const added = Array.isArray(payload.repositories_added)
         ? (payload.repositories_added as Repo[])
         : []
@@ -146,7 +148,7 @@ export async function handleDelivery(
         return { event, action, handled: false, detail: 'no repository in the payload' }
       }
       const account: Account = { login, type: repo.owner?.type ?? 'Organization' }
-      const orgId = await rememberInstallation(pool, clock, account, id)
+      const orgId = await rememberInstallation(pool, clock, account, id, analytics)
       if (action === 'deleted' || action === 'archived') {
         await archiveRepositories(pool, clock, account.login, orgId, [repo])
         return { event, action, handled: true, detail: `${repo.full_name} archived` }
@@ -181,19 +183,33 @@ async function rememberInstallation(
   clock: Clock,
   account: Account,
   installationId: number,
+  analytics: Analytics,
   options: { live: boolean } = { live: false },
 ): Promise<string> {
   const login = account.login
   return pool.withGitHubAccount(login, async (db) => {
     const slug = slugFor(login)
-    const rows = await db.execute<{ id: string }>(sql`
+    const rows = await db.execute<{ id: string; created: boolean }>(sql`
       INSERT INTO organizations (slug, name, github_login)
       VALUES (${slug}, ${login}, ${login})
       ON CONFLICT (slug) DO UPDATE SET
         github_login = EXCLUDED.github_login,
         updated_at = ${clock.now().toISOString()}
-      RETURNING id`)
+      -- xmax is zero on a row this statement inserted. Every installation
+      -- delivery reaches this upsert, and most of them are for organizations
+      -- that already exist, so counting the statement would count an
+      -- organization once per delivery forever.
+      RETURNING id, (xmax = 0) AS created`)
     const orgId = rows[0]!.id
+
+    if (rows[0]!.created) {
+      await analytics.record(db, {
+        name: 'identity.organization_created',
+        occurredAt: clock.now(),
+        orgId,
+        payload: {},
+      })
+    }
 
     await db.execute(sql`
       INSERT INTO github_installations

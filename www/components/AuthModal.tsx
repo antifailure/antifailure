@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { joinWaitlist, rememberedEmail } from "@/lib/waitlist";
+import { ctaEngaged, waitlistSubmitted } from "@/lib/analytics";
 
 /**
  * The in-page version of the waitlist form. Same substance as the full screen:
@@ -26,6 +27,13 @@ export function AuthModal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
   const restoreFocusTo = useRef<Element | null>(null);
+
+  // One engagement per time the dialog opens. In an effect rather than in the
+  // button that opens it, because three different buttons open this dialog and
+  // instrumenting each of them is three places for the fourth to be forgotten.
+  useEffect(() => {
+    if (open) ctaEngaged("waitlist_open");
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -79,6 +87,11 @@ export function AuthModal({
     setError("");
     const result = await joinWaitlist(email, "modal");
     setBusy(false);
+    // The outcome, with the channel the SESSION started on rather than this
+    // page's referrer, which is internal by the time somebody reaches a form.
+    // See www/lib/analytics.ts: that is what makes acquisition answer "what
+    // brought them here" rather than "which page had the form on it".
+    waitlistSubmitted(result.ok ? (result.alreadyJoined ? "already" : "joined") : "refused");
     if (!result.ok) {
       setError(result.message);
       return;

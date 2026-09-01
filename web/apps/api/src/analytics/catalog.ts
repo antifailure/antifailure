@@ -218,10 +218,12 @@ export const CATALOG = {
     answers: 'Which call to action people press, and on which page.',
     producer: 'www/lib/analytics.ts, from the waitlist dialog and the primary buttons',
     payload: {
-      cta: {
-        kind: 'enum',
-        values: ['waitlist_open', 'docs', 'github', 'pricing', 'install'] as const,
-      },
+      // One value, because there is one producer. The docs, GitHub and install
+      // buttons are server-rendered links with no click handler, and declaring
+      // them here would put three bars on a chart that read zero forever. The
+      // variation worth having is the route: dialogs opened per page against
+      // submissions per page is form conversion by page.
+      cta: { kind: 'enum', values: ['waitlist_open'] as const },
       route: { kind: 'enum', values: SITE_ROUTES },
     },
     dimensions: ['cta', 'route'],
@@ -266,7 +268,12 @@ export const CATALOG = {
     answers: 'Which sign-in method people use, and how many are signing in for the first time.',
     producer: 'web/apps/api/src/server.ts, on every completed sign-in',
     payload: {
-      method: { kind: 'enum', values: ['github', 'email_link', 'device', 'sso'] as const },
+      // Two values, because there are two producers. The device flow issues a
+      // terminal credential to somebody who is already signed in, which is not
+      // a sign-in, and single sign-on issues its sessions from the enterprise
+      // edition. Declaring either here would be a bar that reads zero forever
+      // and looks like a broken chart rather than an absent feature.
+      method: { kind: 'enum', values: ['github', 'email_link'] as const },
       first_time: { kind: 'boolean' },
     },
     dimensions: ['method'],
@@ -284,11 +291,13 @@ export const CATALOG = {
     actorKind: 'system',
     privacyBasis: 'contract',
     answers: 'How many organizations exist, and which route created them.',
-    producer: 'web/apps/api/src/github/webhook.ts, when an installation creates an organization',
-    payload: {
-      via: { kind: 'enum', values: ['github_installation', 'bootstrap', 'signin'] as const },
-    },
-    dimensions: ['via'],
+    producer:
+      'web/apps/api/src/github/webhook.ts rememberInstallation, on the delivery whose upsert ' +
+      'actually creates the row. The other way an organization can come into existence is the ' +
+      'bootstrap command, which runs as a CLI against the migration credential with no analytics ' +
+      'recorder, so a self-hosted first organization is not counted here.',
+    payload: {},
+    dimensions: [],
     organization: 'required',
     session: 'never',
   },
@@ -300,12 +309,15 @@ export const CATALOG = {
     actorKind: 'system',
     privacyBasis: 'contract',
     answers: 'How organizations grow, and whether growth comes from a directory or by hand.',
-    producer: 'web/apps/api/src/routers/index.ts members.add, and auth/signin.ts syncMembership',
+    producer:
+      'web/apps/api/src/routers/index.ts members.sync, once per member the reconciliation adds. ' +
+      'There is deliberately no `via` field: membership can only be created by that route today, ' +
+      'so an enum with one value would be a dimension that is the same bar forever, and the ' +
+      'directory-provisioned paths live in the enterprise edition rather than here.',
     payload: {
       role: { kind: 'enum', values: ['owner', 'admin', 'member', 'viewer'] as const },
-      via: { kind: 'enum', values: ['manual', 'github', 'scim', 'sso'] as const },
     },
-    dimensions: ['via', 'role'],
+    dimensions: ['role'],
     organization: 'required',
     session: 'never',
   },
@@ -321,8 +333,13 @@ export const CATALOG = {
     actorKind: 'user',
     privacyBasis: 'contract',
     answers: 'How many organizations get as far as wiring an engine into their CI.',
-    producer: 'web/apps/api/src/tokens.ts mintEngineToken, reached by both the CLI and the console',
+    producer: 'web/apps/api/src/tokens.ts mintEngineToken, from POST /v1/tokens',
     payload: {
+      // console is in the enum and nothing emits it today, deliberately and
+      // visibly: the console can list and revoke engine tokens and cannot mint
+      // one, so wiring CI is a terminal-only step. That is a product gap rather
+      // than an analytics one, and a bar labelled console reading zero forever
+      // is the way it becomes visible to somebody who can fix it.
       via: { kind: 'enum', values: ['cli', 'console'] as const },
       first: { kind: 'boolean' },
     },
@@ -420,8 +437,9 @@ export const CATALOG = {
     privacyBasis: 'legitimate_interest',
     answers: 'Which parts of the product get used, and which were built for nobody.',
     producer:
-      'web/apps/api/src/routers/index.ts and routers/dispatch.ts, on the mutations that ' +
-      'change policy or start work',
+      'web/apps/api/src/routers/index.ts, web/apps/api/src/routers/dispatch.ts, ' +
+      'web/apps/api/src/routers/runtimes.ts and web/apps/api/src/providers/store.ts, one call ' +
+      'beside each audit entry on a mutation that changes policy or starts work',
     payload: {
       feature: {
         kind: 'enum',
@@ -432,7 +450,7 @@ export const CATALOG = {
           'network_rule_approved',
           'agent_run',
           'load_run',
-          'environment_created',
+          'environment_requested',
           'environment_torn_down',
           'audit_exported',
           'runtime_registered',
