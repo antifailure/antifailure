@@ -68,8 +68,8 @@ github:
 `mode: actions` runs everything inside the workflow. The environment lives for
 the length of the job, which suits a repository that wants preview checks
 rather than preview URLs somebody opens later. When you want the second thing,
-[the control plane](/docs/getting-started/hosted/) is what adds it, and the
-mode becomes `app`.
+[when one machine is not enough](/docs/getting-started/hosted/) is the page that
+adds it, and the mode becomes `app`.
 
 ## Open a pull request
 
