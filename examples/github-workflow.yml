@@ -12,6 +12,19 @@ name: Antifailure
 
 on:
   pull_request:
+    # Named rather than left to the default, for one reason each.
+    #
+    # The default list is opened, synchronize and reopened. `labeled` and
+    # `unlabeled` are here because that is how a fork pull request is approved:
+    # `github.fork_policy: label` refuses a fork until a maintainer adds
+    # antifailure:allow, and without this line adding it is an event nothing
+    # subscribes to, so the approval sits there until the next push. The job
+    # below skips a label that is not that one, so the cost is a skipped job
+    # rather than a run per label anybody adds.
+    #
+    # `ready_for_review` is here because it is NOT in the default list, so a
+    # draft that becomes ready would otherwise start nothing.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
 
   # The hosted control plane's verbs. `environments.create`, `agents.run` and
   # `load.run` in the console do not run anything themselves: they ask GitHub to
@@ -65,6 +78,13 @@ jobs:
   preview:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # A label event that is not the approval label is not worth a run. Every
+    # other event runs, including unlabeled, because removing the approval
+    # while a run is in flight should reach af ci and be refused by it.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'antifailure:allow'
     steps:
       - uses: actions/checkout@v4
         with:

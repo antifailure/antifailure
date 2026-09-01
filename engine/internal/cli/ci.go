@@ -67,10 +67,25 @@ change.`),
 				defer cancel()
 			}
 
+			// Before the orchestrator, which is before anything at all.
+			// A pull request from a fork the policy does not allow gets a
+			// report saying nothing ran and no environment, and the order
+			// is the security property: an orchestrator resolves providers
+			// and names an environment, so refusing after building one is
+			// refusing after doing part of what was refused.
+			if fork := forkGate(e); fork.Refused {
+				return skippedRun(e, forkRun(e, branch, docsBase, fork), commentPath(e, output))
+			}
+
 			o, m, err := orchestratorWithManifest(e, branch)
 			if err != nil {
 				return err
 			}
+			// github.comment, which nothing read until now. Resolved once
+			// here rather than at each of the three places a report is
+			// written, so the two exits from this command cannot disagree
+			// about whether there is a comment.
+			output = commentPath(e, output)
 			gate := report.Configure(m.Policy)
 			run := report.Run{
 				Environment: o.EnvID(), Branch: branchName(e, branch),

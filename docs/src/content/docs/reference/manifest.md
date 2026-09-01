@@ -205,6 +205,50 @@ name.
 | `idle_sleep` | Suspend after this long with no traffic. |
 | `domain` | Wildcard domain for preview URLs. |
 
+## `github`
+
+| Key | Read by | Notes |
+| --- | --- | --- |
+| `mode` | `af explain` only | `actions`, `app` or `off`. Which half does the work is decided by your workflow, which has the address of a control plane or does not. |
+| `comment` | `af change`, `af ci` | Whether to maintain one comment on the pull request. |
+| `fork_policy` | `af ci`, `af up`, `af test`, `af load run` | `never`, `label` or `always`. Read from the BASE branch, not from the pull request. |
+| `teardown_on` | `af explain` only | Accepted and read by nothing. Teardown is unconditional. |
+
+**`fork_policy`** is enforced in the engine, before an environment is named and
+before the Docker daemon is touched, on `pull_request` and on
+`pull_request_target`. The policy is read from the base branch rather than from
+the checked out tree, because the manifest is a file in your repository and a
+fork's pull request carries its own copy of it: reading the setting from there
+would let anybody lift their own restriction. A checkout that does not carry
+the base branch falls back to `label` and says so. See
+[Forks](/docs/guides/github/#forks).
+
+The control plane applies `label` behaviour to every repository regardless of
+what this says, and cannot do otherwise, for the reason in the next paragraph.
+
+**`comment: false`** stops `af change --write` and `af ci --report` writing the
+file your workflow posts, when they run inside GitHub Actions. It removes a
+file an earlier step already wrote, because a suppressed comment that leaves
+the change analysis behind would comment the wrong thing rather than nothing.
+Outside Actions the flag wins, since there is no pull request for the setting
+to be about.
+
+**`mode` and `teardown_on` are read by `af explain` only**, and that is worth
+being blunt about rather than leaving somebody to find out by setting one.
+Removing `close` from `teardown_on` does not stop a closed pull request being
+torn down, and no combination of its values turns teardown off. `af ci` tears
+down before it writes the report, whatever the outcome, including on a
+cancelled job. The `ttl` outcome is real and comes from a different key,
+[`runtime.max_ttl`](#runtime).
+
+The reason is architectural rather than an oversight, and it is the sentence
+the whole product rests on: **the hosted control plane never reads your
+manifest.** The manifest lives in your repository beside your code, and the
+control plane holds organizations, policy and aggregated reports. A control
+plane that read the manifest would be a control plane that had to fetch your
+repository, which is the boundary this product exists to keep. Anything in this
+block that only a control plane could act on is therefore not acted on.
+
 ## When the manifest is wrong
 
 ```

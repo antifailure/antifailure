@@ -62,7 +62,11 @@ because nothing is configured to run it.`),
 				return err
 			}
 
-			if output != "" {
+			// The same github.comment the full report obeys. This step
+			// writes the file the workflow posts, so honouring the setting in
+			// af ci alone would leave `comment: false` commenting the change
+			// analysis and nothing else.
+			if output = commentPath(e, output); output != "" {
 				// The same marker af ci's report carries, so a workflow that
 				// writes this one and then overwrites it with the full report
 				// updates one comment rather than leaving two.

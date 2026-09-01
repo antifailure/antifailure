@@ -39,7 +39,15 @@ type Run struct {
 	Insights     *Insights
 	// Notes say what could not be measured, and why. A report that silently
 	// omits a check reads exactly like a check that found nothing.
-	Notes    []string
+	Notes []string
+	// Skipped is why the check did not run at all, when it did not.
+	//
+	// A run that was refused before it started is not a run that found
+	// nothing, and the difference has to survive as far as the comment. The
+	// fork gate is what fills this: a pull request from a fork that no
+	// maintainer has approved gets a report saying so, rather than a green
+	// tick over an environment that was never created.
+	Skipped  string
 	Duration string
 	// DocsBase is where links point, so a self hosted instance can point at
 	// its own copy rather than at ours.
@@ -449,6 +457,13 @@ func (r Run) Markdown() string {
 
 	fmt.Fprintf(&b, "### Antifailure: %s\n\n", r.Headline())
 
+	// First, and in bold, because everything under it is the report of a run
+	// that did not happen. A reader who takes four lines off this comment has
+	// to take away that nothing was checked.
+	if r.Skipped != "" {
+		fmt.Fprintf(&b, "**This check did not run.** %s\n\n", flatten(r.Skipped))
+	}
+
 	if r.URL != "" {
 		fmt.Fprintf(&b, "Environment `%s` is at %s\n\n", r.Environment, r.URL)
 	}
@@ -580,7 +595,10 @@ func (r Run) Markdown() string {
 		fmt.Fprintf(&b, "Not measured: %s\n\n", oneLine(n))
 	}
 
-	if r.Verdict() == VerdictBlocked {
+	// Not on a run that was refused before it started. "The environment or the
+	// runner could not carry a workflow through" is the wrong sentence for a
+	// decision somebody made on purpose, and it reads as an apology for a bug.
+	if r.Verdict() == VerdictBlocked && r.Skipped == "" {
 		fmt.Fprintf(&b,
 			"Blocked means the environment or the runner could not carry a workflow through. "+
 				"It is not counted against this change. [What blocked means](%s/concepts/verdicts)\n\n",

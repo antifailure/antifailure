@@ -608,6 +608,20 @@ The environment does not reproduce {dimension}, which the manifest requires: {de
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/inventory](/docs/concepts/inventory/) |
 
+## GitHub
+
+### AF-GH-003
+
+Nothing ran, because of the fork policy on the base branch. {detail}
+
+**What to do.** Add the antifailure:allow label to the pull request, or change github.fork_policy on the base branch.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [getting-started/pull-requests](/docs/getting-started/pull-requests/) |
+
 ## Infrastructure
 
 ### AF-INF-002

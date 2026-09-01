@@ -42,6 +42,9 @@ evidence about the application, and charging it to the application is how
 people learn to ignore the results. Only a real failure exits non zero.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if fork := forkGate(e); fork.Refused {
+				return refuseFork(fork)
+			}
 			o, err := orchestrator(e, branch, false)
 			if err != nil {
 				return err

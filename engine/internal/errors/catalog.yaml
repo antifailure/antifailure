@@ -852,6 +852,13 @@ errors:
     docs: guides/github
     retryable: false
     exit_code: 4
+  - code: AF-GH-003
+    area: GH
+    message: "Nothing ran, because of the fork policy on the base branch. {detail}"
+    next_step: "Add the antifailure:allow label to the pull request, or change github.fork_policy on the base branch."
+    docs: getting-started/pull-requests
+    retryable: false
+    exit_code: 6
 
   # Control plane
   - code: AF-CP-001
