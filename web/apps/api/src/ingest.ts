@@ -45,6 +45,12 @@ export const EVENT_TYPES = [
   'artifact.stored',
   'golden.published',
   'network.decision',
+  // Workload Studio. A run is created here and its identifier is handed to the
+  // engine, so every one of these carries workload_run_id in its payload; see
+  // workloads/projection.ts for what each does and which orderings it survives.
+  'workload.started',
+  'workload.finished',
+  'workload.cancelled',
 ] as const
 
 export interface IncomingEvent {

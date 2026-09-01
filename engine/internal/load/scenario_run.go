@@ -74,10 +74,26 @@ type ScenarioResult struct {
 }
 
 // AssertionResult is one assertion's answer.
+//
+// Detail is the sentence a person reads. The four fields after it are the same
+// answer in numbers, for a reader that has to chart it or store it in columns:
+// a hosted console cannot draw "served a p95 of 240ms, over 200ms" and cannot
+// tell that sentence from a different measure's without parsing English.
 type AssertionResult struct {
 	Name    string `json:"name"`
 	Verdict string `json:"verdict"`
 	Detail  string `json:"detail"`
+	// Measure is which of the four this assertion asked for:
+	// every_request_succeeded, p95_below_ms, error_rate_below or status_in.
+	Measure string `json:"measure,omitempty"`
+	// Scope is the route it was narrowed to, empty for a scenario wide one.
+	Scope string `json:"scope,omitempty"`
+	// Threshold is the number the assertion declared, and Observed is what was
+	// measured against it. Both are absent for the two measures that are not
+	// numeric comparisons, and Observed is absent when nothing was sent, which
+	// is a different answer from zero.
+	Threshold *float64 `json:"threshold,omitempty"`
+	Observed  *float64 `json:"observed,omitempty"`
 }
 
 // RunScenarios executes scenarios against the environment.
@@ -301,7 +317,72 @@ func judge(s *Scenario, m *scenarioMeter) []AssertionResult {
 	return out
 }
 
+// evaluate answers an assertion, in words and then in numbers.
+//
+// The verdict half is deliberately left exactly as it was and is not read by
+// the numeric half. Deriving the verdict from a threshold comparison computed
+// here would put the decision in two places, and the sentences below are the
+// ones customers have been reading; a refactor that changed one of them by a
+// word would be an invisible break in a report.
 func evaluate(a Assertion, m *scenarioMeter) AssertionResult {
+	out := evaluateVerdict(a, m)
+	out.Measure = a.Measure()
+	out.Scope = a.scopeRoute()
+	out.Threshold, out.Observed = a.reading(m)
+	return out
+}
+
+// reading is the assertion's threshold and what was measured against it.
+//
+// Nil for a measure that is not a numeric comparison, and nil for Observed
+// when the requests it is about were never sent, because zero and nothing
+// measured are different answers and a console charting the first when it
+// means the second says the application was perfect.
+func (a Assertion) reading(m *scenarioMeter) (threshold, observed *float64) {
+	stat, ok := a.statFor(m)
+	switch {
+	case a.P95BelowMs > 0:
+		threshold = &a.P95BelowMs
+		if ok && stat.sent > 0 {
+			p95 := percentiles(stat.samples).P95Ms
+			observed = &p95
+		}
+	case a.ErrorRateBelow > 0:
+		threshold = &a.ErrorRateBelow
+		if ok && stat.sent > 0 {
+			rate := float64(stat.failed) / float64(stat.sent)
+			observed = &rate
+		}
+	}
+	return threshold, observed
+}
+
+// statFor finds the measurements an assertion is about.
+func (a Assertion) statFor(m *scenarioMeter) (routeStat, bool) {
+	if a.Step == "" {
+		return m.overall(), true
+	}
+	route, err := parseRequest(a.Step)
+	if err != nil {
+		return routeStat{}, false
+	}
+	return m.forRoute(route.String())
+}
+
+// scopeRoute is the assertion's step, spelled the way a route is spelled
+// everywhere else, or empty when it is about the whole scenario.
+func (a Assertion) scopeRoute() string {
+	if a.Step == "" {
+		return ""
+	}
+	route, err := parseRequest(a.Step)
+	if err != nil {
+		return a.Step
+	}
+	return route.String()
+}
+
+func evaluateVerdict(a Assertion, m *scenarioMeter) AssertionResult {
 	scope := "the scenario"
 	stat := m.overall()
 	if a.Step != "" {

@@ -188,6 +188,26 @@ func (s *Scenario) Validate() error {
 }
 
 // measures counts how many of the four an assertion set.
+// Measure names which of the four an assertion asked for, or empty when it
+// asks for nothing, which Validate refuses.
+//
+// The strings are the field names, so a report naming a measure and a manifest
+// declaring it use one spelling. A second vocabulary for the same four things
+// is one more thing a reader has to learn.
+func (a Assertion) Measure() string {
+	switch {
+	case a.EveryRequestSucceeded != nil:
+		return "every_request_succeeded"
+	case a.P95BelowMs > 0:
+		return "p95_below_ms"
+	case a.ErrorRateBelow > 0:
+		return "error_rate_below"
+	case len(a.StatusIn) > 0:
+		return "status_in"
+	}
+	return ""
+}
+
 func (a Assertion) measures() int {
 	n := 0
 	if a.EveryRequestSucceeded != nil {
