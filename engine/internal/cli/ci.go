@@ -15,6 +15,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/insights"
+	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 )
@@ -183,16 +184,22 @@ change.`),
 
 			if withLoad {
 				e.Out.Section("Generating load")
-				if res, _, lErr := o.Load(ctx, env.LoadOptions{Duration: 30 * time.Second}); lErr == nil {
-					l := &report.Load{
-						Sent: res.Sent, Rate: res.Rate,
-						ErrorRate: res.ErrorRate, P95Ms: res.Overall.P95Ms,
-					}
-					p95, _ := o.Thresholds()
-					for _, b := range res.Breaches(p95, 0) {
-						l.Regressed = append(l.Regressed, b.What)
-					}
-					run.Load = l
+				// DefaultDuration rather than Duration, so the manifest's own
+				// load.duration still decides. The hardcoded 30s used to sit
+				// in the slot that overrides it.
+				res, refused, lErr := o.Load(ctx, env.LoadOptions{
+					DefaultDuration: 30 * time.Second, DefaultScale: 1,
+				})
+				switch {
+				case lErr != nil:
+					// The header with nothing under it is how this read
+					// before: a load run that failed outright produced the
+					// section and no finding, and silence is read as success.
+					e.Out.Printf("  %s %s\n", e.Out.S(StyleWarn, SymbolWarn), lErr.Error())
+					run.Notes = append(run.Notes, "the load run did not complete: "+lErr.Error())
+				default:
+					p95, errorRate := o.Thresholds()
+					run.Load = loadReport(res, refused, p95, errorRate)
 				}
 			}
 
@@ -231,6 +238,41 @@ change.`),
 	cmd.Flags().StringVar(&saveBaseline, "save-baseline", "",
 		"Save this run's queries and plans, to compare a later branch against")
 	return cmd
+}
+
+// loadReport turns a load run into the section of the report the policy gate
+// reads.
+//
+// Every line here was missing from the call site it replaces, and each absence
+// read as a pass.
+//
+// The error rate threshold was passed as a literal 0. Breaches short-circuits
+// on `errorRate > 0`, so no error rate breach could ever be built, and under
+// access_log and none the manifest refuses p95_increase outright. Those
+// projects called Breaches(0, 0), got nil, and merged. A change that failed
+// every request under load went green in 'af ci' while 'af load run' on the
+// same manifest exited non-zero: two commands, one manifest, opposite verdicts.
+//
+// InertP95 was never called, so the check documented as AF-LOD-016, a
+// threshold that was in force and compared nothing, did not run on this path
+// at all.
+//
+// The routes the shape refused to send were discarded, so a run that could
+// send one route out of forty was indistinguishable from one that sent them
+// all.
+func loadReport(res *load.Result, refused []load.Route, p95Increase, errorRate float64) *report.Load {
+	l := &report.Load{
+		Sent: res.Sent, Rate: res.Rate,
+		ErrorRate: res.ErrorRate, P95Ms: res.Overall.P95Ms,
+		InertP95: res.InertP95(p95Increase),
+	}
+	for _, b := range res.Breaches(p95Increase, errorRate) {
+		l.Regressed = append(l.Regressed, b.What)
+	}
+	for _, r := range refused {
+		l.Refused = append(l.Refused, r.String())
+	}
+	return l
 }
 
 // ciExit turns the verdict into an exit status.

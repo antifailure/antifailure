@@ -77,13 +77,13 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 			}
 			e.Out.Section("Generating load")
 
-			res, refused, err := o.Load(cmd.Context(), env.LoadOptions{
-				Duration: duration, Scale: scale, Seed: seed,
-				Progress: func(p load.Progress) {
-					e.Out.Printf("  %s  %d sent, %d errors, p95 %.0fms, %d in flight\n",
-						p.Elapsed, p.Sent, p.Errors, p.P95Ms, p.Inflight)
-				},
-			})
+			opts := loadRate(cmd, duration, scale, defaultDuration, defaultScale, smoke)
+			opts.Seed = seed
+			opts.Progress = func(p load.Progress) {
+				e.Out.Printf("  %s  %d sent, %d errors, p95 %.0fms, %d in flight\n",
+					p.Elapsed, p.Sent, p.Errors, p.P95Ms, p.Inflight)
+			}
+			res, refused, err := o.Load(cmd.Context(), opts)
 			if err != nil {
 				return err
 			}
@@ -182,6 +182,40 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 	cmd.Flags().Int64Var(&seed, "seed", 1, "Makes two runs send the same sequence")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to send at, defaulting to the checked out one")
 	return cmd
+}
+
+// loadRate reads what the user actually typed, rather than what cobra left in
+// the variable.
+//
+// A flag holds its default whether or not anybody set it, so reading the
+// variable alone cannot tell a default from a choice. Passing the default down
+// as if it were a choice is what made the manifest's load.scale and
+// load.duration unreachable from this command: every run arrived at the engine
+// carrying 60s and scale 1.0, which are not zero, so the fallback that would
+// have read the manifest never fired. A repository that wrote `scale: 0.05`
+// because it was aiming this at something fragile, and read the five percent
+// back correctly out of `af explain`, got production's full arrival rate.
+// Changed() is the only thing in cobra that knows the difference.
+//
+// The defaults travel on as defaults, so a manifest that says nothing still
+// gets the command's own numbers and nothing about an unconfigured project
+// changes.
+func loadRate(
+	cmd *cobra.Command,
+	duration time.Duration, scale float64,
+	defaultDuration time.Duration, defaultScale float64,
+	ceiling bool,
+) env.LoadOptions {
+	opts := env.LoadOptions{
+		DefaultDuration: defaultDuration, DefaultScale: defaultScale, Ceiling: ceiling,
+	}
+	if cmd.Flags().Changed("duration") {
+		opts.Duration = duration
+	}
+	if cmd.Flags().Changed("scale") {
+		opts.Scale = scale
+	}
+	return opts
 }
 
 // loadExit is the verdict a load run exits with.
