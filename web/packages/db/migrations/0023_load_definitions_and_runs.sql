@@ -1,5 +1,12 @@
--- Workload Studio: definitions somebody wrote down, versions nobody can edit,
--- and runs that either finished or said why they did not.
+-- Load: definitions somebody wrote down, versions nobody can edit, and runs
+-- that either finished or said why they did not.
+--
+-- The tables are named for the internal noun, `workload`, which is the id the
+-- site's own table of contents keeps (www/components/home/Toc.tsx has
+-- `{ id: "workload", title: "Load" }`). The visible name is Load, and the
+-- product name this file was first written under was deleted from the
+-- repository before it ever applied anywhere. A migration filename is the most
+-- durable string in the tree, so it does not carry a name nobody uses.
 --
 -- THE ONE DESIGN DECISION THIS FILE EXISTS TO DEFEND.
 --
@@ -231,6 +238,18 @@ CREATE TABLE workload_runs (
   verdict         verdict_value,
   failure_code    text,
   detail          text,
+  -- The plain `af` command that reproduces this run, as the engine reported
+  -- it, and the digest of the manifest it read.
+  --
+  -- Stored rather than rebuilt, and the distinction is the whole value: a
+  -- command a console assembles from the form drifts from the one that
+  -- actually ran, and being the same one is the only reason to print it. NULL
+  -- until an engine reports, and a console that finds NULL says no command was
+  -- recorded rather than inventing one. The manifest digest is what
+  -- distinguishes two runs of the same command line against different
+  -- manifests.
+  reproduce_command text,
+  manifest_digest text,
 
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
@@ -312,20 +331,43 @@ CREATE TABLE workload_run_results (
   scheduled_ms    double precision,
 
   -- A browser. browser_workflow only.
+  -- A browser. browser_workflow only.
+  --
+  -- Five counts and not two. A real `af test` run against examples/go-api
+  -- returned 0 passed, 0 failed, 0 flaky, 0 blocked and 1 unverified, because
+  -- the persona could not be created. With passed and failed alone a console
+  -- renders a run that did nothing as a run with no failures, which is the
+  -- exit-code-zero-over-nothing defect this repository has already shipped
+  -- once, moved into a table.
   workflows       integer,
   workflows_passed integer,
   workflows_failed integer,
+  workflows_flaky integer,
+  workflows_blocked integer,
+  workflows_unverified integer,
   steps           integer,
 
   -- A wander. exploration only.
+  --
+  -- Two counts rather than one boolean, because a version selects up to fifty
+  -- goals and one boolean cannot answer for fifty. Which goal became
+  -- unreachable is the whole finding.
   findings        integer,
-  goal_reached    boolean,
+  goals           integer,
+  goals_reached   integer,
 
   duration_ms     double precision,
   -- Where the traffic mix came from, so a reader can tell production's shape
   -- from a default. The engine's load.Result carries exactly this field and
   -- nothing carried it out of a run until it had somewhere to go.
   source          text,
+  -- Failures by reason, from the closed set the load runner produces: an HTTP
+  -- status of 500 or above spelled as its number, or one of `malformed
+  -- request`, `timeout`, `connection refused`, `connection reset`, `name not
+  -- resolved`, `request failed`. A total alone loses the only part that tells
+  -- somebody what to fix, and the set is small and closed, so it is one column
+  -- rather than a table.
+  error_reasons   jsonb NOT NULL DEFAULT '{}'::jsonb,
   -- Routes the safe list refused, which is why a blocked scenario is blocked.
   refused_routes  text[] NOT NULL DEFAULT '{}',
   recorded_at     timestamptz NOT NULL DEFAULT now(),
@@ -343,7 +385,8 @@ CREATE TABLE workload_run_results (
       WHEN 'browser_workflow' THEN
         workflows IS NOT NULL AND requests IS NULL AND sessions IS NULL AND findings IS NULL
       WHEN 'exploration' THEN
-        findings IS NOT NULL AND requests IS NULL AND sessions IS NULL AND workflows IS NULL
+        findings IS NOT NULL AND goals IS NOT NULL
+        AND requests IS NULL AND sessions IS NULL AND workflows IS NULL
     END
   ),
   CONSTRAINT workload_run_results_counts CHECK (
@@ -361,6 +404,15 @@ CREATE TABLE workload_route_metrics (
   workload_run_id uuid NOT NULL REFERENCES workload_runs(id) ON DELETE CASCADE,
   -- "GET /checkout", spelled the way the manifest's safe list spells it, so
   -- what you allow and what you measure look the same on the page.
+  -- Which scenario sent it, for a run that selected more than one, and NULL
+  -- for a mix that has no scenarios at all.
+  --
+  -- Measured rather than reasoned: a two scenario selection against
+  -- examples/go-api produced GET /health under one scenario, and a second
+  -- scenario sending the same route would have been refused by a key of
+  -- (run, route). The engine cannot merge them and must not try, because two
+  -- p95 values do not average into a p95.
+  scenario        text,
   route           text NOT NULL,
   sent            integer NOT NULL,
   errors          integer NOT NULL DEFAULT 0,
@@ -374,7 +426,6 @@ CREATE TABLE workload_route_metrics (
   -- How much slower this environment is, as a ratio.
   p95_increase    double precision,
   position        integer NOT NULL DEFAULT 0,
-  UNIQUE (workload_run_id, route),
   CONSTRAINT workload_route_metrics_counts CHECK (sent >= 0 AND errors >= 0),
   -- No baseline and no change are different answers, and the engine's
   -- RouteResult carries a separate HasBaseline field precisely because a zero
@@ -386,6 +437,11 @@ CREATE TABLE workload_route_metrics (
     (baseline_p95_ms IS NULL) = (p95_increase IS NULL)
   )
 );
+-- On the expression, because scenario is NULL for a mix and two NULLs never
+-- collide in a plain unique constraint, so the same route could be written
+-- twice for one observed load run.
+CREATE UNIQUE INDEX workload_route_metrics_key
+  ON workload_route_metrics (workload_run_id, coalesce(scenario, ''), route);
 CREATE INDEX workload_route_metrics_run_idx ON workload_route_metrics (workload_run_id, position);
 
 CREATE TABLE workload_threshold_verdicts (
@@ -393,9 +449,15 @@ CREATE TABLE workload_threshold_verdicts (
   org_id          uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   workload_run_id uuid NOT NULL REFERENCES workload_runs(id) ON DELETE CASCADE,
   -- The assertion's own name, which is its identity in a report.
+  -- Which scenario declared it, and NULL for a mix. Two scenarios in one run
+  -- can each declare an assertion called `nothing_failed`, which a key of
+  -- (run, name, scope) refuses. A real run produced exactly that pair.
+  scenario        text,
   name            text NOT NULL,
-  -- The route it was scoped to, or NULL for the whole run. The engine's
-  -- Assertion.Step is exactly this.
+  -- The route it was narrowed to, spelled the way a step is, and NULL for a
+  -- scenario wide assertion. `scope` rather than `step`, because that is what
+  -- the engine's AssertionResult calls it on the wire; the manifest calls it
+  -- step and the two are the same thing seen from either end.
   scope           text,
   -- Which of the four measures this is. Text rather than an enum because the
   -- engine adds one by releasing, and a customer's database should not need a
@@ -413,7 +475,7 @@ CREATE TABLE workload_threshold_verdicts (
 -- for a run wide assertion and two NULLs never collide in a plain unique index.
 -- Without the coalesce the same assertion could be written twice.
 CREATE UNIQUE INDEX workload_threshold_verdicts_key
-  ON workload_threshold_verdicts (workload_run_id, name, coalesce(scope, ''));
+  ON workload_threshold_verdicts (workload_run_id, coalesce(scenario, ''), name, coalesce(scope, ''));
 CREATE INDEX workload_threshold_verdicts_run_idx
   ON workload_threshold_verdicts (workload_run_id, position);
 

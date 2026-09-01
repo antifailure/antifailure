@@ -201,6 +201,13 @@ async function terminal(db: Db, clock: Clock, t: Terminal): Promise<string | nul
   const verdict = report?.verdict ?? null
   const detail = report?.detail ?? textOf(t.payload.detail)
   const failureCode = report?.failureCode ?? textOf(t.payload.failure_code)
+  // The command that reproduces the run, as the engine reported it, and the
+  // digest of the manifest it read. Stored rather than rebuilt: a command a
+  // console assembles from a form drifts from the one that actually ran, and
+  // being the same one is the only reason to print it.
+  const reproduce = obj(t.payload.reproduce)
+  const command = textOf(reproduce.command)
+  const manifestDigest = textOf(reproduce.manifest_digest)
 
   const moved = await db.execute<{ id: string }>(sql`
     UPDATE workload_runs SET
@@ -211,6 +218,8 @@ async function terminal(db: Db, clock: Clock, t: Terminal): Promise<string | nul
       verdict = COALESCE(${verdict}::verdict_value, verdict),
       detail = COALESCE(${detail}, detail),
       failure_code = COALESCE(${failureCode}, failure_code),
+      reproduce_command = COALESCE(${command}, reproduce_command),
+      manifest_digest = COALESCE(${manifestDigest}, manifest_digest),
       last_sequence = GREATEST(last_sequence, ${t.sequence}),
       lease_holder = NULL,
       lease_expires_at = NULL,
@@ -247,6 +256,12 @@ async function terminal(db: Db, clock: Clock, t: Terminal): Promise<string | nul
     )
   }
   return null
+}
+
+function obj(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
 }
 
 function textOf(value: unknown): string | null {

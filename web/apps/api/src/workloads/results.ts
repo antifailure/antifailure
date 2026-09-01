@@ -79,15 +79,21 @@ interface Aggregate {
   workflows: number | null
   workflowsPassed: number | null
   workflowsFailed: number | null
+  workflowsFlaky: number | null
+  workflowsBlocked: number | null
+  workflowsUnverified: number | null
   steps: number | null
   findings: number | null
-  goalReached: boolean | null
+  goals: number | null
+  goalsReached: number | null
   durationMs: number | null
   source: string | null
+  errorReasons: Record<string, number>
   refusedRoutes: string[]
 }
 
 interface RouteMetric {
+  scenario: string | null
   route: string
   sent: number
   errors: number
@@ -101,6 +107,7 @@ interface RouteMetric {
 }
 
 interface ThresholdVerdict {
+  scenario: string | null
   name: string
   scope: string | null
   measure: string
@@ -167,10 +174,16 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
     requests: null, failures: null, errorRate: null, targetRate: null, achievedRate: null,
     p50Ms: null, p90Ms: null, p95Ms: null, p99Ms: null, maxMs: null,
     sessions: null, iterations: null, scheduledMs: null,
-    workflows: null, workflowsPassed: null, workflowsFailed: null, steps: null,
-    findings: null, goalReached: null,
+    workflows: null, workflowsPassed: null, workflowsFailed: null,
+    workflowsFlaky: null, workflowsBlocked: null, workflowsUnverified: null,
+    steps: null,
+    findings: null, goals: null, goalsReached: null,
     durationMs: num(r.duration_ms, 0, 1e12),
     source: str(r.source, 200),
+    // Failures by reason. Bounded and coerced per entry, because it is a map
+    // from an untrusted sender and one absurd key must not take the rest with
+    // it, the same rule the lists follow.
+    errorReasons: counts(r.errors),
     refusedRoutes: strings(r.refused_as_unsafe ?? r.refused_routes, 100, 300),
   }
   const latency = obj(r.overall)
@@ -214,13 +227,20 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
         workflows: whole(r.workflows, 0, 100_000) ?? 0,
         workflowsPassed: whole(r.workflows_passed, 0, 100_000),
         workflowsFailed: whole(r.workflows_failed, 0, 100_000),
+        workflowsFlaky: whole(r.workflows_flaky, 0, 100_000),
+        workflowsBlocked: whole(r.workflows_blocked, 0, 100_000),
+        workflowsUnverified: whole(r.workflows_unverified, 0, 100_000),
         steps: whole(r.steps, 0, 1_000_000),
       }
     case 'exploration':
       return {
         ...empty,
         findings: whole(r.findings, 0, 100_000) ?? 0,
-        goalReached: bool(r.goal_reached),
+        // Zero rather than null for the same reason a load result's request
+        // count is: the CHECK requires an exploration result to carry a goal
+        // count, and refusing the whole row would lose the findings with it.
+        goals: whole(r.goals, 0, 100_000) ?? 0,
+        goalsReached: whole(r.goals_reached, 0, 100_000),
         steps: whole(r.steps, 0, 1_000_000),
       }
   }
@@ -241,6 +261,7 @@ function route(raw: unknown): RouteMetric | null {
   const declared = bool(r.has_baseline)
   const hasBaseline = declared === null ? baseline !== null : declared && baseline !== null
   return {
+    scenario: str(r.scenario, 200),
     route: name,
     sent,
     errors: whole(r.errors, 0, 2_147_483_647) ?? 0,
@@ -261,8 +282,11 @@ function threshold(raw: unknown): ThresholdVerdict | null {
   const value = verdict(t.verdict ?? t.value)
   if (value === null) return null
   return {
+    scenario: str(t.scenario, 200),
     name,
-    scope: str(t.step ?? t.scope, 400),
+    // `scope` is what the engine's AssertionResult calls it and `step` is what
+    // the manifest calls it. Both are read so either wire spelling lands.
+    scope: str(t.scope ?? t.step, 400),
     // The measure is free text on purpose: the engine adds an assertion by
     // releasing, and a customer's database should not need a migration to
     // record a measure it was sent. Unknown falls back to a word that says so
@@ -325,16 +349,19 @@ export async function writeReport(
       org_id, workload_run_id, kind, requests, failures, error_rate,
       target_rate, achieved_rate, p50_ms, p90_ms, p95_ms, p99_ms, max_ms,
       sessions, iterations, scheduled_ms,
-      workflows, workflows_passed, workflows_failed, steps,
-      findings, goal_reached, duration_ms, source, refused_routes)
+      workflows, workflows_passed, workflows_failed,
+      workflows_flaky, workflows_blocked, workflows_unverified, steps,
+      findings, goals, goals_reached, duration_ms, source, error_reasons, refused_routes)
     VALUES (
       ${input.orgId}, ${input.runId}, ${input.kind}::workload_kind,
       ${a.requests}, ${a.failures}, ${a.errorRate},
       ${a.targetRate}, ${a.achievedRate},
       ${a.p50Ms}, ${a.p90Ms}, ${a.p95Ms}, ${a.p99Ms}, ${a.maxMs},
       ${a.sessions}, ${a.iterations}, ${a.scheduledMs},
-      ${a.workflows}, ${a.workflowsPassed}, ${a.workflowsFailed}, ${a.steps},
-      ${a.findings}, ${a.goalReached}, ${a.durationMs}, ${a.source},
+      ${a.workflows}, ${a.workflowsPassed}, ${a.workflowsFailed},
+      ${a.workflowsFlaky}, ${a.workflowsBlocked}, ${a.workflowsUnverified}, ${a.steps},
+      ${a.findings}, ${a.goals}, ${a.goalsReached}, ${a.durationMs}, ${a.source},
+      ${JSON.stringify(a.errorReasons)}::jsonb,
       -- sql.param rather than the bare array. The template inlines a JavaScript
       -- array as a parenthesised value list, so an empty one renders as an empty
       -- pair of brackets, which is a syntax error, and a full one renders as a
@@ -348,12 +375,12 @@ export async function writeReport(
   for (const r of input.report.routes) {
     await db.execute(sql`
       INSERT INTO workload_route_metrics (
-        org_id, workload_run_id, route, sent, errors,
+        org_id, workload_run_id, scenario, route, sent, errors,
         p50_ms, p90_ms, p95_ms, p99_ms, max_ms, baseline_p95_ms, p95_increase, position)
-      VALUES (${input.orgId}, ${input.runId}, ${r.route}, ${r.sent}, ${r.errors},
+      VALUES (${input.orgId}, ${input.runId}, ${r.scenario}, ${r.route}, ${r.sent}, ${r.errors},
               ${r.p50Ms}, ${r.p90Ms}, ${r.p95Ms}, ${r.p99Ms}, ${r.maxMs},
               ${r.baselineP95Ms}, ${r.p95Increase}, ${position})
-      ON CONFLICT (workload_run_id, route) DO NOTHING`)
+      ON CONFLICT (workload_run_id, coalesce(scenario, ''), route) DO NOTHING`)
     position += 1
   }
 
@@ -361,10 +388,10 @@ export async function writeReport(
   for (const t of input.report.thresholds) {
     await db.execute(sql`
       INSERT INTO workload_threshold_verdicts (
-        org_id, workload_run_id, name, scope, measure, threshold, observed, value, detail, position)
-      VALUES (${input.orgId}, ${input.runId}, ${t.name}, ${t.scope}, ${t.measure},
+        org_id, workload_run_id, scenario, name, scope, measure, threshold, observed, value, detail, position)
+      VALUES (${input.orgId}, ${input.runId}, ${t.scenario}, ${t.name}, ${t.scope}, ${t.measure},
               ${t.threshold}, ${t.observed}, ${t.value}::verdict_value, ${t.detail}, ${position})
-      ON CONFLICT (workload_run_id, name, coalesce(scope, '')) DO NOTHING`)
+      ON CONFLICT (workload_run_id, coalesce(scenario, ''), name, coalesce(scope, '')) DO NOTHING`)
     position += 1
   }
 
@@ -427,8 +454,28 @@ function whole(value: unknown, min: number, max: number): number | null {
   return Number.isInteger(n) ? n : Math.round(n)
 }
 
+/**
+ * A map of counts from an untrusted sender.
+ *
+ * Bounded per entry and in total, and one unreadable entry is skipped rather
+ * than taking the map with it, which is the same rule the lists follow. The
+ * keys are a closed set the load runner produces, but they are not checked
+ * against it: the engine adds a reason by releasing, and a control plane that
+ * dropped an unknown one would lose exactly the failure nobody has seen before.
+ */
 function bool(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null
+}
+
+function counts(value: unknown): Record<string, number> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: Record<string, number> = {}
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>).slice(0, 100)) {
+    const name = str(key, 200)
+    const n = whole(raw, 0, 2_147_483_647)
+    if (name !== null && n !== null) out[name] = n
+  }
+  return out
 }
 
 function verdict(value: unknown): Verdict | null {

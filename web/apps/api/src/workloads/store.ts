@@ -235,6 +235,11 @@ export interface RunRow extends Record<string, unknown> {
   verdict: string | null
   failure_code: string | null
   detail: string | null
+  /** The `af` command the engine reported, or null when no engine has
+   *  reported yet. A console that finds null says no command was recorded
+   *  rather than assembling one that would drift from what ran. */
+  reproduce_command: string | null
+  manifest_digest: string | null
   requested_at: Date | string
   accepted_at: Date | string | null
   started_at: Date | string | null
@@ -249,7 +254,8 @@ export const runColumns = sql`
   wr.id, wr.workload_id, w.slug AS workload_slug, w.kind::text AS kind,
   v.version, wr.state::text AS state, e.env_id, wr.repository, wr.git_ref,
   wr.attempt, wr.retry_of, wr.superseded_by, wr.verdict::text AS verdict,
-  wr.failure_code, wr.detail, wr.requested_at, wr.accepted_at, wr.started_at,
+  wr.failure_code, wr.detail, wr.reproduce_command, wr.manifest_digest,
+  wr.requested_at, wr.accepted_at, wr.started_at,
   wr.finished_at, wr.deadline_at, wr.cancel_requested_at, wr.cancelled_at,
   wr.dispatched_at`
 

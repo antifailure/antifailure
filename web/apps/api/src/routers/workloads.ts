@@ -192,16 +192,18 @@ export const workloadsRouter = router({
         const [result] = await db.execute(sql`
           SELECT kind::text AS kind, requests, failures, error_rate, target_rate, achieved_rate,
                  p50_ms, p90_ms, p95_ms, p99_ms, max_ms, sessions, iterations, scheduled_ms,
-                 workflows, workflows_passed, workflows_failed, steps, findings, goal_reached,
-                 duration_ms, source, refused_routes, recorded_at
+                 workflows, workflows_passed, workflows_failed, workflows_flaky,
+                 workflows_blocked, workflows_unverified, steps,
+                 findings, goals, goals_reached,
+                 duration_ms, source, error_reasons, refused_routes, recorded_at
           FROM workload_run_results WHERE workload_run_id = ${input.runId}`)
         const routes = await db.execute(sql`
-          SELECT route, sent, errors, p50_ms, p90_ms, p95_ms, p99_ms, max_ms,
+          SELECT scenario, route, sent, errors, p50_ms, p90_ms, p95_ms, p99_ms, max_ms,
                  baseline_p95_ms, p95_increase
           FROM workload_route_metrics WHERE workload_run_id = ${input.runId}
           ORDER BY position`)
         const thresholds = await db.execute(sql`
-          SELECT name, scope, measure, threshold, observed, value::text AS value, detail
+          SELECT scenario, name, scope, measure, threshold, observed, value::text AS value, detail
           FROM workload_threshold_verdicts WHERE workload_run_id = ${input.runId}
           ORDER BY position`)
         const evidence = await db.execute(sql`

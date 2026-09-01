@@ -502,6 +502,111 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
   // The deadline
   // -------------------------------------------------------------------------
 
+  it('keeps two scenarios that sent the same route, and their own assertions', async () => {
+    // Measured on a real two scenario run: both send GET /health, and two p95
+    // values do not average into a p95, so a key of (run, route) would refuse
+    // the second row and the console would show one scenario's numbers under
+    // both names. Same for an assertion both scenarios call nothing_failed.
+    const target = await define('http_scenario', { select: ['browse', 'checkout'] })
+    await start(target).catch(() => null)
+    const runId = (await h.admin<{ id: string }[]>`
+      SELECT wr.id FROM workload_runs wr JOIN workloads w ON w.id = wr.workload_id
+      WHERE w.slug = ${target.slug}`)[0]!.id
+
+    await send([
+      event({
+        type: 'workload.finished',
+        payload: {
+          workload_run_id: runId, kind: 'http_scenario', verdict: 'pass',
+          result: { sent: 8, sessions: 2, overall: { p95_ms: 20 } },
+          routes: [
+            { scenario: 'browse', route: 'GET /health', sent: 4, latency: { p95_ms: 12 } },
+            { scenario: 'checkout', route: 'GET /health', sent: 4, latency: { p95_ms: 31 } },
+          ],
+          thresholds: [
+            { scenario: 'browse', name: 'nothing_failed', measure: 'every_request_succeeded', verdict: 'pass' },
+            { scenario: 'checkout', name: 'nothing_failed', measure: 'every_request_succeeded', verdict: 'fail' },
+          ],
+        },
+      }),
+    ])
+
+    const routes = await h.admin<{ scenario: string; p95_ms: number }[]>`
+      SELECT scenario, p95_ms FROM workload_route_metrics
+      WHERE workload_run_id = ${runId} ORDER BY scenario`
+    assert.deepEqual(
+      routes.map((r) => [r.scenario, Number(r.p95_ms)]),
+      [['browse', 12], ['checkout', 31]],
+    )
+    const asserted = await h.admin<{ scenario: string; value: string }[]>`
+      SELECT scenario, value::text AS value FROM workload_threshold_verdicts
+      WHERE workload_run_id = ${runId} ORDER BY scenario`
+    assert.deepEqual(
+      asserted.map((a) => [a.scenario, a.value]),
+      [['browse', 'pass'], ['checkout', 'fail']],
+    )
+  })
+
+  it('records all five workflow counts, so a run that did nothing is not a run with no failures', async () => {
+    // A real `af test` against examples/go-api returned 0 passed, 0 failed, 0
+    // flaky, 0 blocked and 1 unverified, because the persona could not be
+    // created. With passed and failed alone that renders as a clean run.
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    await send([
+      event({
+        type: 'workload.finished',
+        payload: {
+          workload_run_id: runId, kind: 'browser_workflow', verdict: 'unverified',
+          result: {
+            workflows: 1, workflows_passed: 0, workflows_failed: 0,
+            workflows_flaky: 0, workflows_blocked: 0, workflows_unverified: 1,
+          },
+          reproduce: { command: 'af test --only sign-up', manifest_digest: 'a'.repeat(64) },
+        },
+      }),
+    ])
+    const [row] = await h.admin<Record<string, string>[]>`
+      SELECT workflows, workflows_passed, workflows_failed, workflows_flaky,
+             workflows_blocked, workflows_unverified
+      FROM workload_run_results WHERE workload_run_id = ${runId}`
+    assert.deepEqual(
+      [row!.workflows, row!.workflows_passed, row!.workflows_failed,
+       row!.workflows_flaky, row!.workflows_blocked, row!.workflows_unverified].map(Number),
+      [1, 0, 0, 0, 0, 1],
+    )
+    assert.equal((await stateOf(runId)).verdict, 'unverified')
+
+    // The command the engine reported, stored rather than rebuilt.
+    const inspected: Answer = await callProcedure(h, owner, 'workloads.inspect', 'query', { runId })
+    assert.equal(inspected.body.result.data.run.reproduce_command, 'af test --only sign-up')
+    assert.equal(inspected.body.result.data.run.manifest_digest, 'a'.repeat(64))
+  })
+
+  it('keeps failures by reason rather than a total, and says nothing when nobody said', async () => {
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+    await send([
+      event({
+        type: 'workload.finished',
+        payload: {
+          workload_run_id: runId, kind: 'observed_load', verdict: 'fail',
+          result: {
+            sent: 10, failures: 3, error_rate: 0.3, overall: { p95_ms: 40 },
+            errors: { timeout: 2, '503': 1, 42: 'not a count' },
+          },
+        },
+      }),
+    ])
+    const [row] = await h.admin<{ error_reasons: Record<string, number>; p50_ms: number | null }[]>`
+      SELECT error_reasons, p50_ms FROM workload_run_results WHERE workload_run_id = ${runId}`
+    // A count alone loses the only part that tells somebody what to fix.
+    assert.deepEqual(row!.error_reasons, { timeout: 2, '503': 1 })
+    // And a percentile nobody reported stays null rather than becoming a zero
+    // that nothing downstream can tell from a real zero.
+    assert.equal(row!.p50_ms, null)
+  })
+
   it('ordering: a run nobody ever reports on is abandoned, not failed', async () => {
     const target = await define('browser_workflow', { select: ['sign-up'] })
     const runId = (await start(target)).body.result.data.runId
