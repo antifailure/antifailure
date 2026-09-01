@@ -108,10 +108,21 @@ export interface StripeClient {
    */
   updateCustomerEmail(customerId: string, email: string): Promise<StripeCustomer>
 
-  /** What Stripe currently believes about a subscription. Null when Stripe has
-   *  never heard of it, which is a real answer during reconciliation and not an
-   *  error. */
+  /**
+   * One subscription by id, or null when Stripe says it has never heard of it.
+   *
+   * This is NOT redundant with listSubscriptions, and the difference decides
+   * whether a deletion proceeds or stops. An empty list cannot tell "Stripe has
+   * already forgotten this subscription" from "Stripe would not answer": both
+   * arrive as nothing. A resumed deletion asks about ONE subscription it
+   * already holds the id of, and only a positive "no such object" lets it treat
+   * the cancellation as already done. See enterprise/deletion.ts.
+   */
   getSubscription(id: string): Promise<StripeSubscription | null>
+
+  /** Every subscription Stripe holds for one customer. This is the recovery
+   *  path when the creation webhook never arrived and no local row exists yet. */
+  listSubscriptions(customerId: string, limit: number): Promise<StripeSubscription[]>
 
   /** Cancels at the end of the paid period. */
   cancelSubscription(id: string): Promise<StripeSubscription>
@@ -209,6 +220,33 @@ export class RealStripeClient implements StripeClient {
     // sweep at the first bad row instead of fixing the rest.
     if (found === null) return null
     return subscriptionOf(found)
+  }
+
+  async listSubscriptions(customerId: string, limit: number): Promise<StripeSubscription[]> {
+    const query = new URLSearchParams({
+      customer: customerId,
+      status: 'all',
+      limit: String(limit),
+    })
+    const page = await this.get(`/v1/subscriptions?${query.toString()}`)
+    if (page === null || !Array.isArray(page.data)) return []
+
+    const out: StripeSubscription[] = []
+    for (const item of page.data) {
+      // One malformed subscription must not hide the other subscriptions. The
+      // identifier and customer are strict inside subscriptionOf; this boundary
+      // contains that failure to the one element that caused it.
+      if (item === null || typeof item !== 'object') continue
+      try {
+        const subscription = subscriptionOf(item as Record<string, unknown>)
+        // Stripe applies the customer filter. Checking it again means a broken
+        // proxy or simulator cannot attach another customer's subscription.
+        if (subscription.customerId === customerId) out.push(subscription)
+      } catch {
+        continue
+      }
+    }
+    return out
   }
 
   async cancelSubscription(id: string): Promise<StripeSubscription> {

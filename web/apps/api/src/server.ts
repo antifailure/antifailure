@@ -103,6 +103,11 @@ import { openApiDocument } from './openapi.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { limitFor, bucketFor, ENDPOINT_LIMITS, type EndpointLimit } from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
+import {
+  HOSTED_ACCESS_MESSAGE,
+  hasHostedAccess,
+  type HostedRequiredPlan,
+} from './hosted.ts'
 
 export interface ServerOptions {
   pool: Pool
@@ -139,6 +144,12 @@ export interface ServerOptions {
    *  variables, and the webhook endpoint refuses every delivery rather than
    *  accepting unsigned ones. */
   stripe?: Billing | null
+  /** Null for self-hosting. The hosted service requires this plan everywhere
+   *  except authentication, billing, health, and sign-out. */
+  hostedRequiredPlan?: HostedRequiredPlan | null
+  /** Public GitHub App installation address shown to a signed-in user who has
+   *  no organization yet. */
+  githubAppInstallUrl?: string
   /** What each model costs, for charging a budget. */
   modelPrices?: Record<string, Price>
   /** Where the providers live. Overridden in tests so nothing reaches a real
@@ -195,6 +206,7 @@ export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
   const secure = options.secureCookies ?? true
   const metrics = options.metrics ?? createMetrics(options.version ?? 'dev')
+  const hostedRequiredPlan = options.hostedRequiredPlan ?? null
   // Read once. It is the bounded set of label values, and reading it per
   // request would be the metrics endpoint doing work proportional to traffic.
   const declaredRoutes = Object.keys(ENDPOINT_LIMITS)
@@ -486,15 +498,25 @@ export function createServer(options: ServerOptions) {
 
   app.get('/auth/session', async (c) => {
     const token = readCookie(c.req.header('cookie'), SESSION_COOKIE)
-    if (!token) return c.json({ signedIn: false, methods: signInMethods }, 200)
+    const publicSignIn = {
+      methods: signInMethods,
+      signupsOpen: options.signInAllowlist == null,
+      githubAppInstallUrl: options.githubAppInstallUrl,
+    }
+    if (!token) return c.json({ signedIn: false, ...publicSignIn }, 200)
     const session = await resolveSession(options.pool, clock, token)
-    if (!session) return c.json({ signedIn: false, methods: signInMethods }, 200)
+    if (!session) return c.json({ signedIn: false, ...publicSignIn }, 200)
     return c.json({
       signedIn: true,
       label: session.label,
       orgId: session.orgId,
       orgSlug: session.orgSlug,
       role: session.role,
+      plan: session.plan,
+      hostedRequiredPlan,
+      hostedAccess: hasHostedAccess(session.plan, hostedRequiredPlan),
+      githubAppInstallUrl: options.githubAppInstallUrl,
+      signupsOpen: options.signInAllowlist == null,
       // Handed to the page so it can send it back on mutations. Safe to expose:
       // it is derived from the session secret and reveals nothing about it.
       csrfToken: session.csrfToken,
@@ -915,6 +937,9 @@ export function createServer(options: ServerOptions) {
       name: who.name,
       organization: who.orgSlug,
       role: who.role,
+      plan: who.plan,
+      hostedRequiredPlan,
+      hostedAccess: hasHostedAccess(who.plan, hostedRequiredPlan),
       scopes: who.scopes,
       tokenPrefix: who.tokenPrefix,
       expiresAt: who.expiresAt ? who.expiresAt.toISOString() : null,
@@ -979,6 +1004,10 @@ export function createServer(options: ServerOptions) {
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
     const who = await identify(options.pool, clock, token)
     if (!who) return c.json({ error: 'This token is not valid.' }, 401)
+
+    if (!hasHostedAccess(who.plan, hostedRequiredPlan)) {
+      return c.json({ error: HOSTED_ACCESS_MESSAGE }, 402)
+    }
 
     if (!who.scopes.includes(need)) {
       // Named in the message, because the fix is a specific command and a
@@ -1295,9 +1324,19 @@ export function createServer(options: ServerOptions) {
     // the same organization to spend its own money, so both are accepted, and
     // the organization comes from the token rather than from the request.
     const engine = await authenticateEngine(options.pool, clock, token)
-    if (engine) return engine.orgId
+    if (engine) {
+      if (!hasHostedAccess(engine.plan, hostedRequiredPlan)) {
+        return c.json({ error: { message: HOSTED_ACCESS_MESSAGE } }, 402)
+      }
+      return engine.orgId
+    }
     const who = await identify(options.pool, clock, token)
-    if (who) return who.orgId
+    if (who) {
+      if (!hasHostedAccess(who.plan, hostedRequiredPlan)) {
+        return c.json({ error: { message: HOSTED_ACCESS_MESSAGE } }, 402)
+      }
+      return who.orgId
+    }
 
     return c.json({ error: { message: 'That token is not valid.' } }, 401)
   }
@@ -1393,7 +1432,7 @@ export function createServer(options: ServerOptions) {
 
     const event = c.req.header('x-github-event') ?? 'unknown'
     try {
-      const outcome = await handleDelivery(options.pool, clock, event, payload)
+      const outcome = await handleDelivery(options.pool, clock, event, payload, options.github)
       return c.json(outcome, 200)
     } catch (err) {
       // A real failure on our side. 500 is right here and the retry is wanted:
@@ -1479,6 +1518,9 @@ export function createServer(options: ServerOptions) {
       // an engine with a made-up token get the same answer.
       return c.json({ error: 'This token is not valid.' }, 401)
     }
+    if (!hasHostedAccess(engine.plan, hostedRequiredPlan)) {
+      return c.json({ error: HOSTED_ACCESS_MESSAGE }, 402)
+    }
     const suspended = await suspensionReason(options.pool, engine.orgId)
     if (suspended !== null) {
       // A different answer from an invalid token, and deliberately so. The
@@ -1539,6 +1581,9 @@ export function createServer(options: ServerOptions) {
   app.get('/v1/environments/:envId', async (c) => {
     const engine = await engineFrom(c.req.header('authorization'))
     if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+    if (!hasHostedAccess(engine.plan, hostedRequiredPlan)) {
+      return c.json({ error: HOSTED_ACCESS_MESSAGE }, 402)
+    }
     // Reading is deliberately still permitted while suspended. A suspension
     // stops new work; taking away the ability to see what is already running is
     // the opposite of what an incident needs.
@@ -1598,6 +1643,19 @@ export function createServer(options: ServerOptions) {
     trpcServer({
       router: appRouter,
       endpoint: '/trpc',
+      // The other half of withholding the message.
+      //
+      // The formatter replaces an INTERNAL_SERVER_ERROR's message with a fixed
+      // sentence, because whatever threw wrote it and drizzle writes the whole
+      // failing statement. Redacting it without writing it down anywhere would
+      // trade a leak for a blindness: the operator would have a console card
+      // saying something went wrong and no way to find out what. This is where
+      // it goes instead, so `af logs web` still has the diagnosis and the
+      // browser does not.
+      onError({ error, path, type }) {
+        if (error.code !== 'INTERNAL_SERVER_ERROR') return
+        console.error(`trpc ${type} ${path ?? 'unknown'}:`, error.cause ?? error)
+      },
       createContext: async (_opts, c) => {
         const token = readCookie(c.req.header('cookie'), SESSION_COOKIE)
         let actor: Actor | null = null
@@ -1614,6 +1672,7 @@ export function createServer(options: ServerOptions) {
               orgId: session.orgId,
               role: session.role,
               sessionId: session.sessionId,
+              plan: session.plan ?? 'free',
             }
           }
         }
@@ -1630,6 +1689,7 @@ export function createServer(options: ServerOptions) {
           // misconfigured.
           mailer: options.emailSignIn?.mailer ?? null,
           productName: options.emailSignIn?.productName ?? 'Antifailure',
+          hostedRequiredPlan,
           actor,
           origin: 'web',
           ip: c.req.header('x-forwarded-for') ?? undefined,

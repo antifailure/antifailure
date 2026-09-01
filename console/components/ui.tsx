@@ -106,15 +106,21 @@ export function LinkButton({
   href,
   children,
   full = false,
+  variant = "primary",
 }: {
   href: string;
   children: ReactNode;
   full?: boolean;
+  variant?: "primary" | "secondary";
 }) {
+  const tone =
+    variant === "primary"
+      ? "bg-ink text-white hover:bg-[#2b2b2b]"
+      : "border border-rule bg-card text-ink hover:border-rule-strong";
   return (
     <a
       href={href}
-      className={`inline-flex h-11 items-center justify-center gap-2.5 rounded-md bg-ink px-4 text-[14px] font-medium text-white transition-colors hover:bg-[#2b2b2b] ${
+      className={`inline-flex h-11 items-center justify-center gap-2.5 rounded-md px-4 text-[14px] font-medium transition-colors ${tone} ${
         full ? "w-full" : ""
       }`}
     >
@@ -367,7 +373,7 @@ export function Button({
   // too wide for its column pushes the table into its own horizontal scroll,
   // which TableWrap already provides and which is the better failure.
   const base =
-    "inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55";
+    "inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55 sm:h-9";
   const variants = {
     primary: "bg-ink text-white hover:bg-[#2b2b2b]",
     secondary: "border border-rule bg-card text-ink hover:border-rule-strong",
@@ -438,10 +444,10 @@ export function Field({
  * maintain and a control that stops looking like the platform's.
  */
 export const selectClass =
-  "h-9 rounded-md border border-rule bg-card px-2.5 text-[13px] text-ink outline-none focus:border-rule-strong disabled:cursor-not-allowed disabled:opacity-60";
+  "h-11 rounded-md border border-rule bg-card px-2.5 text-[13px] text-ink outline-none focus:border-rule-strong disabled:cursor-not-allowed disabled:opacity-60 sm:h-9";
 
 export const inputClass =
-  "mt-1.5 h-9 w-full rounded-md border border-rule bg-card px-2.5 text-[13px] text-ink outline-none placeholder:text-dim focus:border-rule-strong";
+  "mt-1.5 h-11 w-full rounded-md border border-rule bg-card px-2.5 text-[13px] text-ink outline-none placeholder:text-dim focus:border-rule-strong sm:h-9";
 
 /* -------------------------------------------------------------------------
  * The three states a screen is usually missing

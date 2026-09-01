@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -100,12 +102,23 @@ func TestSilentFullSkipOnlyFiresWhenNothingRan(t *testing.T) {
 
 func requireRuntime(t *testing.T) *local.Runtime {
 	t.Helper()
+	return requireRuntimeWith(t, local.Options{})
+}
+
+// requireRuntimeWith is requireRuntime for a test that needs the runtime built
+// differently, which is the port range and nothing else so far.
+func requireRuntimeWith(t *testing.T, opts local.Options) *local.Runtime {
+	t.Helper()
 	asked.Add(1)
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
 		skipped.Add(1)
 		t.Skip("skipped: AF_SKIP_DOCKER is set")
 	}
-	r, err := local.New(local.Options{Clock: clock.New(), ReadyTimeout: 90 * time.Second})
+	opts.Clock = clock.New()
+	if opts.ReadyTimeout == 0 {
+		opts.ReadyTimeout = 90 * time.Second
+	}
+	r, err := local.New(opts)
 	if err != nil {
 		skipped.Add(1)
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
@@ -1079,4 +1092,98 @@ func TestMock_AMissSaysWhatToAddRatherThanAnsweringEmptily(t *testing.T) {
 		`curl -sS --max-time 20 -o /tmp/b -w '%{http_code}' https://api.stripe.com/v1/nothing_like_this > /tmp/c; `+
 			`grep -q 404 /tmp/c || exit 31; grep -q "no fixture" /tmp/b || exit 32; exit 0`)
 	require.Equal(t, 0, code, "a mock miss must be a 404 that says what to add")
+}
+
+// TestUp_SurvivesAPortTakenBetweenTheReservationAndTheBind forces the race the
+// port allocator documents.
+//
+// The allocator probes a port and hands it out, and the daemon binds it much
+// later, after the service it forwards to has been built and started. Anything
+// else on the machine can take it in that gap. Holding a listener on the
+// reserved port for the whole of Up is that gap forced open: the reservation
+// succeeded, and the bind cannot.
+func TestUp_SurvivesAPortTakenBetweenTheReservationAndTheBind(t *testing.T) {
+	r := requireRuntime(t)
+	img := tinyWebImage(t, 8080, "survived the race")
+	id := envID(t, r, "portrace")
+
+	// An ephemeral port, so the number cannot collide with the range the
+	// allocator hands out and the retry has somewhere to go.
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = held.Close() }()
+	taken := held.Addr().(*net.TCPAddr).Port
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+
+	reserved := map[string]int{"web": taken}
+	env, err := r.Up(ctx, provider.EnvSpec{
+		EnvID:       id,
+		PublicPorts: reserved,
+		Services: []provider.ServiceSpec{{
+			Name: "web", Image: img, Kind: "web", Port: 8080,
+		}},
+	})
+	require.NoError(t, err, "a port taken before the bind must be retried, not reported")
+	require.NotEmpty(t, env.URL())
+	require.NotContains(t, env.URL(), strconv.Itoa(taken),
+		"the environment must have moved off the port something else holds")
+	require.Equal(t, "survived the race", get(t, env.URL()))
+
+	// The reservation is corrected in place, which is how a service created
+	// after this one is told the address that was bound rather than the one
+	// that was asked for.
+	require.Equal(t, portOf(t, env.URL()), reserved["web"])
+}
+
+// TestUp_PublishesInsideTheRangeAFPortRangeStartNames traces the variable from
+// set to observably effective.
+//
+// It is not enough that the runtime reads it: `af doctor` names this variable
+// in its remediation, and for a long time nothing anywhere read it, so a user
+// who followed that advice moved nothing. The proof is the port the daemon
+// actually published on.
+func TestUp_PublishesInsideTheRangeAFPortRangeStartNames(t *testing.T) {
+	const base = 44500
+	r := requireRuntimeWith(t, local.Options{
+		Getenv: func(k string) string {
+			if k == "AF_PORT_RANGE_START" {
+				return strconv.Itoa(base)
+			}
+			return ""
+		},
+	})
+	img := tinyWebImage(t, 8080, "moved range")
+	id := envID(t, r, "portrange")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+
+	env, err := r.Up(ctx, provider.EnvSpec{
+		EnvID: id,
+		Services: []provider.ServiceSpec{{
+			Name: "web", Image: img, Kind: "web", Port: 8080,
+		}},
+	})
+	require.NoError(t, err)
+	require.Len(t, env.Services, 1)
+
+	published := portOf(t, env.URL())
+	// The allocator searches a span of 2000 from where it starts, and the
+	// runtime publishes above the database provider's range rather than in it.
+	from := base + local.PublishedPortOffset
+	require.GreaterOrEqual(t, published, from)
+	require.Less(t, published, from+2000)
+	require.Equal(t, "moved range", get(t, env.URL()))
+}
+
+// portOf reads the port out of an environment URL.
+func portOf(t *testing.T, raw string) int {
+	t.Helper()
+	u, err := url.Parse(raw)
+	require.NoError(t, err)
+	p, err := strconv.Atoi(u.Port())
+	require.NoError(t, err, "the environment URL must carry a port: %s", raw)
+	return p
 }

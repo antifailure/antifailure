@@ -34,6 +34,12 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    // node --test runs lib/*.test.ts directly through type stripping, which
+    // needs the real specifier including its extension. Legal here only
+    // because noEmit is set: nothing is written, so nothing can emit an import
+    // of a file that will not exist. Verified against the rewrite this file
+    // documents, two consecutive next builds leave it byte identical.
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "incremental": true,
     "plugins": [

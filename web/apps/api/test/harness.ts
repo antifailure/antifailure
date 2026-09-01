@@ -13,6 +13,7 @@ import { findConsoleBuild } from '../src/console/static.ts'
 import { RealStripeClient } from '../src/billing/stripe.ts'
 import type { StripeConfig } from '../src/billing/plans.ts'
 import type { Billing } from '../src/billing/index.ts'
+import type { HostedRequiredPlan } from '../src/hosted.ts'
 import { MockPack, loadPack } from './mockpack.ts'
 
 export const adminUrl =
@@ -95,6 +96,9 @@ export interface StartApiOptions {
    *  server takes no money, which is the self-hosted default and has its own
    *  tests. */
   stripe?: Billing | null
+  /** The plan required by a hosted deployment. Null is the self-hosted default. */
+  hostedRequiredPlan?: HostedRequiredPlan | null
+  githubAppInstallUrl?: string
 }
 
 export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
@@ -132,6 +136,8 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     ...(options.providerBases ? { providerBases: options.providerBases } : {}),
     ...(options.consoleDir ? { consoleBuild: await findConsoleBuild(options.consoleDir) } : {}),
     stripe: options.stripe ?? null,
+    hostedRequiredPlan: options.hostedRequiredPlan ?? null,
+    githubAppInstallUrl: options.githubAppInstallUrl,
   })
 
   return {
@@ -159,8 +165,11 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
  * this arrangement is what found five defects in the shipped pack.
  *
  * A request no route matches answers 501 rather than 404, because 404 is a real
- * answer here: getSubscription reads it as "Stripe has never heard of this",
- * and a missing ROUTE must never be mistaken for a missing OBJECT.
+ * answer here twice over: the subscription and invoice list calls read it as
+ * "Stripe holds nothing for this customer" and return an empty collection, and
+ * getSubscription reads it as "Stripe has never heard of this one". A missing
+ * ROUTE must never be mistaken for a customer who genuinely has nothing, nor
+ * for a missing OBJECT.
  */
 export async function stripeAgainstMockPack(
   overrides: Partial<StripeConfig> = {},
