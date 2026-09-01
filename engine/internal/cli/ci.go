@@ -15,6 +15,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/insights"
+	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 )
@@ -205,15 +206,8 @@ change.`),
 			if withLoad {
 				e.Out.Section("Generating load")
 				if res, _, lErr := o.Load(ctx, env.LoadOptions{Duration: 30 * time.Second}); lErr == nil {
-					l := &report.Load{
-						Sent: res.Sent, Rate: res.Rate,
-						ErrorRate: res.ErrorRate, P95Ms: res.Overall.P95Ms,
-					}
-					p95, _ := o.Thresholds()
-					for _, b := range res.Breaches(p95, 0) {
-						l.Regressed = append(l.Regressed, b.What)
-					}
-					run.Load = l
+					p95, errorRate := o.Thresholds()
+					run.Load = loadReport(res, p95, errorRate, &run)
 				}
 			}
 
@@ -555,4 +549,41 @@ func reportTeardown(e *Env, td *env.Teardown, err error) {
 	for _, p := range td.Pending {
 		e.Out.Printf("    %s/%s: %s\n", p.Kind, p.ID, p.Reason)
 	}
+}
+
+// loadReport turns a load result into the report's section, against BOTH
+// thresholds the manifest sets.
+//
+// The error rate threshold used to be thrown away here. The call was
+// `p95, _ := o.Thresholds()` and then `res.Breaches(p95, 0)`, and Breaches
+// short circuits on `errorRate > 0`, so a zero limit builds no error rate
+// breach at all. A change that failed every request under load produced an
+// empty Regressed list, never reached policy.load_regression, and merged
+// green, while `af load run` on the same manifest and the same result exited
+// non zero. Two commands, one manifest, opposite answers.
+//
+// It was invisible for a specific reason worth recording. `p95_increase` is
+// refused under the `access_log` and `none` sources, so those projects passed
+// (0, 0) and got nil back from a function that had nothing to compare. This
+// repository's OWN manifest is `source: none` with `error_rate: 0.02`, so the
+// dogfooding that would have caught it could not.
+//
+// The inert case is reported rather than passed over, which is the same
+// argument `af load run` already makes: a threshold that was in force and
+// measured nothing is not a threshold that held, and a report that omits it
+// reads exactly like one that checked.
+func loadReport(res *load.Result, p95Increase, errorRate float64, run *report.Run) *report.Load {
+	l := &report.Load{
+		Sent: res.Sent, Rate: res.Rate,
+		ErrorRate: res.ErrorRate, P95Ms: res.Overall.P95Ms,
+	}
+	for _, b := range res.Breaches(p95Increase, errorRate) {
+		l.Regressed = append(l.Regressed, b.What)
+	}
+	if res.InertP95(p95Increase) {
+		run.Notes = append(run.Notes,
+			"load.thresholds sets p95_increase and no route had a baseline to compare against, "+
+				"so nothing was measured against it")
+	}
+	return l
 }
