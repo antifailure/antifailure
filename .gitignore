@@ -150,6 +150,7 @@ runner/artifacts/
 /readability
 /release
 /releasecheck
+/relpack
 /reltar
 /schemadoc
 /sbomcheck
