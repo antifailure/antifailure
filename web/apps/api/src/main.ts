@@ -26,6 +26,7 @@ import { surrogateSecretFrom } from './analytics/record.ts'
 import { analyticsRetentionFromEnv } from './analytics/rollup.ts'
 import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
+import { resumeDeletions } from './enterprise/deletion.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
 import { RealStripeClient, stripeConfigFrom } from './billing/index.ts'
 import { githubAppInstallUrlFrom, hostedRequiredPlanFrom } from './hosted.ts'
@@ -222,6 +223,14 @@ console.log(
 const consoleBuild = await findConsoleBuild()
 console.log(consoleBuild.summary)
 
+// Built once rather than at each call site. The deletion resumer needs the same
+// client the routes use: a second one would be a second place for a key to be
+// wrong, and a deletion that cancelled a subscription through a different
+// client from the one the console used is a difference nobody would find.
+const billing = stripe.config
+  ? { config: stripe.config, client: new RealStripeClient(stripe.config) }
+  : null
+
 const { app, ingestLimiter, authLimiter } = createServer({
   pool,
   github,
@@ -238,9 +247,7 @@ const { app, ingestLimiter, authLimiter } = createServer({
   ...(installationTokens
     ? { forgetInstallationToken: (id: number) => installationTokens.forget(id) }
     : {}),
-  stripe: stripe.config
-    ? { config: stripe.config, client: new RealStripeClient(stripe.config) }
-    : null,
+  stripe: billing,
   hostedRequiredPlan,
   githubAppInstallUrl,
   modelPrices,
@@ -298,6 +305,22 @@ const housekeeping = setInterval(
     void sweepDeviceAuthorizations(pool, systemClock).catch((err) =>
       console.error('device authorization sweep', err),
     )
+
+    // Not housekeeping. This one finishes work a customer asked for and is the
+    // only thing that gets a deletion past the paid period it is waiting out,
+    // which can be a month: nobody is coming back to press a button, and a
+    // deletion that stops halfway is exactly the state somebody asked us not to
+    // leave them in. It runs unconditionally, on the application pool, rather
+    // than beside the partition maintenance, which only runs when an
+    // administrative connection string happens to be configured.
+    void resumeDeletions({
+      pool,
+      clock: systemClock,
+      github,
+      stripe: billing,
+      log: (line, err) => console.error(line, err),
+    }).catch((err) => console.error('organization deletion sweep', err))
+
     ingestLimiter.sweep()
     authLimiter.sweep()
   },

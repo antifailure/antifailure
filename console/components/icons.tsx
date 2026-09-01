@@ -50,4 +50,10 @@ export const IconPlan = stroke("M2.6 12.6V7.4M6.2 12.6V3.4M9.8 12.6V9M13.4 12.6V
 export const IconAnalytics = stroke(
   "M2.6 2.8v10.4h10.8M5 10.6l2.6-3.2 2.2 2 3-4",
 );
+
+// Two sliders rather than a cog. A cog is the most reused glyph in every icon
+// set there is, and at 16 pixels its teeth turn into noise; two tracks with a
+// handle each stay legible and are not the same shape as everything else in
+// this rail.
+export const IconSettings = stroke("M2.8 5.4h10.4M2.8 10.6h10.4M6.2 3.9v3M10 9.1v3");
 export const IconSignOut = stroke("M6.4 3.2H3.2v9.6h3.2M9.6 10.4 12.8 8 9.6 5.6M12.8 8H6.4");

@@ -71,6 +71,12 @@ import {
   requestDeviceCode,
   revokeCliToken,
 } from './auth/device.ts'
+import {
+  acceptInvitation,
+  lookupInvitation,
+  InvitationError,
+} from './enterprise/invitations.ts'
+import { readHeldExport } from './enterprise/deletion.ts'
 import { mountConsole } from './console/index.ts'
 import type { ConsoleBuild } from './console/static.ts'
 import { PROVIDERS, type Provider } from './providers/seal.ts'
@@ -924,6 +930,127 @@ export function createServer(options: ServerOptions) {
   // -------------------------------------------------------------------------
 
   /** `af whoami`. Answers for a CLI token and for nothing else. */
+  // -------------------------------------------------------------------------
+  // Invitations, and the export a deleted organization is owed
+  //
+  // Outside tRPC, and both for the same reason: neither caller has a tenant.
+  //
+  // Somebody accepting an invitation is signed in and belongs to no
+  // organization, so `createContext` builds no actor for them and every
+  // procedure would answer UNAUTHORIZED. Somebody downloading the export of a
+  // deleted organization has no session at all, because the organization the
+  // session belonged to no longer exists. In both cases the token in the link
+  // is what identifies the row, and the policies in migrations/0022 confine the
+  // caller to exactly that one.
+  // -------------------------------------------------------------------------
+
+  /** What the link says, before anybody signs in. */
+  app.get('/auth/invitation', async (c) => {
+    const limited = authLimiter.take(
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+    )
+    if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+    const token = c.req.query('token') ?? ''
+    if (!token) return c.json({ error: 'That link is missing its token.' }, 400)
+    const found = await lookupInvitation(options.pool, clock, token)
+    // One answer for "no such invitation" whatever the reason, and it is not
+    // 404 by accident: this endpoint is reachable without signing in, and an
+    // answer that distinguished a wrong token from a revoked one would let
+    // somebody test guessed tokens against it.
+    if (!found) return c.json({ error: 'That invitation link is not valid.' }, 404)
+    return c.json(found)
+  })
+
+  /** Taking it up. Needs a session, and deliberately does not need a tenant. */
+  app.post('/auth/invitation/accept', async (c) => {
+    const session = await sessionFrom(c.req.header('cookie'))
+    if (!session) return c.json({ error: 'Sign in first.' }, 401)
+    if (!csrfMatches(readCookie(c.req.header('cookie'), SESSION_COOKIE)!, c.req.header(CSRF_HEADER))) {
+      return c.json({ error: `This request needs the ${CSRF_HEADER} header from GET /auth/session.` }, 403)
+    }
+    let body: { token?: unknown } = {}
+    try {
+      body = (await c.req.json()) as typeof body
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    const token = String(body.token ?? '')
+    if (!token) return c.json({ error: 'That link is missing its token.' }, 400)
+
+    try {
+      const accepted = await acceptInvitation(options.pool, clock, {
+        token,
+        userId: session.userId,
+      })
+      return c.json(accepted)
+    } catch (err) {
+      if (err instanceof InvitationError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+  })
+
+  /**
+   * The export of an organization that has been deleted.
+   *
+   * The token is the whole authorisation, so it is rate limited like a sign-in
+   * rather than like an API read: it is the one endpoint here somebody could
+   * usefully guess at.
+   */
+  app.get('/exports/deletion', async (c) => {
+    const limited = authLimiter.take(
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+    )
+    if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+    const token = c.req.query('token') ?? ''
+    if (!token) return c.json({ error: 'That link is missing its token.' }, 400)
+
+    // `describe` answers the page that the link opens, which has to say whether
+    // the export is still there BEFORE it offers a download. Without it the
+    // page shows a button and a person with a dead link finds out by pressing
+    // it and getting nothing, which is indistinguishable from a broken browser.
+    const describe = c.req.query('describe') === '1'
+    const held = await readHeldExport(
+      options.pool,
+      clock,
+      token,
+      describe ? 'describe' : 'download',
+    )
+    if (!held.found) {
+      // 404 for a link that names nothing, 409 for one that names an export
+      // which is not ready yet. The second is a real link and the caller should
+      // come back rather than go looking for another one.
+      return c.json(
+        { error: held.reason, state: held.state },
+        held.state === 'not_ready' ? 409 : 404,
+      )
+    }
+    if (describe) {
+      return c.json({
+        organization: held.value.organization,
+        slug: held.value.slug,
+        generatedAt: held.value.generatedAt,
+        expiresAt: held.value.expiresAt,
+        sizeBytes: held.value.sizeBytes,
+      })
+    }
+
+    // A file rather than a page. The console fetches this and saves it, and an
+    // operator with the link and curl gets the same bytes.
+    const name = `antifailure-${held.value.slug}-${held.value.generatedAt?.slice(0, 10) ?? 'export'}.json`
+    return new Response(JSON.stringify(held.value.document, null, 2), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'content-disposition': `attachment; filename="${name}"`,
+        // Never cached anywhere but the browser that asked, because the URL
+        // carries the only credential there is.
+        'cache-control': 'no-store',
+      },
+    })
+  })
+
   app.get('/v1/whoami', async (c) => {
     const auth = c.req.header('authorization') ?? ''
     const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
@@ -1940,6 +2067,7 @@ export function createServer(options: ServerOptions) {
               label: session.label,
               orgId: session.orgId,
               role: session.role,
+              sessionId: session.sessionId,
               plan: session.plan ?? 'free',
             }
           }
@@ -1949,6 +2077,14 @@ export function createServer(options: ServerOptions) {
           clock,
           github: options.github,
           stripe: options.stripe ?? null,
+          appBaseUrl: options.appBaseUrl ?? '/',
+          // The sign-in mailer, deliberately. There is one way to send a
+          // message from this process and one variable that configures it, so
+          // an installation either can send or cannot, and a second mailer
+          // would be a second thing to configure and a second thing to be
+          // misconfigured.
+          mailer: options.emailSignIn?.mailer ?? null,
+          productName: options.emailSignIn?.productName ?? 'Antifailure',
           analytics,
           analyticsOperatorOrgSlug: options.analyticsOperatorOrgSlug ?? null,
           hostedRequiredPlan,

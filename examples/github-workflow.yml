@@ -12,13 +12,22 @@ name: Antifailure
 
 on:
   pull_request:
-    # The default is opened, synchronize and reopened. ready_for_review is added
-    # because a draft is not checked, so the moment it stops being one is the
-    # moment the check should start, and without this line the workflow does not
-    # run then. With a control plane that gap is visible rather than silent: it
-    # opens a check on that commit and the check sits waiting for a run that is
-    # never going to start, until it times out.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # Named rather than left to the default, for one reason each.
+    #
+    # The default list is opened, synchronize and reopened. `ready_for_review`
+    # is here because a draft is not checked, so the moment it stops being one
+    # is the moment the check should start, and without this line the workflow
+    # does not run then. With a control plane that gap is visible rather than
+    # silent: it opens a check on that commit and the check sits waiting for a
+    # run that is never going to start, until it times out.
+    #
+    # `labeled` and `unlabeled` are here because that is how a fork pull
+    # request is approved: `github.fork_policy: label` refuses a fork until a
+    # maintainer adds antifailure:allow, and without this line adding it is an
+    # event nothing subscribes to, so the approval sits there until the next
+    # push. The job below skips a label that is not that one, so the cost is a
+    # skipped job rather than a run per label anybody adds.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
 
   # The hosted control plane's verbs. `environments.create`, `agents.run` and
   # `load.run` in the console do not run anything themselves: they ask GitHub to
@@ -94,6 +103,13 @@ jobs:
   preview:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # A label event that is not the approval label is not worth a run. Every
+    # other event runs, including unlabeled, because removing the approval
+    # while a run is in flight should reach af ci and be refused by it.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'antifailure:allow'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -243,11 +259,24 @@ jobs:
       - name: Leave the report on the pull request
         # Always, because the report of a failing run is the one worth reading.
         #
-        # Skipped when the control plane took the report, because it maintains a
-        # comment of its own with the commit fenced into it, and two writers
-        # sharing one pull request is two comments or one that flaps between two
-        # commits' results.
-        if: always() && hashFiles('report.md') != '' && steps.publish.outputs.handled != 'true'
+        # Two independent reasons not to, and the step needs BOTH or it is
+        # wrong in one direction or the other.
+        #
+        # `github.comment: false` is the manifest saying not to comment at all.
+        # It is answered by the engine, which is the half that reads the
+        # manifest, and arrives here as a step output. Gating the step rather
+        # than suppressing report.md is deliberate: the file is also the job
+        # summary and the payload a control plane is sent, and a step that
+        # reads a file somebody deleted fails rather than skipping.
+        #
+        # `steps.publish.outputs.handled` is the control plane having taken the
+        # report already. It maintains a comment of its own with the commit
+        # fenced into it, and two writers sharing one pull request is two
+        # comments or one that flaps between two commits' results.
+        if: >-
+          always() && hashFiles('report.md') != ''
+          && steps.change.outputs.comment != 'false'
+          && steps.publish.outputs.handled != 'true'
         uses: actions/github-script@v7
         with:
           script: |

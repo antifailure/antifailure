@@ -29,6 +29,11 @@ export const PERMISSIONS = [
   'audit.export',
   'runtimes.manage',
   'tokens.manage',
+  'organization.settings',
+  'organization.delete',
+  'sessions.manage',
+  'data.export',
+  'account.close',
   'analytics.read',
 ] as const
 
@@ -58,6 +63,13 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'audit.export': 'Export the audit log, and verify its hash chain.',
   'runtimes.manage': 'Register, tag, and remove runtimes.',
   'tokens.manage': 'Create and revoke the tokens engines use to send events.',
+  'organization.settings': 'Change the organization’s display name.',
+  'organization.delete':
+    'Ask for the organization to be deleted, follow that request, and call it off.',
+  'sessions.manage': 'See who is signed in and sign any of them out.',
+  'data.export': 'Take a copy of the organization’s configuration and history out of the product.',
+  'account.close':
+    'Close your own account: erase your name, address and identity, and leave the organization.',
   'analytics.read':
     'Read the analytics dashboard for this control plane installation. Granted here and ' +
     'checked again against the organization that operates the installation, because this is ' +
@@ -83,6 +95,20 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
  * A viewer can read the audit log but not export it. Reading is oversight;
  * exporting produces a file of who did what that leaves the system.
  *
+ * An admin can change settings, sign people out and export, and cannot delete
+ * the organization or touch billing. Those two are the actions with a
+ * consequence outside this product, one on somebody's card and one on data that
+ * does not come back, and they belong to whoever owns the relationship rather
+ * than to whoever administers the day to day.
+ *
+ * Every role holds account.delete, including viewer, and that is not an
+ * oversight in a deny-by-default table. It is the one permission that is about
+ * the holder rather than about the organization: a person may always leave and
+ * close their own account, and a role that could be trapped in an organization
+ * it cannot leave would be a worse answer than a wide grant. The route refuses
+ * the only case where leaving is destructive, which is the last owner, and says
+ * what to do about it.
+ *
  * Owner and admin hold analytics.read and member and viewer do not, and it is
  * the only permission on this list where the grant is not the whole gate. The
  * dashboard covers the installation rather than the organization, so it is
@@ -96,14 +122,15 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'masking.edit', 'masking.approve', 'network.edit', 'network.approve',
     'agents.run', 'load.run', 'members.manage',
     'audit.read', 'audit.export', 'runtimes.manage', 'tokens.manage',
+    'organization.settings', 'sessions.manage', 'data.export', 'account.close',
     'analytics.read',
   ],
   member: [
     'environments.view', 'environments.create', 'environments.teardown',
     'masking.edit', 'network.edit', 'agents.run', 'load.run',
-    'audit.read',
+    'audit.read', 'account.close',
   ],
-  viewer: ['environments.view', 'audit.read'],
+  viewer: ['environments.view', 'audit.read', 'account.close'],
 }
 
 export function roleHas(role: Role, permission: Permission): boolean {
