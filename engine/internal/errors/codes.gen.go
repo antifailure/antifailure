@@ -161,6 +161,8 @@ const (
 	AFGH001 Code = "AF-GH-001"
 	// The GitHub API rejected the request: {detail}
 	AFGH002 Code = "AF-GH-002"
+	// Nothing ran, because of the fork policy on the base branch. {detail}
+	AFGH003 Code = "AF-GH-003"
 
 	// Infrastructure
 	// The cloud API returned a quota error for {quota} in {region}.
@@ -909,6 +911,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/github",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFGH003: {
+		Code:      AFGH003,
+		Area:      "GH",
+		Message:   "Nothing ran, because of the fork policy on the base branch. {detail}",
+		NextStep:  "Add the antifailure:allow label to the pull request, or change github.fork_policy on the base branch.",
+		Docs:      "getting-started/pull-requests",
+		Retryable: false,
+		ExitCode:  ExitPolicyDenied,
 	},
 	AFINF001: {
 		Code:      AFINF001,

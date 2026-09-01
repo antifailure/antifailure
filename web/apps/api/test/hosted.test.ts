@@ -2,7 +2,11 @@
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { githubAppInstallUrlFrom, hostedRequiredPlanFrom } from '../src/hosted.ts'
+import {
+  HOSTED_GATE_EXEMPT,
+  githubAppInstallUrlFrom,
+  hostedRequiredPlanFrom,
+} from '../src/hosted.ts'
 import { hashEngineToken } from '../src/ingest.ts'
 import { fileURLToPath } from 'node:url'
 import {
@@ -19,6 +23,12 @@ import {
   type Org,
   type SignedIn,
 } from './harness.ts'
+
+function data<T>(body: unknown): T {
+  const b = body as { result?: { data?: T }; error?: { message?: string } }
+  assert.ok(b.result, `expected a result, got: ${JSON.stringify(b.error ?? b).slice(0, 500)}`)
+  return b.result.data as T
+}
 
 const hasDatabase = await available()
 
@@ -230,5 +240,201 @@ describe('enterprise-only hosted access', { skip: hasDatabase ? false : 'no Post
       h, owner, 'repositories.list', 'query', { includeArchived: false },
     )
     assert.equal(browser.status, 200, JSON.stringify(browser.body))
+  })
+})
+
+/**
+ * The exits, which a lapsed plan may not close.
+ *
+ * This suite exists ONLY on the merged tree, because that is the only place the
+ * defect exists. `w-authbilling-codex` put the hosted gate in shared tRPC
+ * middleware exempting one permission; `w-enterprise-mgmt` added the routes a
+ * customer uses to export their data, delete their organization, close their
+ * account and revoke a leaked session. Neither branch is wrong alone, git
+ * merges `orgProcedure` clean, and the result was a hosted service on which a
+ * customer whose subscription had lapsed could only pay.
+ *
+ * The line these assertions encode, which is also written next to
+ * HOSTED_GATE_EXEMPT: a permission is exempt when refusing it TRAPS somebody in
+ * the product, and gated when refusing it merely stops them using something
+ * they have not paid for.
+ *
+ * It has been proved able to fail: removing `sessions.manage` from
+ * HOSTED_GATE_EXEMPT turns "sessions.manage: seeing who is signed in" red with
+ * the hosted refusal in the message, and the summary names that permission.
+ */
+describe('a lapsed plan does not close the exits', {
+  skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL',
+}, () => {
+  let h: ApiHarness
+  let org: Org
+  let owner: SignedIn
+
+  before(async () => {
+    const stripe = await stripeAgainstMockPack()
+    h = await startApi({ stripe: stripe.billing, hostedRequiredPlan: 'enterprise' })
+    org = await seedOrg(h.admin, 'hosted-exits')
+    owner = await signInAs(h, org, 'owner')
+  })
+
+  after(async () => {
+    await dropOrg(h.admin, org.orgId)
+    await h.close()
+  })
+
+  /** The state under test, asserted rather than assumed: no hosted plan. */
+  it('is an organization with no hosted plan', async () => {
+    const [row] = await h.admin<{ plan: string }[]>`
+      SELECT plan FROM organizations WHERE id = ${org.orgId}`
+    assert.equal(row!.plan, 'free')
+  })
+
+  /**
+   * Every exempt permission gets a cell, named by the permission, so a failure
+   * says which exit closed rather than which route broke.
+   *
+   * Each route is one that reaches its handler without changing anything a
+   * later cell depends on. `account.close` is called with a confirmation that
+   * cannot match, so what it proves is that the request got PAST the gate and
+   * was answered by the route's own validation.
+   */
+  const exits: Array<{
+    permission: string
+    what: string
+    route: string
+    type: 'query' | 'mutation'
+    input: Record<string, unknown>
+  }> = [
+    {
+      permission: 'billing.manage',
+      what: 'the path that resolves the refusal',
+      route: 'org.billingContact', type: 'query', input: {},
+    },
+    {
+      permission: 'data.export',
+      what: 'taking your own data out',
+      route: 'exports.organization', type: 'mutation', input: {},
+    },
+    {
+      permission: 'organization.delete',
+      what: 'watching a deletion you have already asked for',
+      route: 'deletion.status', type: 'query', input: {},
+    },
+    {
+      permission: 'sessions.manage',
+      what: 'seeing who is signed in',
+      route: 'sessions.list', type: 'query', input: { includeRevoked: false },
+    },
+    {
+      permission: 'account.close',
+      what: 'a person leaving',
+      route: 'account.close', type: 'mutation',
+      input: { confirm: 'this cannot be anybody\'s label' },
+    },
+  ]
+
+  for (const exit of exits) {
+    it(`${exit.permission}: ${exit.what}`, async () => {
+      const { status, body } = await callProcedure(h, owner, exit.route, exit.type, exit.input)
+      const said = JSON.stringify(body)
+      assert.doesNotMatch(
+        said,
+        /requires the enterprise plan/,
+        `${exit.permission} was refused by the plan gate on ${exit.route}. ` +
+          'A lapsed customer would be trapped in the product.',
+      )
+      if (exit.route === 'account.close') {
+        // The one cell that must NOT succeed: it reached its own validation,
+        // which is the proof that the gate let it through.
+        assert.equal(errorCode(body), 'BAD_REQUEST')
+        assert.match(said, /to confirm/)
+        const [row] = await h.admin<{ closed_at: Date | null }[]>`
+          SELECT closed_at FROM users WHERE id = ${owner.userId}`
+        assert.equal(row!.closed_at, null, 'the account was closed by a test that must not close it')
+      } else {
+        assert.equal(status, 200, said)
+      }
+    })
+  }
+
+  /**
+   * The read that makes every one of the above REACHABLE rather than merely
+   * permitted, and the reason it is under account.close.
+   *
+   * Exempting the permissions was not enough. The console's settings page reads
+   * org.settings, which is environments.view and stays gated, so a lapsed
+   * customer had the page refused and every exempt control on it went with it.
+   * account.context is the exit screen's own read, and it has to answer for
+   * every role that holds an exit: an admin holds data.export and
+   * sessions.manage and does not hold organization.delete, so a read under that
+   * permission would have left an admin with exits and no page.
+   */
+  for (const role of ['owner', 'admin', 'member', 'viewer'] as const) {
+    it(`account.context is reachable by a ${role} with no hosted plan`, async () => {
+      const who = role === 'owner' ? owner : await signInAs(h, org, role)
+      const { status, body } = await callProcedure(h, who, 'account.context', 'query', {})
+      assert.equal(status, 200, JSON.stringify(body))
+      const got = data<{
+        organization: { slug: string; name: string; plan: string }
+        hostedRequiredPlan: string | null
+        hostedAccess: boolean
+        role: string
+        permissions: string[]
+        exportRetentionDays: number
+        sessions: { count: number } | null
+      }>(body)
+
+      // The load-bearing field. deletion.request refuses anything but an exact
+      // match on the slug, and the only other route exposing it is gated, so
+      // without this a lapsed owner is asked to type a string the product
+      // refuses to show them.
+      assert.equal(got.organization.slug, org.slug)
+      assert.equal(got.organization.plan, 'free')
+      assert.equal(got.hostedRequiredPlan, 'enterprise')
+      assert.equal(got.hostedAccess, false)
+      assert.equal(got.role, role)
+      assert.ok(got.exportRetentionDays > 0)
+
+      // The screen renders only the exits this person holds, so the permission
+      // list has to be this role's real one rather than everybody's.
+      assert.ok(got.permissions.includes('account.close'))
+      assert.equal(got.permissions.includes('organization.delete'), role === 'owner')
+      assert.equal(got.permissions.includes('data.export'), role === 'owner' || role === 'admin')
+
+      // The count only, and only for the roles that may read who is signed in.
+      if (role === 'owner' || role === 'admin') {
+        assert.ok(got.sessions && got.sessions.count >= 1, 'no session count for a role that holds sessions.manage')
+      } else {
+        assert.equal(got.sessions, null, 'a role without sessions.manage was handed a session count')
+      }
+    })
+  }
+
+  /**
+   * The other half, without which the set proves nothing. If everything were
+   * reachable the assertions above would pass with the gate deleted.
+   */
+  it('environments.view is still refused, because it is the product doing work', async () => {
+    const refused = await callProcedure(h, owner, 'org.settings', 'query', {})
+    assert.equal(errorCode(refused.body), 'FORBIDDEN')
+    assert.match(JSON.stringify(refused.body), /requires the enterprise plan/)
+  })
+
+  it('organization.settings is still refused', async () => {
+    const refused = await callProcedure(h, owner, 'org.rename', 'mutation', { name: 'Renamed' })
+    assert.equal(errorCode(refused.body), 'FORBIDDEN')
+    assert.match(JSON.stringify(refused.body), /requires the enterprise plan/)
+  })
+
+  /**
+   * The set itself, read rather than described. A permission added to
+   * HOSTED_GATE_EXEMPT without a cell above would otherwise be exempt and
+   * untested, which is the state that produced this defect in the first place.
+   */
+  it('every exempt permission has a cell above it', () => {
+    assert.deepEqual(
+      [...HOSTED_GATE_EXEMPT].sort(),
+      exits.map((e) => e.permission).sort(),
+    )
   })
 })
