@@ -22,6 +22,7 @@ import {
   text,
   timestamp,
   customType,
+  doublePrecision,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
@@ -50,6 +51,26 @@ export const runState = pgEnum('run_state', [
 ])
 export const verdictValue = pgEnum('verdict_value', [
   'pass', 'fail', 'flaky', 'blocked', 'unverified',
+])
+
+// Workload Studio. See migrations/0021_workload_studio.sql for why these four
+// kinds stay four kinds, and why a run's state and its verdict are two columns.
+export const workloadKind = pgEnum('workload_kind', [
+  'observed_load', 'http_scenario', 'browser_workflow', 'exploration',
+])
+export const workloadRunState = pgEnum('workload_run_state', [
+  'requested', 'accepted', 'running',
+  'succeeded', 'failed', 'cancelled', 'timed_out', 'abandoned',
+])
+export const workloadVersionSource = pgEnum('workload_version_source', ['authored', 'promoted'])
+export const runtimeCommandKind = pgEnum('runtime_command_kind', [
+  'environment.teardown', 'workload.cancel',
+])
+export const runtimeCommandState = pgEnum('runtime_command_state', [
+  'pending', 'claimed', 'acknowledged', 'failed', 'expired', 'superseded',
+])
+export const workloadEvidenceAvailability = pgEnum('workload_evidence_availability', [
+  'uploaded', 'runner_local', 'not_retained',
 ])
 
 // githubId and githubLogin are optional because GitHub is no longer the only
@@ -644,6 +665,186 @@ export const billingEvents = pgTable('billing_events', {
   payload: jsonb('payload').notNull().default({}),
 })
 
+// ---------------------------------------------------------------------------
+// Workload Studio
+// ---------------------------------------------------------------------------
+
+/** A named, versioned thing to run against an environment. See
+ *  migrations/0021_workload_studio.sql: the kind is on the definition because
+ *  the four kinds measure materially different things, and there is no common
+ *  intermediate representation behind them. */
+export const workloads = pgTable('workloads', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  repositoryId: uuid('repository_id').notNull(),
+  slug: text('slug').notNull(),
+  name: text('name').notNull(),
+  kind: workloadKind('kind').notNull(),
+  description: text('description'),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
+})
+
+/** One immutable definition. The application role holds INSERT and SELECT and
+ *  nothing else, so "a version cannot be edited after a run has used it" is a
+ *  privilege rather than a promise about the routes. */
+export const workloadVersions = pgTable('workload_versions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadId: uuid('workload_id').notNull(),
+  version: integer('version').notNull(),
+  body: jsonb('body').notNull(),
+  bodyDigest: text('body_digest').notNull(),
+  notes: text('notes'),
+  source: workloadVersionSource('source').notNull().default('authored'),
+  promotedFromRunId: uuid('promoted_from_run_id'),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const workloadRuns = pgTable('workload_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadId: uuid('workload_id').notNull(),
+  workloadVersionId: uuid('workload_version_id').notNull(),
+  environmentId: uuid('environment_id').notNull(),
+  state: workloadRunState('state').notNull().default('requested'),
+  requestedBy: uuid('requested_by'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  requestKey: text('request_key').notNull(),
+  repository: text('repository').notNull(),
+  gitRef: text('git_ref').notNull(),
+  workflowFile: text('workflow_file'),
+  dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  deadlineAt: timestamp('deadline_at', { withTimezone: true }).notNull(),
+  lastSequence: bigint('last_sequence', { mode: 'number' }).notNull().default(0),
+  leaseHolder: text('lease_holder'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
+  cancelRequestedBy: uuid('cancel_requested_by'),
+  cancelReason: text('cancel_reason'),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  attempt: integer('attempt').notNull().default(1),
+  retryOf: uuid('retry_of'),
+  supersededBy: uuid('superseded_by'),
+  verdict: verdictValue('verdict'),
+  failureCode: text('failure_code'),
+  detail: text('detail'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** The aggregate, one row per run. Which columns carry a number depends on the
+ *  kind, and a CHECK in the migration refuses a row shaped like another kind. */
+export const workloadRunResults = pgTable('workload_run_results', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadRunId: uuid('workload_run_id').notNull(),
+  kind: workloadKind('kind').notNull(),
+  requests: integer('requests'),
+  failures: integer('failures'),
+  errorRate: doublePrecision('error_rate'),
+  targetRate: doublePrecision('target_rate'),
+  achievedRate: doublePrecision('achieved_rate'),
+  p50Ms: doublePrecision('p50_ms'),
+  p90Ms: doublePrecision('p90_ms'),
+  p95Ms: doublePrecision('p95_ms'),
+  p99Ms: doublePrecision('p99_ms'),
+  maxMs: doublePrecision('max_ms'),
+  sessions: integer('sessions'),
+  iterations: integer('iterations'),
+  scheduledMs: doublePrecision('scheduled_ms'),
+  workflows: integer('workflows'),
+  workflowsPassed: integer('workflows_passed'),
+  workflowsFailed: integer('workflows_failed'),
+  steps: integer('steps'),
+  findings: integer('findings'),
+  goalReached: boolean('goal_reached'),
+  durationMs: doublePrecision('duration_ms'),
+  source: text('source'),
+  refusedRoutes: textArray('refused_routes').notNull().default([]),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const workloadRouteMetrics = pgTable('workload_route_metrics', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadRunId: uuid('workload_run_id').notNull(),
+  route: text('route').notNull(),
+  sent: integer('sent').notNull(),
+  errors: integer('errors').notNull().default(0),
+  p50Ms: doublePrecision('p50_ms'),
+  p90Ms: doublePrecision('p90_ms'),
+  p95Ms: doublePrecision('p95_ms'),
+  p99Ms: doublePrecision('p99_ms'),
+  maxMs: doublePrecision('max_ms'),
+  /** Null when there is nothing to compare with, which is not the same answer
+   *  as no change. A CHECK keeps this and p95Increase null together. */
+  baselineP95Ms: doublePrecision('baseline_p95_ms'),
+  p95Increase: doublePrecision('p95_increase'),
+  position: integer('position').notNull().default(0),
+})
+
+export const workloadThresholdVerdicts = pgTable('workload_threshold_verdicts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadRunId: uuid('workload_run_id').notNull(),
+  name: text('name').notNull(),
+  scope: text('scope'),
+  measure: text('measure').notNull(),
+  threshold: doublePrecision('threshold'),
+  observed: doublePrecision('observed'),
+  value: verdictValue('value').notNull(),
+  detail: text('detail'),
+  position: integer('position').notNull().default(0),
+})
+
+/** Where a screenshot, a trace or a report actually is, and whether it can be
+ *  fetched at all. `runner_local` is the honest answer for a path on a machine
+ *  that no longer exists, which this product's reports have carried. */
+export const workloadEvidence = pgTable('workload_evidence', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadRunId: uuid('workload_run_id').notNull(),
+  kind: text('kind').notNull(),
+  label: text('label'),
+  availability: workloadEvidenceAvailability('availability').notNull(),
+  locator: text('locator').notNull(),
+  sha256: text('sha256'),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** What the control plane is asking a runtime to do, durably, with a lease and
+ *  an acknowledgement. A teardown that is only a column update is a teardown
+ *  that never happens; see migrations/0021_workload_studio.sql. */
+export const runtimeCommands = pgTable('runtime_commands', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  kind: runtimeCommandKind('kind').notNull(),
+  environmentId: uuid('environment_id'),
+  workloadRunId: uuid('workload_run_id'),
+  payload: jsonb('payload').notNull().default({}),
+  state: runtimeCommandState('state').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  leaseHolder: text('lease_holder'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  outcome: text('outcome'),
+  detail: text('detail'),
+  requestedBy: uuid('requested_by'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
@@ -655,4 +856,7 @@ export const tenantScopedTables = [
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,
   billingCustomers, paymentMethods, subscriptions, invoices, billingEvents,
+  workloads, workloadVersions, workloadRuns, workloadRunResults,
+  workloadRouteMetrics, workloadThresholdVerdicts, workloadEvidence,
+  runtimeCommands,
 ] as const

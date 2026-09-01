@@ -123,6 +123,10 @@ export interface Fixture {
   connectionId: string
   /** The seeded Stripe customer, for the billing policies. */
   customerId: string
+  /** The seeded workload definition, its first version, and one finished run. */
+  workloadId: string
+  workloadVersionId: string
+  workloadRunId: string
 }
 
 /**
@@ -280,7 +284,59 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
       stripe_event_id, org_id, stripe_customer_id, type, event_created_at, outcome)
     VALUES (${`evt_${slug}`}, ${orgId}, ${customerId}, 'invoice.paid', now(), 'applied')`
 
-  return { orgId, userId, repoId, envId, runId, slug, connectionId, customerId }
+  // Workload Studio. Every one of these carries org_id, so the cross-tenant
+  // suite picks them up from the database and needs a row per tenant to attack:
+  // a query that returns nothing because the fixture never inserted anything
+  // looks exactly like isolation working.
+  //
+  // The shapes are not interchangeable. workload_run_results carries a CHECK
+  // that refuses a result of one kind wearing another kind's columns, so this
+  // fixture writes a browser_workflow result for a browser_workflow definition
+  // and a change to either half fails here rather than in production.
+  const [workload] = await admin<{ id: string }[]>`
+    INSERT INTO workloads (org_id, repository_id, slug, name, kind, created_by)
+    VALUES (${orgId}, ${repoId}, 'checkout', ${`${label} checkout`}, 'browser_workflow', ${userId})
+    RETURNING id`
+  const workloadId = workload!.id
+
+  const [version] = await admin<{ id: string }[]>`
+    INSERT INTO workload_versions (org_id, workload_id, version, body, body_digest, created_by)
+    VALUES (${orgId}, ${workloadId}, 1,
+            ${JSON.stringify({ workflows: ['sign-up'] })}::jsonb,
+            ${tokenHash(`workload-${slug}`).toString('hex')}, ${userId})
+    RETURNING id`
+  const workloadVersionId = version!.id
+
+  const [workloadRun] = await admin<{ id: string }[]>`
+    INSERT INTO workload_runs (
+      org_id, workload_id, workload_version_id, environment_id, state,
+      requested_by, request_key, repository, git_ref, deadline_at, finished_at, verdict)
+    VALUES (${orgId}, ${workloadId}, ${workloadVersionId}, ${envId}, 'succeeded',
+            ${userId}, ${`req-${slug}`}, ${`${slug}/app`}, 'main',
+            now() + interval '1 hour', now(), 'pass')
+    RETURNING id`
+  const workloadRunId = workloadRun!.id
+
+  await admin`
+    INSERT INTO workload_run_results (org_id, workload_run_id, kind, workflows, workflows_passed, workflows_failed, duration_ms)
+    VALUES (${orgId}, ${workloadRunId}, 'browser_workflow', 1, 1, 0, 1200)`
+  await admin`
+    INSERT INTO workload_route_metrics (org_id, workload_run_id, route, sent, errors, p95_ms)
+    VALUES (${orgId}, ${workloadRunId}, 'GET /checkout', 10, 0, 42)`
+  await admin`
+    INSERT INTO workload_threshold_verdicts (org_id, workload_run_id, name, measure, threshold, observed, value)
+    VALUES (${orgId}, ${workloadRunId}, 'checkout is quick', 'p95_below_ms', 200, 42, 'pass')`
+  await admin`
+    INSERT INTO workload_evidence (org_id, workload_run_id, kind, availability, locator)
+    VALUES (${orgId}, ${workloadRunId}, 'trace', 'runner_local', ${`/home/runner/${slug}/trace.zip`})`
+  await admin`
+    INSERT INTO runtime_commands (org_id, kind, environment_id, expires_at, requested_by)
+    VALUES (${orgId}, 'environment.teardown', ${envId}, now() + interval '1 hour', ${userId})`
+
+  return {
+    orgId, userId, repoId, envId, runId, slug, connectionId, customerId,
+    workloadId, workloadVersionId, workloadRunId,
+  }
 }
 
 export function tokenHash(value: string): Buffer {
