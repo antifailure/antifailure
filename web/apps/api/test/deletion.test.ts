@@ -735,16 +735,41 @@ describe(
     // What everybody else sees
     // -----------------------------------------------------------------------
 
+    // The banner every role sees comes from org.settings, not from
+    // deletion.status. deletion.status moved to organization.delete when the
+    // hosted plan gate landed, because environments.view is gated and a lapsed
+    // owner has to be able to watch a deletion they cannot cancel. The property
+    // this test has always been about, that an organization is not deleted out
+    // from under the people using it, is unchanged and is asserted where the
+    // console actually reads it.
     it('every role can see that the organization is being deleted', async () => {
       await subscribe(h.clock.now().getTime() + 10 * 24 * 60 * 60 * 1000)
       await request(org.slug, 'moving to another vendor')
       for (const role of ['admin', 'member', 'viewer'] as const) {
         const session = await signInAs(h, org, role)
-        const { body } = await callProcedure(h, session, 'deletion.status', 'query', {})
+        const { body } = await callProcedure(h, session, 'org.settings', 'query', {})
         const view = data<{ deletion: DeletionView | null }>(body).deletion
         assert.ok(view, `${role} cannot see the deletion`)
         assert.equal(view.step, 'await_entitlement_end')
         assert.equal(view.reason, 'moving to another vendor')
+      }
+    })
+
+    it('deletion.status is the owner\'s, because the plan gate reaches the other route', async () => {
+      await subscribe(h.clock.now().getTime() + 10 * 24 * 60 * 60 * 1000)
+      await request(org.slug, 'moving to another vendor')
+      const { body } = await callProcedure(h, owner, 'deletion.status', 'query', {})
+      const view = data<{ deletion: DeletionView | null }>(body).deletion
+      assert.ok(view)
+      assert.equal(view.step, 'await_entitlement_end')
+      for (const role of ['admin', 'member', 'viewer'] as const) {
+        const session = await signInAs(h, org, role)
+        const refused = await callProcedure(h, session, 'deletion.status', 'query', {})
+        assert.match(
+          JSON.stringify(refused.body),
+          /organization\.delete permission/,
+          `${role} was not refused deletion.status`,
+        )
       }
     })
 

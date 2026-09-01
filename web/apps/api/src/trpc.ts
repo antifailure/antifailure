@@ -19,7 +19,12 @@ import type { Clock } from './clock.ts'
 import type { GitHubClient } from './auth/github.ts'
 import type { Billing } from './billing/index.ts'
 import type { Message as MailMessage } from './auth/mail.ts'
-import { HOSTED_ACCESS_MESSAGE, hasHostedAccess, type HostedRequiredPlan } from './hosted.ts'
+import {
+  HOSTED_ACCESS_MESSAGE,
+  HOSTED_GATE_EXEMPT,
+  hasHostedAccess,
+  type HostedRequiredPlan,
+} from './hosted.ts'
 
 /** Who is making the request, once the session cookie has been resolved. */
 export interface Actor {
@@ -208,11 +213,12 @@ export function orgProcedure(permission: Permission) {
           message: `This needs the ${permission} permission, which your role does not have.`,
         })
       }
-      // Billing remains reachable because it is the path that resolves this
-      // refusal. Everything else is enforced here, where every tRPC procedure
-      // passes, rather than repeated on whichever pages happen to be visible.
+      // The exits stay reachable. Everything else is enforced here, where every
+      // tRPC procedure passes, rather than repeated on whichever pages happen to
+      // be visible. HOSTED_GATE_EXEMPT carries the line that decides which side
+      // a permission falls on, and why shortening it is a legal problem.
       if (
-        permission !== 'billing.manage' &&
+        !HOSTED_GATE_EXEMPT.has(permission) &&
         !hasHostedAccess(octx.actor.plan, octx.hostedRequiredPlan)
       ) {
         throw new TRPCError({ code: 'FORBIDDEN', message: HOSTED_ACCESS_MESSAGE })

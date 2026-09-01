@@ -693,12 +693,21 @@ export const deletionRouter = router({
   /**
    * Where the deletion has got to.
    *
-   * Under environments.view, so every role sees the banner. An organization
-   * being deleted underneath somebody is not a thing to keep from them: a
-   * member whose environments stopped working needs to know why, and telling
-   * only the owner means everybody else files a support ticket.
+   * This was written under environments.view so every role would see the
+   * banner, which is the better read on a healthy organization: a member whose
+   * environments stopped working needs to know why, and telling only the owner
+   * means everybody else files a support ticket.
+   *
+   * It is organization.delete instead, and the reason is the hosted plan gate.
+   * environments.view is gated and must stay gated, so on the hosted service a
+   * customer whose plan has lapsed could REQUEST a deletion and then not see
+   * whether it was progressing, which step it stopped at, or the error when it
+   * failed. Between the two losses, a member losing the banner is bounded, and
+   * an owner unable to watch a deletion they can neither cancel nor see is a
+   * trap. It reads with the three routes below it: whoever can ask for the
+   * deletion and cancel it can also watch it.
    */
-  status: orgProcedure('environments.view').query(async ({ ctx }) => {
+  status: orgProcedure('organization.delete').query(async ({ ctx }) => {
     const c = ctx as OrgContext
     return c.pool.withTenant(c.tenant, async (db) => ({
       deletion: await readDeletion(db, c.clock, c.actor.orgId),

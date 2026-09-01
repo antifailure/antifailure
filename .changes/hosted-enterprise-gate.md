@@ -2,11 +2,19 @@
 
 A hosted control plane can require a plan before it does any work.
 `AF_HOSTED_REQUIRED_PLAN=enterprise` refuses every operational procedure until
-Stripe grants that plan, while leaving authentication, sign-out and billing
-reachable, because billing is the path that resolves the refusal. It is unset
-everywhere except Antifailure's own hosted service, so self-hosting is
-unchanged. Setting it while billing is off stops the process at startup, since
-that combination refuses every request and offers no way to pay.
+Stripe grants that plan, while leaving authentication, sign-out and the exits
+reachable. It is unset everywhere except Antifailure's own hosted service, so
+self-hosting is unchanged. Setting it while billing is off stops the process at
+startup, since that combination refuses every request and offers no way to pay.
+
+The exits are the part worth stating plainly. A plan gate may restrict what the
+product DOES for a customer. It may never restrict a customer's ability to
+leave, to retrieve what is theirs, or to secure their account. So a lapsed plan
+still permits billing, exporting the organization's data, deleting the
+organization, closing an account, and listing and revoking sessions. That last
+one is a security action rather than a convenience: a credential can leak while
+a subscription has lapsed, and a paywall in front of session revocation would
+leave somebody unable to contain it.
 
 The gate is enforced in shared tRPC middleware rather than per page, and on the
 three entrances that do not pass through it: engine ingestion, engine

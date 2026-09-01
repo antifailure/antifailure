@@ -140,9 +140,14 @@ describe(
           input: { confirm: 'deliberately-not-a-login' },
           allowed: ['owner', 'admin', 'member', 'viewer'],
         },
-        // Every role, because a member whose environments stopped needs to
-        // know why rather than filing a support ticket.
-        { route: 'deletion.status', type: 'query', input: {}, allowed: ['owner', 'admin', 'member', 'viewer'] },
+        // Owner only, and NOT because a member should be kept in the dark. It
+        // was written under environments.view so every role saw the banner, and
+        // the hosted plan gate took that away: environments.view is gated, so a
+        // lapsed customer who had already asked for a deletion could not see
+        // whether it was progressing. A member losing the banner is a bounded
+        // loss. An owner unable to watch a deletion they can neither cancel nor
+        // see is a trap. See HOSTED_GATE_EXEMPT.
+        { route: 'deletion.status', type: 'query', input: {}, allowed: ['owner'] },
       ]
 
       for (const cell of cells) {
