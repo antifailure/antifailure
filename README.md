@@ -34,7 +34,7 @@ paste, because a running shell cannot see a file written a second ago.
 
 ## What it does
 
-**Masked data, verified.** Masking is compiled to SQL and executed in resumable chunks, deterministic so the same customer maps to the same fake customer across every table and every refresh. Then a scanner reads back every column of every table looking for anything that still parses as an email, a card, a phone number, or a key, and signs an attestation. An unverified golden cannot be branched. That is enforced in code, not in a checklist.
+**Masked data, verified.** Masking is compiled to SQL and executed in resumable chunks, deterministic so the same customer maps to the same fake customer across every table and every refresh. Then a scanner reads back every column of every table, sampling rows rather than reading all of them, looking for anything that still parses as an email, a card, a phone number, or a key, and signs an attestation that records the sample size it used. An unverified golden cannot be branched. That is enforced in code, not in a checklist.
 
 **A network you control.** Every environment gets a sidecar that owns its network namespace. Nothing leaves except through it. Each host gets a mode: `BLOCK` refuses with a decision you can read, `ALLOW` lets it through with a rate limit, `SANDBOX` swaps in test credentials and trips a wire if a live key ever appears, `CAPTURE` records the email or SMS into a searchable inbox your agents can read, `MOCK` answers from a stateful offline pack, and `SYNTH` asks a model to invent a response and marks every result that touched it as unverified rather than passed. The Stripe pack is complete enough to run checkout, subscribe, renew, and cancel with signed webhooks and no network at all.
 

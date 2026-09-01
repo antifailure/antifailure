@@ -137,11 +137,12 @@ export function ArchitecturePage() {
         </div>
         <div className="mt-12">
           <Callout label="The credential, stated plainly">
-            It is a bearer token, not a client certificate, so this is ordinary TLS rather than
-            mutual TLS. The token is issued by a device authorization grant, kept in the operating
-            system keyring, valid for ninety days, and revocable at any time. What is enforced in
-            code is the transport: the client refuses to build against any control plane address
-            that is not https, other than localhost, so the token is never sent in the clear.
+            It is a bearer token, not a client certificate.
+            This is ordinary TLS rather than mutual TLS.
+            The token is issued by a device authorization grant, kept in the operating system
+            keyring, valid for ninety days, and revocable at any time. What is enforced in code is
+            the transport: the client refuses to build against any control plane address that is
+            not https, other than localhost, so the token is never sent in the clear.
           </Callout>
         </div>
         <div className="mt-12">

@@ -144,7 +144,10 @@ func run(root string, out io.Writer) error {
 	if err := checkDocsLinks(root, tracked, out); err != nil {
 		return err
 	}
-	return checkPinnedImage(root, out)
+	if err := checkPinnedImage(root, out); err != nil {
+		return err
+	}
+	return checkSiteClaims(root, out)
 }
 
 // docsBase is where the documentation site is served from. It is not cosmetic:
@@ -712,4 +715,291 @@ func existsAt(root, commit, p string) bool {
 func mentionsAt(root, commit, needle, under string) bool {
 	cmd := exec.Command("git", "-C", root, "grep", "-q", "-F", needle, commit, "--", under)
 	return cmd.Run() == nil
+}
+
+// ---------------------------------------------------------------------------
+// What the site says about the code.
+// ---------------------------------------------------------------------------
+
+// siteTrees are the surfaces a customer reads. www is here because until now
+// NOTHING opened a www file to ask whether a sentence in it was true: this
+// tool read three markdown documents, and the site's own forbidden-token scan
+// takes only *.md and *.mdx, of which www has one. Four of the false claims
+// this rule set encodes were on www and every documentation gate was green.
+var siteTrees = []string{
+	"www", "docs/src/content/docs", "docs/src/pages", "docs/adr",
+	"README.md", "ee/README.md", "CONTRIBUTING.md", "SECURITY.md",
+}
+
+// siteClaim is one sentence the site must not make, and the code that settles
+// it.
+//
+// THE SHAPE IS TWO SIDED ON PURPOSE, and the second side is the part that
+// makes this more than a list of banned words. `premise` names a file and a
+// string that must be present for the rule to mean anything. If the engine
+// grows real mutual TLS, or the sampling is removed, or the hosted control
+// plane is withdrawn, the premise stops holding and THIS GATE FAILS rather
+// than going on refusing a sentence that has become true. A ban with no expiry
+// condition is how a gate ends up enforcing yesterday's world.
+//
+// `requires` is the other half: a page may make the claim in `forbidden` only
+// if it also carries this. It exists for claims that are true as far as they
+// go and misleading alone.
+type siteClaim struct {
+	name      string
+	forbidden *regexp.Regexp
+	requires  *regexp.Regexp
+	premise   [2]string
+	reason    string
+}
+
+var siteClaims = []siteClaim{
+	{
+		name:      "mutual TLS to the control plane",
+		forbidden: regexp.MustCompile(`(?i)\bmutual TLS\b|\bmTLS\b`),
+		premise: [2]string{"engine/internal/controlplane/client.go",
+			`req.Header.Set("authorization", "Bearer "+c.token)`},
+		reason: "the engine authenticates with a bearer token, not a client certificate, " +
+			"and the token is good for ninety days (CLI_TOKEN_TTL_MS). The architecture " +
+			"page claimed short-lived mTLS four times and both halves were false. If " +
+			"client certificates are ever really used, delete this rule; the premise " +
+			"beside it is what tells you the day that happens",
+	},
+	{
+		name:      "there is no hosted control plane",
+		forbidden: regexp.MustCompile(`(?i)no hosted control plane`),
+		premise:   [2]string{"www/components/AuthScreen.tsx", "invitation only"},
+		reason: "the hosted control plane is deployed and invitation only, and " +
+			"AuthScreen says so while offering sign-in with GitHub. The sentence " +
+			"survived as the meta description of /signin and /signup and inside the " +
+			"modal the header's Log in button opens, so an invited customer pressing " +
+			"Log in was told the thing they were invited to does not exist",
+	},
+	{
+		name:      "the build runs inside the sandbox",
+		forbidden: regexp.MustCompile(`builds and runs your services inside a sandbox`),
+		premise:   [2]string{"engine/internal/build/docker.go", "dockerbuild.ImageBuildOptions{"},
+		reason: "ImageBuildOptions sets no NetworkMode and the buildpack path runs " +
+			"`npm ci` and `pip install`, so a build necessarily has a route out. The " +
+			"containment is real and applies to the running services. This string " +
+			"feeds JSON-LD and llms.txt, so the loose word travelled furthest",
+	},
+	{
+		name:      "the scanner reads every row",
+		forbidden: regexp.MustCompile(`every column of every table`),
+		requires:  regexp.MustCompile(`(?i)sampl`),
+		premise:   [2]string{"engine/internal/verify/scan.go", "DefaultSampleSize"},
+		reason: "columns are exhaustive and ROWS ARE SAMPLED, up to DefaultSampleSize " +
+			"per column. The engine discloses it in the attestation and no customer " +
+			"facing page did. A page may describe the read-back, and it has to say " +
+			"that the rows are a sample when it does",
+	},
+	{
+		name:      "a documentation page count nothing counted",
+		forbidden: regexp.MustCompile(`\b[0-9]+ documentation pages\b`),
+		premise:   [2]string{"www/lib/docs-facts.ts", "documentationPageCount"},
+		reason: "llms.txt said 41 and there were 81, and the same number sat in a " +
+			"comment in docs/src/pages/llms-full.txt.ts. The audience is what makes it " +
+			"expensive: llms.txt is read by models deciding whether one fetch will " +
+			"answer a question, so understating by half is advice to crawl the site " +
+			"instead. Interpolate documentationPageCount() rather than typing a number",
+	},
+}
+
+// checkSiteClaims fails the build on a sentence the code contradicts.
+//
+// It is deliberately narrow. It does not try to read prose for meaning; every
+// rule here is a claim that was actually published, actually false, and can be
+// matched exactly, with the file that settles it named beside it. A gate that
+// guessed would fire on correct sentences and be deleted within a week, which
+// is the reasoning constcheck writes down for the same restraint.
+func checkSiteClaims(root string, out io.Writer) error {
+	files, err := siteFiles(root)
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("no site files found under %s, so this check is looking in the wrong place",
+			strings.Join(siteTrees, ", "))
+	}
+
+	// The premises first. A rule whose premise has gone is a rule about a world
+	// that no longer exists, and it must stop the build rather than keep
+	// refusing a sentence that may have become true.
+	var lapsed []string
+	for _, c := range siteClaims {
+		body, err := os.ReadFile(filepath.Join(root, c.premise[0]))
+		if err != nil {
+			lapsed = append(lapsed, fmt.Sprintf("%s: %s is gone", c.name, c.premise[0]))
+			continue
+		}
+		if !strings.Contains(string(body), c.premise[1]) {
+			lapsed = append(lapsed, fmt.Sprintf("%s: %s no longer contains %q",
+				c.name, c.premise[0], c.premise[1]))
+		}
+	}
+	if len(lapsed) > 0 {
+		report(out, "\nclaimcheck: a rule about the site rests on code that has changed.\n")
+		for _, l := range lapsed {
+			report(out, "  %s\n", l)
+		}
+		report(out, "  The claim may now be true. Re-read the rule's reason and either\n")
+		report(out, "  update its premise or delete the rule.\n")
+		return fmt.Errorf("%d site claim rule(s) rest on code that is gone", len(lapsed))
+	}
+
+	var hits []string
+	for _, f := range files {
+		body, err := os.ReadFile(filepath.Join(root, f))
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", f, err)
+		}
+		text := string(body)
+		lines := strings.Split(text, "\n")
+		for _, c := range siteClaims {
+			for i, line := range lines {
+				if !c.forbidden.MatchString(line) {
+					continue
+				}
+				if c.requires != nil && c.requires.MatchString(text) {
+					continue
+				}
+				if allowed(f, c.name, line) {
+					continue
+				}
+				hits = append(hits, fmt.Sprintf("%s:%d  %s\n      %s\n      %s",
+					f, i+1, c.name, strings.TrimSpace(line), c.reason))
+			}
+		}
+	}
+
+	if len(hits) > 0 {
+		report(out, "\nclaimcheck: the site says something the code contradicts.\n")
+		for _, h := range hits {
+			report(out, "  %s\n", h)
+		}
+		return fmt.Errorf("%d claim(s) the code contradicts", len(hits))
+	}
+
+	var stale []string
+	for i, e := range siteClaimExceptions {
+		if !usedException[i] {
+			stale = append(stale, fmt.Sprintf("%s (%s) excusing %q", e.file, e.rule, e.line))
+		}
+	}
+	if len(stale) > 0 {
+		report(out, "\nclaimcheck: an exception that excuses nothing.\n")
+		for _, st := range stale {
+			report(out, "  %s\n", st)
+		}
+		report(out, "  Delete it. An exception nobody needs is a licence nobody granted,\n")
+		report(out, "  and it would silently cover a future line that happens to match.\n")
+		return fmt.Errorf("%d stale site claim exception(s)", len(stale))
+	}
+
+	report(out, "claimcheck: %d site files, %d claim rules, %d line exceptions, 0 contradicted\n",
+		len(files), len(siteClaims), len(siteClaimExceptions))
+	return nil
+}
+
+// siteFiles lists the customer facing source and prose, tracked by git so the
+// answer does not depend on what happens to be on disk.
+func siteFiles(root string) ([]string, error) {
+	args := append([]string{"-C", root, "ls-files", "-z", "--"}, siteTrees...)
+	outBytes, err := exec.Command("git", args...).Output()
+	if err != nil {
+		return nil, fmt.Errorf("asking git for the site's files: %w", err)
+	}
+	var files []string
+	for _, f := range strings.Split(string(outBytes), "\x00") {
+		if f == "" {
+			continue
+		}
+		switch filepath.Ext(f) {
+		case ".ts", ".tsx", ".md", ".mdx", ".mjs", ".js", ".json", ".txt":
+		default:
+			continue
+		}
+		// www/out is the static export: a copy of prose the source has already
+		// corrected, which is why constcheck prunes it too.
+		if strings.HasPrefix(f, "www/out/") || strings.Contains(f, "/node_modules/") {
+			continue
+		}
+		files = append(files, f)
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+// claimException allows one line to say a forbidden thing.
+//
+// The reason this exists at all is that the honest fix for a false claim is
+// usually a sentence saying what the claim used to be and why it was wrong.
+// The architecture page has to write "ordinary TLS rather than mutual TLS" to
+// make the correction legible, and a gate that made that unsayable would push
+// every correction towards being made silently, which is the opposite of what
+// this repository wants.
+//
+// It is scoped to a LINE, not a file. `line` must appear in the offending line
+// for the exception to apply, so a genuinely new claim elsewhere in the same
+// file still fails. A file-wide exemption would have quietly re-opened every
+// page that ever carried a correction.
+type claimException struct {
+	file, rule, line, reason string
+}
+
+// siteClaimExceptions are checked for staleness: one that excuses nothing is a
+// licence nobody granted, and it fails the build. Same rule as notAPath above,
+// for the same reason.
+var siteClaimExceptions = []claimException{
+	{
+		file: "www/components/pages/product/Architecture.tsx",
+		rule: "mutual TLS to the control plane",
+		line: "This is ordinary TLS rather than mutual TLS.",
+		reason: "the sentence that denies mutual TLS. The page has to be able to say " +
+			"what it is not, because a reader who was told mTLS for months needs the " +
+			"correction stated rather than the words quietly removed",
+	},
+	{
+		file: "www/components/AuthScreen.tsx",
+		rule: "there is no hosted control plane",
+		line: "The page said",
+		reason: "the header comment recording what this screen used to say and why it " +
+			"changed, which is the note that stops somebody restoring it",
+	},
+	{
+		file: "www/components/AuthModal.tsx",
+		rule: "there is no hosted control plane",
+		line: "This said",
+		reason: "the same retraction on the modal, which is the surface the header's " +
+			"Log in button opens and where the claim did the most damage",
+	},
+	{
+		file: "www/lib/docs-facts.ts",
+		rule: "a documentation page count nothing counted",
+		line: "offered \"all 41 documentation pages",
+		reason: "the header recording the number this file exists to stop anybody " +
+			"typing again, which has to quote it to be worth reading",
+	},
+	{
+		file: "www/lib/routes.ts",
+		rule: "there is no hosted control plane",
+		line: "Both descriptions used to say",
+		reason: "the note recording that these two meta descriptions carried the claim " +
+			"while the visible page said the opposite",
+	},
+}
+
+// used records which exceptions actually excused something, so a stale one can
+// be reported.
+var usedException = map[int]bool{}
+
+func allowed(file, rule, line string) bool {
+	for i, e := range siteClaimExceptions {
+		if e.file == file && e.rule == rule && strings.Contains(line, e.line) {
+			usedException[i] = true
+			return true
+		}
+	}
+	return false
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -497,5 +498,153 @@ func TestAPageWithNoPinIsNotChecked(t *testing.T) {
 	var out strings.Builder
 	if err := checkPinnedImage(root, &out); err != nil {
 		t.Fatalf("a page with no pin should not fail: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// What the site says about the code.
+// ---------------------------------------------------------------------------
+
+// The repository as it stands. This is the assertion that goes red the day
+// somebody writes one of these sentences back onto a page.
+func TestTheRealSiteContradictsNothing(t *testing.T) {
+	var out strings.Builder
+	if err := checkSiteClaims(filepath.Join("..", ".."), &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+}
+
+// Every rule is proved able to fail, by writing the claim it forbids into a
+// www file and requiring a red. A rule nobody has watched fail is a rule
+// nobody knows the shape of.
+func TestEveryRuleCanFail(t *testing.T) {
+	real := filepath.Join("..", "..")
+	for _, sample := range []struct {
+		rule, text string
+	}{
+		{"mutual TLS to the control plane", "The agent authenticates with short-lived mTLS."},
+		{"there is no hosted control plane", "There is no hosted control plane yet."},
+		{"the build runs inside the sandbox", "It builds and runs your services inside a sandbox."},
+		{"the scanner reads every row", "A scanner reads back every column of every table."},
+		{"a documentation page count nothing counted", "all 41 documentation pages as one file"},
+	} {
+		root := siteFixture(t, real, "www/lib/fixture.ts", sample.text+"\n")
+		var out strings.Builder
+		err := checkSiteClaims(root, &out)
+		if err == nil {
+			t.Errorf("rule %q did not fire on %q:\n%s", sample.rule, sample.text, out.String())
+			continue
+		}
+		if !strings.Contains(out.String(), sample.rule) {
+			t.Errorf("a rule fired on %q but not %q:\n%s", sample.text, sample.rule, out.String())
+		}
+	}
+}
+
+// The read-back rule is the two sided one: a page may describe the scan, and
+// has to say the rows are a sample when it does. Both halves are tested,
+// because a rule that fired on the corrected sentence too would be answered by
+// deleting the sentence.
+func TestTheReadBackRuleAcceptsTheDisclosedVersion(t *testing.T) {
+	root := siteFixture(t, filepath.Join("..", ".."), "www/lib/fixture.ts",
+		"A scanner reads back every column of every table, sampling rows rather than all of them.\n")
+	var out strings.Builder
+	if err := checkSiteClaims(root, &out); err != nil {
+		t.Fatalf("the disclosed version was refused: %v\n%s", err, out.String())
+	}
+}
+
+// A rule whose premise has gone must STOP THE BUILD rather than go on
+// refusing a sentence that may have become true. A ban with no expiry
+// condition ends up enforcing yesterday's world, and nobody notices because a
+// green gate looks the same either way.
+func TestARuleWhosePremiseIsGoneFails(t *testing.T) {
+	root := t.TempDir()
+	// A repository with none of the premise files in it.
+	mustRun(t, root, "git", "init", "-q")
+	mustWrite(t, filepath.Join(root, "www", "lib", "x.ts"), "nothing to see\n")
+	mustRun(t, root, "git", "add", "-A")
+	var out strings.Builder
+	if err := checkSiteClaims(root, &out); err == nil {
+		t.Fatalf("every premise was missing and the check passed:\n%s", out.String())
+	} else if !strings.Contains(out.String(), "rests on code that has changed") {
+		t.Fatalf("failed for the wrong reason: %v\n%s", err, out.String())
+	}
+}
+
+// An exception that excuses nothing is a licence nobody granted, and it would
+// silently cover a future line that happens to match it.
+func TestAStaleExceptionFails(t *testing.T) {
+	saved := siteClaimExceptions
+	defer func() { siteClaimExceptions = saved }()
+	siteClaimExceptions = append(append([]claimException{}, saved...), claimException{
+		file: "www/lib/does-not-exist.ts", rule: "mutual TLS to the control plane",
+		line: "nothing matches this", reason: "a deliberately stale entry, for this test",
+	})
+	var out strings.Builder
+	if err := checkSiteClaims(filepath.Join("..", ".."), &out); err == nil {
+		t.Fatalf("a stale exception passed:\n%s", out.String())
+	}
+}
+
+// Every exception says why, in a sentence rather than a word. Same rule the
+// path exclusions carry, for the same reason: reading the list has to tell you
+// why a hit was allowed and not only that somebody allowed it.
+func TestEverySiteExceptionStatesWhy(t *testing.T) {
+	for _, e := range siteClaimExceptions {
+		if len(strings.Fields(e.reason)) < 8 {
+			t.Errorf("the exception for %s (%s) says %q, which is too short to explain itself",
+				e.file, e.rule, e.reason)
+		}
+	}
+}
+
+// siteFixture copies the real premise files into a scratch repository and adds
+// one file of its own, so a rule can be driven without its premise lapsing
+// first and reporting the wrong failure.
+func siteFixture(t *testing.T, real, name, body string) string {
+	t.Helper()
+	root := t.TempDir()
+	mustRun(t, root, "git", "init", "-q")
+	for _, c := range siteClaims {
+		src, err := os.ReadFile(filepath.Join(real, c.premise[0]))
+		if err != nil {
+			t.Fatalf("reading premise %s: %v", c.premise[0], err)
+		}
+		mustWrite(t, filepath.Join(root, filepath.FromSlash(c.premise[0])), string(src))
+	}
+	// AuthScreen is a premise and also a file the real tree exempts, so the
+	// exemption has something to excuse in the fixture too.
+	for _, f := range []string{
+		"www/components/AuthScreen.tsx", "www/components/AuthModal.tsx",
+		"www/lib/routes.ts", "www/components/pages/product/Architecture.tsx",
+	} {
+		src, err := os.ReadFile(filepath.Join(real, filepath.FromSlash(f)))
+		if err != nil {
+			t.Fatalf("reading %s: %v", f, err)
+		}
+		mustWrite(t, filepath.Join(root, filepath.FromSlash(f)), string(src))
+	}
+	mustWrite(t, filepath.Join(root, filepath.FromSlash(name)), body)
+	mustRun(t, root, "git", "add", "-A")
+	return root
+}
+
+func mustWrite(t *testing.T, p, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustRun(t *testing.T, dir, name string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
 	}
 }
