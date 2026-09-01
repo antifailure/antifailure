@@ -80,9 +80,9 @@ personas:
 workflows:
   - name: read-what-each-customer-has-spent
     description: >-
-      As the analyst, open the customer list and check that it carries every
-      seeded customer along with the aggregate taken across the foreign key:
-      how many orders each has placed, and what those came to.
+      As the analyst, open the customer list and check that it carries the
+      customer who has ordered nothing and the amount that only exists once
+      the aggregate has crossed the foreign key.
     persona: analyst
     start_path: /customers
     expect:
@@ -90,11 +90,17 @@ workflows:
       # branch where Sum returns null and the view has to answer 0 rather than
       # nothing.
       - "Alan Turing"
-      # Katherine's two orders come to 47500 cents, and that number appears
+      # Katherine's one order is 47500 cents, and that number reaches the page
       # only when the aggregate crossed customers.id to orders.customer_id.
       # Masking rewrites both sides and `link: customer` in masking.yaml is
       # what keeps them together; break that and every customer reports zero
       # spent, the expectation stops matching, and the run stops passing. That
       # is the failure this example exists to make visible.
+      #
+      # Written as words rather than as the JSON: the checker takes the
+      # meaningful words out of an expectation and looks for each of them in
+      # the page's text, so this asks for "spent" and for "47500", both of
+      # which `"spent_cents": 47500` contains. An expectation is a sentence for
+      # a person, and a model key reads it as one.
       - "spent 47500"
     tags: [smoke]
