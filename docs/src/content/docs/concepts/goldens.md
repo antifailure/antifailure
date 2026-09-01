@@ -60,7 +60,7 @@ host would differ between the machine that made a golden and every machine
 entitled to use it.
 
 The repository's path on disk is deliberately not part of it either. CI checks
-out somewhere new on every run and a worktree per branch is a different
+out somewhere new on every run and a separate checkout per branch is a different
 directory, so keying on the path would refuse the golden every time and cost a
 full copy of production.
 
