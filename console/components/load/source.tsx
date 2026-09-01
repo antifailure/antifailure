@@ -23,6 +23,7 @@ import { StateBadge, VerdictBadge } from "@/components/load/primitives";
 import { SourceHeader, SourceView } from "@/components/load/sources";
 import { Denied, LoadError, SourceSkeleton } from "@/components/load/states";
 import {
+  KNOBS,
   count,
   getSource,
   listRuns,
@@ -43,15 +44,23 @@ interface Environment {
 /**
  * Starting a run.
  *
- * The safe and unsafe patterns are on this form and not buried in a settings
- * page, because they decide what the run is allowed to do to the twin and a
- * person pressing Start should be looking at them. The placeholder is a glob
- * in the engine's own syntax, "GET /api/*", rather than a bare path, since
- * that is what the matcher takes.
+ * The fields are decided by the source's kind, not by the form's convenience,
+ * because the engine refuses a knob when the plain command has no flag for it.
+ * `af load run` declares --duration, --scale and --seed; `af load scenario`
+ * declares --seed, --concurrency and --only. An earlier version of this form
+ * offered all of them to both kinds, which meant two of every three controls
+ * would have come back AF-WLD-002: a control that exists to be refused, which
+ * is the exact failure the permission-denied card in this same area warns
+ * about.
+ *
+ * What a kind cannot set is said rather than hidden. A reader who finds no
+ * concurrency box and no explanation assumes the console forgot; one who is
+ * told `af load run` has no such flag has learned something about the product.
  */
 function Start({ source, onStarted }: { source: SourceDetail; onStarted: () => void }) {
   const session = useSessionContext();
   const csrf = session.data?.csrfToken ?? "";
+  const knobs = KNOBS[source.kind];
   const environments = useApi<{ environments: Environment[] }>(
     () => query("environments.list", { limit: 100 }),
     [],
@@ -61,21 +70,32 @@ function Start({ source, onStarted }: { source: SourceDetail; onStarted: () => v
   const [scale, setScale] = useState("1");
   const [duration, setDuration] = useState("60");
   const [concurrency, setConcurrency] = useState("");
-  const [safe, setSafe] = useState("GET /api/*");
-  const [unsafe, setUnsafe] = useState("");
+  const [seed, setSeed] = useState("1");
+  // Defaulted to the scenario's own name, which is the selection somebody
+  // opening this source almost always wants and is never the empty one the
+  // engine refuses.
+  const [select, setSelect] = useState(
+    source.source?.kind === "deterministic" ? (source.source.scenarioName ?? "") : "",
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState<string | null>(null);
 
+  // Number.isFinite rejects NaN, which matters more than it looks: the engine
+  // found a real defect where NaN parsed as a float and every comparison
+  // against it was false, so a range check let it through and the send rate
+  // became NaN requests per second. Nothing here can send one.
   const positive = (v: string) => {
     const n = Number(v);
     return v.trim() !== "" && Number.isFinite(n) && n > 0 ? n : undefined;
   };
-  const patterns = (v: string) =>
+  const names = (v: string) =>
     v
       .split(",")
       .map((r) => r.trim())
       .filter(Boolean);
+
+  const selectionMissing = knobs.select === "required" && names(select).length === 0;
 
   return (
     <Card
@@ -113,6 +133,7 @@ function Start({ source, onStarted }: { source: SourceDetail; onStarted: () => v
               className="px-4 py-4"
               onSubmit={async (e) => {
                 e.preventDefault();
+                if (selectionMissing) return;
                 setBusy(true);
                 setError(null);
                 setStarted(null);
@@ -121,15 +142,17 @@ function Start({ source, onStarted }: { source: SourceDetail; onStarted: () => v
                     {
                       sourceId: source.id,
                       envId: chosen,
-                      ...(positive(scale) === undefined ? {} : { scale: positive(scale) }),
-                      ...(positive(duration) === undefined
-                        ? {}
-                        : { durationSeconds: positive(duration) }),
-                      ...(positive(concurrency) === undefined
-                        ? {}
-                        : { concurrency: positive(concurrency) }),
-                      ...(patterns(safe).length ? { safe: patterns(safe) } : {}),
-                      ...(patterns(unsafe).length ? { unsafe: patterns(unsafe) } : {}),
+                      ...(knobs.scale && positive(scale) !== undefined
+                        ? { scale: positive(scale) }
+                        : {}),
+                      ...(knobs.duration && positive(duration) !== undefined
+                        ? { durationSeconds: positive(duration) }
+                        : {}),
+                      ...(knobs.concurrency && positive(concurrency) !== undefined
+                        ? { concurrency: positive(concurrency) }
+                        : {}),
+                      ...(knobs.seed && positive(seed) !== undefined ? { seed: positive(seed) } : {}),
+                      ...(knobs.select === "required" ? { select: names(select) } : {}),
                     },
                     csrf,
                   );
@@ -160,57 +183,73 @@ function Start({ source, onStarted }: { source: SourceDetail; onStarted: () => v
                     ))}
                   </select>
                 </Field>
-                <Field label="Scale" hint="A multiplier on the source's own rate.">
-                  <input
-                    className={inputClass}
-                    inputMode="decimal"
-                    value={scale}
-                    onChange={(e) => setScale(e.target.value)}
-                    placeholder="1"
-                  />
-                </Field>
-                <Field label="Duration" hint="Seconds.">
-                  <input
-                    className={inputClass}
-                    inputMode="numeric"
-                    value={duration}
-                    onChange={(e) => setDuration(e.target.value)}
-                    placeholder="60"
-                  />
-                </Field>
-                <Field label="Concurrency" hint="Empty leaves the engine's own default.">
-                  <input
-                    className={inputClass}
-                    inputMode="numeric"
-                    value={concurrency}
-                    onChange={(e) => setConcurrency(e.target.value)}
-                  />
-                </Field>
-                <Field
-                  label="Safe patterns"
-                  hint="Comma separated globs. Nothing is sent unless it matches one."
-                >
-                  <input
-                    className={inputClass}
-                    value={safe}
-                    onChange={(e) => setSafe(e.target.value)}
-                    placeholder="GET /api/*"
-                  />
-                </Field>
-                <Field
-                  label="Unsafe patterns"
-                  hint="Named explicitly as allowed to change state on the twin."
-                >
-                  <input
-                    className={inputClass}
-                    value={unsafe}
-                    onChange={(e) => setUnsafe(e.target.value)}
-                    placeholder="POST /api/cart"
-                  />
-                </Field>
+
+                {knobs.select === "required" ? (
+                  <Field
+                    label="Scenarios"
+                    hint="Comma separated names. Required: running everything the manifest declares would change what this source does the day somebody adds one."
+                    error={selectionMissing ? "Name at least one scenario." : null}
+                  >
+                    <input
+                      className={inputClass}
+                      value={select}
+                      onChange={(e) => setSelect(e.target.value)}
+                      placeholder="checkout-decline-retry"
+                    />
+                  </Field>
+                ) : null}
+
+                {knobs.scale ? (
+                  <Field label="Scale" hint="A multiplier on production's rate.">
+                    <input
+                      className={inputClass}
+                      inputMode="decimal"
+                      value={scale}
+                      onChange={(e) => setScale(e.target.value)}
+                      placeholder="1"
+                    />
+                  </Field>
+                ) : null}
+
+                {knobs.duration ? (
+                  <Field label="Duration" hint="Seconds.">
+                    <input
+                      className={inputClass}
+                      inputMode="numeric"
+                      value={duration}
+                      onChange={(e) => setDuration(e.target.value)}
+                      placeholder="60"
+                    />
+                  </Field>
+                ) : null}
+
+                {knobs.concurrency ? (
+                  <Field label="Concurrency" hint="Ceiling on requests in flight.">
+                    <input
+                      className={inputClass}
+                      inputMode="numeric"
+                      value={concurrency}
+                      onChange={(e) => setConcurrency(e.target.value)}
+                      placeholder="20"
+                    />
+                  </Field>
+                ) : null}
+
+                {knobs.seed ? (
+                  <Field label="Seed" hint="The same seed sends the same sequence.">
+                    <input
+                      className={inputClass}
+                      inputMode="numeric"
+                      value={seed}
+                      onChange={(e) => setSeed(e.target.value)}
+                      placeholder="1"
+                    />
+                  </Field>
+                ) : null}
               </div>
+
               <div className="mt-4 flex flex-wrap items-center gap-3">
-                <Button type="submit" variant="primary" busy={busy}>
+                <Button type="submit" variant="primary" busy={busy} disabled={selectionMissing}>
                   {busy ? "Starting" : "Start the run"}
                 </Button>
                 {error ? (
@@ -221,13 +260,23 @@ function Start({ source, onStarted }: { source: SourceDetail; onStarted: () => v
                   <p role="status" className="text-[12.5px] leading-6 text-muted">
                     {started}
                   </p>
-                ) : (
-                  <p className="text-[12.5px] leading-6 text-dim">
-                    Every route is unsafe until a safe pattern matches it, so an empty safe list
-                    sends nothing.
-                  </p>
-                )}
+                ) : null}
               </div>
+
+              {knobs.refused.length > 0 ? (
+                <div className="mt-4 border-t border-rule pt-3">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">
+                    Not settable on this kind
+                  </p>
+                  <ul className="mt-2 space-y-1.5">
+                    {knobs.refused.map((r) => (
+                      <li key={r.knob} className="max-w-[74ch] text-[12.5px] leading-6 text-muted">
+                        <span className="font-medium text-ink">{r.knob}.</span> {r.because}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </form>
           );
         })()

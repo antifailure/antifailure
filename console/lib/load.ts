@@ -276,6 +276,66 @@ export function readSource(kind: SourceKind, v: unknown): LoadSource | null {
   };
 }
 
+/**
+ * Which knobs each kind can actually set.
+ *
+ * Read off the engine's own flag sets rather than chosen for the form:
+ * `af load run` declares exactly --duration, --scale, --seed and --branch, and
+ * `af load scenario` declares --seed, --concurrency, --only and --branch. The
+ * hosted adapter refuses a knob when, and only when, the plain command has no
+ * flag for it, with AF-WLD-002, so a form offering concurrency on an observed
+ * mix is a control that exists to be refused.
+ *
+ * That is the failure this console warns about elsewhere and had built into
+ * its own start form: every kind was offered every knob, so two of the three
+ * on each kind would have come back refused.
+ *
+ * `select` is required for a scenario and an empty one is refused, because
+ * `af load scenario` with no --only runs everything the manifest declares, and
+ * a manifest that later gains a scenario would silently change what a saved
+ * source runs.
+ */
+export interface Knobs {
+  duration: boolean;
+  scale: boolean;
+  seed: boolean;
+  concurrency: boolean;
+  select: "required" | "no";
+  /** What this kind cannot set, and the command that is the reason. */
+  refused: { knob: string; because: string }[];
+}
+
+export const KNOBS: Record<SourceKind, Knobs> = {
+  observed: {
+    duration: true,
+    scale: true,
+    seed: true,
+    concurrency: false,
+    select: "no",
+    refused: [
+      {
+        knob: "Concurrency",
+        because:
+          "af load run has no --concurrency flag. Accepting it and running at the generator's own default would produce a run that did not do what its author asked, with nothing in the result saying so.",
+      },
+    ],
+  },
+  deterministic: {
+    duration: false,
+    scale: false,
+    seed: true,
+    concurrency: true,
+    select: "required",
+    refused: [
+      {
+        knob: "Duration and scale",
+        because:
+          "af load scenario has neither flag. A journey runs its steps in order for as long as they take; it does not send at a rate.",
+      },
+    ],
+  },
+};
+
 export interface SourceRow {
   id: string;
   name: string;
@@ -974,14 +1034,31 @@ export async function getRun(runId: string): Promise<RunDetail | null> {
   return readRunDetail(await query<unknown>("load.runs.get", { runId }));
 }
 
+/**
+ * What a start request may carry.
+ *
+ * Every field here maps to a flag the kind's command actually declares. There
+ * is deliberately no `safe` or `unsafe`: neither `af load run` nor `af load
+ * scenario` has such a flag, because the safe list is a manifest decision
+ * rather than a per-run one, and offering it here would invent a capability
+ * the engine does not have.
+ */
 export interface StartInput {
   sourceId: string;
   envId: string;
+  /** Observed only. */
   scale?: number;
+  /** Observed only. Seconds; the command takes a Go duration and the control
+   *  plane formats it, so the console cannot send "1 hour" and have it refused
+   *  after the job has started. */
   durationSeconds?: number;
+  /** Deterministic only. */
   concurrency?: number;
-  safe?: string[];
-  unsafe?: string[];
+  /** Deterministic only, and required: an empty selection is refused. */
+  select?: string[];
+  /** Both kinds. A number, which is what makes two runs send the same
+   *  sequence. */
+  seed?: number;
 }
 
 export async function startRun(input: StartInput, csrf: string): Promise<{ runId: string | null }> {

@@ -94,16 +94,22 @@ function Settings({ run }: { run: RunDetail }) {
 /**
  * Which routes the run was allowed to touch.
  *
- * Both lists are shown, and the sentence says the default outright. Every
- * route is unsafe until a safe pattern matches it, so presenting the safe list
- * alone would let a reader assume the rest were sent too.
+ * These come from the manifest, not from the form that started the run.
+ * Neither `af load run` nor `af load scenario` has a --safe or --unsafe flag,
+ * so the safe list is a decision committed alongside the code rather than one
+ * somebody makes per run, and the console shows it read only for that reason.
+ *
+ * Both lists are shown and the default is said outright. Every route is unsafe
+ * until a safe pattern matches it, so showing the safe list alone would let a
+ * reader assume the rest were sent too.
  */
 function Policy({ run }: { run: RunDetail }) {
   if (run.safe.length === 0 && run.unsafe.length === 0) {
     return (
-      <Empty title="No patterns recorded">
-        The run stored neither list. Every route is unsafe until a safe pattern
-        matches it, so a run with no safe list sends nothing at all.
+      <Empty title="No patterns in the manifest">
+        This repository declares neither list under `load`. Every route is
+        unsafe until a safe pattern matches it, so a manifest with no safe list
+        sends nothing at all.
       </Empty>
     );
   }
@@ -381,7 +387,7 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
         </>
       )}
 
-      <Card title="Route policy">
+      <Card title="Route policy" note="From the manifest. Not a per-run setting: neither load command has a flag for it.">
         <Policy run={run} />
       </Card>
     </div>

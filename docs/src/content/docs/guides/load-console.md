@@ -44,21 +44,49 @@ third kind of traffic, which it is not. See
 
 ## Starting a run
 
-Open a source and use **Start a run**. The fields are the same ones
-`af load run` takes.
+Open a source and use **Start a run**. The fields you get depend on the kind,
+because each kind runs through a different command and a knob only exists when
+that command has a flag for it. Asking for one it does not have is refused with
+`AF-WLD-002` rather than accepted and quietly ignored.
 
-**Scale** multiplies the source's own rate. An observed mix at scale 1 arrives
-at the rate production served it.
+| Knob | Observed, through `af load run` | Deterministic, through `af load scenario` |
+| --- | --- | --- |
+| Scenarios (`--only`) | not applicable | required |
+| Duration | yes | refused |
+| Scale | yes | refused |
+| Concurrency | refused | yes |
+| Seed | yes | yes |
 
-**Duration** and **Concurrency** bound the run. Leaving concurrency empty
-leaves the engine's own default.
+**Scale** multiplies production's rate. An observed mix at scale 1 arrives at
+the rate production served it. **Duration** bounds the run. Neither exists for
+a scenario, which runs its steps in order for as long as they take rather than
+sending at a rate.
 
-**Safe patterns** and **Unsafe patterns** decide what may be sent, and this is
-the field to read twice. Every route is unsafe until a safe pattern matches
-it. That default is deliberate: a generator that finds `POST /checkout` in an
-access log and runs it four hundred times charges four hundred cards. A
-pattern is a method and a path glob, as in `GET /api/*`, where `*` covers one
-segment and `**` covers the rest; a bare glob matches any method.
+**Concurrency** caps requests in flight for a scenario. `af load run` has no
+such flag, so an observed mix cannot set it; accepting the knob and running at
+the generator's own default would produce a run that did not do what its author
+asked, with nothing in the result saying so.
+
+**Seed** is what makes two runs send the same sequence, which is what makes one
+run comparable with another.
+
+**Scenarios** is required for a deterministic source and an empty selection is
+refused. Running everything the manifest declares would mean a manifest that
+later gains a scenario silently changes what a saved source runs.
+
+### Safe and unsafe routes are a manifest decision
+
+They are not on this form, and that is deliberate. Neither load command has a
+`--safe` or `--unsafe` flag: the lists live under `load` in your manifest, so
+they are committed alongside the code and reviewed with it rather than being
+set per run. The run view shows the effective lists read only.
+
+The rule they express is the one worth reading twice. Every route is unsafe
+until a safe pattern matches it, because a generator that finds
+`POST /checkout` in an access log and runs it four hundred times charges four
+hundred cards. A pattern is a method and a path glob, as in `GET /api/*`, where
+`*` covers one segment and `**` covers the rest; a bare glob matches any
+method.
 
 An empty safe list sends nothing at all.
 
