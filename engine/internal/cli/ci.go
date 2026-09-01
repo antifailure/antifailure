@@ -179,6 +179,12 @@ change.`),
 						Steps: r.Outcome.Reproduction, Trace: r.Evidence.Trace,
 					})
 				}
+				// What the run noticed that belongs to no single workflow.
+				// A synthesized response nobody's window claimed is the case
+				// this exists for, and dropping it here would put the run
+				// back where it started: the fact reaching the engine and
+				// stopping there.
+				run.Notes = append(run.Notes, test.Notes...)
 				for _, i := range test.Invariants {
 					run.Invariants = append(run.Invariants, report.Invariant{
 						Name: i.Name, Description: i.Description, Held: i.Held,

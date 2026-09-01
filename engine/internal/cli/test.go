@@ -97,6 +97,12 @@ people learn to ignore the results. Only a real failure exits non zero.`),
 
 			printInvariants(e, report)
 
+			// What the run noticed that belongs to no single workflow. A
+			// note nobody prints is a note nobody has.
+			for _, n := range report.Notes {
+				e.Out.Printf("  %s %s\n", e.Out.S(StyleWarn, SymbolWarn), e.Out.Wrap(n, 4))
+			}
+
 			e.Out.Println("")
 			e.Out.Printf("  %d passed, %d failed, %d flaky, %d blocked, %d unverified, in %s\n",
 				report.Passed, report.Failed, report.Flaky, report.Blocked,
