@@ -685,6 +685,34 @@ describe(
       assert.equal(again.json.reason, 'binding_revoked')
     })
 
+    test('a repository can be claimed again after its claim was withdrawn', async () => {
+      // The message on a revoked claim tells somebody they can claim it again,
+      // and until this ran that was a sentence rather than a fact. It works
+      // because the unique index covers only live rows, so the withdrawn one
+      // stays as the record of who was allowed and when that ended without
+      // standing in the way of the next claim.
+      assert.equal((await claim(repository)).status, 201)
+      const admin = await cliToken('owner', ['tokens.manage'])
+      assert.equal((await call(admin, 'DELETE', `/v1/oidc/bindings/${repository}`)).status, 200)
+      assert.equal(
+        (await exchange(identityToken({ repository }, api.clock.now()))).json.reason,
+        'binding_revoked',
+      )
+
+      assert.equal((await claim(repository)).status, 201)
+      const issued = await exchange(identityToken({ repository }, api.clock.now()))
+      assert.equal(issued.status, 200, JSON.stringify(issued.json))
+      assert.equal(issued.json.org_id, org.orgId)
+
+      // Both rows are still there, and the list shows the withdrawn one rather
+      // than hiding it: after an incident, when a claim was made is the
+      // question, and a deleted row cannot answer it.
+      const listed = await call(admin, 'GET', '/v1/oidc/bindings')
+      const rows = listed.json.bindings as { repository: string; revokedAt: string | null }[]
+      assert.equal(rows.filter((r) => r.repository === repository).length, 2)
+      assert.equal(rows.filter((r) => r.repository === repository && !r.revokedAt).length, 1)
+    })
+
     test('a suspended installation stops the repository reporting', async () => {
       await claim(repository)
       await api.admin`
