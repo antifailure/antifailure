@@ -147,7 +147,7 @@ jobs:
               af load run ${args[@]+"${args[@]}"}
               ;;
             *)
-              af ci --output report.md
+              af ci --report report.md
               ;;
           esac
 
