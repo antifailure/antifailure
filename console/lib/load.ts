@@ -987,7 +987,7 @@ export function readExploration(v: unknown): Exploration | null {
  * The calls
  * ---------------------------------------------------------------------- */
 
-interface Page<T> {
+export interface Page<T> {
   items: T[];
   nextCursor: string | null;
 }

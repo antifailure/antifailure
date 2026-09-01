@@ -22,6 +22,7 @@ import {
 import { StateBadge, VerdictBadge } from "@/components/load/primitives";
 import { SourceHeader, SourceView } from "@/components/load/sources";
 import { Denied, LoadError, SourceSkeleton } from "@/components/load/states";
+import { PageFooter, usePaged } from "@/components/load/paging";
 import {
   KNOBS,
   count,
@@ -342,19 +343,23 @@ function RunsFor({
   onOpen: (runId: string) => void;
   nonce: number;
 }) {
-  const state = useApi<{ items: RunRow[] }>(() => listRuns({ sourceId: id }), [id, nonce]);
+  const state = usePaged<RunRow>(
+    (cursor) => listRuns({ sourceId: id, ...(cursor ? { cursor } : {}) }),
+    [id, nonce],
+  );
   return (
     <Card title="Runs" note="Every run of this source, newest first.">
       {state.status === "error" && state.error ? (
         <LoadError error={state.error} retry={state.reload} />
-      ) : state.status === "loading" || state.data === null ? (
+      ) : state.status === "loading" ? (
         <TableSkeleton rows={4} cols={5} />
-      ) : state.data.items.length === 0 ? (
+      ) : state.items.length === 0 ? (
         <Empty title="Never run">
           This source is configured and has never been sent anywhere. Start it
           above and the result lands here.
         </Empty>
       ) : (
+        <>
         <TableWrap>
           <Table>
             <thead>
@@ -371,7 +376,7 @@ function RunsFor({
               </tr>
             </thead>
             <tbody>
-              {state.data.items.map((r) => (
+              {state.items.map((r) => (
                 <Row key={r.id} onClick={() => onOpen(r.id)}>
                   <Td>
                     <CellLink href={`/load?run=${encodeURIComponent(r.id)}`}>
@@ -395,6 +400,16 @@ function RunsFor({
             </tbody>
           </Table>
         </TableWrap>
+        <PageFooter
+          count={state.items.length}
+          noun="run"
+          hasMore={state.hasMore}
+          pages={state.pages}
+          loadingMore={state.loadingMore}
+          moreError={state.moreError}
+          onMore={state.loadMore}
+        />
+        </>
       )}
     </Card>
   );

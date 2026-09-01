@@ -2,7 +2,6 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useApi } from "@/lib/api";
 import {
   Card,
   CellLink,
@@ -21,6 +20,7 @@ import { SourceDetailView } from "@/components/load/source";
 import { RunView } from "@/components/load/run";
 import { Explorations } from "@/components/load/exploration";
 import { LoadError } from "@/components/load/states";
+import { PageFooter, usePaged } from "@/components/load/paging";
 import {
   SOURCE_FACTS,
   SOURCE_KINDS,
@@ -83,15 +83,18 @@ function KindFilter({
 }
 
 function Sources({ kind, onOpen }: { kind: SourceKind | null; onOpen: (id: string) => void }) {
-  const state = useApi<{ items: SourceRow[] }>(() => listSources(kind ? { kind } : {}), [kind]);
+  const state = usePaged<SourceRow>(
+    (cursor) => listSources({ ...(kind ? { kind } : {}), ...(cursor ? { cursor } : {}) }),
+    [kind],
+  );
 
   return (
     <Card title="Sources" note="What can be sent at a twin, and where each one's traffic came from.">
       {state.status === "error" && state.error ? (
         <LoadError error={state.error} retry={state.reload} />
-      ) : state.status === "loading" || state.data === null ? (
+      ) : state.status === "loading" ? (
         <TableSkeleton rows={5} cols={5} />
-      ) : state.data.items.length === 0 ? (
+      ) : state.items.length === 0 ? (
         kind === null ? (
           <Empty title="No load sources yet">
             A source is traffic with a known origin: a mix compiled from
@@ -106,6 +109,7 @@ function Sources({ kind, onOpen }: { kind: SourceKind | null; onOpen: (id: strin
           </Empty>
         )
       ) : (
+        <>
         <TableWrap>
           <Table>
             <thead>
@@ -118,7 +122,7 @@ function Sources({ kind, onOpen }: { kind: SourceKind | null; onOpen: (id: strin
               </tr>
             </thead>
             <tbody>
-              {state.data.items.map((s) => (
+              {state.items.map((s) => (
                 <Row key={s.id} onClick={() => onOpen(s.id)}>
                   <Td>
                     <CellLink href={`/load?source=${encodeURIComponent(s.id)}`}>{s.name}</CellLink>
@@ -145,24 +149,41 @@ function Sources({ kind, onOpen }: { kind: SourceKind | null; onOpen: (id: strin
             </tbody>
           </Table>
         </TableWrap>
+        <PageFooter
+          count={state.items.length}
+          noun="source"
+          hasMore={state.hasMore}
+          pages={state.pages}
+          loadingMore={state.loadingMore}
+          moreError={state.moreError}
+          onMore={state.loadMore}
+        />
+        </>
       )}
     </Card>
   );
 }
 
 function RecentRuns({ onOpen }: { onOpen: (runId: string) => void }) {
-  const state = useApi<{ items: RunRow[] }>(() => listRuns({ limit: 8 }), []);
+  // Twenty rather than the list default of fifty. This is the second card on a
+  // page whose subject is the sources above it, so it is a recent-activity
+  // glance with a way to go further, not the run history.
+  const state = usePaged<RunRow>(
+    (cursor) => listRuns({ limit: 20, ...(cursor ? { cursor } : {}) }),
+    [],
+  );
   return (
     <Card title="Recent runs" note="Across every source.">
       {state.status === "error" && state.error ? (
         <LoadError error={state.error} retry={state.reload} />
-      ) : state.status === "loading" || state.data === null ? (
+      ) : state.status === "loading" ? (
         <TableSkeleton rows={4} cols={5} />
-      ) : state.data.items.length === 0 ? (
+      ) : state.items.length === 0 ? (
         <Empty title="Nothing has run">
           A run appears the first time load is sent at an environment.
         </Empty>
       ) : (
+        <>
         <TableWrap>
           <Table>
             <thead>
@@ -175,7 +196,7 @@ function RecentRuns({ onOpen }: { onOpen: (runId: string) => void }) {
               </tr>
             </thead>
             <tbody>
-              {state.data.items.map((r) => (
+              {state.items.map((r) => (
                 <Row key={r.id} onClick={() => onOpen(r.id)}>
                   <Td>
                     <CellLink href={`/load?run=${encodeURIComponent(r.id)}`}>
@@ -199,6 +220,16 @@ function RecentRuns({ onOpen }: { onOpen: (runId: string) => void }) {
             </tbody>
           </Table>
         </TableWrap>
+        <PageFooter
+          count={state.items.length}
+          noun="run"
+          hasMore={state.hasMore}
+          pages={state.pages}
+          loadingMore={state.loadingMore}
+          moreError={state.moreError}
+          onMore={state.loadMore}
+        />
+        </>
       )}
     </Card>
   );
