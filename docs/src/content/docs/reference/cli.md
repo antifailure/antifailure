@@ -2044,3 +2044,156 @@ af whoami --offline
 | `--control-plane` | - | The control plane to ask (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
 | `--offline` | `false` | Report the stored credential without asking the control plane. |
 
+### `af workload`
+
+Run a hosted workload definition and report what it measured.
+
+A workload is a selection out of your manifest plus the knobs the command that
+runs it actually has. There are four kinds and they are not four flavours of
+one thing: a mix compiled from production telemetry, a declared HTTP journey, a
+declared browser workflow, and a seeded exploration. They measure materially
+different things and this command keeps them apart.
+
+Everything it runs is already declared in antifailure.yaml. Nothing here can
+send traffic your manifest does not name as safe.
+
+```
+af workload
+```
+
+```
+af workload teardown
+```
+
+Subcommands:
+
+- [`af workload compare`](#af-workload-compare) Difference two workload results of the same kind.
+- [`af workload promote`](#af-workload-promote) Turn an exploration into a versioned workflow definition.
+- [`af workload run`](#af-workload-run) Run one workload and write what it measured.
+- [`af workload teardown`](#af-workload-teardown) Remove the environment and report what was actually removed.
+
+### `af workload compare`
+
+Difference two workload results of the same kind.
+
+Reads two result documents and reports what moved: the run wide numbers, every
+route on either side, and every threshold whose verdict changed.
+
+It is not the differential oracle. 'af oracle' brings a second environment up
+from a baseline revision, branches one golden for both so they start from
+identical rows, and diffs the responses and the database. That is a far
+stronger claim. This differences two runs that already happened, which is
+cheaper, works over history, and is honest about what it cannot control: two
+runs against two environments are not a controlled experiment, and every
+comparison says so in its notes.
+
+```
+af workload compare <baseline.json> <candidate.json>
+```
+
+```
+af workload compare baseline.json candidate.json
+```
+
+### `af workload promote`
+
+Turn an exploration into a versioned workflow definition.
+
+Reads an exploration report, produced by 'af explore -o json', and compiles one
+exploration into the workflow definition a hosted workload runs.
+
+What it will not pretend: the compiled workflow is planned again from the start
+path on every run rather than replayed, so it can take a different route to the
+same goal. Every promotion lists what the compilation could not carry over, one
+sentence each, and records a digest of the journey the exploration walked so a
+later exploration from the same seed can be compared against it.
+
+An exploration that did not reach its goal is refused. The expectation a
+compiled workflow asserts is the goal sentence, and a wander that never got
+there is no evidence the goal is reachable.
+
+```
+af workload promote [report.json] [flags]
+```
+
+```
+# Reads the report af explore -o json writes.
+af workload promote explored.json --only upgrade
+af workload promote explored.json --against promotion.json
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--against` | - | A previous promotion document. Reports whether the route has moved since, instead of promoting. |
+| `--only` | - | Which exploration to promote, when the report holds more than one. |
+| `--persona` | - | Persona the compiled workflow runs as. |
+| `--seed` | - | Seed to quote in the replay command, defaulting to the exploration's own. |
+
+### `af workload run`
+
+Run one workload and write what it measured.
+
+Reads a workload definition, runs it through the command that kind names, and
+writes a result document.
+
+The result carries the plain command that reproduces the run. That is the point
+of it: a hosted measurement nobody can reproduce is a number you have to
+believe. Paste the command, get the same run.
+
+A knob this workload's command has no flag for is refused rather than ignored.
+A definition that sets concurrency on an observed_load fails before anything is
+sent, because af load run has no concurrency flag and honouring it would be a
+promise the run cannot keep.
+
+```
+af workload run [flags]
+```
+
+```
+# The result carries the plain command that reproduces it.
+af workload run --kind observed_load --duration 60s --scale 1
+af workload run --kind http_scenario --select checkout,refund --seed 7
+af workload run --kind browser_workflow --select sign-in --result result.json
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to run against, defaulting to the checked out one. |
+| `--concurrency` | - | Ceiling on requests in flight. http_scenario only. |
+| `--duration` | - | How long to send load for, as a Go duration. observed_load only. |
+| `--kind` | - | Which kind of workload: observed_load, http_scenario, browser_workflow or exploration. |
+| `--result` | - | Write the result document here as well as to the terminal. |
+| `--run-id` | - | The control plane's identifier for this run, echoed back in the result. |
+| `--scale` | - | Multiplier on production's rate. observed_load only. |
+| `--seed` | - | Makes two runs do the same thing. A number for load, free text for exploration. |
+| `--select` | - | Comma separated names from the manifest this workload runs. |
+| `--teardown` | `false` | Remove the environment when the work ends, however it ends. |
+| `--timeout` | `0s` | Give up after this long and report a timeout rather than hanging. |
+
+### `af workload teardown`
+
+Remove the environment and report what was actually removed.
+
+The same teardown 'af down' performs, with a machine readable acknowledgement.
+
+It exists because a hosted teardown used to be a row marked torn down and a
+comment saying the engine reads the row. Nothing read the row, so containers
+kept running while the console said the environment was gone and the bill kept
+growing. This reaches the runtime and says what it found: how many resources
+were removed, and every one that is still standing with the reason it could
+not be.
+
+```
+af workload teardown [flags]
+```
+
+```
+af workload teardown
+af workload teardown --result torn-down.json
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch whose environment to remove. |
+| `--result` | - | Write the acknowledgement here as well. |
+

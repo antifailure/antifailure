@@ -342,6 +342,27 @@ const (
 	AFSEC004 Code = "AF-SEC-004"
 	// The environment certificate could not be created: {detail}
 	AFSEC010 Code = "AF-SEC-010"
+
+	// Workloads
+	// There is no workload kind called {kind}.
+	AFWLD001 Code = "AF-WLD-001"
+	// The {kind} kind cannot set {knobs}.
+	AFWLD002 Code = "AF-WLD-002"
+	// The {knob} value {value} is not what this workload's command takes:
+	// {detail}
+	AFWLD003 Code = "AF-WLD-003"
+	// The {kind} kind must name what it runs: {detail}
+	AFWLD004 Code = "AF-WLD-004"
+	// The exploration {exploration} cannot be promoted: {detail}
+	AFWLD010 Code = "AF-WLD-010"
+	// These two workload results cannot be compared: {detail}
+	AFWLD011 Code = "AF-WLD-011"
+	// The workload found a failure: {detail}
+	AFWLD012 Code = "AF-WLD-012"
+	// The workload proved nothing: {detail}
+	AFWLD013 Code = "AF-WLD-013"
+	// The workload did not finish: {detail}
+	AFWLD014 Code = "AF-WLD-014"
 )
 
 // catalog is the generated lookup table.
@@ -1506,5 +1527,86 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/egress",
 		Retryable: true,
 		ExitCode:  ExitFailure,
+	},
+	AFWLD001: {
+		Code:      AFWLD001,
+		Area:      "WLD",
+		Message:   "There is no workload kind called {kind}.",
+		NextStep:  "Use one of {known}, spelled the way the control plane spells it.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFWLD002: {
+		Code:      AFWLD002,
+		Area:      "WLD",
+		Message:   "The {kind} kind cannot set {knobs}.",
+		NextStep:  "Remove it from the workload version. The command a {kind} runs has no flag for it, so honouring it would be a promise the run cannot keep.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFWLD003: {
+		Code:      AFWLD003,
+		Area:      "WLD",
+		Message:   "The {knob} value {value} is not what this workload's command takes: {detail}",
+		NextStep:  "Correct the value in the workload version, then run it again.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFWLD004: {
+		Code:      AFWLD004,
+		Area:      "WLD",
+		Message:   "The {kind} kind must name what it runs: {detail}",
+		NextStep:  "List the scenarios or goals the workload selects, by the names the manifest declares.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFWLD010: {
+		Code:      AFWLD010,
+		Area:      "WLD",
+		Message:   "The exploration {exploration} cannot be promoted: {detail}",
+		NextStep:  "Promote an exploration that reached its goal. One that was blocked has no journey to compile.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFWLD011: {
+		Code:      AFWLD011,
+		Area:      "WLD",
+		Message:   "These two workload results cannot be compared: {detail}",
+		NextStep:  "Compare two runs of the same workload kind. A mix and a browser workflow measure different things and a difference between them would be arithmetic on unlike numbers.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFWLD012: {
+		Code:      AFWLD012,
+		Area:      "WLD",
+		Message:   "The workload found a failure: {detail}",
+		NextStep:  "The result document above names what failed. Reproduce it with the command it carries.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
+	},
+	AFWLD013: {
+		Code:      AFWLD013,
+		Area:      "WLD",
+		Message:   "The workload proved nothing: {detail}",
+		NextStep:  "A run that measured nothing is not a run that found nothing. The result says which routes were refused or which selection matched no declared name.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitVerification,
+	},
+	AFWLD014: {
+		Code:      AFWLD014,
+		Area:      "WLD",
+		Message:   "The workload did not finish: {detail}",
+		NextStep:  "The environment was torn down where the run asked for it. Run it again, or raise the deadline.",
+		Docs:      "concepts/workloads",
+		Retryable: true,
+		ExitCode:  ExitInterruptedClean,
 	},
 }
