@@ -94,13 +94,20 @@ export function SiteFooter() {
           {LEGAL_LINKS.map((item) => (
             <Link
               key={item.href}
-              // The text is 20px tall and DPA is 25px wide, so the padding is
-              // what makes the target and the negative margin is what keeps the
-              // row looking the same. 10px of side padding is deliberate rather
-              // than round: DPA needs 19px to reach 44 and the column gap is
+              // `leading-5` before the padding, and it is load bearing rather
+              // than tidy. 13px text inherits the 1.5 line height, so the line
+              // box is 19.5px and 12px of padding either side reaches 43.5, not
+              // 44. Half a pixel short is still short, and it measures 43.5 in
+              // a browser while the arithmetic that produced it says 44, which
+              // is the kind of gap a screenshot cannot show. Pinning the line
+              // box at 20px makes the number the comment claims the number the
+              // element renders.
+              //
+              // 10px of side padding is deliberate rather than round: DPA is
+              // 25px wide and needs 19px to reach 44, and the column gap is
               // 20px at 375, so two neighbours meeting in the middle of it end
               // up exactly touching with nothing to spare.
-              className="px-2.5 py-3 -mx-2.5 -my-3 transition-colors duration-200 hover:text-white"
+              className="px-2.5 py-3 -mx-2.5 -my-3 leading-5 transition-colors duration-200 hover:text-white"
               href={item.href}
             >
               {item.text}
