@@ -467,7 +467,7 @@ code { font-family: var(--mono); font-size: 0.86em; letter-spacing: 0; }
   font-variant-numeric: tabular-nums;
 }
 .freshness b { color: var(--ink); font-weight: 600; }
-.freshness .sep { color: var(--rule-strong); padding: 0 8px; }
+.freshness .sep { color: var(--muted); padding: 0 8px; }
 
 /* -------------------------------------------------------------- components */
 
@@ -647,7 +647,7 @@ h2.block-title {
   font-size: 12px;
 }
 .update-head b { text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
-.update-head time { font-family: var(--mono); color: var(--dim); letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.update-head time { font-family: var(--mono); color: var(--muted); letter-spacing: 0; font-variant-numeric: tabular-nums; }
 .update-body { margin: 3px 0 0; font-size: 15px; color: var(--muted); max-width: 68ch; }
 .incident--open .update-body { color: var(--ink); }
 
@@ -708,6 +708,7 @@ footer {
   .row-meta, .figures { font-size: 14px; }
   .axis { font-size: 12px; }
   .block-note, footer { font-size: 14px; }
+  .figures b { font-size: 12px; }
   .incident-meta { font-size: 14px; }
 }
 

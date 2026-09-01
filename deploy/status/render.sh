@@ -57,6 +57,16 @@ done
 [ -f "$TARGETS" ] || { echo "render.sh: no targets at $TARGETS" >&2; exit 1; }
 [ -f "$PAGE_JQ" ] || { echo "render.sh: no page program at $PAGE_JQ" >&2; exit 1; }
 
+# Every intermediate below goes through a file rather than a shell variable.
+# `jq --argjson history "$merged"` is the obvious way to write this and it
+# fails in production rather than in a test: the whole record travels on the
+# command line, and seven components at the retention cap is well over a
+# megabyte, which is past ARG_MAX. The symptom is "Argument list too long" and
+# a page that silently stops updating once the history is big enough, which is
+# to say months after anyone would connect the two.
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
 mkdir -p "$OUT"
 [ -f "$HISTORY" ] || echo '[]' > "$HISTORY"
 [ -f "$DAILY" ] || echo '{"counted_through":{},"days":[]}' > "$DAILY"
@@ -78,9 +88,9 @@ jq -e 'type == "object" and (.days | type) == "array"' "$DAILY" > /dev/null 2>&1
 # One bad line must not cost the whole run's readings. `jq -s` over a .jsonl
 # with one malformed line parses nothing at all, so each line is read as text
 # and parsed on its own, and the ones that do not parse are counted.
-new="$(jq -R -s 'split("\n") | map(select(length > 0)) | map(fromjson? // empty)' "$READINGS")"
+jq -R -s 'split("\n") | map(select(length > 0)) | map(fromjson? // empty)' "$READINGS" > "$TMP/new.json"
 new_lines="$(grep -c '[^[:space:]]' "$READINGS" || true)"
-new_ok="$(jq 'length' <<<"$new")"
+new_ok="$(jq 'length' "$TMP/new.json")"
 dropped_new=$(( new_lines - new_ok ))
 [ "$dropped_new" -gt 0 ] && echo "::warning::$dropped_new of $new_lines lines in $READINGS did not parse and were skipped" >&2
 
@@ -98,20 +108,19 @@ readable='
     and ((((.id? // .name?) // "") | length) > 0);
   map(select(usable))'
 
-usable="$(jq -n --slurpfile old "$HISTORY" --argjson new "$new" "
-  ((\$old[0] + \$new) | $readable) | sort_by(.checked_at)")"
+jq -n --slurpfile old "$HISTORY" --slurpfile new "$TMP/new.json" "
+  ((\$old[0] + \$new[0]) | $readable) | sort_by(.checked_at)" > "$TMP/usable.json"
 
-merged="$(jq -n --argjson all "$usable" \
-  --argjson keep "$KEEP_READINGS" --argjson days "$KEEP_READING_DAYS" --argjson now "$NOW_EPOCH" '
-  $all as $all
+jq --argjson keep "$KEEP_READINGS" --argjson days "$KEEP_READING_DAYS" --argjson now "$NOW_EPOCH" '
+  . as $all
   | ($now - ($days * 86400)) as $floor
   | [ ($all | group_by(.id // .name))[]
       | map(select((.checked_at | fromdateiso8601) >= $floor))
       | sort_by(.checked_at)
       | .[-$keep:][] ]
   | sort_by(.checked_at)
-')"
-dropped_old=$(( $(jq 'length' "$HISTORY") + new_ok - $(jq 'length' <<<"$usable") ))
+' "$TMP/usable.json" > "$TMP/merged.json"
+dropped_old=$(( $(jq 'length' "$HISTORY") + new_ok - $(jq 'length' "$TMP/usable.json") ))
 
 # The rollups.
 #
@@ -134,13 +143,14 @@ dropped_old=$(( $(jq 'length' "$HISTORY") + new_ok - $(jq 'length' <<<"$usable")
 # is not counted. The probe writes one batch per run with a single timestamp
 # and the workflow serialises its own runs, so that does not happen; it is
 # recorded here because it is the assumption that would have to break.
-daily="$(jq -n --slurpfile old "$DAILY" --argjson rows "$usable" \
+jq -n --slurpfile old "$DAILY" --slurpfile rows "$TMP/usable.json" \
   --argjson days "$KEEP_DAILY_DAYS" --argjson now "$NOW_EPOCH" '
   def ok: if has("ok") and ((.ok | type) == "boolean") then .ok
           elif has("ready") and ((.ready | type) == "boolean") then .ready
           else false end;
 
-  ($old[0] // {}) as $prev
+  ($rows[0]) as $rows
+  | ($old[0] // {}) as $prev
   | ($prev.counted_through // {}) as $mark
   | (($prev.days // []) | map(select(type == "object" and (.id | type) == "string"
         and (.day | type) == "string" and (.checks | type) == "number"
@@ -166,22 +176,23 @@ daily="$(jq -n --slurpfile old "$DAILY" --argjson rows "$usable" \
                                       | from_entries
                                 | with_entries(.value = ([.value, ($mark[.key] // "")] | max)))),
       days: ($all | map(select(.day >= $floor)) | sort_by([.id, .day])) }
-')"
+' > "$TMP/daily.json"
 
-incidents="$("$HERE/incidents.sh" collect "$INCIDENT_DIR")"
+"$HERE/incidents.sh" collect "$INCIDENT_DIR" > "$TMP/incidents.json"
 
-printf '%s\n' "$merged" > "$HISTORY"
-printf '%s\n' "$daily" > "$DAILY"
+cp "$TMP/merged.json" "$HISTORY"
+cp "$TMP/daily.json" "$DAILY"
+jq -c '.days' "$TMP/daily.json" > "$TMP/days.json"
 
 jq -r -n -f "$PAGE_JQ" \
   --argjson now "$NOW_EPOCH" \
-  --argjson targets "$(jq -c '.' "$TARGETS")" \
-  --argjson history "$merged" \
-  --argjson daily "$(jq -c '.days' <<<"$daily")" \
-  --argjson incidents "$incidents" \
+  --slurpfile targets "$TARGETS" \
+  --slurpfile history "$TMP/merged.json" \
+  --slurpfile daily "$TMP/days.json" \
+  --slurpfile incidents "$TMP/incidents.json" \
   --argjson dropped "$(( dropped_new + (dropped_old > 0 ? dropped_old : 0) ))" \
   --argjson stripDays "$STRIP_DAYS" \
   --arg generated "$GENERATED" \
   > "$OUT/index.html"
 
-echo "rendered $(jq 'length' <<<"$merged") readings and $(jq '.days | length' <<<"$daily") daily rollups into $OUT/index.html"
+echo "rendered $(jq 'length' "$TMP/merged.json") readings and $(jq '.days | length' "$TMP/daily.json") daily rollups into $OUT/index.html"
