@@ -197,14 +197,24 @@ workflows:
 
   - name: edit-a-network-policy
     description: >-
-      As the owner, go to the network policy page and check that it lists the
-      hosts the policy names and offers a way to explain a decision.
+      As the owner, go to the network policy page and check that it offers a
+      way to explain a decision and shows the approval queue as somebody who
+      can approve from it.
     persona: owner
     start_path: /network
     expect:
       - "Effective policy"
-      - "Host"
       - "Explain a request"
+      # The sentence the approval queue carries only for a role that can
+      # approve, which is what makes this an assertion about the owner rather
+      # than about the page. It said "Host" here, and "Host" is a column
+      # heading in three separate tables and a field label in the explain form,
+      # so it was satisfied by any of them and distinguished nothing. It also
+      # went with a description saying the page lists the hosts the policy
+      # names, which this environment's page does not: every rule in the
+      # branched golden is proposed and none is approved, so the effective
+      # policy is empty and says so.
+      - "None of these is being enforced anywhere until it is approved"
     tags: [policy]
 
   - name: read-the-audit-log
@@ -220,13 +230,21 @@ workflows:
 
   - name: a-viewer-cannot-edit-policy
     description: >-
-      As the viewer, open the network policy page and check that the form for
-      proposing a rule is not usable.
+      As the viewer, open the network policy page and check that it says
+      approving an egress change is somebody else's job.
     persona: viewer
     start_path: /network
     expect:
       - "Effective policy"
-      - "Host"
+      # The only string on this page that an owner does not also see, and the
+      # reason this workflow now proves anything. It expected "Effective
+      # policy" and "Host", both of which the owner's page shows too, so a
+      # viewer who could propose and approve every rule would have passed a
+      # workflow named for not being able to. An expectation cannot assert an
+      # absence, because the checker matches words that are present, so the
+      # role is asserted through the sentence the console shows exactly when
+      # the propose form and the approve column are withheld.
+      - "Approving an egress change needs owner or admin"
     tags: [policy, rbac]
 
 invariants:
