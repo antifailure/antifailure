@@ -14,10 +14,11 @@
  * below.
  */
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+// `/docs`, not `/docs/`, matching www/lib/nav.ts. See SiteChrome.astro.
 const nav = [
   { text: "Product", href: "/product" },
   { text: "Solutions", href: "/solutions" },
-  { text: "Docs", href: `${base}/` },
+  { text: "Docs", href: base || "/" },
   { text: "Writing", href: "/blog" },
   { text: "Pricing", href: "/pricing" },
   { text: "GitHub", href: "https://github.com/antifailure/antifailure", external: true },
