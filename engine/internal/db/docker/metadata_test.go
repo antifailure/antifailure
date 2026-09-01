@@ -41,10 +41,11 @@ func TestGoldenMetadata_SurvivesARoundTrip(t *testing.T) {
 	defer cancel()
 
 	const rules = "abc123def456"
+	const prov = "gp1-metadata-round-trip"
 	const attestation = `{"report":{"columns":84},"golden":"x","signature":"sig"}`
 
 	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
-		Version: 17, RulesHash: rules,
+		Version: 17, RulesHash: rules, Provenance: prov,
 		Mask: func(context.Context, secrets.Value) error { return nil },
 		Verify: func(context.Context, secrets.Value) (string, error) {
 			return attestation, nil
@@ -58,6 +59,7 @@ func TestGoldenMetadata_SurvivesARoundTrip(t *testing.T) {
 	}()
 
 	require.Equal(t, rules, gv.RulesHash, "the refresh itself has to report it")
+	require.Equal(t, prov, gv.Provenance, "and the project it was made for")
 
 	// The part that was broken: a different process, asking the provider what
 	// exists, rather than the struct the refresh happened to return.
@@ -73,6 +75,9 @@ func TestGoldenMetadata_SurvivesARoundTrip(t *testing.T) {
 	require.NotNil(t, found, "the golden that was just published is not listed")
 	require.Equal(t, rules, found.RulesHash,
 		"the rules digest did not survive, so golden selection cannot use it")
+	require.Equal(t, prov, found.Provenance,
+		"the project the golden was made for did not survive, so `af up` cannot tell "+
+			"this project's golden from another project's and will refuse both")
 	require.Equal(t, attestation, found.Attestation,
 		"the attestation did not survive, so the comment cannot report the masking")
 	require.True(t, found.Verified)
