@@ -58,6 +58,14 @@ const (
 	// separate checks read those fields, and both were silently inert.
 	LabelRules       = "dev.antifailure.rules"
 	LabelAttestation = "dev.antifailure.attestation"
+	// LabelProvenance is which project a golden was made for, and out of what.
+	//
+	// Separate from LabelRules because the two answer different questions and
+	// the daemon is shared. The rules digest says how a golden was masked; two
+	// unrelated projects with no masking.yaml were masked identically and
+	// share it, which is how `af up` in one project branched another project's
+	// production data. This says whose it is.
+	LabelProvenance = "dev.antifailure.provenance"
 	// LabelService is the manifest service name a container runs.
 	LabelService = "dev.antifailure.service"
 	// LabelServiceKind is web, worker, or cron.

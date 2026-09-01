@@ -555,6 +555,21 @@ branched whichever verified golden was newest regardless of which manifest made
 it, so a preview of one project could come up holding a masked copy of another
 project's database.
 
+That last one was fixed twice, and the first fix is worth recording because it
+looked right. Selection was narrowed to the masking rules digest, which is a
+statement about how a golden was masked and not about whose it is: a project
+with no `masking.yaml` declares no rules, and every project on a machine
+without one therefore hashed to the same value and shared one pool. Reproduced
+on 2026-09-01 with the released binary and two ordinary Express repositories:
+one declared a production database and refreshed a golden from it, the other
+declared none, printed in its own generated manifest that "branches will start
+empty", and came up holding the first project's tables and rows. A golden now
+records the project it was made for along with the source variable, the seed,
+the rules, the subset and the Postgres major (`engine/internal/env/provenance.go`),
+selection is exact equality on that, `af golden pull` refuses a published
+golden made for another project, `af golden gc` no longer collects other
+projects' goldens, and every branch line says where its data came from.
+
 ## Phase 14. Scaling
 
 | Sub-phase | State | Notes |
