@@ -218,8 +218,8 @@ errors:
     exit_code: 5
   - code: AF-DB-012
     area: DB
-    message: "No golden matches this manifest's masking rules, and {count} were made under different ones."
-    next_step: "Run 'af golden refresh' to make one from the source this manifest names."
+    message: "No golden here was made for this project, and {count} were made for something else."
+    next_step: "Run 'af golden refresh' to make one from the source this manifest names. A golden is chosen by the project it was made for, the database it was copied from, the masking rules, the subset and the Postgres version, so one belonging to another project on this machine is never branched here."
     docs: concepts/goldens
     retryable: false
     exit_code: 5

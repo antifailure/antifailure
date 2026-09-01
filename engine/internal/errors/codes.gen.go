@@ -93,8 +93,8 @@ const (
 	AFDB010 Code = "AF-DB-010"
 	// The subset could not be taken: {detail}
 	AFDB011 Code = "AF-DB-011"
-	// No golden matches this manifest's masking rules, and {count} were
-	// made under different ones.
+	// No golden here was made for this project, and {count} were made for
+	// something else.
 	AFDB012 Code = "AF-DB-012"
 	// The database seed command failed: {detail}
 	AFDB013 Code = "AF-DB-013"
@@ -664,8 +664,8 @@ var catalog = map[Code]Entry{
 	AFDB012: {
 		Code:      AFDB012,
 		Area:      "DB",
-		Message:   "No golden matches this manifest's masking rules, and {count} were made under different ones.",
-		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names.",
+		Message:   "No golden here was made for this project, and {count} were made for something else.",
+		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names. A golden is chosen by the project it was made for, the database it was copied from, the masking rules, the subset and the Postgres version, so one belonging to another project on this machine is never branched here.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,

@@ -388,9 +388,9 @@ The subset could not be taken: {detail}
 
 ### AF-DB-012
 
-No golden matches this manifest's masking rules, and {count} were made under different ones.
+No golden here was made for this project, and {count} were made for something else.
 
-**What to do.** Run 'af golden refresh' to make one from the source this manifest names.
+**What to do.** Run 'af golden refresh' to make one from the source this manifest names. A golden is chosen by the project it was made for, the database it was copied from, the masking rules, the subset and the Postgres version, so one belonging to another project on this machine is never branched here.
 
 | | |
 | --- | --- |
