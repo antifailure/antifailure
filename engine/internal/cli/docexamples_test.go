@@ -32,6 +32,24 @@ var (
 	afLine = regexp.MustCompile(`(?m)^\s*(?:[a-z_]+=\$\()?af\s+([^\n|>&;#]*)`)
 	// A long flag, with or without a value.
 	longFlag = regexp.MustCompile(`--[a-zA-Z][a-zA-Z0-9-]*`)
+	// A command inside an inline code span or inside single quotes, which is
+	// how prose names one and how the generated error reference renders every
+	// remedy.
+	//
+	// afLine alone was not enough, and the gap was invisible for the reason
+	// Standard 28a names: it is a correct instrument pointed at an assumption
+	// about SHAPE. Anchoring on ^ says a command occupies its own line, which
+	// is true of a fenced example and false of a sentence, so all 127 remedies
+	// on reference/errors.md were outside what this gate could see. Three
+	// instances of a command that does not exist accumulated underneath it,
+	// one of them printed by the engine itself: AF-DB-004 told a reader to run
+	// af up --golden, and af up has no such flag.
+	//
+	// Delimited on both sides on purpose. An unterminated span is prose with an
+	// apostrophe in it, and reading to the end of the line would turn "the
+	// environment's af doctor output" into a command.
+	afInBackticks = regexp.MustCompile("`af\\s+([^`\n]*)`")
+	afInQuotes    = regexp.MustCompile(`'af\s+([^'\n]*)'`)
 )
 
 func docsDir() string {
@@ -60,7 +78,11 @@ func TestEveryCommandInTheDocsExists(t *testing.T) {
 
 		enterprisePage := strings.HasPrefix(rel, "enterprise"+string(filepath.Separator))
 
-		for _, match := range afLine.FindAllStringSubmatch(string(body), -1) {
+		var matches [][]string
+		for _, re := range []*regexp.Regexp{afLine, afInBackticks, afInQuotes} {
+			matches = append(matches, re.FindAllStringSubmatch(string(body), -1)...)
+		}
+		for _, match := range matches {
 			line := strings.TrimSpace(match[1])
 			if line == "" {
 				continue

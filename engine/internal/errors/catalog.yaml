@@ -184,7 +184,7 @@ errors:
   - code: AF-DB-004
     area: DB
     message: "The golden version {version} no longer exists."
-    next_step: "Run 'af golden list' to see the available versions, then 'af up --golden <version>'."
+    next_step: "Run 'af golden list' to see what exists, or 'af golden refresh' to make one. 'af up' chooses a version itself."
     docs: concepts/goldens
     retryable: false
     exit_code: 5

@@ -318,7 +318,7 @@ The source database is Postgres {found}, and this provider supports {supported}.
 
 The golden version {version} no longer exists.
 
-**What to do.** Run 'af golden list' to see the available versions, then 'af up --golden <version>'.
+**What to do.** Run 'af golden list' to see what exists, or 'af golden refresh' to make one. 'af up' chooses a version itself.
 
 | | |
 | --- | --- |

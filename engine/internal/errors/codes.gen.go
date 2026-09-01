@@ -593,7 +593,7 @@ var catalog = map[Code]Entry{
 		Code:      AFDB004,
 		Area:      "DB",
 		Message:   "The golden version {version} no longer exists.",
-		NextStep:  "Run 'af golden list' to see the available versions, then 'af up --golden <version>'.",
+		NextStep:  "Run 'af golden list' to see what exists, or 'af golden refresh' to make one. 'af up' chooses a version itself.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
