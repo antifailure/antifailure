@@ -28,6 +28,7 @@ import {
   retryRun,
   seconds,
   STATUS_FACTS,
+  verdictContradiction,
   type RunDetail as Run,
 } from "@/lib/workloads";
 
@@ -180,6 +181,8 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
 
   const fact = STATUS_FACTS[run.status];
   const results = run.results;
+  const contradiction =
+    results === null ? null : verdictContradiction(run.status, results.thresholds);
   const partial =
     results !== null && (results.partial || isRunning(run.status) || run.status === "cancelled");
 
@@ -326,6 +329,19 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
                 : "Read these against the status above. This run did not reach a verdict."
             }
           >
+            {/* A contradiction between the headline verdict and the table under
+                it is said out loud rather than left for a reader to notice.
+                The console cannot correct a status the control plane computed,
+                but presenting a pass over a broken or unevaluated threshold
+                without comment is how a green run over nothing survives. */}
+            {contradiction ? (
+              <p
+                role="alert"
+                className="border-b border-rule bg-[rgba(138,90,0,0.07)] px-4 py-2.5 text-[12.5px] leading-6 text-warn"
+              >
+                {contradiction}
+              </p>
+            ) : null}
             <Thresholds thresholds={results.thresholds} />
           </Card>
 

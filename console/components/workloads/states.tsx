@@ -203,7 +203,14 @@ export function Command({ command }: { command: string | null }) {
   return (
     <div className="px-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <pre className="scroll-x min-w-0 flex-1 rounded-md border border-rule bg-[rgba(16,16,16,0.03)] px-3 py-2.5 font-mono text-[12.5px] leading-6 text-ink">
+        {/* overflow-x-auto by hand, NOT the shared .scroll-x helper. That
+            class turns itself off below 640px (globals.css sets it to
+            overflow-x: visible there) because at that width the tables it was
+            written for stop scrolling and stack instead. A command block does
+            not stack, so borrowing the class clipped a long command dead at
+            the card edge on a phone: no scrollbar, no ellipsis, just a
+            sentence that stopped. */}
+        <pre className="min-w-0 flex-1 overflow-x-auto rounded-md border border-rule bg-[rgba(16,16,16,0.03)] px-3 py-2.5 font-mono text-[12.5px] leading-6 text-ink">
           <code>{command}</code>
         </pre>
         <Button

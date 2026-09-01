@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { Badge, Button, Empty, Row, Table, TableWrap, Td, Th, When } from "@/components/ui";
-import { Provenance } from "@/components/workloads/primitives";
+import { Provenance, RouteCell } from "@/components/workloads/primitives";
 import {
   KIND_FACTS,
   count,
@@ -111,8 +111,7 @@ function Observed({ s }: { s: ObservedSource }) {
                 .map((r) => (
                   <Row key={`${r.method ?? ""} ${r.route}`}>
                     <Td mono>
-                      {r.method ? <span className="text-dim">{r.method} </span> : null}
-                      {r.route}
+                      <RouteCell method={r.method} route={r.route} />
                     </Td>
                     <Td label="Share">
                       <span className="flex items-center gap-3">
@@ -198,8 +197,7 @@ function Deterministic({ s }: { s: DeterministicSource }) {
                   <Td numeric>{i + 1}</Td>
                   <Td label="Name">{step.name}</Td>
                   <Td label="Route" mono>
-                    {step.method ? <span className="text-dim">{step.method} </span> : null}
-                    {step.route}
+                    <RouteCell method={step.method} route={step.route} />
                   </Td>
                   <Td label="Weight" numeric>
                     {step.weight === null ? "--" : step.weight}
@@ -286,8 +284,7 @@ function Exploratory({
               {s.discoveries.map((d) => (
                 <Row key={d.id}>
                   <Td mono>
-                    {d.method ? <span className="text-dim">{d.method} </span> : null}
-                    {d.route}
+                    <RouteCell method={d.method} route={d.route} />
                   </Td>
                   <Td label="Reached">
                     <When value={d.reachedAt} />

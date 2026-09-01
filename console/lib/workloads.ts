@@ -654,6 +654,41 @@ export function readResults(v: unknown): Results | null {
   };
 }
 
+/**
+ * A run whose headline verdict does not match its own thresholds.
+ *
+ * This exists because of the specific way this product has been wrong before:
+ * a nightly corpus reported six passing workflows having never once reached an
+ * agent, and every summary anybody read said green. The console cannot fix a
+ * status the control plane computed, but it can refuse to present a
+ * contradiction silently.
+ *
+ * Only a conclusive status is checked. An inconclusive one already says it is
+ * inconclusive, and flagging a blocked run for having unevaluated thresholds
+ * would be restating its own definition at a reader.
+ *
+ * Returns null when the run and its thresholds agree, which is the normal case.
+ */
+export function verdictContradiction(
+  status: RunStatus,
+  thresholds: Threshold[],
+): string | null {
+  if (!STATUS_FACTS[status].conclusive) return null;
+  const broke = thresholds.filter((t) => t.outcome === "broke").length;
+  const unevaluated = thresholds.filter((t) => t.outcome === "not_evaluated").length;
+
+  if (status === "passed" && broke > 0) {
+    return `This run is recorded as passed, but ${broke === 1 ? "one threshold below broke" : `${broke} of the thresholds below broke`}. One of the two is wrong and the run should not be read as a pass until it is known which.`;
+  }
+  if (status === "passed" && unevaluated > 0) {
+    return `This run is recorded as passed, but ${unevaluated === 1 ? "one threshold was never evaluated" : `${unevaluated} thresholds were never evaluated`}. A threshold nothing measured has not held, so this pass covers less than it appears to.`;
+  }
+  if (status === "failed" && broke === 0) {
+    return "This run is recorded as failed, but no threshold below broke. The reason it failed is not in this table.";
+  }
+  return null;
+}
+
 export interface RunDetail extends RunRow {
   results: Results | null;
   /** Why it stopped, when that is not obvious from the status. A cancellation

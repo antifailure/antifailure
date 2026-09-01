@@ -78,8 +78,22 @@ export function Provenance({ kind, className = "" }: { kind: Kind; className?: s
 export function statusTone(status: RunStatus): Tone {
   if (status === "passed") return "pass";
   if (status === "failed") return "fail";
-  if (status === "blocked" || status === "unverified" || status === "errored") return "warn";
-  return "neutral";
+  // Everything else is amber, including the four in-progress states. Two
+  // reasons, and the second one is a defect this console has already had once.
+  //
+  // Green and red are the only colours that carry a verdict here, so anything
+  // that is not a verdict must not be able to borrow one. And `toneFor` in
+  // ui.tsx already paints queued, starting and building amber, with a comment
+  // explaining that leaving them neutral made an environment still being built
+  // look exactly like one that had been torn down. The first draft of this
+  // function had that bug back: `running` and `cancelled` were both neutral
+  // and rendered identically in the run list.
+  //
+  // Cancelled keeps neutral on purpose. It is the one outcome that is over,
+  // settled and not a judgement, so it is the thing amber has to be different
+  // from.
+  if (status === "cancelled") return "neutral";
+  return "warn";
 }
 
 /**
@@ -232,5 +246,28 @@ export function LatencyLadder({ percentiles }: { percentiles: Percentile[] }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------
+ * Routes in a table
+ * ---------------------------------------------------------------------- */
+
+/**
+ * A route path in a table cell, bounded so a long one cannot cross the column.
+ *
+ * The bound has to be on a block INSIDE the cell, not on the cell. Under the
+ * automatic table layout these tables use, `max-width` on a `<td>` is advisory
+ * and a long unbroken path ignores it: a 78 character route ran straight
+ * through the neighbouring column and printed on top of the request count.
+ * A block element inside the cell honours the width, and `break-all` gives the
+ * browser somewhere to break a path that has no spaces in it.
+ */
+export function RouteCell({ method, route }: { method?: string | null; route: string }) {
+  return (
+    <span className="block break-all sm:max-w-[44ch]">
+      {method ? <span className="text-dim">{method} </span> : null}
+      {route}
+    </span>
   );
 }

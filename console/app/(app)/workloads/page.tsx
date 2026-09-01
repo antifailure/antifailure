@@ -64,7 +64,10 @@ function KindFilter({
             type="button"
             onClick={() => onChange(o.key)}
             aria-pressed={active}
-            className={`inline-flex h-9 items-center rounded-md px-3 text-[13px] font-medium transition-colors ${
+            // min-w-11 because "All" is four characters and h-9 plus px-3
+            // came to 40px wide under a thumb. globals.css raises the height
+            // to 44 on a phone and cannot know about the width.
+            className={`inline-flex h-9 min-w-11 items-center justify-center rounded-md px-3 text-[13px] font-medium transition-colors ${
               active
                 ? "bg-ink text-white"
                 : "border border-rule bg-card text-muted hover:border-rule-strong hover:text-ink"

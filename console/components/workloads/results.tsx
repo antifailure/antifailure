@@ -19,6 +19,7 @@ import {
   type RouteDelta,
   type Threshold,
 } from "@/lib/workloads";
+import { RouteCell } from "@/components/workloads/primitives";
 
 /* -------------------------------------------------------------------------
  * Thresholds
@@ -202,10 +203,7 @@ export function RouteDeltas({ routes }: { routes: RouteDelta[] }) {
             {sorted.map((r) => (
               <Row key={`${r.method ?? ""} ${r.route}`}>
                 <Td mono>
-                  {r.method ? (
-                    <span className="text-dim">{r.method} </span>
-                  ) : null}
-                  {r.route}
+                  <RouteCell method={r.method} route={r.route} />
                 </Td>
                 <Td label="Requests" numeric>
                   {count(r.requests)}
@@ -220,11 +218,17 @@ export function RouteDeltas({ routes }: { routes: RouteDelta[] }) {
                   {/* The number leads and the bar follows it, so a reader who
                       cannot see the bar's colour or its side has already been
                       told the direction in words. */}
-                  <span className="flex min-w-[16ch] items-center gap-3">
+                  {/* The bar is a fixed 64px and does not flex. As flex-1
+                      with a min width it grew the column until the table was
+                      wider than the card, and the whole chart sat off the
+                      right edge behind a horizontal scroll: a diverging
+                      encoding nobody could see without going looking for it.
+                      A comparison bar only has to be long enough to compare. */}
+                  <span className="flex items-center gap-3">
                     <span className="tnum whitespace-nowrap text-[12.5px]">
                       <DeltaValue d={r} />
                     </span>
-                    <span className="hidden min-w-[80px] flex-1 sm:block">
+                    <span className="hidden w-16 shrink-0 sm:block">
                       <DeltaBar fraction={deltaFraction(r)} largest={largest} />
                     </span>
                   </span>
