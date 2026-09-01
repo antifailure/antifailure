@@ -230,8 +230,8 @@ func exchangeWorkflowIdentity(
 		snippet, _ := io.ReadAll(io.LimitReader(res.Body, 2048))
 		detail := reasonFrom(snippet)
 
-		switch {
-		case res.StatusCode == http.StatusForbidden:
+		switch res.StatusCode {
+		case http.StatusForbidden:
 			// Authenticated and not authorised, which is a different thing and
 			// has to read as one. The commonest case is a repository the
 			// control plane has never been told belongs to this organization,
@@ -246,7 +246,7 @@ func exchangeWorkflowIdentity(
 				"controlplane: %s has not been told that this repository belongs to your "+
 					"organization, so this run is not reported", hostOf(target))
 
-		case res.StatusCode == http.StatusTooManyRequests:
+		case http.StatusTooManyRequests:
 			// Said with the wait, because a rate limit with no number is a
 			// reader guessing whether to look at their own workflow.
 			if wait := retryAfter(res, 0); wait > 0 {
