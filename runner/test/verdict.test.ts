@@ -86,6 +86,21 @@ test('touching a synthesized response is unverified even when it passed', () => 
   assert.match(out.detail, /synthesized/);
 });
 
+test('a page nobody could read is unverified, and it is not the synth case', () => {
+  // These were one cause until now, and the conflation had a cost. The one
+  // mapping that produces unverified was spoken for by "nothing on the page
+  // confirmed or contradicted the expectation", which has nothing to do with a
+  // synthesized response, so the promise that touching one comes back
+  // unverified had a mapping, a test, and a producer firing on something else.
+  // Different conditions, different remedies: a model key here, a sandbox
+  // credential or a fixture there.
+  const out = classify([attempt('page-unreadable', 'nothing confirms it either'),
+                        attempt('succeeded')]);
+  assert.equal(out.verdict, 'unverified');
+  assert.equal(out.cause, 'page-unreadable');
+  assert.notEqual(out.cause, 'synthesized-response');
+});
+
 test('only a real failure fails the build', () => {
   const pass = classify([attempt('succeeded')]);
   const blocked = classify([attempt('runner-failure')]);
@@ -102,6 +117,7 @@ test('every cause maps to a verdict', () => {
   const causes: Cause[] = [
     'succeeded', 'expectation-not-met', 'application-error',
     'runner-failure', 'environment-incomplete', 'synthesized-response',
+    'page-unreadable', 'explored',
   ];
   for (const c of causes) {
     assert.ok(['pass', 'fail', 'flaky', 'blocked', 'unverified'].includes(verdictFor(c)), c);

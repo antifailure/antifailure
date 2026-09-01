@@ -301,7 +301,9 @@ export const ROUTES: readonly Route[] = [
   // while the page under them offered a working GitHub button. The title is the
   // one piece of copy a person reads before the page renders and the only piece
   // that survives being sent to somebody else, so it is the last place a stale
-  // claim should be allowed to sit.
+  // claim should be allowed to sit. The description is served the same way, to
+  // every crawler and every link preview, while the visible page was already
+  // correct and nothing compared the two.
   {
     path: "/signin",
     title: pageTitle("Sign in"),

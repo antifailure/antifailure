@@ -74,7 +74,7 @@ const PRODUCT_FAQ: FaqItem[] = [
   {
     question: "How do I know the masking actually worked?",
     answer:
-      "A scanner reads back every column of every table looking for anything that still parses as an email, a card number, a phone number, or a key, then signs an attestation. An unverified golden cannot be branched, and that is enforced in code rather than in a checklist.",
+      "A scanner reads back every column of every table, sampling rows rather than reading all of them, looking for anything that still parses as an email, a card number, a phone number, or a key, then signs an attestation that records the sample size. An unverified golden cannot be branched, and that is enforced in code rather than in a checklist.",
   },
   {
     question: "What stops a test run from emailing real customers or charging a real card?",
