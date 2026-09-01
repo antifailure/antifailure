@@ -186,6 +186,34 @@ func (o *Orchestrator) runnerEnvironment(ctx context.Context) []string {
 // is started, what happens when it writes nothing, or whether its output is
 // redacted. Two copies would have drifted first at the error path, which is
 // the one nobody exercises by hand.
+// marshalJob writes the document the runner reads, with no null where it
+// expects a list.
+//
+// A nil Go slice marshals as null, and the runner read workflows without a
+// guard, so `af explore` reached it as {"workflows": null} and died on
+// TypeError: Cannot read properties of null (reading 'length') before the
+// browser opened. Every exploration, on every application, since the command
+// was written. Found by running it against examples/next-app rather than by
+// reading either side: both sides compiled and both sides typechecked.
+//
+// A function rather than four lines inside invokeRunner, because a test can
+// call this and cannot call that, and a copy of the rule inside a test is a
+// test of the copy.
+//
+// The runner is made tolerant of a null in the same change. Both halves are
+// deliberate and they are not the same statement: strict on the write, so an
+// engine that sends an empty list is saying there are none; tolerant on the
+// read, so a runner still works against an engine that predates this.
+func marshalJob(job jobDocument) ([]byte, error) {
+	if job.Workflows == nil {
+		job.Workflows = []workflowDoc{}
+	}
+	if job.Personas == nil {
+		job.Personas = []personaDoc{}
+	}
+	return json.Marshal(job)
+}
+
 func (o *Orchestrator) invokeRunner(
 	ctx context.Context, runnerPath string, job jobDocument,
 ) ([]byte, error) {
@@ -196,7 +224,7 @@ func (o *Orchestrator) invokeRunner(
 	if err := os.MkdirAll(job.Artifacts, 0o755); err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFAGT001, "detail", err.Error())
 	}
-	body, err := json.Marshal(job)
+	body, err := marshalJob(job)
 	if err != nil {
 		return nil, err
 	}
