@@ -437,6 +437,16 @@
               }
             }
           },
+          "500": {
+            "description": "The request failed for a reason the control plane did not expect. The body carries a correlation id; nothing about the request payload is logged or returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerFailure"
+                }
+              }
+            }
+          },
           "503": {
             "description": "The process is alive and its database did not answer. The body reports the deployed version and commit, which is what a rollback decision needs.",
             "content": {

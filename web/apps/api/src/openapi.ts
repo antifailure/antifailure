@@ -151,6 +151,11 @@ export function openApiDocument(): Record<string, unknown> {
               'deployed version and commit, which is what a rollback decision needs.',
             content: json({ $ref: '#/components/schemas/Readiness' }),
           },
+          // Reachable, and not from this handler: it catches the database error
+          // itself and answers 503. A 500 here is the middleware in front of it
+          // throwing, which is the same for every route in the service, and the
+          // body is unusual enough to be worth naming wherever it can happen.
+          '500': serverFailure,
         },
       },
     },
