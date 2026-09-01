@@ -273,14 +273,19 @@ describe("a report an engine actually sent", () => {
       const payload = wire(fixture)
       const aggregate = decodeReport(kind, payload).aggregate
       for (const [name, value] of Object.entries(sent(payload))) {
-        // A null is the engine saying this measurement does not apply to this
-        // kind, which is not something to carry anywhere.
-        if (value === null || value === undefined) continue
         const property = lands[name]
+        // The NAME is checked whatever the value, including null. A field the
+        // engine adds is null for the three kinds it does not apply to, and
+        // checking only non-null values would let a new measurement arrive
+        // unnoticed on any regeneration of these fixtures where it happened to
+        // be null. The name is the contract; the value is the check on it.
         if (property === undefined) {
           unnamed.push(`${kind}.${name}`)
           continue
         }
+        // A null IS the engine saying this measurement does not apply to this
+        // kind, so there is nothing for the decoder to have carried.
+        if (value === null || value === undefined) continue
         // The value has to ARRIVE UNCHANGED, not merely arrive. `landed !==
         // null` is not enough and the reason is the whole defect: a request
         // count the decoder could not find falls back to ZERO rather than to
