@@ -174,6 +174,11 @@ func (o *Orchestrator) pullWithin(ctx context.Context, s *session, version strin
 				"an empty database, so a published dump has nowhere to go", s.dbProv.Name()))
 	}
 
+	prov, err := o.provenanceOf()
+	if err != nil {
+		return nil, err
+	}
+
 	if version == "" {
 		available, listErr := golden.VersionsIn(ctx, store)
 		if listErr != nil {
@@ -197,6 +202,27 @@ func (o *Orchestrator) pullWithin(ctx context.Context, s *session, version strin
 		return nil, aferrors.Coded(aferrors.AFDB011, "detail", err.Error())
 	}
 
+	// Whose golden this is, before a byte of it is restored.
+	//
+	// A store is shared on purpose, which is the whole point of publishing,
+	// and with no version named this takes the newest object in it. Without
+	// this check that is the same defect as the local one one layer out: the
+	// newest thing in a bucket several projects publish to is not necessarily
+	// this project's, and restoring it would put another project's masked
+	// production into this project's golden pool, where every later `af up`
+	// would branch it as its own.
+	//
+	// The attestation is where the claim lives because it is the only part of
+	// a published golden that travels with it and is signed. An older
+	// attestation carries none, and one is refused rather than assumed to be
+	// ours: this refusal costs a refresh and naming the version explicitly
+	// still works, where the other way round costs somebody a preview built on
+	// data that was never theirs.
+	if attested := attestedProvenance(attestation); attested != prov.digest() {
+		return nil, aferrors.Coded(aferrors.AFDB015,
+			"version", version, "store", store.Name())
+	}
+
 	result := &PullResult{From: version}
 	rulesHash := attestedRulesHash(attestation)
 
@@ -206,6 +232,12 @@ func (o *Orchestrator) pullWithin(ctx context.Context, s *session, version strin
 		// comparable with one refreshed here under the same rules and shows up
 		// as a different one under different rules.
 		RulesHash: rulesHash,
+		// This project's own identity, not the one read out of the store. The
+		// two are equal, because a mismatch was refused above, and computing
+		// it here rather than copying it is what keeps that true: a pulled
+		// golden that recorded a foreign identity would be unbranchable, and
+		// one that recorded a copied identity would launder a stolen one.
+		Provenance: prov.digest(),
 		// Non-zero so the provider takes the Load path rather than its seed.
 		SourceURL: secrets.New("published://" + version),
 		Load: func(ctx context.Context, _, candidate secrets.Value) error {
@@ -227,7 +259,7 @@ func (o *Orchestrator) pullWithin(ctx context.Context, s *session, version strin
 		// attestation describe a database that no longer exists.
 		Mask: func(context.Context, secrets.Value) error { return nil },
 		Verify: func(ctx context.Context, url secrets.Value) (string, error) {
-			report, att, verifyErr := o.verifyDatabase(ctx, s, url, rulesHash)
+			report, att, verifyErr := o.verifyDatabase(ctx, s, url, rulesHash, prov.digest())
 			result.Report = report
 			if verifyErr != nil {
 				return "", verifyErr
@@ -271,6 +303,23 @@ func readObject(ctx context.Context, store golden.Store, name string) (string, e
 		return "", err
 	}
 	return string(body), nil
+}
+
+// attestedProvenance reads the identity of the project an attestation was
+// signed for, and returns the empty string when it carries none.
+//
+// Empty is never equal to a real identity, because a real one always carries
+// at least the manifest name and the major version, so an attestation written
+// before this field existed is refused by the comparison rather than by a
+// separate branch that somebody could later invert.
+func attestedProvenance(attestation string) string {
+	var doc struct {
+		Provenance string `json:"provenance"`
+	}
+	if err := json.Unmarshal([]byte(attestation), &doc); err != nil {
+		return ""
+	}
+	return doc.Provenance
 }
 
 // attestedRulesHash reads the rules hash out of an attestation, and returns a
