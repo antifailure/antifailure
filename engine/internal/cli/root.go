@@ -24,11 +24,18 @@ import (
 )
 
 // Version information, set by the linker at release time.
+//
+// Every variable in this group is stamped by tools/release/build.sh, and
+// tools/ldcheck fails a build in which one of them is not. Edition used to sit
+// here and nothing stamped it, so af version read "community" out of a variable
+// no build ever wrote while af license status, in the same enterprise binary,
+// correctly reported enterprise. The edition is not a build time string: it is
+// what the running binary attached to its context, and declaredEdition is the
+// one place that answers it.
 var (
 	Version   = "dev"
 	Commit    = "none"
 	BuildDate = "unknown"
-	Edition   = "community"
 )
 
 // Env carries everything a command needs that is not a flag.

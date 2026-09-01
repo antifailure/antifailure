@@ -28,6 +28,14 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The tags, which a checkout does not fetch by default. tools/tagsync
+          # compares a version pin against the tags that exist, and against an
+          # empty tag list every pin would look unpublished. It refuses to run
+          # on an empty list rather than passing over nothing, so without this
+          # the job fails loudly instead of checking quietly, which is the right
+          # direction and still not the one anybody wants.
+          fetch-tags: true
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -110,6 +118,22 @@ jobs:
         # log and a green step, and the release goes out short an asset
         # looking finished.
         run: go run ./tools/releasecheck .
+
+      - name: The release notes for a tag exist and say something
+        # A changelog section that is a heading and nothing under it reads as
+        # finished in the diff and would publish a release that says nothing.
+        # Checked here rather than only at tag time, because at tag time the
+        # only remedy is to delete a tag people may already have fetched.
+        run: go run ./tools/relnotes .
+
+      - name: No version pin names a tag nobody published
+        # The Terraform image_tag defaults are live: the maintenance container
+        # app job reads them with no ignore_changes, so an apply from main takes
+        # the value. Bumping them in the same commit as the tag points the next
+        # apply at an image that does not exist yet. This is that ordering as a
+        # gate rather than as a sentence somebody has to remember once a
+        # release, which is about as often as anybody remembers anything.
+        run: go run ./tools/tagsync .
 
       - name: The one command runs what this workflow runs
         # CONTRIBUTING.md promises that a green `just gate` means a green CI.

@@ -68,6 +68,9 @@ var notAPath = map[string]string{
 	"antifailure/antifailure-foss": "a GitHub repository name, not a path in this checkout",
 
 	"THIRD_PARTY_NOTICES.md": "generated at release time from what is actually linked, so it is deliberately absent from the tree",
+
+	"checksums.txt.sigstore.json": "a release asset on the GitHub releases page, produced by the signing step, and the whole point of naming it is that a reader checks the release rather than this tree",
+	"sbom.spdx.json":              "the same, the bill of materials asset, and it is named so a reader can tell a release that ran the signing steps from one that predates them",
 }
 
 // claim is one backticked token that looks like a path into this repository.

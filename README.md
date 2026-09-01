@@ -129,7 +129,9 @@ On Kubernetes, use the chart in `deploy/helm/antifailure-control-plane`. The Hel
 
 ## Status
 
-Pre-1.0 and under construction. [docs/plan/STATUS.md](docs/plan/STATUS.md) tracks every component with one of three states: proven (it runs and its tests pass in CI), written (the code exists and its fakes pass, but it has not been exercised against the real service), and planned. That table is the honest answer to "does it do X yet", and it is updated in the same pull request as the code. Breaking changes are announced in the changelog.
+Version 1.0. That is a promise about what keeps working, and it is written down surface by surface in [what is stable](https://antifailure.dev/docs/reference/stability/) rather than made as a blanket claim: a manifest declaring `version: 1`, the commands and their flags and exit codes, the documented `--output json` fields, the provider interfaces, and the error codes. Breaking any of those costs a major version. That page also names what is deliberately not covered, which is the half worth reading before you build against something.
+
+It is a promise about interfaces, not a claim that every component is finished. [docs/plan/STATUS.md](docs/plan/STATUS.md) tracks each one with one of three states: proven (it runs and its tests pass in CI), written (the code exists and its fakes pass, but it has not been exercised against the real service), and planned. That table is the honest answer to "does it do X yet", and it is updated in the same pull request as the code. [CHANGELOG.md](CHANGELOG.md) is what changed in each release.
 
 ## Contributing
 

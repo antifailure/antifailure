@@ -150,11 +150,13 @@ runner/artifacts/
 /readability
 /release
 /releasecheck
+/relnotes
 /reltar
 /schemadoc
 /sbomcheck
 /scanrepo
 /site
+/tagsync
 /vulncheck
 /walkthrough
 engine/af-proxy

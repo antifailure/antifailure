@@ -64,6 +64,8 @@ gate: _reports
     run "generated files are current" just _generated
     run "release stamps a real version"  just ldcheck
     run "release publishes what it signs" just releasecheck
+    run "release notes exist for the tag" just relnotes
+    run "version pins name real tags"    just tagsync
     run "error catalog and code agree"   just errcheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
@@ -422,7 +424,8 @@ fmt-check:
 errcheck:
     go run ./tools/errcheck .
 
-# The release stamps version variables that exist.
+# The release stamps version variables that exist, and stamps every one it
+# declares.
 ldcheck:
     go run ./tools/ldcheck .
 
@@ -431,6 +434,22 @@ ldcheck:
 # run, so the first tag is its first execution.
 releasecheck:
     go run ./tools/releasecheck .
+
+# Every changelog section has something under it, so no tag can publish a
+# release whose notes are a heading and nothing else.
+relnotes:
+    go run ./tools/relnotes .
+
+# No version pin names a tag nobody has published. The Terraform image_tag
+# defaults are live, so bumping them with the tag rather than after it points
+# the next apply at an image that does not exist.
+#
+# It also holds the four version literals in the verification page to the
+# release being cut, and holds them strictly: naming an older tag that really
+# was published is the defect that shipped, since the page then tells a reader
+# to fetch a bundle that release does not carry.
+tagsync:
+    go run ./tools/tagsync .
 
 # Nothing in the tree looks like a live credential.
 scanrepo:
