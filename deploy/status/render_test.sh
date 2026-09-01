@@ -254,6 +254,29 @@ expect "the closed incident is in the history" "$d/index.html" "Reports were del
 expect "the closed one shows how long it lasted" "$d/index.html" "after 41 minutes"
 expect "the unreadable file is named rather than dropped silently" "$d/index.html" "broken.json"
 refute "the empty-history sentence is gone once there are incidents" "$d/index.html" "No incident has been recorded"
+refute "and the closed-record sentence too, since one has closed" "$d/index.html" "Nothing has closed in the"
+# The open incident is shown in full above the components. Rendering it again
+# verbatim in the history, on the same screen, is not a second piece of
+# information, and it was doing exactly that.
+expect_exit "the open incident appears once, not twice" 1 "$(grep -oc "Sign-in is returning 503" "$d/index.html")"
+expect_exit "the closed one appears once" 1 "$(grep -oc "Reports were delayed by up to nine minutes" "$d/index.html")"
+# A maintenance window next month has not started and is not open.
+expect "future maintenance is scheduled, not started" "$d/index.html" "scheduled for 20 Sep 2026"
+refute "future maintenance is not described as open" "$d/index.html" "still open</b></p><ol class=\"updates\"><li><p class=\"update-head\"><b>scheduled"
+
+# ---------------------------------------------------------------------------
+case_start "an incident is open and none has ever closed"
+d="$WORK/onlyopen"; mkdir -p "$d"; s="$(scripts onlyopen)"
+cat > "$s/incidents/2026-08-31-open.json" <<'JSON'
+{ "id": "2026-08-31-open", "title": "Sign-in is returning 503",
+  "type": "incident", "severity": "major", "components": ["control-plane-api"],
+  "started_at": "2026-08-31T04:10:00Z",
+  "updates": [ { "at": "2026-08-31T04:18:00Z", "status": "investigating", "body": "Looking at it." } ] }
+JSON
+reading control-plane-api 600 true > "$d/readings.jsonl"
+run "$d" "$d/readings.jsonl" "$s"
+expect "the history reports on the closed record" "$d/index.html" "Nothing has closed in the"
+refute "and does not contradict the open incident above it" "$d/index.html" "No incident has been recorded"
 
 # ---------------------------------------------------------------------------
 case_start "no incidents at all: the state this page is in almost always"
@@ -286,6 +309,24 @@ expect "states the figure it actually measured" "$d/index.html" "99.8%"
 refute "does not round the failed check half away" "$d/index.html" "99.9%"
 refute "never rounds a failed check away into a clean 100%" "$d/index.html" "100%"
 expect "shows the denominator beside it" "$d/index.html" "799 of 800 checks"
+
+# ---------------------------------------------------------------------------
+# Raw readings are pruned to a few weeks and the rollups are not, so a window
+# check written against the raw history would refuse the ninety day figure
+# forever on a page whose record holds a year. It did exactly that.
+case_start "a rollup reaching back a year shows the ninety day figure, with no raw that old"
+d="$WORK/window"; mkdir -p "$d"; s="$(scripts window)"
+jq -n --arg now "$(date -u +%s)" '
+  ($now | tonumber) as $n
+  | { counted_through: {},
+      days: [ range(1; 200) | { id: "control-plane-api",
+                                day: (($n - (. * 86400)) | strftime("%Y-%m-%d")),
+                                checks: 288, ok: 288 } ] }' > "$d/daily.json"
+reading control-plane-api 600 true > "$d/readings.jsonl"
+run "$d" "$d/readings.jsonl" "$s"
+expect "the ninety day window is offered" "$d/index.html" ">90d<"
+expect "and the thirty day one" "$d/index.html" ">30d<"
+expect "over the checks the rollups actually hold" "$d/index.html" "of 25633 checks"
 
 # ---------------------------------------------------------------------------
 case_start "the raw retention cap holds, and the rollup keeps the count it truncated"

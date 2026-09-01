@@ -71,7 +71,16 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
 
 # ------------------------------------------------------------------ the data
 
-($now | floor) as $nowS
+# Every one of the inputs arrives through --slurpfile, which wraps the file's
+# contents in an array, so each is unwrapped exactly once here. They are files
+# and not --argjson because the record otherwise travels on the command line,
+# and a full history is past ARG_MAX. That failure does not appear until the
+# record is big enough, which is months after anyone would connect the two.
+($targets[0]) as $targets
+| ($history[0]) as $history
+| ($daily[0]) as $daily
+| ($incidents[0]) as $incidents
+| ($now | floor) as $nowS
 | ($stripDays - 1) as $back
 | [range(0; $stripDays) | ($nowS - (($back - .) * 86400)) | dayKey] as $days
 | ($days | last) as $today
@@ -97,6 +106,15 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
 | (if $interval == null then null else ([1800, $interval * 3] | max) end) as $staleAfter
 | ($stamps | if length == 0 then null else .[0] end) as $firstSeen
 | ($stamps | if length == 0 then null else .[-1] end) as $lastSeen
+
+# Window eligibility is measured against the ROLLUPS, not against the raw
+# readings, and the difference is a bug rather than a nicety. Raw is pruned to
+# a few weeks, so $firstSeen never reaches back further than that and a check
+# written against it would refuse to print the ninety day figure forever, on a
+# page whose rollups hold a full year. The rollups are the record of how far
+# back this page can see.
+| ($daily | map(.day) | if length == 0 then null
+    else (min + "T00:00:00Z" | iso) end) as $recordStart
 
 # ------------------------------------------------------------- per component
 
@@ -133,7 +151,7 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
         cells: $cells, day1n: $day1n, day1ok: $day1ok,
         allChecks: $allChecks, allOk: $allOk,
         windows: (
-          ([ (if $day1n > 0 and $firstSeen != null and $firstSeen <= ($nowS - 86400)
+          ([ (if $day1n > 0 and $recordStart != null and $recordStart <= ($nowS - 86400)
               then {label: "24h", checks: $day1n, ok: $day1ok, text: availability($day1ok; $day1n)}
               else empty end),
              ([ {label: "7d", secs: 604800}, {label: "30d", secs: 2592000}, {label: "90d", secs: 7776000} ][]
@@ -145,7 +163,7 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
               # A window is only shown once the record actually reaches back
               # across it. Printing "90 days: 100%" over four days of data is
               # the specific lie this page exists not to tell.
-              | select($c > 0 and $firstSeen != null and $firstSeen <= ($nowS - $w.secs))
+              | select($c > 0 and $recordStart != null and $recordStart <= ($nowS - $w.secs))
               | {label: $w.label, checks: $c, ok: $o, text: availability($o; $c)}) ]) as $w
           | if ($w | length) > 0 then $w
             elif $allChecks > 0
@@ -204,7 +222,11 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
 | ($allIncidents | map(select(.type == "maintenance"))) as $maintList
 | ($incidentList | map(select((has("ended_at") | not) or (.ended_at == null)))) as $openIncidents
 | ($maintList | map(select((has("ended_at") | not) or (.ended_at == null)))) as $openMaint
-| ($incidentList | map(select((.started_at | iso) > ($nowS - ($stripDays * 86400))))) as $recentIncidents
+| ($incidentList
+    | map(select((.started_at | iso) > ($nowS - ($stripDays * 86400))))
+    # Open incidents are rendered in full above the components. Repeating them
+    # here verbatim, on the same screen, is not a second piece of information.
+    | map(select((.ended_at // null) != null))) as $recentIncidents
 
 # ------------------------------------------------------------------ renderer
 
@@ -232,7 +254,7 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
   def row($c):
     ($c.cells | map(select(.known))) as $known
     | ($c.cells | map(select(.known and .ok < .checks)) | length) as $badDays
-    | "<article class=\"row\">"
+    | "<article class=\"row s-\($c.state)\">"
     + "<div class=\"row-head\">"
     + glyph($c.state)
     + "<h4 class=\"row-name\">\($c.name | esc)</h4>"
@@ -252,11 +274,11 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
     + (if $c.latest == null
        then "No check has been recorded for this component yet."
        else ((if $c.state == "down"
-              then "Failing since the check at \($c.latestAt | stampTime) UTC" + (if (($c.latest.detail // "") | length) > 0 then ": \($c.latest.detail | esc)" else "" end) + ". "
+              then "<b class=\"said\">Failing since the check at \($c.latestAt | stampTime) UTC" + (if (($c.latest.detail // "") | length) > 0 then ": \($c.latest.detail | esc)" else "" end) + ".</b> "
               elif $c.state == "stale"
-              then "Last checked \(($nowS - $c.latestAt) | humanSecs) ago, which is longer than the interval this probe has been keeping. "
+              then "<b class=\"said\">Last checked \(($nowS - $c.latestAt) | humanSecs) ago, which is longer than the interval this probe has been keeping.</b> "
               elif $c.state == "recovered"
-              then "\($c.day1n - $c.day1ok) of \(plural($c.day1n; "check"; "checks")) failed in the last 24 hours. "
+              then "<b class=\"said\">\($c.day1n - $c.day1ok) of \(plural($c.day1n; "check"; "checks")) failed in the last 24 hours.</b> "
               else "" end)
              + "Checked \($c.latestAt | stampDate | esc) at \($c.latestAt | stampTime) UTC"
              + (if ($c.latest.duration_ms // 0) > 0 then ", answered in \($c.latest.duration_ms)&nbsp;ms" else "" end)
@@ -272,14 +294,19 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
 
   def incidentBlock($i; $open):
     ($i.components | map(. as $id | ($components | map(select(.id == $id)) | .[0].name) // $id)) as $names
+    | (($i.started_at | iso) > $nowS) as $future
     | "<article class=\"incident incident--\(if $open then "open" else "closed" end) sev--\($i.severity // "none" | esc)\">"
     + "<h4 class=\"incident-title\">\($i.title | esc)</h4>"
     + "<p class=\"incident-meta\">"
     + (if $i.type == "maintenance" then "Maintenance" else "\($i.severity // "incident" | esc) incident" end)
     + " &middot; \($names | map(esc) | join(", "))"
-    + " &middot; started \(($i.started_at | iso | stampDate) | esc), \(($i.started_at | iso | stampTime) | esc) UTC"
+    # A window that has not opened yet has not started, and is not open. The
+    # first version said "started 8 Sep, still open" about a date next week.
+    + " &middot; \(if $future then "scheduled for" else "started" end) \(($i.started_at | iso | stampDate) | esc), \(($i.started_at | iso | stampTime) | esc) UTC"
     + (if ($i.ended_at // null) != null
        then " &middot; ended \(($i.ended_at | iso | stampDate) | esc), \(($i.ended_at | iso | stampTime) | esc) UTC, after \((($i.ended_at | iso) - ($i.started_at | iso)) | humanSecs | esc)"
+       elif $future then " &middot; in \(($i.started_at | iso) - $nowS | humanSecs | esc)"
+       elif $i.type == "maintenance" then " &middot; <b>in progress</b>"
        else " &middot; <b>still open</b>" end)
     + "</p><ol class=\"updates\">"
     + ($i.updates | sort_by(.at) | reverse | map(updateBlock(.)) | join(""))
@@ -497,7 +524,7 @@ h2.block-title {
 .strip {
   display: flex;
   gap: 2px;
-  height: 38px;
+  height: 32px;
   margin: 14px 0 0;
   align-items: stretch;
 }
@@ -561,7 +588,12 @@ h2.block-title {
 .figures em { font-style: normal; color: var(--dim); }
 
 .row-meta { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
-.row.s-down .row-meta { color: var(--fail); }
+/* Only the sentence that says what went wrong is coloured. Painting the whole
+   line takes the link and the timestamp with it and reads as shouting. */
+.row-meta .said { font-weight: 600; }
+.row.s-down .row-meta .said { color: var(--fail); }
+.row.s-recovered .row-meta .said { color: var(--warn); }
+.row.s-stale .row-meta .said { color: var(--ink); }
 
 /* ------------------------------------------------------------------ legend */
 
@@ -671,7 +703,12 @@ footer {
   .verdict { padding: 26px 0 24px; }
   .verdict.is-warn, .verdict.is-down { padding: 20px 16px; }
   .incident--open { padding: 18px 16px; }
-  .legend { gap: 8px 16px; padding: 12px 14px; }
+  .legend { gap: 8px 16px; padding: 12px 14px; font-size: 14px; }
+  .row-desc { font-size: 15px; }
+  .row-meta, .figures { font-size: 14px; }
+  .axis { font-size: 12px; }
+  .block-note, footer { font-size: 14px; }
+  .incident-meta { font-size: 14px; }
 }
 
 /*
@@ -748,7 +785,7 @@ footer {
 + (($targets | reduce .[] as $t ([]; if (. | index($t.group)) then . else . + [$t.group] end)) as $order
    | $components | group_by(.group) | sort_by(.[0].group as $g | $order | index($g)) | map(
      "<div class=\"group\"><h3 class=\"group-name\">\(.[0].group | esc)</h3><div class=\"group-rule\"></div>"
-     + (map("<div class=\"row s-\(.state)\">" + row(.) + "</div>") | join(""))
+     + (map(row(.)) | join(""))
      + "</div>") | join(""))
 + "
   <div class=\"legend\">
@@ -766,6 +803,11 @@ footer {
    else "" end)
 + (if ($recentIncidents | length) > 0
    then ($recentIncidents | map(incidentBlock(.; false)) | join(""))
+   # With an incident open, "no incident has been recorded" is a sentence that
+   # contradicts the block directly above it. The closed record is what this
+   # section holds, so that is what it reports on.
+   elif ($openIncidents | length) > 0 or ($openMaint | length) > 0
+   then "<p class=\"empty\"><b>Nothing has closed in the \($stripDays) days to \($today | dayLabel | esc).</b> What is open is above.</p>"
    else "<p class=\"empty\"><b>No incident has been recorded"
      + (if $firstSeen == null then "." else " in the \($stripDays) days to \($today | dayLabel | esc)." end)
      + "</b> That is a statement about the record, which is written by hand, and not a measurement. What the readings measure is the strip above.</p>"
