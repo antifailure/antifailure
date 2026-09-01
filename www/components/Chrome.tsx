@@ -17,9 +17,8 @@ export type { SheetId };
 // an openAuth that put it on screen. Nothing ever called openAuth: a grep for
 // it found the definition, the context value and nothing else, while the same
 // grep found openSheet with a real caller at AuthScreen.tsx. So the modal was
-// unreachable, and it still shipped in the JavaScript bundle carrying the
-// sentence "There is no hosted control plane to sign in to yet" long after
-// there was one.
+// unreachable, and it still shipped saying "There is no hosted control plane
+// to sign in to yet" long after there was one.
 //
 // Deleted rather than wired up, which is the unusual direction for dead code
 // and is right here. The thing it duplicated is finished and reachable: the
