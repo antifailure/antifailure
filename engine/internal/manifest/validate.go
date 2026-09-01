@@ -43,6 +43,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.fidelity(m)
 	v.runtime(m)
 	v.change(m)
+	v.github(m)
 
 	if v.suppressed > 0 {
 		v.problems = append(v.problems, Problem{
@@ -1064,6 +1065,52 @@ func isCatchAll(p string) bool {
 // to a default would mean a manifest that says "block" quietly warns instead,
 // and the first time anybody noticed would be a merge that should not have
 // happened.
+// github checks the values in the github block.
+//
+// There was no github function here at all, so none of the three enumerations
+// in that block was enforced by the engine: `fork_policy: bogus`,
+// `mode: sideways` and `teardown_on: [closed, merged]` all loaded without a
+// word. The JSON Schema has had the enums the whole time, and the reference
+// page is generated from it, so the page told a reader the values and nothing
+// held them to it. Two documentation pages in this repository shipped
+// `teardown_on: [closed, merged]` for exactly that reason.
+//
+// fork_policy is the one that matters. normalize only fills an EMPTY policy,
+// so a misspelling survives as itself, and everything downstream treats an
+// unrecognised policy as label. That is the safe direction and it is silent:
+// somebody who writes `nevr` gets label, believes they wrote never, and is
+// running a stranger's code behind one label instead of refusing it outright.
+// A typo in a security control has to be an error, not a shrug.
+func (v *validator) github(m *schema.Manifest) {
+	g := m.GitHub
+	if g == nil {
+		return
+	}
+	switch g.Mode {
+	case "", schema.GitHubActions, schema.GitHubApp, schema.GitHubOff:
+	default:
+		v.add("github.mode",
+			fmt.Sprintf("The value %q is not one of actions, app or off.", g.Mode),
+			"actions runs everything inside the workflow. app uses the GitHub App and a control plane. off disables the integration.")
+	}
+	switch g.ForkPolicy {
+	case "", schema.ForkNever, schema.ForkLabel, schema.ForkAlways:
+	default:
+		v.add("github.fork_policy",
+			fmt.Sprintf("The value %q is not one of never, label or always.", g.ForkPolicy),
+			"label is the default and the safe one: a fork's pull request runs only once a maintainer has added the antifailure:allow label. An unrecognised value would be treated as label, which is why this is refused rather than assumed.")
+	}
+	for i, on := range g.TeardownOn {
+		switch on {
+		case "close", "merge", "ttl":
+		default:
+			v.add(fmt.Sprintf("github.teardown_on[%d]", i),
+				fmt.Sprintf("The value %q is not one of close, merge or ttl.", on),
+				"Teardown is unconditional whatever this says, so the shortest fix is to remove the key.")
+		}
+	}
+}
+
 func (v *validator) policy(m *schema.Manifest) {
 	p := m.Policy
 	if p == nil {
