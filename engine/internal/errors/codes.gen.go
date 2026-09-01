@@ -100,6 +100,9 @@ const (
 	AFDB013 Code = "AF-DB-013"
 	// No database branch exists for {env}.
 	AFDB014 Code = "AF-DB-014"
+	// The published golden {version} in {store} was made for a different
+	// project.
+	AFDB015 Code = "AF-DB-015"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
@@ -684,6 +687,15 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "No database branch exists for {env}.",
 		NextStep:  "Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB015: {
+		Code:      AFDB015,
+		Area:      "DB",
+		Message:   "The published golden {version} in {store} was made for a different project.",
+		NextStep:  "Name a version this project published with 'af golden pull <version>', or run 'af golden refresh' on a machine that can reach the source. A store is shared, so the newest object in it is not necessarily yours.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,

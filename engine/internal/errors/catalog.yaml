@@ -223,6 +223,13 @@ errors:
     docs: concepts/goldens
     retryable: false
     exit_code: 5
+  - code: AF-DB-015
+    area: DB
+    message: "The published golden {version} in {store} was made for a different project."
+    next_step: "Name a version this project published with 'af golden pull <version>', or run 'af golden refresh' on a machine that can reach the source. A store is shared, so the newest object in it is not necessarily yours."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 5
   - code: AF-DB-007
     planned: true
     area: DB

@@ -422,6 +422,18 @@ No database branch exists for {env}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens/) |
 
+### AF-DB-015
+
+The published golden {version} in {store} was made for a different project.
+
+**What to do.** Name a version this project published with 'af golden pull <version>', or run 'af golden refresh' on a machine that can reach the source. A store is shared, so the newest object in it is not necessarily yours.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens/) |
+
 ### AF-DB-020
 
 Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured.
