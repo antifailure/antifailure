@@ -228,10 +228,10 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
               </Link>
             </div>
             <div className="flex gap-x-3.5">
-              <Button href="/signin" theme="outlined" size="xxs" className="h-9 px-[18px]">
+              <Button href="/signin" theme="outlined" size="xxs">
                 Log in
               </Button>
-              <Button href="/signup" theme="filled" size="xxs" className="h-9 px-[18px]">
+              <Button href="/signup" theme="filled" size="xxs">
                 Sign up
               </Button>
             </div>

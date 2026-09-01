@@ -1,4 +1,4 @@
-# docs
+# fixed
 
 The documentation looked like a different product from the site around it, and
 its code blocks were close to invisible on a phone.
