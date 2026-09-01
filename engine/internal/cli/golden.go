@@ -194,11 +194,19 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 				// shared, so a listing that does not say this presents a
 				// machine's worth of other projects' goldens as though `af up`
 				// could use any of them, and for a long time it could.
+				//
+				// The tagged form hides something the two clause form showed,
+				// so it is written here: mine is a variable, and if it were
+				// ever empty these would be two cases with one value. Go
+				// rejects duplicate CONSTANT cases and would compile this, and
+				// the first case would win, which is the harmless order. It
+				// cannot happen anyway, because an identity always carries at
+				// least the manifest name and the major version.
 				owner := env.Out.S(StyleWarn, "another project")
-				switch {
-				case g.Provenance == mine:
+				switch g.Provenance {
+				case mine:
 					owner = env.Out.S(StyleGood, "this project")
-				case g.Provenance == "":
+				case "":
 					owner = env.Out.S(StyleWarn, "not recorded")
 				}
 				rows = append(rows, []string{
