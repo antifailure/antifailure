@@ -167,6 +167,17 @@ type mintingRun struct {
 // closes, which is the whole lifecycle a command has.
 func runOne(t *testing.T, r *runner, h *hosted, env map[string]string) *mintingRun {
 	t.Helper()
+	return runWith(t, r, h, env, true)
+}
+
+// runWithoutAddress is the same, for a repository that names no control plane.
+func runWithoutAddress(t *testing.T, r *runner, h *hosted, env map[string]string) *mintingRun {
+	t.Helper()
+	return runWith(t, r, h, env, false)
+}
+
+func runWith(t *testing.T, r *runner, h *hosted, env map[string]string, addressed bool) *mintingRun {
+	t.Helper()
 
 	runnerSrv := httptest.NewServer(r)
 	t.Cleanup(runnerSrv.Close)
@@ -191,6 +202,11 @@ func runOne(t *testing.T, r *runner, h *hosted, env map[string]string) *mintingR
 	fake := clock.NewFake(time.Unix(1700000000, 0).UTC())
 	bus := events.NewBus(fake)
 
+	address := planeSrv.URL
+	if !addressed {
+		address = ""
+	}
+
 	out := &mintingRun{runner: r, plane: h, dir: dir}
 	tel, err := Attach(t.Context(), bus, Options{
 		StateDir:        dir,
@@ -198,7 +214,7 @@ func runOne(t *testing.T, r *runner, h *hosted, env map[string]string) *mintingR
 		Redactor:        redact.New(),
 		Clock:           fake,
 		State:           db,
-		ControlPlaneURL: planeSrv.URL,
+		ControlPlaneURL: address,
 		Getenv:          func(k string) string { return full[k] },
 		OnWarning:       func(s string) { out.warned = append(out.warned, s) },
 	})
@@ -359,6 +375,29 @@ func TestWithNoTokenAndNoRunnerNothingIsAttached(t *testing.T) {
 	require.Empty(t, run.plane.ingested())
 	require.Empty(t, run.warned, "and no warning, because nothing is wrong")
 	require.Len(t, run.log, 1)
+}
+
+// The commonest way to use this tool is without a control plane at all, and
+// that path must stay silent.
+//
+// A runner will vouch for any job that asks, so running in GitHub Actions says
+// nothing about whether this repository has a control plane. Without an address
+// to report to, every such run would trade an identity against the hosted
+// instance, be refused for a repository that is not connected to it, and print
+// a warning about a service the user has never heard of.
+func TestWithNoControlPlaneAddressNoIdentityIsSpent(t *testing.T) {
+	r := &runner{value: "signed.workflow.identity"}
+	h := &hosted{issued: "minted-for-this-job"}
+
+	run := runWithoutAddress(t, r, h, map[string]string{
+		identityURLEnv:   "present",
+		identityTokenEnv: "the-runners-request-token",
+	})
+
+	require.Equal(t, 0, run.runner.calls(), "the runner was asked for an identity anyway")
+	require.Equal(t, 0, run.plane.exchangeCount())
+	require.Empty(t, run.warned, "and nothing was said, because nothing is wrong: %v", run.warned)
+	require.Len(t, run.log, 1, "the run is unaffected")
 }
 
 // Half the runner variables means something is wrong, and guessing is worse

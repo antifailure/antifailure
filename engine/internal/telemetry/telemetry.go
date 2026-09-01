@@ -215,7 +215,16 @@ func (t *Telemetry) attachControlPlane(
 	}
 
 	token := controlplane.TokenFromEnvironment(lookup)
-	if token == "" && controlplane.WorkflowIdentityAvailable(lookup) {
+	// An address is what says this repository uses a control plane at all.
+	//
+	// Only for the minted path, and the asymmetry is the point. Setting a token
+	// is itself an explicit choice, so that path may fall back to the hosted
+	// address. Nobody chooses anything by running in GitHub Actions, and
+	// "without a control plane" is a first class way to use this tool: without
+	// this condition every such run would trade an identity against the hosted
+	// instance, be refused because the repository is not connected to it, and
+	// print a warning about a service the user has never heard of.
+	if token == "" && baseURL != "" && controlplane.WorkflowIdentityAvailable(lookup) {
 		minted, err := controlplane.TokenFromWorkflowIdentity(ctx, controlplane.WorkflowIdentityOptions{
 			Lookup: lookup, BaseURL: baseURL,
 		})
