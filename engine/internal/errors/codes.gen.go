@@ -53,6 +53,8 @@ const (
 	AFCP001 Code = "AF-CP-001"
 	// The control plane rejected this engine's token.
 	AFCP002 Code = "AF-CP-002"
+	// The control plane could not complete this request.
+	AFCP003 Code = "AF-CP-003"
 
 	// Control plane
 	// No control plane token is configured.
@@ -521,6 +523,15 @@ var catalog = map[Code]Entry{
 		Docs:      "self-hosting/control-plane",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFCP003: {
+		Code:      AFCP003,
+		Area:      "CP",
+		Message:   "The control plane could not complete this request.",
+		NextStep:  "Retry once. If it fails again, quote the requestId the response carries: it is the only thing that ties the answer to a log line.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: true,
+		ExitCode:  ExitProvider,
 	},
 	AFCPL001: {
 		Code:      AFCPL001,
