@@ -297,7 +297,12 @@ export function Notebook({
           <div className="flex items-end gap-1 border-b border-black/[0.06] bg-[#f7f7f5] px-3 pt-3">
             <div className="flex items-center gap-2 rounded-t-[8px] bg-[#CAE6D9] px-3 py-2 text-[12px] font-medium text-[#285D49]">
               {tab}
-              <span className="text-[#285D49]/40">×</span>
+              {/* Window chrome, not a control. Unmarked it announced a bare
+                  "times" inside the figure and measured 1.8:1, which is a
+                  contrast failure only because it was posing as text. */}
+              <span className="text-[#285D49]/40" aria-hidden>
+                ×
+              </span>
             </div>
             <div className="mb-2 ml-auto mr-2 border-b-2 border-[#33bf00] pb-1 text-[11px] font-medium uppercase tracking-[0.12em] text-black">
               {rail}
@@ -308,9 +313,9 @@ export function Notebook({
               <span className="text-[9px] font-medium uppercase tracking-[0.14em] text-black/35 [writing-mode:vertical-rl]">
                 {rail}
               </span>
-              <span className="mt-2 size-1.5 rounded-full bg-[#33bf00]" />
-              <span className="size-1.5 rounded-full bg-black/15" />
-              <span className="size-1.5 rounded-full bg-black/15" />
+              <span className="mt-2 size-1.5 rounded-full bg-[#33bf00]" aria-hidden />
+              <span className="size-1.5 rounded-full bg-black/15" aria-hidden />
+              <span className="size-1.5 rounded-full bg-black/15" aria-hidden />
             </div>
             <div className="min-w-0 flex-1">
               {children ? (
@@ -326,7 +331,7 @@ export function Notebook({
                   </div>
                   <div className="overflow-hidden rounded-[10px] border border-black/[0.06]">
                     <div className="grid grid-cols-[16px_72px_1fr_auto_64px] items-center gap-2 bg-[#f7f7f5] px-3 py-1.5 text-[9px] font-medium uppercase tracking-[0.12em] text-black/35 max-sm:grid-cols-[16px_1fr_auto]">
-                      <span className="size-3 rounded-[3px] border border-black/20 bg-white" />
+                      <span className="size-3 rounded-[3px] border border-black/20 bg-white" aria-hidden />
                       <span className="max-sm:hidden">Id</span>
                       <span>Entity</span>
                       <span>Policy</span>
@@ -347,6 +352,7 @@ export function Notebook({
                               ? "border-[#33bf00] bg-[#33bf00]"
                               : "border-black/20 bg-white",
                           )}
+                          aria-hidden
                         />
                         <span className="truncate font-mono text-[11px] text-black/40 max-sm:hidden">
                           {row.id}
