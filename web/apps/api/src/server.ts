@@ -198,8 +198,18 @@ export const GRANTABLE_SCOPES: readonly string[] = [
  * The value matters to a caller: it is the key into
  * https://antifailure.dev/errors.v1.json, which carries the same message,
  * resolution and retryability an engine-side failure would.
+ *
+ * Named for what it is rather than for the code it holds, and the obvious name
+ * was the code with its hyphens turned into underscores.
+ * `test/config-docs.test.ts` refused that: it reads this directory for anything
+ * shaped like an AF prefixed screaming-case identifier and requires it on the
+ * configuration reference page, because an environment variable the process
+ * reads and nobody documents is an operator's afternoon. An identifier that
+ * reads like a variable and is not one puts a setting on that page that does
+ * nothing. Writing the rejected name into this comment fails the same test, for
+ * the same reason, which is worth knowing before trying it.
  */
-const AF_CP_003 = 'AF-CP-003'
+const CONTROL_PLANE_FAILURE = 'AF-CP-003'
 
 export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
@@ -257,7 +267,7 @@ export function createServer(options: ServerOptions) {
     return c.json(
       {
         error: {
-          code: AF_CP_003,
+          code: CONTROL_PLANE_FAILURE,
           message: 'The control plane could not complete this request.',
           resolution:
             'Retry once. If it fails again, quote the requestId below: it is the only thing ' +
