@@ -159,10 +159,10 @@ missing permission looks exactly like a missing file.
 
 ## Starting a run from the console
 
-The console's **Create environment**, **Run agents** and **Run load** controls
-do not run anything on the control plane. They dispatch a run of your own
-workflow, in your own repository, on the branch the environment is on. Your
-database, your secrets and your captured traffic stay where they already are.
+The console's **Create environment** control and its workload controls do not
+run anything on the control plane. They dispatch a run of your own workflow, in
+your own repository, on the branch the environment is on. Your database, your
+secrets and your captured traffic stay where they already are.
 
 That needs two things. The App has Actions write, above. And the workflow
 accepts a dispatch:
@@ -172,18 +172,34 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      command:     { type: choice, options: [up, agents, load], default: up }
+      command:
+        type: choice
+        default: up
+        options: [up, observed_load, http_scenario, browser_workflow, exploration]
       workflows:   { required: false, default: '' }
       duration:    { required: false, default: '' }
       scale:       { required: false, default: '' }
+      seed:        { required: false, default: '' }
+      concurrency: { required: false, default: '' }
+      run_id:      { required: false, default: '' }
 ```
 
-`examples/github-workflow.yml` carries the whole file, including the step that
-turns each input into the flag it belongs to. Two things about this cost an
-afternoon if you meet them the hard way: GitHub reads the trigger list from the
-**default branch**, so adding `workflow_dispatch` on a feature branch alone
-changes nothing, and a dispatch to a workflow without it answers 404 rather
-than saying what is wrong.
+`up` brings the environment up. The four other values are the
+[workload kinds](/docs/concepts/workloads/), and the step that handles them is
+one `af workload run` invocation rather than a case arm per kind. That command
+refuses an input its kind's command has no flag for, rather than dropping it,
+and writes a result document carrying what was measured and the plain `af`
+command that reproduces it.
+
+`examples/github-workflow.yml` carries the whole file. Two things about this
+cost an afternoon if you meet them the hard way: GitHub reads the trigger list
+from the **default branch**, so adding `workflow_dispatch` on a feature branch
+alone changes nothing, and a dispatch to a workflow without it answers 404
+rather than saying what is wrong.
+
+The older `agents` and `load` values still resolve, to `browser_workflow` and
+`observed_load`, so a copy of this file taken before the workload command
+existed keeps working.
 
 The control plane records nothing about the environment when it dispatches.
 The run appears in your Actions tab, and the environment appears in the console

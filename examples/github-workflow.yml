@@ -40,17 +40,40 @@ on:
         required: true
         default: up
         type: choice
-        options: [up, agents, load]
+        # The four workload kinds are spelled the way the control plane spells
+        # them, rather than as verbs of their own. One vocabulary across the
+        # boundary means no translation table, and a translation table is a
+        # place to be wrong that has no reason to exist. The three older verbs
+        # still resolve, so a copy of this file from before the workload
+        # command existed keeps working.
+        options:
+          - up
+          - observed_load
+          - http_scenario
+          - browser_workflow
+          - exploration
       workflows:
-        description: Comma separated workflow names for agents. Empty means all of them.
+        description: Comma separated names this workload selects. Empty means all of them.
         required: false
         default: ''
       duration:
-        description: How long to send load for, as a Go duration such as 60s.
+        description: How long to send load for, as a Go duration such as 60s. observed_load only.
         required: false
         default: ''
       scale:
-        description: Multiplier on production's rate, for load.
+        description: Multiplier on production's rate. observed_load only.
+        required: false
+        default: ''
+      seed:
+        description: Makes two runs do the same thing. A number for load, free text for exploration.
+        required: false
+        default: ''
+      concurrency:
+        description: Ceiling on requests in flight. http_scenario only.
+        required: false
+        default: ''
+      run_id:
+        description: The control plane's identifier for this run, echoed back in the result.
         required: false
         default: ''
 
@@ -124,19 +147,25 @@ jobs:
         # ran the analysis, so its outputs are empty, and gating on them alone
         # would silently skip the one job somebody pressed a button to get.
         if: github.event_name != 'pull_request' || steps.change.outputs.environment == 'true'
-        # A pull request runs the whole check. A dispatch runs the third of it
+        # A pull request runs the whole check. A dispatch runs the part of it
         # the console asked for, because `af ci` would bring up an environment,
         # run the agents and tear it down again, which is not what somebody
-        # pressing "Run agents" against a running environment asked for.
+        # pressing a button against a running environment asked for.
         #
         # The inputs go through the environment rather than into the script
         # text. A `${{ inputs.workflows }}` interpolated into a run block is a
-        # shell injection from anybody who can dispatch this workflow.
+        # shell injection from anybody who can dispatch this workflow, and a
+        # YAML comment inside a run block is not a safe place to write one
+        # either: the runner substitutes the expression before bash sees the
+        # `#`, so an input carrying a newline escapes the comment.
         env:
           AF_COMMAND: ${{ inputs.command || 'ci' }}
           AF_WORKFLOWS: ${{ inputs.workflows }}
           AF_DURATION: ${{ inputs.duration }}
           AF_SCALE: ${{ inputs.scale }}
+          AF_SEED: ${{ inputs.seed }}
+          AF_CONCURRENCY: ${{ inputs.concurrency }}
+          AF_RUN_ID: ${{ inputs.run_id }}
           # Bring your own key. Without one the agents still run; workflows
           # that need a page read come back unverified rather than guessed at.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -154,29 +183,43 @@ jobs:
               # belongs to, so the checked out one is already right.
               af up
               ;;
-            agents)
-              args=()
-              # `|| true`, and `if` rather than `[ ... ] && ...`, because both
-              # of those return non zero on the ordinary empty case and set -e
-              # would end the job there with no output at all.
-              IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
-              for name in "${names[@]:-}"; do
-                if [ -n "$name" ]; then args+=(--only "$name"); fi
-              done
-              # ${args[@]+"${args[@]}"} rather than "${args[@]}": under set -u
-              # an empty array is an unbound variable on bash 3.2, which is the
-              # bash on a macOS runner, and "run everything" is the ordinary
-              # case here.
-              af test ${args[@]+"${args[@]}"}
-              ;;
-            load)
-              args=()
-              if [ -n "$AF_DURATION" ]; then args+=(--duration "$AF_DURATION"); fi
-              if [ -n "$AF_SCALE" ]; then args+=(--scale "$AF_SCALE"); fi
-              af load run ${args[@]+"${args[@]}"}
+            ci)
+              af ci --report report.md --report-json report.json
               ;;
             *)
-              af ci --report report.md --report-json report.json
+              # Everything else is a workload, and one command runs all four
+              # kinds. This used to be a case arm per kind assembling its own
+              # flags, and the three things wrong with that are the three
+              # things this command adds.
+              #
+              # It dropped an input silently. A seed passed to a browser
+              # workflow went nowhere, because af test has no --seed flag, and
+              # nothing said so. af workload run refuses it by name instead.
+              #
+              # It produced no result. An exit code was everything anybody
+              # learned, and an exit code cannot tell a run that failed from a
+              # run that never measured anything. The document written below
+              # carries what was measured, route by route, with the verdict of
+              # every threshold.
+              #
+              # And it left nothing to reproduce. The result names the plain af
+              # command that produces the same run on a laptop, which is the
+              # only thing that makes a hosted number checkable.
+              #
+              # Values reach the script through the env block above rather
+              # than through the script text, exactly as they did before. An
+              # expression interpolated into a run block is substituted by the
+              # runner before bash ever sees it, so a dispatch input carrying a
+              # newline and a command would execute here.
+              af workload run \
+                --kind "$AF_COMMAND" \
+                --select "$AF_WORKFLOWS" \
+                --duration "$AF_DURATION" \
+                --scale "$AF_SCALE" \
+                --seed "$AF_SEED" \
+                --concurrency "$AF_CONCURRENCY" \
+                --run-id "$AF_RUN_ID" \
+                --result workload-result.json
               ;;
           esac
 
@@ -239,6 +282,15 @@ jobs:
             -H 'content-type: application/json' \
             --data-binary @payload.json
           echo "handled=true" >> "$GITHUB_OUTPUT"
+      # Always, because the result of a failing workload is the one worth
+      # reading, and because a cancelled or timed out run still writes one.
+      - name: Keep the workload result
+        if: always() && hashFiles('workload-result.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: workload-result
+          path: workload-result.json
+          retention-days: 30
 
       - name: Leave the report on the pull request
         # Always, because the report of a failing run is the one worth reading.
