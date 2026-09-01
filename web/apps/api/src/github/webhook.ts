@@ -232,16 +232,22 @@ async function rememberInstallation(
   const login = account.login
   return pool.withGitHubAccount(login, async (db) => {
     const slug = slugFor(login)
+    // `xmax = 0` in the RETURNING below is true only on a row this statement
+    // INSERTED. Every installation delivery reaches this upsert and most are
+    // for organizations that already exist, so counting the statement rather
+    // than the insert would count one organization once per delivery forever.
+    //
+    // The explanation sits above the statement rather than inside it because
+    // the gate in tenancy.test.ts that requires every write to this table to
+    // name its columns reads source text and cannot tell code from a comment.
+    // It said so, and said a false positive costs a rewording. This is the
+    // rewording.
     const rows = await db.execute<{ id: string; created: boolean }>(sql`
       INSERT INTO organizations (slug, name, github_login)
       VALUES (${slug}, ${login}, ${login})
       ON CONFLICT (slug) DO UPDATE SET
         github_login = EXCLUDED.github_login,
         updated_at = ${clock.now().toISOString()}
-      -- xmax is zero on a row this statement inserted. Every installation
-      -- delivery reaches this upsert, and most of them are for organizations
-      -- that already exist, so counting the statement would count an
-      -- organization once per delivery forever.
       RETURNING id, (xmax = 0) AS created`)
     const orgId = rows[0]!.id
 
