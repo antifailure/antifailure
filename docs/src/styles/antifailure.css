@@ -176,21 +176,36 @@ body {
 }
 
 /* A rule above every h2 gives the page a spine you can scan, which is most of
-   what somebody does when they arrive here from an error message. */
-.sl-markdown-content h2 {
-  /* display:block, because Starlight's anchor heading leaves the h2 inline and
-     a border-top on an inline box is only as wide as its text. The rule above
-     "Top level" in the manifest reference was 146px long in a 343px column: a
-     stub next to the heading rather than the spine this is meant to be. */
-  display: block;
-  margin-top: 2.75rem;
+   what somebody does when they arrive here from an error message.
+
+   It goes on the WRAPPER rather than on the heading, and that is the whole
+   point of this block. Starlight renders every linkable heading as
+   <div class="sl-heading-wrapper"><h2>...</h2><a class="sl-anchor-link">, and
+   anchor-links.css sets the heading itself to display:inline so the link sits
+   at the end of the last line rather than on a line of its own. This
+   stylesheet is unlayered and Starlight's is in @layer starlight.content, so
+   an unlayered `display: block` here wins whatever its specificity, and the
+   heading became a block box with the anchor pushed underneath it: 67px below
+   the heading top, on every h2 on every page.
+
+   Styling the wrapper answers both halves at once. The wrapper is already a
+   block, so the border is the full column width rather than the 146px stub a
+   border on an inline box gave, and the heading stays inline so the anchor
+   stays beside it.
+
+   No margin-top here, deliberately. Starlight's own rule gives the wrapper
+   1.5em, which is 52.5px at 1280 and 43.5px at 390, and today that number is
+   what renders: the h2's 2.75rem collapses into it and loses. Restating 2.75rem
+   on the wrapper would block the collapse, win, and quietly tighten every
+   heading on 81 pages by 8.5px. The number to keep is the one on the screen. */
+.sl-markdown-content .sl-heading-wrapper.level-h2,
+.sl-markdown-content > h2 {
   padding-top: 1.5rem;
   border-top: 1px solid var(--af-rule);
-  font-weight: 500;
 }
 
+.sl-markdown-content h2,
 .sl-markdown-content h3 {
-  margin-top: 2rem;
   font-weight: 500;
 }
 
@@ -573,8 +588,8 @@ starlight-theme-select select,
     --sl-text-h1: 2rem;
     --sl-nav-height: 7.35rem;
   }
-  .sl-markdown-content h2 {
-    margin-top: 2.25rem;
+  .sl-markdown-content .sl-heading-wrapper.level-h2,
+  .sl-markdown-content > h2 {
     padding-top: 1.25rem;
   }
 }
