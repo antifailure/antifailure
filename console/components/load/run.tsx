@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useApi } from "@/lib/api";
+import { useState } from "react";
 import { may } from "@/lib/roles";
 import { useSessionContext } from "@/components/session";
 import { Button, Card, Empty, When } from "@/components/ui";
@@ -21,6 +20,7 @@ import {
   Throughput,
 } from "@/components/load/results";
 import { Command, LoadError, PartialNotice, RunSkeleton } from "@/components/load/states";
+import { StaleNotice, useInterval, useLive } from "@/components/load/polling";
 import {
   STATE_FACTS,
   VERDICT_FACTS,
@@ -44,31 +44,6 @@ import {
  * database the run is already competing with.
  */
 const POLL_MS = 6000;
-
-/**
- * Ask again while the run is going, and stop the moment it is not.
- *
- * The stop condition is why this is written out rather than a bare
- * setInterval. A poll that keeps running after a run has finished is a request
- * every six seconds forever on a tab somebody left open, invisible in every
- * way except the load it makes.
- *
- * `document.hidden` is checked at each tick rather than subscribed to: a
- * backgrounded tab does not need the answer and browsers already throttle the
- * timer, so this only has to avoid making the request.
- */
-function usePoll(active: boolean, reload: () => void) {
-  const fn = useRef(reload);
-  fn.current = reload;
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      fn.current();
-    }, POLL_MS);
-    return () => clearInterval(id);
-  }, [active]);
-}
 
 /** What was asked for, so a number in the results can be read against it. */
 function Settings({ run }: { run: RunDetail }) {
@@ -146,8 +121,10 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
   const csrf = session.data?.csrfToken ?? "";
   const canRun = may(session.data?.role, "load.run");
 
-  const state = useApi<RunDetail | null>(() => getRun(runId), [runId]);
-  const run = state.status === "ready" ? state.data : null;
+  // useLive rather than useApi: a refresh must not blank a screen that is
+  // already showing results, and a failed refresh must not throw them away.
+  const state = useLive<RunDetail | null>(() => getRun(runId), [runId]);
+  const run = state.data;
 
   const [acting, setActing] = useState<"cancel" | "retry" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -156,7 +133,7 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
    *  waiting a poll interval. Rolled back if the server refuses. */
   const [stopping, setStopping] = useState(false);
 
-  usePoll(run !== null && isRunning(run.state), state.reload);
+  useInterval(run !== null && isRunning(run.state), POLL_MS, state.reload);
 
   if (state.status === "error" && state.error) {
     return (
@@ -188,6 +165,17 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
 
   return (
     <div className="space-y-6">
+      {/* Above the cards, because it changes what every number under it means.
+          Only rendered when a refresh has actually failed: a notice that
+          appears every six seconds is one people stop reading. */}
+      {state.refreshError ? (
+        <StaleNotice
+          message={state.refreshError}
+          updatedAt={state.updatedAt}
+          onRetry={state.reload}
+          retrying={state.refreshing}
+        />
+      ) : null}
       <Card
         title="Load run"
         note={run.id}
