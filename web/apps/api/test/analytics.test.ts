@@ -589,9 +589,49 @@ describe('the analytics stream', { skip: hasDatabase ? false : 'no Postgres at A
     })
 
     it('builds a funnel that cannot have a step wider than the one before it', async () => {
+      // The case the earlier version of this test did not have, and whose
+      // absence let a broken funnel reach a rendered page: an organization
+      // whose milestones are NOT nested. A verdict without a lifecycle event
+      // is the state the engine is actually in, so this is the ordinary case
+      // rather than a contrived one.
+      //
+      // The day is cleared first, and that is not tidiness. Every other case in
+      // this file writes facts rows that outlive the suite, so a window over a
+      // shared day accumulates organizations from previous runs and the
+      // assertion below stops being about the orphan. It read 5 instead of 1
+      // the first time. One day, used by nothing else, emptied before use.
+      const day = '2026-10-07'
+      await h.admin`DELETE FROM analytics_org_facts WHERE first_seen_on = ${day}::date`
+      const orphan = randomUUID()
+      await record({
+        name: 'validation.run_finished',
+        eventId: randomUUID(),
+        occurredAt: new Date(`${day}T00:00:00Z`),
+        orgId: orphan,
+        payload: { kind: 'test', verdict: 'pass' },
+      })
+      const facts = (await factsFor(h.analytics.surrogate(orphan)!))!
+      assert.ok(facts.first_proven_run_on !== null, 'the fixture set no proven run')
+      assert.equal(facts.first_environment_on, null, 'the fixture set an environment after all')
+
+      // A one day window holding exactly the organization above, so the
+      // assertion is about that organization rather than about whatever else
+      // the database happens to contain. A monotonicity check over an
+      // accumulated table passes by luck as often as by correctness, which is
+      // how the broken version of this query reached a rendered page.
       const steps = await h.pool.withoutTenant((db) =>
-        organizationFunnel(db, 3650, new Date('2027-01-01T00:00:00Z')),
+        organizationFunnel(db, 1, new Date(`${day}T00:00:00Z`)),
       )
+      const by = new Map(steps.map((s) => [s.step, s.organizations]))
+      assert.equal(by.get('Organizations'), 1, 'the one day window did not hold exactly the orphan')
+      assert.equal(by.get('Environment up'), 0)
+      assert.equal(
+        by.get('Proven run'),
+        0,
+        'an organization with a proven run and no environment was counted at the proven step, ' +
+          'so the funnel is not nested and the caption on the page is false',
+      )
+
       for (let i = 1; i < steps.length; i += 1) {
         assert.ok(
           steps[i]!.organizations <= steps[i - 1]!.organizations,

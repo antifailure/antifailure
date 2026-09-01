@@ -135,9 +135,23 @@ export async function breakdown(
  * here is a milestone and a milestone is a column. See the catalog's
  * DERIVED_FROM_FACTS for why that is not an omission.
  *
- * Each step counts organizations whose milestone is set AND whose first sight
- * is inside the window, so a step can never be larger than the one before it
- * and the funnel is monotone by construction rather than by hoping.
+ * EACH STEP REQUIRES EVERY STEP BEFORE IT, and that is not pedantry.
+ *
+ * The obvious query counts each milestone column on its own, and it was the
+ * first one here. It produced a page showing 3 organizations that brought an
+ * environment up and 6 that got a proven run, under a caption promising a step
+ * could never be wider than the one above it. The caption was wrong and the
+ * numbers were right: the milestones are independent columns, and an engine
+ * that reports a verdict without ever reporting a lifecycle event sets one and
+ * not the other, which is exactly the state the engine is in today.
+ *
+ * Found by looking at the rendered page, not by reading the code and not by the
+ * test, which asserted monotonicity over whatever rows happened to exist and
+ * passed. There is a case in the suite now that puts a proven run on an
+ * organization with no environment.
+ *
+ * So each step ANDs in the ones before it, which is what a funnel means: the
+ * number at step four is how many got all the way to step four.
  */
 export interface FunnelStep {
   step: string
@@ -160,10 +174,19 @@ export async function organizationFunnel(
     paid: string | number
   }>(sql`
     SELECT count(*) AS seen,
-           count(first_event_on) AS reported,
-           count(first_environment_on) AS environment,
-           count(first_proven_run_on) AS proven,
-           count(first_paid_on) AS paid
+           count(*) FILTER (WHERE first_event_on IS NOT NULL) AS reported,
+           count(*) FILTER (
+             WHERE first_event_on IS NOT NULL
+               AND first_environment_on IS NOT NULL) AS environment,
+           count(*) FILTER (
+             WHERE first_event_on IS NOT NULL
+               AND first_environment_on IS NOT NULL
+               AND first_proven_run_on IS NOT NULL) AS proven,
+           count(*) FILTER (
+             WHERE first_event_on IS NOT NULL
+               AND first_environment_on IS NOT NULL
+               AND first_proven_run_on IS NOT NULL
+               AND first_paid_on IS NOT NULL) AS paid
     FROM analytics_org_facts
     WHERE first_seen_on >= ${from}::date AND first_seen_on <= ${dayString(today)}::date`)
   const r = rows[0]
@@ -185,12 +208,14 @@ export async function organizationFunnel(
     },
     {
       step: 'Proven run',
-      meaning: 'Got a verdict that proved something, rather than blocked or unverified.',
+      meaning:
+        'Brought an environment up AND got a verdict that proved something, rather than ' +
+        'blocked or unverified.',
       organizations: Number(r?.proven ?? 0),
     },
     {
       step: 'Paying',
-      meaning: 'Left the free plan.',
+      meaning: 'Reached every step above and left the free plan.',
       organizations: Number(r?.paid ?? 0),
     },
   ]

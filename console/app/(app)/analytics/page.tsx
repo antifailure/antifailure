@@ -176,7 +176,6 @@ function Analytics() {
                       heading="Where they came from"
                       caption="The channel the visit started on. Derived from the referrer in the browser and never stored."
                       rows={data.acquisition.bySource}
-                      accent
                     />
                     <Group
                       heading="Where they landed"
@@ -188,7 +187,6 @@ function Analytics() {
                     heading="Waitlist submissions, by the channel that brought them"
                     caption="Attributed to where the browsing session started, not to the page holding the form."
                     rows={data.acquisition.waitlistBySource}
-                    accent
                   />
                 </div>
               )}
@@ -196,7 +194,7 @@ function Analytics() {
 
             <Card
               title="Organizations"
-              note="Every step counts organizations first seen in this window, so a step can never be wider than the one above it."
+              note="Organizations first seen in this window. Each step requires every step above it, so this is how many got all the way there."
             >
               {data.organizations.funnel[0]?.organizations === 0 ? (
                 <Empty title="No organizations in this window">
@@ -464,16 +462,24 @@ function Provenance({ p }: { p: Provenance }) {
   );
 }
 
+/**
+ * One breakdown, as bars.
+ *
+ * Deliberately no accent colour. An earlier version highlighted whole groups,
+ * and rendering it put seven full-width brand-green bars on one card, which
+ * turns the accent into wallpaper and stops it meaning anything where it is
+ * used to single one number out. The two places it survives are the ones where
+ * it points at a single row: organizations still active this week, and the
+ * verdicts that passed.
+ */
 function Group({
   heading,
   caption,
   rows,
-  accent = false,
 }: {
   heading: string;
   caption: string;
   rows: Breakdown[];
-  accent?: boolean;
 }) {
   const max = rows.reduce((m, r) => Math.max(m, r.events), 0);
   return (
@@ -490,7 +496,6 @@ function Group({
               label={r.value || "unlabelled"}
               value={r.events}
               max={max}
-              tone={accent ? "accent" : "neutral"}
             />
           ))}
         </div>

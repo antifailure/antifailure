@@ -397,7 +397,7 @@ export function DpaPage() {
               ],
               [
                 "Recoverability",
-                "Fourteen days of point-in-time recovery on the hosted database. A restore is verified against a manifest taken at backup time and then asked, through the unprivileged role, to refuse a cross-tenant read.",
+                "Thirty-five days of point-in-time recovery on the production database, with geo-redundant backup storage. Staging keeps fourteen days in one region. A restore is verified against a manifest taken at backup time and then asked, through the unprivileged role, to refuse a cross-tenant read.",
               ],
             ]}
           />
@@ -792,15 +792,23 @@ export function DataRetentionPage() {
               ],
               [
                 "Model provider keys",
-                "Until you delete them. Deletion is an endpoint you can call, not a request you have to send us.",
+                "Removal is an endpoint you can call, not a request you have to send us, and it stops the key working immediately. It marks the record revoked rather than deleting the row, so the encrypted value remains until the row is removed with the organization. Rotating a key does the same to the one it replaces.",
               ],
               [
                 "Waitlist addresses",
-                "Until the waitlist is closed or you ask for removal. Signing up twice updates one row rather than adding a second.",
+                "Until the waitlist is closed or you ask for removal, which is carried out by hand: nothing in the site reads the list back and there is no removal endpoint. Signing up twice updates one row rather than adding a second. Your browser also keeps a copy of the address you submitted, which clearing site data removes.",
               ],
               [
                 "Database backups",
-                "Fourteen days of point-in-time recovery. A deletion is reflected in every backup only after that window has passed.",
+                "Thirty-five days of point-in-time recovery on production, fourteen on staging. A deletion is reflected in every backup only after that window has passed.",
+              ],
+              [
+                "Analytics events",
+                "Raw analytics events are kept for as long as the deployment sets, and the daily counts computed from them outlive that: a count of page views by channel has nothing in it that identifies anybody. An event carries a keyed hash of the organization rather than its identifier, so the store can count organizations and cannot name one.",
+              ],
+              [
+                "Operational logs",
+                "Ninety days on production and thirty on staging, in Azure Monitor. They hold request paths, status codes and timings, and never a request body, a token or a snapshot.",
               ],
               [
                 "Masked dumps",
@@ -855,7 +863,7 @@ export function DataRetentionPage() {
               ],
               [
                 "Backups",
-                "A deletion applies to the live database immediately and to backups only as they age out, over the fourteen day recovery window. Restoring a backup within that window restores the deleted rows, and any deletion request is applied again afterwards.",
+                "A deletion applies to the live database immediately and to backups only as they age out, over the thirty-five day recovery window on production and fourteen on staging. Restoring a backup within that window restores the deleted rows, and any deletion request is applied again afterwards.",
               ],
               [
                 "The audit log",
