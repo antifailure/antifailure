@@ -112,7 +112,14 @@ export type Cta = "waitlist_open";
  * surveillance with a different name.
  */
 export function routeIdFor(pathname: string): SiteRoute {
-  const path = pathname.replace(/\/+$/, "") || "/";
+  // The trailing .html and any trailing slash come off first. A static export
+  // is a tree of files, and which of /pricing, /pricing/ and /pricing.html a
+  // reader's URL bar holds is decided by the host rather than by this site:
+  // Azure Static Web Apps serves the clean path, and a plain file server serves
+  // the file. Without this, every page under a file server classified as
+  // `other`, which reads as readers landing nowhere. Found by serving the real
+  // built output and watching the row arrive.
+  const path = pathname.replace(/\.html$/, "").replace(/\/+$/, "") || "/";
   if (path === "/") return "home";
   if (path === "/product") return "product";
   if (path.startsWith("/product/")) return "product_detail";

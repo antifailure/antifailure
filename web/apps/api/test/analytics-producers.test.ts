@@ -164,6 +164,16 @@ describe('the catalog and the site agree', () => {
     )
   })
 
+  it('classifies a path whichever of its three forms the host serves', () => {
+    // /pricing, /pricing/ and /pricing.html are the same page. Which one a
+    // reader's URL bar holds is the host's decision, not this site's, and the
+    // first version of routeIdFor handled only the first, so every page under a
+    // plain file server arrived as `other`.
+    assert.match(site, /replace\(\/\\\.html\$\/, ""\)/,
+      'routeIdFor no longer strips a trailing .html, so a static host that serves files ' +
+      'classifies every page as other')
+  })
+
   it('declares every channel the site can derive', () => {
     const declared = new Set(VISIT_SOURCES as readonly string[])
     const returned = [...site.matchAll(/return "([a-z_]+)";/g)].map((m) => m[1]!)
