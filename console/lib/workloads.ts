@@ -842,11 +842,20 @@ export function ms(value: number | null): string {
   return `${(value / 1000).toFixed(2)} s`;
 }
 
-export function rate(value: number | null, unit: string): string {
+/**
+ * A rate, at a precision that scales with the number rather than a fixed one.
+ *
+ * The unit is NOT included. Every caller here puts the number in a stat tile
+ * whose label carries the unit underneath it, so returning "149 rps" would
+ * print the unit twice. This decides only how many figures a rate is worth:
+ * two decimals under ten, one under a hundred, and none above it, where a
+ * tenth of a request per second is noise.
+ */
+export function rate(value: number | null): string {
   if (value === null) return "--";
-  if (value >= 100) return `${Math.round(value).toLocaleString()} ${unit}`;
-  if (value >= 10) return `${value.toFixed(1)} ${unit}`;
-  return `${value.toFixed(2)} ${unit}`;
+  if (value >= 100) return Math.round(value).toLocaleString();
+  if (value >= 10) return value.toFixed(1);
+  return value.toFixed(2);
 }
 
 export function count(value: number | null): string {

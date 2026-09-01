@@ -8,6 +8,7 @@ import {
   count,
   ms,
   percent,
+  rate,
   type Kind,
   type Percentile,
   type RunStatus,
@@ -163,11 +164,7 @@ export function ThroughputStats({ t }: { t: Throughput }) {
   return (
     <dl className="grid grid-cols-2 gap-x-6 gap-y-5 px-4 py-4 sm:grid-cols-4">
       <Stat label="Requests" value={count(t.requests)} />
-      <Stat
-        label="Throughput"
-        value={t.rps === null ? "--" : `${t.rps < 10 ? t.rps.toFixed(1) : Math.round(t.rps)}`}
-        note="requests per second"
-      />
+      <Stat label="Throughput" value={rate(t.rps)} note="requests per second" />
       <Stat label="Errors" value={count(t.errors)} tone={errored ? "fail" : undefined} />
       <Stat
         label="Error rate"
