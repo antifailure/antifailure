@@ -158,6 +158,39 @@ function Detail({ envId, onClose }: { envId: string; onClose: () => void }) {
 }
 
 
+/** What the control plane found out about a repository before anybody asked
+ *  it for anything. `unknown` is GitHub not having answered, and renders as
+ *  nothing: a warning nobody can act on is worse than silence. */
+type Readiness =
+  | { status: "ready" }
+  | { status: "blocked"; cause: string; message: string }
+  | { status: "unknown" };
+
+/**
+ * What would stop this repository, said before the button is pressed.
+ *
+ * The failure it replaces was found at the worst possible moment: fill in the
+ * form, press the button, and only then learn that the App holds no permission
+ * to start a workflow. Nothing it reports is caused by anything in the form and
+ * every one of them was already true when the page loaded.
+ *
+ * It does not disable the button. The check can be out of date by the width of
+ * whatever the person just did on GitHub, and a form that refuses to submit
+ * because of a stale read is worse than one that tries and reports.
+ */
+function Blocked({ repository }: { repository: string }) {
+  const state = useApi<Readiness>(
+    () => query("environments.readiness", { repository }),
+    [repository],
+  );
+  if (state.status !== "ready" || state.data.status !== "blocked") return null;
+  return (
+    <p role="status" className="mt-2.5 text-[12px] leading-5 text-warn">
+      {state.data.message}
+    </p>
+  );
+}
+
 /**
  * Asking for an environment.
  *
@@ -251,9 +284,12 @@ function Create({ onRequested }: { onRequested: () => void }) {
                   {error}
                 </p>
               ) : (
-                <p role={asked ? "status" : undefined} className="mt-2.5 text-[12px] leading-5 text-dim">
-                  {asked ?? "Empty uses the repository's default branch. The environment appears below when the engine reports it."}
-                </p>
+                <>
+                  <p role={asked ? "status" : undefined} className="mt-2.5 text-[12px] leading-5 text-dim">
+                    {asked ?? "Empty uses the repository's default branch. The environment appears below when the engine reports it."}
+                  </p>
+                  <Blocked repository={repository || repos[0]!.full_name} />
+                </>
               )}
             </form>
           )

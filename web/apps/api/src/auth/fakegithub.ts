@@ -10,7 +10,15 @@
 // else, and the happy path is not where sign-in breaks.
 
 import { randomBytes } from 'node:crypto'
-import { GitHubError, type GitHubClient, type GitHubOrg, type GitHubUser } from './github.ts'
+import {
+  GitHubError,
+  blockerFor,
+  type DispatchBlocker,
+  type DispatchCause,
+  type GitHubClient,
+  type GitHubOrg,
+  type GitHubUser,
+} from './github.ts'
 import type { Clock } from '../clock.ts'
 
 interface PendingCode {
@@ -37,7 +45,15 @@ export class FakeGitHub implements GitHubClient {
   private readonly tokens = new Map<string, string>()
   private readonly workflows = new Set<string>()
   private readonly dispatched: Dispatched[] = []
-  private dispatchRefusal: string | null = null
+  private dispatchRefusal: DispatchCause | null = null
+  // The three states GitHub reports that are not about the workflow file.
+  // Held as exceptions rather than as requirements, so that a test which only
+  // cares about a dispatch does not have to declare an installation, a
+  // permission grant and a branch before it can ask for one.
+  private readonly uninstalled = new Set<string>()
+  private readonly invisible = new Set<string>()
+  private readonly absentBranches = new Set<string>()
+  private actionsWrite = true
 
   /** How long a code is good for. GitHub's is ten minutes. */
   readonly codeTtlMs = 10 * 60 * 1000
@@ -135,11 +151,51 @@ export class FakeGitHub implements GitHubClient {
    * code exchange is single use: the interesting case for a dispatch is the
    * one where GitHub says no, and a fake that accepts every dispatch cannot
    * reach it. A repository with no registered workflow refuses exactly the way
-   * the real client does when the file is missing, the App was not installed
-   * on the repository, or `actions: write` was never granted.
+   * the real client does when the file is not on the default branch.
    */
   addWorkflow(repository: string, workflow: string): void {
     this.workflows.add(`${repository}#${workflow}`)
+  }
+
+  /** The App is not installed on this repository, though GitHub will still
+   *  show it. */
+  uninstallFrom(repository: string): void {
+    this.uninstalled.add(repository)
+  }
+
+  /** GitHub will not show this App the repository at all: a wrong name, or a
+   *  private repository nobody added to the installation. */
+  hideRepository(repository: string): void {
+    this.invisible.add(repository)
+    this.uninstalled.add(repository)
+  }
+
+  /** The installation exists and was never granted Actions write, which is the
+   *  state every installation of a widened App is in until somebody accepts. */
+  revokeActionsWrite(): void {
+    this.actionsWrite = false
+  }
+
+  /** A branch nobody pushed. */
+  removeBranch(repository: string, ref: string): void {
+    this.absentBranches.add(`${repository}#${ref}`)
+  }
+
+  /**
+   * Puts every dispatch exception back, leaving the registered workflows and
+   * the dispatch log alone.
+   *
+   * One suite shares one fake across its tests, so a test that revokes a
+   * permission to reach the refusal would otherwise revoke it for everything
+   * after it. Restoring in a finally is what keeps a failed assertion from
+   * turning into a different failure three tests later.
+   */
+  reset(): void {
+    this.uninstalled.clear()
+    this.invisible.clear()
+    this.absentBranches.clear()
+    this.actionsWrite = true
+    this.dispatchRefusal = null
   }
 
   /** Every dispatch the control plane asked for, in order. */
@@ -147,10 +203,44 @@ export class FakeGitHub implements GitHubClient {
     return this.dispatched
   }
 
-  /** Makes the next dispatch fail the way GitHub does when a workflow file
-   *  exists and will not accept a dispatch. */
-  refuseDispatches(reason: string | null = 'no workflow_dispatch trigger'): void {
-    this.dispatchRefusal = reason
+  /**
+   * Makes the next dispatch fail the way GitHub does when the workflow file
+   * exists and will not accept this particular dispatch.
+   *
+   * A cause and not a sentence, because these two are the states no lookup can
+   * find: what a file triggers on and which inputs it declares are inside the
+   * file. Naming them as causes is what keeps the fake and the real client
+   * refusing the same set of things.
+   */
+  refuseDispatches(cause: 'trigger-missing' | 'inputs-refused' | null = 'trigger-missing'): void {
+    this.dispatchRefusal = cause
+  }
+
+  async dispatchBlocker(
+    _installationId: number,
+    repository: string,
+    workflow: string,
+    ref?: string,
+  ): Promise<DispatchBlocker | null> {
+    const subject = { repository, workflow, ref }
+    // The same order the real client asks in, because the order is a claim
+    // about GitHub and not an implementation detail: a repository that is both
+    // uninstalled and missing a workflow file reports the installation, since
+    // installing is what has to happen first.
+    if (this.uninstalled.has(repository)) {
+      return blockerFor(
+        this.invisible.has(repository) ? 'repository-not-visible' : 'app-not-installed',
+        subject,
+      )
+    }
+    if (!this.actionsWrite) return blockerFor('permission-missing', subject)
+    if (!this.workflows.has(`${repository}#${workflow}`)) {
+      return blockerFor('workflow-missing', subject)
+    }
+    if (ref !== undefined && ref !== '' && this.absentBranches.has(`${repository}#${ref}`)) {
+      return blockerFor('branch-missing', subject)
+    }
+    return null
   }
 
   async dispatchWorkflow(
@@ -166,11 +256,12 @@ export class FakeGitHub implements GitHubClient {
     // fake that threw something untyped would make the refusal path
     // unreachable from a test and leave the 500 path the only one exercised.
     if (this.dispatchRefusal) {
-      throw new GitHubError(`GitHub refused to dispatch ${workflow}: ${this.dispatchRefusal}`)
+      throw new GitHubError(
+        blockerFor(this.dispatchRefusal, { repository, workflow, ref }).message,
+      )
     }
-    if (!this.workflows.has(`${repository}#${workflow}`)) {
-      throw new GitHubError(`GitHub cannot see ${workflow} in ${repository}`)
-    }
+    const blocker = await this.dispatchBlocker(installationId, repository, workflow, ref)
+    if (blocker) throw new GitHubError(blocker.message)
     this.dispatched.push({ installationId, repository, workflow, ref, inputs })
   }
 }

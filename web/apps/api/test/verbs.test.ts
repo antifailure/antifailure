@@ -40,20 +40,72 @@ function message(body: unknown): string {
 }
 
 /**
- * The real client against GitHub's documented answers.
+ * The real client against the answers GitHub actually gives.
  *
  * Needs no database and no Postgres, deliberately: what is under test is the
- * request this builds and the sentence it turns each status into, and both are
- * user-facing. A 404 here is the one that costs an afternoon, because GitHub
- * gives the same answer for a missing workflow file, a repository the App was
- * not given, and a missing Actions permission, and a message that only said
- * "404" would send whoever read it to the wrong one of the three.
+ * request this builds and the sentence it turns each refusal into, and both
+ * are user-facing.
+ *
+ * The fake below answers per PATH rather than with one status for everything,
+ * because the code it stands in for stopped guessing. Every status in it was
+ * observed against api.github.com on 2026-08-31, using two real installations
+ * of the Antifailure App on the same public repository, one holding
+ * `actions: write` and one holding no actions permission:
+ *
+ *   POST .../dispatches   403 "Resource not accessible by integration"
+ *                              for a missing `actions: write`, AND for a
+ *                              repository the App does not hold
+ *                         404 "Not Found" for a missing workflow file, AND
+ *                              for a repository that does not exist
+ *                         422 for a missing ref, a missing workflow_dispatch
+ *                              trigger, and undeclared inputs
+ *   GET /repos/o/r        200 even for a public repository the App was never
+ *                              given, which is why it cannot answer "is the
+ *                              App installed"
+ *   GET /repos/o/r/installation
+ *                         200 with the permissions the installation actually
+ *                              holds, 404 when there is no installation
+ *
+ * Measuring first mattered here more than usual. The code under test used to
+ * infer the cause from the status, the documentation said a missing permission
+ * answered 404, and it answers 403. A fake written from that belief would have
+ * agreed with the bug.
  */
 describe('dispatching a workflow against GitHub', () => {
   interface Call { url: string; method: string; body: unknown; headers: Record<string, string> }
 
+  /** One repository as GitHub sees it, in the four terms that decide a
+   *  dispatch. A test names the state and never a status code. */
+  interface World {
+    /** Null when no installation of this App covers the repository. */
+    installation: { permissions: Record<string, string> } | null
+    /** Whether GitHub serves the repository at all. True for any public
+     *  repository, installed or not. */
+    visible: boolean
+    workflowPresent: boolean
+    branchPresent: boolean
+    /** What the dispatch itself answers, since the states inside the workflow
+     *  file are not visible to any lookup. */
+    dispatch: { status: number; body: string }
+  }
+
+  function world(over: Partial<World> = {}): World {
+    return {
+      installation: { permissions: { actions: 'write', contents: 'read', metadata: 'read' } },
+      visible: true,
+      workflowPresent: true,
+      branchPresent: true,
+      dispatch: { status: 204, body: '' },
+      ...over,
+    }
+  }
+
+  const notFound = '{"message":"Not Found","documentation_url":"https://docs.github.com/rest","status":"404"}'
+  const notAccessible =
+    '{"message":"Resource not accessible by integration","documentation_url":"https://docs.github.com/rest","status":"403"}'
+
   /**
-   * Runs one body with global fetch answering a fixed status.
+   * Runs one body against a GitHub built from a World.
    *
    * The restore is in a finally rather than in an `after` hook, and that is
    * not a style choice: an `after` registered from inside a test runs when the
@@ -61,33 +113,67 @@ describe('dispatching a workflow against GitHub', () => {
    * every test after this one and for every suite sharing the process. This
    * scopes it to exactly the call it is standing in for.
    */
-  async function withGitHubAnswering(
-    status: number,
-    body: string,
+  async function withGitHub(
+    w: World,
     run: (client: RealGitHubClient, calls: Call[]) => Promise<void>,
   ): Promise<void> {
     const calls: Call[] = []
     const original = globalThis.fetch
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
       calls.push({
-        url: String(input),
+        url,
         method: init?.method ?? 'GET',
         body: init?.body ? JSON.parse(String(init.body)) : null,
         headers: (init?.headers ?? {}) as Record<string, string>,
       })
+      const path = new URL(url).pathname
       // 204 has to be constructed with a null body. Passing an empty string
       // throws, which is the Response constructor being stricter than the
       // network is and worth knowing before writing a fake of anything.
-      return new Response(status === 204 ? null : body, { status })
+      if (path.endsWith('/dispatches')) {
+        return new Response(
+          w.dispatch.status === 204 ? null : w.dispatch.body,
+          { status: w.dispatch.status },
+        )
+      }
+      if (/\/branches\/[^/]+$/.test(path)) {
+        return new Response(w.branchPresent ? '{}' : notFound, { status: w.branchPresent ? 200 : 404 })
+      }
+      if (/\/actions\/workflows\/[^/]+$/.test(path)) {
+        return new Response(w.workflowPresent ? '{}' : notFound, { status: w.workflowPresent ? 200 : 404 })
+      }
+      return new Response(w.visible ? '{}' : notFound, { status: w.visible ? 200 : 404 })
     }) as typeof fetch
     try {
-      await run(realClient({ for: async () => 'ghs_installation_token' }), calls)
+      await run(realClient(tokensFor(w)), calls)
     } finally {
       globalThis.fetch = original
     }
   }
 
-  function realClient(installationTokens?: { for(id: number): Promise<string> }): RealGitHubClient {
+  /**
+   * The installation-token port, which is where the installation lookup lives.
+   *
+   * It is not on the fetch path above on purpose: the real one needs the App
+   * JWT, which an installation token cannot mint, and that separation is the
+   * reason it is a port at all. `InstallationTokens.onRepository` is proved
+   * against its own HTTP in githubapp.test.ts.
+   */
+  function tokensFor(w: World) {
+    return {
+      for: async () => 'ghs_installation_token',
+      onRepository: async () =>
+        w.installation === null ? null : { id: 4242, permissions: w.installation.permissions },
+      forget: () => {},
+    }
+  }
+
+  function realClient(installationTokens?: {
+    for(id: number): Promise<string>
+    onRepository(repository: string): Promise<{ id: number; permissions: Record<string, string> } | null>
+    forget(id: number): void
+  }): RealGitHubClient {
     return new RealGitHubClient({
       clientId: 'id',
       clientSecret: 'secret',
@@ -97,8 +183,24 @@ describe('dispatching a workflow against GitHub', () => {
     })
   }
 
+  /** The message from one refused dispatch. */
+  async function refusalFor(w: World, ref = 'main'): Promise<string> {
+    let said = ''
+    await withGitHub(w, async (client) => {
+      await assert.rejects(
+        () => client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', ref, {}),
+        (err: unknown) => {
+          assert.ok(err instanceof GitHubError, `expected a GitHubError, got ${String(err)}`)
+          said = err.message
+          return true
+        },
+      )
+    })
+    return said
+  }
+
   it('posts the ref and the inputs to the workflow dispatch endpoint', async () => {
-    await withGitHubAnswering(204, '', async (client, calls) => {
+    await withGitHub(world(), async (client, calls) => {
       await client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {
         command: 'agents',
         workflows: 'sign-up',
@@ -117,37 +219,269 @@ describe('dispatching a workflow against GitHub', () => {
         inputs: { command: 'agents', workflows: 'sign-up' },
       })
       assert.equal(call.headers.authorization, 'Bearer ghs_installation_token')
+      // Nothing is looked up on the happy path. The diagnosis costs two more
+      // requests and exists for the refusal, not for every dispatch.
+      assert.equal(calls.length, 1)
     })
   })
 
-  it('404 says all three things it can mean', async () => {
-    await withGitHubAnswering(404, '{"message":"Not Found"}', async (client) => {
+  it('an ungranted Actions write says so, and says who can grant it', async () => {
+    const said = await refusalFor(
+      world({
+        installation: { permissions: { contents: 'read', metadata: 'read' } },
+        dispatch: { status: 403, body: notAccessible },
+      }),
+    )
+    assert.match(said, /Actions write/)
+    // The remedy is a person in the customer's GitHub organization, not
+    // anything in this console, and the message has to say which.
+    assert.match(said, /owner of the acme organization/)
+    assert.match(said, /Nothing in this console can grant it/)
+    // The three states this refusal used to be conflated with must not appear.
+    assert.doesNotMatch(said, /workflows\/antifailure\.yml/)
+    assert.doesNotMatch(said, /not installed/)
+  })
+
+  it('the same 403 for an App that was never given the repository says to install it', async () => {
+    const said = await refusalFor(
+      world({ installation: null, dispatch: { status: 403, body: notAccessible } }),
+    )
+    assert.match(said, /not installed on acme\/storefront/)
+    assert.match(said, /Configure/)
+    assert.doesNotMatch(said, /Actions write/)
+  })
+
+  it('a repository GitHub will not show at all says to check the name', async () => {
+    const said = await refusalFor(
+      world({ installation: null, visible: false, dispatch: { status: 404, body: notFound } }),
+    )
+    assert.match(said, /will not show this App a repository named acme\/storefront/)
+    assert.match(said, /private/)
+    assert.doesNotMatch(said, /Actions write/)
+  })
+
+  it('a missing workflow file names the path it has to be committed to', async () => {
+    const said = await refusalFor(
+      world({ workflowPresent: false, dispatch: { status: 404, body: notFound } }),
+    )
+    assert.match(said, /\.github\/workflows\/antifailure\.yml/)
+    assert.match(said, /default branch/)
+    assert.match(said, /examples\/github-workflow\.yml/)
+    assert.doesNotMatch(said, /Actions write/)
+    assert.doesNotMatch(said, /not installed/)
+  })
+
+  it('a branch nobody pushed is named, from the 422 and from the lookup alike', async () => {
+    const fromDispatch = await refusalFor(
+      world({
+        dispatch: { status: 422, body: '{"message":"No ref found for: wip"}' },
+      }),
+      'wip',
+    )
+    assert.match(fromDispatch, /no branch named wip/)
+    assert.match(fromDispatch, /leave the branch empty/)
+  })
+
+  it('422 names the default branch rule, which is the part nobody guesses', async () => {
+    const said = await refusalFor(
+      world({
+        dispatch: {
+          status: 422,
+          body: '{"message":"Workflow does not have \'workflow_dispatch\' trigger"}',
+        },
+      }),
+      'wip',
+    )
+    assert.match(said, /default branch/)
+    assert.match(said, /wip/)
+    assert.match(said, /workflow_dispatch/)
+  })
+
+  it('inputs the workflow does not declare name the four this console sends', async () => {
+    const said = await refusalFor(
+      world({
+        dispatch: {
+          status: 422,
+          body: '{"message":"Unexpected inputs provided: [\\"command\\"]"}',
+        },
+      }),
+    )
+    assert.match(said, /command, workflows, duration and scale/)
+    assert.match(said, /examples\/github-workflow\.yml/)
+  })
+
+  it('never puts GitHub JSON on a product screen', async () => {
+    // Every refusal, including the one nothing can explain. The body that
+    // reaches this used to be pasted into the console verbatim.
+    const messages = [
+      await refusalFor(world({ dispatch: { status: 403, body: notAccessible } })),
+      await refusalFor(world({ dispatch: { status: 500, body: '<html>bad gateway</html>' } })),
+      await refusalFor(world({ dispatch: { status: 422, body: notFound } })),
+    ]
+    for (const said of messages) {
+      assert.doesNotMatch(said, /documentation_url/)
+      assert.doesNotMatch(said, /[{}]/)
+      assert.doesNotMatch(said, /<html>/)
+      // A sentence a person can act on, not a status code on its own.
+      assert.ok(said.length > 60, `too terse to act on: ${said}`)
+    }
+  })
+
+  it('a refusal nothing explains still carries what GitHub said', async () => {
+    const said = await refusalFor(
+      world({ dispatch: { status: 403, body: '{"message":"API rate limit exceeded"}' } }),
+    )
+    assert.match(said, /API rate limit exceeded/)
+    assert.match(said, /not a setting in this console/)
+  })
+
+  it('a diagnosis that fails leaves the refusal it was explaining', async () => {
+    // The lookup throwing must not replace the answer with an exception about
+    // a request the person never made.
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => new Response(null, { status: 403 })) as typeof fetch
+    try {
+      const client = realClient({
+        for: async () => 'ghs_installation_token',
+        onRepository: async () => {
+          throw new Error('the App JWT was refused')
+        },
+        forget: () => {},
+      })
       await assert.rejects(
         () => client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {}),
         (err: unknown) => {
           assert.ok(err instanceof GitHubError)
-          assert.match(err.message, /\.github\/workflows\/antifailure\.yml/)
-          assert.match(err.message, /installed on this repository/)
-          assert.match(err.message, /Actions\s+write/)
+          assert.doesNotMatch(err.message, /App JWT/)
+          assert.match(err.message, /GitHub would not start antifailure\.yml/)
           return true
         },
       )
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  it('a lookup that is refused rather than absent does not invent a missing file', async () => {
+    // A rate limit is a 403 and a bad gateway is a 502. Reading either as "your
+    // workflow file is not committed" sends somebody to commit a file that is
+    // already committed, which is a false finding on the one screen that has to
+    // be trusted.
+    const original = globalThis.fetch
+    globalThis.fetch = (async (input: string | URL | Request) =>
+      new Response('{"message":"API rate limit exceeded"}', {
+        status: String(input).includes('/dispatches') ? 403 : 429,
+      })) as typeof fetch
+    try {
+      const client = realClient(tokensFor(world()))
+      const blocker = await client.dispatchBlocker(99, 'acme/storefront', 'antifailure.yml', 'main')
+      assert.equal(blocker, null)
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  it('dispatchBlocker finds nothing when nothing is wrong, and asks about the branch only when given one', async () => {
+    await withGitHub(world(), async (client, calls) => {
+      assert.equal(await client.dispatchBlocker(99, 'acme/storefront', 'antifailure.yml'), null)
+      // The console asks this while the branch box is still being typed in, so
+      // an absent ref must not become a lookup.
+      assert.equal(calls.filter((c) => c.url.includes('/branches/')).length, 0)
+      assert.equal(await client.dispatchBlocker(99, 'acme/storefront', 'antifailure.yml', 'main'), null)
+      assert.equal(calls.filter((c) => c.url.includes('/branches/main')).length, 1)
     })
   })
 
-  it('422 names the default branch rule, which is the part nobody guesses', async () => {
-    const body = '{"message":"Workflow does not have workflow_dispatch trigger"}'
-    await withGitHubAnswering(422, body, async (client) => {
+  it('dispatchBlocker reports the cause, so a reworded message is not a broken test', async () => {
+    const cases: [Partial<World>, string][] = [
+      [{ installation: null }, 'app-not-installed'],
+      [{ installation: null, visible: false }, 'repository-not-visible'],
+      [{ installation: { permissions: { metadata: 'read' } } }, 'permission-missing'],
+      [{ installation: { permissions: { actions: 'read' } } }, 'permission-missing'],
+      [{ workflowPresent: false }, 'workflow-missing'],
+      [{ branchPresent: false }, 'branch-missing'],
+    ]
+    for (const [over, cause] of cases) {
+      await withGitHub(world(over), async (client) => {
+        const blocker = await client.dispatchBlocker(99, 'acme/storefront', 'antifailure.yml', 'wip')
+        assert.equal(blocker?.cause, cause, `expected ${cause} for ${JSON.stringify(over)}`)
+      })
+    }
+  })
+
+  /**
+   * The state a person is in the instant after they fix the permission.
+   *
+   * They accept the Actions write grant on GitHub, which invalidates every
+   * outstanding installation token, and then they come straight back and press
+   * the button again. The cached token has up to an hour left on its clock and
+   * GitHub stopped honouring it seconds ago.
+   *
+   * Without the retry this is not merely a failure, it is a confident wrong
+   * answer: a 401 makes every lookup in the diagnosis answer "not 404", so it
+   * finds nothing wrong and tells the person the App is installed with Actions
+   * write and the workflow file is there. Which is true, and the button still
+   * does not work.
+   */
+  it('a token GitHub stopped honouring is forgotten and the call retried once', async () => {
+    let minted = 0
+    let forgotten: number[] = []
+    const calls: { token: string }[] = []
+    const original = globalThis.fetch
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const token = (init?.headers as Record<string, string>).authorization ?? ''
+      calls.push({ token })
+      // The first token is the stale cached one and the second is fresh, which
+      // is exactly what GitHub does after a permission is accepted.
+      return new Response(
+        token.endsWith('stale') ? '{"message":"Bad credentials"}' : null,
+        { status: token.endsWith('stale') ? 401 : 204 },
+      )
+    }) as typeof fetch
+    try {
+      const client = realClient({
+        for: async () => (minted++ === 0 ? 'ghs_stale' : 'ghs_fresh'),
+        onRepository: async () => ({ id: 4242, permissions: { actions: 'write' } }),
+        forget: (id) => forgotten.push(id),
+      })
+      await client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {})
+      assert.deepEqual(forgotten, [99], 'the stale token was not dropped from the cache')
+      assert.equal(calls.length, 2, 'the call was not retried')
+      assert.equal(calls[1]!.token, 'Bearer ghs_fresh')
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  it('a second 401 is not retried again, so a bad key is not a request storm', async () => {
+    let forgotten = 0
+    let calls = 0
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => {
+      calls++
+      return new Response('{"message":"Bad credentials"}', { status: 401 })
+    }) as typeof fetch
+    try {
+      const client = realClient({
+        for: async () => 'ghs_never_works',
+        onRepository: async () => ({ id: 4242, permissions: { actions: 'write' } }),
+        forget: () => forgotten++,
+      })
       await assert.rejects(
-        () => client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'wip', {}),
+        () => client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {}),
         (err: unknown) => {
           assert.ok(err instanceof GitHubError)
-          assert.match(err.message, /DEFAULT branch/)
-          assert.match(err.message, /wip/)
+          assert.match(err.message, /Bad credentials/)
           return true
         },
       )
-    })
+      // Two for the dispatch, then the diagnosis makes its own, each of which
+      // retries once. What must not happen is a loop.
+      assert.ok(calls < 12, `retried ${calls} times, which is a storm`)
+      assert.ok(forgotten > 0, 'the token was never dropped')
+    } finally {
+      globalThis.fetch = original
+    }
   })
 
   it('no App configured is a message naming the variables, not a crash', async () => {
@@ -516,9 +850,9 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
     })
 
     it('GitHub refusing is an answer, not an internal error', async () => {
-      // No workflow file registered for this repository, which is what a
-      // missing .github/workflows/antifailure.yml, a repository the App was
-      // not given, and a missing actions:write permission all look like.
+      // No workflow file registered for this repository. Distinct from a
+      // missing installation and from an ungranted permission, which are the
+      // two states this message used to be given for as well.
       const res = await callProcedure(h, member, 'environments.create', 'mutation', {
         repository: org.repository,
         workflow: 'not-there.yml',
@@ -528,7 +862,127 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
         'PRECONDITION_FAILED',
         'GitHub saying no arrived as a fault in this control plane',
       )
-      assert.match(message(res.body), /not-there\.yml/)
+      assert.match(message(res.body), /\.github\/workflows\/not-there\.yml/)
+      assert.doesNotMatch(message(res.body), /Actions write/)
+    })
+
+    /**
+     * The five states behind a refused dispatch, through the route a person
+     * actually presses.
+     *
+     * One test per remedy, because the remedies are what differ: accepting a
+     * permission on GitHub, adding a repository to an installation, checking a
+     * name, committing a file, and pushing a branch are five afternoons, and
+     * the message this replaced named three of them at once and left the
+     * reader to pick.
+     */
+    it('every way a dispatch is refused reaches the person as its own remedy', async () => {
+      // Each arrangement takes the repository it is about. Closing over the
+      // suite's own `org` instead would arrange a state on a repository the
+      // call never touches, and every case would quietly pass by dispatching
+      // successfully, which is exactly what it did once.
+      const cases: [string, (repo: string) => void, RegExp, RegExp][] = [
+        [
+          'the permission was never accepted',
+          () => h.github.revokeActionsWrite(),
+          /Actions write/,
+          /workflows\//,
+        ],
+        [
+          'the App does not hold this repository',
+          (repo) => h.github.uninstallFrom(repo),
+          /not installed on /,
+          /Actions write/,
+        ],
+        [
+          'GitHub will not show the repository',
+          (repo) => h.github.hideRepository(repo),
+          /will not show this App/,
+          /Actions write/,
+        ],
+        [
+          'the branch was never pushed',
+          (repo) => h.github.removeBranch(repo, 'main'),
+          /no branch named main/,
+          /Actions write/,
+        ],
+        [
+          'the workflow has no dispatch trigger',
+          () => h.github.refuseDispatches('trigger-missing'),
+          /workflow_dispatch/,
+          /Actions write/,
+        ],
+      ]
+      for (const [i, [what, arrange, names, doesNotName]] of cases.entries()) {
+        const fresh = await seedOrg(h.admin, `refused${i}`)
+        const session = await signInAs(h, fresh, 'admin')
+        try {
+          await install(fresh)
+          h.github.addWorkflow(fresh.repository, 'antifailure.yml')
+          arrange(fresh.repository)
+          const res = await callProcedure(h, session, 'environments.create', 'mutation', {
+            repository: fresh.repository,
+          })
+          assert.equal(errorCode(res.body), 'PRECONDITION_FAILED', what)
+          assert.match(message(res.body), names, what)
+          assert.doesNotMatch(message(res.body), doesNotName, what)
+          // The whole reason this work exists: no JSON reaches a screen.
+          assert.doesNotMatch(message(res.body), /documentation_url|[{}]/, what)
+        } finally {
+          h.github.reset()
+          await dropOrg(h.admin, fresh.orgId)
+        }
+      }
+    })
+
+    /**
+     * The same states, before anybody presses anything.
+     *
+     * A form that only fails on submit is the defect this closes: none of what
+     * it reports is caused by anything typed into the form, and every one of
+     * them was already true when the page loaded.
+     */
+    it('readiness answers before the button is pressed, and never throws on a supported state', async () => {
+      const ready = data<{ status: string }>(
+        await callProcedure(h, member, 'environments.readiness', 'query', {
+          repository: org.repository,
+        }),
+        'environments.readiness',
+      )
+      assert.deepEqual(ready, { status: 'ready' })
+
+      h.github.revokeActionsWrite()
+      try {
+        const blocked = data<{ status: string; cause: string; message: string }>(
+          await callProcedure(h, member, 'environments.readiness', 'query', {
+            repository: org.repository,
+          }),
+          'environments.readiness',
+        )
+        assert.equal(blocked.status, 'blocked')
+        assert.equal(blocked.cause, 'permission-missing')
+        assert.match(blocked.message, /Actions write/)
+      } finally {
+        h.github.reset()
+      }
+
+      // An organization that has not installed the App is the most ordinary
+      // state this product has, and a query that threw on it would make the
+      // page render its error state instead of its answer.
+      const lonely = await seedOrg(h.admin, 'noapp-readiness')
+      const session = await signInAs(h, lonely, 'admin')
+      try {
+        const answer = data<{ status: string; cause: string }>(
+          await callProcedure(h, session, 'environments.readiness', 'query', {
+            repository: lonely.repository,
+          }),
+          'environments.readiness',
+        )
+        assert.equal(answer.status, 'blocked')
+        assert.equal(answer.cause, 'app-not-installed')
+      } finally {
+        await dropOrg(h.admin, lonely.orgId)
+      }
     })
 
     it('a suspended organization cannot start new work', async () => {

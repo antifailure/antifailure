@@ -27,9 +27,15 @@ on:
   # your database and your credentials leaving your own cloud.
   #
   # Two things about this that are easy to get wrong and cost an afternoon.
-  # Without this block a dispatch answers 404, indistinguishable from the App
-  # not being installed. And GitHub reads the trigger list from the DEFAULT
-  # branch, so adding this on a feature branch alone does nothing at all.
+  # Without this block a dispatch answers 422 saying the workflow has no
+  # workflow_dispatch trigger, and without the FILE it answers 404, which is
+  # the same answer GitHub gives for a repository it will not show the App. And
+  # GitHub reads the trigger list from the DEFAULT branch, so adding this on a
+  # feature branch alone does nothing at all.
+  #
+  # The input NAMES here are load bearing. GitHub answers 422 "Unexpected
+  # inputs provided" for anything the console sends that is not declared, so
+  # renaming one breaks every button rather than that one flag.
   #
   # Delete it if you do not use the hosted control plane. `af ci` on a pull
   # request needs none of it.
@@ -59,9 +65,17 @@ on:
 concurrency:
   # github.head_ref is empty on anything that is not a pull request, so a
   # dispatch would otherwise share one group called `antifailure-` with every
-  # other dispatch and cancel it.
-  group: antifailure-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  # other dispatch. The event name is in the group as well so that a dispatch
+  # and a pull request run for the same branch never replace each other.
+  group: antifailure-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  # A push replaces the run for the same pull request, because only the newest
+  # commit is worth a preview. A dispatch replaces nothing, and that difference
+  # is the whole reason this is an expression rather than `true`: the console's
+  # three buttons run one after another against one branch, so somebody who
+  # presses "Ask for an environment" and then "Run agents" would otherwise have
+  # the second dispatch cancel the run that was building the environment the
+  # first one asked for. With this, the second queues behind the first.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
