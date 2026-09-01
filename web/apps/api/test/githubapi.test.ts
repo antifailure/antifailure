@@ -31,6 +31,8 @@ import {
   RealRepositoryApi,
 } from '../src/github/api.ts'
 import { COMMENT_MARKER, reachable, shaOfComment, commentBody } from '../src/github/render.ts'
+import { decodeReport } from '../src/github/lifecycle.ts'
+import { stateFromReport } from '../src/github/states.ts'
 
 interface Recorded {
   method: string
@@ -295,5 +297,87 @@ describe('what reaches a pull request comment', () => {
     // And no console link is offered when there is no console, because a link
     // to one that is not there is worse than a sentence.
     assert.doesNotMatch(body, /\]\(http/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('reading an engine report', () => {
+  // The report crosses a version boundary: the engine that wrote it may be
+  // older or newer than the control plane reading it. So one element that does
+  // not decode is skipped and the rest is kept, because a report discarded over
+  // one malformed field is a pull request with no answer on it, and an outcome
+  // word this build has never heard of counts as unverified rather than as a
+  // pass.
+
+  it('counts every workflow verdict by name, not by position', () => {
+    const decoded = decodeReport({
+      Environment: 'af-1',
+      Workflows: [
+        { Name: 'a', Verdict: 'pass' },
+        { Name: 'b', Verdict: 'fail' },
+        { Name: 'c', Verdict: 'flaky' },
+        { Name: 'd', Verdict: 'blocked' },
+        { Name: 'e', Verdict: 'unverified' },
+      ],
+    })
+    assert.deepEqual(decoded.counts, {
+      passed: 1,
+      failed: 1,
+      flaky: 1,
+      blocked: 1,
+      unverified: 1,
+    })
+    assert.equal(decoded.environment, 'af-1')
+  })
+
+  it('reads a verdict it has never heard of as unverified, never as a pass', () => {
+    const decoded = decodeReport({ Workflows: [{ Name: 'a', Verdict: 'brilliant' }] })
+    assert.equal(decoded.counts.unverified, 1)
+    assert.equal(decoded.counts.passed, 0)
+    assert.equal(stateFromReport(decoded.counts), 'unverified')
+  })
+
+  it('keeps the workflows around an element that does not decode', () => {
+    // The failure this shape exists to prevent: one malformed element throwing
+    // away the whole collection, so a broken pull request reads as an empty
+    // one.
+    const decoded = decodeReport({
+      Workflows: [{ Name: 'a', Verdict: 'fail' }, null, 'not an object', { Verdict: 'pass' }],
+    })
+    assert.equal(decoded.counts.failed, 1)
+    assert.equal(decoded.counts.passed, 1)
+    assert.equal(stateFromReport(decoded.counts), 'failed')
+  })
+
+  it('a violated invariant fails a run whose every workflow passed', () => {
+    // The product leads with this. A report where the agents were happy and the
+    // data is broken must not read as a pass.
+    const decoded = decodeReport({
+      Workflows: [{ Name: 'a', Verdict: 'pass' }],
+      Invariants: [{ Name: 'no-orphaned-orders', Held: false }],
+    })
+    assert.equal(decoded.counts.failed, 1)
+    assert.equal(stateFromReport(decoded.counts), 'failed')
+  })
+
+  it('an invariant that could not be asked is unverified, not violated', () => {
+    // Held and Error are separate for the same reason failed and blocked are:
+    // an invariant that could not be asked has found nothing, and reporting it
+    // as a violation blames the change for our own gap.
+    const decoded = decodeReport({
+      Workflows: [{ Name: 'a', Verdict: 'pass' }],
+      Invariants: [{ Name: 'no-orphaned-orders', Held: false, Error: 'no connection' }],
+    })
+    assert.equal(decoded.counts.failed, 0)
+    assert.equal(decoded.counts.unverified, 1)
+    assert.equal(stateFromReport(decoded.counts), 'unverified')
+  })
+
+  it('a run that reached no workflow at all verified nothing', () => {
+    // Two of this repository's own examples declared no workflows, the report
+    // headline was literally "Antifailure: Nothing ran", and the leg was green.
+    assert.equal(stateFromReport(decodeReport({ Workflows: [] }).counts), 'unverified')
+    assert.equal(stateFromReport(decodeReport({}).counts), 'unverified')
   })
 })

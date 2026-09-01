@@ -176,7 +176,7 @@ export interface RepositoryApiConfig {
 /** GitHub's own cap on the check output's long half. */
 const MAX_OUTPUT_TEXT = 65_535
 /** And on a comment body. */
-export const MAX_COMMENT_BODY = 65_536
+const MAX_COMMENT_BODY = 65_536
 
 export class RealRepositoryApi implements RepositoryApi {
   private readonly config: RepositoryApiConfig

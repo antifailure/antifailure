@@ -38,13 +38,15 @@ import {
   type KeyObject,
 } from 'node:crypto'
 import { FakeRepositoryApi } from '../src/github/fakeapi.ts'
-import { CALLBACK_AUDIENCE } from '../src/github/oidc.ts'
+import { ACTIONS_ISSUER, CALLBACK_AUDIENCE } from '../src/github/oidc.ts'
 import {
   DEFAULT_DEADLINE_MS,
   FORK_APPROVAL_LABEL,
   sweepGenerations,
   sweepTeardowns,
   TEARDOWN_ATTEMPTS,
+  TEARDOWN_LEASE_MS,
+  TIMED_OUT_DETAIL,
 } from '../src/github/lifecycle.ts'
 import { CHECK_NAME, COMMENT_MARKER } from '../src/github/render.ts'
 import { checkShapeFor, GENERATION_STATES } from '../src/github/states.ts'
@@ -95,7 +97,7 @@ function identityToken(claims: IdentityClaims, now: Date): string {
   const header = { alg: claims.algorithm ?? 'RS256', typ: 'JWT', kid: IDENTITY_KID }
   const seconds = Math.floor(now.getTime() / 1000)
   const payload = {
-    iss: claims.issuer ?? 'https://token.actions.githubusercontent.com',
+    iss: claims.issuer ?? ACTIONS_ISSUER,
     aud: claims.audience ?? CALLBACK_AUDIENCE,
     iat: seconds - 10,
     exp: seconds + (claims.expiresInSeconds ?? 600),
@@ -630,7 +632,7 @@ describe(
 
       // The run reaches a terminal state, which is the acknowledgement.
       api.finishWorkflowRun(5009, 'cancelled')
-      h.clock.advance(120_000)
+      h.clock.advance(TEARDOWN_LEASE_MS + 1000)
       await sweepTeardowns(lifecycle())
       const done = await h.admin<{ state: string; acknowledged_at: Date | null }[]>`
         SELECT state, acknowledged_at FROM teardown_requests WHERE workflow_run_id = 5009`
@@ -781,6 +783,12 @@ describe(
       assert.ok(swept.timedOut >= 1)
 
       assert.equal((await generation(head))?.state, 'unverified')
+      // The sentence, not merely the state. A timeout and a run that reported
+      // `unverified` itself are the same state and different conclusions, and
+      // the recorded detail is the only thing that separates them, so a
+      // reworded sentence that quietly stopped matching would silently collapse
+      // the two.
+      assert.equal((await generation(head))?.detail, TIMED_OUT_DETAIL)
       // timed_out rather than action_required, because a reader should know
       // nothing came back at all rather than that something needs approving.
       assert.equal(checkFor(head)?.conclusion, 'timed_out')
@@ -882,7 +890,7 @@ describe(
 
       for (let attempt = 0; attempt <= TEARDOWN_ATTEMPTS; attempt += 1) {
         await sweepTeardowns(lifecycle())
-        h.clock.advance(120_000)
+        h.clock.advance(TEARDOWN_LEASE_MS + 1000)
       }
       const row = await h.admin<{ state: string; last_error: string | null }[]>`
         SELECT state, last_error FROM teardown_requests WHERE env_id = ${envId}`
@@ -961,7 +969,7 @@ describe(
       const header = base64url(JSON.stringify({ alg: 'none', typ: 'JWT' }))
       const payload = base64url(
         JSON.stringify({
-          iss: 'https://token.actions.githubusercontent.com',
+          iss: ACTIONS_ISSUER,
           aud: CALLBACK_AUDIENCE,
           exp: Math.floor(h.clock.now().getTime() / 1000) + 600,
           repository,

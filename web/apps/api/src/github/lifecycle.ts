@@ -1450,8 +1450,13 @@ export async function issueCallback(
 // Teardown
 // ---------------------------------------------------------------------------
 
-/** Asks for the environment behind a generation to be removed. */
-export async function requestTeardownFor(
+/** Asks for the environment behind a generation to be removed.
+ *
+ *  Not exported. The console's teardown verb writes its own row, because it
+ *  runs on a connection scoped to the tenant and this one runs on a connection
+ *  scoped to the GitHub account, and a function that had to work under both
+ *  would take the scope as an argument, which is a seam nobody needs yet. */
+async function requestTeardownFor(
   deps: LifecycleDeps,
   login: string,
   generationId: string,
@@ -1780,7 +1785,7 @@ export async function sweepGenerations(deps: LifecycleDeps): Promise<{ timedOut:
 
 /** One sentence about a GitHub failure, with no status code and no JSON body.
  *  Both of those reach a pull request comment, where they help nobody. */
-export function describeApiFailure(err: unknown, what: string): string {
+function describeApiFailure(err: unknown, what: string): string {
   if (err instanceof GitHubPermissionError) return err.message
   if (err instanceof GitHubApiError) {
     return `GitHub would not ${what}. ${err.message}`

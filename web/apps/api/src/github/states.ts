@@ -154,4 +154,3 @@ export interface ReportCounts {
   blocked: number
   unverified: number
 }
-

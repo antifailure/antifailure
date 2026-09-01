@@ -25,6 +25,7 @@ import {
   verifySignature,
 } from '../src/github/app.ts'
 import { handleDelivery, slugFor } from '../src/github/webhook.ts'
+import { CLAIM_TAKEOVER_MS } from '../src/github/deliveries.ts'
 import { available, startApi, dropOrg, type ApiHarness } from './harness.ts'
 import type { Clock } from '../src/clock.ts'
 
@@ -766,6 +767,43 @@ describe('the webhook endpoint', {
     const [ledger] = await api.admin<{ n: number }[]>`
       SELECT count(*)::int AS n FROM github_deliveries WHERE delivery_id = ${`concurrent-fence-1-${run}`}`
     assert.equal(ledger!.n, 1)
+  })
+
+  test('ordering: a claim a dead process left behind is taken over, not waited on forever', async () => {
+    // A process killed mid-delivery leaves a claim nobody will ever stamp.
+    // Without a takeover window that delivery is refused forever while looking
+    // handled, which is the failure mode of every lease that is really a flag.
+    const payload = {
+      action: 'created',
+      installation: { id: 901779, account: { login: 'stale-claim-org', type: 'Organization' } },
+    }
+    // The same identifier deliver() will send: it appends the per-process
+    // suffix to an explicit one, so building it by hand has to append it too or
+    // the seeded claim and the delivery are two different deliveries.
+    const id = `stale-claim-${run}`
+
+    // The claim, written the way a process that then died would have left it:
+    // received, never stamped.
+    await api.admin`
+      INSERT INTO github_deliveries (delivery_id, event, action, received_at)
+      VALUES (${id}, 'installation', 'created', ${api.clock.now()})`
+
+    // Inside the window, the retry is told to come back rather than told it
+    // succeeded, because the first attempt may still be running.
+    const early = await deliver('installation', payload, { deliveryId: 'stale-claim' })
+    assert.equal(early.status, 503)
+
+    // Past it, the retry takes the claim and the delivery is handled.
+    api.clock.advance(CLAIM_TAKEOVER_MS + 1000)
+    const late = await deliver('installation', payload, { deliveryId: 'stale-claim' })
+    assert.equal(late.status, 200)
+    assert.doesNotMatch(late.body, /"replay":true/)
+
+    const [org] = await api.admin<{ id: string }[]>`
+      SELECT id FROM organizations WHERE github_login = 'stale-claim-org'`
+    assert.ok(org, 'the taken-over delivery was answered and did nothing')
+    await dropOrg(api.admin, org!.id)
+    await api.admin`DELETE FROM github_deliveries WHERE delivery_id = ${id}`
   })
 
   test('the endpoint is in the rate limit table', async () => {

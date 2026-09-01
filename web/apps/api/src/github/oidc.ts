@@ -305,7 +305,12 @@ export class ActionsKeys {
     const keys: Jwk[] = []
     for (const item of body.keys) {
       const key = item as Jwk
-      if (key && typeof key === 'object' && typeof key.n === 'string' && typeof key.e === 'string') {
+      if (
+        key &&
+        typeof key === 'object' &&
+        typeof key.n === 'string' &&
+        typeof key.e === 'string'
+      ) {
         keys.push(key)
       }
     }
