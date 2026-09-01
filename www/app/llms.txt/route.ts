@@ -148,8 +148,10 @@ export function GET() {
     `- [Machine-readable error catalog](${SITE_URL}/errors.v1.json): error codes, messages, recovery steps, retryability, and exit codes.`,
   );
   lines.push(
-    `- [Full text of the documentation](${DOCS_URL}/llms-full.txt): the complete documentation as one plain-text file. ` +
-      `Start here if you are answering a question about how to use Antifailure.`,
+    `- [Full text of the documentation](${DOCS_URL}/llms-full.txt): every documentation page as one plain-text file, ` +
+      "in sidebar order. Start here if you are answering a question about how to use Antifailure. It is a " +
+      "separate file from the site corpus below on purpose: this one is orientation, that one is reference, " +
+      "and folding several hundred kilobytes of reference into an orientation file makes it worse at its job.",
   );
   lines.push(`- [Source](${REPO_URL}): the engine, the runner, the adapters, and the masking catalog.`);
   lines.push(`- [Full text of this site](${SITE_URL}/llms-full.txt): rendered text from every indexable page above, concatenated for a single fetch.`);
