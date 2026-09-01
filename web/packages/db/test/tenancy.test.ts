@@ -95,6 +95,11 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'or the user code the caller already holds, the same shape as oauth_states',
       ],
       ['schema_migrations', "the schema's own bookkeeping, not tenant data"],
+      [
+        'admin_notes',
+        'an operator\'s words about a customer rather than the customer\'s data; ' +
+          'the application role holds no grant on it at all, which the test below proves',
+      ],
     ])
 
     // Partitions are excluded because a partition is storage for its parent
@@ -120,6 +125,54 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       `these tables are isolated by nothing this suite knows about:\n  ${unclassified.join('\n  ')}\n` +
         'Give the table an org_id, or record why it does not need one.',
     )
+  })
+
+  /**
+   * The claim the classification above makes, actually tested.
+   *
+   * Listing admin_notes as "deliberately global" is a sentence in a test file,
+   * and a sentence is not an isolation mechanism. What keeps an operator's
+   * private note about a customer away from that customer is that the
+   * application role holds no grant on the table, so every statement it can
+   * construct is refused by the database before any policy is consulted.
+   *
+   * Asserted as 42501 specifically. A SELECT that merely returns no rows would
+   * pass a weaker assertion and would mean something completely different: it
+   * would mean the table IS reachable and simply happened to be empty, which
+   * is the state this suite exists to distinguish from isolation.
+   */
+  it('the application role cannot read or write an operator\'s notes', async () => {
+    const [note] = await h.admin<{ id: string }[]>`
+      INSERT INTO admin_notes (subject_type, subject_id, body, author_label)
+      VALUES ('user', ${alice.userId}, 'a note the tenant must never see', 'the fixture')
+      RETURNING id`
+
+    // Read, on a connection that has a tenant, which is the strongest position
+    // the application is ever in.
+    const read = await h.pool
+      .withTenant({ orgId: alice.orgId, userId: alice.userId }, async (db) => {
+        await db.execute(sql`SELECT body FROM admin_notes`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.equal(
+      read?.code,
+      '42501',
+      'the application role could reach admin_notes; an operator note is not tenant data',
+    )
+
+    const write = await h.pool
+      .withTenant({ orgId: alice.orgId, userId: alice.userId }, async (db) => {
+        await db.execute(sql`DELETE FROM admin_notes WHERE id = ${note!.id}::uuid`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.equal(write?.code, '42501', 'the application role could delete an operator note')
+
+    // Still there, so the refusals above were refusals rather than statements
+    // that quietly matched nothing.
+    const [left] = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM admin_notes WHERE id = ${note!.id}::uuid`
+    assert.equal(Number(left!.n), 1)
+    await h.admin`DELETE FROM admin_notes WHERE id = ${note!.id}::uuid`
   })
 
   it('every tenant-scoped table has row-level security enabled and a policy', async () => {
@@ -330,6 +383,63 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       err.code,
       '42501',
       `expected ownership to be refused, got ${err.code}: ${err.message}`,
+    )
+  })
+
+  /**
+   * The admin portal's backdoor, and the wall around it.
+   *
+   * Migration 0023 creates a role that CAN read every tenant, which is a
+   * deliberate hole and is the only way to answer a support question without
+   * asking the customer to paste their data into a ticket. The property that
+   * makes it a bounded hole rather than an unbounded one is that the
+   * application cannot climb into it: the request path holds antifailure_app's
+   * credential, and reaching antifailure_admin would mean either being a
+   * member of that role or opening a second connection with a password this
+   * process is not given.
+   *
+   * SET ROLE is the specific attack. It needs no password and no new
+   * connection, so if antifailure_admin were ever granted to antifailure_app,
+   * which is one careless GRANT away and would look tidy in a migration, then
+   * every handler in the product would be one statement from reading the
+   * whole database. Nothing else in this suite would notice, because every
+   * other assertion here is about policies, and a role with BYPASSRLS is not
+   * subject to policies at all.
+   */
+  it('the application role cannot become the admin role', async () => {
+    const [admin] = await h.admin<{ rolbypassrls: boolean; rolcanlogin: boolean }[]>`
+      SELECT rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = 'antifailure_admin'`
+    assert.ok(admin, 'migration 0023 did not create antifailure_admin')
+    // If this is ever false the admin portal reads zero rows and every page
+    // renders an empty state that looks like a product with no customers.
+    assert.equal(admin.rolbypassrls, true, 'the admin role cannot actually bypass row-level security')
+
+    // No membership. This is the grant that must never be written.
+    const members = await h.admin<{ member: string }[]>`
+      SELECT m.rolname AS member
+      FROM pg_auth_members am
+      JOIN pg_roles r ON r.oid = am.roleid
+      JOIN pg_roles m ON m.oid = am.member
+      WHERE r.rolname = 'antifailure_admin'`
+    assert.deepEqual(
+      members.map((r) => r.member),
+      [],
+      'something has been granted the admin role; the application must never be able to SET ROLE into it',
+    )
+
+    // And the statement itself, refused, rather than only the catalog being
+    // the right shape. A catalog assertion proves the grant is absent today;
+    // this proves what happens when somebody tries.
+    const escalated = await h.pool
+      .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+        await db.execute(sql`SET ROLE antifailure_admin`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.ok(escalated, 'the application role became the admin role')
+    assert.equal(
+      escalated.code,
+      '42501',
+      `expected SET ROLE to be refused, got ${escalated.code}: ${escalated.message}`,
     )
   })
 
