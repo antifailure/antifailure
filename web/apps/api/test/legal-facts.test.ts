@@ -383,7 +383,12 @@ describe('the subprocessor page describes the code that exists', () => {
       (await read('www/components/pages/company/Legal.tsx'))
     const forbidden: [RegExp, string][] = [
       [
-        /There is no billing\./,
+        // No trailing period. The privacy page said "There is no billing, so
+        // there are no payment records" and the pattern required a full stop,
+        // so the same false claim in different punctuation walked straight
+        // through this gate. Found by building the site and reading the output,
+        // not by the gate, which is the whole argument for doing both.
+        /There is no billing/,
         'billing/plans.ts builds a live Stripe client from AF_STRIPE_SECRET_KEY',
       ],
       [
@@ -403,26 +408,44 @@ describe('the subprocessor page describes the code that exists', () => {
     }
   })
 
-  it('still says this site loads no third-party script, which is true and worth keeping true', async () => {
-    // The one absolute on that page that survived, and the one this branch came
-    // closest to breaking: adding analytics could have meant adding a vendor.
-    // It did not, and this fails on the day somebody adds one.
+  it('keeps the analytics claim and the analytics code in step, in both directions', async () => {
+    // CONDITIONAL ON THE FILE, NOT ON A FLAG, and that idea is integrator7's
+    // rather than mine. I had deleted this assertion on the branch where the
+    // beacon does not exist, which means somebody has to remember to put it
+    // back the day it does. Keying it on whether the file is there makes it
+    // start asserting on its own, which is the exact failure mode this whole
+    // file exists to prevent.
+    //
+    // The refinement is that BOTH states are asserted rather than one being a
+    // silent skip. A skip reads as a pass, and the two halves of this pair can
+    // drift apart in either direction: a beacon added while the page still says
+    // the site loads no analytics, or the page rewritten to describe a beacon
+    // that is not there. One of those was a real near miss: the branch that
+    // adds the beacon also rewrites this claim, and landing the rewrite without
+    // the beacon would have published a site that counts page views when it
+    // does not.
     const page = await read('www/lib/subprocessors.ts')
-    assert.match(page, /no script from another origin/)
+    const beacon = await read('www/lib/analytics.ts').catch(() => null)
 
-    // The beacon arrives with the analytics work and is not on main yet, so
-    // this half is conditional rather than assumed. Absent, there is no beacon
-    // that could name a vendor and the claim is trivially true; present, it is
-    // checked exactly as before. Conditional on the FILE rather than on a flag,
-    // so the day it lands this starts asserting without anybody remembering to
-    // switch it on, which is the failure mode this whole file exists for.
-    const beaconPath = 'www/lib/analytics.ts'
-    const beacon = await read(beaconPath).catch(() => null)
-    if (beacon !== null) {
-      assert.ok(
-        !/https?:\/\/(?!127\.0\.0\.1)/.test(beacon.replace(/CONTROL_PLANE_URL/g, '')),
-        'the site beacon now names an external address, so the no-third-party claim needs revisiting',
+    if (beacon === null) {
+      assert.match(
+        page,
+        /This site loads no analytics and no third-party script/,
+        'there is no www/lib/analytics.ts, so the subprocessor page must still say the site ' +
+          'loads no analytics. It says something else, which means the claim was rewritten ' +
+          'for a beacon that is not in this tree.',
       )
+      return
     }
+
+    assert.match(
+      page,
+      /no script from another origin/,
+      'a beacon exists and the subprocessor page still claims the site loads no analytics',
+    )
+    assert.ok(
+      !/https?:\/\/(?!127\.0\.0\.1)/.test(beacon.replace(/CONTROL_PLANE_URL/g, '')),
+      'the site beacon now names an external address, so the no-third-party claim needs revisiting',
+    )
   })
 })

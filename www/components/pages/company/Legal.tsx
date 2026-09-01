@@ -164,14 +164,13 @@ export function PrivacyPage() {
           </p>
           <p>
             What is conditional is everything else. The control plane contains a real Stripe
-            integration, and it is active only where{" "}
-            <code>AF_STRIPE_SECRET_KEY</code> and <code>AF_STRIPE_WEBHOOK_SECRET</code> are set.
-            Where they are, Stripe holds the customer, subscription and invoice records for that
-            deployment and is a processor for it, listed on the{" "}
-            <Link href="/subprocessors">subprocessor page</Link>. Where they are not, the billing
-            routes refuse and name the missing variables, and an organization carries nothing but a
-            plan name, which sets its rate limits and quotas. The control plane says which of the
-            two it is on the first line it logs when it starts.
+            integration, and it is active only where <code>AF_STRIPE_SECRET_KEY</code> and{" "}
+            <code>AF_STRIPE_WEBHOOK_SECRET</code> are set. Where they are, Stripe holds the
+            customer, subscription and invoice records for that deployment and is a processor for
+            it, listed on the <Link href="/subprocessors">subprocessor page</Link>. Where they are
+            not, the billing routes refuse and name the missing variables, and an organization
+            carries nothing but a plan name, which sets its rate limits and quotas. The control
+            plane says which of the two it is on the first line it logs when it starts.
           </p>
           <p>
             This page previously said there was no billing at all. That was true when it was
@@ -829,10 +828,6 @@ export function DataRetentionPage() {
                 `${cap(BACKUP_RECOVERY.production.words)} days of point-in-time recovery on production, ${BACKUP_RECOVERY.staging.words} on staging. A deletion is reflected in every backup only after that window has passed.`,
               ],
               [
-                "Analytics events",
-                "Raw analytics events are kept for as long as the deployment sets, and the daily counts computed from them outlive that: a count of page views by channel has nothing in it that identifies anybody. An event carries a keyed hash of the organization rather than its identifier, so the store can count organizations and cannot name one.",
-              ],
-              [
                 "Operational logs",
                 `${cap(LOG_RETENTION.production.words)} days on production and ${LOG_RETENTION.staging.words} on staging, in Azure Monitor. They hold request paths, status codes and timings, and never a request body, a token or a snapshot.`,
               ],
@@ -897,7 +892,7 @@ export function DataRetentionPage() {
               ],
               [
                 "A person who asks to be removed",
-                "Their personal fields are erased and the account row is kept. The row is kept by choice, not because the database refuses: the audit log references it with ON DELETE SET NULL and the delete would succeed. What it would also do is set a column that is inside the hash chain to null, so every entry that person ever wrote would stop hashing to its recorded hash and the organization's audit log would report itself as altered. Erasing the fields removes the personal data; deleting the row would remove the ability to prove nothing else had been changed.",
+                "Their personal fields are erased and the account row is kept. The row is kept by choice, not because the database refuses: the audit log references it with ON DELETE SET NULL and the delete would succeed. What it would also do is set a column that is inside the hash chain to null, so every entry that person ever wrote would stop hashing to its recorded hash and the organization\u2019s audit log would report itself as altered. Erasing the fields removes the personal data; deleting the row would remove the ability to prove nothing else had been changed.",
               ],
             ]}
           />
