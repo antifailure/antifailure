@@ -1733,10 +1733,10 @@ than from a record of what this command last did, so closing the laptop,
 switching branches, or tearing an environment down by hand all move the answer
 with you.
 
-Two steps cannot be answered without side effects and are reported as not
-checked, with the reason and the command that does answer them. That is the
-point rather than a gap: a step reported as fine because nothing looked at it is
-how a green run over nothing happens.
+A step that cannot be answered without side effects is reported as not checked,
+with the reason and the command that does answer them. That is the point rather
+than a gap: a step reported as fine because nothing looked at it is how a green
+run over nothing happens.
 
 Exit 0 means every step is either done or simply not reached yet, which is the
 normal state of a first run in progress. Exit 3 means a step is broken and the
