@@ -359,12 +359,9 @@ the refusal. Restore beside it and switch.
 records who ran it and why, in a log the customer can export. It is for restoring
 access somebody already had, not for acquiring access nobody granted.
 
-**Do not run `af env prune --older-than 0` to clean up during an incident.** A
-cutoff of zero means every environment on the machine is older than it,
-including the ones somebody is using to debug the incident. `af env prune`
-refuses to run without a cutoff for exactly this reason, and `--dry-run` prints
-what would go before anything does. `af env reap` is the one that removes only
-the environments whose lifetime has already ended.
+**Do not run `af down --all` to clean up during an incident.** It removes every
+environment on the machine, including ones somebody is using to debug the
+incident.
 
 **Do not delete a golden to reclaim space while environments are running.**
 `af golden gc` already refuses to collect a version an environment came from, and
