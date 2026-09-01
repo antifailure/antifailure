@@ -87,6 +87,15 @@ function inputsFor(org: Org): Record<string, unknown> {
     'runtimes.register': { name: 'matrix', provider: 'local', labels: [] },
     'runtimes.tag': { name: 'nothing-registered-here', labels: [] },
     'runtimes.remove': { name: 'nothing-registered-here' },
+    // The dashboard, which is guarded twice: by analytics.read here, and again
+    // by membership of the organization that operates the installation. This
+    // fixture is not that organization, so a role that HOLDS the permission
+    // reaches the handler and gets PRECONDITION_FAILED or FORBIDDEN, which is
+    // what the matrix accepts and what proves the permission gate let the call
+    // through. The second gate has its own tests, in analytics-dashboard.test.ts.
+    'analytics.overview': { days: 28 },
+    'analytics.series': { days: 28, name: 'site.page_viewed' },
+    'analytics.catalog': {},
     'billing.get': {},
     // The plan the fixture already has, so the matrix cannot change what an
     // organization is on as a side effect: `set` treats that as a no-op.

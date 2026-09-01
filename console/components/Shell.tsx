@@ -8,6 +8,7 @@ import {
   IconAudit,
   IconEnvironments,
   IconKeys,
+  IconAnalytics,
   IconMasking,
   IconMembers,
   IconNetwork,
@@ -29,6 +30,7 @@ const NAV = [
   { href: "/members", label: "Members", Icon: IconMembers },
   { href: "/plan", label: "Plan", Icon: IconPlan },
   { href: "/keys", label: "Provider keys", Icon: IconKeys },
+  { href: "/analytics", label: "Analytics", Icon: IconAnalytics },
 ];
 
 /* -------------------------------------------------------------------------

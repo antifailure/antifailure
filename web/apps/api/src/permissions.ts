@@ -29,6 +29,7 @@ export const PERMISSIONS = [
   'audit.export',
   'runtimes.manage',
   'tokens.manage',
+  'analytics.read',
 ] as const
 
 export type Permission = (typeof PERMISSIONS)[number]
@@ -57,6 +58,10 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'audit.export': 'Export the audit log, and verify its hash chain.',
   'runtimes.manage': 'Register, tag, and remove runtimes.',
   'tokens.manage': 'Create and revoke the tokens engines use to send events.',
+  'analytics.read':
+    'Read the analytics dashboard for this control plane installation. Granted here and ' +
+    'checked again against the organization that operates the installation, because this is ' +
+    'the one page that is not about the caller’s own organization.',
 }
 
 /**
@@ -77,6 +82,12 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
  *
  * A viewer can read the audit log but not export it. Reading is oversight;
  * exporting produces a file of who did what that leaves the system.
+ *
+ * Owner and admin hold analytics.read and member and viewer do not, and it is
+ * the only permission on this list where the grant is not the whole gate. The
+ * dashboard covers the installation rather than the organization, so it is
+ * ALSO confined to members of the organization that operates the installation,
+ * which a role table cannot express. See routers/analytics.ts.
  */
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   owner: [...PERMISSIONS],
@@ -85,6 +96,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'masking.edit', 'masking.approve', 'network.edit', 'network.approve',
     'agents.run', 'load.run', 'members.manage',
     'audit.read', 'audit.export', 'runtimes.manage', 'tokens.manage',
+    'analytics.read',
   ],
   member: [
     'environments.view', 'environments.create', 'environments.teardown',

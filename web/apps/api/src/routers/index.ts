@@ -19,6 +19,7 @@ import { createEnvironment, agentsRouter, loadRouter } from './dispatch.ts'
 import { runtimesRouter } from './runtimes.ts'
 import { billingRouter } from './billing.ts'
 import { subscriptionsRouter } from './subscriptions.ts'
+import { analyticsRouter } from './analytics.ts'
 
 const uuid = z.string().uuid()
 
@@ -776,11 +777,19 @@ const membersRouter = router({
       // four and the mapping is its decision, not this route's. Reading it back
       // means the chart shows what was actually written.
       if (report.added.length > 0) {
+        // Read whole and filtered here rather than with a WHERE over the list.
+        // A JavaScript array interpolated into a tag is a TUPLE to Postgres,
+        // not an array, so `= ANY(${logins})` compiled to `= ANY(($1, $2))`
+        // and every sync answered 500. The membership of one organization is
+        // small and this route has already read it once, so filtering in
+        // memory costs nothing and cannot get the shape wrong.
+        const added = new Set(report.added.map((l) => l.toLowerCase()))
         await c.pool.withTenant(c.tenant, async (db) => {
-          const roles = await db.execute<{ role: string }>(sql`
-            SELECT m.role FROM members m JOIN users u ON u.id = m.user_id
-            WHERE lower(u.github_login) = ANY(${report.added.map((l) => l.toLowerCase())})`)
-          for (const row of roles) {
+          const members = await db.execute<{ role: string; login: string }>(sql`
+            SELECT m.role, lower(u.github_login) AS login
+            FROM members m JOIN users u ON u.id = m.user_id`)
+          for (const row of members) {
+            if (!added.has(row.login)) continue
             await c.analytics.record(db, {
               name: 'identity.member_joined',
               occurredAt: c.clock.now(),
@@ -996,6 +1005,7 @@ export const appRouter = router({
   tokens: tokensRouter,
   org: orgRouter,
   subscriptions: subscriptionsRouter,
+  analytics: analyticsRouter,
 })
 
 export type AppRouter = typeof appRouter

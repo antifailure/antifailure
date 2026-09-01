@@ -317,7 +317,7 @@ describe('the analytics stream', { skip: hasDatabase ? false : 'no Postgres at A
         name: 'identity.organization_created',
         occurredAt: new Date('2026-05-02T00:00:00Z'),
         orgId,
-        payload: { via: 'github_installation' },
+        payload: {},
       })
       assert.equal(outcome.status, 'recorded')
       const facts = await factsFor(s)

@@ -19,6 +19,7 @@ import path from 'node:path'
 import { once } from 'node:events'
 import postgres from 'postgres'
 import {
+  ANALYTICS_EVENTS,
   applyPartitions,
   currentPartitions,
   planPartitions,
@@ -27,6 +28,7 @@ import {
   type ApplyResult,
 } from '@antifailure/db'
 import type { Clock } from './clock.ts'
+import { rollUp } from './analytics/rollup.ts'
 
 export interface MaintenanceConfig {
   /** A connection string for a role that may run DDL. */
@@ -39,6 +41,16 @@ export interface MaintenanceConfig {
   /** Where to write a month before dropping it. Undefined does not archive,
    *  which is only safe when the events are not worth keeping. */
   archiveDir?: string
+  /**
+   * Delete raw analytics events older than this many days. Undefined never
+   * deletes, which is the default for the same reason retentionMonths is.
+   *
+   * Note what is NOT deleted: the daily aggregates computed from them. A count
+   * of page views by channel has nothing in it that identifies anybody, so the
+   * shape of a retention policy here is that the rows carrying a surrogate go
+   * and the counts stay.
+   */
+  analyticsRetentionDays?: number
   /** How often to run. */
   intervalMs?: number
   log?: (line: string) => void
@@ -50,6 +62,10 @@ export interface MaintenanceRun {
   dropped: string[]
   archived: string[]
   pruned: number
+  /** Days of analytics recomputed by the rollup. */
+  rolledUp: string[]
+  /** Raw analytics events deleted by retention. */
+  analyticsPruned: number
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -123,7 +139,36 @@ export async function runMaintenance(
       pruned = deleted
     }
 
-    return { created: made.created, dropped, archived, pruned }
+    // Analytics partitions, kept ahead of the writes exactly as the events
+    // partitions are. A range-partitioned table with no partition for an
+    // incoming row does not slow down, it fails, and the analytics stream is
+    // written from the sign-in path.
+    const analyticsPartitions = await applyPartitions(admin, {
+      now, monthsAhead: config.monthsAhead, table: ANALYTICS_EVENTS,
+    })
+
+    // Then the rollup, which is the only reader of the analytics stream. It
+    // rides this pass rather than having a scheduler of its own: it needs the
+    // same privileged credential, and a second timer is a second thing to
+    // notice had stopped.
+    //
+    // After the partitions and never before, so a rollup can never be the
+    // reason a month does not exist.
+    const rolled = await rollUp(admin, clock, {
+      now,
+      ...(config.analyticsRetentionDays === undefined
+        ? {}
+        : { retentionDays: config.analyticsRetentionDays }),
+    })
+
+    return {
+      created: [...made.created, ...analyticsPartitions.created],
+      dropped,
+      archived,
+      pruned,
+      rolledUp: rolled.days,
+      analyticsPruned: rolled.pruned,
+    }
   } finally {
     await admin.end({ timeout: 10 })
   }
@@ -154,6 +199,12 @@ export function startMaintenance(
       if (run.archived.length) log(`archived partitions: ${run.archived.join(', ')}`)
       if (run.dropped.length) log(`dropped partitions: ${run.dropped.join(', ')}`)
       if (run.pruned) log(`pruned ${run.pruned} late events past the retention`)
+      if (run.rolledUp.length) {
+        log(`rolled up analytics for ${run.rolledUp.join(', ')}`)
+      }
+      if (run.analyticsPruned) {
+        log(`pruned ${run.analyticsPruned} raw analytics events past the retention`)
+      }
     } catch (err) {
       onError(err)
     }

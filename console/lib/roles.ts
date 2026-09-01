@@ -23,12 +23,14 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "masking.edit", "masking.approve", "network.edit", "network.approve",
     "agents.run", "load.run", "members.manage", "billing.manage",
     "audit.read", "audit.export", "runtimes.manage", "tokens.manage",
+    "analytics.read",
   ],
   admin: [
     "environments.view", "environments.create", "environments.teardown",
     "masking.edit", "masking.approve", "network.edit", "network.approve",
     "agents.run", "load.run", "members.manage",
     "audit.read", "audit.export", "runtimes.manage", "tokens.manage",
+    "analytics.read",
   ],
   member: [
     "environments.view", "environments.create", "environments.teardown",
