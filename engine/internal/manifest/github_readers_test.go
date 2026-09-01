@@ -18,14 +18,17 @@ import (
 
 // Which fields of the github block anything actually reads.
 //
-// All four are validated, defaulted, and printed by af explain, and none of
-// them changes what happens. Setting `fork_policy: always` does not make a fork
-// run. Removing `close` from `teardown_on` does not stop a closed pull request
-// being torn down. That is a real gap and it is written down in
-// docs/reference/manifest.md, with the reason: the hosted control plane never
-// reads the customer's manifest, because a control plane that read it would
-// have to fetch the repository, and that is the boundary the whole product
-// rests on.
+// Two of the four are live now. `fork_policy` is enforced in the engine before
+// an environment is named, and `comment` decides whether the workflow's comment
+// step runs at all, so both have real readers and neither is exempt below.
+//
+// `mode` and `teardown_on` are still validated, defaulted, and printed by af
+// explain, and neither changes what happens: removing `close` from
+// `teardown_on` does not stop a closed pull request being torn down. That is a
+// real gap and it is written down in docs/reference/manifest.md, with the
+// reason: the hosted control plane never reads the customer's manifest, because
+// a control plane that read it would have to fetch the repository, and that is
+// the boundary the whole product rests on.
 //
 // This test exists so the gap cannot grow quietly in either direction. A new
 // field added to the block with no classification fails here, and a field that
@@ -48,10 +51,6 @@ import (
 var displayOnly = map[string]string{
 	"Mode": "printed by af explain; whether a control plane is involved is decided by " +
 		"the workflow, which has the address of one or does not",
-	"Comment": "printed by af explain; the comment is maintained by the control plane when " +
-		"there is one and by the workflow's own step when there is not",
-	"ForkPolicy": "printed by af explain; the control plane always requires a maintainer to " +
-		"approve the exact commit, which is label behaviour, because it cannot read this file",
 	"TeardownOn": "printed by af explain; teardown is always asked for on close, merge, " +
 		"supersession and timeout, because a run that is stopping leaks its environment " +
 		"if nothing cleans up after it",

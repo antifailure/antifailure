@@ -51,6 +51,16 @@ export interface WorkflowResult {
     readonly failed: readonly string[];
   };
   readonly durationMs: number;
+  /** When this workflow ran, as RFC 3339 in UTC.
+   *
+   *  Here so the engine can attribute an outbound request to the workflow
+   *  that caused it. The runner drives a browser and never sees the calls the
+   *  APPLICATION makes, so it cannot know that a workflow touched a response
+   *  a model invented; the proxy knows, and the only thing that connects the
+   *  two is a window. durationMs alone could not: it says how long, not when,
+   *  and the engine's clock is not this process's. */
+  readonly startedAt: string;
+  readonly finishedAt: string;
 }
 
 const MAX_STEPS = 40;
@@ -112,6 +122,8 @@ async function runOne(job: Job, workflow: Workflow): Promise<WorkflowResult> {
     steps,
     evidence,
     durationMs: Date.now() - started,
+    startedAt: new Date(started).toISOString(),
+    finishedAt: new Date().toISOString(),
   };
 }
 
@@ -228,7 +240,12 @@ function finalJudgement(
       };
     default:
       return {
-        cause: 'synthesized-response',
+        // page-unreadable, not synthesized-response. This branch is about a
+        // page nobody could read; the other name belongs to a response a
+        // model invented, which the proxy knows about and the runner cannot
+        // see. Wearing it here left the real case with a mapping and no
+        // producer for as long as synth has existed.
+        cause: 'page-unreadable',
         detail:
           `${why} Nothing on the page contradicts what was expected, and nothing confirms it ` +
           `either, so this run proved nothing. Set a model key so the runner can read the page, ` +

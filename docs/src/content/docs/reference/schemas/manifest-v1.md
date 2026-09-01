@@ -177,10 +177,10 @@ How Antifailure appears on a pull request: what runs it, whether it comments, wh
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `comment` | boolean | no | Whether to maintain a single comment on the pull request. It is updated in place rather than appended, so a busy pull request does not accumulate twenty bot comments. Defaults to `true`. |
-| `fork_policy` | `never`, `label`, `always` | no | What to do with a pull request from a fork. label requires a maintainer to add antifailure:allow first, which is the only safe default: a fork's code would otherwise run with the environment's credentials. Defaults to `label`. |
+| `comment` | boolean | no | Whether to maintain a single comment on the pull request. It is updated in place rather than appended, so a busy pull request does not accumulate twenty bot comments. Set false and af change and af ci write comment=false to GITHUB_OUTPUT for the workflow to gate its comment step on. The report files are still written, because the report is also the job summary and the payload a control plane is sent. Defaults to `true`. |
+| `fork_policy` | `never`, `label`, `always` | no | What to do with a pull request from a fork. label requires a maintainer to add antifailure:allow first, which is the only safe default: a fork's code would otherwise run with the environment's credentials. Enforced by af ci, af up, af test and af load run before an environment is created, on pull_request and pull_request_target, and read from the base branch rather than from the pull request, because the pull request's copy of this file belongs to the contributor. Defaults to `label`. |
 | `mode` | `actions`, `app`, `off` | no | actions runs everything inside a workflow with no server. app uses the GitHub App and the control plane. Defaults to `actions`. |
-| `teardown_on` | list of string | no | Events that tear the environment down. Defaults to `[close merge ttl]`. Max items 5. |
+| `teardown_on` | list of string | no | Accepted and read by nothing. Teardown is unconditional: af ci tears down whatever the outcome, and the control plane asks for teardown on close, merge, supersession and timeout without reading your manifest. The lifetime ceiling is runtime.max_ttl. Defaults to `[close merge ttl]`. Max items 5. |
 
 ## Goal
 
