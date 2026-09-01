@@ -195,6 +195,100 @@ jobs:
 
           echo "GET /api is 200 and lists the waitlist; POST /api/waitlist rejects junk with 400"
 
+      - name: The machine-readable surfaces answer, and describe this revision
+        # The other half of "a publish is not a working endpoint", for the two
+        # documents an agent fetches instead of reading the site.
+        #
+        # Both are generated at build time and committed, so the question is not
+        # whether they are valid, CI already refused the push otherwise. It is
+        # whether the CDN is serving THESE bytes rather than the previous
+        # revision's, which a 200 alone cannot tell you: a stale document is a
+        # perfectly healthy 200 that describes an API this revision does not
+        # serve.
+        #
+        # The drift check afterwards is the honest part of the design decision
+        # in web/apps/api/scripts/openapi.ts. The site deploys on every push to
+        # main; the production control plane moves on a release promotion. So
+        # this document can be ahead of what app.antifailure.dev serves. That is
+        # tolerable while the API VERSION agrees, because the paths are additive
+        # and a caller reading an operation that is not there yet gets a 404.
+        # It stops being tolerable the moment the versions differ, and that is
+        # the one case this fails on.
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: |
+          set -uo pipefail
+          site=https://antifailure.dev
+          control=https://app.antifailure.dev
+
+          for name in openapi.json errors.v1.json; do
+            for attempt in $(seq 1 15); do
+              code=$(curl -sS -m 20 -o "/tmp/$name" -w '%{http_code}' "$site/$name" || echo 000)
+              [ "$code" = "200" ] && break
+              echo "attempt $attempt: GET /$name returned $code"
+              sleep 10
+            done
+            if [ "$code" != "200" ]; then
+              echo "::error::GET $site/$name returned $code after 15 attempts."
+              head -c 400 "/tmp/$name" || true
+              exit 1
+            fi
+            # Byte for byte against what this run built. Nothing else proves the
+            # CDN moved: the previous revision's document is also valid JSON,
+            # also 200, and also parses.
+            if ! cmp -s "/tmp/$name" "site/$name"; then
+              echo "::error::$site/$name is not the document this revision built."
+              echo "  served  $(shasum -a 256 < "/tmp/$name" | cut -c1-16)"
+              echo "  built   $(shasum -a 256 < "site/$name" | cut -c1-16)"
+              exit 1
+            fi
+            echo "$site/$name is 200 and matches this revision"
+          done
+
+          node -e '
+            const fs = require("fs");
+            const doc = JSON.parse(fs.readFileSync("/tmp/openapi.json", "utf8"));
+            if (doc.openapi !== "3.1.0") throw new Error(`openapi is ${doc.openapi}`);
+            const paths = Object.keys(doc.paths ?? {});
+            if (paths.length === 0) throw new Error("the published document has no paths");
+            const ids = Object.values(doc.paths).flatMap((item) =>
+              Object.values(item).map((op) => op.operationId));
+            if (ids.some((id) => !id)) throw new Error("an operation has no operationId");
+            console.log(`the published document has ${paths.length} paths and ${ids.length} operation ids`);
+          '
+
+          catalog=$(node -e '
+            const c = JSON.parse(require("fs").readFileSync("/tmp/errors.v1.json", "utf8"));
+            if (c.schemaVersion !== 1) throw new Error(`schemaVersion ${c.schemaVersion}`);
+            if (!c.errors.some((e) => e.code === "AF-CP-003"))
+              throw new Error("the code the control plane 500 returns is not in the published catalog");
+            console.log(c.errors.length);
+          ')
+          echo "the published error catalog resolves $catalog codes"
+
+          # Drift, reported always and fatal only when the API version differs.
+          served=$(curl -sS -m 20 "$control/openapi.json" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).info.version' || echo unknown)
+          published=$(node -pe 'JSON.parse(require("fs").readFileSync("/tmp/openapi.json","utf8")).info.version')
+          if [ "$served" != "$published" ]; then
+            echo "::error::the apex publishes API version $published and $control serves $served."
+            echo "Promote the control plane, or hold this document back. A caller reading one"
+            echo "version of the contract and calling the other is the failure this catches."
+            exit 1
+          fi
+          echo "apex and control plane agree on API version $published"
+
+          # Live, not documented. A path in the document that the host does not
+          # answer is the drift that actually costs a caller something, and the
+          # two unauthenticated ones can be asked directly.
+          for route in /health /readyz; do
+            code=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "$control$route" || echo 000)
+            case "$code" in
+              200|503) echo "$control$route answers $code" ;;
+              *) echo "::error::$control$route is published in the document and answered $code"; exit 1 ;;
+            esac
+          done
+
       - name: Tell Bing what changed
         # Only after a real publish, because IndexNow is a claim that a URL is
         # live and fetchable. Submitting before the deploy asks a crawler to
