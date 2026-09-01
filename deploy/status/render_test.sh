@@ -139,6 +139,7 @@ d="$WORK/never"; mkdir -p "$d"; s="$(scripts never)"
 run "$d" "$d/readings.jsonl" "$s"
 expect "names the state rather than showing an empty row" "$d/index.html" ">No Data<"
 expect "says so on the row rather than leaving it blank" "$d/index.html" "no readings yet"
+expect "a component never probed says so beside its status word too" "$d/index.html" 'class="comp-t">never checked<' 
 expect "and the probed ones are still operational" "$d/index.html" ">Operational<"
 
 # ---------------------------------------------------------------------------
@@ -197,6 +198,11 @@ d="$WORK/down"; mkdir -p "$d"; s="$(scripts down)"
   reading control-plane-api 3600 true; } > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
 expect "the component says it is out, in a word and not only a colour" "$d/index.html" ">Partial Outage<"
+# A status word alone overstates: this probe lands every few hours, so
+# Operational beside a four hour old check is a weaker claim than a reader
+# takes it for. The word and the age it was earned at travel together.
+expect "the age of the check sits beside the status word" "$d/index.html" 'class="comp-t">checked '
+expect "and the page says what Operational means" "$d/index.html" "not that a component is up right now"
 expect "the day is drawn as partly failed, sized by the share" "$d/index.html" 'class="b b-part"'
 expect "the feed carries the detected outage" "$d/feed.xml" "still failing"
 expect "the feed names which failure it was" "$d/feed.xml" "HTTP 503"

@@ -407,7 +407,17 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
     | "<article class=\"comp\">"
     + "<div class=\"comp-h\"><span class=\"comp-n\">\($c.name | esc)"
     + "<a class=\"what\" href=\"https://antifailure.dev/docs/self-hosting/status-page/#what-is-watched-and-why-each-one-separately\" title=\"\($c.name | esc): \($c.description | esc)\" aria-label=\"What \($c.name | esc) is: \($c.description | esc)\">?</a>"
-    + "</span><span class=\"comp-s \(statusClass($c))\">\(statusWord($c) | esc)</span></div>"
+    + "</span><span class=\"comp-r\"><span class=\"comp-s \(statusClass($c))\">\(statusWord($c) | esc)</span>"
+    # The status word and the time it was earned travel together, always, on
+    # the same line. "Operational" beside a four hour old check is a weaker
+    # claim than a reader will take it for, and the reader can only discount
+    # it if the age is in front of them rather than in a paragraph at the
+    # bottom of the page. GitHub delivers this five minute cron every three to
+    # six hours in practice, so this is the normal case and not an edge one.
+    + "<span class=\"comp-t\">"
+    + (if $c.latestAt == null then "never checked"
+       else "checked \(($nowS - $c.latestAt) | humanSecs) ago" end)
+    + "</span></span></div>"
     + "<div class=\"strip\" role=\"img\" aria-label=\"\($stripDays) days to \($lastDay | dayStampKey): \(($known | length)) with readings, \(($known | map(select(.ok < .checks)) | length)) with a failed check, \(($stripDays - ($known | length))) with no readings.\">"
     + ($c.cells | map(bar(.)) | join("")) + "</div>"
     + "<div class=\"foot\"><span class=\"f-l\">\($stripDays) days ago</span><span class=\"f-l f-sm\">30 days ago</span><i class=\"hr\"></i>"
@@ -562,13 +572,15 @@ a { color: inherit; }
 
 .sec-note {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  justify-content: space-between;
   gap: 6px;
   margin: 22px 0 8px;
   font-size: 12px;
   color: var(--dim);
 }
 .sec-note a { color: var(--dim); }
+.gloss { max-width: 62ch; }
 
 .comps { border: 1px solid var(--rule); background: var(--card); }
 /* Rows share edges rather than each carrying its own border, which is the
@@ -594,7 +606,9 @@ a { color: inherit; }
   vertical-align: 1px;
 }
 .what:hover { border-color: var(--ink); color: var(--ink); }
-.comp-s { margin-left: auto; font-size: 13px; font-weight: 500; }
+.comp-r { margin-left: auto; display: flex; align-items: baseline; gap: 9px; }
+.comp-s { font-size: 13px; font-weight: 500; }
+.comp-t { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .s-ok { color: var(--pass); }
 .s-warn { color: var(--warn); }
 .s-down { color: var(--fail); }
@@ -708,6 +722,7 @@ footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--rule);
   .ban, .ban-b { padding-left: 14px; padding-right: 14px; }
   .comp-n, .m-n { font-size: 15px; }
   .comp-s, .none, .ts, .mnote, .sec-note, .foot { font-size: 13px; }
+  .comp-t { font-size: 13px; }
   .upd-l { font-size: 15px; }
   .top { padding: 20px 0 18px; }
   /* Touch targets. WCAG 2.5.8 asks 24 by 24 as the floor and the subscribe
@@ -748,7 +763,7 @@ footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--rule);
 
 + (($openIncidents + $openMaint) | map("<section class=\"active\">" + banner(.) + "</section>") | join(""))
 
-+ "<p class=\"sec-note\"><span>"
++ "<p class=\"sec-note\"><span class=\"gloss\">Operational means the most recent check passed, not that a component is up right now. Between two checks this page knows nothing, so read every status with the time beside it.</span><span>"
 + (if $recordStart != null and $recordStart <= ($nowS - ($stripDays * 86400))
    then "Uptime over the past \($stripDays) days."
    elif $recordStart != null

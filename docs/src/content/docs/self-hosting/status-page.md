@@ -110,6 +110,20 @@ the two most status pages have no word for and quietly render as green,
 `No Recent Data` when the probe has stopped arriving and `No Data` when a
 component has never been checked.
 
+Every status word carries the age of the check that earned it, on the same
+line and at the same weight: `Operational  checked 21 minutes ago`. That
+pairing is the point. GitHub delivers this five minute cron every three to six
+hours in practice, so a status word standing alone would be a weaker claim
+than a reader takes it for, and a reader can only discount it if the age is in
+front of them rather than in a paragraph at the foot of the page. The page
+also says once, where the list starts, that Operational means the most recent
+check passed and not that a component is up right now.
+
+Past a threshold the word itself changes. A component whose last reading is
+older than three times the interval the probe has actually been keeping reads
+`No Recent Data`, not `Operational`, because at that point the page has
+stopped knowing rather than started disagreeing.
+
 The word is not politeness. The amber and the red in the day strip are 0.7
 apart in OKLab under deuteranopia and the green and the red are 4.0 apart,
 which is to say all three bars are one bar to a red-green colour blind reader
