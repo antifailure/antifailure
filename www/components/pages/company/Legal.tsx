@@ -723,7 +723,7 @@ export function ServiceLevelsPage() {
               ],
               [
                 "Backups",
-                "Production is configured for thirty-five days of point-in-time recovery with geo-redundant backup storage, so a region losing its storage does not take the backups with it. Staging keeps fourteen days in one region with geo-redundancy off. A standby is not a backup: a bad migration reaches it instantly.",
+                `Production is configured for ${BACKUP_RECOVERY.production.words} days of point-in-time recovery with geo-redundant backup storage, so a region losing its storage does not take the backups with it. Staging keeps ${BACKUP_RECOVERY.staging.words} days in one region with geo-redundancy off. A standby is not a backup: a bad migration reaches it instantly.`,
               ],
               [
                 "Monitoring",

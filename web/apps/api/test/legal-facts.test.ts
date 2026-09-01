@@ -217,16 +217,26 @@ describe('the published retention numbers are the ones the infrastructure sets',
       )
     }
 
-    // And no hand-written retention sentence left beside the rendered ones.
-    // The flat fourteen is the exact sentence that was wrong on three pages.
-    assert.ok(
-      !/[Ff]ourteen days of point-in-time recovery/.test(legal),
-      'a page still states a flat fourteen day recovery window with no environment named',
-    )
-    assert.ok(
-      !/[Nn]inety days on production/.test(legal),
-      'a log retention period is written out by hand beside the one that is rendered from the fact',
-    )
+    // And NO hand-written copy of a published number anywhere in the file.
+    //
+    // The first version of this checked two specific stale sentences, which is
+    // a list rather than a property, and it passed over a third: the service
+    // levels page still spelled both numbers out. It was CORRECT, which is
+    // exactly how the other three started, and it is the shape that drifts.
+    // Found by a colleague asking whether the fix covered a line I had not
+    // looked at, not by the gate.
+    //
+    // `thirty` is deliberately absent from this list. It is also the blob
+    // soft-delete window on the masked dumps row, which is a different fact
+    // from a different source, and forbidding the word would refuse a sentence
+    // this module has no opinion about.
+    for (const word of ['thirty-five', 'fourteen', 'ninety']) {
+      assert.ok(
+        !new RegExp(`\\b${word}\\b`, 'i').test(legal),
+        `the legal pages spell "${word}" out by hand somewhere. Every published retention ` +
+          `number comes from legal-facts.ts, and a second copy is the thing that drifted.`,
+      )
+    }
   })
 })
 
