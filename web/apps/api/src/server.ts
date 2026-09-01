@@ -1365,9 +1365,21 @@ export function createServer(options: ServerOptions) {
 
     try {
       const lifecycle = lifecycleDeps()
-      const outcome = lifecycle
-        ? await handleLifecycleDelivery(lifecycle, login ?? '', event, payload)
-        : { handled: false, detail: 'no GitHub App is configured', orgId: null }
+      // The account has to be known before the lifecycle runs, because every
+      // statement it makes is on a connection scoped to that account and an
+      // empty one is refused rather than silently matching nothing. A payload
+      // that names no account at all is not one the lifecycle can act on, so it
+      // falls through to the installation handler, which answers rather than
+      // throwing. Without this a malformed payload would be a 500, and a 500 is
+      // a delivery GitHub retries into the same 500 forever.
+      const outcome =
+        lifecycle && login
+          ? await handleLifecycleDelivery(lifecycle, login, event, payload)
+          : {
+              handled: false,
+              detail: lifecycle ? 'the payload names no account' : 'no GitHub App is configured',
+              orgId: null,
+            }
 
       // The installation handler still sees everything the lifecycle did not
       // act on, so installations and repositories are recorded exactly as

@@ -806,6 +806,20 @@ describe('the webhook endpoint', {
     await api.admin`DELETE FROM github_deliveries WHERE delivery_id = ${id}`
   })
 
+  test('a pull request payload that names no account is answered, not thrown', async () => {
+    // Every statement the lifecycle makes runs on a connection scoped to the
+    // account the payload named, and an empty one is refused rather than
+    // silently matching nothing. A 500 here would be a delivery GitHub retries
+    // into the same 500 forever.
+    const res = await deliver('pull_request', {
+      action: 'opened',
+      number: 1,
+      pull_request: { number: 1, head: { sha: 'f'.repeat(40) } },
+    })
+    assert.equal(res.status, 200)
+    assert.match(res.body, /"handled":false/)
+  })
+
   test('the endpoint is in the rate limit table', async () => {
     // The server refuses an endpoint with no declared limit outright, so this
     // passing at all proves the entry exists. Asserted anyway, because the
