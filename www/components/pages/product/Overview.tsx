@@ -5,21 +5,12 @@ import {
   PageHero,
   PageSection,
   PageShell,
-  RelatedGrid,
   Split,
   Steps,
 } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
-import { TwinLifecycleScene } from "@/components/home/visuals/TwinLifecycleScene";
-import { MigrationScene } from "@/components/home/visuals/MigrationScene";
-import {
-  CheckRow,
-  Hairline,
-  MonoLabel,
-  Panel,
-  StatusPill,
-} from "@/components/home/visuals/primitives";
-import { cn } from "@/lib/cn";
+import { POV01, POV02, POV03, POV04 } from "@/components/pages/figures/product";
+import { MonoLabel, StatusPill } from "@/components/home/visuals/primitives";
 
 const MODULES: {
   title: string;
@@ -57,8 +48,6 @@ const MODULES: {
   },
 ];
 
-const FRAGMENTS = ["Preview", "Test data", "E2E", "Load", "Mirror", "Observability"] as const;
-
 const STAGING_ROWS: { miss: string; have: string }[] = [
   { miss: "Fixture volume", have: "Production-shaped subset" },
   { miss: "No long-tail rows", have: "Referential rare records" },
@@ -76,26 +65,6 @@ const VERDICTS: { tone: "PASS" | "FAIL" | "UNVERIFIED"; title: string; body: str
     title: "We could not tell",
     body: "Flaky, blocked or unverified. Something is wrong with the run, and it does not count against you.",
   },
-];
-
-/**
- * What af insights reports about a migration.
- *
- * The four rows here used to be a lock, a checkout p99, a timeout rate and a
- * rollback verdict. Only the lock was something this engine can measure:
- * nothing runs traffic against a migration while it applies, and there is no
- * old-binary coexistence check anywhere in the product.
- *
- * The second row was then "84 statements queued behind it", which the engine
- * cannot produce either. insights.LockHold records one boolean, Blocking,
- * whether another session was ever seen waiting. There is no count of waiters
- * and no list of their statements.
- */
-const MIGRATION_FINDINGS: { k: string; v: string }[] = [
-  { k: "strongest lock", v: "ACCESS EXCLUSIVE 27.4s on subscriptions" },
-  { k: "blocked another", v: "yes, a session was seen waiting" },
-  { k: "table rewrite", v: "yes, reported by Postgres" },
-  { k: "plan change", v: "Index Scan to Seq Scan on events" },
 ];
 
 /**
@@ -156,7 +125,8 @@ export function OverviewPage() {
         eyebrow="Product"
         title="A disposable production twin that proves whether a deployment is safe."
         lead="Connect a repository and a cloud environment. For every risky change, Antifailure builds an isolated production twin, fills it with safe production-shaped state, exercises it, and says whether the deployment is safe to ship."
-        visual={<TwinLifecycleScene />}
+        framed={false}
+        visual={<POV01 />}
       />
 
       <PageSection>
@@ -190,62 +160,7 @@ export function OverviewPage() {
       </PageSection>
 
       <PageSection tone="sage">
-        <Split
-          visual={
-            <Panel className="rounded-[12px] bg-white">
-              <div className="flex items-center justify-between gap-3 px-5 py-3">
-                <MonoLabel tone="reader">What teams assemble today</MonoLabel>
-                <MonoLabel tone="reader">no single decision</MonoLabel>
-              </div>
-              <Hairline />
-              <div className="flex flex-wrap gap-2 px-5 py-4">
-                {FRAGMENTS.map((name) => (
-                  <span
-                    key={name}
-                    className="border border-black/[0.08] px-2 py-1 font-mono text-[10px] tracking-extra-tight text-black/60"
-                  >
-                    {name}
-                  </span>
-                ))}
-              </div>
-              <Hairline />
-              <div className="grid grid-cols-2 max-xl:grid-cols-1">
-                <div className="border-r border-black/8 px-5 py-5 max-xl:border-r-0 max-xl:border-b max-xl:border-black/8">
-                  <div className="flex items-center justify-between gap-2">
-                    <MonoLabel tone="reader">Shared staging</MonoLabel>
-                    <span className="border border-black/[0.08] px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight text-black/35">
-                      drifted
-                    </span>
-                  </div>
-                  <ul className="mt-4 space-y-2.5">
-                    {STAGING_ROWS.map((row) => (
-                      <li key={row.miss}>
-                        <CheckRow ok={false} className="text-black/60">
-                          {row.miss}
-                        </CheckRow>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="px-5 py-5">
-                  <div className="flex items-center justify-between gap-2">
-                    <MonoLabel tone="reader">Disposable twin</MonoLabel>
-                    <StatusPill tone="FAIL">FAIL</StatusPill>
-                  </div>
-                  <ul className="mt-4 space-y-2.5">
-                    {STAGING_ROWS.map((row) => (
-                      <li key={row.have}>
-                        <CheckRow ok className="text-black/70">
-                          {row.have}
-                        </CheckRow>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </Panel>
-          }
-        >
+        <Split visual={<POV02 rows={STAGING_ROWS} />}>
           <PageHeading title="<strong>The question staging cannot answer.</strong> What happens when this change meets real data, concurrency, workers, and the deploy process." />
           <p className="mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Preview tools, test-data platforms, E2E suites, load tests, packet mirrors, and observability
@@ -256,17 +171,15 @@ export function OverviewPage() {
       </PageSection>
 
       <PageSection>
-        <PageHeading kicker="Scope" title="<strong>Postgres migrations first.</strong> Not universal multicloud cloning." />
-        <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Exclusive locks, table rewrites, pool exhaustion, query-plan regressions, and old binaries
-          that cannot read candidate writes. Conventional tests miss all of them. So the first thing
-          built completely is the check for a risky Postgres-backed deployment, rather than a shallow
-          version of everything.
-        </p>
-
-        <div className="mt-14">
-          <MigrationScene tab={0} playId={0} />
-        </div>
+        <Split visual={<POV03 />}>
+          <PageHeading kicker="Scope" title="<strong>Postgres migrations first.</strong> Not universal multicloud cloning." />
+          <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
+            Exclusive locks, table rewrites, pool exhaustion, query-plan regressions, and old binaries
+            that cannot read candidate writes. Conventional tests miss all of them. So the first thing
+            built completely is the check for a risky Postgres-backed deployment, rather than a shallow
+            version of everything.
+          </p>
+        </Split>
         <Illustrative label="Example finding">
           One migration rehearsed, with the numbers chosen. The measurements are the ones{" "}
           <code className="font-mono text-[15px] text-black">af insights</code> takes: the strongest
@@ -274,40 +187,10 @@ export function OverviewPage() {
           plans before and after.
         </Illustrative>
 
-        <div className="mt-8 grid grid-cols-2 gap-5 max-xl:grid-cols-1">
-          <Panel className="rounded-[12px] bg-white">
-            <div className="flex items-center justify-between gap-3 px-5 py-3">
-              <MonoLabel tone="reader">af insights · migration rehearsal</MonoLabel>
-              <StatusPill tone="FAIL">FAIL</StatusPill>
-            </div>
-            <Hairline />
-            <div className="px-5 py-5">
-              <h3 className="text-[18px] tracking-extra-tight text-black">Unsafe schema migration</h3>
-              <p className="mt-2 font-mono text-[12px] tracking-extra-tight text-black/60">
-                20260824_widen_plan_id
-              </p>
-              <dl className="mt-5 space-y-2.5">
-                {MIGRATION_FINDINGS.map((row) => (
-                  <div key={row.k} className="flex items-baseline justify-between gap-4">
-                    <dt className="font-mono text-[11px] tracking-extra-tight text-black/55">{row.k}</dt>
-                    <dd
-                      className={cn(
-                        "font-mono text-[12px] tracking-extra-tight",
-                        row.k === "strongest lock" ? "text-red-700" : "text-black/70",
-                      )}
-                    >
-                      {row.v}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-            <div className="border-t border-black/[0.08] px-5 py-3 font-mono text-[11px] leading-5 tracking-extra-tight text-[#285D49]">
-              lint · add a second column of the new type, backfill it, then drop the old one
-            </div>
-          </Panel>
+        <div className="mt-8 grid grid-cols-2 gap-x-16 gap-y-12 max-xl:grid-cols-1">
+          <POV04 />
 
-          <div className="flex min-w-0 flex-col justify-center rounded-[12px] border border-black/[0.08] bg-white px-8 py-8 max-md:px-5 max-md:py-6">
+          <div className="flex min-w-0 flex-col justify-center">
             <h3 className="text-[28px] leading-dense tracking-tighter text-gray-new-40 max-lg:text-[22px] [&>strong]:font-normal [&>strong]:text-black">
               <strong>A 27-second lock is a finding.</strong> Not a line in a log nobody reads.
             </h3>
@@ -374,13 +257,6 @@ export function OverviewPage() {
         <Faq path="/product" items={PRODUCT_FAQ} />
       </PageSection>
 
-      <RelatedGrid
-        items={[
-          { href: "/product/twins", title: "Isolated Twin", description: "How the orchestrator provisions and tears down." },
-          { href: "/product/migrations", title: "Migration Safety", description: "Locks, rewrites and plans, before it ships." },
-          { href: "/docs", title: "Docs", description: "How a twin run works, end to end." },
-        ]}
-      />
     </PageShell>
   );
 }
