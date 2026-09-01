@@ -35,7 +35,7 @@
 import { sql } from 'drizzle-orm'
 import type { Db } from '@antifailure/db'
 
-export type CommandKind = 'environment.teardown' | 'workload.cancel'
+export type CommandKind = 'workload.cancel'
 
 type CommandState =
   | 'pending'
@@ -108,16 +108,7 @@ export async function createCommand(db: Db, input: CreateCommand): Promise<Comma
   const payload = JSON.stringify(input.payload ?? {})
 
   const inserted =
-    input.kind === 'environment.teardown'
-      ? await db.execute<CommandRow>(sql`
-          INSERT INTO runtime_commands (org_id, kind, environment_id, payload, requested_by, expires_at)
-          VALUES (${input.orgId}, 'environment.teardown', ${input.environmentId},
-                  ${payload}::jsonb, ${input.requestedBy ?? null}, ${expiresAt}::timestamptz)
-          ON CONFLICT (environment_id)
-            WHERE kind = 'environment.teardown' AND state IN ('pending', 'claimed')
-            DO NOTHING
-          RETURNING ${commandColumns}`)
-      : await db.execute<CommandRow>(sql`
+    await db.execute<CommandRow>(sql`
           INSERT INTO runtime_commands (org_id, kind, workload_run_id, payload, requested_by, expires_at)
           VALUES (${input.orgId}, 'workload.cancel', ${input.workloadRunId},
                   ${payload}::jsonb, ${input.requestedBy ?? null}, ${expiresAt}::timestamptz)
@@ -293,42 +284,6 @@ export async function acknowledgeCommand(
 }
 
 /**
- * Acknowledges the live teardown for an environment, from the engine's own
- * report that the environment is gone.
- *
- * This is the acknowledgement that works today, and it is the reason the
- * teardown loop is closed rather than half built. `af down` emits
- * `env.destroyed`, the control plane sink maps it to `environment.torn_down`,
- * ingestion projects it, and this is what turns the command from "requested"
- * into "the runtime says it is gone". No engine change, no new client, no
- * polling: the event the engine already sends is the receipt.
- *
- * Not conditioned on the command being claimed. The engine that ran the
- * teardown reached it through a workflow dispatch and never claimed anything,
- * so requiring a claim here would leave every command that took the fast path
- * pending forever, which is the defect wearing different clothes.
- */
-export async function acknowledgeTeardownFromEvent(
-  db: Db,
-  input: { environmentId: string; now: Date; detail: string },
-): Promise<number> {
-  const rows = await db.execute<{ id: string }>(sql`
-    UPDATE runtime_commands SET
-      state = 'acknowledged',
-      outcome = 'done',
-      detail = ${input.detail},
-      acknowledged_at = ${input.now.toISOString()}::timestamptz,
-      lease_holder = NULL,
-      lease_expires_at = NULL,
-      updated_at = ${input.now.toISOString()}::timestamptz
-    WHERE kind = 'environment.teardown'
-      AND environment_id = ${input.environmentId}
-      AND state IN ('pending', 'claimed')
-    RETURNING id`)
-  return rows.length
-}
-
-/**
  * Marks commands nobody carried out.
  *
  * Runs inside the caller's tenant transaction, which is what makes it work at
@@ -363,19 +318,6 @@ export async function expireOverdueCommands(
       AND expires_at <= ${input.now.toISOString()}::timestamptz
     RETURNING id`)
   return rows.length
-}
-
-/** The live command for one environment, for a console that has to say whether
- *  a teardown was actually confirmed. */
-export async function teardownFor(
-  db: Db,
-  environmentId: string,
-): Promise<CommandRow | null> {
-  const rows = await db.execute<CommandRow>(sql`
-    SELECT ${commandColumns} FROM runtime_commands
-    WHERE kind = 'environment.teardown' AND environment_id = ${environmentId}
-    ORDER BY requested_at DESC LIMIT 1`)
-  return rows[0] ?? null
 }
 
 // The columns every read of this table returns. Written once so that two reads

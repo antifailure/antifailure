@@ -64,7 +64,7 @@ export const workloadRunState = pgEnum('workload_run_state', [
 ])
 export const workloadVersionSource = pgEnum('workload_version_source', ['authored', 'promoted'])
 export const runtimeCommandKind = pgEnum('runtime_command_kind', [
-  'environment.teardown', 'workload.cancel',
+  'workload.cancel',
 ])
 export const runtimeCommandState = pgEnum('runtime_command_state', [
   'pending', 'claimed', 'acknowledged', 'failed', 'expired', 'superseded',

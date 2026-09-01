@@ -29,7 +29,6 @@ import type { Db, Pool } from '@antifailure/db'
 import type { Clock } from './clock.ts'
 import type { RateLimiter } from './ratelimit.ts'
 import { isWorkloadEvent, projectWorkloadEvent } from './workloads/projection.ts'
-import { acknowledgeTeardownFromEvent } from './workloads/commands.ts'
 
 /** The event types the control plane understands. An event of any other type
  *  is stored but changes nothing, so an older control plane can ingest a newer
@@ -410,9 +409,6 @@ async function applyToProjection(
     const note = await advanceExisting(db, orgId, event.envId, {
       state, sequence, previewUrl, runtime, golden, ttl, tornDownAt, cameUp, now,
     })
-    if (note === null && state === 'torn_down') {
-      await acknowledgeTeardown(db, clock, event.envId)
-    }
     return note
   }
 
@@ -472,38 +468,7 @@ async function applyToProjection(
                           ELSE environments.torn_down_at END,
       updated_at = ${now}::timestamptz`)
 
-  if (state === 'torn_down') {
-    await acknowledgeTeardown(db, clock, event.envId)
-  }
   return null
-}
-
-/**
- * Closes the loop on a teardown somebody asked for.
- *
- * This is the whole reason `environments.teardown` is now a durable command
- * rather than a column update, and it is the acknowledgement that works with
- * the engine exactly as it ships today. `af down` emits `env.destroyed`, the
- * control plane sink maps that to `environment.torn_down`, and this turns the
- * pending command into "the runtime says it is gone". No new engine client, no
- * polling, no second callback channel: the event the engine already sends is
- * the receipt.
- *
- * A teardown nothing asked for acknowledges nothing and costs one indexed
- * update against a partial index, which is the common case: most environments
- * are torn down by `af ci` at the end of a pull request rather than by somebody
- * pressing a button.
- */
-async function acknowledgeTeardown(db: Db, clock: Clock, envId: string): Promise<void> {
-  const rows = await db.execute<{ id: string }>(sql`
-    SELECT id FROM environments WHERE env_id = ${envId}`)
-  const environmentId = rows[0]?.id
-  if (!environmentId) return
-  await acknowledgeTeardownFromEvent(db, {
-    environmentId,
-    now: clock.now(),
-    detail: 'the engine reported the environment torn down',
-  })
 }
 
 interface Advance {
