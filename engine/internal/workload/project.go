@@ -468,14 +468,8 @@ func projectExploration(res *Result, opts Options, out *explore.Report) {
 	res.Evidence = explorationEvidence(opts.Root, out)
 }
 
-// explorationVerdict never returns fail.
-//
-// An exploration produces findings rather than a pass or a fail, which is why
-// af explore cannot fail a build. A goal that was not reached is unverified: a
-// wander that did not get there has not shown the application is broken, it
-// has shown that a seeded wander did not find the way.
 // explorationVerdict is the run's one word answer, and it is `pass` unless the
-// exploration could not be carried out.
+// exploration could not be carried out. It never returns fail.
 //
 // A GOAL THAT WAS NOT REACHED IS NOT A FAILING RUN. It used to roll up to
 // `unverified`, and workloadOutcome maps unverified to a NON-ZERO exit, so a

@@ -30,22 +30,39 @@ import (
 // skips when node is absent, because a silent skip on a missing tool reads as
 // a pass and that is the shape that hid this in the first place.
 
-func orchestratorForDocument(t *testing.T) *env.Orchestrator {
+// Returns the root as well as the orchestrator, because findRunner resolves an
+// empty override against it and a test that wants a runner found has to be able
+// to put one there.
+func orchestratorForDocument(t *testing.T) (*env.Orchestrator, string) {
 	t.Helper()
+	root := t.TempDir()
 	o, err := env.New(env.Options{
-		Root:     t.TempDir(),
+		Root:     root,
 		Manifest: &schema.Manifest{Name: "app"},
 		Branch:   "main",
 		Clock:    clock.New(),
 		Redactor: redact.New(),
 	})
 	require.NoError(t, err)
-	return o
+	return o, root
 }
 
 func TestTheRunnerDocumentNeverCarriesANullList(t *testing.T) {
-	o := orchestratorForDocument(t)
+	o, root := orchestratorForDocument(t)
 	artifacts := filepath.Join(t.TempDir(), "artifacts")
+
+	// A runner where findRunner looks first, because an empty override
+	// resolves against the orchestrator's root and everything after that is
+	// somebody's machine: the home directory and the directory the test binary
+	// was built into. This test passed only where a release happened to be
+	// installed under ~/.antifailure and failed in CI, which is the machine
+	// dependence this file's own comment complains about one test lower down.
+	//
+	// Its content is deliberately never read. The node below ignores the script
+	// it is handed, so what is asserted stays the bytes on stdin.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "runner", "src"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, "runner", "src", "main.ts"), []byte("// not read\n"), 0o644))
 
 	// A node that reads the document and prints it back, so the assertion is
 	// over the bytes the subprocess actually received rather than over a
@@ -105,7 +122,7 @@ func TestTheRealRunnerAcceptsADocumentWithNoWorkflows(t *testing.T) {
 		t.Skip("runner/node_modules is absent; run npm ci in runner")
 	}
 
-	o := orchestratorForDocument(t)
+	o, _ := orchestratorForDocument(t)
 	_, out, runErr := o.InvokeRunnerCapturingDocument(
 		context.Background(), runner, filepath.Join(t.TempDir(), "artifacts"), nil)
 	require.NoError(t, runErr,

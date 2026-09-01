@@ -676,9 +676,17 @@ func TestAnExplorationCountsGoalsRatherThanAnsweringWithOneBoolean(t *testing.T)
 	require.Equal(t, 2, *res.Measured.Goals)
 	require.Equal(t, 1, *res.Measured.GoalsReached)
 	require.Equal(t, 3, *res.Measured.Findings)
-	require.Equal(t, workload.VerdictUnverified, res.Verdict,
+	// PASS at the run level, and this is the half of "an exploration that found
+	// a wall is a pass" that the commit making that change did not carry here.
+	// The run-wide rollup says the exploration was carried out and found no
+	// fault; unverified would exit non-zero and fail a build the documentation
+	// promises an exploration cannot fail.
+	require.Equal(t, workload.VerdictPass, res.Verdict,
 		"an exploration finds things; it never fails a build")
 	require.Len(t, res.Thresholds, 2)
+	// The per goal rows are a different question and deliberately unchanged: a
+	// row records whether THAT goal was reached, so the unreached one stays
+	// unverified. The rollup is not the worst row.
 	require.Equal(t, workload.VerdictPass, res.Thresholds[0].Value)
 	require.Equal(t, workload.VerdictUnverified, res.Thresholds[1].Value)
 }
