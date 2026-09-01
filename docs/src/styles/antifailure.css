@@ -176,21 +176,47 @@ body {
 }
 
 /* A rule above every h2 gives the page a spine you can scan, which is most of
-   what somebody does when they arrive here from an error message. */
-.sl-markdown-content h2 {
-  /* display:block, because Starlight's anchor heading leaves the h2 inline and
-     a border-top on an inline box is only as wide as its text. The rule above
-     "Top level" in the manifest reference was 146px long in a 343px column: a
-     stub next to the heading rather than the spine this is meant to be. */
-  display: block;
+   what somebody does when they arrive here from an error message.
+
+   The spine goes on the WRAPPER, not on the heading, and that distinction is
+   the whole of this block.
+
+   Starlight 0.41 renders an anchored heading as
+   <div class="sl-heading-wrapper level-h2"><h2>..</h2><a class="sl-anchor-link">
+   and makes the anchor land at the end of the last line by leaving the heading
+   `display: inline` and reserving space after it. An earlier version of this
+   file set `display: block` on the h2 instead, for a correct reason: a
+   border-top on an inline box is only as wide as its text, and the rule above
+   "Top level" in the manifest reference measured 146px in a 343px column, a
+   stub rather than a spine. It won because Starlight's rules sit in a cascade
+   layer and this stylesheet does not, and an unlayered declaration beats every
+   layered one whatever its specificity. So the more specific framework rule
+   lost, the h2 became a block, the inline-flex anchor could no longer share
+   its line, and every heading on the live site rendered a green icon on the
+   line beneath it. Vir found it on /docs/enterprise/secrets.
+
+   The wrapper is already a block and already the full column, so putting the
+   rule there gets both things: a full-width spine and the anchor where
+   Starlight puts it. `>` reaches the headings Starlight did not wrap, and
+   nothing else.
+
+   There is no h3 rule here any more, and its absence is deliberate. It set
+   `margin-top: 2rem` on an inline box, which does nothing, and the obvious
+   repair was to move it to `.sl-heading-wrapper.level-h3`. That would have
+   made things worse: Starlight's own
+   `:not(h1..h6, .sl-heading-wrapper) + .sl-heading-wrapper { margin-top: 1.5em }`
+   already puts 43.5px above every h3, measured in a browser, so relocating
+   2rem would have overridden 43.5px with 32px and tightened every h3 on 81
+   pages. Dead CSS whose death costs nothing is deleted, not relocated. */
+.sl-markdown-content .sl-heading-wrapper.level-h2,
+.sl-markdown-content > h2 {
   margin-top: 2.75rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--af-rule);
-  font-weight: 500;
 }
 
+.sl-markdown-content h2,
 .sl-markdown-content h3 {
-  margin-top: 2rem;
   font-weight: 500;
 }
 
