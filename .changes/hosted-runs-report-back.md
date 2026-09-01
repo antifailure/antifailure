@@ -24,6 +24,14 @@ A cancel pressed in the console now reaches a run that is already going, and
 stops it. So does a lease taken by another engine, which is what happens after
 a run has gone quiet long enough for somebody else to pick it up.
 
+A test reads the control plane's report decoder and checks that every field it
+reaches for inside the run's aggregate is a field the engine's own struct tags
+emit. Two green suites had never put a real message on the wire between them,
+and running one against the other found that the decoder was reading the shape
+of the engine's internal load result rather than the result document: it would
+have recorded a run that sent twelve hundred requests as having sent none, with
+every percentile null and every route beside it decoding perfectly.
+
 # fixed
 
 `examples/github-workflow.yml` never set `AF_CONTROL_PLANE_TOKEN`, so a
