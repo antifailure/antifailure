@@ -10,9 +10,9 @@ know nothing about the state of the system and have about ninety seconds of
 patience. Everything here has been run; nothing is aspirational.
 
 Setting the rotation up rather than firefighting inside it belongs on the
-[on-call page](/docs/self-hosting/on-call/): who holds it, what an
+[on-call page](/docs/self-hosting/on-call): who holds it, what an
 acknowledgement means, and what to do first for each class of page. The
-[status page](/docs/self-hosting/status-page/) is what a customer reads while
+[status page](/docs/self-hosting/status-page) is what a customer reads while
 you read this one; it is not the pager and does not substitute for it.
 
 ## The first thirty seconds
@@ -45,7 +45,7 @@ scraping `/metrics`.
 The hosted control plane on Azure has a second, smaller set that needs no
 Prometheus and watches the platform rather than the process: the database, the
 replicas, the jobs, the certificate, and the service as a customer reaches it.
-Those have their own pages under [runbooks](/docs/self-hosting/runbooks/), and
+Those have their own pages under [runbooks](/docs/self-hosting/runbooks), and
 each rule names its page in the notification it sends.
 
 Both sets are deliberately short. An alert nobody acts on trains everybody to
@@ -129,7 +129,7 @@ problem only became visible later, from a graph or a customer.
 
 Full procedure, including the case where a migration already applied and the
 revision you are about to restore may or may not still be compatible with it:
-[Upgrade and rollback, the manual path](/docs/self-hosting/azure/#upgrade-and-rollback-the-manual-path).
+[Upgrade and rollback, the manual path](/docs/self-hosting/azure#upgrade-and-rollback-the-manual-path).
 Do not skip that page's step on the migration; assuming compatibility instead
 of checking it is how a rollback becomes a second incident.
 

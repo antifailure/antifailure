@@ -26,7 +26,7 @@ named. Everything else is refused with a decision you can read.
 | `workflows` | list | What the agents do. |
 | `invariants` | list | Statements about the data that must stay true. |
 | `insights` | block | The Postgres native checks. |
-| `change` | block | Path rules for [change analysis](/docs/concepts/change-analysis/), for a layout the built in rules do not predict. |
+| `change` | block | Path rules for [change analysis](/docs/concepts/change-analysis), for a layout the built in rules do not predict. |
 | `fidelity` | block | The component inventory of what this environment reproduces. |
 | `load` | block | Production shaped traffic. |
 | `policy` | block | What each class of finding does to the check. |
@@ -161,7 +161,7 @@ subset silently breaks.
 | --- | --- |
 | `default` | Any mode: `block` (default), `allow`, `capture`, `mock`, `sandbox` or `synth`. |
 | `allow_ipv6` | Off by default. |
-| `rules` | See [egress](/docs/concepts/egress/). |
+| `rules` | See [egress](/docs/concepts/egress). |
 
 ## `policy`
 
@@ -184,14 +184,14 @@ refused at the line rather than treated as the weakest one.
 | `cleanup` | `fail` | Teardown left a resource behind. |
 | `workflows_unverified` | `fail` | No workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. |
 
-See [verdicts](/docs/concepts/verdicts/) for what each level does to the run
+See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
 ## `fidelity`
 
 | Key | Notes |
 | --- | --- |
 | `enabled` | On by default. Turning it off means the inventory is not taken, which is not the same as everything having passed. |
-| `require` | Dimensions every component of which must be reproduced: `services`, `database`, `third_party`, `auth`, `runtime`, `traffic`. See [inventory](/docs/concepts/inventory/). |
+| `require` | Dimensions every component of which must be reproduced: `services`, `database`, `third_party`, `auth`, `runtime`, `traffic`. See [inventory](/docs/concepts/inventory). |
 
 There is no threshold here. A single percentage hides the one dimension that
 matters to a particular change, so what a manifest requires is a dimension by
@@ -222,7 +222,7 @@ the checked out tree, because the manifest is a file in your repository and a
 fork's pull request carries its own copy of it: reading the setting from there
 would let anybody lift their own restriction. A checkout that does not carry
 the base branch falls back to `label` and says so. See
-[Forks](/docs/guides/github/#forks).
+[Forks](/docs/guides/github#forks).
 
 The control plane applies `label` behaviour to every repository regardless of
 what this says, and cannot do otherwise, for the reason two paragraphs down. Its
@@ -286,5 +286,5 @@ an edit.
 test validates real manifests against both, so a field in one and not the other
 fails the build. Point your editor at it for completion and inline errors.
 
-Related: [detection](/docs/concepts/detection/), [egress](/docs/concepts/egress/),
-[providers](/docs/providers/overview/).
+Related: [detection](/docs/concepts/detection), [egress](/docs/concepts/egress),
+[providers](/docs/providers/overview).

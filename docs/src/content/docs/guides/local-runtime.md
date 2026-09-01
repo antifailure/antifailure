@@ -122,5 +122,5 @@ Two `af up` runs on one branch would race on the same names and both fail in
 ways neither explains, so the second waits. If the first died without releasing
 it, `af down` cleans up.
 
-Related: [the journal](/docs/concepts/journal/), [egress](/docs/concepts/egress/),
-[building](/docs/guides/build/).
+Related: [the journal](/docs/concepts/journal), [egress](/docs/concepts/egress),
+[building](/docs/guides/build).

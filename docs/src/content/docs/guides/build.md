@@ -105,4 +105,4 @@ A generated Dockerfile installs dependencies before copying source, so editing
 a file does not reinstall the dependency graph. If you write your own, do the
 same: it is the difference between a two second rebuild and a two minute one.
 
-Related: [detection](/docs/concepts/detection/), [the local runtime](/docs/guides/local-runtime/).
+Related: [detection](/docs/concepts/detection), [the local runtime](/docs/guides/local-runtime).

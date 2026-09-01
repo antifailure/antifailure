@@ -16,7 +16,7 @@ github:
 `comment` and `fork_policy` are read and acted on by the engine. `mode` and
 `teardown_on` are printed by `af explain` and read by nothing, which is not an
 oversight and is worth knowing before you set one: see
-[the manifest reference](/docs/reference/manifest/#github) for what happens
+[the manifest reference](/docs/reference/manifest#github) for what happens
 instead, and why the hosted control plane cannot read your manifest.
 
 ## Two ways to run it
@@ -218,12 +218,12 @@ a workflow `af ci` tears down before it writes the report, including on a failed
 job and including on a cancelled one, and the runner goes away at the end of the
 job regardless. The `ttl` outcome is real and is configured somewhere else: the
 ceiling on how long an environment may live is
-[`runtime.max_ttl`](/docs/reference/manifest/), and that one is read. `af explain`
+[`runtime.max_ttl`](/docs/reference/manifest), and that one is read. `af explain`
 says so against the setting, so the manifest and the command agree.
 
 ## What the App must be granted
 
-[Standing up production](/docs/self-hosting/production/#8-create-the-production-github-app)
+[Standing up production](/docs/self-hosting/production#8-create-the-production-github-app)
 carries the permission and event lists, with what each one is for and why the
 rest are refused. It is one list rather than two so that they cannot drift.
 
@@ -354,7 +354,7 @@ migrations rehearsed against a branch of the golden, the locks they held, what
 Postgres rewrote, the lint findings, the plans that changed, the hosts the
 environment reached for, whether the branch read back masked, and what teardown
 removed. Each of those is ranked by the manifest's
-[policy block](/docs/concepts/verdicts/), worst first, and the ones set to
+[policy block](/docs/concepts/verdicts), worst first, and the ones set to
 `fail` are what stop the merge.
 
 ## Signature verification
@@ -379,4 +379,4 @@ Almost always a permission the App was not granted, or a token from a workflow
 with a narrower `permissions:` block than the job needs. The message carries
 GitHub's own words, which name the missing scope.
 
-Related: [scheduling](/docs/concepts/scheduling/), [the control plane](/docs/self-hosting/control-plane/).
+Related: [scheduling](/docs/concepts/scheduling), [the control plane](/docs/self-hosting/control-plane).
