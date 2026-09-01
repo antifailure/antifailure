@@ -93,6 +93,23 @@ commit.** The next push withdraws it, because a maintainer approved code they
 read and the next push is code nobody read. The check on an unapproved fork
 commit says so, with the label to add.
 
+**What the approval does and does not buy, said plainly.** GitHub's own rule is
+that a `pull_request` job on a fork gets a read-only token, no secrets, and
+therefore no workflow identity to exchange, so a fork's own job cannot report a
+result to a control plane whatever anybody grants it. The label is what makes
+the control plane willing to ACCEPT a result for that commit; the result still
+has to come from a run that can prove itself, which means a maintainer starting
+one from the console or from the Actions tab against the base repository.
+
+Without a control plane none of that applies: the workflow runs on the fork's
+pull request, `af ci` does its work, and the comment step posts the report with
+the `pull-requests: write` the job already has.
+
+That GitHub rule is documented rather than observed here. Establishing it would
+mean opening a fork pull request against this repository, which is a public
+action nobody has approved, so it is stated as GitHub's documented behaviour and
+not as something this project has watched happen.
+
 ## Teardown, and what "torn down" means
 
 An environment that outlives its pull request is the leak this product exists to

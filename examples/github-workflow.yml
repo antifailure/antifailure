@@ -12,6 +12,13 @@ name: Antifailure
 
 on:
   pull_request:
+    # The default is opened, synchronize and reopened. ready_for_review is added
+    # because a draft is not checked, so the moment it stops being one is the
+    # moment the check should start, and without this line the workflow does not
+    # run then. With a control plane that gap is visible rather than silent: it
+    # opens a check on that commit and the check sits waiting for a run that is
+    # never going to start, until it times out.
+    types: [opened, synchronize, reopened, ready_for_review]
 
   # The hosted control plane's verbs. `environments.create`, `agents.run` and
   # `load.run` in the console do not run anything themselves: they ask GitHub to

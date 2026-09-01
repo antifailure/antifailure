@@ -526,8 +526,11 @@ async function startGeneration(
       const blocked =
         pr.from_fork && pr.approved_sha !== headSha
           ? `This pull request is from a fork, and ${shortSha(headSha)} has not been approved. ` +
-            `A maintainer who has read this exact commit adds the \`${FORK_APPROVAL_LABEL}\` label. ` +
-            `Approval is per commit: the next push withdraws it.`
+            `A maintainer who has read this exact commit adds the \`${FORK_APPROVAL_LABEL}\` label, ` +
+            `and the approval covers that commit alone: the next push withdraws it. ` +
+            `A fork's own job cannot report a result whatever is granted, because GitHub gives ` +
+            `it a read-only token and no workflow identity, so after approving, start a run from ` +
+            `the console or from the Actions tab.`
           : null
 
       const rows = await db.execute<{
