@@ -101,9 +101,11 @@ the control plane willing to ACCEPT a result for that commit; the result still
 has to come from a run that can prove itself, which means a maintainer starting
 one from the console or from the Actions tab against the base repository.
 
-Without a control plane none of that applies: the workflow runs on the fork's
-pull request, `af ci` does its work, and the comment step posts the report with
-the `pull-requests: write` the job already has.
+Without a control plane there is nothing for the job to report to, so none of
+this arises: the workflow runs on the fork's pull request, `af ci` does its
+work, and the comment step posts the report with the `pull-requests: write` the
+job already has. The fork still gets no secrets, which is GitHub's doing and not
+this product's.
 
 That GitHub rule is documented rather than observed here. Establishing it would
 mean opening a fork pull request against this repository, which is a public
@@ -123,7 +125,7 @@ environment down on every exit including a cancelled one. So teardown is:
 cancel, then come back and check, and it is not finished until GitHub says the
 run reached a terminal state.
 
-The console reports one of five states and none of them is a guess:
+The console reports the state it is actually in, and none of them is a guess:
 
 | Teardown | What it means |
 | --- | --- |
