@@ -537,11 +537,82 @@ func (o *Orchestrator) personaDocs(provisioned *personas.Result) []personaDoc {
 }
 
 // LoadOptions configure a load run.
+//
+// Duration and Scale are what the CALLER asked for, and zero means the caller
+// did not ask. That distinction is the whole point of the two Default fields
+// beside them, and it exists because it was missing: a cobra flag holds its
+// default value whether or not anybody typed it, so `af load run` handed 60s
+// and scale 1.0 down here on every invocation and the manifest's own
+// load.scale and load.duration were unreachable. A repository whose manifest
+// said `scale: 0.05` because it was pointing this at something fragile got
+// production's full arrival rate, while `af explain` read the 5 percent back
+// correctly. Only the command knows whether a value was typed; only these
+// fields let it say so.
 type LoadOptions struct {
+	// Duration and Scale override the manifest. Zero means the caller did not
+	// ask, and the manifest decides.
 	Duration time.Duration
 	Scale    float64
+	// DefaultDuration and DefaultScale apply when neither the caller nor the
+	// manifest named one. They are the command's own defaults, carried here
+	// rather than baked into a flag, so that an untyped flag cannot be
+	// mistaken for a choice.
+	DefaultDuration time.Duration
+	DefaultScale    float64
+	// Ceiling caps the resolved values at the two Default fields, for a
+	// caller whose defaults are a promise rather than a preference.
+	// `af load smoke` promises a short burst; a manifest asking for five
+	// minutes at production's rate must not silently turn one into a full
+	// run. It only ever lowers, so it cannot cause the defect above.
+	Ceiling bool
+
 	Seed     int64
 	Progress func(load.Progress)
+}
+
+// ResolveLoadRate settles how long to send for and at what multiple of
+// production's rate.
+//
+// Three sources in precedence order, and the order is the fix: what the caller
+// explicitly asked for, then what the manifest configured, then the caller's
+// own fallback. A caller that passes its fallback in the first slot, which is
+// what a cobra flag default does, makes the middle one unreachable.
+//
+// Exported because the defect was a disagreement between two layers about
+// exactly this, and neither could see the other. The command decides what the
+// user typed; the engine decides what that means beside the manifest. A test
+// that asserts one of those and not the seam between them stayed green through
+// the whole thing.
+func ResolveLoadRate(opts LoadOptions, cfg *schema.Load) (time.Duration, float64) {
+	duration := opts.Duration
+	if duration <= 0 && cfg != nil && cfg.Duration != "" {
+		if d, parseErr := time.ParseDuration(cfg.Duration); parseErr == nil {
+			duration = d
+		}
+	}
+	if duration <= 0 {
+		duration = opts.DefaultDuration
+	}
+	scale := opts.Scale
+	if scale <= 0 && cfg != nil && cfg.Scale > 0 {
+		scale = cfg.Scale
+	}
+	if scale <= 0 {
+		scale = opts.DefaultScale
+	}
+
+	// The cap applies to the manifest and to the default, never to a typed
+	// flag: somebody who types --duration 5m on a smoke has said what they
+	// want, and refusing it would be a second surprise rather than a fix.
+	if opts.Ceiling {
+		if opts.Duration <= 0 && opts.DefaultDuration > 0 && duration > opts.DefaultDuration {
+			duration = opts.DefaultDuration
+		}
+		if opts.Scale <= 0 && opts.DefaultScale > 0 && scale > opts.DefaultScale {
+			scale = opts.DefaultScale
+		}
+	}
+	return duration, scale
 }
 
 // Load sends traffic shaped like production's at the environment.
@@ -580,16 +651,7 @@ func (o *Orchestrator) Load(ctx context.Context, opts LoadOptions) (*load.Result
 			"detail", "every route in the shape is unsafe to send; add safe_routes to the manifest")
 	}
 
-	duration := opts.Duration
-	if duration <= 0 && cfg != nil && cfg.Duration != "" {
-		if d, parseErr := time.ParseDuration(cfg.Duration); parseErr == nil {
-			duration = d
-		}
-	}
-	scale := opts.Scale
-	if scale <= 0 && cfg != nil && cfg.Scale > 0 {
-		scale = cfg.Scale
-	}
+	duration, scale := ResolveLoadRate(opts, cfg)
 
 	res, err := load.Run(ctx, load.Options{
 		BaseURL: status.URL, Shape: sendable, Scale: scale, Duration: duration,

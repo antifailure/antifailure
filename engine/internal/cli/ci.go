@@ -206,7 +206,20 @@ change.`),
 
 			if withLoad {
 				e.Out.Section("Generating load")
-				if res, refused, lErr := o.Load(ctx, env.LoadOptions{Duration: 30 * time.Second}); lErr == nil {
+				// DefaultDuration rather than Duration, so the manifest's own
+				// load.duration still decides. The hardcoded 30s used to sit
+				// in the slot that overrides it.
+				res, refused, lErr := o.Load(ctx, env.LoadOptions{
+					DefaultDuration: 30 * time.Second, DefaultScale: 1,
+				})
+				switch {
+				case lErr != nil:
+					// The header with nothing under it is how this read
+					// before: a load run that failed outright produced the
+					// section and no finding, and silence is read as success.
+					e.Out.Printf("  %s %s\n", e.Out.S(StyleWarn, SymbolWarn), lErr.Error())
+					run.Notes = append(run.Notes, "the load run did not complete: "+lErr.Error())
+				default:
 					p95, errorRate := o.Thresholds()
 					run.Load = loadReport(res, refused, p95, errorRate, &run)
 				}
