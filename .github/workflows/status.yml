@@ -124,7 +124,7 @@ jobs:
       - name: Commit and push, only if something actually changed
         working-directory: data
         run: |
-          git add history.json daily.json index.html
+          git add history.json daily.json index.html feed.xml
           if git diff --cached --quiet; then
             echo "no change in this probe's readings; nothing to commit"
             exit 0

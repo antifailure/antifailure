@@ -96,36 +96,83 @@ The markers are build output paths and route names rather than copy, because a
 marker that tracks a headline turns a prose edit into a false outage, and a
 false outage is the one thing this page must never publish.
 
-## What the page states, and what it refuses to
+## What the page shows
 
-Every number on the page is computed from the record. There is no configured
-target and no typed figure.
+Plain, dense and in the order a person needs it: any open incident first, then
+every component with its current status and its last ninety days, then the
+response times behind those checks, then the incident history day by day. No
+card inside a card and nothing decorative, because somebody reading this is
+trying to find one fact quickly while something else is going wrong.
+
+Each component states its status as a **word** as well as a colour:
+`Operational`, `Degraded Performance`, `Partial Outage`, `Major Outage`, and
+the two most status pages have no word for and quietly render as green,
+`No Recent Data` when the probe has stopped arriving and `No Data` when a
+component has never been checked.
+
+The word is not politeness. The amber and the red in the day strip are 0.7
+apart in OKLab under deuteranopia and the green and the red are 4.0 apart,
+which is to say all three bars are one bar to a red-green colour blind reader
+and on a greyscale printout. So a day containing any failure is also capped in
+near black and sized by the share of that day's checks that failed, and the
+neutral for a day with no readings is achromatic, which is the one thing no
+form of colour blindness can confuse with the other three.
+
+Under System metrics is the only thing this design measures besides pass and
+fail: how long each check took. There is no CPU, no queue depth and no
+throughput, because nothing here observes any of those and a chart of a number
+nobody measured is the worst thing a status page can contain. The window
+selector is three radio inputs and a stylesheet, with no script at all, since
+a page that has to render from a cold cache during an outage cannot depend on
+JavaScript arriving.
+
+## What the page refuses to say
+
+Every number on it is computed from the record. There is no configured target
+and no typed figure.
 
 - **The percentages are the share of checks that passed**, and the page says
   so in those words rather than calling it uptime. Between two checks it knows
   nothing, and an outage shorter than the gap can pass unrecorded.
-- **A window is only offered once the record reaches back across it.** A page
-  with four days of history shows no ninety day figure. It shows what it has.
+- **A ninety day figure is only called that once the record reaches back
+  ninety days.** Before then the page says how much record there is, on the
+  section heading and again on every row.
 - **Nothing rounds up.** A percentage is floored, so only an unbroken run of
   passing checks can print `100%`.
+- **A day with no readings is drawn in the neutral**, never in green, and is
+  never counted as a day that was up. The strip ships almost entirely neutral
+  and that is the honest picture of a record that has just started.
+- **A gap in the readings is a gap in the line.** An isolated reading is drawn
+  as a dot rather than joined to one hours away, because a line across a gap
+  is a line through data that does not exist.
 - **The observed interval is printed, not the schedule.** The workflow asks
   for a check every five minutes. GitHub drops scheduled runs under load and
   delivers considerably fewer, so the page measures the gaps between the
-  readings it actually has and prints that. A reader can tell whether the
-  green above is four minutes old or four hours old.
-- **A day with no reading is drawn as a day with no reading**, in grey, at a
-  quarter height, and never as a passing day.
-
-State never reaches a reader as colour alone. The pass and fail colours are
-four units apart in OKLab under deuteranopia, which is to say a red cell and a
-green cell are the same cell to a red-green colour blind reader and on a
-greyscale printout. So a day containing a failure is also capped in near black
-and sized by the share that failed, every component carries a shape and a word
-beside its colour, and the strip keeps its shapes under forced colours.
+  readings it actually has.
 
 Nothing on the page animates. There is deliberately no live indicator: a
 pulsing dot says nothing a timestamp does not say better, and it says it
 forever.
+
+## Subscribe
+
+The Subscribe control is an Atom feed at `feed.xml`, generated from the same
+data by `deploy/status/feed.jq`.
+
+It is a feed rather than a mailing list because there is no mailing list here,
+and a Subscribe button that does nothing is worse than no button: it tells a
+customer they will be told, and then does not tell them. A feed costs almost
+nothing, works in every reader, and is what a person watching a vendor's
+status actually wants.
+
+Two kinds of entry, and both are real. One per incident update, so a
+subscriber sees each note as it is written rather than one entry that silently
+changes. And one per run of consecutive failed checks detected in the
+readings, because without those the feed would be empty until somebody hand
+wrote an incident, and the most common real outage is the one nobody had time
+to write up. A detected entry says so in its own text and carries only what
+the readings support: when the run started, when it last failed, and whether a
+later check has passed.
 
 ## Incidents
 
@@ -171,6 +218,7 @@ a probe has to keep publishing whatever else is wrong.
   than the raw readings it keeps.
 - `deploy/status/page.jq` is the page: the layout, the wording and the
   stylesheet, with every value escaped on the way out.
+- `deploy/status/feed.jq` is the Atom feed behind the Subscribe control.
 - `deploy/status/render_test.sh` runs the renderer over the states this page
   will actually be in, including the ones nobody builds: no history, one
   reading, a gap, a component never probed, a probe that stopped, a malformed

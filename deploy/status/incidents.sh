@@ -16,6 +16,11 @@
 # instantly. That is at most one probe interval, and the alerting stack, not
 # this page, is what wakes anybody.
 #
+# The status words are a closed vocabulary, and a short one, because the point
+# of the bold word at the head of each update is that a reader learns the state
+# of the incident without reading the sentence after it. A free text status
+# would be a second sentence wearing bold.
+#
 # The lie this format exists to prevent: an incident history that is always
 # empty because writing one is hard. So the format is a flat object with no
 # tooling, no generator and no schema registry, and a malformed file is
@@ -84,8 +89,8 @@ def nonempty: type == "string" and (. | gsub("\\s"; "") | length) > 0;
    else ( .updates | to_entries[]
           | .key as $i | .value as $u
           | ( if ($u.at? | ts | not) then "update \($i + 1): at must be a UTC timestamp" else empty end,
-              if (($u.status? // "") | IN("investigating", "identified", "monitoring", "resolved", "scheduled", "in progress", "completed") | not)
-              then "update \($i + 1): status must be one of investigating, identified, monitoring, resolved, scheduled, in progress, completed"
+              if (($u.status? // "") | IN("investigating", "identified", "update", "monitoring", "resolved", "scheduled", "in progress", "completed") | not)
+              then "update \($i + 1): status must be one of investigating, identified, update, monitoring, resolved, scheduled, in progress, completed"
               else empty end,
               if ($u.body? | nonempty | not) then "update \($i + 1): body must be a non-empty string" else empty end )
         )

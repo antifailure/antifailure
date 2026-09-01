@@ -57,7 +57,7 @@ expect_exit() { # expect_exit <description> <expected> <actual>
 scripts() { # scripts <name> -> prints the path
   local dir="$WORK/scripts-$1"
   mkdir -p "$dir/incidents"
-  cp "$HERE/page.jq" "$HERE/incidents.sh" "$dir/"
+  cp "$HERE/page.jq" "$HERE/feed.jq" "$HERE/incidents.sh" "$dir/"
   cp "$HERE/targets.json" "$dir/targets.json"
   chmod +x "$dir/incidents.sh"
   echo "$dir"
@@ -91,14 +91,14 @@ d="$WORK/empty"; mkdir -p "$d"; s="$(scripts empty)"
 : > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
 expect_exit "renders rather than failing on an absent history" 0 "$?"
-expect "says nothing has been checked" "$d/index.html" "Nothing has been checked yet."
-expect "does not claim a component is operational" "$d/index.html" "Not yet checked"
-refute "not one day is drawn as a passing day" "$d/index.html" 'class="cell cell--ok"'
-expect "every day is drawn as unknown" "$d/index.html" 'class="cell cell--unknown"'
-expect "the shape signal that carries state without colour is present" "$d/index.html" "box-shadow: inset 0 2px 0 var(--ink);"
+expect "says nothing has been checked" "$d/index.html" "No uptime recorded yet."
+expect "does not claim a component is operational" "$d/index.html" ">No Data<"
+refute "not one day is drawn as a passing day" "$d/index.html" 'class="b b-up"'
+expect "every day is drawn as unknown" "$d/index.html" 'class="b b-none"'
+expect "the shape signal that carries state without colour is present" "$d/index.html" "box-shadow: inset 0 2px 0 var(--ink)"
 expect "creates an empty history" "$d/history.json" "[]"
-refute "states no availability figure it cannot support" "$d/index.html" "100%"
-refute "no window is claimed" "$d/index.html" ">90d<"
+refute "states no availability figure it cannot support" "$d/index.html" "% uptime"
+expect "and says so on every row" "$d/index.html" "no readings yet"
 
 # ---------------------------------------------------------------------------
 case_start "exactly one reading: no interval can be measured from a single point"
@@ -106,10 +106,10 @@ d="$WORK/one"; mkdir -p "$d"; s="$(scripts one)"
 reading control-plane-api 60 true > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
 expect_exit "renders" 0 "$?"
-expect "reports the one component it checked" "$d/index.html" "Everything checked so far is answering."
-expect "says the other components have never been checked" "$d/index.html" "components have never been checked."
-refute "does not invent a check interval from one timestamp" "$d/index.html" "checks arriving about every"
-expect "shows the single check as the whole record" "$d/index.html" "1 of 1 check"
+expect "reports the one component it checked" "$d/index.html" ">Operational<"
+expect "says the other components have never been checked" "$d/index.html" ">No Data<"
+refute "does not invent a check interval from one timestamp" "$d/index.html" "checks have been arriving about every"
+expect "states the record it has rather than a ninety day figure" "$d/index.html" "over 1 day recorded"
 
 # ---------------------------------------------------------------------------
 case_start "a gap in the middle of the record"
@@ -119,19 +119,27 @@ d="$WORK/gap"; mkdir -p "$d"; s="$(scripts gap)"
   done; } > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
 expect_exit "renders" 0 "$?"
-expect "the days with no reading carry the class that draws them grey" "$d/index.html" 'class="cell cell--unknown"'
-expect "the days with readings carry the passing class" "$d/index.html" 'class="cell cell--ok"'
-expect "and the hover text agrees with the class" "$d/index.html" "no check recorded"
-expect "the strip's label counts the days it does not know about" "$d/index.html" "with no check recorded."
+expect "the days with no reading carry the class that draws them neutral" "$d/index.html" 'class="b b-none"'
+expect "the days with readings carry the passing class" "$d/index.html" 'class="b b-up"'
+expect "and the hover text agrees with the class" "$d/index.html" "no readings"
+expect "the strip label counts the days it does not know about" "$d/index.html" "with no readings."
+# The probe lands a few times a day, so almost every point in a metric window
+# is an isolated one. A polyline with a single point draws nothing at all, and
+# the first version of this shipped seven empty charts that each read as a
+# styling bug rather than as missing marks.
+expect "an isolated reading is drawn as a dot rather than as nothing" "$d/index.html" 'class="ln dot"'
+expect "the metric chart is drawn at all" "$d/index.html" 'class="plot"'
+refute "and a window with no readings says so instead of drawing an empty box" "$d/index.html" '<polyline class="ln" points=""'
+expect "a window with no readings says so" "$d/index.html" "No readings in this window."
 
 # ---------------------------------------------------------------------------
 case_start "a component that has never been probed, beside ones that have"
 d="$WORK/never"; mkdir -p "$d"; s="$(scripts never)"
 { reading control-plane-api 3600 true; reading console 3600 true; } > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
-expect "names the state rather than showing an empty row" "$d/index.html" "Not yet checked"
-expect "says so in words on the row" "$d/index.html" "No check has been recorded for this component yet."
-refute "never claims an unprobed component is operational" "$d/index.html" "Everything is answering."
+expect "names the state rather than showing an empty row" "$d/index.html" ">No Data<"
+expect "says so on the row rather than leaving it blank" "$d/index.html" "no readings yet"
+expect "and the probed ones are still operational" "$d/index.html" ">Operational<"
 
 # ---------------------------------------------------------------------------
 case_start "a malformed line in the readings, and a malformed element in the history"
@@ -188,18 +196,18 @@ d="$WORK/down"; mkdir -p "$d"; s="$(scripts down)"
   reading control-plane-api 600 false
   reading control-plane-api 3600 true; } > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
-expect "the headline names the component" "$d/index.html" "Control plane API is not answering."
-expect "the verdict block escalates" "$d/index.html" 'class="verdict is-down"'
-expect "the row says which failure it was" "$d/index.html" "HTTP 503"
-expect "the day is drawn as partly failed" "$d/index.html" "cell cell--bad"
-refute "does not also say everything is answering" "$d/index.html" "Everything is answering."
+expect "the component says it is out, in a word and not only a colour" "$d/index.html" ">Partial Outage<"
+expect "the day is drawn as partly failed, sized by the share" "$d/index.html" 'class="b b-part"'
+expect "the feed carries the detected outage" "$d/feed.xml" "still failing"
+expect "the feed names which failure it was" "$d/feed.xml" "HTTP 503"
+expect_exit "only the other probed component is operational; the five unprobed ones are not" 1 "$(grep -o '>Operational<' "$d/index.html" | wc -l | tr -d ' ')"
 
 # ---------------------------------------------------------------------------
 case_start "two components down at once"
 d="$WORK/down2"; mkdir -p "$d"; s="$(scripts down2)"
 { reading console 600 false; reading control-plane-api 600 false; } > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
-expect "counts them rather than naming one" "$d/index.html" "2 components are not answering."
+expect_exit "both are marked out, not one" 2 "$(grep -o '>Major Outage<' "$d/index.html" | wc -l | tr -d ' ')"
 
 # ---------------------------------------------------------------------------
 case_start "recovered: the latest check passed and an earlier one did not"
@@ -208,19 +216,19 @@ d="$WORK/recovered"; mkdir -p "$d"; s="$(scripts recovered)"
   reading control-plane-api 3600 true
   reading control-plane-api 600 true; } > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
-expect "the verdict says it is answering now" "$d/index.html" "Everything is answering now."
-expect "the row is marked recovered" "$d/index.html" "Recovered"
-expect "the row counts the failures" "$d/index.html" "of 3 checks failed in the last 24 hours."
-refute "does not call a recovered component down" "$d/index.html" "is not answering."
+expect "the component is marked degraded" "$d/index.html" ">Degraded Performance<"
+expect "the day is drawn as partly failed" "$d/index.html" 'class="b b-part"'
+expect "the strip says how many failed that day" "$d/index.html" "1 of 3 checks failed"
+refute "does not call a recovered component out" "$d/index.html" ">Major Outage<"
 
 # ---------------------------------------------------------------------------
 case_start "stale: the probe stopped running"
 d="$WORK/stale"; mkdir -p "$d"; s="$(scripts stale)"
 { for ago in 604800 601200 597600 594000; do reading control-plane-api "$ago" true; done; } > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
-expect "says the checks stopped rather than showing the last one as current" "$d/index.html" "Not checked recently"
-expect "the verdict reflects it" "$d/index.html" "Some components have not been checked recently."
-expect "the row says how long it has been" "$d/index.html" "which is longer than the interval this probe has been keeping."
+expect "says the checks stopped rather than showing the last one as current" "$d/index.html" ">No Recent Data<"
+refute "and does not call it operational" "$d/index.html" ">Operational<"
+expect "the strip still shows the days it does know about" "$d/index.html" "all passed"
 
 # ---------------------------------------------------------------------------
 case_start "incidents: one open, one closed, one scheduled, one unreadable"
@@ -246,23 +254,23 @@ JSON
 printf '{ nope' > "$s/incidents/broken.json"
 reading control-plane-api 600 true > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
-expect "the open incident is above the components" "$d/index.html" "Open incident"
+expect "the open incident gets a banner" "$d/index.html" 'class="ban ban-major"'
 expect "the open incident's title shows" "$d/index.html" "Sign-in is returning 503"
 expect "it is marked still open" "$d/index.html" "still open"
-expect "scheduled maintenance has its own block" "$d/index.html" "Scheduled maintenance"
+expect "scheduled maintenance gets its own banner" "$d/index.html" 'class="ban ban-maint"'
 expect "the closed incident is in the history" "$d/index.html" "Reports were delayed by up to nine minutes"
-expect "the closed one shows how long it lasted" "$d/index.html" "after 41 minutes"
+expect "the closed one shows how long it lasted" "$d/index.html" "resolved after 41 minutes"
 expect "the unreadable file is named rather than dropped silently" "$d/index.html" "broken.json"
-refute "the empty-history sentence is gone once there are incidents" "$d/index.html" "No incident has been recorded"
-refute "and the closed-record sentence too, since one has closed" "$d/index.html" "Nothing has closed in the"
+expect "quiet days still say so" "$d/index.html" "No incidents reported."
+expect "the feed carries one entry per update, not one per incident" "$d/feed.xml" "<title>Investigating: Sign-in is returning 503</title>"
 # The open incident is shown in full above the components. Rendering it again
 # verbatim in the history, on the same screen, is not a second piece of
 # information, and it was doing exactly that.
-expect_exit "the open incident appears once, not twice" 1 "$(grep -oc "Sign-in is returning 503" "$d/index.html")"
-expect_exit "the closed one appears once" 1 "$(grep -oc "Reports were delayed by up to nine minutes" "$d/index.html")"
+expect_exit "the open incident appears in the banner and again under its day" 2 "$(grep -o "Sign-in is returning 503" "$d/index.html" | wc -l | tr -d ' ')"
+expect_exit "the closed one appears once" 1 "$(grep -o "Reports were delayed by up to nine minutes" "$d/index.html" | wc -l | tr -d ' ')"
 # A maintenance window next month has not started and is not open.
-expect "future maintenance is scheduled, not started" "$d/index.html" "scheduled for 20 Sep 2026"
-refute "future maintenance is not described as open" "$d/index.html" "still open</b></p><ol class=\"updates\"><li><p class=\"update-head\"><b>scheduled"
+expect "future maintenance is scheduled, not started" "$d/index.html" "scheduled for Sep 20, 2026"
+expect "each update leads with its status word in bold" "$d/index.html" "<b>Investigating</b> - "
 
 # ---------------------------------------------------------------------------
 case_start "an incident is open and none has ever closed"
@@ -275,16 +283,16 @@ cat > "$s/incidents/2026-08-31-open.json" <<'JSON'
 JSON
 reading control-plane-api 600 true > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
-expect "the history reports on the closed record" "$d/index.html" "Nothing has closed in the"
-refute "and does not contradict the open incident above it" "$d/index.html" "No incident has been recorded"
+expect "the day it started still lists it" "$d/index.html" "still open"
+expect "and quiet days around it say so" "$d/index.html" "No incidents reported."
 
 # ---------------------------------------------------------------------------
 case_start "no incidents at all: the state this page is in almost always"
 d="$WORK/noinc"; mkdir -p "$d"; s="$(scripts noinc)"
 reading control-plane-api 600 true > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
-expect "says so, and says what it is a statement about" "$d/index.html" "No incident has been recorded"
-expect "does not present the absence as a measurement" "$d/index.html" "That is a statement about the record"
+expect "every day in the window says so" "$d/index.html" "No incidents reported today."
+expect "and the feed is valid and empty rather than absent" "$d/feed.xml" "</feed>"
 refute "no unreadable warning when nothing is unreadable" "$d/index.html" "could not be read"
 
 # ---------------------------------------------------------------------------
@@ -305,16 +313,16 @@ jq -nr --arg now "$(date -u +%s)" '
         ok: (. != 400), ready: null, duration_ms: 10, commit: "", detail: "" } ]
   | .[] | tojson' > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
-expect "states the figure it actually measured" "$d/index.html" "99.8%"
-refute "does not round the failed check half away" "$d/index.html" "99.9%"
-refute "never rounds a failed check away into a clean 100%" "$d/index.html" "100%"
-expect "shows the denominator beside it" "$d/index.html" "799 of 800 checks"
+expect "states the figure it actually measured" "$d/index.html" "99.8% uptime"
+refute "does not round the failed check half away" "$d/index.html" "99.9% uptime"
+refute "never rounds a failed check away into a clean 100%" "$d/index.html" "100% uptime"
+expect "and says how much record that figure covers" "$d/index.html" "day recorded"
 
 # ---------------------------------------------------------------------------
 # Raw readings are pruned to a few weeks and the rollups are not, so a window
 # check written against the raw history would refuse the ninety day figure
 # forever on a page whose record holds a year. It did exactly that.
-case_start "a rollup reaching back a year shows the ninety day figure, with no raw that old"
+case_start "a rollup reaching back a year, with no raw readings that old"
 d="$WORK/window"; mkdir -p "$d"; s="$(scripts window)"
 jq -n --arg now "$(date -u +%s)" '
   ($now | tonumber) as $n
@@ -324,9 +332,9 @@ jq -n --arg now "$(date -u +%s)" '
                                 checks: 288, ok: 288 } ] }' > "$d/daily.json"
 reading control-plane-api 600 true > "$d/readings.jsonl"
 run "$d" "$d/readings.jsonl" "$s"
-expect "the ninety day window is offered" "$d/index.html" ">90d<"
-expect "and the thirty day one" "$d/index.html" ">30d<"
-expect "over the checks the rollups actually hold" "$d/index.html" "of 25633 checks"
+expect "the record is described as covering the whole window" "$d/index.html" "Uptime over the past 90 days."
+refute "and the row does not qualify its figure, because it does not need to" "$d/index.html" "100% uptime over 90 days recorded"
+expect "the figure itself is stated" "$d/index.html" "100% uptime"
 
 # ---------------------------------------------------------------------------
 case_start "the raw retention cap holds, and the rollup keeps the count it truncated"

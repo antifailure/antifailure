@@ -35,8 +35,11 @@ directory, so a malformed file is a red check rather than a hole in the page.
     }
 
 `severity` is required on an incident and ignored on maintenance. An update's
-`status` is one of `investigating`, `identified`, `monitoring`, `resolved` for
-an incident, or `scheduled`, `in progress`, `completed` for maintenance.
+`status` is one of `investigating`, `identified`, `update`, `monitoring` or
+`resolved` for an incident, or `scheduled`, `in progress` or `completed` for
+maintenance. The list is closed and short on purpose: the whole point of the
+bold word at the head of an update is that a reader learns the state without
+reading the sentence after it.
 
 An incident with no `ended_at` renders as still open, with its most recent
 update at the top of the page above everything else. Add `ended_at` and a

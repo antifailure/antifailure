@@ -172,6 +172,67 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
             else [] end)
       } ] as $components
 
+# ------------------------------------------------------- the metric series
+#
+# The only metric this page measures is how long each check took, so that is
+# the only metric it plots. There is no CPU, no queue depth and no throughput
+# here, because nothing in this design observes any of those, and a chart of a
+# number nobody measured is the worst thing a status page can contain.
+#
+# It is labelled as measured from a GitHub Actions runner, which is the honest
+# framing: it includes that runner's own network path and tells a reader about
+# reachability rather than about what their users feel.
+#
+# Readings are bucketed into a fixed number of slots across the window and
+# averaged inside each. A slot with no readings does not get an interpolated
+# value: it ends the current line segment and the next slot with data starts a
+# new one. A line drawn across a gap is a line drawn through data that does
+# not exist.
+| def segments:
+    reduce .[] as $b ([];
+      if (length > 0) and (.[length - 1][-1].i == ($b.i - 1))
+      then .[0:length - 1] + [ .[length - 1] + [$b] ]
+      else . + [[$b]] end);
+
+  def niceMax:
+    if . <= 0 then 1
+    else (. | log10 | floor) as $e
+      | pow(10; $e) as $p
+      | (. / $p) as $m
+      | (if $m <= 1 then 1 elif $m <= 2 then 2 elif $m <= 5 then 5 else 10 end) * $p
+    end;
+
+  60 as $slots
+| [ {k: "day", label: "Day", secs: 86400},
+    {k: "week", label: "Week", secs: 604800},
+    {k: "month", label: "Month", secs: 2592000} ] as $mwins
+
+| ($components | map(
+    . as $c
+    | ($byId[$c.id] // []) as $reads
+    | $c + { series: ($mwins | map(
+        . as $w
+        | ($nowS - $w.secs) as $from
+        | ($w.secs / $slots) as $step
+        | ($reads
+            | map(select((.checked_at | iso) != null
+                         and (.checked_at | iso) > $from
+                         and ((.duration_ms // 0) > 0)))) as $pts
+        | ($pts
+            | map(. + {_i: (((((.checked_at | iso) - $from) / $step) | floor)
+                            | if . > ($slots - 1) then $slots - 1 elif . < 0 then 0 else . end)})
+            | group_by(._i)
+            | map({ i: .[0]._i,
+                    v: (((map(.duration_ms) | add) / length) | round),
+                    n: length,
+                    at: (map(.checked_at | iso) | max) })
+            | sort_by(.i)) as $buckets
+        | { k: $w.k, label: $w.label, secs: $w.secs, from: $from,
+            count: ($pts | length),
+            buckets: $buckets,
+            segs: ($buckets | segments),
+            top: (($buckets | map(.v) | max // 0) | niceMax) })) } )) as $components
+
 # ------------------------------------------------------------------- verdict
 
 | ($components | map(select(.state == "down"))) as $down
@@ -230,87 +291,135 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
 
 # ------------------------------------------------------------------ renderer
 
-| def glyph($state):
-    { ok: "g-ok", recovered: "g-warn", down: "g-down",
-      stale: "g-unknown", unchecked: "g-unknown", unknown: "g-unknown",
-      warn: "g-warn" }[$state] as $sym
-    | "<svg class=\"glyph\" viewBox=\"0 0 14 14\" aria-hidden=\"true\" focusable=\"false\"><use href=\"#\($sym)\"/></svg>";
+| ($days | last) as $lastDay
+| ([range(0; 14) | ($nowS - (. * 86400)) | dayKey]) as $pastDays
+| ($allIncidents | map(select((.started_at | iso) > ($nowS - (14 * 86400))))) as $pastWindow
 
-  def stateWord($state):
-    { ok: "Operational", recovered: "Recovered", down: "Not answering",
-      stale: "Not checked recently", unchecked: "Not yet checked" }[$state] // "Unknown";
+| def esc2: esc;
 
-  def cell($c):
-    ($c.day | dayLabel) as $label
-    | if $c.known | not
-      then "<span class=\"cell cell--unknown\" title=\"\($label): no check recorded\"></span>"
-      elif $c.ok == $c.checks
-      then "<span class=\"cell cell--ok\" title=\"\($label): \(plural($c.checks; "check"; "checks")), all passed\"></span>"
-      else ((($c.share * 100) | floor) | if . < 4 then 4 else . end) as $h
-        | "<span class=\"cell cell--bad\" title=\"\($label): \($c.checks - $c.ok) of \(plural($c.checks; "check"; "checks")) failed\">"
-          + "<i style=\"height:\($h)%\"></i></span>"
+  def stamp:
+    # "Sep 1, 2026 - 04:12 UTC". Built from parts rather than one format
+    # string, because %-d is a GNU extension and this has to print the same on
+    # a BSD userland.
+    (strftime("%b") + " " + (strftime("%d") | sub("^0"; "")) + ", " + strftime("%Y"))
+    + " - " + strftime("%H:%M") + " UTC";
+
+  def dayStamp:
+    (strftime("%b") + " " + (strftime("%d") | sub("^0"; "")) + ", " + strftime("%Y"));
+
+  def dayStampKey: (. + "T00:00:00Z") | fromdateiso8601 | dayStamp;
+
+  # Operational, Degraded Performance and an outage word, exactly as a reader
+  # of any status page expects them, plus the two states most status pages do
+  # not have a word for and quietly render as green.
+  def statusWord($c):
+    if $c.state == "unchecked" then "No Data"
+    elif $c.state == "stale" then "No Recent Data"
+    elif $c.state == "down" then (if $c.day1ok > 0 then "Partial Outage" else "Major Outage" end)
+    elif $c.state == "recovered" then "Degraded Performance"
+    else "Operational" end;
+
+  def statusClass($c):
+    if $c.state == "unchecked" or $c.state == "stale" then "s-none"
+    elif $c.state == "down" then "s-down"
+    elif $c.state == "recovered" then "s-warn"
+    else "s-ok" end;
+
+  # One bar per day. A bar's colour comes from that day's readings and from
+  # nothing else, and a day with no readings is drawn in the neutral, never in
+  # green. With a few days of history most of this strip is neutral for a
+  # while, which is the honest picture and is what it should look like.
+  #
+  # The failed share sits on top, sized by the share that failed, and a day
+  # containing any failure also carries a near black cap. That cap is not
+  # decoration. Measured with the palette validator, the amber and the red are
+  # 0.7 apart in OKLab under deuteranopia and the green and the red are 4.0
+  # apart, which is to say all three bars are one bar to a red-green colour
+  # blind reader and on a greyscale printout. The cap and the fill proportion
+  # are what survive that.
+  def bar($d):
+    ($d.day | dayStampKey) as $label
+    | if ($d.known | not)
+      then "<i class=\"b b-none\" title=\"\($label): no readings\"></i>"
+      elif $d.ok == $d.checks
+      then "<i class=\"b b-up\" title=\"\($label): \(plural($d.checks; "check"; "checks")), all passed\"></i>"
+      elif $d.ok == 0
+      then "<i class=\"b b-out\" title=\"\($label): every one of \(plural($d.checks; "check"; "checks")) failed\"></i>"
+      else ((($d.share * 100) | floor) | if . < 8 then 8 elif . > 92 then 92 else . end) as $h
+        | "<i class=\"b b-part\" title=\"\($label): \($d.checks - $d.ok) of \(plural($d.checks; "check"; "checks")) failed\"><s style=\"height:\($h)%\"></s></i>"
       end;
 
-  def row($c):
-    ($c.cells | map(select(.known))) as $known
-    | ($c.cells | map(select(.known and .ok < .checks)) | length) as $badDays
-    | "<article class=\"row s-\($c.state)\">"
-    + "<div class=\"row-head\">"
-    + glyph($c.state)
-    + "<h4 class=\"row-name\">\($c.name | esc)</h4>"
-    + "<span class=\"row-state\">\(stateWord($c.state) | esc)</span>"
-    + "</div>"
-    + "<p class=\"row-desc\">\($c.description | esc)</p>"
-    + "<div class=\"strip\" role=\"img\" aria-label=\"\($stripDays) days to \($today | dayLabel): \(($known | length)) with checks recorded, \($badDays) with a failed check, \($stripDays - ($known | length)) with no check recorded.\">"
-    + ($c.cells | map(cell(.)) | join(""))
-    + "</div>"
-    + "<div class=\"axis\"><span class=\"axis-start\">\($days[0] | dayLabel | esc)</span>"
-    + "<span class=\"axis-start-sm\">\($days[$stripDays - 30] | dayLabel | esc)</span>"
-    + "<span class=\"axis-end\">today</span></div>"
-    + (if ($c.windows | length) > 0
-       then "<p class=\"figures\">" + ($c.windows | map("<span><b>\(.label)</b> \(.text) <em>\(.ok) of \(plural(.checks; "check"; "checks"))</em></span>") | join("")) + "</p>"
-       else "" end)
-    + "<p class=\"row-meta\">"
-    + (if $c.latest == null
-       then "No check has been recorded for this component yet."
-       else ((if $c.state == "down"
-              then "<b class=\"said\">Failing since the check at \($c.latestAt | stampTime) UTC" + (if (($c.latest.detail // "") | length) > 0 then ": \($c.latest.detail | esc)" else "" end) + ".</b> "
-              elif $c.state == "stale"
-              then "<b class=\"said\">Last checked \(($nowS - $c.latestAt) | humanSecs) ago, which is longer than the interval this probe has been keeping.</b> "
-              elif $c.state == "recovered"
-              then "<b class=\"said\">\($c.day1n - $c.day1ok) of \(plural($c.day1n; "check"; "checks")) failed in the last 24 hours.</b> "
-              else "" end)
-             + "Checked \($c.latestAt | stampDate | esc) at \($c.latestAt | stampTime) UTC"
-             + (if ($c.latest.duration_ms // 0) > 0 then ", answered in \($c.latest.duration_ms)&nbsp;ms" else "" end)
-             + (if (($c.latest.commit // "") | length) >= 8 then ", running <code>\($c.latest.commit[0:8] | esc)</code>" else "" end)
-             + ". <a href=\"\($c.url | esc)\">\($c.url | esc)</a>")
-       end)
-    + "</p></article>";
+  def chart($c; $s):
+    ($s.top) as $top
+    | if $s.count == 0
+      then "<p class=\"nodata\">No readings in this window.</p>"
+      else
+        "<div class=\"plot\"><svg viewBox=\"0 0 600 78\" preserveAspectRatio=\"none\" role=\"img\" aria-label=\"\($c.name | esc) response time, \(plural($s.count; "reading"; "readings")) over the last \($s.label | ascii_downcase), highest point \($top) milliseconds.\">"
+        + ([0, 33.5, 67] | map("<line class=\"g\" x1=\"0\" x2=\"600\" y1=\"\(. + 5)\" y2=\"\(. + 5)\"/>") | join(""))
+        + ($s.segs | map(
+            # A segment of one point is the normal case here, not an edge case:
+            # the probe lands a few times a day, so most slots in a window have
+            # a neighbour with nothing in it. A polyline with a single point
+            # draws precisely nothing, which is how the first version of this
+            # produced seven empty charts that each looked like a styling bug.
+            # Repeating the point and letting a round line cap close it renders
+            # a dot, at whatever stroke width the class carries, and it cannot
+            # distort when the plot scales to the column because the stroke
+            # does not scale.
+            (if length == 1 then "ln dot" else "ln" end) as $cls
+            | (map("\(((.i + 0.5) / 60 * 592 + 4) * 100 | round / 100),\((72 - (.v / $top * 67)) * 100 | round / 100)")) as $pts
+            | "<polyline class=\"\($cls)\" points=\"" + ($pts + (if ($pts | length) == 1 then $pts else [] end) | join(" ")) + "\"/>") | join(""))
+        + ($s.buckets | map(
+            "<rect x=\"\((.i / 60 * 592 + 4) * 100 | round / 100)\" y=\"0\" width=\"9.86\" height=\"78\" fill=\"transparent\"><title>\(.at | stamp | esc): \(.v) ms\((if .n > 1 then " mean of \(.n) checks" else "" end))</title></rect>") | join(""))
+        + "</svg>"
+        + "<span class=\"ylab yt\">\($top)</span><span class=\"ylab ym\">\((($top / 2) * 10 | round) / 10)</span><span class=\"ylab yb\">0</span>"
+        + "</div>"
+        + "<div class=\"xlab\"><span>\($s.from | stamp | esc)</span><span>now</span></div>"
+      end;
 
-  def updateBlock($u):
-    "<li><p class=\"update-head\"><b>\($u.status | ascii_downcase | esc)</b>"
-    + "<time datetime=\"\($u.at | esc)\">\(($u.at | iso | stampDate) | esc), \(($u.at | iso | stampTime) | esc) UTC</time></p>"
-    + "<p class=\"update-body\">\($u.body | esc)</p></li>";
+  def updates($i):
+    "<div class=\"upds\">"
+    + ($i.updates | sort_by(.at) | reverse | map(
+        "<div class=\"upd\"><p class=\"upd-l\"><b>\(.status | split(" ") | map((.[0:1] | ascii_upcase) + .[1:]) | join(" ") | esc)</b> - \(.body | esc)</p>"
+        + "<p class=\"ts\">\(.at | iso | stamp | esc)</p></div>") | join(""))
+    + "</div>";
 
-  def incidentBlock($i; $open):
+  def banner($i):
     ($i.components | map(. as $id | ($components | map(select(.id == $id)) | .[0].name) // $id)) as $names
-    | (($i.started_at | iso) > $nowS) as $future
-    | "<article class=\"incident incident--\(if $open then "open" else "closed" end) sev--\($i.severity // "none" | esc)\">"
-    + "<h4 class=\"incident-title\">\($i.title | esc)</h4>"
-    + "<p class=\"incident-meta\">"
+    | (if $i.type == "maintenance" then "maint"
+       elif ($i.severity // "") == "critical" then "crit"
+       elif ($i.severity // "") == "major" then "major"
+       else "minor" end) as $tone
+    | "<div class=\"ban ban-\($tone)\"><span class=\"ban-t\">\($i.title | esc)</span>"
+    + "<a class=\"ban-s\" href=\"feed.xml\">Subscribe</a></div>"
+    + "<div class=\"ban-b\"><p class=\"ban-m\">"
     + (if $i.type == "maintenance" then "Maintenance" else "\($i.severity // "incident" | esc) incident" end)
-    + " &middot; \($names | map(esc) | join(", "))"
-    # A window that has not opened yet has not started, and is not open. The
-    # first version said "started 8 Sep, still open" about a date next week.
-    + " &middot; \(if $future then "scheduled for" else "started" end) \(($i.started_at | iso | stampDate) | esc), \(($i.started_at | iso | stampTime) | esc) UTC"
-    + (if ($i.ended_at // null) != null
-       then " &middot; ended \(($i.ended_at | iso | stampDate) | esc), \(($i.ended_at | iso | stampTime) | esc) UTC, after \((($i.ended_at | iso) - ($i.started_at | iso)) | humanSecs | esc)"
-       elif $future then " &middot; in \(($i.started_at | iso) - $nowS | humanSecs | esc)"
-       elif $i.type == "maintenance" then " &middot; <b>in progress</b>"
-       else " &middot; <b>still open</b>" end)
-    + "</p><ol class=\"updates\">"
-    + ($i.updates | sort_by(.at) | reverse | map(updateBlock(.)) | join(""))
-    + "</ol></article>";
+    + " affecting \($names | map(esc) | join(", "))"
+    + (if (($i.started_at | iso) > $nowS)
+       then ", scheduled for \($i.started_at | iso | stamp | esc)"
+       else ", since \($i.started_at | iso | stamp | esc)" end)
+    + "</p>" + updates($i) + "</div>";
+
+  def component($c):
+    ($c.cells | map(select(.known))) as $known
+    | ($known | map(.checks) | add // 0) as $ck
+    | ($known | map(.ok) | add // 0) as $okc
+    | "<article class=\"comp\">"
+    + "<div class=\"comp-h\"><span class=\"comp-n\">\($c.name | esc)"
+    + "<a class=\"what\" href=\"https://antifailure.dev/docs/self-hosting/status-page/#what-is-watched-and-why-each-one-separately\" title=\"\($c.name | esc): \($c.description | esc)\" aria-label=\"What \($c.name | esc) is: \($c.description | esc)\">?</a>"
+    + "</span><span class=\"comp-s \(statusClass($c))\">\(statusWord($c) | esc)</span></div>"
+    + "<div class=\"strip\" role=\"img\" aria-label=\"\($stripDays) days to \($lastDay | dayStampKey): \(($known | length)) with readings, \(($known | map(select(.ok < .checks)) | length)) with a failed check, \(($stripDays - ($known | length))) with no readings.\">"
+    + ($c.cells | map(bar(.)) | join("")) + "</div>"
+    + "<div class=\"foot\"><span class=\"f-l\">\($stripDays) days ago</span><span class=\"f-l f-sm\">30 days ago</span><i class=\"hr\"></i>"
+    + "<span class=\"f-p\">"
+    + (if $ck == 0 then "no readings yet"
+       else "\(availability($okc; $ck)) uptime"
+         + (if ($known | length) < $stripDays
+            then " over \(plural(($known | length); "day"; "days")) recorded"
+            else "" end)
+       end)
+    + "</span><i class=\"hr\"></i><span class=\"f-r\">Today</span></div>"
+    + "</article>";
 
 # ------------------------------------------------------------------ the page
 
@@ -319,48 +428,55 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
 <head>
 <meta charset=\"utf-8\">
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-<title>Antifailure status</title>
-<meta name=\"description\" content=\"Whether Antifailure is answering, checked every few minutes from outside the infrastructure it reports on.\">
-<meta name=\"robots\" content=\"index, follow\">
+<title>Antifailure Status</title>
+<meta name=\"description\" content=\"Whether Antifailure is answering, checked from outside the infrastructure it reports on.\">
 <meta name=\"color-scheme\" content=\"light\">
+<link rel=\"alternate\" type=\"application/atom+xml\" title=\"Antifailure status updates\" href=\"feed.xml\">
 <style>
 /*
- * Self contained on purpose. No font file, no stylesheet, no script, no image
- * and no request of any kind leaves this document, because the one moment it
- * has to render correctly is the moment something else is broken. A web font
- * from a CDN is a second origin that can be down, and a status page that
- * renders unstyled during an outage has failed at the only job it has.
+ * Plain on purpose. No card inside a card, no shadow, no gradient, no icon
+ * set, nothing rounded that does not need to be. The page should read as a
+ * document, because a person arriving here is trying to find one fact quickly
+ * while something else is going wrong.
+ *
+ * Self contained on purpose too. No font file, no stylesheet, no script, no
+ * image and no request of any kind leaves this document, because the one
+ * moment it has to render correctly is the moment something else is broken. A
+ * web font from a CDN is a second origin that can be down.
  *
  * That rules out the site's Inter and Geist, so the type is the reader's own
- * system stack with the site's tracking and its type scale applied over it.
- * Everything else is copied from console/app/globals.css by value: the same
- * paper, the same ink, the same measured pass, fail and warn, the same three
- * greys, the same radius vocabulary. A customer arriving here from
- * antifailure.dev should not feel they left.
- *
- * Light only, and painted explicitly. The marketing site and the console are
- * both light only, and a dark theme mechanically inverted from a light one is
- * worse than not having one.
+ * system stack with the site's tracking over it. Every colour is Antifailure's,
+ * copied by value from console/app/globals.css and measured on both grounds.
  */
 :root {
   color-scheme: light;
   --paper: #f7f7f5;
   --card: #ffffff;
   --ink: #101010;
-  /* Measured against both grounds rather than picked by eye. On #f7f7f5:
-     ink 17.7:1, pass 5.0:1, fail 6.1:1, warn 5.5:1, muted 6.8:1, dim 4.6:1.
-     Every one of them clears 4.5:1 as body text. */
+  /* On white: ink 19.0:1, pass 5.4:1, fail 6.5:1, warn 5.9:1, muted 7.3:1,
+     dim 5.0:1. Every one of them clears 4.5:1 as body text. */
   --pass: #1e7a3a;
   --fail: #b3261e;
   --warn: #8a5a00;
   --muted: #575752;
   --dim: #70706b;
-  --rule: rgba(16, 16, 16, 0.1);
-  --rule-strong: rgba(16, 16, 16, 0.22);
-  /* State grounds, each measured with the text that sits on it:
-     fail on #fbeceb is 5.7:1, warn on #faf0dc is 5.2:1. */
-  --fail-ground: #fbeceb;
-  --warn-ground: #faf0dc;
+  --rule: rgba(16, 16, 16, 0.11);
+  --rule-2: rgba(16, 16, 16, 0.2);
+  /* Bar fills, which are non-text and need 3:1 against the white row. Green
+     5.4:1, amber 4.4:1, red 6.5:1. The neutral is deliberately far below that
+     because it is an absence rather than a status, and it is achromatic, which
+     is the one thing no form of colour blindness can confuse with the other
+     three. */
+  --b-up: #1e7a3a;
+  --b-part: #a86a00;
+  --b-out: #b3261e;
+  --b-none: #d4d4cf;
+  /* Incident banner grounds, each measured with white on it: minor 5.2:1,
+     major 6.5:1, critical 19.0:1, maintenance 8.9:1. */
+  --ban-minor: #a15c00;
+  --ban-major: #b3261e;
+  --ban-crit: #101010;
+  --ban-maint: #4a4a45;
   --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace;
 }
@@ -369,465 +485,342 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
 
 body {
   margin: 0;
-  padding: 0 20px 72px;
+  padding: 0 20px 64px;
   background: var(--paper);
   color: var(--ink);
   font-family: var(--sans);
   font-size: 16px;
-  line-height: 1.55;
+  line-height: 1.5;
   letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
   min-width: 320px;
 }
+main { max-width: 56rem; margin: 0 auto; }
 
-main { max-width: 60rem; margin: 0 auto; }
-
-a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; }
-a:hover { text-decoration-color: var(--ink); }
-
-/* One focus ring, defined once, for every interactive element on the page.
-   The alternative is what usually happens: a ring on the things somebody
-   styled and a browser default on the ones they forgot. */
-:where(a, button, [tabindex]):focus-visible {
+a { color: inherit; }
+:where(a, label, [tabindex]):focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
   border-radius: 3px;
 }
 
-code { font-family: var(--mono); font-size: 0.86em; letter-spacing: 0; }
+/* -------------------------------------------------------------- masthead */
 
-/* ---------------------------------------------------------------- masthead */
+.top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 26px 0 24px;
+}
+.wm { font-size: 19px; font-weight: 600; letter-spacing: -0.03em; text-decoration: none; }
+.wm span { font-weight: 400; color: var(--muted); }
+.sub {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--rule-2);
+  border-radius: 3px;
+  background: var(--card);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.sub:hover { border-color: var(--ink); }
 
-.masthead {
+/* ------------------------------------------------------- active incidents */
+
+.ban {
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  padding: 28px 0 22px;
-  border-bottom: 1px solid var(--rule);
+  gap: 16px;
+  padding: 13px 18px;
+  color: #fff;
 }
-.wordmark { font-size: 15px; font-weight: 600; letter-spacing: -0.03em; margin: 0; }
-.masthead .page-name { font-size: 15px; font-weight: 400; color: var(--muted); margin: 0; letter-spacing: -0.02em; }
-.masthead .away { margin-left: auto; font-size: 14px; color: var(--muted); }
+.ban-minor { background: var(--ban-minor); }
+.ban-major { background: var(--ban-major); }
+.ban-crit  { background: var(--ban-crit); }
+.ban-maint { background: var(--ban-maint); }
+.ban-t { font-size: 17px; font-weight: 500; letter-spacing: -0.02em; }
+.ban-s { margin-left: auto; flex: none; font-size: 13px; color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+.ban-b { padding: 16px 18px 20px; background: var(--card); border: 1px solid var(--rule); border-top: 0; }
+.ban-m { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+.active + .active { margin-top: 18px; }
+.active { margin-bottom: 18px; }
 
-/* ----------------------------------------------------------------- verdict */
+.upd + .upd { margin-top: 15px; }
+.upd-l { margin: 0; font-size: 15px; }
+.upd-l b { font-weight: 600; }
+.ts { margin: 1px 0 0; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
 
-/* The verdict is quiet when everything is fine and loud when it is not. A
-   permanently coloured banner is decoration, and decoration is exactly what
-   stops carrying meaning when it matters. */
-.verdict { padding: 34px 0 30px; border-bottom: 1px solid var(--rule); }
-.verdict.is-warn, .verdict.is-down {
-  margin: 22px 0 0;
-  padding: 24px 22px;
-  border-bottom: 0;
-  border-radius: 6px;
-}
-.verdict.is-warn { background: var(--warn-ground); }
-.verdict.is-down { background: var(--fail-ground); }
+/* ------------------------------------------------------------ components */
 
-.verdict-line {
+.sec-note {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin: 0;
-  font-size: clamp(26px, 6.4vw, 40px);
-  line-height: 1.12;
-  font-weight: 500;
-  letter-spacing: -0.035em;
-  text-wrap: balance;
-}
-.verdict-line .glyph { width: 18px; height: 18px; flex: none; margin-top: 0.34em; }
-.verdict.is-ok .verdict-line .glyph { color: var(--pass); }
-.verdict.is-warn .verdict-line { color: var(--warn); }
-.verdict.is-warn .verdict-line .glyph { color: var(--warn); }
-.verdict.is-down .verdict-line { color: var(--fail); }
-.verdict.is-down .verdict-line .glyph { color: var(--fail); }
-.verdict.is-unknown .verdict-line .glyph { color: var(--dim); }
-
-.verdict-sub { margin: 14px 0 0; font-size: 17px; color: var(--muted); max-width: 44ch; letter-spacing: -0.014em; }
-.verdict.is-warn .verdict-sub, .verdict.is-down .verdict-sub { color: var(--ink); }
-
-/*
- * The line this page is built around.
- *
- * Every status page states a verdict. Almost none of them state how recently
- * they earned the right to. This one prints the moment of the last check, how
- * long ago that was, and the interval the checks have actually been arriving
- * at, measured from the readings rather than copied from the cron expression
- * that asks for them. A reader can tell at a glance whether the green above is
- * four minutes old or four hours old, which is the difference between a
- * status page and a decoration.
- */
-.freshness {
-  margin: 18px 0 0;
-  font-family: var(--mono);
-  font-size: 13px;
-  line-height: 1.7;
-  letter-spacing: 0;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.freshness b { color: var(--ink); font-weight: 600; }
-.freshness .sep { color: var(--muted); padding: 0 8px; }
-
-/* -------------------------------------------------------------- components */
-
-section.block { padding: 34px 0 0; }
-h2.block-title {
-  margin: 0 0 4px;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 22px 0 8px;
   font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: var(--muted);
-}
-.block-note { margin: 0 0 20px; font-size: 14px; color: var(--muted); max-width: 62ch; }
-
-.group { margin-top: 26px; }
-.group-name {
-  margin: 0 0 2px;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-.group-rule { height: 1px; background: var(--ink); opacity: 0.85; margin-bottom: 4px; }
-
-.row { padding: 18px 0; border-bottom: 1px solid var(--rule); }
-.row:last-child { border-bottom: 0; }
-.row-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.row-name { margin: 0; font-size: 17px; font-weight: 500; letter-spacing: -0.022em; }
-.row-state {
-  margin-left: auto;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.glyph { width: 13px; height: 13px; flex: none; }
-.row-head .glyph { margin-top: 1px; }
-
-/* State reaches the reader three ways at once, and this is not belt and
-   braces. Measured with the palette validator, pass and fail are 4.0 apart in
-   OKLab under deuteranopia and 1.21:1 apart in luminance, which is to say a
-   red cell and a green cell are the same cell to a red-green colour blind
-   reader and to anyone printing this in grey. So every state also carries a
-   shape and a word. */
-.row .glyph { color: var(--dim); }
-.row.s-ok .glyph, .row.s-ok .row-state { color: var(--pass); }
-.row.s-recovered .glyph, .row.s-recovered .row-state { color: var(--warn); }
-.row.s-down .glyph, .row.s-down .row-state { color: var(--fail); }
-.row.s-stale .glyph, .row.s-stale .row-state,
-.row.s-unchecked .glyph, .row.s-unchecked .row-state { color: var(--dim); }
-
-.row-desc { margin: 3px 0 0; font-size: 14px; color: var(--muted); }
-
-/* ------------------------------------------------------------------- strip */
-
-.strip {
-  display: flex;
-  gap: 2px;
-  height: 32px;
-  margin: 14px 0 0;
-  align-items: stretch;
-}
-.cell {
-  position: relative;
-  flex: 1 1 0;
-  min-width: 0;
-  border-radius: 1px;
-  align-self: stretch;
-}
-.cell--ok { background: var(--pass); }
-.cell--bad { background: var(--pass); }
-/*
- * The failed share of a day, drawn from the top, with the true fraction as its
- * height and a floor of 4% so a single failed check inside a busy day cannot
- * disappear. The 2px ink cap is the part that is not colour: near black
- * against both the green and the red, at 17.7:1 on paper, so a day with a
- * failure is distinguishable from a clean day on a greyscale printout and to
- * a reader who cannot separate the two hues at all.
- */
-.cell--bad > i {
-  position: absolute;
-  inset: 0 0 auto 0;
-  display: block;
-  background: var(--fail);
-  border-radius: 1px 1px 0 0;
-  box-shadow: inset 0 2px 0 var(--ink);
-}
-/* A day with no reading is neither good nor bad and must not look like
-   either. It is grey, which is achromatic and so cannot be confused with
-   pass or fail under any colour vision, and it is a quarter height, which
-   reads as an absence rather than as a bar even at three pixels wide. */
-.cell--unknown {
-  align-self: flex-end;
-  height: 25%;
-  background: var(--rule-strong);
-}
-
-.axis {
-  display: flex;
-  justify-content: space-between;
-  margin: 6px 0 0;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0;
   color: var(--dim);
 }
-.axis-start-sm { display: none; }
+.sec-note a { color: var(--dim); }
 
-.figures {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 18px;
-  margin: 12px 0 0;
-  font-size: 13px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
+.comps { border: 1px solid var(--rule); background: var(--card); }
+/* Rows share edges rather than each carrying its own border, which is the
+   difference between a list and a stack of cards. */
+.comp { padding: 16px 18px 14px; border-top: 1px solid var(--rule); }
+.comp:first-child { border-top: 0; }
+
+.comp-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.comp-n { font-size: 14px; font-weight: 600; letter-spacing: -0.012em; }
+.what {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 5px;
+  border: 1px solid var(--rule-2);
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--dim);
+  text-decoration: none;
+  vertical-align: 1px;
 }
-.figures span { white-space: nowrap; }
-.figures b { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
-.figures em { font-style: normal; color: var(--dim); }
+.what:hover { border-color: var(--ink); color: var(--ink); }
+.comp-s { margin-left: auto; font-size: 13px; font-weight: 500; }
+.s-ok { color: var(--pass); }
+.s-warn { color: var(--warn); }
+.s-down { color: var(--fail); }
+.s-none { color: var(--dim); }
 
-.row-meta { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
-/* Only the sentence that says what went wrong is coloured. Painting the whole
-   line takes the link and the timestamp with it and reads as shouting. */
-.row-meta .said { font-weight: 600; }
-.row.s-down .row-meta .said { color: var(--fail); }
-.row.s-recovered .row-meta .said { color: var(--warn); }
-.row.s-stale .row-meta .said { color: var(--ink); }
+.strip { display: flex; gap: 2px; height: 34px; margin: 11px 0 0; align-items: stretch; }
+.b { position: relative; flex: 1 1 0; min-width: 0; align-self: stretch; }
+.b-up { background: var(--b-up); }
+.b-out { background: var(--b-out); box-shadow: inset 0 2px 0 var(--ink); }
+.b-part { background: var(--b-up); }
+/* The failed share of the day, from the top, at its true size with a floor so
+   one failed check inside a busy day cannot vanish, capped in near black. */
+.b-part > s { position: absolute; inset: 0 0 auto 0; display: block; background: var(--b-part); box-shadow: inset 0 2px 0 var(--ink); }
+.b-none { background: var(--b-none); }
 
-/* ------------------------------------------------------------------ legend */
+.foot { display: flex; align-items: center; gap: 10px; margin: 7px 0 0; font-size: 12px; color: var(--dim); }
+.hr { flex: 1 1 auto; height: 1px; background: var(--rule); }
+.f-p { flex: none; font-variant-numeric: tabular-nums; }
+.f-l, .f-r { flex: none; }
+.f-sm { display: none; }
 
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 22px;
-  margin: 22px 0 0;
-  padding: 14px 16px;
-  background: var(--card);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--muted);
-}
-.legend span { display: flex; align-items: center; gap: 8px; }
-.key { width: 12px; height: 20px; flex: none; border-radius: 1px; }
-.key--ok { background: var(--pass); }
-.key--bad { background: var(--pass); box-shadow: inset 0 2px 0 var(--ink), inset 0 6px 0 var(--fail); }
-.key--unknown { height: 5px; align-self: center; background: var(--rule-strong); }
+/* --------------------------------------------------------------- metrics */
 
-/* --------------------------------------------------------------- incidents */
-
-.incident {
-  padding: 18px 0;
-  border-bottom: 1px solid var(--rule);
-}
-.incident:last-child { border-bottom: 0; }
-.incident--open {
-  margin: 0 0 14px;
-  padding: 20px 22px;
-  background: var(--fail-ground);
-  border: 0;
-  border-radius: 6px;
-}
-.incident--open.sev--none { background: var(--warn-ground); }
-.incident-title { margin: 0; font-size: 19px; font-weight: 500; letter-spacing: -0.026em; }
-.incident-meta { margin: 5px 0 0; font-size: 13px; color: var(--muted); }
-.incident--open .incident-meta { color: var(--ink); }
-.incident-meta b { color: var(--fail); }
-
-.updates { margin: 14px 0 0; padding: 0; list-style: none; }
-.updates li { padding: 0 0 0 16px; border-left: 1px solid var(--rule-strong); }
-.updates li + li { margin-top: 14px; }
-.update-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  margin: 0;
+.msec { margin-top: 30px; }
+.mhead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.022em; }
+.seg { margin-left: auto; display: inline-flex; border: 1px solid var(--rule-2); border-radius: 3px; overflow: hidden; }
+.seg label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 13px;
   font-size: 12px;
-}
-.update-head b { text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
-.update-head time { font-family: var(--mono); color: var(--muted); letter-spacing: 0; font-variant-numeric: tabular-nums; }
-.update-body { margin: 3px 0 0; font-size: 15px; color: var(--muted); max-width: 68ch; }
-.incident--open .update-body { color: var(--ink); }
-
-.empty {
-  margin: 0;
-  padding: 20px 22px;
-  background: var(--card);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  font-size: 15px;
+  font-weight: 500;
   color: var(--muted);
-  max-width: 68ch;
+  cursor: pointer;
+  background: var(--card);
 }
-.empty b { color: var(--ink); font-weight: 500; }
+.seg label + label { border-left: 1px solid var(--rule-2); }
+/* A three way toggle with no script at all: three radios, hidden but still
+   focusable and still in the tab order, and sibling selectors below. A page
+   that has to render from a cold cache during an outage cannot afford a
+   toggle that depends on JavaScript arriving. */
+.wsel { position: absolute; opacity: 0; width: 1px; height: 1px; }
+/* Focus rings the whole group, not one label, because arrow keys move focus
+   within a radio group and the selected label is what the :checked rule below
+   already marks. Ringing a single label would be right one time in three. */
+.wsel:focus-visible ~ .mhead .seg { outline: 2px solid var(--ink); outline-offset: 2px; }
+#w-day:checked ~ .mhead label[for=\"w-day\"],
+#w-week:checked ~ .mhead label[for=\"w-week\"],
+#w-month:checked ~ .mhead label[for=\"w-month\"] { background: var(--ink); color: #fff; }
+.pane { display: none; }
+#w-day:checked ~ .mlist .p-day,
+#w-week:checked ~ .mlist .p-week,
+#w-month:checked ~ .mlist .p-month { display: block; }
 
-.warnbox {
-  margin: 0 0 16px;
-  padding: 14px 18px;
-  background: var(--warn-ground);
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--ink);
-}
+.mnote { margin: 6px 0 0; font-size: 12px; color: var(--dim); max-width: 62ch; }
+.mlist { margin-top: 14px; border: 1px solid var(--rule); background: var(--card); }
+.metric { padding: 16px 18px 12px; border-top: 1px solid var(--rule); }
+.metric:first-child { border-top: 0; }
+.m-h { display: flex; align-items: baseline; gap: 12px; }
+.m-n { font-size: 14px; font-weight: 600; letter-spacing: -0.012em; }
+.m-v { margin-left: auto; font-size: 24px; font-weight: 500; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.m-v em { font-style: normal; font-size: 13px; font-weight: 400; color: var(--dim); margin-left: 2px; }
 
-/* ------------------------------------------------------------------ method */
+.plot { position: relative; margin-top: 8px; padding-right: 38px; }
+.plot svg { display: block; width: 100%; height: 78px; overflow: visible; }
+.g { stroke: var(--rule); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ln { fill: none; stroke: var(--pass); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.dot { stroke-width: 5; }
+/* Axis text is HTML rather than SVG text, because the plot scales
+   non-uniformly to the column width and a <text> inside it would stretch. */
+.ylab { position: absolute; right: 0; transform: translateY(-50%); font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.yt { top: 5px; } .ym { top: 38.5px; } .yb { top: 72px; }
+.xlab { display: flex; justify-content: space-between; margin: 2px 38px 0 0; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.nodata { margin: 10px 0 4px; font-size: 13px; color: var(--dim); }
 
-.method { margin-top: 6px; font-size: 15px; color: var(--muted); max-width: 68ch; }
-.method p { margin: 0 0 12px; }
+/* --------------------------------------------------------- past incidents */
+
+.past { margin-top: 34px; }
+.day { padding: 14px 0; border-bottom: 1px solid var(--rule); }
+.day:first-of-type { border-top: 1px solid var(--rule); }
+h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+.none { margin: 0; font-size: 14px; color: var(--dim); }
+.pinc + .pinc { margin-top: 16px; }
+.pinc-t { margin: 8px 0 2px; font-size: 15px; font-weight: 500; color: var(--fail); letter-spacing: -0.015em; }
+.pinc-t.t-maint { color: var(--muted); }
+.pinc-m { margin: 0 0 8px; font-size: 12px; color: var(--dim); }
+
+/* ---------------------------------------------------------------- closing */
+
+.method { margin-top: 34px; font-size: 14px; color: var(--muted); max-width: 68ch; }
+.method p { margin: 0 0 11px; }
 .method p:last-child { margin-bottom: 0; }
 .method b { color: var(--ink); font-weight: 500; }
+.warnbox { margin: 0 0 14px; padding: 12px 16px; background: #faf0dc; font-size: 13px; color: var(--ink); }
+footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 12px; color: var(--dim); }
 
-footer {
-  margin-top: 46px;
-  padding-top: 20px;
-  border-top: 1px solid var(--rule);
-  font-size: 13px;
-  color: var(--dim);
-}
-
-/* ---------------------------------------------------------------- narrower */
+/* -------------------------------------------------------------- narrower */
 
 @media (max-width: 640px) {
-  body { padding: 0 16px 56px; }
-  .masthead .away { display: none; }
-  /* Thirty days rather than ninety on a phone: ninety cells inside 288px of
-     content is three pixels each with the gaps, which is a texture and not a
-     chart. The oldest sixty are hidden rather than never drawn, so one page
-     serves both widths with no second render and no script. */
-  .strip .cell:nth-child(-n + 60) { display: none; }
-  .axis-start { display: none; }
-  .axis-start-sm { display: inline; }
-  .strip { height: 32px; }
-  .verdict { padding: 26px 0 24px; }
-  .verdict.is-warn, .verdict.is-down { padding: 20px 16px; }
-  .incident--open { padding: 18px 16px; }
-  .legend { gap: 8px 16px; padding: 12px 14px; font-size: 14px; }
-  .row-desc { font-size: 15px; }
-  .row-meta, .figures { font-size: 14px; }
-  .axis { font-size: 12px; }
-  .block-note, footer { font-size: 14px; }
-  .figures b { font-size: 12px; }
-  .incident-meta { font-size: 14px; }
+  body { padding: 0 14px 48px; }
+  /* Thirty bars rather than ninety on a phone: ninety inside 292px of content
+     is under two pixels each once the gaps are taken out, which is a texture
+     and not a chart. The oldest sixty are hidden rather than never drawn, so
+     one page serves both widths with no second render and no script. */
+  .strip .b:nth-child(-n + 60) { display: none; }
+  .f-l:not(.f-sm) { display: none; }
+  .f-sm { display: inline; }
+  .comp, .metric { padding-left: 14px; padding-right: 14px; }
+  .ban, .ban-b { padding-left: 14px; padding-right: 14px; }
+  .comp-n, .m-n { font-size: 15px; }
+  .comp-s, .none, .ts, .mnote, .sec-note, .foot { font-size: 13px; }
+  .upd-l { font-size: 15px; }
+  .top { padding: 20px 0 18px; }
+  /* Touch targets. WCAG 2.5.8 asks 24 by 24 as the floor and the subscribe
+     control is the one thing on this page a thumb actually aims at, so it
+     gets the full 44. */
+  .sub { min-height: 44px; }
+  .what { width: 24px; height: 24px; font-size: 12px; }
+  .seg label { min-height: 40px; padding: 0 16px; font-size: 13px; }
+  .m-v { font-size: 21px; }
 }
 
-/*
- * Windows high contrast forces every background and colour to the user's own
- * palette, which would flatten the strip into one uniform block. The border
- * survives forced colours, so the states keep a shape when the fills are gone.
- */
+/* Windows high contrast forces every fill to the user's own palette, which
+   would flatten the strip into one block. Borders survive it, so the states
+   keep a shape when the colours are gone. */
 @media (forced-colors: active) {
-  .cell { border: 1px solid CanvasText; }
-  .cell--bad > i { border-bottom: 2px solid CanvasText; }
-  .cell--unknown { border-style: dotted; }
-  .key { border: 1px solid CanvasText; }
+  .b { border: 1px solid CanvasText; }
+  .b-none { border-style: dotted; }
+  .b-out, .b-part > s { border-bottom: 2px solid CanvasText; }
 }
 
-/* Nothing on this page animates, so there is nothing to gate here beyond the
-   browser's own smooth scrolling. There is deliberately no live indicator: a
-   pulsing dot says nothing a timestamp does not say better, and it says it
-   forever. */
+/* Nothing on this page animates, so there is nothing to gate for reduced
+   motion. There is deliberately no live indicator: a pulsing dot says nothing
+   a timestamp does not say better, and it says it forever. */
 @media print {
   body { background: #fff; }
-  .verdict.is-warn, .verdict.is-down, .incident--open { background: #fff; border: 1px solid #000; }
+  .comps, .mlist, .ban-b { border-color: #000; }
 }
 </style>
 </head>
 <body>
-<svg width=\"0\" height=\"0\" style=\"position:absolute\" aria-hidden=\"true\" focusable=\"false\">
-  <symbol id=\"g-ok\" viewBox=\"0 0 14 14\"><rect x=\"2\" y=\"2\" width=\"10\" height=\"10\" rx=\"1\" fill=\"currentColor\"/></symbol>
-  <symbol id=\"g-warn\" viewBox=\"0 0 14 14\"><path d=\"M7 1.5 13 12.5H1z\" fill=\"currentColor\"/></symbol>
-  <symbol id=\"g-down\" viewBox=\"0 0 14 14\"><path d=\"M2.6 1.2 7 5.6l4.4-4.4 1.4 1.4L8.4 7l4.4 4.4-1.4 1.4L7 8.4l-4.4 4.4-1.4-1.4L5.6 7 1.2 2.6z\" fill=\"currentColor\"/></symbol>
-  <symbol id=\"g-unknown\" viewBox=\"0 0 14 14\"><rect x=\"2.1\" y=\"2.1\" width=\"9.8\" height=\"9.8\" rx=\"1\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/></symbol>
-</svg>
 <main>
 
-<header class=\"masthead\">
-  <p class=\"wordmark\">Antifailure</p>
-  <p class=\"page-name\">Status</p>
-  <p class=\"away\"><a href=\"https://antifailure.dev\">antifailure.dev</a></p>
-</header>
-
-<section class=\"verdict is-\($verdict)\">
-  <p class=\"verdict-line\">\(glyph($verdict)) \($headline | esc)</p>
-  <p class=\"verdict-sub\">\($subhead | esc)</p>
-  <p class=\"freshness\">"
-+ (if $lastSeen == null
-   then "no check recorded yet"
-   else "last check <b>\($lastSeen | stampDate | esc) \($lastSeen | stampTime | esc) UTC</b>"
-     + "<span class=\"sep\">|</span>\(($nowS - $lastSeen) | humanSecs) ago"
-     + (if $interval == null then ""
-        else "<span class=\"sep\">|</span>checks arriving about every \($interval | humanSecs)"
-        end)
-   end)
-+ "</p>
-</section>
+<div class=\"top\">
+  <a class=\"wm\" href=\"https://antifailure.dev\">Antifailure <span>Status</span></a>
+  <a class=\"sub\" href=\"feed.xml\">Subscribe to updates</a>
+</div>
 "
 
-# Anything open goes above the components, because a reader who arrives during
-# an incident came for the note and not for the strip.
-+ (if ($openIncidents | length) > 0
-   then "<section class=\"block\"><h2 class=\"block-title\">Open incident"
-     + (if ($openIncidents | length) > 1 then "s" else "" end) + "</h2>"
-     + ($openIncidents | map(incidentBlock(.; true)) | join(""))
-     + "</section>"
-   else "" end)
++ (($openIncidents + $openMaint) | map("<section class=\"active\">" + banner(.) + "</section>") | join(""))
 
-+ (if ($openMaint | length) > 0
-   then "<section class=\"block\"><h2 class=\"block-title\">Scheduled maintenance</h2>"
-     + ($openMaint | map(incidentBlock(.; true)) | join(""))
-     + "</section>"
-   else "" end)
++ "<p class=\"sec-note\"><span>"
++ (if $recordStart != null and $recordStart <= ($nowS - ($stripDays * 86400))
+   then "Uptime over the past \($stripDays) days."
+   elif $recordStart != null
+   then "Uptime since \($recordStart | dayStamp | esc), which is all the record there is."
+   else "No uptime recorded yet." end)
++ "</span><a href=\"https://github.com/antifailure/antifailure/tree/status-data\">Every reading</a></p>"
 
-+ "<section class=\"block\">
-  <h2 class=\"block-title\">Components</h2>
-  <p class=\"block-note\">A component is operational when its most recent check passed. Recovered means the most recent check passed and an earlier one inside the last 24 hours did not.</p>"
++ "<div class=\"comps\">"
 + (($targets | reduce .[] as $t ([]; if (. | index($t.group)) then . else . + [$t.group] end)) as $order
-   | $components | group_by(.group) | sort_by(.[0].group as $g | $order | index($g)) | map(
-     "<div class=\"group\"><h3 class=\"group-name\">\(.[0].group | esc)</h3><div class=\"group-rule\"></div>"
-     + (map(row(.)) | join(""))
-     + "</div>") | join(""))
-+ "
-  <div class=\"legend\">
-    <span><i class=\"key key--ok\"></i>every check that day passed</span>
-    <span><i class=\"key key--bad\"></i>at least one failed, capped in black, sized by the share that failed</span>
-    <span><i class=\"key key--unknown\"></i>no check recorded that day</span>
-  </div>
-</section>"
+   | $components | group_by(.group) | sort_by(.[0].group as $g | $order | index($g))
+   | map(map(component(.)) | join("")) | join(""))
++ "</div>"
 
-+ "<section class=\"block\">
-  <h2 class=\"block-title\">Incident history</h2>
-  <p class=\"block-note\">Written by hand, reviewed in a pull request, and published by the next probe. Nothing here is generated from the readings above.</p>"
++ "<section class=\"msec\">
+  <input class=\"wsel\" type=\"radio\" name=\"w\" id=\"w-day\" checked>
+  <input class=\"wsel\" type=\"radio\" name=\"w\" id=\"w-week\">
+  <input class=\"wsel\" type=\"radio\" name=\"w\" id=\"w-month\">
+  <div class=\"mhead\"><h2>System metrics</h2>
+    <div class=\"seg\">"
++ ($mwins | map("<label for=\"w-\(.k)\">\(.label)</label>") | join(""))
++ "</div></div>
+  <p class=\"mnote\">How long each check took, measured from a GitHub Actions runner over the public internet. It includes that runner's own network path, so it says whether a surface is reachable rather than what one of your users would feel.</p>
+  <div class=\"mlist\">"
++ ($components | map(
+    . as $c
+    | "<div class=\"metric\"><div class=\"m-h\"><span class=\"m-n\">\($c.name | esc)</span>"
+    + "<span class=\"m-v\">"
+    + (if $c.latest != null and (($c.latest.duration_ms // 0) > 0)
+       then "\($c.latest.duration_ms)<em>ms</em>" else "&mdash;" end)
+    + "</span></div>"
+    + ($c.series | map("<div class=\"pane p-\(.k)\">" + chart($c; .) + "</div>") | join(""))
+    + "</div>") | join(""))
++ "</div></section>"
+
++ "<section class=\"past\"><h2>Past incidents</h2>"
 + (if (($incidents.unreadable // []) | length) > 0
-   then "<p class=\"warnbox\">\(plural((($incidents.unreadable // []) | length); "incident file"; "incident files")) could not be read and \(if (($incidents.unreadable // []) | length) == 1 then "is" else "are" end) not shown here: \((($incidents.unreadable // []) | map(esc) | join(", ")))." + "</p>"
+   then "<p class=\"warnbox\">\(plural((($incidents.unreadable // []) | length); "incident file"; "incident files")) could not be read and \(if (($incidents.unreadable // []) | length) == 1 then "is" else "are" end) not shown: \((($incidents.unreadable // []) | map(esc) | join(", ")))." + "</p>"
    else "" end)
-+ (if ($recentIncidents | length) > 0
-   then ($recentIncidents | map(incidentBlock(.; false)) | join(""))
-   # With an incident open, "no incident has been recorded" is a sentence that
-   # contradicts the block directly above it. The closed record is what this
-   # section holds, so that is what it reports on.
-   elif ($openIncidents | length) > 0 or ($openMaint | length) > 0
-   then "<p class=\"empty\"><b>Nothing has closed in the \($stripDays) days to \($today | dayLabel | esc).</b> What is open is above.</p>"
-   else "<p class=\"empty\"><b>No incident has been recorded"
-     + (if $firstSeen == null then "." else " in the \($stripDays) days to \($today | dayLabel | esc)." end)
-     + "</b> That is a statement about the record, which is written by hand, and not a measurement. What the readings measure is the strip above.</p>"
-   end)
++ ($pastDays | map(
+    . as $d
+    | ($pastWindow | map(select((.started_at | iso | dayKey) == $d))) as $on
+    | "<div class=\"day\"><h3>\($d | dayStampKey | esc)</h3>"
+    + (if ($on | length) == 0
+       then "<p class=\"none\">No incidents reported\(if $d == $lastDay then " today" else "" end).</p>"
+       else ($on | map(
+           . as $i
+           | ($i.components | map(. as $id | ($components | map(select(.id == $id)) | .[0].name) // $id)) as $names
+           | "<div class=\"pinc\"><p class=\"pinc-t\(if $i.type == "maintenance" then " t-maint" else "" end)\">\($i.title | esc)</p>"
+           + "<p class=\"pinc-m\">\(if $i.type == "maintenance" then "Maintenance" else "\($i.severity // "incident" | esc) incident" end)"
+           + " affecting \($names | map(esc) | join(", "))"
+           + (if ($i.ended_at // null) != null
+              then ", resolved after \((($i.ended_at | iso) - ($i.started_at | iso)) | humanSecs | esc)"
+              else ", still open" end)
+           + "</p>" + updates($i) + "</div>") | join(""))
+       end)
+    + "</div>") | join(""))
 + "</section>"
 
-+ "<section class=\"block\">
-  <h2 class=\"block-title\">How this page is measured</h2>
-  <div class=\"method\">
-    <p>Every component above is checked over the public internet from a GitHub Actions runner, <b>not from Antifailure's own infrastructure</b>. A probe that lived inside the control plane would go quiet during exactly the outage it exists to report, and a page served from the same Azure region as the product would go down alongside it. This page is generated on GitHub and served from GitHub, so an Azure event that takes the product down does not take its status page with it.</p>
++ "<div class=\"method\">
+    <p>Every component above is checked over the public internet from a GitHub Actions runner, <b>not from Antifailure's own infrastructure</b>. A probe that lived inside the control plane would go quiet during exactly the outage it exists to report, and a page served from the same Azure region as the product would go down alongside it. This page is generated on GitHub and served from GitHub.</p>
     <p>The control plane checks answer <code>/readyz</code>, which runs a real database query. <code>/health</code> is a static literal that answers even when the database is unreachable, so a page built on it would report an outage as healthy. The static surfaces are checked for a marker in the body as well as a 200, because this site has twice been published broken behind a 200.</p>
-    <p>The percentages are <b>the share of checks that passed</b>, not measured uptime. Between two checks this page knows nothing, and an outage shorter than the gap between checks can pass unrecorded. A window is only shown once the record actually reaches back across it, which is why a fresh page shows fewer of them than an old one.</p>
-    <p>This page is not the pager. Alerting wakes an engineer far sooner than a five minute sample can move a bar here. They watch the same system from different distances.</p>
-  </div>
-</section>"
+    <p>The percentages are <b>the share of checks that passed</b>, not measured uptime. Between two checks this page knows nothing, and an outage shorter than the gap can pass unrecorded. A day with no readings is drawn in the neutral and is never counted as a day that was up.</p>"
++ (if $lastSeen != null
+   then "<p>The last check landed <b>\($lastSeen | stamp | esc)</b>, \(($nowS - $lastSeen) | humanSecs) ago"
+     + (if $interval == null then "." else ", and checks have been arriving about every \($interval | humanSecs)." end)
+     + " That interval is measured from the readings rather than taken from the schedule that asks for them.</p>"
+   else "<p>No check has been recorded yet.</p>" end)
++ "  </div>"
 
 + "<footer>Generated \($generated | esc). "
 + (if $dropped > 0 then "\(plural($dropped; "reading was"; "readings were")) unreadable and skipped. " else "" end)
-+ "Every reading behind this page is in the <a href=\"https://github.com/antifailure/antifailure/tree/status-data\">status-data</a> branch, and the probe that wrote them is <a href=\"https://github.com/antifailure/antifailure/blob/main/deploy/status/probe.sh\">deploy/status/probe.sh</a>.</footer>
++ "Every reading behind this page is in the <a href=\"https://github.com/antifailure/antifailure/tree/status-data\">status-data</a> branch, and the probe that wrote them is <a href=\"https://github.com/antifailure/antifailure/blob/main/deploy/status/probe.sh\">deploy/status/probe.sh</a>. <a href=\"feed.xml\">Atom feed</a>.</footer>
 </main>
 </body>
 </html>

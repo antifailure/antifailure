@@ -22,6 +22,7 @@
 #   daily.json    one rollup per component per UTC day, which is what lets the
 #                 page show ninety days without keeping ninety days of raw
 #   index.html    the page
+#   feed.xml      the Atom feed the page's Subscribe control points at
 
 set -euo pipefail
 
@@ -33,6 +34,14 @@ HISTORY="$OUT/history.json"
 DAILY="$OUT/daily.json"
 TARGETS="$HERE/targets.json"
 PAGE_JQ="$HERE/page.jq"
+FEED_JQ="$HERE/feed.jq"
+
+# Where this page is served from, used for the absolute links Atom wants.
+# Atom resolves a relative link differently in different readers, so this is
+# one variable rather than a guess repeated in four places. It is the GitHub
+# Pages address for this repository; change it here, and only here, if the
+# page ever moves to a custom domain.
+STATUS_BASE_URL="${STATUS_BASE_URL:-https://antifailure.github.io/antifailure/}"
 INCIDENT_DIR="$HERE/incidents"
 
 # Raw readings are kept for this long and no longer. Everything older survives
@@ -56,6 +65,7 @@ for tool in jq date; do
 done
 [ -f "$TARGETS" ] || { echo "render.sh: no targets at $TARGETS" >&2; exit 1; }
 [ -f "$PAGE_JQ" ] || { echo "render.sh: no page program at $PAGE_JQ" >&2; exit 1; }
+[ -f "$FEED_JQ" ] || { echo "render.sh: no feed program at $FEED_JQ" >&2; exit 1; }
 
 # Every intermediate below goes through a file rather than a shell variable.
 # `jq --argjson history "$merged"` is the obvious way to write this and it
@@ -194,5 +204,13 @@ jq -r -n -f "$PAGE_JQ" \
   --argjson stripDays "$STRIP_DAYS" \
   --arg generated "$GENERATED" \
   > "$OUT/index.html"
+
+jq -r -n -f "$FEED_JQ" \
+  --argjson now "$NOW_EPOCH" \
+  --slurpfile targets "$TARGETS" \
+  --slurpfile history "$TMP/merged.json" \
+  --slurpfile incidents "$TMP/incidents.json" \
+  --arg base "$STATUS_BASE_URL" \
+  > "$OUT/feed.xml"
 
 echo "rendered $(jq 'length' "$TMP/merged.json") readings and $(jq '.days | length' "$TMP/daily.json") daily rollups into $OUT/index.html"
