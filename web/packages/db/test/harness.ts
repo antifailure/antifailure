@@ -280,6 +280,27 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
       stripe_event_id, org_id, stripe_customer_id, type, event_created_at, outcome)
     VALUES (${`evt_${slug}`}, ${orgId}, ${customerId}, 'invoice.paid', now(), 'applied')`
 
+  // The pull request lifecycle. Every one of these carries org_id, so the
+  // cross-tenant suite finds them in the database and needs a row per tenant to
+  // attack: a query returning nothing because the fixture never inserted
+  // anything looks exactly like isolation working.
+  const headSha = `${'0'.repeat(33)}${slug.replace(/[^0-9a-f]/g, '0').slice(0, 7)}`
+  const [pullRequest] = await admin<{ id: string }[]>`
+    INSERT INTO pull_requests (
+      org_id, repository_id, number, head_sha, head_ref, base_ref, head_repository)
+    VALUES (${orgId}, ${repoId}, 1, ${headSha}, 'feature', 'main', ${`${slug}/app`})
+    RETURNING id`
+  const [generation] = await admin<{ id: string }[]>`
+    INSERT INTO pr_generations (org_id, pull_request_id, head_sha, deadline_at)
+    VALUES (${orgId}, ${pullRequest!.id}, ${headSha}, now() + interval '30 minutes')
+    RETURNING id`
+  await admin`
+    INSERT INTO teardown_requests (org_id, environment_id, env_id, repository_id, generation_id, reason)
+    VALUES (${orgId}, ${envId}, ${`env-${slug}`}, ${repoId}, ${generation!.id}, 'seed')`
+  await admin`
+    INSERT INTO github_deliveries (delivery_id, org_id, account_login, event, action)
+    VALUES (${`delivery-${slug}`}, ${orgId}, ${slug}, 'pull_request', 'opened')`
+
   return { orgId, userId, repoId, envId, runId, slug, connectionId, customerId }
 }
 
