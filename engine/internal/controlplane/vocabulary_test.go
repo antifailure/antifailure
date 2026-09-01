@@ -332,32 +332,32 @@ func emittedTypes(t *testing.T) map[string]bool {
 // checking anything. A type losing its emitter, or being added with neither an
 // emitter nor an entry, fails for the reason the list exists.
 func TestEveryMappedTypeHasSomethingInTheEngineThatEmitsIt(t *testing.T) {
-	// Five, and the number is the finding. Each is listed rather than deleted
-	// because deleting any of them removes a value from the control plane's
-	// accepted set, and the sleeping one is an enum value in a shipped schema,
-	// which is a migration rather than a comment fix.
+	// One, and it was five. This test is the record of that, because the four
+	// that left the list were not deleted, they were connected, and the reason
+	// each was disconnected is worth more than the fact that it now is not.
 	//
 	// agent.started, agent.finished and agent.verdict are the whole agent run
-	// lifecycle. Nothing in the engine emits any of them, so the control
-	// plane's runs, its verdicts and every view built on them are fed by
-	// nobody. The same gap is visible from the other end: no INSERT into the
-	// runs table exists on the ingestion path either.
+	// lifecycle, and nothing emitted them because `af test` runs in its own
+	// process and opened no session, so there was no bus to emit onto. The gap
+	// was visible from the other end too: no INSERT into the control plane's
+	// runs or verdicts tables existed outside the test harness and the staging
+	// seeder, so the console's runs list was full in development and empty for
+	// every customer. env.openReporting is the session; ingest.ts applyRun and
+	// applyVerdict are the projections.
 	//
-	// egress.decision is disconnected rather than unbuilt. The decisions are
-	// made, Orchestrator.Decisions returns them, af net and af ci render them,
-	// and internal/hud already classifies egress.decision as a type to suppress
-	// as noisy. Producer and consumer both exist and the wire between them does
-	// not, which makes it the most finishable of the five.
+	// egress.decision was disconnected rather than unbuilt: the decisions were
+	// made, Orchestrator.Decisions returned them, af net and af ci rendered
+	// them, and the wire was missing. Orchestrator.ReportDecisions is that
+	// wire, called once per environment from Down, because the bus stamps a
+	// random identifier on each event and the console counts rows.
 	//
-	// env.sleeping is reserved for idle sleep, which is not built at all.
-	//
-	// The three agent types are the set where the code does not say which it
-	// is. Nothing consumes them either, so there is no half-built wire to read
-	// intent from, and saying so is more useful than guessing.
-	expected := []string{
-		"agent.finished", "agent.started", "agent.verdict",
-		"egress.decision", "env.sleeping",
-	}
+	// env.sleeping is the one that is still reserved. Idle sleep is not built:
+	// nothing sleeps an environment, and runtime.idle_sleep is defaulted by
+	// manifest normalization, checked by validation, printed by af explain and
+	// read by nothing that acts on it. It is listed rather than deleted because
+	// deleting it removes a value from a shipped schema's enum, which is a
+	// migration rather than a comment fix.
+	expected := []string{"env.sleeping"}
 
 	emitted := emittedTypes(t)
 

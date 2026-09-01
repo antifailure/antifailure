@@ -189,14 +189,39 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		return nil, aferrors.Wrap(err, aferrors.AFAGT001, "detail", err.Error())
 	}
 
+	// The run is reported from here, and this session is why the reporting
+	// exists at all. agent.started, agent.finished and agent.verdict were three
+	// of the event types the control plane sink translates and nothing emitted,
+	// because af test runs in its own process and opened no session, so there
+	// was no bus to emit onto. The consequence was two empty tables: the
+	// console's runs list and every verdict under it had no writer in the whole
+	// repository except the test harness and the staging seeder.
+	//
+	// Opened before the runner starts rather than after it finishes, so that a
+	// run which is killed part way through has still been announced. A run
+	// nobody was told about is indistinguishable from a run that never
+	// happened, and those call for opposite responses.
+	rs := o.openReporting(ctx)
+	defer closeSession(rs)
+	runStartedAt := o.opts.Clock.Now()
+	id := runID(runStartedAt, o.envID)
+	o.reportRunStarted(rs, id, "workflows", runStartedAt, len(workflows))
+
 	report, err := o.driveRunner(ctx, runnerJob{
 		Runner: runner, BaseURL: status.URL, Artifacts: artifacts,
 		Workflows: workflows, Personas: o.personaDocs(provisioned),
 		WorkDir: o.opts.Root, Attempts: opts.Attempts, Headless: !opts.Headed,
 	})
 	if err != nil {
+		// Failed, not complete. The runner could not be driven, so nothing was
+		// learned about the application, and a run recorded as complete with no
+		// verdicts under it says the opposite.
+		o.reportRunFinished(rs, id, runStartedAt, nil, "failed")
 		return nil, err
 	}
+
+	o.reportVerdicts(rs, id, report.Results)
+	o.reportRunFinished(rs, id, runStartedAt, report, "complete")
 
 	// Asked after the workflows, of the rows they left behind. This is the
 	// only part of a run that looks at the data rather than at the screen, and
