@@ -45,6 +45,15 @@ is a process that fails in production rather than at deploy time.
 | `AF_STRIPE_API_BASE` | `https://api.stripe.com` | Where the Stripe API lives. For tests, which point it at the engine's own Stripe mock pack, and for nothing else. |
 | `AF_CONSOLE_DIR` | `/app/console-out` | Where the console's build is. The published image carries it at the default and nothing needs setting. Point it elsewhere only if you build `console/` yourself. A directory that is not there is not fatal: the API serves normally, the start-up log says the console is missing, and every page answers with that sentence rather than a blank 404 that reads like a routing bug. |
 
+## Set on the engine, not here
+
+| Variable | Where it is set | What it is |
+| --- | --- | --- |
+| `AF_CONTROL_PLANE_TOKEN` | On the engine, or in a CI job | An engine token, which the control plane **issues and verifies but never reads from its own environment**. A self-hoster creates one by posting to `/v1/tokens`, then sets it where `af` runs so the CLI can reach a hosted control plane. It is listed here because this is the page somebody configuring a self-hosted installation reads, and a token the control plane mints is easy to mistake for a variable the control plane consumes. Setting it on the control plane process does nothing at all. |
+
+Everything above this section is read by the control plane process itself.
+
+
 ## Who may sign in
 
 Two gates, and they are not the same one.

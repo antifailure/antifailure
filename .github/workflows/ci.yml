@@ -34,6 +34,14 @@ jobs:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
 
+      # The installer tests start a real zsh, because which profile file a shell
+      # reads is the whole subject and a run that never starts one has not
+      # tested it. macOS ships zsh; this runner does not. The tests refuse
+      # rather than skip when CI is set, so a missing zsh fails loudly here
+      # instead of passing quietly.
+      - name: The shell the installer tests drive
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
       - name: Generated files are current
         # The error catalog and the sidecar's packaged source are generated and
         # checked in. A drift between the generator and what is committed is

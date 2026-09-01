@@ -317,6 +317,27 @@ func assertNumberedStepsAreIndented(t *testing.T, out string) {
 	}
 }
 
+// zshPath finds the shell these tests need, rather than assuming /bin/zsh.
+//
+// The installer's whole subject is which profile file a shell reads, so a run
+// that never starts a real zsh has not tested the thing. macOS always has one;
+// a Linux runner does not unless somebody installed it. Both facts are true, so
+// this refuses rather than skips wherever CI is set: a skipped check reads as a
+// pass, and this is the check that proves the installer works at all.
+func zshPath(t *testing.T) string {
+	t.Helper()
+	path, err := exec.LookPath("zsh")
+	if err == nil {
+		return path
+	}
+	if os.Getenv("CI") != "" {
+		t.Fatalf("zsh is not on PATH and CI is set, so this cannot be skipped: %v.\n"+
+			"The workflow has to install it; these tests start a real zsh on purpose.", err)
+	}
+	t.Skipf("zsh is not on PATH, so the shell this test drives does not exist here: %v", err)
+	return ""
+}
+
 // The whole point, end to end: install, then open a genuinely new terminal.
 func TestTheDefaultInstallMakesANewTerminalWork(t *testing.T) {
 	s := newSession(t)
@@ -334,7 +355,7 @@ func TestTheDefaultInstallMakesANewTerminalWork(t *testing.T) {
 	// The line printed is the line written, or the reader cannot undo it.
 	contains(t, out, want)
 
-	got, err := s.newTerminal("/bin/zsh", "-ic", "af")
+	got, err := s.newTerminal(zshPath(t), "-ic", "af")
 	if err != nil {
 		t.Fatalf("a new terminal could not find af: %v\n%s", err, got)
 	}
@@ -362,7 +383,7 @@ func TestThePastedLineFixesTheCurrentTerminal(t *testing.T) {
 
 	// A shell with the installer's PATH and no profile sourced, which is what
 	// the terminal that ran curl | sh actually is.
-	cmd := exec.Command("/bin/zsh", "-c", strings.Replace(paste, "af doctor", "af", 1))
+	cmd := exec.Command(zshPath(t), "-c", strings.Replace(paste, "af doctor", "af", 1))
 	cmd.Env = []string{"HOME=" + s.home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "TERM=dumb"}
 	got, err := cmd.CombinedOutput()
 	if err != nil {
