@@ -1,5 +1,4 @@
 import { PageShell, RelatedGrid } from "@/components/pages/kit";
-import { MigrationScene } from "@/components/home/visuals/MigrationScene";
 import { CircularMap, DashChart, FeatureRow, Notebook, SplitHero, TaskTable } from "./well";
 
 export function DevtoolsPage() {
@@ -61,11 +60,7 @@ export function DevtoolsPage() {
                 "Publish what the twin reproduced. Do not pretend unsupported components are cloned.",
               ],
             }}
-          >
-            <div className="overflow-hidden">
-              <MigrationScene tab={0} playId={0} />
-            </div>
-          </Notebook>
+          />
         }
       />
 

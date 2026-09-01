@@ -260,6 +260,18 @@ type NotebookRow = {
   kind?: string;
 };
 
+/**
+ * The notebook body is either rows or a scene, never both.
+ *
+ * It was both on two pages, and `children` wins in the render, so five rows of
+ * written data on each were dead: edited, reviewed, and never drawn. A union
+ * rather than two optional props, so passing both stops compiling instead of
+ * quietly discarding one of them.
+ */
+type NotebookBody =
+  | { rows: NotebookRow[]; children?: never }
+  | { children: ReactNode; rows?: never };
+
 export function Notebook({
   tab,
   rail,
@@ -270,11 +282,9 @@ export function Notebook({
 }: {
   tab: string;
   rail: string;
-  rows: NotebookRow[];
   overlay: { title: string; checks: string[] };
   overlaySide?: "left" | "right";
-  children?: ReactNode;
-}) {
+} & NotebookBody) {
   return (
     <SageWell>
       <div className="relative min-h-[440px] max-md:min-h-0">
@@ -304,11 +314,14 @@ export function Notebook({
             </div>
             <div className="min-w-0 flex-1">
               {children ? (
-                <div className="h-[340px] overflow-hidden bg-[#f7f7f5]">{children}</div>
+                // No fixed height. At 340px the scene's last row was sliced
+                // through the middle of its glyphs on every width, which reads
+                // as a rendering fault rather than as a crop.
+                <div className="overflow-hidden bg-[#f7f7f5]">{children}</div>
               ) : (
                 <div className="p-3">
                   <div className="mb-2 flex items-center justify-between px-1 text-[10px] text-black/35">
-                    <span>{rows.length} rows · referential subset</span>
+                    <span>{rows?.length ?? 0} rows · referential subset</span>
                     <span className="hidden sm:inline">Filter · Sort</span>
                   </div>
                   <div className="overflow-hidden rounded-[10px] border border-black/[0.06]">
@@ -319,7 +332,7 @@ export function Notebook({
                       <span>Policy</span>
                       <span className="max-sm:hidden">Cover</span>
                     </div>
-                    {rows.map((row, i) => (
+                    {rows?.map((row, i) => (
                       <div
                         key={row.id}
                         className={cn(
@@ -330,7 +343,7 @@ export function Notebook({
                         <span
                           className={cn(
                             "size-3 rounded-[3px] border",
-                            i < rows.length - 1
+                            i < (rows?.length ?? 0) - 1
                               ? "border-[#33bf00] bg-[#33bf00]"
                               : "border-black/20 bg-white",
                           )}

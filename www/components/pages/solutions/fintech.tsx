@@ -20,13 +20,6 @@ export function FintechPage() {
             overlaySide="right"
             tab="Side-Effect Firewall"
             rail="NOTES"
-            rows={[
-              { id: "CHG-184", label: "POST /v1/charges $49.00", kind: "stripe", status: "MOCK", tone: "PASS", bar: 88 },
-              { id: "MAIL-91", label: "Order #4182 receipt", kind: "email", status: "CAPTURE", tone: "WARN", bar: 64 },
-              { id: "WH-220", label: "slack.hooks · store only", kind: "hook", status: "CAPTURE", tone: "WARN", bar: 40 },
-              { id: "DNS-018", label: "api.prod.internal", kind: "dns", status: "BLOCK", tone: "BLOCK", bar: 8 },
-              { id: "TCP-443", label: "unknown destination", kind: "tcp", status: "BLOCK", tone: "BLOCK", bar: 6 },
-            ]}
             overlay={{
               title: "Fail closed",
               checks: [
