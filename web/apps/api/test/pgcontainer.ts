@@ -24,6 +24,28 @@ export const PORT = 55433
 export const URL = `postgres://postgres:test@127.0.0.1:${PORT}/antifailure`
 
 /**
+ * A token unique to this process, put in the name of every database this run
+ * creates so that the cleanup can find its own and nothing else.
+ *
+ * The container above is deliberately shared and reused, which is right when
+ * one person runs one suite at a time and wrong the moment two runs overlap,
+ * because they share a CLUSTER. The sweep used to drop every `af_dr_` database
+ * on it with `WITH (FORCE)`, and FORCE means terminate whoever is connected.
+ * So a run finishing would reach into a run still going, kill its connections
+ * and delete the database it was restoring into. What came back was an
+ * ECONNRESET halfway through a restore, or a missing database, or a stall,
+ * none of which name the cause and all of which read as a defect in the
+ * backup code.
+ *
+ * Scoping the names is the half of the problem that can be fixed from here.
+ * The other half is that the cluster, its roles and its migrations are still
+ * shared, so two checkouts on different branches still migrate one database.
+ * That is a design decision above this file and it is written down rather than
+ * quietly worked around.
+ */
+export const RUN = `${process.pid.toString(36)}${Date.now().toString(36).slice(-4)}`
+
+/**
  * The Postgres major this machine has a client for.
  *
  * The suite starts a server matching the newest pg_dump it can find rather than
@@ -121,7 +143,12 @@ export async function start(): Promise<boolean> {
   throw new Error(`${CONTAINER} did not accept a connection within two minutes:\n${logs}`)
 }
 
-/** Removes every database this suite made, by name prefix. */
+/**
+ * Removes databases by name prefix.
+ *
+ * Callers pass a prefix carrying RUN, so this only ever reaches its own. A
+ * bare `af_dr_` here would take another run's databases with it: see RUN.
+ */
 export async function dropDatabasesNamed(prefix: string): Promise<void> {
   const admin = postgres(URL, { max: 1, connect_timeout: 30, onnotice: () => {} })
   try {
