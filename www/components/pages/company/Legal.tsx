@@ -12,6 +12,7 @@ import {
   RelatedGrid,
   SpecTable,
 } from "@/components/pages/kit";
+import { BACKUP_RECOVERY, LOG_RETENTION } from "@/lib/legal-facts";
 import {
   NOT_ENGAGED,
   SUBPROCESSOR_CHANGES,
@@ -79,6 +80,15 @@ function CounselNotice({ children }: { children: ReactNode }) {
   );
 }
 
+
+/** A published number spelled as a word, at the start of a sentence. The words
+ *  live in legal-facts.ts so a test can hold them to the Terraform that sets
+ *  them, and they are lower case there because most of their uses are mid
+ *  sentence. */
+function cap(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
 export function PrivacyPage() {
   return (
     <PageShell>
@@ -144,14 +154,30 @@ export function PrivacyPage() {
         </div>
       </PageSection>
       <PageSection tone="sage">
-        <PageHeading title="<strong>There is no billing, so there are no payment records.</strong>" />
+        <PageHeading title="<strong>No card ever reaches this product.</strong>" />
         <Prose className="mt-10">
           <p>
-            No payment processor is connected to any part of this product. No card details, billing
-            addresses, or invoices exist anywhere in it. An organization carries a plan name, which
-            sets its rate limits and quotas, and that is the whole of what a reader might call
-            billing data today. If that changes, the processor will appear on the{" "}
-            <Link href="/subprocessors">subprocessor list</Link> before it processes anything.
+            That part is unconditional and it is architectural rather than a promise: checkout and
+            the billing portal are pages Stripe hosts, so a card is entered on Stripe&rsquo;s own
+            form and never passes through anything here. No card details or billing addresses exist
+            anywhere in this product and none can.
+          </p>
+          <p>
+            What is conditional is everything else. The control plane contains a real Stripe
+            integration, and it is active only where{" "}
+            <code>AF_STRIPE_SECRET_KEY</code> and <code>AF_STRIPE_WEBHOOK_SECRET</code> are set.
+            Where they are, Stripe holds the customer, subscription and invoice records for that
+            deployment and is a processor for it, listed on the{" "}
+            <Link href="/subprocessors">subprocessor page</Link>. Where they are not, the billing
+            routes refuse and name the missing variables, and an organization carries nothing but a
+            plan name, which sets its rate limits and quotas. The control plane says which of the
+            two it is on the first line it logs when it starts.
+          </p>
+          <p>
+            This page previously said there was no billing at all. That was true when it was
+            written and stopped being true when the billing work landed, which is the reason the
+            numbers and capabilities on these pages are now checked against the code by a test
+            rather than kept in step by hand.
           </p>
         </Prose>
       </PageSection>
@@ -397,7 +423,7 @@ export function DpaPage() {
               ],
               [
                 "Recoverability",
-                "Thirty-five days of point-in-time recovery on the production database, with geo-redundant backup storage. Staging keeps fourteen days in one region. A restore is verified against a manifest taken at backup time and then asked, through the unprivileged role, to refuse a cross-tenant read.",
+                `${cap(BACKUP_RECOVERY.production.words)} days of point-in-time recovery on the production database, with geo-redundant backup storage. Staging keeps ${BACKUP_RECOVERY.staging.words} days in one region. A restore is verified against a manifest taken at backup time and then asked, through the unprivileged role, to refuse a cross-tenant read.`,
               ],
             ]}
           />
@@ -800,7 +826,7 @@ export function DataRetentionPage() {
               ],
               [
                 "Database backups",
-                "Thirty-five days of point-in-time recovery on production, fourteen on staging. A deletion is reflected in every backup only after that window has passed.",
+                `${cap(BACKUP_RECOVERY.production.words)} days of point-in-time recovery on production, ${BACKUP_RECOVERY.staging.words} on staging. A deletion is reflected in every backup only after that window has passed.`,
               ],
               [
                 "Analytics events",
@@ -808,7 +834,7 @@ export function DataRetentionPage() {
               ],
               [
                 "Operational logs",
-                "Ninety days on production and thirty on staging, in Azure Monitor. They hold request paths, status codes and timings, and never a request body, a token or a snapshot.",
+                `${cap(LOG_RETENTION.production.words)} days on production and ${LOG_RETENTION.staging.words} on staging, in Azure Monitor. They hold request paths, status codes and timings, and never a request body, a token or a snapshot.`,
               ],
               [
                 "Masked dumps",
@@ -863,7 +889,7 @@ export function DataRetentionPage() {
               ],
               [
                 "Backups",
-                "A deletion applies to the live database immediately and to backups only as they age out, over the thirty-five day recovery window on production and fourteen on staging. Restoring a backup within that window restores the deleted rows, and any deletion request is applied again afterwards.",
+                `A deletion applies to the live database immediately and to backups only as they age out, over the ${BACKUP_RECOVERY.production.words} day recovery window on production and ${BACKUP_RECOVERY.staging.words} on staging. Restoring a backup within that window restores the deleted rows, and any deletion request is applied again afterwards.`,
               ],
               [
                 "The audit log",

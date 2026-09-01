@@ -231,6 +231,88 @@ describe('the analytics stream', { skip: hasDatabase ? false : 'no Postgres at A
   // Write only
   // -------------------------------------------------------------------------
 
+  it('records inside the caller transaction, and rolls back with it', async () => {
+    // The property the whole "same transaction as the thing it describes"
+    // argument rests on, and it is not free: drizzle's nested transaction could
+    // in principle be a second connection, and then a rolled-back sign-in would
+    // leave an analytics row claiming it happened. Asserted three ways because
+    // any one of them alone is consistent with a second connection.
+    const orgId = randomUUID()
+    const s = h.analytics.surrogate(orgId)!
+    const ids = await h.pool.withoutTenant(async (db) => {
+      const outer = await db.execute<{ t: string; p: number }>(sql`
+        SELECT txid_current()::text AS t, pg_backend_pid() AS p`)
+      const inner = await db.transaction(async (tx) =>
+        tx.execute<{ t: string; p: number }>(sql`
+          SELECT txid_current()::text AS t, pg_backend_pid() AS p`))
+      return { outer: outer[0]!, inner: inner[0]! }
+    })
+    assert.equal(ids.inner.t, ids.outer.t, 'the nested block is a different transaction, not a savepoint')
+    assert.equal(ids.inner.p, ids.outer.p, 'the nested block ran on a different connection')
+
+    await assert.rejects(
+      h.pool.withoutTenant(async (db) => {
+        const wrote = await h.analytics.record(db, {
+          name: 'environment.created',
+          eventId: `rollback-${orgId}`,
+          occurredAt: new Date('2026-05-06T00:00:00Z'),
+          orgId,
+          payload: { runtime_class: 'docker' },
+        })
+        assert.equal(wrote.status, 'recorded', 'the fixture wrote nothing, so the rollback proves nothing')
+        // What a failing sign-in does one statement later.
+        throw new Error('the caller rolled back')
+      }),
+    )
+    assert.equal((await streamFor(s)).length, 0, 'an analytics row survived a rolled-back caller')
+  })
+
+  it('a caught failure with no savepoint still reaches the caller, which is why there is one', async () => {
+    // The measurement behind record()'s savepoint, kept as a test because it is
+    // a fact about this driver rather than about this code, and a driver upgrade
+    // that changed it would silently remove the reason the savepoint exists.
+    //
+    // postgres.js records the first failed query of a transaction and rethrows
+    // it once the callback returns, whatever the callback did about it. So
+    // catching is not recovering, and a producer that caught its own failure
+    // would still take the caller down.
+    await assert.rejects(
+      h.pool.withoutTenant(async (db) => {
+        try {
+          await db.execute(sql`
+            INSERT INTO analytics_events (event_id, name, occurred_at, source, actor_kind, privacy_basis)
+            VALUES ('no-savepoint', 'x', now(), 'not-a-source', 'engine', 'contract')`)
+        } catch {
+          // Caught, and deliberately swallowed. The pool rethrows anyway.
+        }
+        return 'the callback returned normally'
+      }),
+      (err: unknown) => {
+        assert.equal(codeOf(err), '23514', 'the driver stopped rethrowing, so the savepoint may be unnecessary now')
+        return true
+      },
+    )
+
+    // And the same failure inside a savepoint, which is what record() does: the
+    // catch holds, the outer transaction survives, and the caller carries on.
+    const survived = await h.pool.withoutTenant(async (db) => {
+      let caught: string | null = null
+      try {
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO analytics_events (event_id, name, occurred_at, source, actor_kind, privacy_basis)
+            VALUES ('with-savepoint', 'x', now(), 'not-a-source', 'engine', 'contract')`)
+        })
+      } catch (err) {
+        caught = codeOf(err)
+      }
+      const after = await db.execute<{ ok: number }>(sql`SELECT 1 AS ok`)
+      return { caught, carriedOn: after.length === 1 }
+    })
+    assert.equal(survived.caught, '23514')
+    assert.equal(survived.carriedOn, true, 'the savepoint did not protect the caller transaction')
+  })
+
   it('the application role cannot read the stream, and gets an error rather than nothing', async () => {
     await record({
       name: 'environment.created',

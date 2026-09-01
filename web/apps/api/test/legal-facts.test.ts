@@ -1,0 +1,300 @@
+// The published legal pages, against the thing that decides them.
+//
+// THE CLASS THIS EXISTS FOR, which is the finding rather than any one instance.
+//
+// Seven published claims were found false in one night: backup retention saying
+// fourteen days while production runs thirty-five, log retention documented
+// nowhere, the subprocessor page saying there was no billing and that nothing
+// could send mail while the repository held a real Stripe client and a real
+// mailer, provider-key removal called deletion when it is revocation, a privacy
+// sheet saying a waitlist address never leaves the browser after it started
+// being posted to a server.
+//
+// Every one was TRUE WHEN IT WAS WRITTEN. That is the whole point. They are not
+// carelessness, they are drift, and prose has no compiler. A legal page that has
+// drifted is worse than a documentation page that has drifted, because somebody
+// relies on it in a way they cannot check.
+//
+// So this holds the mechanical half to reality, the same way config-docs.test.ts
+// holds the control plane's environment variables to the source that reads them.
+//
+// WHAT IT CANNOT SEE, written next to the assertions rather than in a report.
+//
+// It holds NUMBERS and the existence of NAMED CAPABILITIES. It cannot hold a
+// sentence. "We do not use Stripe" and "Stripe cannot be used" differ by a
+// promise, and nothing here can tell them apart; the rule for that is prose, at
+// the top of www/lib/subprocessors.ts, and it stays a judgement. It also cannot
+// see a claim nobody thought to encode: a page can still say something false
+// about a subject this file does not know about. What it does do is make the
+// half that IS checkable fail loudly at the moment the code moves, which is the
+// moment all seven of these went wrong.
+
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+/**
+ * The facts are READ AS TEXT rather than imported, and that is not laziness.
+ *
+ * www is a separate npm project with its own module resolution, and importing
+ * across the boundary made this file fail to compile under the API's
+ * verbatimModuleSyntax while the tests themselves still ran, which is the worst
+ * of both: a gate that works and a build that does not. config-docs.test.ts
+ * reads the documentation it checks the same way, for the same reason.
+ *
+ * The cost is that a parse which stops matching reads as an empty set and every
+ * assertion over it passes. The first test below is the negative control on
+ * exactly that.
+ */
+interface RetentionFact {
+  days: number
+  words: string
+}
+
+const here = path.dirname(fileURLToPath(import.meta.url))
+const repoRoot = path.join(here, '..', '..', '..', '..')
+
+const read = (p: string) => readFile(path.join(repoRoot, p), 'utf8')
+
+const facts = await read('www/lib/legal-facts.ts')
+
+/** One `{ days: N, words: "x" }` out of the facts file, by the constant and the
+ *  environment that hold it. */
+function published(constant: string, environment: string): RetentionFact | null {
+  const block = facts.match(new RegExp(`export const ${constant} = \\{[\\s\\S]*?\\n\\};`, 'm'))
+  if (!block) return null
+  const found = block[0].match(
+    new RegExp(`${environment}:\\s*\\{\\s*days:\\s*(\\d+),\\s*words:\\s*"([a-z-]+)"`, 'm'),
+  )
+  return found ? { days: Number(found[1]), words: found[2]! } : null
+}
+
+const BACKUP_RECOVERY = {
+  production: published('BACKUP_RECOVERY', 'production'),
+  staging: published('BACKUP_RECOVERY', 'staging'),
+}
+const LOG_RETENTION = {
+  production: published('LOG_RETENTION', 'production'),
+  staging: published('LOG_RETENTION', 'staging'),
+}
+
+/** Every conditional processor, as vendor, module and the variables that switch
+ *  it on. */
+function conditionalProcessors(): { vendor: string; module: string; variables: string[] }[] {
+  // Split on the vendor and read each entry's own slice, rather than one
+  // pattern spanning all three fields. The first version required them
+  // adjacent, and the moment an entry gained an explanatory comment between
+  // vendor and module it silently matched one processor instead of two, which
+  // is a parser reporting on its own shape rather than on the file.
+  const out: { vendor: string; module: string; variables: string[] }[] = []
+  const starts = [...facts.matchAll(/vendor:\s*"([^"]+)"/g)]
+  for (let i = 0; i < starts.length; i += 1) {
+    const from = starts[i]!.index!
+    const to = i + 1 < starts.length ? starts[i + 1]!.index! : facts.length
+    const slice = facts.slice(from, to)
+    const module = slice.match(/module:\s*"([^"]+)"/)
+    const variables = slice.match(/variables:\s*\[([\s\S]*?)\]/)
+    if (!module || !variables) continue
+    out.push({
+      vendor: starts[i]![1]!,
+      module: module[1]!,
+      variables: [...variables[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!),
+    })
+  }
+  return out
+}
+
+/** A Terraform assignment, from the file that actually sets it. */
+function tfvar(source: string, name: string): number | null {
+  const found = source.match(new RegExp(`^\\s*${name}\\s*=\\s*(\\d+)\\s*$`, 'm'))
+  return found ? Number(found[1]) : null
+}
+
+/** A module default, for the values an environment leaves unset. */
+function tfDefault(source: string, name: string): number | null {
+  const block = source.match(new RegExp(`variable\\s+"${name}"\\s*\\{[\\s\\S]*?\\n\\}`, 'm'))
+  if (!block) return null
+  const found = block[0].match(/^\s*default\s*=\s*(\d+)\s*$/m)
+  return found ? Number(found[1]) : null
+}
+
+const NUMBER_WORDS: Record<number, string> = {
+  14: 'fourteen', 30: 'thirty', 35: 'thirty-five', 90: 'ninety',
+}
+
+describe('the published retention numbers are the ones the infrastructure sets', () => {
+  it('reads the Terraform it is comparing against, so an empty parse cannot pass', async () => {
+    // Every assertion below is vacuously true against a file that did not load
+    // or a regular expression that stopped matching, and a null read from a
+    // pattern is exactly what a broken instrument prints.
+    const production = await read('infra/terraform/stacks/control-plane/production.tfvars')
+    const variables = await read('infra/terraform/stacks/control-plane/variables.tf')
+    assert.ok(production.length > 100, 'production.tfvars did not load')
+    assert.ok(
+      tfvar(production, 'backup_retention_days') !== null,
+      'the tfvars parser found no backup_retention_days, so it is measuring itself',
+    )
+    assert.ok(
+      tfDefault(variables, 'log_retention_days') !== null,
+      'the variable-default parser found no log_retention_days',
+    )
+    assert.ok(
+      BACKUP_RECOVERY.production !== null && LOG_RETENTION.staging !== null,
+      'the facts parser read nothing out of www/lib/legal-facts.ts, so every assertion below ' +
+        'is vacuously true and this gate is checking nothing',
+    )
+    assert.ok(
+      conditionalProcessors().length >= 2,
+      `the facts parser found ${conditionalProcessors().length} conditional processors`,
+    )
+  })
+
+  it('publishes production backup recovery as the tfvars set it', async () => {
+    const production = await read('infra/terraform/stacks/control-plane/production.tfvars')
+    assert.equal(
+      BACKUP_RECOVERY.production?.days,
+      tfvar(production, 'backup_retention_days'),
+      'the legal pages publish a production recovery window that production does not run. ' +
+        'This is the exact drift that had three pages saying fourteen days while production ' +
+        'ran thirty-five.',
+    )
+  })
+
+  it('publishes staging backup recovery as the stack default, which staging leaves unset', async () => {
+    const variables = await read('infra/terraform/stacks/control-plane/variables.tf')
+    const staging = await read('infra/terraform/stacks/control-plane/staging.tfvars')
+    assert.equal(
+      tfvar(staging, 'backup_retention_days'),
+      null,
+      'staging.tfvars now sets backup_retention_days, so the published number can no longer ' +
+        'come from the stack default and this test is reading the wrong source',
+    )
+    assert.equal(BACKUP_RECOVERY.staging?.days, tfDefault(variables, 'backup_retention_days'))
+  })
+
+  it('publishes log retention for both environments, which was documented nowhere', async () => {
+    const production = await read('infra/terraform/stacks/control-plane/production.tfvars')
+    const variables = await read('infra/terraform/stacks/control-plane/variables.tf')
+    assert.equal(LOG_RETENTION.production?.days, tfvar(production, 'log_retention_days'))
+    assert.equal(LOG_RETENTION.staging?.days, tfDefault(variables, 'log_retention_days'))
+  })
+
+  it('spells each number the way the prose reads it', () => {
+    // The pages are written in words, so the number and the word are two
+    // representations of one fact and either can drift from the other. A page
+    // saying "fourteen days" beside a config saying 35 is the failure; a page
+    // saying "thirty-five" beside a fact object saying 14 is the same failure
+    // one level in.
+    const published: [string, RetentionFact | null][] = [
+      ['production backup', BACKUP_RECOVERY.production],
+      ['staging backup', BACKUP_RECOVERY.staging],
+      ['production logs', LOG_RETENTION.production],
+      ['staging logs', LOG_RETENTION.staging],
+    ]
+    for (const [label, fact] of published) {
+      assert.ok(fact, `${label} is not published at all`)
+      assert.equal(
+        fact.words,
+        NUMBER_WORDS[fact.days],
+        `${label} is published as ${fact.days} days and spelled "${fact.words}"`,
+      )
+    }
+  })
+
+  it('renders the fact rather than a copy of it, so the prose cannot drift on its own', async () => {
+    // Stronger than checking the page contains the right word, which is what
+    // this asserted first and which broke the moment the prose started
+    // interpolating: a literal in the prose is a second copy of the number and
+    // a second copy is the thing that drifted. The page has to READ the fact.
+    const legal = await read('www/components/pages/company/Legal.tsx')
+    for (const constant of ['BACKUP_RECOVERY', 'LOG_RETENTION']) {
+      assert.ok(
+        legal.includes(`${constant}.production`) && legal.includes(`${constant}.staging`),
+        `the legal pages do not render ${constant} for both environments, so a number there is ` +
+          `a hand-maintained copy and nothing holds it to the infrastructure`,
+      )
+    }
+
+    // And no hand-written retention sentence left beside the rendered ones.
+    // The flat fourteen is the exact sentence that was wrong on three pages.
+    assert.ok(
+      !/[Ff]ourteen days of point-in-time recovery/.test(legal),
+      'a page still states a flat fourteen day recovery window with no environment named',
+    )
+    assert.ok(
+      !/[Nn]inety days on production/.test(legal),
+      'a log retention period is written out by hand beside the one that is rendered from the fact',
+    )
+  })
+})
+
+describe('the subprocessor page describes the code that exists', () => {
+  it('names a module and variables that are really there, for every conditional processor', async () => {
+    // The claim being held is the weak one and the only one checkable: the code
+    // CONTAINS this integration and it is reached through these variables. That
+    // an integration was REMOVED, or its variables renamed, would leave the page
+    // describing a vendor nothing can reach, which is a different falsehood in
+    // the same family.
+    for (const processor of conditionalProcessors()) {
+      const source = await read(processor.module).catch(() => '')
+      assert.ok(
+        source.length > 0,
+        `${processor.vendor} is published as conditionally engaged through ${processor.module}, ` +
+          `which does not exist`,
+      )
+      for (const variable of processor.variables) {
+        assert.ok(
+          source.includes(variable),
+          `${processor.vendor} is published as switched on by ${variable}, and ${processor.module} ` +
+            `does not read it`,
+        )
+      }
+    }
+  })
+
+  it('does not claim a vendor is unreachable while its client is in the tree', async () => {
+    // The two sentences that were false, as a guard. Both were true when
+    // written. Both became false the day a branch landed, and nothing said so.
+    // Both files, because the same false claim was on the privacy page as well
+    // as the subprocessor page and fixing one would have left the other.
+    const page =
+      (await read('www/lib/subprocessors.ts')) +
+      (await read('www/components/pages/company/Legal.tsx'))
+    const forbidden: [RegExp, string][] = [
+      [
+        /There is no billing\./,
+        'billing/plans.ts builds a live Stripe client from AF_STRIPE_SECRET_KEY',
+      ],
+      [
+        /Nothing in the product can send email or a message\./,
+        'auth/mail.ts posts to api.resend.com and main.ts wires it',
+      ],
+      [
+        /only Stripe code in the repository is an offline simulator/,
+        'RealStripeClient ships in billing/stripe.ts',
+      ],
+    ]
+    for (const [pattern, why] of forbidden) {
+      assert.ok(
+        !pattern.test(page),
+        `the subprocessor page publishes a claim that is false about the code: ${why}`,
+      )
+    }
+  })
+
+  it('still says this site loads no third-party script, which is true and worth keeping true', async () => {
+    // The one absolute on that page that survived, and the one this branch came
+    // closest to breaking: adding analytics could have meant adding a vendor.
+    // It did not, and this fails on the day somebody adds one.
+    const page = await read('www/lib/subprocessors.ts')
+    assert.match(page, /no script from another origin/)
+
+    const beacon = await read('www/lib/analytics.ts')
+    assert.ok(
+      !/https?:\/\/(?!127\.0\.0\.1)/.test(beacon.replace(/CONTROL_PLANE_URL/g, '')),
+      'the site beacon now names an external address, so the no-third-party claim needs revisiting',
+    )
+  })
+})
