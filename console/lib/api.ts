@@ -129,25 +129,81 @@ type State<T> =
  * The point of returning a discriminated union rather than `{data, loading}`
  * is that a page cannot forget the error branch: `state.data` does not exist
  * unless the status is "ready", so the compiler asks for the other two.
+ *
+ * A RELOAD is not a first load, and the difference is the whole reason this
+ * hook is longer than the effect it wraps. `reload()` used to reset to
+ * `{status: "loading", data: null}`, which is right when the deps change,
+ * because a different environment's rows have nothing to do with this one's,
+ * and wrong when the same question is being asked again: the reader loses what
+ * they were reading to a skeleton, and if the second answer FAILS they lose it
+ * for good and are shown a full page error over data that was fine a moment
+ * ago.
+ *
+ * Where that lands is the Plan page's Refresh from Stripe, which somebody
+ * presses immediately after paying, on a network they have just been reminded
+ * is doing something. It never reproduces on a fast local control plane. With
+ * 400ms of injected latency it is every press.
+ *
+ * So a reload keeps what is on screen, says `refreshing` while it is in
+ * flight, and puts a failure in `refreshError` rather than in `error`, where
+ * it would blank the page. A dependency change still resets, because then the
+ * held data genuinely belongs to a different question.
  */
 export function useApi<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [state, setState] = useState<State<T>>({ status: "loading", data: null, error: null });
   const [nonce, setNonce] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<ApiError | null>(null);
   const alive = useRef(true);
   const run = useRef(fn);
   run.current = fn;
 
+  // What the last effect run saw, so this one can tell a reload from a
+  // dependency change. `nonce` alone cannot: a page that changes its filter
+  // and reloads in the same commit would keep the previous filter's rows.
+  const seen = useRef<{ nonce: number; deps: unknown[] } | null>(null);
+  // Whether the held state is worth keeping, read inside the effect without
+  // making the effect depend on it.
+  const held = useRef(state);
+  held.current = state;
+  // Which request is the current one. Two reloads in flight can land out of
+  // order, and the older answer must not overwrite the newer.
+  const seq = useRef(0);
+
   useEffect(() => {
     alive.current = true;
-    setState({ status: "loading", data: null, error: null });
+    const before = seen.current;
+    const sameDeps =
+      before !== null &&
+      before.deps.length === deps.length &&
+      before.deps.every((v, i) => Object.is(v, deps[i]));
+    seen.current = { nonce, deps };
+    const reloading = sameDeps && before.nonce !== nonce && held.current.status === "ready";
+
+    const mine = ++seq.current;
+    if (reloading) {
+      setRefreshing(true);
+      setRefreshError(null);
+    } else {
+      setState({ status: "loading", data: null, error: null });
+      setRefreshError(null);
+    }
+
     run
       .current()
       .then((data) => {
-        if (alive.current) setState({ status: "ready", data, error: null });
+        if (!alive.current || mine !== seq.current) return;
+        setState({ status: "ready", data, error: null });
+        setRefreshing(false);
       })
       .catch((error: unknown) => {
-        if (!alive.current) return;
-        setState({ status: "error", data: null, error: asApiError(error) });
+        if (!alive.current || mine !== seq.current) return;
+        setRefreshing(false);
+        // The held rows are still the last thing the control plane actually
+        // said. Throwing them away because the next question went unanswered
+        // tells the reader less than keeping them and saying so.
+        if (reloading) setRefreshError(asApiError(error));
+        else setState({ status: "error", data: null, error: asApiError(error) });
       });
     return () => {
       alive.current = false;
@@ -156,7 +212,7 @@ export function useApi<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   }, [...deps, nonce]);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
-  return { ...state, reload };
+  return { ...state, refreshing, refreshError, reload };
 }
 
 /** The signed-in session, or the absence of one. */
@@ -195,29 +251,66 @@ export function usePages<Row>(
   const [busy, setBusy] = useState(false);
   const [moreError, setMoreError] = useState<ApiError | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<ApiError | null>(null);
   const alive = useRef(true);
   const run = useRef(fetchPage);
   run.current = fetchPage;
 
+  // The same distinction `useApi` makes, for the same reason. Every caller of
+  // this hook reloads after a mutation: /runs after Start, /environments after
+  // Create and after a teardown. Blanking a fifty row table because somebody
+  // started one run is a worse answer than showing the fifty rows and the new
+  // one a moment later, and blanking it PERMANENTLY because the reload failed
+  // is losing data the reader had.
+  const seen = useRef<{ nonce: number; deps: unknown[] } | null>(null);
+  const ready = useRef(false);
+  const seq = useRef(0);
+
   useEffect(() => {
     alive.current = true;
-    setStatus("loading");
-    setData([]);
-    setError(null);
-    setNext(null);
+    const before = seen.current;
+    const sameDeps =
+      before !== null &&
+      before.deps.length === deps.length &&
+      before.deps.every((v, i) => Object.is(v, deps[i]));
+    seen.current = { nonce, deps };
+    const reloading = sameDeps && before.nonce !== nonce && ready.current;
+
+    const mine = ++seq.current;
+    setRefreshError(null);
     setMoreError(null);
+    if (reloading) {
+      setRefreshing(true);
+    } else {
+      setStatus("loading");
+      setData([]);
+      setError(null);
+      setNext(null);
+      ready.current = false;
+    }
     run
       .current(null)
       .then((page) => {
-        if (!alive.current) return;
+        if (!alive.current || mine !== seq.current) return;
+        // A reload starts again from the first page on purpose. Holding the
+        // pages somebody had already asked for would mean stitching a fresh
+        // first page onto stale later ones, and the cursor that joined them
+        // no longer describes the list.
         setData(page.rows);
         setNext(page.next);
         setStatus("ready");
+        setRefreshing(false);
+        ready.current = true;
       })
       .catch((e: unknown) => {
-        if (!alive.current) return;
-        setError(asApiError(e));
-        setStatus("error");
+        if (!alive.current || mine !== seq.current) return;
+        setRefreshing(false);
+        if (reloading) setRefreshError(asApiError(e));
+        else {
+          setError(asApiError(e));
+          setStatus("error");
+        }
       });
     return () => {
       alive.current = false;
@@ -249,5 +342,16 @@ export function usePages<Row>(
   // `data` rather than `rows` so this drops into `Loaded` where a `useApi`
   // was, which is what keeps the loading and error branches in one place
   // instead of being written out again on every page that pages.
-  return { status, data, error, hasMore: next !== null, more, busy, moreError, reload };
+  return {
+    status,
+    data,
+    error,
+    hasMore: next !== null,
+    more,
+    busy,
+    moreError,
+    refreshing,
+    refreshError,
+    reload,
+  };
 }
