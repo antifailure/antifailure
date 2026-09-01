@@ -1305,7 +1305,7 @@ export function createServer(options: ServerOptions) {
 
     const event = c.req.header('x-github-event') ?? 'unknown'
     try {
-      const outcome = await handleDelivery(options.pool, clock, event, payload)
+      const outcome = await handleDelivery(options.pool, clock, event, payload, options.github)
       return c.json(outcome, 200)
     } catch (err) {
       // A real failure on our side. 500 is right here and the retry is wanted:
