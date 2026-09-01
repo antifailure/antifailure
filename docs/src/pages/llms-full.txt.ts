@@ -7,9 +7,17 @@ import { getCollection } from "astro:content";
  * This is the single most useful thing this site can hand an assistant, and it
  * is nearly free to produce: the docs are already markdown, so there is nothing
  * to convert. A model answering "how do I mask a Postgres branch with
- * Antifailure" can read one file instead of crawling 41 pages of Starlight
+ * Antifailure" can read one file instead of crawling every page of Starlight
  * chrome, and the answer it gives will be grounded in the current text rather
  * than in whatever it absorbed months ago.
+ *
+ * This comment said "41 pages" and there were 81 by the time anybody counted.
+ * A number in prose that nothing computes is a number that drifts, and the
+ * same 41 was being served to models in www/app/llms.txt/route.ts, where it
+ * amounted to advice to crawl the site instead of taking the one file. The
+ * count that ships is derived now, in www/lib/docs-facts.ts; this sentence
+ * states none, because a page count in a comment about why the file exists
+ * adds nothing a reader needs.
  *
  * The audience is not only web crawlers. Cursor, Claude Code, Copilot and MCP
  * servers all fetch files like this when a developer points them at a tool they

@@ -98,6 +98,27 @@ export interface StripeClient {
 
   /** The hosted page somebody changes a plan, a card, or a cancellation on. */
   createPortalSession(input: { customerId: string; returnUrl: string }): Promise<{ url: string }>
+  /**
+   * Changes where the receipts go.
+   *
+   * Stripe puts this address on every invoice and every receipt it sends, so a
+   * billing contact recorded only in this database would be a setting that
+   * looks changed and changes nothing a customer's finance department ever
+   * sees. This is the write that makes it real.
+   */
+  updateCustomerEmail(customerId: string, email: string): Promise<StripeCustomer>
+
+  /**
+   * One subscription by id, or null when Stripe says it has never heard of it.
+   *
+   * This is NOT redundant with listSubscriptions, and the difference decides
+   * whether a deletion proceeds or stops. An empty list cannot tell "Stripe has
+   * already forgotten this subscription" from "Stripe would not answer": both
+   * arrive as nothing. A resumed deletion asks about ONE subscription it
+   * already holds the id of, and only a positive "no such object" lets it treat
+   * the cancellation as already done. See enterprise/deletion.ts.
+   */
+  getSubscription(id: string): Promise<StripeSubscription | null>
 
   /** Every subscription Stripe holds for one customer. This is the recovery
    *  path when the creation webhook never arrived and no local row exists yet. */
@@ -184,6 +205,21 @@ export class RealStripeClient implements StripeClient {
     const url = text(session.url)
     if (!url) throw new StripeError('Stripe returned a portal session with no address to send anybody to.')
     return { url }
+  }
+
+  async updateCustomerEmail(customerId: string, email: string): Promise<StripeCustomer> {
+    const body = new URLSearchParams({ email })
+    return customerOf(await this.post(`/v1/customers/${encodeURIComponent(customerId)}`, body))
+  }
+
+  async getSubscription(id: string): Promise<StripeSubscription | null> {
+    const found = await this.get(`/v1/subscriptions/${encodeURIComponent(id)}`)
+    // A subscription Stripe has never heard of is a real answer here rather
+    // than a failure: reconciliation asks about a row that may have been
+    // created against a different Stripe account, and throwing would stop the
+    // sweep at the first bad row instead of fixing the rest.
+    if (found === null) return null
+    return subscriptionOf(found)
   }
 
   async listSubscriptions(customerId: string, limit: number): Promise<StripeSubscription[]> {
