@@ -21,6 +21,20 @@ export default defineConfig({
       description:
         "A disposable copy of your production stack for every pull request: masked Postgres branches, contained third-party APIs, agents that use the app like people, and load shaped like your real traffic.",
       favicon: "/favicon.svg",
+      // This site ships its own 404 at src/pages/404.astro, and Starlight
+      // injects one at the same pattern unless told not to. Both were declared,
+      // Astro warned on every single build that "/404" is defined twice, and
+      // Astro's own message says a collision becomes a hard error in a later
+      // version. Which of the two won was undefined.
+      //
+      // Ours is the one that should win, and not by seniority: somebody who
+      // lands on it arrived from a path printed at the end of an engine error
+      // message, so it names the four pages they were most likely reaching for
+      // and tells them the address in their terminal is the wrong half. The
+      // Starlight default is a generic page with none of that.
+      //
+      // A build that warns every time is a build people stop reading.
+      disable404Route: true,
       customCss: ["./src/styles/antifailure.css"],
       // One theme, not a light/dark pair. The site commits to a single light
       // appearance and the theme toggle is off, so a second code theme would
