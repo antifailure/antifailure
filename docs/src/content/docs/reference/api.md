@@ -2,7 +2,7 @@
 title: HTTP endpoints
 description: What answers on antifailure.dev, what answers on the control plane, and which of the two is the product's API.
 sidebar:
-  order: 9
+  order: 6
 ---
 
 Two hosts serve HTTP, and only one of them is an API worth building against.

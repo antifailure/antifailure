@@ -2,7 +2,7 @@
 title: Transform reference
 description: Every masking transform, what it replaces a value with, and what it keeps.
 sidebar:
-  order: 7
+  order: 4
 ---
 
 Every transform available to a masking rule. The table is generated from the

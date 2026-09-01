@@ -2,7 +2,7 @@
 title: Environment lifetime and cost caps
 description: How long an environment lives, what removes it, how to keep one you are using, and what happens when a run would cost more than the plan allows.
 sidebar:
-  order: 10
+  order: 7
 ---
 
 An environment is not free while nobody is looking at it. Each one holds a

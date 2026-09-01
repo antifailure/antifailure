@@ -335,6 +335,15 @@ func reachability(root string, groups map[string][]page) ([]string, error) {
 			}
 		}
 	}
+	// A hand-listed group renders in the order of the ARRAY, so its pages'
+	// sidebar.order is inert there. Two descriptions of one thing is the shape
+	// this repository keeps finding defects in, and the inert one is the
+	// dangerous half: somebody renumbers the frontmatter, nothing moves, and
+	// they conclude the sidebar is broken. So the two have to agree, and the
+	// frontmatter stays meaningful as the record of intent and as what would
+	// render if the group ever went back to autogenerate.
+	problems = append(problems, handListedOrderAgrees(block, groups)...)
+
 	// A slug written out that names no page is a dead sidebar entry.
 	names := make([]string, 0, len(explicit))
 	for slug := range explicit {
@@ -358,4 +367,61 @@ func dirOfAuto(autoDirs map[string]bool, dir string) string {
 		}
 	}
 	return dir
+}
+
+// handListedOrderAgrees checks a hand-listed group against its frontmatter.
+func handListedOrderAgrees(block string, groups map[string][]page) []string {
+	// The slugs in the order the config writes them, which is the order that
+	// actually renders.
+	var listed []string
+	for _, m := range explicitSlug.FindAllStringSubmatch(block, -1) {
+		listed = append(listed, m[1])
+	}
+
+	byDir := map[string][]string{}
+	for _, slug := range listed {
+		byDir[filepath.Dir(slug)] = append(byDir[filepath.Dir(slug)], slug)
+	}
+
+	orderOf := map[string]int{}
+	for dir, ps := range groups {
+		for _, p := range ps {
+			if !p.hasOrder {
+				continue
+			}
+			n, err := strconv.Atoi(p.order)
+			if err != nil {
+				continue
+			}
+			slug := strings.TrimSuffix(filepath.ToSlash(p.path), ".md")
+			slug = strings.TrimSuffix(slug, "/index")
+			_ = dir
+			orderOf[slug] = n
+		}
+	}
+
+	var problems []string
+	dirs := make([]string, 0, len(byDir))
+	for d := range byDir {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	for _, dir := range dirs {
+		slugs := byDir[dir]
+		for i := 1; i < len(slugs); i++ {
+			prev, cur := slugs[i-1], slugs[i]
+			pn, pok := orderOf[prev]
+			cn, cok := orderOf[cur]
+			if !pok || !cok {
+				continue
+			}
+			if pn > cn {
+				problems = append(problems, fmt.Sprintf(
+					"%s lists %q before %q and their sidebar.order says the opposite, %d then %d. "+
+						"The array is what renders, so the frontmatter is describing an order nobody sees",
+					sidebarConfig, prev, cur, pn, cn))
+			}
+		}
+	}
+	return problems
 }
