@@ -439,9 +439,9 @@ func renderManifest(m *schema.Manifest) ([]byte, error) {
 		b.WriteString(strings.TrimSpace(`
 # Detection found no production database to build a golden from, so branches
 # start from an empty database this project makes for itself. A golden another
-# project on this machine made is never branched here, whatever the two have in
-# common. To copy production instead, add the name of the variable holding its
-# read only connection string:
+# project on this machine made is never branched into an environment here,
+# whatever the two have in common. To copy production instead, add the name of
+# the variable holding its read only connection string:
 #
 #   database:
 #     source_url_env: PRODUCTION_DATABASE_URL
