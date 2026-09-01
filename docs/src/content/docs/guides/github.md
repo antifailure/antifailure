@@ -37,6 +37,12 @@ Set it to the control plane's address and the two extra steps in the example
 workflow run; leave it unset and they are skipped and the workflow comments for
 itself. There is no mode to configure and nothing to keep in step.
 
+It is a **variable** on your repository rather than a secret, because it is an
+address and not a credential, and it is read by your workflow rather than by the
+control plane. Do not confuse it with `AF_CONTROL_PLANE_TOKEN`, which is one
+word longer and a different thing entirely: an engine token, for `af` talking to
+a control plane from a terminal. Nothing here needs one.
+
 ## The check
 
 One check run per commit, named **Antifailure**, so a branch protection rule can

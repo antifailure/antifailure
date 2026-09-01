@@ -49,7 +49,7 @@ is a process that fails in production rather than at deploy time.
 
 | Variable | Where it is set | What it is |
 | --- | --- | --- |
-| `AF_CONTROL_PLANE_TOKEN` | On the engine, or in a CI job | An engine token, which the control plane **issues and verifies but never reads from its own environment**. Somebody running their own control plane creates one by posting to `/v1/tokens`, then sets it where `af` runs so the CLI can reach a hosted control plane. It is listed here because this is the page somebody setting up a self-hosted installation reads, and a token the control plane mints is easy to mistake for a variable the control plane consumes. Setting it on the control plane process does nothing at all. Not to be confused with `AF_CONTROL_PLANE`, which is not read by anything here either: it is a REPOSITORY VARIABLE in the customer's own workflow holding the address of a control plane, and it is what decides whether the pull request check publishes anywhere. See [GitHub](/docs/guides/github/). |
+| `AF_CONTROL_PLANE_TOKEN` | On the engine, or in a CI job | An engine token, which the control plane **issues and verifies but never reads from its own environment**. Somebody running their own control plane creates one by posting to `/v1/tokens`, then sets it where `af` runs so the CLI can reach a hosted control plane. It is listed here because this is the page somebody setting up a self-hosted installation reads, and a token the control plane mints is easy to mistake for a variable the control plane consumes. Setting it on the control plane process does nothing at all. |
 
 Everything above this section is read by the control plane process itself.
 
