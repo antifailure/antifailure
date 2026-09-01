@@ -527,13 +527,33 @@ later inside af test as a node error about a module it could not resolve.`),
 				}
 			}
 			if !ready {
-				e.Out.Println("")
-				e.Out.Hint("Install it with", "af runner install")
+				// The trailing hint used to print unconditionally, and the
+				// commonest failure of all is a machine with no runner, whose
+				// only remedy is that same sentence. So the first command a
+				// new install runs answered with "Install it with: af runner
+				// install" twice, one line apart. It is printed now only when
+				// nothing above already said it, which is the case where a
+				// blocker carries no remedy of its own.
+				if !namesRunnerInstall(remedies) {
+					e.Out.Println("")
+					e.Out.Hint("Install it with", "af runner install")
+				}
 				return &silentError{code: aferrors.ExitConfiguration}
 			}
 			return nil
 		},
 	}
+}
+
+// namesRunnerInstall reports whether a remedy already told the reader to run
+// the command the closing hint would.
+func namesRunnerInstall(remedies []string) bool {
+	for _, r := range remedies {
+		if strings.Contains(r, "af runner install") {
+			return true
+		}
+	}
+	return false
 }
 
 func checksJSON(results []runnerCheck) []RunnerCheckItemJSON {

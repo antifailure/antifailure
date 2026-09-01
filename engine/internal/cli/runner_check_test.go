@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -313,5 +314,34 @@ func TestEveryFailureCarriesARemedyThatFitsIt(t *testing.T) {
 	}
 	if got := nodeCheck("", m).remedy; strings.Contains(got, "af runner install") {
 		t.Errorf("a missing node advises %q, and installing the runner again does not add node", got)
+	}
+}
+
+// The first command a new install runs answered with the same sentence twice,
+// one line apart: the blocker's own remedy, and then a closing hint that said
+// the same thing unconditionally. Found by running af runner check against a
+// home directory with nothing in it, which is the state every new machine is in.
+func TestTheRemedyIsNotPrintedTwiceOnAMachineWithNoRunner(t *testing.T) {
+	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	var buf bytes.Buffer
+	e := &Env{Out: NewOutput(&buf, &buf), Getenv: func(string) string { return "" }}
+	cmd := newRunnerCheckCommand(e)
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("af runner check exited 0 against a home with no runner in it")
+	}
+
+	if n := strings.Count(buf.String(), "af runner install"); n != 1 {
+		t.Errorf("the remedy is printed %d times, want 1:\n%s", n, buf.String())
+	}
+}
+
+// And a blocker whose remedy is something else still gets the closing hint,
+// because that is the case the hint exists for.
+func TestABlockerWithADifferentRemedyStillGetsTheClosingHint(t *testing.T) {
+	remedies := []string{"Install node from https://nodejs.org, then run af runner check again."}
+	if namesRunnerInstall(remedies) {
+		t.Error("a node remedy was treated as already naming af runner install")
 	}
 }

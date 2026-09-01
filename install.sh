@@ -315,13 +315,6 @@ in_profile() {
 next_steps() {
   say "  af start           where you are, and what to run next"
 }
-# ${1:-} rather than $1, because set -u turns a call that forgets the argument
-# into "unbound variable" printed where the next steps belong, which is how an
-# earlier version of this first ran.
-next_steps_rest() {
-  say "  ${1:-}af start           where you are, and what to run next"
-}
-
 # The same command for a branch that could not put af on the PATH, so the reader
 # gets something that runs rather than a name that will not resolve.
 next_steps_full() {
@@ -396,14 +389,15 @@ elif [ -n "$wrote" ]; then
     say "Next:"
     next_steps
   else
+    # One line and no numbered list. This used to print the paste line as step
+    # one and then "2. Then:" followed by three commands, which was right when
+    # there were three. There is one now, the paste line already runs it, and a
+    # step two that repeats step one reads as a second thing to do.
     say ""
-    say "1. This terminal started before that line existed. Start here:"
+    say "This terminal started before that line existed. Paste this to fix it"
+    say "here and see where you are:"
     say ""
     say "     $session_line"
-    say ""
-    say "2. Then:"
-    say ""
-    next_steps_rest "   "
   fi
 elif [ "$reason" = already ] || [ "$reason" = managed ]; then
   if on_path; then
@@ -411,15 +405,9 @@ elif [ "$reason" = already ] || [ "$reason" = managed ]; then
     next_steps
   else
     say "$(display_path "$profile") already puts af on the PATH. This terminal started"
-    say "before that line existed."
-    say ""
-    say "1. Start here:"
+    say "before that line existed. Paste this to fix it here and see where you are:"
     say ""
     say "     $session_line"
-    say ""
-    say "2. Then:"
-    say ""
-    next_steps_rest "   "
   fi
 else
   # PATH was not set up and will not be, so nothing below may print a bare af.

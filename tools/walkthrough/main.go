@@ -385,7 +385,22 @@ func reachable(ctx context.Context, url string) error {
 // here, because a zero read out of an absent field looks exactly like a zero
 // read out of a run that examined nothing, and only one of those is a defect
 // in the product.
+//
+// An error document is separated from a report missing a field, because they
+// are different findings and the first version reported both as the second.
+// af test refusing before it reached a workflow came back as "returned no
+// flaky count", which describes the instrument rather than the failure, and
+// buried the engine's own message underneath it.
 func verdictCounts(doc string) (map[string]int, error) {
+	var failed struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(doc), &failed); err == nil && failed.Code != "" {
+		return nil, fmt.Errorf("af test refused before it reached a workflow: %s %s",
+			failed.Code, failed.Message)
+	}
+
 	var parsed struct {
 		Passed     *int `json:"passed"`
 		Failed     *int `json:"failed"`
