@@ -459,6 +459,25 @@ var typeMap = map[string]string{
 
 	string(events.GoldenReady):    "golden.published",
 	string(events.EgressDecision): "network.decision",
+
+	// Identity, and in the map anyway rather than left to fall through
+	// mapType. Two reasons, and neither is tidiness.
+	//
+	// These three names were chosen on both sides at once, so there is nothing
+	// to translate today and there is every chance of a rename tomorrow.
+	// Falling through would make such a rename silent: the event would arrive
+	// as a type outside the control plane's accepted set, be stored, advance
+	// nothing, and the run would end as `abandoned` while the engine's own
+	// terminal said it passed. That is the exact failure the nine wrong
+	// literals above produced.
+	//
+	// And the drift gates in vocabulary_test.go are built on MappedTypes. A
+	// type that is not in this map is not checked against the control plane's
+	// list at all, so an identity entry is what puts these three under the
+	// gate rather than beside it.
+	string(events.WorkloadStarted):   "workload.started",
+	string(events.WorkloadFinished):  "workload.finished",
+	string(events.WorkloadCancelled): "workload.cancelled",
 }
 
 // KnownTypes lists the engine event types the control plane understands.
@@ -488,7 +507,7 @@ var typeMap = map[string]string{
 // Both are listed in TestTheControlPlaneTypesWithNoEngineEventAreTheExpectedOnes
 // so that a third appearing is a decision rather than a silent gap. That test
 // asks whether a type is MAPPED, which is a weaker question than whether
-// anything emits it, and the difference is not academic: five of the eleven
+// anything emits it, and the difference is not academic: five of the
 // types this map does translate are emitted by nothing, so they pass that test
 // and are still columns that are always empty. env.sleeping is one, because
 // idle sleep is not implemented at all; runtime.idle_sleep is defaulted by

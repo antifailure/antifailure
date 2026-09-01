@@ -119,8 +119,34 @@ promise the run cannot keep.`),
 			}
 			root := repoRoot(manifestPath)
 
+			// The control plane comes before the work, because the run it
+			// hands back is the row everything after this reports against, and
+			// because a run claimed after the work has started is a run that
+			// spent the whole of that work looking abandoned.
+			reporter, reporterErr := newHostedReporter(e, hostedStateDir(root), o.EnvID())
+			if reporterErr != nil {
+				// Survived rather than fatal: the work is the thing and the
+				// reporting is a view of it. Named, because a control plane
+				// that is configured and unusable is worth seeing.
+				e.Out.Status(e.Out.S(StyleDim, SymbolSkip), "control plane",
+					"this run is not being reported: "+reporterErr.Error())
+			}
+			defer reporter.Close()
+			reporter.Claim(cmd.Context(), runID, plan.Kind)
+			if reporter.Reporting() {
+				// The plan carries it, so the result document echoes the same
+				// identifier the events do and an artifact can be matched to
+				// the row without a second lookup.
+				plan.RunID = reporter.RunID()
+			}
+
 			e.Out.Section("Running the " + string(plan.Kind) + " workload")
-			res, err := workload.Execute(cmd.Context(), workload.Options{
+			// Start returns the context the work runs on, which the reporter
+			// cancels when a cancel command arrives or when this engine loses
+			// its lease. Nothing else can carry either fact to work that is
+			// already going.
+			work := reporter.Start(cmd.Context(), plan.Kind)
+			res, err := workload.Execute(work, workload.Options{
 				Plan: plan, Runner: o, Clock: e.Clock,
 				Engine:         workload.Engine{Version: Version, Commit: Commit, Edition: Edition},
 				Branch:         o.Branch(),
@@ -132,6 +158,12 @@ promise the run cannot keep.`),
 			if err != nil {
 				return err
 			}
+			noteHostedStop(res, reporter.StoppedBy())
+
+			// The report goes out before the document is written and before the
+			// exit code is decided, so that a failure to write a file, or a
+			// non-zero exit, cannot be the reason a run reads as abandoned.
+			reporter.Finish(cmd.Context(), res)
 
 			if writeErr := writeWorkloadResult(e, res, result); writeErr != nil {
 				return writeErr

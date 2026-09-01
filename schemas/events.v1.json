@@ -250,6 +250,18 @@
         {
           "const": "webhook.queued",
           "description": "An inbound webhook was queued for delivery."
+        },
+        {
+          "const": "workload.cancelled",
+          "description": "A hosted workload run stopped before finishing, because a signal or a cancel command reached it."
+        },
+        {
+          "const": "workload.finished",
+          "description": "A hosted workload run ended and reported what it measured. The data is the result document, which says whether the work happened and, separately, what it found."
+        },
+        {
+          "const": "workload.started",
+          "description": "A hosted workload run has been claimed and started. The data carries the control plane's run identifier."
         }
       ]
     }
