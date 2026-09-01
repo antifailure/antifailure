@@ -40,10 +40,11 @@ missing permission looks exactly like a missing file.
 
 ## Starting a run from the console
 
-The console's **Create environment**, **Run agents** and **Run load** controls
-do not run anything on the control plane. They dispatch a run of your own
-workflow, in your own repository, on the branch the environment is on. Your
-database, your secrets and your captured traffic stay where they already are.
+The console's **Create environment**, **Run agents**, **Run load**, **Run
+workload** and **Tear down** controls do not run anything on the control plane.
+They dispatch a run of your own workflow, in your own repository, on the branch
+the environment is on. Your database, your secrets and your captured traffic
+stay where they already are.
 
 That needs two things. The App has Actions write, above. And the workflow
 accepts a dispatch:
@@ -53,10 +54,12 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      command:     { type: choice, options: [up, agents, load], default: up }
+      command:     { type: choice, options: [up, down, agents, load, scenario, explore], default: up }
       workflows:   { required: false, default: '' }
       duration:    { required: false, default: '' }
       scale:       { required: false, default: '' }
+      seed:        { required: false, default: '' }
+      concurrency: { required: false, default: '' }
 ```
 
 `examples/github-workflow.yml` carries the whole file, including the step that
@@ -66,10 +69,18 @@ afternoon if you meet them the hard way: GitHub reads the trigger list from the
 changes nothing, and a dispatch to a workflow without it answers 404 rather
 than saying what is wrong.
 
+GitHub refuses a dispatch that carries an input the workflow does not declare,
+so a workflow still carrying the older four-input block runs `up`, `agents` and
+`load` and refuses `scenario` and `explore`. Copy the current example over
+your file on the default branch to get the rest. Nothing is lost while you
+have not: the workload run is recorded either way, and an engine can claim it.
+
 The control plane records nothing about the environment when it dispatches.
 The run appears in your Actions tab, and the environment appears in the console
 when the engine reports it, the same way it does for a run you started
-yourself.
+yourself. A workload run is the one thing it does record before dispatching,
+because the run names a definition that lives only in the control plane, and
+"asked for and never picked up" is a state you need to be able to see.
 
 ## Comments
 
