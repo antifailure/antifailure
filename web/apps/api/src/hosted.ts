@@ -71,6 +71,18 @@ export const HOSTED_GATE_EXEMPT: ReadonlySet<string> = new Set([
   'sessions.manage',
 ])
 
+/**
+ * A permission being exempt is NOT the same as the exit being reachable, and
+ * this is the sentence that stops the next person stopping one step early.
+ *
+ * Exempting these five left every one of them behind a page that could not
+ * load, because the console's settings screen reads `org.settings`, which is
+ * `environments.view` and stays gated. `account.context`, under `account.close`
+ * because that is the one permission every role holds, is the read that makes
+ * the exits reachable rather than merely permitted. If a future exit needs a
+ * read of its own, it belongs there rather than in a gated route.
+ */
+
 export function githubAppInstallUrlFrom(value: string | undefined | null): string | undefined {
   if (!value?.trim()) return undefined
   const url = new URL(value)

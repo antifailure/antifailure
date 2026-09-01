@@ -67,6 +67,8 @@ describe('signing in and installing, in both orders', {
    * is exactly the shape of dead code this repository keeps shipping: it
    * compiles, it reads as a feature, and the behaviour never happens.
    */
+  let deliveries = 0
+
   async function deliver(payload: Record<string, unknown>): Promise<Response> {
     const body = JSON.stringify(payload)
     return h.fetch('/webhooks/github', {
@@ -74,6 +76,14 @@ describe('signing in and installing, in both orders', {
       headers: {
         'content-type': 'application/json',
         'x-github-event': 'installation',
+        // Unique per call, and that is the point rather than a formality. The
+        // endpoint refuses a delivery carrying no `x-github-delivery` with a
+        // 400, because the replay fence records deliveries by that identifier
+        // and one it cannot record is one it cannot fence. Reusing an id here
+        // would be worse than omitting it: the second delivery would come back
+        // 200 as a replay having run nothing, and the test below that sends the
+        // same installation twice on purpose would pass while proving nothing.
+        'x-github-delivery': `installorder-${(deliveries += 1)}-${randomUUID()}`,
         'x-hub-signature-256':
           'sha256=' + createHmac('sha256', SECRET).update(body, 'utf8').digest('hex'),
       },

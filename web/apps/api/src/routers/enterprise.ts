@@ -24,7 +24,8 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
 import { router, orgProcedure, audit, type OrgContext } from '../trpc.ts'
-import { ROLES } from '../permissions.ts'
+import { ROLES, ROLE_PERMISSIONS, permits } from '../permissions.ts'
+import { hasHostedAccess } from '../hosted.ts'
 import { MailError } from '../auth/mail.ts'
 import { StripeError } from '../billing/stripe.ts'
 import {
@@ -810,6 +811,82 @@ export const deletionRouter = router({
 // ---------------------------------------------------------------------------
 
 export const accountRouter = router({
+  /**
+   * Everything the lapsed-plan screen needs, under the one permission every
+   * role holds.
+   *
+   * This route exists because making the exit PERMISSIONS exempt was not enough
+   * to make the exits REACHABLE. The console's settings page reads `org.settings`,
+   * which is `environments.view` and stays gated, so on the hosted service a
+   * customer whose plan had lapsed had the whole page refused and every exempt
+   * control on it went too. An exempt permission reaching a page nobody can
+   * open is not a fix.
+   *
+   * `account.close` rather than `organization.delete`, and the reason is the
+   * shape of the problem rather than convenience. A read that gates the exits
+   * has to be held by everybody who HAS an exit. An admin holds `data.export`
+   * and `sessions.manage` and does not hold `organization.delete`, so under that
+   * permission an admin would have exits and no page. `account.close` is the one
+   * permission granted to every role, and PERMISSIONS says why in a sentence
+   * that is the exit line almost word for word: a person may always leave, and a
+   * role that could be trapped in an organization it cannot leave would be a
+   * worse answer than a wide grant.
+   *
+   * It deliberately does NOT duplicate `org.settings`. No counts, no repository
+   * or environment totals. Those are the product doing work and they stay gated.
+   * What is here is what somebody needs in order to LEAVE.
+   */
+  context: orgProcedure('account.close').query(async ({ ctx }) => {
+    const c = ctx as OrgContext
+    return c.pool.withTenant(c.tenant, async (db) => {
+      const rows = await db.execute<{ slug: string; name: string; plan: string }>(sql`
+        SELECT o.slug, o.name, o.plan FROM organizations o WHERE o.id = ${c.actor.orgId}::uuid`)
+      const row = rows[0]
+      if (!row) throw notFound('organization', c.actor.orgId)
+
+      // The count only, never the list. Reading who is signed in is
+      // `sessions.manage`, which an owner and an admin hold and a member does
+      // not, and this route has to answer for a member as well. A member's
+      // screen shows signing out and closing the account, and no session list,
+      // which is the correct amount for the exits a member actually has.
+      const maySeeSessions = permits({
+        orgId: c.actor.orgId,
+        userId: c.actor.userId,
+        role: c.actor.role,
+        permission: 'sessions.manage',
+      })
+      let sessions: { count: number } | null = null
+      if (maySeeSessions) {
+        const counted = await db.execute<{ n: string }>(sql`
+          SELECT count(*) AS n FROM sessions s
+          WHERE s.org_id = ${c.actor.orgId}::uuid AND s.revoked_at IS NULL`)
+        sessions = { count: Number(counted[0]?.n ?? 0) }
+      }
+
+      return {
+        organization: {
+          // Verbatim, not a display form. `deletion.request` refuses anything
+          // but an exact match, and the only other route that exposes this
+          // string is gated, so a lapsed owner would otherwise be asked to type
+          // something the product refuses to show them.
+          slug: row.slug,
+          name: row.name,
+          plan: row.plan,
+        },
+        hostedRequiredPlan: c.hostedRequiredPlan,
+        hostedAccess: hasHostedAccess(row.plan, c.hostedRequiredPlan),
+        role: c.actor.role,
+        // So the screen renders only the exits this person holds. A control
+        // that is visible and then refused is worse than one that is absent
+        // and explained.
+        permissions: [...ROLE_PERMISSIONS[c.actor.role]],
+        deletion: await readDeletion(db, c.clock, c.actor.orgId),
+        exportRetentionDays: Math.round(EXPORT_RETENTION_MS / (24 * 60 * 60 * 1000)),
+        sessions,
+      }
+    })
+  }),
+
   /**
    * Closes the account of whoever is asking.
    *

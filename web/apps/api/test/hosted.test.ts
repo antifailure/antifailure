@@ -24,6 +24,12 @@ import {
   type SignedIn,
 } from './harness.ts'
 
+function data<T>(body: unknown): T {
+  const b = body as { result?: { data?: T }; error?: { message?: string } }
+  assert.ok(b.result, `expected a result, got: ${JSON.stringify(b.error ?? b).slice(0, 500)}`)
+  return b.result.data as T
+}
+
 const hasDatabase = await available()
 
 describe('the hosted plan configuration', () => {
@@ -347,6 +353,59 @@ describe('a lapsed plan does not close the exits', {
         assert.equal(row!.closed_at, null, 'the account was closed by a test that must not close it')
       } else {
         assert.equal(status, 200, said)
+      }
+    })
+  }
+
+  /**
+   * The read that makes every one of the above REACHABLE rather than merely
+   * permitted, and the reason it is under account.close.
+   *
+   * Exempting the permissions was not enough. The console's settings page reads
+   * org.settings, which is environments.view and stays gated, so a lapsed
+   * customer had the page refused and every exempt control on it went with it.
+   * account.context is the exit screen's own read, and it has to answer for
+   * every role that holds an exit: an admin holds data.export and
+   * sessions.manage and does not hold organization.delete, so a read under that
+   * permission would have left an admin with exits and no page.
+   */
+  for (const role of ['owner', 'admin', 'member', 'viewer'] as const) {
+    it(`account.context is reachable by a ${role} with no hosted plan`, async () => {
+      const who = role === 'owner' ? owner : await signInAs(h, org, role)
+      const { status, body } = await callProcedure(h, who, 'account.context', 'query', {})
+      assert.equal(status, 200, JSON.stringify(body))
+      const got = data<{
+        organization: { slug: string; name: string; plan: string }
+        hostedRequiredPlan: string | null
+        hostedAccess: boolean
+        role: string
+        permissions: string[]
+        exportRetentionDays: number
+        sessions: { count: number } | null
+      }>(body)
+
+      // The load-bearing field. deletion.request refuses anything but an exact
+      // match on the slug, and the only other route exposing it is gated, so
+      // without this a lapsed owner is asked to type a string the product
+      // refuses to show them.
+      assert.equal(got.organization.slug, org.slug)
+      assert.equal(got.organization.plan, 'free')
+      assert.equal(got.hostedRequiredPlan, 'enterprise')
+      assert.equal(got.hostedAccess, false)
+      assert.equal(got.role, role)
+      assert.ok(got.exportRetentionDays > 0)
+
+      // The screen renders only the exits this person holds, so the permission
+      // list has to be this role's real one rather than everybody's.
+      assert.ok(got.permissions.includes('account.close'))
+      assert.equal(got.permissions.includes('organization.delete'), role === 'owner')
+      assert.equal(got.permissions.includes('data.export'), role === 'owner' || role === 'admin')
+
+      // The count only, and only for the roles that may read who is signed in.
+      if (role === 'owner' || role === 'admin') {
+        assert.ok(got.sessions && got.sessions.count >= 1, 'no session count for a role that holds sessions.manage')
+      } else {
+        assert.equal(got.sessions, null, 'a role without sessions.manage was handed a session count')
       }
     })
   }

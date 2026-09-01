@@ -1,7 +1,26 @@
 {
+  // Formatted the way `next build` writes it, on purpose, the same as
+  // www/tsconfig.json and console/tsconfig.json.
+  //
+  // Next 16 rewrites this file on every build: it expands the arrays, sets
+  // "jsx" to "react-jsx" and adds the .next/dev/types include. This example is
+  // built by the walkthrough and dogfood tooling rather than by a person, so
+  // the rewrite landed in whoever's working tree happened to run the tools,
+  // looking like an edit they had made. It reached one commit that way and was
+  // taken back out. Committing what the tool writes makes the build a no-op
+  // here instead.
+  //
+  // Verified rather than assumed, against the Next the lockfile pins, 16.3.3,
+  // installed with npm ci first: two consecutive builds leave this file byte
+  // identical, and a third build against this committed form leaves the tree
+  // clean. Comments survive the rewrite, which is why this one can be here.
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": false,
     "skipLibCheck": true,
     "strict": true,
@@ -11,11 +30,27 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
-    "plugins": [{ "name": "next" }],
-    "paths": { "@/*": ["./*"] }
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

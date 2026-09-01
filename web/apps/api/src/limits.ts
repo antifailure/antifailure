@@ -244,6 +244,23 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 20, burst: 200, key: 'ip',
     reason: 'Stripe sends a burst when a billing period rolls over and every subscription renews at once, and a delivery lost to a rate limit is a payment this control plane never learns about. The signature check runs before any work, so an unsigned flood is cheap to refuse.',
   },
+  // What a job in the customer's CI reports about one commit. Keyed by address
+  // because the first call has no token yet: it is the exchange that gets one.
+  //
+  // Generous, and deliberately so. A busy repository can have twenty pull
+  // requests running at once, each one job, each making exactly two calls. The
+  // thing worth bounding here is a loop, and the real bound is the credential:
+  // it is issued for one generation, spent on one report, and expires within
+  // the hour, so a refused report is a check that says nothing about a commit
+  // somebody is waiting on.
+  'POST /v1/pr/callback-token': {
+    rate: 2, burst: 60, key: 'ip',
+    reason: 'One exchange per job, and a workflow identity token is verified against a cached key set before anything is written. The burst covers twenty pull requests starting at once behind one NAT.',
+  },
+  'POST /v1/pr/report': {
+    rate: 2, burst: 60, key: 'ip',
+    reason: 'One report per job. Refusing this loses the result of a run somebody has already paid for, so it is as generous as the exchange that precedes it.',
+  },
   'POST /v1/events': {
     rate: 200, burst: 2000, key: 'token',
     reason: 'An engine that was offline sends its backlog at once. The burst absorbs a re-connect; the rate is what one busy CI account sustains.',
