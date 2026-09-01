@@ -362,6 +362,30 @@ func TestARefusedExchangeIsReportedAndTheRunCarriesOn(t *testing.T) {
 		"the control plane's own reason is carried through: %v", run.warned)
 }
 
+// A control plane older than the engine says so, rather than saying "refused".
+//
+// The difference matters at three in the morning: a 404 reported as a refusal
+// sends somebody looking for a permission problem in a repository that does not
+// have one, when what they need is to upgrade the server.
+func TestAControlPlaneWithoutTheExchangeSaysToUpgradeIt(t *testing.T) {
+	r := &runner{value: "signed.workflow.identity"}
+	// refuse with 404, which is what a control plane that predates this route
+	// answers: the route is simply not there.
+	h := &hosted{refuse: http.StatusNotFound}
+
+	run := runOne(t, r, h, map[string]string{
+		identityURLEnv:   "present",
+		identityTokenEnv: "the-runners-request-token",
+	})
+
+	require.Empty(t, run.plane.ingested())
+	require.Len(t, run.log, 1, "the run is unaffected")
+	require.True(t, warnedAbout(run.warned, "does not offer the identity exchange"),
+		"a 404 has to name the cause rather than read as a refusal: %v", run.warned)
+	require.True(t, warnedAbout(run.warned, "AF_CONTROL_PLANE_TOKEN"),
+		"and name the way out: %v", run.warned)
+}
+
 // With neither a token nor a runner, nothing is attempted and nothing is said.
 // This is a laptop, and it is the ordinary case rather than a problem.
 func TestWithNoTokenAndNoRunnerNothingIsAttached(t *testing.T) {

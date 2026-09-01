@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -90,10 +91,10 @@ func WorkflowIdentityAvailable(lookup func(string) (string, bool)) bool {
 	if lookup == nil {
 		return false
 	}
-	url, hasURL := lookup(identityURLVar)
+	endpoint, hasURL := lookup(identityURLVar)
 	token, hasToken := lookup(identityTokenVar)
 	return hasURL && hasToken &&
-		strings.TrimSpace(url) != "" && strings.TrimSpace(token) != ""
+		strings.TrimSpace(endpoint) != "" && strings.TrimSpace(token) != ""
 }
 
 // TokenFromWorkflowIdentity trades this job's identity for an engine token.
@@ -211,6 +212,16 @@ func exchangeWorkflowIdentity(
 	}
 	defer func() { _ = res.Body.Close() }()
 
+	if res.StatusCode == http.StatusNotFound {
+		// A control plane that predates this exchange, rather than one that
+		// refused it. Worth its own sentence: "refused (404)" would send
+		// somebody looking for a permission problem in a repository that does
+		// not have one, when what they need is to upgrade the server.
+		return "", fmt.Errorf(
+			"controlplane: %s does not offer the identity exchange, so this run is not reported. "+
+				"A control plane older than this engine needs upgrading, or set "+
+				"AF_CONTROL_PLANE_TOKEN to an engine token instead", hostOf(target))
+	}
 	if res.StatusCode != http.StatusOK {
 		// The control plane's refusals here are written for the workflow author
 		// and name what to fix, so the reason is worth carrying. The body is
@@ -240,6 +251,14 @@ func exchangeWorkflowIdentity(
 		return "", fmt.Errorf("controlplane: the control plane issued no token for this job's identity")
 	}
 	return strings.TrimSpace(body.Token), nil
+}
+
+// hostOf names the control plane without repeating the path or any query.
+func hostOf(target string) string {
+	if u, err := url.Parse(target); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return "the control plane"
 }
 
 // reasonFrom pulls the error sentence out of a refusal, or returns nothing.
