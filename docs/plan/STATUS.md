@@ -306,6 +306,7 @@ and if it changes in one it changes in both.
 | `internal/load` OpenTelemetry source | proven | OTLP/JSON, one document or one per line, server spans only, both attribute vocabularies; production's own p95 per route becomes the baseline `p95_increase` had nothing to compare against before |
 | `internal/load` scenarios | proven | declared journeys with think time, parallel blocks and assertions; deterministic per seed, proven by planning the same seed twice and by sending the same sequence twice |
 | `af load` and `af load smoke` | proven | run against a live environment; a route with no baseline is never a breach; the report says where the shape came from and the rate it asked for |
+| `load.thresholds` that cannot fire | proven | `p95_increase` needs a per route baseline, so the manifest refuses it under `access_log` and `none` and the engine no longer defaults it there; a run whose every route came back without one exits AF-LOD-016 rather than reporting a clean p95; `query_count_increase` is refused because nothing ever read it |
 | `af load scenario` | proven | assertions answer in the run vocabulary; a scenario whose step is not in `safe_routes` is blocked entirely and still exits non-zero |
 
 ## The differential oracle

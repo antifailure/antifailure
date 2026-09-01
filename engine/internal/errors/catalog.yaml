@@ -732,6 +732,13 @@ errors:
     docs: concepts/load
     retryable: false
     exit_code: 3
+  - code: AF-LOD-016
+    area: LOD
+    message: "The p95_increase threshold proved nothing: {detail}"
+    next_step: "The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
   - code: AF-LOD-001
     planned: true
     area: LOD
