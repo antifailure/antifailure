@@ -36,6 +36,7 @@ import {
   isTerminal,
   retryRun,
   verdictContradiction,
+  whatDecidedIt,
   type RunDetail,
 } from "@/lib/load";
 
@@ -136,6 +137,83 @@ function Provenance({ run }: { run: RunDetail["run"] }) {
   );
 }
 
+/**
+ * Why nothing has reported, when nothing has.
+ *
+ * Three situations that look identical on the badge and are completely
+ * different to act on, told apart by two timestamps the row already carries.
+ *
+ * NEVER CLAIMED is the one worth writing. `af` does the work with or without a
+ * token: an environment comes up, the agents run, the report is written. What
+ * the token decides is whether any of it is REPORTED. Unset, the engine claims
+ * no hosted run and sends no events, so a run started from this console is
+ * dispatched, actually runs, and ends abandoned at its deadline having done
+ * everything asked of it. That is a support ticket that answers itself if the
+ * screen says so, and it is the commonest way this page will be wrong about a
+ * customer's software.
+ *
+ * CLAIMED THEN SILENT is deliberately vaguer, because the truth is vaguer. An
+ * engine that loses its lease stops and says nothing on purpose, rather than
+ * ending a run a second engine is now doing and destroying that engine's
+ * measurements. So a lost lease and a dead runner are indistinguishable from
+ * here, and the console says which two things it cannot tell apart rather than
+ * picking one. Only the control plane can separate them, because only it holds
+ * the lease.
+ *
+ * WAITING is the state nobody designed for: dispatched, not yet claimed. It is
+ * neither running nor an error, and drawn as neither it reads as a hang. So it
+ * says out loud that a minute or two is ordinary and what it means when it is
+ * longer.
+ */
+function WhyNothingYet({ run }: { run: RunDetail["run"] }) {
+  const claimed = run.acceptedAt !== null;
+  const waiting = run.state === "requested" && run.dispatchedAt !== null;
+  const abandoned = run.state === "abandoned";
+  if (!waiting && !abandoned) return null;
+
+  const token = (
+    <>
+      <code className="font-mono text-[12px]">af</code> does the work with or without a token, and
+      what the token decides is whether any of it is reported. Without{" "}
+      <code className="font-mono text-[12px]">AF_CONTROL_PLANE_TOKEN</code> the engine claims no
+      hosted run and sends no events, so a run started here is dispatched, runs, and ends abandoned
+      at its deadline having done everything asked of it. Make one with{" "}
+      <code className="font-mono text-[12px]">af token create ci</code> and add it to this
+      repository&apos;s secrets under that name; the workflow reads it as{" "}
+      <code className="font-mono text-[12px]">secrets.AF_CONTROL_PLANE_TOKEN</code>.
+    </>
+  );
+
+  if (waiting) {
+    return (
+      <div className="border-t border-rule px-4 py-3">
+        <p className="max-w-[74ch] text-[12.5px] leading-6 text-muted">
+          Waiting for an engine to claim it. A GitHub Actions job has to start, check the code out
+          and reach this control plane, so a minute or two here is ordinary. Much longer than that
+          and it is usually the token: {token}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-rule bg-[rgba(138,90,0,0.07)] px-4 py-3">
+      <p role="status" className="max-w-[74ch] text-[12.5px] leading-6 text-warn">
+        {claimed ? (
+          <>
+            An engine claimed this run and then stopped reporting. That is a runner that died, or a
+            lease a second engine took over: an engine that loses its lease stops and deliberately
+            says nothing rather than ending a run somebody else is now doing, so those two are not
+            distinguishable from here. The Actions run for this branch is where to look.
+          </>
+        ) : (
+          <>Nothing ever claimed this run. {token}</>
+        )}
+      </p>
+    </div>
+  );
+}
+
 export function RunView({
   runId,
   onClose,
@@ -187,6 +265,7 @@ export function RunView({
   const run = detail.run;
   const result = detail.result;
   const contradiction = verdictContradiction(run.verdict, detail.thresholds);
+  const decided = whatDecidedIt(run.verdict, detail.thresholds);
   const traffic = sendsTraffic(run.kind);
   const stopRequested = run.cancelRequestedAt !== null || stopping;
 
@@ -302,6 +381,17 @@ export function RunView({
               {run.detail}
             </p>
           ) : null}
+          {/* What decided the verdict, named off the rows that decided it.
+              A load run that sent traffic and failed a threshold arrives with
+              an EMPTY detail, because the engine writes one only when nothing
+              was sent. Without this the header of a failing load run is a red
+              badge and nothing else: the reader knows something broke and is
+              told nothing about what. */}
+          {decided ? (
+            <p className="mt-2 max-w-[70ch] text-pretty text-[12.5px] leading-6 text-ink">
+              {decided}
+            </p>
+          ) : null}
           {run.detail === null || run.state === "succeeded" ? (
             <p className="mt-2 max-w-[70ch] text-pretty text-[12.5px] leading-6 text-muted">
               {STATE_FACTS[run.state].meaning}
@@ -370,6 +460,7 @@ export function RunView({
         <div className="border-t border-rule">
           <Timeline run={run} />
         </div>
+        <WhyNothingYet run={run} />
       </Card>
 
       {detail.cancel ? (

@@ -170,6 +170,39 @@ happened, and what is missing is the report rather than necessarily the work.
 The two want different things done about them: a failed run is a defect in the
 change, and an abandoned one is a defect in the plumbing.
 
+### The commonest reason a run never reports
+
+`af` does the work with or without a token. An environment comes up, the agents
+run, the report is written. What the token decides is whether any of that is
+**reported** back here.
+
+Without `AF_CONTROL_PLANE_TOKEN` the engine claims no hosted run and sends no
+events, so a run you start from the console is dispatched, actually runs, does
+everything you asked, and ends `abandoned` at its deadline. Nothing is wrong
+with your software and nothing is wrong with the run. The console simply never
+heard about it.
+
+Make one with `af token create ci` and add it to the repository's secrets under
+that name. The workflow reads it as `secrets.AF_CONTROL_PLANE_TOKEN`. Leave it
+out and everything except the hosted reporting keeps working, which is the
+self-hosted path and stays supported.
+
+The console says this on the run itself, and only where it applies: on a run
+nothing ever claimed. A run an engine **did** claim and then went quiet on is a
+different problem, and the console says which two things it cannot tell apart
+rather than guessing between them. An engine that loses its lease to a second
+engine stops and deliberately says nothing, rather than ending a run the second
+one is now doing and destroying its measurements, so a lost lease and a dead
+runner look identical from here. The Actions run for the branch is where to
+look next.
+
+### A run waiting to be claimed
+
+`requested` with a dispatch behind it is neither running nor an error, and the
+console says so rather than leaving it looking like a hang. A GitHub Actions
+job has to start, check the code out and reach the control plane, so a minute
+or two is ordinary. Much longer than that is usually the token above.
+
 | Verdict | Means |
 | --- | --- |
 | `pass` | Everything that was evaluated held. |
@@ -186,6 +219,13 @@ When a recorded verdict disagrees with the thresholds under it, a pass over
 something that broke, or came back flaky, or was never evaluated, the console
 says so above the table. It cannot correct a verdict the engine computed, but
 it will not show you the contradiction quietly.
+
+A failing run always says what failed it, beside the verdict. That is not
+decoration: a load run that sent traffic and broke a threshold carries no
+message of its own, because the engine writes one only when nothing was sent.
+Left alone it would be a red word with nothing next to it. So the console names
+the thresholds that broke, out of the rows that recorded them, and when none of
+them did it says that instead rather than going quiet.
 
 ## Reading the result
 

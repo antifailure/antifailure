@@ -54,6 +54,7 @@ import {
   runStateOf,
   verdictContradiction,
   verdictOf,
+  whatDecidedIt,
   type RouteMetric,
   type RunResult,
   type ThresholdVerdict,
@@ -678,6 +679,99 @@ describe('a verdict that disagrees with its own thresholds', () => {
     // its own definition at a reader.
     assert.equal(verdictContradiction('blocked', decode([t('blocked')])), null)
     assert.equal(verdictContradiction('unverified', decode([t('unverified')])), null)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A red badge with nothing beside it
+// ---------------------------------------------------------------------------
+
+describe('what decided a verdict', () => {
+  // The gap this closes was found by reading the engine's own bytes rather
+  // than the contract. `mixDetail` in engine/internal/workload/project.go
+  // returns a sentence ONLY when nothing was sent, so a load run that sent
+  // traffic and failed a threshold arrives with an empty detail. Rendered
+  // naively that is a red FAIL badge with nothing next to it: the reader knows
+  // something broke and is told nothing about what.
+  const t = (verdict: string, name: string, scope: string | null = null): ThresholdVerdict => {
+    const row = readThreshold({ name, scope, value: verdict, measure: 'p95_below_ms' })
+    assert.ok(row)
+    return row
+  }
+
+  test('a failure names the thresholds that failed it', () => {
+    const said = whatDecidedIt('fail', [t('pass', 'a'), t('fail', 'checkout_p95', 'GET /checkout')])
+    assert.ok(said)
+    assert.match(said, /One threshold broke/)
+    assert.match(said, /checkout_p95 on GET \/checkout/)
+  })
+
+  test('a scope only appears when there is one', () => {
+    const said = whatDecidedIt('fail', [t('fail', 'error_rate_holds')])
+    assert.ok(said)
+    assert.match(said, /error_rate_holds\./)
+    assert.equal(said.includes(' on '), false)
+  })
+
+  test('a long list stops at three and counts the rest', () => {
+    // Forty names is a wall somebody skips, and the table underneath has all
+    // of them anyway.
+    const rows = ['a', 'b', 'c', 'd', 'e'].map((n) => t('fail', n))
+    const said = whatDecidedIt('fail', rows)
+    assert.ok(said)
+    assert.match(said, /5 thresholds broke/)
+    assert.match(said, /a, b, c and 2 more/)
+  })
+
+  test('a failure with rows that all held says which absence it is', () => {
+    const said = whatDecidedIt('fail', [t('pass', 'a'), t('pass', 'b')])
+    assert.ok(said)
+    assert.match(said, /Nothing in the thresholds below broke/)
+  })
+
+  test('a failure with no rows at all says something different', () => {
+    // Pointing at "the thresholds below" when there are none sends somebody
+    // to an empty card.
+    const said = whatDecidedIt('fail', [])
+    assert.ok(said)
+    assert.match(said, /No thresholds were recorded/)
+    assert.equal(said.includes('below'), false)
+  })
+
+  test('A FAILURE IS NEVER SILENT, whatever the rows say', () => {
+    // The property, not the cases. This is the whole point of the function:
+    // there is no combination of rows for which a fail verdict renders with
+    // nothing beside it.
+    const shapes: ThresholdVerdict[][] = [
+      [],
+      [t('pass', 'a')],
+      [t('fail', 'a')],
+      [t('flaky', 'a')],
+      [t('blocked', 'a'), t('unverified', 'b')],
+      [t('fail', 'a', 'GET /x'), t('fail', 'b'), t('fail', 'c'), t('fail', 'd')],
+    ]
+    for (const rows of shapes) {
+      const said = whatDecidedIt('fail', rows)
+      assert.ok(said, `a fail over ${rows.length} rows said nothing`)
+      assert.ok(said.length > 40, `a fail over ${rows.length} rows said only ${JSON.stringify(said)}`)
+    }
+  })
+
+  test('flaky names its own rows and stays quiet when it has none', () => {
+    const said = whatDecidedIt('flaky', [t('flaky', 'retry_is_fast')])
+    assert.ok(said)
+    assert.match(said, /came back flaky/)
+    // Unlike a failure, a flaky run with no flaky row is not a contradiction
+    // worth a sentence: the run verdict can be flaky for a workflow that
+    // passed only sometimes, which is not a threshold at all.
+    assert.equal(whatDecidedIt('flaky', [t('pass', 'a')]), null)
+  })
+
+  test('a verdict that is not a finding says nothing', () => {
+    for (const v of ['pass', 'blocked', 'unverified'] as const) {
+      assert.equal(whatDecidedIt(v, [t('fail', 'a')]), null, `${v} volunteered a sentence`)
+    }
+    assert.equal(whatDecidedIt(null, [t('fail', 'a')]), null)
   })
 })
 

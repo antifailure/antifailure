@@ -1203,6 +1203,52 @@ export function verdictContradiction(
   return null;
 }
 
+/**
+ * What decided a verdict, named off the rows that decided it.
+ *
+ * This exists because of a measured gap rather than for symmetry. A load run
+ * that sent traffic and failed a threshold arrives with an EMPTY detail: the
+ * engine's mixDetail returns a sentence only when nothing was sent. So the
+ * header of a failing load run is a red badge with nothing beside it, which is
+ * the worst version of a failure state: the reader knows something broke and
+ * is told nothing about what.
+ *
+ * The reason lives in the threshold rows, so this names them rather than
+ * inventing a sentence. Three at most, because a list of forty is a wall
+ * somebody skips and the table underneath has all of them anyway.
+ *
+ * The empty case is said too. A run recorded as a failure with nothing broken
+ * under it is a real disagreement between two records, and a silent header
+ * there would hide the only clue that the reason is somewhere else.
+ */
+export function whatDecidedIt(
+  verdict: Verdict | null,
+  thresholds: ThresholdVerdict[],
+): string | null {
+  if (verdict !== "fail" && verdict !== "flaky") return null;
+  const named = thresholds.filter((t) => t.verdict === verdict);
+  const word = verdict === "fail" ? "broke" : "came back flaky";
+
+  if (named.length === 0) {
+    if (verdict !== "fail") return null;
+    // Two different absences. A table of thresholds that all held is a
+    // disagreement between two records; no table at all is a run that was
+    // never going to explain itself here. Pointing at "the thresholds below"
+    // when there are none sends somebody to an empty card.
+    return thresholds.length === 0
+      ? "No thresholds were recorded for this run, so what failed it is not on this page. The engine's own output for this branch is where to look."
+      : "Nothing in the thresholds below broke, so whatever failed this run was not recorded as one.";
+  }
+  const label = (t: ThresholdVerdict) =>
+    t.scope === null ? t.name : `${t.name} on ${t.scope}`;
+  const shown = named.slice(0, 3).map(label);
+  const rest = named.length - shown.length;
+  const list = rest > 0 ? `${shown.join(", ")} and ${rest} more` : joinWords(shown);
+  return named.length === 1
+    ? `One threshold ${word}: ${list}. It is in the table below.`
+    : `${named.length} thresholds ${word}: ${list}. They are in the table below.`;
+}
+
 /** "a", "a and b", "a, b and c". Written out because three clauses joined with
  *  " and " twice reads as a list somebody forgot to punctuate. */
 function joinWords(parts: string[]): string {
