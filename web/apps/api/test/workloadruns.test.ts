@@ -646,6 +646,60 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
     assert.deepEqual(await beat(), { held: true, cancelRequested: true })
   })
 
+  it('reads the projected result document, not the engine internal load type', async () => {
+    // The seam neither suite crossed. The decoder read `sent`, `rate` and a
+    // nested `overall`, which are internal/load.Result's names, and the wire
+    // carries the projected document: `requests`, `achieved_rate` and flat
+    // percentiles. It failed silently, because requests falls back to zero for
+    // the CHECK, so a run that sent 1200 requests was stored as one that sent
+    // none while every route row decoded perfectly.
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+    await send([
+      event({
+        type: 'workload.finished',
+        payload: {
+          workload_run_id: runId, kind: 'observed_load', verdict: 'pass',
+          result: {
+            requests: 1200, failures: 3, error_rate: 0.0025,
+            target_rate: 40, achieved_rate: 38.5,
+            p50_ms: 12, p90_ms: 40, p95_ms: 61, p99_ms: 120, max_ms: 900,
+            duration_ms: 30000, source: 'otlp',
+          },
+        },
+      }),
+    ])
+    const [row] = await h.admin<Record<string, string | null>[]>`
+      SELECT requests, achieved_rate, target_rate, p50_ms, p95_ms, max_ms
+      FROM workload_run_results WHERE workload_run_id = ${runId}`
+    assert.equal(Number(row!.requests), 1200, 'the projected request count was read as zero')
+    assert.equal(Number(row!.achieved_rate), 38.5)
+    assert.equal(Number(row!.target_rate), 40)
+    assert.equal(Number(row!.p50_ms), 12)
+    assert.equal(Number(row!.p95_ms), 61)
+    assert.equal(Number(row!.max_ms), 900)
+  })
+
+  it('still reads the engine native spelling, so an older engine is not silently zeroed', async () => {
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+    await send([
+      event({
+        type: 'workload.finished',
+        payload: {
+          workload_run_id: runId, kind: 'observed_load', verdict: 'pass',
+          result: { sent: 77, rate: 9.5, overall: { p95_ms: 33 } },
+        },
+      }),
+    ])
+    const [row] = await h.admin<Record<string, string | null>[]>`
+      SELECT requests, achieved_rate, p95_ms FROM workload_run_results
+      WHERE workload_run_id = ${runId}`
+    assert.equal(Number(row!.requests), 77)
+    assert.equal(Number(row!.achieved_rate), 9.5)
+    assert.equal(Number(row!.p95_ms), 33)
+  })
+
   it('ordering: a run nobody ever reports on is abandoned, not failed', async () => {
     const target = await define('browser_workflow', { select: ['sign-up'] })
     const runId = (await start(target)).body.result.data.runId

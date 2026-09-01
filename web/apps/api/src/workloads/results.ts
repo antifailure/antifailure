@@ -186,13 +186,34 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
     errorReasons: counts(r.errors),
     refusedRoutes: strings(r.refused_as_unsafe ?? r.refused_routes, 100, 300),
   }
-  const latency = obj(r.overall)
+  // Flat first, nested second, and this is the correction that mattered most.
+  //
+  // These read `r.overall.p50_ms` and `r.sent` and `r.rate`, which are
+  // internal/load.Result's names: the engine's NATIVE type, which is precisely
+  // the document nobody sends. What arrives is the projected result the
+  // engine's `--result` writes, and it spells them `requests`,
+  // `achieved_rate`, and flat percentiles.
+  //
+  // It failed silently, which is the whole reason it survived a green suite on
+  // both sides. `requests` falls back to zero because the CHECK needs a count,
+  // so a load run that sent 1200 requests was written with 0 requests and
+  // every percentile null, `skipped` stayed at zero so the note never fired,
+  // and every route row decoded perfectly. A console would have drawn per route
+  // p95s over a run-wide total of nothing and nobody would have read that as a
+  // decoder bug.
+  //
+  // Found by studio-emitters dumping the real bytes and running this file over
+  // them, which is the only thing that could have found it: neither suite
+  // crossed the seam. Both spellings are accepted now, which is the tolerant
+  // read this file's own header argues for and what the route decoder beside it
+  // already did.
+  const nested = obj(r.overall)
   const percentiles = {
-    p50Ms: num(latency.p50_ms, 0, 1e9),
-    p90Ms: num(latency.p90_ms, 0, 1e9),
-    p95Ms: num(latency.p95_ms, 0, 1e9),
-    p99Ms: num(latency.p99_ms, 0, 1e9),
-    maxMs: num(latency.max_ms, 0, 1e9),
+    p50Ms: num(r.p50_ms ?? nested.p50_ms, 0, 1e9),
+    p90Ms: num(r.p90_ms ?? nested.p90_ms, 0, 1e9),
+    p95Ms: num(r.p95_ms ?? nested.p95_ms, 0, 1e9),
+    p99Ms: num(r.p99_ms ?? nested.p99_ms, 0, 1e9),
+    maxMs: num(r.max_ms ?? nested.max_ms, 0, 1e9),
   }
 
   switch (kind) {
@@ -204,17 +225,17 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
         // carry a request count and an engine that reported no number sent no
         // requests as far as anybody can tell. Saying nothing here would refuse
         // the whole row and lose the percentiles with it.
-        requests: whole(r.sent, 0, 2_147_483_647) ?? 0,
+        requests: whole(r.requests ?? r.sent, 0, 2_147_483_647) ?? 0,
         failures: whole(r.failures, 0, 2_147_483_647),
         errorRate: num(r.error_rate, 0, 1),
         targetRate: num(r.target_rate, 0, 1e9),
-        achievedRate: num(r.rate, 0, 1e9),
+        achievedRate: num(r.achieved_rate ?? r.rate, 0, 1e9),
       }
     case 'http_scenario':
       return {
         ...empty,
         ...percentiles,
-        requests: whole(r.sent, 0, 2_147_483_647) ?? 0,
+        requests: whole(r.requests ?? r.sent, 0, 2_147_483_647) ?? 0,
         failures: whole(r.failures, 0, 2_147_483_647),
         errorRate: num(r.error_rate, 0, 1),
         sessions: whole(r.sessions, 0, 1_000_000) ?? 0,
