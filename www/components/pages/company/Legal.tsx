@@ -122,7 +122,7 @@ export function PrivacyPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading title="<strong>Sanitization happens where the data already lives.</strong>" />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
@@ -143,7 +143,7 @@ export function PrivacyPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading title="<strong>There is no billing, so there are no payment records.</strong>" />
         <Prose className="mt-10">
           <p>
@@ -242,7 +242,7 @@ export function TermsPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading title="<strong>What these terms do not say.</strong>" />
         <Ledger items={NOT_CLAIMED} />
       </PageSection>
@@ -302,7 +302,7 @@ export function DpaPage() {
           enforceable. It must be reviewed before anybody relies on it.
         </CounselNotice>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading kicker="Parties" title="<strong>Who is agreeing, and under which law.</strong>" />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
@@ -359,7 +359,7 @@ export function DpaPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="Security"
           title="<strong>The measures that exist</strong>, described as what the code does rather than as a category."
@@ -422,7 +422,7 @@ export function DpaPage() {
           </p>
         </Prose>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="Obligations"
           title="<strong>What we would owe you</strong>, and how quickly the honest answer is a range."
@@ -528,7 +528,7 @@ export function SubprocessorsPage() {
           </div>
         ))}
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="Engaged only under a condition"
           title="<strong>Model providers receive nothing unless you give us a key.</strong>"
@@ -560,7 +560,7 @@ export function SubprocessorsPage() {
           </div>
         ))}
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="Not engaged"
           title="<strong>The vendors a reviewer asks about next</strong>, and why each one is absent."
@@ -597,7 +597,7 @@ export function SubprocessorsPage() {
           </p>
         </Prose>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading title="<strong>Change log.</strong>" />
         <ChangeLog entries={SUBPROCESSOR_CHANGES} />
       </PageSection>
@@ -651,7 +651,7 @@ export function ServiceLevelsPage() {
           ]}
         />
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="True anyway"
           title="<strong>The part that survives our outage.</strong> The thing that gates your pull request does not run here."
@@ -679,7 +679,7 @@ export function ServiceLevelsPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="What is deployed"
           title="<strong>A production control plane and a staging one</strong>, and only two people can sign in to either."
@@ -810,7 +810,7 @@ export function DataRetentionPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="Precision"
           title="<strong>What the event retention actually does</strong>, including the part that is not exact."
@@ -836,7 +836,7 @@ export function DataRetentionPage() {
           ]}
         />
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading kicker="Deletion" title="<strong>How to have data deleted, and what happens then.</strong>" />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
