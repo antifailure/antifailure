@@ -696,6 +696,18 @@ The scenario {scenario} proved nothing: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/load](/docs/concepts/load/) |
 
+### AF-LOD-016
+
+The p95_increase threshold proved nothing: {detail}
+
+**What to do.** The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
 ## Manifest
 
 ### AF-MAN-001

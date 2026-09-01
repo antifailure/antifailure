@@ -184,6 +184,8 @@ const (
 	AFLOD014 Code = "AF-LOD-014"
 	// The scenario {scenario} proved nothing: {detail}
 	AFLOD015 Code = "AF-LOD-015"
+	// The p95_increase threshold proved nothing: {detail}
+	AFLOD016 Code = "AF-LOD-016"
 
 	// Manifest
 	// No antifailure.yaml was found in {path} or any parent directory.
@@ -959,6 +961,15 @@ var catalog = map[Code]Entry{
 		Area:      "LOD",
 		Message:   "The scenario {scenario} proved nothing: {detail}",
 		NextStep:  "A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFLOD016: {
+		Code:      AFLOD016,
+		Area:      "LOD",
+		Message:   "The p95_increase threshold proved nothing: {detail}",
+		NextStep:  "The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone.",
 		Docs:      "concepts/load",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

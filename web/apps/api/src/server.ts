@@ -1471,6 +1471,19 @@ export function createServer(options: ServerOptions) {
     trpcServer({
       router: appRouter,
       endpoint: '/trpc',
+      // The other half of withholding the message.
+      //
+      // The formatter replaces an INTERNAL_SERVER_ERROR's message with a fixed
+      // sentence, because whatever threw wrote it and drizzle writes the whole
+      // failing statement. Redacting it without writing it down anywhere would
+      // trade a leak for a blindness: the operator would have a console card
+      // saying something went wrong and no way to find out what. This is where
+      // it goes instead, so `af logs web` still has the diagnosis and the
+      // browser does not.
+      onError({ error, path, type }) {
+        if (error.code !== 'INTERNAL_SERVER_ERROR') return
+        console.error(`trpc ${type} ${path ?? 'unknown'}:`, error.cause ?? error)
+      },
       createContext: async (_opts, c) => {
         const token = readCookie(c.req.header('cookie'), SESSION_COOKIE)
         let actor: Actor | null = null

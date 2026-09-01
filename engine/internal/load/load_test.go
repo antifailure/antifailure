@@ -226,6 +226,36 @@ func TestBreaches_ARouteWithNoBaselineIsNeverABreach(t *testing.T) {
 	require.Empty(t, res.Breaches(0, 0), "no thresholds means no breaches")
 }
 
+func TestInertP95_AThresholdThatMeasuredNothingIsNotACleanRun(t *testing.T) {
+	t.Parallel()
+	// Breaches is right to skip a route with no baseline, and silence is the
+	// wrong answer when it skipped all of them: the threshold was in force,
+	// evaluated zero routes, and the run reported green having compared
+	// nothing.
+	none := &load.Result{Routes: []load.RouteResult{
+		{Route: "GET /", Latency: load.Latency{P95Ms: 900}, HasBaseline: false},
+		{Route: "GET /orders", Latency: load.Latency{P95Ms: 40}, HasBaseline: false},
+	}}
+	require.Empty(t, none.Breaches(0.25, 0), "nothing to compare, so nothing is a breach")
+	require.True(t, none.InertP95(0.25))
+
+	// One baseline is enough for the threshold to have done something, even
+	// when it found nothing wrong. That is a real pass, not a silent skip.
+	some := &load.Result{Routes: []load.RouteResult{
+		{Route: "GET /", Latency: load.Latency{P95Ms: 900}, HasBaseline: false},
+		{Route: "GET /orders", Latency: load.Latency{P95Ms: 40}, BaselineP95Ms: 38,
+			HasBaseline: true, P95Increase: 0.05},
+	}}
+	require.False(t, some.InertP95(0.25))
+
+	// No threshold means nothing was asked for, so nothing went unmeasured.
+	require.False(t, none.InertP95(0))
+
+	// A run that sent nothing has a louder problem than an unmeasured
+	// threshold, and reporting both would bury it.
+	require.False(t, (&load.Result{}).InertP95(0.25))
+}
+
 func TestBreaches_ReportsAnErrorRateOverTheLimit(t *testing.T) {
 	t.Parallel()
 	res := &load.Result{ErrorRate: 0.2}
