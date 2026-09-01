@@ -36,7 +36,7 @@ import (
 // pass.
 
 func newCICommand(e *Env) *cobra.Command {
-	var branch, output, docsBase, runner, baseline, saveBaseline string
+	var branch, output, jsonOutput, docsBase, runner, baseline, saveBaseline string
 	var skipTeardown, withLoad bool
 	var timeout time.Duration
 	cmd := &cobra.Command{
@@ -130,7 +130,7 @@ change.`),
 					}
 				}
 				run.Duration = e.Clock.Since(started).Round(time.Second).String()
-				writeReport(e, run, output)
+				writeReport(e, run, output, jsonOutput)
 			}
 
 			e.Out.Section("Bringing up " + o.EnvID())
@@ -209,6 +209,17 @@ change.`),
 	// which is notable for the one command written for CI. Renaming it frees
 	// -o to mean here what it means everywhere.
 	cmd.Flags().StringVar(&output, "report", "", "Write the report here as well as to the terminal")
+	// The same report, as JSON, for something that has to read it rather than
+	// display it. Not -o json, which is the whole terminal's format: a step
+	// that prints progress and captures a machine readable result cannot use
+	// one switch for both, and redirecting stdout to a file gives up the
+	// progress a person watching the job is there for.
+	//
+	// It exists because the hosted control plane's pull request check needs
+	// the counts and the environment name, and reading them back out of the
+	// Markdown would be a parser for prose.
+	cmd.Flags().StringVar(&jsonOutput, "report-json", "",
+		"Write the same report here as JSON, for a program to read")
 	cmd.Flags().BoolVar(&skipTeardown, "keep", false, "Leave the environment up, for debugging a failure")
 	cmd.Flags().BoolVar(&withLoad, "load", false, "Generate load as well as running the workflows")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Give up after this long")
@@ -420,11 +431,23 @@ func summariseInsights(r insights.Report) *report.Insights {
 }
 
 // writeReport prints the comment and writes it where a workflow can post it.
-func writeReport(e *Env, run report.Run, output string) {
+func writeReport(e *Env, run report.Run, output, jsonOutput string) {
 	body := run.Comment()
 	if output != "" {
 		if err := os.WriteFile(output, []byte(body), 0o644); err != nil {
 			e.Out.Printf("  could not write the report to %s: %v\n", output, err)
+		}
+	}
+	if jsonOutput != "" {
+		// Marshalled and then written, rather than encoded into the file. A
+		// failed marshal that had already truncated the file would leave
+		// whatever reads this looking at half a report, which is worse than
+		// looking at none: half a report decodes, and the counts it carries
+		// are wrong rather than absent.
+		if encoded, err := json.MarshalIndent(run, "", "  "); err != nil {
+			e.Out.Printf("  could not encode the report as JSON: %v\n", err)
+		} else if err := os.WriteFile(jsonOutput, append(encoded, '\n'), 0o644); err != nil {
+			e.Out.Printf("  could not write the report to %s: %v\n", jsonOutput, err)
 		}
 	}
 	// Also appended to the job summary when there is one, so a run shows its
