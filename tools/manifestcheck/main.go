@@ -364,7 +364,54 @@ func walk(value any, node, root map[string]any, path string, report func(string)
 			}
 			return
 		}
+	case string:
+		checkEnum(v, node, root, path, report)
 	}
+}
+
+// checkEnum reports a documented value the schema's enum does not list.
+//
+// The gate could not see this, and it was written for exactly the defect it
+// could not see. Two live pages told a reader to write
+// `teardown_on: [closed, merged]`, which the engine refuses with AF-MAN-002
+// because the enum is close, merge and ttl, and a third had already been
+// caught by hand and written up in .changes. Every one of them passed here,
+// because walk only ever asked whether a KEY exists. A key that exists with a
+// value the engine will not take is the same failure for the reader: they copy
+// the block and the manifest does not load.
+//
+// Deliberately conservative in two directions, because a documentation gate
+// that cries wolf is a documentation gate somebody disables. It looks at
+// strings only, since every enum in this schema is a list of strings and
+// comparing a YAML integer to a JSON number invites a false positive over
+// nothing. And it stays quiet unless EVERY branch that has an enum refuses the
+// value, so a value permitted by one arm of a oneOf is permitted.
+func checkEnum(value string, node, root map[string]any, path string, report func(string)) {
+	var allowed []string
+	for _, alt := range branches(node, root) {
+		list, ok := alt["enum"].([]any)
+		if !ok {
+			// A branch with no enum accepts this value as far as this check
+			// can tell, so there is nothing to report.
+			return
+		}
+		for _, want := range list {
+			text, isText := want.(string)
+			if !isText {
+				return
+			}
+			if text == value {
+				return
+			}
+			allowed = append(allowed, text)
+		}
+	}
+	if len(allowed) == 0 {
+		return
+	}
+	sort.Strings(allowed)
+	report(fmt.Sprintf("%s is %q, which is not one the manifest accepts. The engine refuses it "+
+		"with AF-MAN-002. It has to be one of: %s", path, value, strings.Join(allowed, ", ")))
 }
 
 // propertyFor finds the schema for a key across a node's branches, and reports
