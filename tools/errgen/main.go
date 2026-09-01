@@ -290,7 +290,12 @@ func renderDocs(es []entry) []byte {
 	b.WriteString("---\n")
 	b.WriteString("title: Error reference\n")
 	b.WriteString("description: Every error Antifailure can return, what causes it, and what to do about it.\n")
-	b.WriteString("sidebar:\n  order: 6\n")
+	// 3, matching the hand-listed Reference group in docs/astro.config.mjs and
+	// the four sibling pages renumbered with it. This page is GENERATED, so
+	// editing its frontmatter alone moved nothing: the next `just generated`
+	// wrote 6 back and the "generated files are current" gate went red. The
+	// number lives here because this is the only place that decides it.
+	b.WriteString("sidebar:\n  order: 3\n")
 	b.WriteString("---\n\n")
 	b.WriteString("Every user facing error carries a code of the form `AF-<AREA>-<NNN>`.\n")
 	b.WriteString("This page is generated from `engine/internal/errors/catalog.yaml`, so it\n")
