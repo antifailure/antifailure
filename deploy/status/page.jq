@@ -725,12 +725,29 @@ footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--rule);
   .comp-t { font-size: 13px; }
   .upd-l { font-size: 15px; }
   .top { padding: 20px 0 18px; }
-  /* Touch targets. WCAG 2.5.8 asks 24 by 24 as the floor and the subscribe
-     control is the one thing on this page a thumb actually aims at, so it
-     gets the full 44. */
+  /* The name and the status on two lines, always, rather than on whichever
+     number of lines the name's length happens to produce.
+
+     .comp-h wraps, so at 390px a row was 24px tall when the name was short
+     enough to leave room for the status and the time beside it and 54px when
+     it was not: five of seven rows one height and two of them the other, down
+     a list whose whole job is to be scanned. Nothing about a component
+     decides which it gets, so the rhythm read as an accident, which is what
+     it was. Stacking every row costs 30px each and buys a list with one
+     shape. Above 640px they all fit on one line and this does not apply. */
+  .comp-h { display: block; }
+  .comp-r { margin-left: 0; margin-top: 3px; }
+
+  /* Touch targets. WCAG 2.5.8 asks 24 by 24 as the floor, and the two
+     controls a thumb actually aims at, the subscribe button and the metric
+     window, both get the full 44. The metric window was 40, which is neither
+     the floor nor the target and was the only control on the page sitting
+     between them. The help circles stay at the 24 floor deliberately: they
+     sit on a heading line beside the component name, and 44 would either
+     push that name off its baseline or reach into the row above. */
   .sub { min-height: 44px; }
   .what { width: 24px; height: 24px; font-size: 12px; }
-  .seg label { min-height: 40px; padding: 0 16px; font-size: 13px; }
+  .seg label { min-height: 44px; padding: 0 16px; font-size: 13px; }
   .m-v { font-size: 21px; }
 }
 
