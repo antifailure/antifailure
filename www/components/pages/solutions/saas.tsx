@@ -20,7 +20,7 @@ export function SaasPage() {
         framed={false}
         visual={<SSAAS01 />}
       />
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <SectionHeading title="<strong>Tenant-shaped state.</strong> Checkout and seat changes against sanitized accounts." />
         <div className={AFTER_HEADING}>
           <Metrics
@@ -32,7 +32,7 @@ export function SaasPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <Split visual={<SSAAS02 />}>
           <SectionHeading title="<strong>Staging differs in too many dimensions at once.</strong>" />
           <Lead>

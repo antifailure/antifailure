@@ -84,7 +84,7 @@ export function LoadPage() {
         <FeatureGrid items={PROPERTIES} />
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <Split visual={<PLD02 source={MANIFEST} />}>
           <PageHeading title="<strong>Two sources, and only one of them carries a baseline.</strong> A trace export carries a latency. A log line does not." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
@@ -129,7 +129,7 @@ export function LoadPage() {
         </Split>
       </PageSection>
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split
           visual={
             <Callout label="What load does not do">

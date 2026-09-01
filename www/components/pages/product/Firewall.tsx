@@ -59,7 +59,7 @@ export function FirewallPage() {
         </Illustrative>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <Split visual={<PFW06 />}>
           <PageHeading title="<strong>Containment is not a rule you can edit.</strong> A direct-IP attempt does not get out." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
@@ -81,7 +81,7 @@ export function FirewallPage() {
         </Split>
       </PageSection>
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split
           visual={
             <Callout label="Existential failure" tone="block">

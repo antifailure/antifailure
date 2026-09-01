@@ -61,7 +61,7 @@ export function MigrationsPage() {
         visual={<PMG01 captions={CAPTIONS} />}
       />
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split visual={<PMG02 />}>
           <PageHeading
             kicker="The finding"
@@ -97,7 +97,7 @@ export function MigrationsPage() {
         </Illustrative>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <Split visual={<PMG03 source={INSIGHTS} />}>
           <PageHeading title="<strong>Measured, not inferred.</strong> The lock comes from pg_locks and the rewrite from Postgres itself." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">

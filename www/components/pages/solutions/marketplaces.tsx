@@ -13,7 +13,7 @@ export function MarketplacesPage() {
         framed={false}
         visual={<SMKT01 />}
       />
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <SectionHeading title="<strong>Timing is the bug.</strong> Services, queues, and workers are a dimension staging drops." />
         <Lead>
           Matching logic that depends on queue order will not show up in a shared staging environment
@@ -30,7 +30,7 @@ export function MarketplacesPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <OpenSteps
           items={[
             { title: "Restore both sides", body: "Buyers, sellers, listings, and in-flight orders as a referential subset." },

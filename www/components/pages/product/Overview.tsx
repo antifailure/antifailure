@@ -159,7 +159,7 @@ export function OverviewPage() {
         </div>
       </PageSection>
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split visual={<POV02 rows={STAGING_ROWS} />}>
           <PageHeading title="<strong>The question staging cannot answer.</strong> What happens when this change meets real data, concurrency, workers, and the deploy process." />
           <p className="mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
@@ -217,7 +217,7 @@ export function OverviewPage() {
         </div>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading title="<strong>The output is a decision.</strong> Not a dataset. Not a preview URL alone." />
         <ul className="relative mt-16 grid grid-cols-3 gap-x-16 max-xl:grid-cols-1 max-xl:gap-y-10">
           {VERDICTS.map((item) => (

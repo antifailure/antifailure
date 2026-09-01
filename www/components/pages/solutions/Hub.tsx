@@ -55,7 +55,7 @@ export function SolutionsHubPage() {
         </p>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <SectionHeading title="<strong>Teams.</strong> Postgres, frequent deploys, and a platform engineer who owns reliability." />
         <div className={AFTER_HEADING}>
           <DirectoryList items={TEAMS} />

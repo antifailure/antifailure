@@ -75,7 +75,7 @@ export function ArchitecturePage() {
         </Illustrative>
       </PageSection>
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split visual={<PAR03 inForce={ISOLATION_MINIMUMS} planned={ISOLATION_PLANNED} />}>
           <PageHeading title="<strong>Dedicated account, or a strongly isolated network.</strong> When practical, the clone is its own account, subscription, or project." />
           <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
@@ -93,7 +93,7 @@ export function ArchitecturePage() {
         </Split>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="Cost controls"
           title="<strong>What keeps a run cheap,</strong> and what is still only a plan."

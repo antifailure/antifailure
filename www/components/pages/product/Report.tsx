@@ -108,7 +108,7 @@ export function ReportPage() {
         </Split>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="Five verdicts"
           title="<strong>A run that could not answer says so</strong> instead of blaming the change."
@@ -155,7 +155,7 @@ export function ReportPage() {
         </Illustrative>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading title="<strong>What the report does not contain</strong> is written down too." />
         <p className="mt-6 max-w-[640px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
           A passing run that hides its own gaps is worth less than a failing one. Migration findings
@@ -206,7 +206,7 @@ export function ReportPage() {
         </div>
       </PageSection>
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split
           visual={
             <div className="border border-black/12 bg-[#f7f7f5] px-5 py-5">

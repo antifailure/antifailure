@@ -21,7 +21,7 @@ export function DevtoolsPage() {
         framed={false}
         visual={<SDEV01 />}
       />
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <Split reverse visual={<SDEV02 source={EVENTS} />}>
           <SectionHeading title="<strong>Users notice p99 immediately.</strong> Large tables plus frequent schema change." />
           <Lead>
@@ -39,7 +39,7 @@ export function DevtoolsPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split
           visual={
             <div className="border border-black/12 bg-[#f7f7f5] px-5 py-5">

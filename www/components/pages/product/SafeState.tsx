@@ -34,7 +34,7 @@ export function SafeStatePage() {
           ]}
         />
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <Split visual={<PSS02 />}>
           <PageHeading title="<strong>A 12% subset that still joins.</strong> Dropped parents take their children. Rare rows stay." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
@@ -66,7 +66,7 @@ export function SafeStatePage() {
           </p>
         </Split>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split visual={<PSS04 />}>
           <PageHeading
             kicker="Customer-hosted masking"

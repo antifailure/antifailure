@@ -37,7 +37,7 @@ export function FintechPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <Split reverse visual={<SFIN02 rows={FIN_SPEC} />}>
           <SectionHeading title="<strong>Containment is the product surface.</strong>" />
           <Lead>
@@ -47,7 +47,7 @@ export function FintechPage() {
           </Lead>
         </Split>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split
           visual={
             <div className="border border-black/12 bg-[#f7f7f5] px-5 py-5">
