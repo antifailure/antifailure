@@ -581,8 +581,13 @@ func (r Run) Markdown() string {
 			fmt.Fprintf(&b, "Slower than production: %s\n", strings.Join(l.Regressed, ", "))
 		}
 		if len(l.Refused) > 0 {
-			fmt.Fprintf(&b, "%s were not sent, because nothing in the manifest named them safe: %s\n",
-				plural(len(l.Refused), "route", "routes"), strings.Join(l.Refused, ", "))
+			// The verb travels with the noun, because the singular case
+			// rendered "1 route were not sent". Only the plural case had a
+			// test, and 500 requests at one route is exactly the run this line
+			// exists to describe, so the ungrammatical half is the half a
+			// reader is most likely to meet.
+			fmt.Fprintf(&b, "%s not sent, because nothing in the manifest named them safe: %s\n",
+				plural(len(l.Refused), "route was", "routes were"), strings.Join(l.Refused, ", "))
 		}
 		b.WriteString("\n")
 	}
