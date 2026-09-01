@@ -805,3 +805,202 @@ func reached(name string, ok bool, findings int) explore.Exploration {
 	e.Findings = make([]explore.Finding, findings)
 	return e
 }
+
+// A failing load run says why, on the line a person reads first.
+//
+// It said nothing. `mixDetail` returned empty whenever anything was sent, so a
+// run with a `fail` verdict arrived with an empty detail and the reason lived
+// only in the threshold rows. The scenario path beside it has always named its
+// failing scenario, and the two reading differently is what kept this
+// invisible: each one is correct on its own.
+func TestAFailingLoadRunSaysWhichThresholdItBreached(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		result   *load.Result
+		contains []string
+	}{
+		{
+			name: "an error rate breach names both numbers in the units the manifest uses",
+			result: &load.Result{
+				Sent: 1000, ErrorRate: 0.042,
+				Overall: load.Latency{P95Ms: 100},
+			},
+			contains: []string{"the error rate was 4.2 percent", "threshold of 1.0 percent"},
+		},
+		{
+			name: "a p95 breach names the route it happened on",
+			result: &load.Result{
+				Sent: 1000, ErrorRate: 0,
+				Overall: load.Latency{P95Ms: 100},
+				Routes: []load.RouteResult{
+					{Route: "GET /checkout", Sent: 1000, HasBaseline: true, P95Increase: 0.45},
+				},
+			},
+			contains: []string{"p95 on GET /checkout rose 45.0 percent", "threshold of 25.0 percent"},
+		},
+		{
+			name: "several breaches name the first and count the rest",
+			result: &load.Result{
+				Sent: 1000, ErrorRate: 0.5,
+				Overall: load.Latency{P95Ms: 100},
+				Routes: []load.RouteResult{
+					{Route: "GET /a", Sent: 500, HasBaseline: true, P95Increase: 0.9},
+					{Route: "GET /b", Sent: 500, HasBaseline: true, P95Increase: 0.8},
+				},
+			},
+			contains: []string{"the error rate was 50.0 percent", "and 2 more thresholds were breached"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := mixRunner()
+			r.loadResult = c.result
+			res := execute(t, context.Background(), r,
+				workload.Request{Kind: "observed_load"}, nil)
+			require.Equal(t, workload.VerdictFail, res.Verdict,
+				"the fixture is meant to breach something")
+			require.NotEmpty(t, res.Detail,
+				"a failing run reported no reason at all, so a console leads with an empty line")
+			for _, want := range c.contains {
+				require.Contains(t, res.Detail, want)
+			}
+		})
+	}
+}
+
+// A clean run still says nothing, which is correct rather than an oversight:
+// there is no failure to explain and a sentence here would be noise on every
+// passing run.
+func TestAPassingLoadRunSaysNothing(t *testing.T) {
+	r := mixRunner()
+	r.loadResult = &load.Result{
+		Sent: 1000, ErrorRate: 0, Overall: load.Latency{P95Ms: 50},
+		Routes: []load.RouteResult{
+			{Route: "GET /ok", Sent: 1000, HasBaseline: true, P95Increase: 0.01},
+		},
+	}
+	res := execute(t, context.Background(), r, workload.Request{Kind: "observed_load"}, nil)
+	require.Equal(t, workload.VerdictPass, res.Verdict)
+	require.Empty(t, res.Detail)
+}
+
+// A run that sent nothing keeps the sentence it always had, because "nothing
+// was measured" and "a threshold was breached" are different findings and the
+// first one outranks every threshold row beneath it.
+func TestALoadRunThatSentNothingStillSaysSo(t *testing.T) {
+	r := mixRunner()
+	r.loadResult = &load.Result{Sent: 0}
+	res := execute(t, context.Background(), r, workload.Request{Kind: "observed_load"}, nil)
+	require.Equal(t, workload.VerdictUnverified, res.Verdict)
+	require.Contains(t, res.Detail, "no requests were sent")
+}
+
+// A failing scenario or workflow that reports no reason says so, rather than
+// rendering a name, a colon and nothing.
+//
+// `name + ": " + detail` with an empty detail is a WORSE empty than an absent
+// one: it reads as a sentence that was cut off, so a person goes looking for
+// the missing half. Unreachable today, because every failing assertion sets a
+// detail; the guard is here so it stays unreachable when somebody adds the next
+// failure path and forgets.
+func TestAFailureWithNoReasonDoesNotRenderADanglingColon(t *testing.T) {
+	require.Equal(t, "checkout: the p95 was over budget",
+		workload.NamedForTest("checkout", "the p95 was over budget"))
+	for _, empty := range []string{"", "   ", "\t"} {
+		got := workload.NamedForTest("checkout", empty)
+		require.NotContains(t, got, ": ",
+			"an empty reason rendered as a name and a colon, which reads as a truncated sentence")
+		require.Contains(t, got, "checkout")
+		require.Contains(t, got, "no reason")
+	}
+}
+
+// An exploration that did not reach its goal says which one.
+//
+// An exploration never fails, so this detail never lands under a red verdict,
+// which was the reasoning for leaving it empty. It lands under `unverified`,
+// which is not a pass and is the same blank first line a failing load run used
+// to have.
+func TestAnExplorationThatMissedItsGoalSaysWhichOne(t *testing.T) {
+	r := &fakeRunner{envID: "demo-main-abc123", exploreReport: &explore.Report{
+		Explorations: []explore.Exploration{
+			{Name: "sign up", Reached: true},
+			{Name: "check out", Reached: false},
+		},
+	}}
+	res := execute(t, context.Background(), r,
+		workload.Request{Kind: "exploration", Select: "sign up,check out"}, nil)
+	require.Equal(t, workload.VerdictUnverified, res.Verdict)
+	require.Contains(t, res.Detail, "check out did not reach its goal")
+
+	two := &fakeRunner{envID: "demo-main-abc123", exploreReport: &explore.Report{
+		Explorations: []explore.Exploration{
+			{Name: "sign up", Reached: false},
+			{Name: "check out", Reached: false},
+		},
+	}}
+	res = execute(t, context.Background(), two,
+		workload.Request{Kind: "exploration", Select: "sign up,check out"}, nil)
+	require.Contains(t, res.Detail, "2 goals were not reached, starting with sign up")
+
+	all := &fakeRunner{envID: "demo-main-abc123", exploreReport: &explore.Report{
+		Explorations: []explore.Exploration{{Name: "sign up", Reached: true}},
+	}}
+	res = execute(t, context.Background(), all,
+		workload.Request{Kind: "exploration", Select: "sign up"}, nil)
+	require.Equal(t, workload.VerdictPass, res.Verdict)
+	require.Empty(t, res.Detail, "a run that reached everything has nothing to explain")
+}
+
+// The two exploration shapes examples/next-app declares, and the distinction
+// between them that a console has to be able to draw.
+//
+// `what-each-customer-spent` reaches its goal on the first page. `correct-a-
+// customer-name` never reaches its goal, on purpose, because that page offers
+// no control to press: somebody looked and the application had no way onward.
+//
+// THE THING THIS PINS is that the second is NOT `blocked`. Blocked means the
+// run could not be carried out, and this run was carried out perfectly: the
+// state is that the work happened and the verdict is a finding. The runner's
+// own VERDICT_FOR_CAUSE is what makes that true, mapping the `explored` cause
+// to pass and reserving blocked for `runner-failure` and
+// `environment-incomplete`, so a dead end arrives here as a passing outcome
+// that simply did not reach, and only `Reached` tells them apart.
+//
+// An exploration cannot fail a build, which docs/concepts/exploration states,
+// so a wander that found a wall is a finding rather than a defect.
+func TestADeadEndIsUnverifiedRatherThanBlocked(t *testing.T) {
+	reached := explore.Exploration{Name: "what-each-customer-spent", Reached: true}
+	reached.Outcome.Verdict = workload.VerdictPass
+	deadEnd := explore.Exploration{Name: "correct-a-customer-name", Reached: false}
+	// The cause is `explored`, which the runner maps to pass. A dead end is not
+	// a runner failure and not an incomplete environment, which are the only
+	// two causes that produce blocked.
+	deadEnd.Outcome.Verdict = workload.VerdictPass
+
+	r := &fakeRunner{envID: "next-app-main-abc123", exploreReport: &explore.Report{
+		Explorations: []explore.Exploration{reached, deadEnd},
+	}}
+	res := execute(t, context.Background(), r,
+		workload.Request{Kind: "exploration", Select: "what-each-customer-spent,correct-a-customer-name"}, nil)
+
+	require.Equal(t, workload.StateSucceeded, res.State,
+		"the work happened; a dead end is a finding and not a run that could not be carried out")
+	require.Equal(t, workload.VerdictUnverified, res.Verdict)
+	require.NotEqual(t, workload.VerdictBlocked, res.Verdict,
+		"a page with no control to press was reported as a run that could not proceed")
+	require.Contains(t, res.Detail, "correct-a-customer-name did not reach its goal",
+		"the one useful thing to say about this run is which goal was not reached")
+
+	// And blocked is still reachable, so the distinction above is a real one
+	// rather than a verdict nothing produces.
+	blocked := explore.Exploration{Name: "correct-a-customer-name", Reached: false}
+	blocked.Outcome.Verdict = workload.VerdictBlocked
+	blocked.Outcome.Detail = "the browser could not be started"
+	stopped := &fakeRunner{envID: "next-app-main-abc123", exploreReport: &explore.Report{
+		Explorations: []explore.Exploration{blocked},
+	}}
+	res = execute(t, context.Background(), stopped, workload.Request{
+		Kind: "exploration", Select: "correct-a-customer-name"}, nil)
+	require.Equal(t, workload.VerdictBlocked, res.Verdict)
+	require.Contains(t, res.Detail, "the browser could not be started")
+}

@@ -96,6 +96,9 @@ type hostedReporter struct {
 	// sequence orders this run's own events. See emit for why it starts at one
 	// rather than continuing the environment's.
 	sequence uint64
+	// saidCancelIsUnknown stops the once-per-run notice about a control plane
+	// that cannot report cancels from being said once a minute.
+	saidCancelIsUnknown bool
 
 	mu sync.Mutex
 	// stopped is why the work was stopped from here, so the result can say
@@ -315,7 +318,25 @@ func (h *hostedReporter) tick(ctx context.Context) (string, bool) {
 		h.warn("a heartbeat could not be sent: " + err.Error())
 		return "", false
 	}
-	if cancelRequested {
+	if cancelRequested == nil {
+		// UNKNOWN, and said out loud rather than read as no. A control plane
+		// that predates the cancel riding the beat answers `{held: true}` and
+		// nothing else, and flattening that to false is a cancel button that
+		// silently does nothing: no error, no log, and a customer who pressed a
+		// control that had no effect. This line is the difference between a
+		// support ticket and a five second diagnosis.
+		//
+		// Once per run rather than once a minute, because a true sentence
+		// repeated a hundred times in a job log is a sentence nobody reads.
+		if !h.saidCancelIsUnknown {
+			h.saidCancelIsUnknown = true
+			h.warn("this control plane does not report cancels on the heartbeat, so a cancel " +
+				"pressed in the console will not reach this run. Everything else is reported " +
+				"normally. Upgrading the control plane is what fixes it.")
+		}
+		return "", false
+	}
+	if *cancelRequested {
 		return "a cancel was requested in the control plane", false
 	}
 	return "", false

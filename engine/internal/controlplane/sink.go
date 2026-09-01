@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -226,7 +227,10 @@ func (s *Sink) drainOverflow(ctx context.Context) error {
 		if batch == nil {
 			return nil
 		}
-		_, sendErr := s.client.Send(ctx, batch)
+		res, sendErr := s.client.Send(ctx, batch)
+		if sendErr == nil {
+			s.explain(res)
+		}
 		if ackErr := ack(sendErr); ackErr != nil && sendErr == nil {
 			// Sent but not acknowledged: the batch will be sent again by
 			// whoever picks it up. The control plane deduplicates on the event
@@ -349,7 +353,10 @@ func (s *Sink) Flush(ctx context.Context) error {
 		s.pending = s.pending[n:]
 		s.mu.Unlock()
 
-		_, err := s.client.Send(ctx, batch)
+		res, err := s.client.Send(ctx, batch)
+		if err == nil {
+			s.explain(res)
+		}
 		if err != nil {
 			s.mu.Lock()
 			var throttled *Throttled
@@ -384,6 +391,53 @@ func (s *Sink) Flush(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// explain surfaces what the control plane said about events it did not apply.
+//
+// WHY THIS EXISTS AT ALL. Send returns a SendResult and, until this, nothing
+// read it. The control plane deliberately answers each event with a sentence
+// when it stored it and could not apply it, and its own comment says that
+// sentence "reaches the sender in the batch response". It did not reach it: the
+// wire type dropped the field and the only caller dropped the whole result. So
+// the one channel that explains why an event changed nothing was written at one
+// end and discarded at the other, which is the same dead-socket shape as an
+// event nothing emits, running in the opposite direction.
+//
+// It matters most for a workload run. A terminal report that a projection
+// refuses is the difference between "the console has my numbers" and "the
+// console says nobody reported", and without this the engine exits zero, the
+// job is green, and the only account of what went wrong is in an HTTP response
+// nobody kept.
+//
+// Reported through onError rather than raised, because none of it is a failure
+// of this engine and none of it should stop a run. A duplicate is not reported
+// at all: it is the ordinary result of a resend and of the idempotency key
+// doing its job.
+//
+// Bounded, because a batch carries up to five hundred events and a sender that
+// got the shape wrong gets it wrong for all of them. The count is exact and the
+// sentences are a sample, which is what makes this readable rather than a wall.
+func (s *Sink) explain(res SendResult) {
+	const maxSentences = 3
+	var said []string
+	unapplied := 0
+	for _, o := range res.Outcomes {
+		explanation := o.Explanation()
+		if explanation == "" {
+			continue
+		}
+		unapplied++
+		if len(said) < maxSentences && !slices.Contains(said, explanation) {
+			said = append(said, explanation)
+		}
+	}
+	if unapplied == 0 {
+		return
+	}
+	s.onError(fmt.Errorf(
+		"control plane: %d of %d events were stored and changed nothing: %s",
+		unapplied, len(res.Outcomes), strings.Join(said, "; ")))
 }
 
 // toWire converts an engine event to the ingestion form.

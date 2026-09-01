@@ -41,6 +41,32 @@ every percentile null and every route beside it decoding perfectly.
 
 # fixed
 
+A hosted run that did not pass now says why on the line a person reads first.
+A load run that breached a threshold reported a `fail` verdict and an empty
+detail, so the reason lived only in the threshold rows and the line a console
+leads with was blank. It now names the breach in the units the manifest declares
+it in, and says how many more there were. The scenario path beside it had always
+named its failing scenario, which is why nobody saw this: both read correctly on
+their own.
+
+Two siblings had the same gap. An exploration that missed a goal said nothing,
+on the reasoning that an exploration can never fail so the blank never lands
+under a red verdict; it lands under `unverified`, which is not a pass, and the
+goal that was missed is the one thing worth saying. And a failing scenario or
+workflow whose own reason was empty rendered as a name, a colon and nothing,
+which is a worse absence than an empty one because it reads as a sentence that
+was cut off. Both closed.
+
+The control plane answers every event it stored and could not apply with a
+sentence saying why, and the engine threw all of them away. The wire type had no
+field for the note at all, so it was dropped by the decoder, and the only caller
+of `Send` discarded the whole result, so the rejections were dropped too. That
+is the one channel that explains why a run reported and the console still shows
+nothing, written at one end and discarded at the other. Those sentences now
+reach the job log, bounded, with duplicates left out because a duplicate is the
+idempotency key working rather than a fault.
+
+
 `examples/github-workflow.yml` never set `AF_CONTROL_PLANE_TOKEN`, so a
 repository following the documented workflow sent no engine events at all. Not
 the workload ones, and not the environment lifecycle either: the console's

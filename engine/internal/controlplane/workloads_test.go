@@ -16,11 +16,15 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/controlplane"
+	"github.com/antifailure/antifailure/engine/internal/events"
+	"github.com/antifailure/antifailure/engine/internal/redact"
 )
 
 // claimBody is what POST /v1/workloads/claim answers with a run waiting.
@@ -151,8 +155,8 @@ func TestHeartbeatNamesTheRunInThePath(t *testing.T) {
 	if sawPath != "/v1/workloads/runs/"+claimedRunID+"/heartbeat" {
 		t.Fatalf("heartbeat posted to %q", sawPath)
 	}
-	if cancelRequested {
-		t.Fatal("no cancel was requested and the beat reported one")
+	if cancelRequested == nil || *cancelRequested {
+		t.Fatal("the control plane said cancelRequested false and the engine did not read it")
 	}
 }
 
@@ -170,17 +174,24 @@ func TestHeartbeatCarriesTheCancelBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cancelRequested {
+	if cancelRequested == nil || !*cancelRequested {
 		t.Fatal("a cancel was waiting and the beat did not carry it back")
 	}
 }
 
-// An older control plane answers `{held: true}` and means no cancel.
+// An older control plane answers `{held: true}` and the answer is UNKNOWN.
 //
-// No version negotiation, deliberately: an absent field decodes to false, which
-// is what it means. A client that refused the shape, or defaulted it to true,
-// would stop every run against a control plane one release behind.
-func TestAHeartbeatWithNoCancelFieldMeansNoCancel(t *testing.T) {
+// Not false, and the distinction is the whole test. A control plane that
+// predates the cancel riding the beat cannot say anything about a cancel, and
+// flattening that to "no cancel" is a cancel button in the console that
+// silently does nothing: no error, no log line, no symptom except a control
+// somebody pressed having no effect.
+//
+// Only the engine can tell absent from false, and only here. The control plane
+// cannot make an older control plane send a field. So the distinguishable
+// outcome is asserted rather than the tolerated one: this proves the engine
+// knows that it does not know.
+func TestAHeartbeatWithNoCancelFieldIsUnknownRatherThanNoCancel(t *testing.T) {
 	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"held":true}`))
 	}))
@@ -188,8 +199,10 @@ func TestAHeartbeatWithNoCancelFieldMeansNoCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cancelRequested {
-		t.Fatal("an absent cancelRequested was read as a cancel, which stops a healthy run")
+	if cancelRequested != nil {
+		t.Fatalf("an absent cancelRequested decoded to %v; absent and false have to stay "+
+			"distinguishable, because only one of them means the console's cancel works",
+			*cancelRequested)
 	}
 }
 
@@ -235,5 +248,68 @@ func TestAnUnreachableControlPlaneIsNotALostLease(t *testing.T) {
 	var lost *controlplane.LeaseLost
 	if errors.As(err, &lost) {
 		t.Fatal("a 502 was reported as a lost lease, which would stop a healthy run")
+	}
+}
+
+// What the control plane says about an event it stored and did not apply.
+//
+// The sentence is the only account there is of a report that landed and
+// changed nothing, which is the difference between "the console has my
+// numbers" and "the console says nobody reported". It was written at one end
+// and discarded at the other: the wire type had no `note` field, and the only
+// caller of Send threw the whole result away.
+func TestTheControlPlanesOwnExplanationReachesTheEngine(t *testing.T) {
+	var said []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`{"accepted":2,"duplicates":1,"rejected":1,"unprojected":1,"outcomes":[
+		  {"id":"a","status":"accepted","note":"Stored, and the run was already abandoned, so nothing was applied."},
+		  {"id":"b","status":"duplicate"},
+		  {"id":"c","status":"rejected","reason":"the event has no id"},
+		  {"id":"d","status":"accepted"}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+	c, err := controlplane.New(controlplane.Options{
+		BaseURL: srv.URL, Token: "aft_" + strings.Repeat("a", 40),
+		HTTP: srv.Client(), Redactor: redact.New(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sink := controlplane.NewSink(controlplane.SinkOptions{
+		Client: c, Clock: clock.NewFake(time.Now()),
+		OnError: func(err error) { said = append(said, err.Error()) },
+	})
+	if err := sink.Deliver(context.Background(), events.Event{
+		ID: "a", Type: events.WorkloadFinished, TS: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(said) == 0 {
+		t.Fatal("the control plane explained why two events changed nothing and the engine said nothing")
+	}
+	joined := strings.Join(said, "\n")
+	if !strings.Contains(joined, "already abandoned") {
+		t.Errorf("the note was decoded and lost; got %q", joined)
+	}
+	if !strings.Contains(joined, "the event has no id") {
+		t.Errorf("the rejection reason did not reach the engine; got %q", joined)
+	}
+	// A duplicate is the ordinary result of a resend and of the idempotency key
+	// working. Reporting it would make every spool drain look like a fault.
+	if strings.Contains(joined, "duplicate") {
+		t.Errorf("a duplicate was reported as something changing nothing; got %q", joined)
+	}
+	if !strings.Contains(joined, "2 of 4") {
+		t.Errorf("the count should be exact and over the whole batch; got %q", joined)
 	}
 }

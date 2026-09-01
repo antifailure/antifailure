@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func runObservedLoad(ctx context.Context, opts Options, res *Result) {
 	p95Increase, errorRate := opts.Runner.Thresholds()
 	res.Thresholds = mixThresholds(out, p95Increase, errorRate)
 
-	settle(res, opts, err, mixVerdict(out, res.Thresholds), mixDetail(out))
+	settle(res, opts, err, mixVerdict(out, res.Thresholds), mixDetail(out, res.Thresholds))
 }
 
 func projectMix(res *Result, out *load.Result) {
@@ -127,11 +128,70 @@ func mixVerdict(out *load.Result, verdicts []ThresholdVerdict) string {
 	return VerdictPass
 }
 
-func mixDetail(out *load.Result) string {
+// mixDetail is the sentence somebody reads before they read anything else.
+//
+// It returned EMPTY whenever anything was sent, so every failing load run
+// arrived carrying a `fail` verdict and nothing beside it. The reason lived
+// only in the threshold rows, and a console that leads with the detail had
+// nothing to lead with; the row that says the run failed and the rows that say
+// why were in different places, and only one of them is on the first screen.
+//
+// scenarioDetail directly below has always named its failing scenario. The two
+// sat beside each other doing different things for as long as both existed,
+// which is how this survived: each reads correctly on its own.
+func mixDetail(out *load.Result, verdicts []ThresholdVerdict) string {
 	if out.Sent == 0 {
 		return "no requests were sent, so nothing was measured"
 	}
-	return ""
+	var failed []ThresholdVerdict
+	for _, v := range verdicts {
+		if v.Value == VerdictFail {
+			failed = append(failed, v)
+		}
+	}
+	if len(failed) == 0 {
+		return ""
+	}
+	first := breachSentence(failed[0])
+	if len(failed) == 1 {
+		return first
+	}
+	return fmt.Sprintf("%s, and %d more thresholds were breached", first, len(failed)-1)
+}
+
+// breachSentence says what one breached threshold measured, in its own units.
+//
+// The measure decides the wording rather than the name, because the name is the
+// manifest's word and the measure is what the number means. An unrecognised
+// measure gets a sentence that names it rather than a number nobody can read:
+// the engine adds a measure by releasing, and a detail line that silently
+// stopped explaining the newest one would be the worst kind of stale.
+func breachSentence(v ThresholdVerdict) string {
+	where := ""
+	if v.Scope != "" {
+		where = " on " + v.Scope
+	}
+	switch v.Measure {
+	case "error_rate":
+		return fmt.Sprintf("the error rate%s was %s against a threshold of %s",
+			where, asPercent(v.Observed), asPercent(v.Threshold))
+	case "p95_increase":
+		return fmt.Sprintf("p95%s rose %s against a threshold of %s",
+			where, asPercent(v.Observed), asPercent(v.Threshold))
+	}
+	return "the threshold " + v.Name + where + " was breached"
+}
+
+// asPercent renders a ratio the way the manifest declares it.
+//
+// Never a bare number. A threshold of 0.2 read out as "0.2" beside an observed
+// "0.45" is two numbers a reader has to know the units of, and this is the line
+// written for the reader who does not.
+func asPercent(v *float64) string {
+	if v == nil {
+		return "an unmeasured amount"
+	}
+	return fmt.Sprintf("%.1f percent", *v*100)
 }
 
 // runScenarios runs the declared journeys.
@@ -236,10 +296,29 @@ func scenarioDetail(out []load.ScenarioResult) string {
 	}
 	for _, s := range out {
 		if s.Verdict == VerdictFail || s.Verdict == VerdictBlocked {
-			return s.Scenario + ": " + s.Detail
+			return named(s.Scenario, s.Detail)
 		}
 	}
 	return ""
+}
+
+// named joins the thing that failed to the reason, and never produces the join
+// on its own.
+//
+// `name + ": " + detail` with an empty detail renders as "checkout: ", which is
+// WORSE than an empty string: a name, a colon and nothing reads as a sentence
+// that was cut off, so a person goes looking for the missing half. An absence
+// should look like an absence.
+//
+// Written as a guard rather than as an audit of every place an inner detail is
+// set. Today every failing assertion sets one, so this is unreachable; the
+// point is that it stays unreachable when somebody adds the next failure path
+// and forgets, which is the version of this that actually ships.
+func named(name, detail string) string {
+	if strings.TrimSpace(detail) == "" {
+		return name + " failed and reported no reason"
+	}
+	return name + ": " + detail
 }
 
 // runWorkflows drives the declared workflows through a browser.
@@ -325,7 +404,7 @@ func workflowDetail(out *env.TestReport) string {
 	}
 	for _, r := range out.Results {
 		if r.Outcome.Verdict == VerdictFail {
-			return r.Workflow + ": " + r.Outcome.Detail
+			return named(r.Workflow, r.Outcome.Detail)
 		}
 	}
 	return ""
@@ -412,11 +491,41 @@ func explorationVerdict(out *explore.Report) string {
 	return worst
 }
 
+// explorationDetail is the sentence beside an exploration's verdict.
+//
+// An exploration never FAILS: explorationVerdict above can only return pass,
+// blocked or unverified, because a wander produces findings rather than a
+// judgement. So this was empty for every exploration that explored anything,
+// on the reasoning that an empty detail never lands under a red verdict.
+//
+// That reasoning is half right and the half it misses is the one people see.
+// `unverified` is not red and it is not a pass either, and an unverified run
+// with nothing beside it is the same blank first line a failing load run used
+// to have. A goal that was not reached is the single most useful thing to say
+// about an exploration, and it was the one thing this did not say.
 func explorationDetail(out *explore.Report) string {
 	if len(out.Explorations) == 0 {
 		return "no goal was explored, so nothing was found"
 	}
-	return ""
+	for _, e := range out.Explorations {
+		if e.Outcome.Verdict == VerdictBlocked {
+			return named(e.Name, e.Outcome.Detail)
+		}
+	}
+	var unreached []string
+	for _, e := range out.Explorations {
+		if !e.Reached {
+			unreached = append(unreached, e.Name)
+		}
+	}
+	switch len(unreached) {
+	case 0:
+		return ""
+	case 1:
+		return unreached[0] + " did not reach its goal"
+	}
+	return fmt.Sprintf("%d goals were not reached, starting with %s",
+		len(unreached), unreached[0])
 }
 
 // worseOf picks the worse of two verdicts, in the product's own precedence.

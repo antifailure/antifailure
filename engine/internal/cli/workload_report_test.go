@@ -72,6 +72,9 @@ type fakePlane struct {
 	// cancelRequested is what the heartbeat answers back. The cancel rides the
 	// beat, so there is no command endpoint here at all any more.
 	cancelRequested bool
+	// omitCancelField answers the older shape, `{held: true}` and nothing
+	// else, which is a control plane that cannot report a cancel at all.
+	omitCancelField bool
 	// eventsStatus lets a test make the ingestion endpoint unreachable.
 	eventsStatus int
 
@@ -118,6 +121,8 @@ func (f *fakePlane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.heartbeat == http.StatusConflict {
 			_, _ = w.Write([]byte(`{"error":"Run ` + testRunID +
 				` is not held by this token. Stop and claim again."}`))
+		} else if f.omitCancelField {
+			_, _ = w.Write([]byte(`{"held":true}`))
 		} else {
 			_, _ = w.Write([]byte(`{"held":true,"cancelRequested":` +
 				map[bool]string{true: "true", false: "false"}[f.cancelRequested] + `}`))
@@ -193,11 +198,19 @@ func (f *fakePlane) sent() []controlplane.Event {
 // reporterFor builds a reporter against the fake, with a fake clock and a real
 // spool in a temporary directory.
 func reporterFor(t *testing.T, url string) (*hostedReporter, *clock.Fake, string) {
+	h, fake, dir, _ := reporterAndOutput(t, url)
+	return h, fake, dir
+}
+
+// reporterAndOutput also hands back what the reporter printed, for the tests
+// that are about what it SAYS rather than what it sends.
+func reporterAndOutput(t *testing.T, url string) (*hostedReporter, *clock.Fake, string, *bytes.Buffer) {
 	t.Helper()
 	fake := clock.NewFake(time.Date(2026, 9, 1, 6, 40, 0, 0, time.UTC))
 	stateDir := t.TempDir()
+	said := &bytes.Buffer{}
 	e := &Env{
-		Out:      NewOutput(&bytes.Buffer{}, &bytes.Buffer{}),
+		Out:      NewOutput(said, said),
 		Clock:    fake,
 		Redactor: redact.New(),
 		Getenv: func(k string) string {
@@ -214,7 +227,7 @@ func reporterFor(t *testing.T, url string) (*hostedReporter, *clock.Fake, string
 	require.NoError(t, err)
 	require.NotNil(t, h, "a token was configured and no reporter was built")
 	t.Cleanup(h.Close)
-	return h, fake, stateDir
+	return h, fake, stateDir, said
 }
 
 // runningRun is the claim body for a run waiting on pr-42.
@@ -838,3 +851,66 @@ func TestARunWithNoDocumentStillReportsAFailure(t *testing.T) {
 	require.NotContains(t, sent[1].Payload, "result",
 		"a run that produced no document sent measurements it does not have")
 }
+
+// A control plane that cannot report cancels says so, once.
+//
+// THE DEFECT THIS CLOSES IS AN ABSENCE THAT LOOKED LIKE A VALUE. `cancelRequested`
+// was a plain bool, so a control plane predating the cancel riding the beat
+// decoded to false. Nothing errored, no run stopped wrongly, and the cancel
+// button in the console silently did nothing: no error, no log, no symptom
+// except a customer pressing a control that had no effect.
+//
+// Only the engine can tell absent from false, and only here, because the
+// control plane cannot make an older control plane send a field. So the test
+// asserts a DISTINGUISHABLE outcome rather than a tolerated one: it proves the
+// engine knows that it does not know, and says so where somebody will read it.
+func TestAControlPlaneThatCannotReportCancelsSaysSoOnce(t *testing.T) {
+	f, url := newFakePlane(t)
+	f.set(func(p *fakePlane) {
+		p.claim = runningRun("observed_load")
+		// The older shape: held, and nothing about a cancel.
+		p.omitCancelField = true
+	})
+	h, fake, _, said := reporterAndOutput(t, url)
+
+	h.Claim(context.Background(), "", workload.ObservedLoad)
+	ctx := h.Start(context.Background(), workload.ObservedLoad)
+
+	// Four beats, and reading after the LAST one rather than the first.
+	//
+	// The fake signals when it has ANSWERED a heartbeat, which is before the
+	// engine has decoded that answer and decided anything about it. Reading the
+	// output straight after one beat reads it before the notice can have been
+	// written, and the assertion passes or fails on scheduling. Waiting for a
+	// later beat is proof the earlier tick finished, because the loop is
+	// sequential.
+	for range 4 {
+		beatOnce(t, f, fake)
+	}
+
+	require.NoError(t, ctx.Err(),
+		"an unknown cancel state stopped the run, which would end every run against an "+
+			"older control plane")
+	// Whitespace collapsed before matching, because the terminal WRAPS. The
+	// first version of this asserted the sentence verbatim and failed against
+	// output that contained it, split across a newline and six spaces of
+	// indent, which reads as "the engine said nothing" and is the opposite of
+	// what happened. A test of what a program SAYS has to be indifferent to how
+	// the renderer folded it.
+	said1 := flat(said.String())
+	require.Contains(t, said1, "does not report cancels on the heartbeat",
+		"the engine could not tell whether a cancel was waiting and said nothing, so a cancel "+
+			"button that does nothing has no symptom at all")
+
+	// Once per run, not once a beat. A true sentence repeated once a minute for
+	// two hours is a sentence nobody reads.
+	require.Equal(t, 1, strings.Count(said1, "does not report cancels"),
+		"the notice was repeated on every beat")
+
+	h.Finish(context.Background(), resultFor(workload.StateSucceeded, workload.VerdictPass))
+	require.Len(t, f.sent(), 2, "everything else is reported normally")
+}
+
+// flat collapses every run of whitespace to one space, so an assertion about a
+// sentence is not also an assertion about the terminal's wrap width.
+func flat(s string) string { return strings.Join(strings.Fields(s), " ") }

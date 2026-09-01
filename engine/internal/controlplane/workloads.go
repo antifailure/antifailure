@@ -150,12 +150,21 @@ func (e *LeaseLost) Error() string {
 // unrelated command it happened to return on the way past. The column is on the
 // row the heartbeat already updates.
 //
-// An absent field decodes to false, which is the safe default and the reason
-// this needs no version negotiation: an older control plane that answers
-// `{held: true}` reads as no cancel, which is what it means.
+// A POINTER, so absent and false are different answers.
+//
+// This was a plain bool and an absent field decoded to false, which is the
+// shape of every defect in this workstream: an absence indistinguishable from a
+// legitimate value. Against a control plane that predates the cancel riding the
+// beat, nothing errors, no run stops wrongly, and the cancel button in the
+// console silently does nothing. No log line, no symptom, and a customer who
+// pressed a control that had no effect.
+//
+// Only the engine can tell the two apart, and only here. The control plane
+// cannot make an older control plane send a field. So `nil` is carried out of
+// this function as UNKNOWN rather than flattened, and the caller says so once.
 type heartbeatResponse struct {
-	Held            bool `json:"held"`
-	CancelRequested bool `json:"cancelRequested"`
+	Held            bool  `json:"held"`
+	CancelRequested *bool `json:"cancelRequested"`
 }
 
 // Heartbeat says this engine is still working on a run, and asks in the same
@@ -169,27 +178,31 @@ type heartbeatResponse struct {
 // A LeaseLost is the interesting failure and the one a caller must act on. Any
 // other error is the network, and a caller should keep working: a heartbeat
 // that could not be sent says nothing about whether the work is going well.
-func (c *Client) Heartbeat(ctx context.Context, runID string) (bool, error) {
+// The returned pointer is nil when the control plane said nothing about a
+// cancel, which means it predates the cancel riding the beat. That is a fact
+// about the far end and not a value: nil is not "no cancel", it is "this
+// control plane cannot tell me".
+func (c *Client) Heartbeat(ctx context.Context, runID string) (*bool, error) {
 	if strings.TrimSpace(runID) == "" {
-		return false, errors.New("controlplane: a run identifier is required to heartbeat")
+		return nil, errors.New("controlplane: a run identifier is required to heartbeat")
 	}
 	res, err := c.do(ctx, http.MethodPost,
 		"/v1/workloads/runs/"+url.PathEscape(runID)+"/heartbeat", bytes.NewReader([]byte(`{}`)))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode == http.StatusConflict {
-		return false, &LeaseLost{RunID: runID, Detail: c.errorSentence(res)}
+		return nil, &LeaseLost{RunID: runID, Detail: c.errorSentence(res)}
 	}
 	if res.StatusCode != http.StatusOK {
-		return false, c.statusError(res)
+		return nil, c.statusError(res)
 	}
 
 	var out heartbeatResponse
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return false, fmt.Errorf("controlplane: the response was not the expected shape: %w", err)
+		return nil, fmt.Errorf("controlplane: the response was not the expected shape: %w", err)
 	}
 	return out.CancelRequested, nil
 }
