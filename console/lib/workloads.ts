@@ -677,11 +677,26 @@ export function verdictContradiction(
   const broke = thresholds.filter((t) => t.outcome === "broke").length;
   const unevaluated = thresholds.filter((t) => t.outcome === "not_evaluated").length;
 
-  if (status === "passed" && broke > 0) {
-    return `This run is recorded as passed, but ${broke === 1 ? "one threshold below broke" : `${broke} of the thresholds below broke`}. One of the two is wrong and the run should not be read as a pass until it is known which.`;
-  }
-  if (status === "passed" && unevaluated > 0) {
-    return `This run is recorded as passed, but ${unevaluated === 1 ? "one threshold was never evaluated" : `${unevaluated} thresholds were never evaluated`}. A threshold nothing measured has not held, so this pass covers less than it appears to.`;
+  if (status === "passed" && (broke > 0 || unevaluated > 0)) {
+    // Both halves when both apply. Reporting only the broken ones would leave a
+    // reader believing the rest held, which is the quieter half of the same
+    // mistake: a threshold nothing measured has not passed either.
+    const parts: string[] = [];
+    if (broke > 0) {
+      parts.push(broke === 1 ? "one threshold below broke" : `${broke} of the thresholds below broke`);
+    }
+    if (unevaluated > 0) {
+      parts.push(
+        unevaluated === 1
+          ? "one was never evaluated"
+          : `${unevaluated} were never evaluated`,
+      );
+    }
+    const tail =
+      broke > 0
+        ? "A run cannot be a pass over a threshold that broke, so one of the two records is wrong."
+        : "A threshold nothing measured has not held, so this pass covers less than it appears to.";
+    return `This run is recorded as passed, but ${parts.join(" and ")}. ${tail}`;
   }
   if (status === "failed" && broke === 0) {
     return "This run is recorded as failed, but no threshold below broke. The reason it failed is not in this table.";

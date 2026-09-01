@@ -5,7 +5,6 @@ import { query, useApi } from "@/lib/api";
 import { may } from "@/lib/roles";
 import { useSessionContext } from "@/components/session";
 import {
-  Badge,
   Button,
   Card,
   CellLink,
@@ -20,7 +19,7 @@ import {
   When,
   inputClass,
 } from "@/components/ui";
-import { Provenance, RunStatusBadge } from "@/components/workloads/primitives";
+import { RunStatusBadge } from "@/components/workloads/primitives";
 import { SourceHeader, SourceView } from "@/components/workloads/sources";
 import { DefinitionSkeleton, Denied, WorkloadError } from "@/components/workloads/states";
 import {
@@ -29,7 +28,6 @@ import {
   listRuns,
   listVersions,
   promoteDiscovery,
-  seconds,
   startRun,
   type Definition,
   type RunRow,
@@ -329,10 +327,16 @@ function RunsFor({ id, onOpen, nonce }: { id: string; onOpen: (runId: string) =>
           <Table>
             <thead>
               <tr>
-                <Th>Run</Th>
+                {/* When, not which id. Every row here is a run of the same
+                    workload, so the id distinguishes nothing a person is
+                    looking for, and a truncated one leading the row reads as a
+                    word that got cut off. The id is still the last column for
+                    anybody who needs to quote it. */}
+                <Th>Started</Th>
                 <Th>Side</Th>
                 <Th>Status</Th>
-                <Th>Started</Th>
+                <Th>Finished</Th>
+                <Th>Run</Th>
               </tr>
             </thead>
             <tbody>
@@ -340,15 +344,18 @@ function RunsFor({ id, onOpen, nonce }: { id: string; onOpen: (runId: string) =>
                 <Row key={r.id} onClick={() => onOpen(r.id)}>
                   <Td>
                     <CellLink href={`/workloads?run=${encodeURIComponent(r.id)}`}>
-                      <span className="font-mono text-[12px]">{r.id.slice(0, 12)}</span>
+                      <When value={r.started_at ?? r.created_at} />
                     </CellLink>
                   </Td>
                   <Td label="Side">{r.execution ?? "--"}</Td>
                   <Td label="Status">
                     <RunStatusBadge status={r.status} />
                   </Td>
-                  <Td label="Started">
-                    <When value={r.started_at ?? r.created_at} />
+                  <Td label="Finished">
+                    {r.finished_at ? <When value={r.finished_at} /> : <span className="text-dim">not yet</span>}
+                  </Td>
+                  <Td label="Run" mono className="text-dim">
+                    {r.id}
                   </Td>
                 </Row>
               ))}

@@ -85,8 +85,12 @@ export function WorkloadError({
  * every other skeleton in this console.
  */
 export function DefinitionSkeleton() {
+  // No role="status" on this wrapper. TableSkeleton carries one of its own, and
+  // nesting two live regions made a screen reader announce "Loading" twice, as
+  // "LoadingLoading the workload". One announcement, from the shared component,
+  // is also what every other screen in this console does.
   return (
-    <div className="space-y-6" role="status">
+    <div className="space-y-6">
       <div className="rounded-lg border border-rule bg-card">
         <div className="border-b border-rule px-4 py-4">
           <Bar className="h-3 w-24" />
@@ -103,7 +107,6 @@ export function DefinitionSkeleton() {
         </div>
         <TableSkeleton rows={4} cols={3} />
       </div>
-      <span className="sr-only">Loading the workload</span>
     </div>
   );
 }
@@ -111,8 +114,9 @@ export function DefinitionSkeleton() {
 /** A wait shaped like the run detail: a status line, four stat tiles, then
  *  the result tables. */
 export function RunSkeleton() {
+  // See DefinitionSkeleton: one live region, and it is TableSkeleton's.
   return (
-    <div className="space-y-6" role="status">
+    <div className="space-y-6">
       <div className="rounded-lg border border-rule bg-card">
         <div className="border-b border-rule px-4 py-3">
           <Bar className="h-3.5 w-28" />
@@ -132,7 +136,6 @@ export function RunSkeleton() {
         </div>
         <TableSkeleton rows={4} cols={4} />
       </div>
-      <span className="sr-only">Loading the run</span>
     </div>
   );
 }

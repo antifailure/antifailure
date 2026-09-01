@@ -287,7 +287,10 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
 
       {results === null ? (
         <Card title="Results">
-          <Empty title={fact.conclusive ? "No results stored" : "Nothing measured yet"}>
+          {/* "yet" only while there is still a run to produce it. A blocked run
+              is finished, and telling somebody its numbers are still coming is
+              a promise the run has already broken. */}
+          <Empty title={isRunning(run.status) ? "Nothing measured yet" : "Nothing was measured"}>
             {isRunning(run.status)
               ? "The runner has not reported a measurement yet. This fills in as the run reports."
               : "This run finished without storing a measurement. There is nothing here to read, which is not the same as a run that measured zero."}
