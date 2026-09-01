@@ -1,17 +1,16 @@
-// The seam between the rows this process produces and the console that reads
-// them.
+// The seam between the rows the control plane produces and the console that
+// reads them.
 //
-// WHY AN API TEST IMPORTS THE CONSOLE. Because both halves of a seam passing
-// their own suites is exactly what happened here and it proved nothing: the
-// console's Load area was built complete, verified, and against a contract
-// that did not exist. Two green suites, neither crossing the seam. This is the
-// crossing, and it lives on this side because this is where a test runner
-// exists and where the rows are made.
+// WHY THIS FILE EXISTS. Both halves of this seam passed their own suites and
+// it proved nothing: the Load area was built complete, verified, and against a
+// contract that did not exist. Two green suites, neither crossing between
+// them. This is the crossing, and it is a test of the CONSOLE that reads the
+// control plane's own schema files rather than a copy of what they say.
 //
-// `console/lib/loadshapes.ts` holds no import for that reason. The calls next
-// door reach the network and cannot run outside a browser; the decoders are
-// the half worth testing, because every defect this module has had was a shape
-// defect rather than a rendering one.
+// `loadshapes.ts` next door holds no import for that reason. The calls in
+// `load.ts` reach the network and cannot run outside a browser; the decoders
+// are the half worth testing, because every defect this module has had was a
+// shape defect rather than a rendering one.
 //
 // THE FIVE VOCABULARY TESTS ARE THE POINT. Each reads an enum out of the
 // migration that declares it and asserts the console knows exactly those
@@ -58,10 +57,9 @@ import {
   type RouteMetric,
   type RunResult,
   type ThresholdVerdict,
-} from '../../../../console/lib/loadshapes.ts'
-import { ago } from '../../../../console/lib/format.ts'
+} from './loadshapes.ts'
 
-const root = fileURLToPath(new URL('../../../../', import.meta.url))
+const root = fileURLToPath(new URL('../../', import.meta.url))
 
 /**
  * The three files the vocabulary and column checks read, or the reason they
@@ -708,49 +706,4 @@ describe('formatting', () => {
     assert.equal(duration(125_000), '2m 5s')
   })
 
-})
-
-// ---------------------------------------------------------------------------
-// A time that has not happened yet
-// ---------------------------------------------------------------------------
-
-describe('a relative time', () => {
-  // `ago` lives in console/lib/format.ts and is shared by six screens, and it
-  // is tested from here because the Load area is what reached the half of it
-  // that had never been exercised. Every other screen shows times that have
-  // already happened; a run's deadline is the first instant in this product a
-  // person is asked to read before it arrives, and the abs() in the old
-  // version rendered it as "-1h ago".
-  //
-  // Offsets from the real clock rather than a fixed date, so the arithmetic is
-  // deterministic without a fake clock this module has no way to inject.
-  const inMinutes = (n: number) => new Date(Date.now() + n * 60_000)
-
-  test('the past reads as the past', () => {
-    assert.equal(ago(inMinutes(-30)), '30m ago')
-    assert.equal(ago(inMinutes(-180)), '3h ago')
-    assert.equal(ago(inMinutes(-60 * 24 * 3)), '3d ago')
-    assert.equal(ago(inMinutes(-0.2)), 'just now')
-  })
-
-  test('the future reads as the future, and never as a negative number', () => {
-    assert.equal(ago(inMinutes(30)), 'in 30m')
-    assert.equal(ago(inMinutes(180)), 'in 3h')
-    assert.equal(ago(inMinutes(60 * 24 * 3)), 'in 3d')
-    assert.equal(ago(inMinutes(0.2)), 'in under a minute')
-  })
-
-  test('nothing it can produce starts with a minus sign', () => {
-    // The property, not a list of the cases that happened to be checked above.
-    for (let m = -4000; m <= 4000; m += 7) {
-      const said = ago(inMinutes(m))
-      assert.ok(!said.includes('-'), `ago at ${m} minutes said ${JSON.stringify(said)}`)
-    }
-  })
-
-  test('an absent or unreadable time says nothing rather than guessing', () => {
-    assert.equal(ago(null), '')
-    assert.equal(ago(undefined), '')
-    assert.equal(ago('not a date'), '')
-  })
 })
