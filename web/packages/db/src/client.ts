@@ -96,6 +96,14 @@ export interface UnscopedOptions {
    *  it. The row has no organization until that approval happens, so it cannot
    *  be reached by tenant. */
   deviceUserCode?: string
+  /** The hash of an invitation token, for the person accepting it. They are
+   *  signed in and belong to no organization yet, so the tenant is what the
+   *  acceptance is establishing rather than something it can be scoped to. */
+  invitationTokenHash?: Buffer
+  /** The hash of a deletion export token, for downloading the export after the
+   *  organization it belonged to has been purged. There is no membership left
+   *  to authorise against, so the link is the authorisation. */
+  deletionTokenHash?: Buffer
 }
 
 /** What a verified webhook delivery declares it is about. */
@@ -223,6 +231,11 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.device_user_code': '',
           'antifailure.github_account': '',
           'antifailure.stripe_customer': '',
+          // Cleared for the same reason as every setting above it. Both name a
+          // row that has no tenant by definition, so a transaction that has one
+          // has no business declaring either.
+          'antifailure.invitation_token_hash': '',
+          'antifailure.deletion_token_hash': '',
         },
         fn,
       )
@@ -255,6 +268,12 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.device_user_code': opts?.deviceUserCode ?? '',
           'antifailure.github_account': '',
           'antifailure.stripe_customer': '',
+          'antifailure.invitation_token_hash': opts?.invitationTokenHash
+            ? opts.invitationTokenHash.toString('hex')
+            : '',
+          'antifailure.deletion_token_hash': opts?.deletionTokenHash
+            ? opts.deletionTokenHash.toString('hex')
+            : '',
         },
         fn,
       )
@@ -280,6 +299,8 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.device_user_code': '',
           'antifailure.github_account': account,
           'antifailure.stripe_customer': '',
+          'antifailure.invitation_token_hash': '',
+          'antifailure.deletion_token_hash': '',
         },
         fn,
       )
@@ -305,6 +326,8 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.device_user_code': '',
           'antifailure.github_account': '',
           'antifailure.stripe_customer': customer,
+          'antifailure.invitation_token_hash': '',
+          'antifailure.deletion_token_hash': '',
         },
         fn,
       )
