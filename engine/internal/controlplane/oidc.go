@@ -264,6 +264,21 @@ func exchangeWorkflowIdentity(
 		return "", fmt.Errorf("controlplane: this job's identity was refused (%d)", res.StatusCode)
 	}
 
+	// Only the token is read, and the expiry the control plane returns beside it
+	// is deliberately ignored.
+	//
+	// Renewal here is REACTIVE: the credential is replaced when the control
+	// plane refuses a batch, not when a clock says it should have died. That is
+	// a choice rather than an oversight, and it is the better one. A 401 is the
+	// truth, whereas an expiry is a prediction that a revoked credential, a
+	// clock skewed against the server, or a control plane that shortened its
+	// own lifetimes would all falsify. Reacting to the refusal handles every
+	// one of those with no extra code.
+	//
+	// So do not wire proactive renewal on top of this, and do not delete the
+	// server's expiry field as unused: it is informational, it is what an
+	// operator reads when asking how long a leaked credential is worth, and the
+	// two mechanisms together would renew twice and race each other.
 	var body struct {
 		Token string `json:"token"`
 	}
