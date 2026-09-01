@@ -1,13 +1,12 @@
-import { PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
+import { PageHero, PageSection, PageShell } from "@/components/pages/kit";
+import { SSAAS01, SSAAS02 } from "@/components/pages/figures/solutions";
 import {
   AFTER_HEADING,
   FeatureList,
   Lead,
   Metrics,
   SectionHeading,
-  SpecRows,
   Split,
-  TenantSubsetScene,
 } from "./visuals";
 
 export function SaasPage() {
@@ -18,7 +17,8 @@ export function SaasPage() {
         eyebrow="Solutions · B2B SaaS"
         title="Daily deploys. Expanding schemas. Staging that drifted years ago."
         lead="The first twin should catch the migration that locks subscriptions during peak traffic, against sanitized tenant-shaped state rather than a fixture dump."
-        visual={<TenantSubsetScene />}
+        framed={false}
+        visual={<SSAAS01 />}
       />
       <PageSection tone="sage">
         <SectionHeading title="<strong>Tenant-shaped state.</strong> Checkout and seat changes against sanitized accounts." />
@@ -33,18 +33,7 @@ export function SaasPage() {
         </div>
       </PageSection>
       <PageSection tone="white">
-        <Split
-          visual={
-            <SpecRows
-              rows={[
-                ["Restore", "Referential subset of orgs, seats, subscriptions, invoices"],
-                ["Mask", "Account identifiers replaced inside the customer boundary"],
-                ["Exercise", "Checkout, upgrades, and seat changes at production-shaped concurrency"],
-                ["Decide", "Pass or fail on the pull request, then destroy the twin"],
-              ]}
-            />
-          }
-        >
+        <Split visual={<SSAAS02 />}>
           <SectionHeading title="<strong>Staging differs in too many dimensions at once.</strong>" />
           <Lead>
             A change can pass unit, integration, end-to-end, and a manual staging check, then still
@@ -62,13 +51,6 @@ export function SaasPage() {
           />
         </div>
       </PageSection>
-      <RelatedGrid
-        items={[
-          { href: "/product/migrations", title: "Migration Safety", description: "The lock on subscriptions is the first finding." },
-          { href: "/signup", title: "Sign up", description: "Join the waitlist." },
-          { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
-        ]}
-      />
     </PageShell>
   );
 }

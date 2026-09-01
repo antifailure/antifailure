@@ -2,10 +2,6 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { SectionLabel } from "@/components/layout/SectionLabel";
-import { CheckRow, MonoLabel } from "@/components/home/visuals/primitives";
-import { CompactSwap } from "@/components/pages/kit";
-import { LockChartMobile } from "@/components/home/media/LockChart";
-import { MigrationScene } from "@/components/home/visuals/MigrationScene";
 
 /** Shared gap after a section heading. One value, every page. */
 export const AFTER_HEADING = "mt-14 max-md:mt-10";
@@ -40,12 +36,12 @@ export function Split({
   return (
     <div
       className={cn(
-        "grid grid-cols-2 items-start gap-x-16 gap-y-10 text-left max-xl:grid-cols-1",
+        "grid grid-cols-2 items-start gap-x-16 gap-y-12 text-left max-xl:grid-cols-1",
         reverse && "[&>*:first-child]:max-xl:order-2",
       )}
     >
       <div className={cn("min-w-0", reverse && "xl:order-2")}>{children}</div>
-      <div className="min-w-0">{visual}</div>
+      <div className="min-w-0 max-w-[560px]">{visual}</div>
     </div>
   );
 }
@@ -65,19 +61,6 @@ export function Metrics({
           <p className="mt-4 max-w-[280px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
             {item.label}
           </p>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-export function SpecRows({ rows }: { rows: [string, string][] }) {
-  return (
-    <ul className="divide-y divide-black/12 border-y border-black/12 text-left">
-      {rows.map(([k, v]) => (
-        <li key={k} className="grid grid-cols-2 gap-x-8 py-4 max-sm:grid-cols-1 max-sm:gap-y-1">
-          <span className="text-[14px] font-medium tracking-extra-tight text-black">{k}</span>
-          <span className="text-[14px] leading-6 tracking-extra-tight text-gray-new-40">{v}</span>
         </li>
       ))}
     </ul>
@@ -194,62 +177,5 @@ export function DirectoryList({
         </li>
       ))}
     </ul>
-  );
-}
-
-export function TenantSubsetScene() {
-  return (
-    <div className="bg-[#f4f7f5] px-8 py-8 text-left max-md:px-5 max-md:py-6" aria-hidden>
-      <MonoLabel className="uppercase">Tenant subset</MonoLabel>
-      <ul className="mt-6 divide-y divide-black/8 border-y border-black/8">
-        {[
-          ["acme-prod", "12.4k seats"],
-          ["northwind", "3.1k seats"],
-          ["helix", "890 seats"],
-        ].map(([name, seats]) => (
-          <li key={name} className="flex items-center gap-6 py-3">
-            <CheckRow ok>{name}</CheckRow>
-            <span className="font-mono text-[12px] tracking-extra-tight text-black/45">{seats}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-export function WorkersScene() {
-  return (
-    <div className="bg-[#f4f7f5] px-8 py-8 text-left max-md:px-5 max-md:py-6" aria-hidden>
-      <MonoLabel className="uppercase">twin · marketplace workers</MonoLabel>
-      <ul className="mt-6 divide-y divide-black/8 border-y border-black/8">
-        {([
-          ["matching.worker", "RUNNING", true as const],
-          ["notify.worker", "RUNNING", true as const],
-          ["settle.worker", "RUNNING", true as const],
-          ["api.partners.test", "BLOCKED", false as const],
-        ] as const).map(([name, status, ok]) => (
-          <li key={name} className="flex items-center gap-6 py-3">
-            <CheckRow ok={ok}>{name}</CheckRow>
-            <span
-              className={cn(
-                "font-mono text-[11px] tracking-extra-tight",
-                ok ? "text-black/45" : "text-red-700",
-              )}
-            >
-              {status}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-export function MigrationHero({ tab }: { tab: 0 | 1 }) {
-  return (
-    <CompactSwap
-      desktop={<MigrationScene tab={tab} playId={0} />}
-      compact={<LockChartMobile state={tab} always />}
-    />
   );
 }

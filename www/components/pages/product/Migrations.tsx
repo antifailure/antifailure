@@ -1,21 +1,15 @@
-"use client";
-
-import { useState } from "react";
 import {
   Callout,
-  CodePanel,
   FeatureGrid,
   PageHeading,
   PageHero,
   PageSection,
   PageShell,
-  RelatedGrid,
   Split,
   Steps,
 } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
-import { LockChart, LockChartMobile } from "@/components/home/media/LockChart";
-import { MigrationScene } from "@/components/home/visuals/MigrationScene";
+import { PMG01, PMG02, PMG03, PMG04 } from "@/components/pages/figures/product";
 import { cn } from "@/lib/cn";
 
 const CAPTIONS = [
@@ -47,25 +41,13 @@ const FINDINGS = [
   { value: "Seq Scan", label: "Plan change", hint: "EXPLAIN before and after, on production's own shape", danger: true },
 ] as const;
 
-function MigrationStudio() {
-  const [active, setActive] = useState<0 | 1>(0);
-  const [playId, setPlayId] = useState(0);
+const INSIGHTS = `20260824_widen_plan_id
 
-  function cutTo(index: 0 | 1) {
-    if (index === active) return;
-    setActive(index);
-    setPlayId((n) => n + 1);
-  }
-
-  return (
-    <div className="relative z-10 w-full min-w-0">
-      <MigrationScene tab={active} playId={playId} onTab={cutTo} />
-      <p className="relative z-20 mt-10 max-w-[640px] text-[18px] leading-normal tracking-extra-tight text-black max-xl:mt-8 max-md:mt-7 max-md:text-[15px]">
-        {CAPTIONS[active]}
-      </p>
-    </div>
-  );
-}
+lock        ACCESS EXCLUSIVE  subscriptions  27.4s
+blocked     another session was seen waiting on it
+rewrite     subscriptions rewritten in full
+plan        events: Index Scan -> Seq Scan  12ms -> 410ms
+lint        changing plan_id to bigint rewrites the whole table`;
 
 export function MigrationsPage() {
   return (
@@ -76,40 +58,38 @@ export function MigrationsPage() {
         title="Catch exclusive locks before they take checkout down."
         lead="The flagship module. A fresh branch carrying production's shape applies the pending migrations while a second connection samples what is locked, then reports the strongest mode held per table, how long it was held, whether another session was left waiting on it, which tables were rewritten, and how the query plans moved."
         framed={false}
-        visual={<MigrationStudio />}
+        visual={<PMG01 captions={CAPTIONS} />}
       />
 
       <PageSection tone="sage">
-        <PageHeading
-          kicker="The finding"
-          title="<strong>A 27-second lock is a finding.</strong> Not a line in a log nobody reads."
-        />
-        <ul className="mt-16 divide-y divide-black/[0.08] border-y border-black/[0.08] max-md:mt-10">
-          {FINDINGS.map((item) => (
-            <li key={item.label} className="flex items-baseline justify-between gap-8 py-4 max-sm:flex-col max-sm:gap-2">
-              <div className="min-w-0">
-                <div className="font-mono text-[11px] font-medium tracking-[0.14em] text-gray-new-50 uppercase">
-                  {item.label}
+        <Split visual={<PMG02 />}>
+          <PageHeading
+            kicker="The finding"
+            title="<strong>A 27-second lock is a finding.</strong> Not a line in a log nobody reads."
+          />
+          <ul className="mt-16 divide-y divide-black/[0.08] border-y border-black/[0.08] max-md:mt-10">
+            {FINDINGS.map((item) => (
+              <li key={item.label} className="flex items-baseline justify-between gap-8 py-4 max-sm:flex-col max-sm:gap-2">
+                <div className="min-w-0">
+                  <div className="font-mono text-[11px] font-medium tracking-[0.14em] text-gray-new-50 uppercase">
+                    {item.label}
+                  </div>
+                  <p className="mt-1 max-w-[420px] text-[14px] leading-5 tracking-extra-tight text-gray-new-40">
+                    {item.hint}
+                  </p>
                 </div>
-                <p className="mt-1 max-w-[420px] text-[14px] leading-5 tracking-extra-tight text-gray-new-40">
-                  {item.hint}
-                </p>
-              </div>
-              <div
-                className={cn(
-                  "shrink-0 font-mono text-[18px] leading-none tracking-extra-tight tabular-nums",
-                  item.danger ? "text-red-700" : "text-black",
-                )}
-              >
-                {item.value}
-              </div>
-            </li>
-          ))}
-        </ul>
-        <div className="mt-16 overflow-hidden rounded-[12px] border border-black/[0.08] bg-white max-md:mt-10">
-          <LockChart state={0} />
-          <LockChartMobile state={0} />
-        </div>
+                <div
+                  className={cn(
+                    "shrink-0 font-mono text-[18px] leading-none tracking-extra-tight tabular-nums",
+                    item.danger ? "text-red-700" : "text-black",
+                  )}
+                >
+                  {item.value}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Split>
         <Illustrative label="Example finding">
           A rehearsal of one migration, with the numbers chosen. The measurements are the ones{" "}
           <code className="font-mono text-[12px] text-black/70">af insights</code> takes: lock mode
@@ -118,18 +98,7 @@ export function MigrationsPage() {
       </PageSection>
 
       <PageSection tone="white">
-        <Split
-          visual={
-            <CodePanel label="af insights">{`20260824_widen_plan_id
-
-lock        ACCESS EXCLUSIVE  subscriptions  27.4s
-blocked     another session was seen waiting on it
-rewrite     subscriptions rewritten in full
-plan        events: Index Scan -> Seq Scan  12ms -> 410ms
-lint        changing plan_id to bigint rewrites the whole table`}
-            </CodePanel>
-          }
-        >
+        <Split visual={<PMG03 source={INSIGHTS} />}>
           <PageHeading title="<strong>Measured, not inferred.</strong> The lock comes from pg_locks and the rewrite from Postgres itself." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Staging with a handful of rows will not show an exclusive lock or a table rewrite. A
@@ -164,14 +133,7 @@ lint        changing plan_id to bigint rewrites the whole table`}
       </PageSection>
 
       <PageSection>
-        <Split
-          visual={
-            <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">
-              <LockChart state={1} />
-              <LockChartMobile state={1} />
-            </div>
-          }
-        >
+        <Split visual={<PMG04 />}>
           <PageHeading title="<strong>Safer pattern: expand-and-contract.</strong> The lint rule carries the fix, not only the complaint." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Switch the film to expand-and-contract. The strongest lock drops to 0.4s, nothing is
@@ -209,13 +171,6 @@ lint        changing plan_id to bigint rewrites the whole table`}
         </div>
       </PageSection>
 
-      <RelatedGrid
-        items={[
-          { href: "/solutions", title: "Solutions", description: "The teams who feel this first." },
-          { href: "/product/report", title: "Safety Report", description: "How the lock becomes a GitHub check." },
-          { href: "/docs/guides/invariants", title: "Invariants docs", description: "The subscriptions demo in full." },
-        ]}
-      />
     </PageShell>
   );
 }

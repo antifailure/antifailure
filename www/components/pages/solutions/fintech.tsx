@@ -1,6 +1,15 @@
-import { FirewallScene } from "@/components/home/visuals/FirewallScene";
-import { PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
-import { AFTER_HEADING, FeatureList, Lead, Note, SectionHeading, SpecRows, Split } from "./visuals";
+import { PageHero, PageSection, PageShell } from "@/components/pages/kit";
+import { SFIN01, SFIN02 } from "@/components/pages/figures/solutions";
+import { AFTER_HEADING, FeatureList, Lead, SectionHeading, Split } from "./visuals";
+
+const FIN_SPEC: [string, string][] = [
+  ["Stripe payment", "Answered from a stateful pack, in a clone-local ledger"],
+  ["SendGrid email", "Render and capture, never deliver"],
+  ["Slack webhook", "Captured, never posted"],
+  ["Production hostname", "Block and flag as critical"],
+  ["Unknown TCP", "Deny by default"],
+  ["Attempted-effect ledger", "Every outbound attempt is recorded, including denies"],
+];
 
 export function FintechPage() {
   return (
@@ -10,7 +19,8 @@ export function FintechPage() {
         eyebrow="Solutions · Fintech"
         title="Billing, ledgers, and side effects that must never hit live processors."
         lead="The firewall answers Stripe from a stateful pack with the network unplugged. Safe State masks account identifiers inside your boundary. An invariant you write catches the duplicate ledger row, and the comment carries the rows."
-        visual={<FirewallScene />}
+        framed={false}
+        visual={<SFIN01 />}
       />
       <PageSection>
         <SectionHeading title="<strong>Simulators, not live processors.</strong> Charging a card from a twin is an existential failure." />
@@ -28,21 +38,7 @@ export function FintechPage() {
         </div>
       </PageSection>
       <PageSection tone="white">
-        <Split
-          reverse
-          visual={
-            <SpecRows
-              rows={[
-                ["Stripe payment", "Answered from a stateful pack, in a clone-local ledger"],
-                ["SendGrid email", "Render and capture, never deliver"],
-                ["Slack webhook", "Captured, never posted"],
-                ["Production hostname", "Block and flag as critical"],
-                ["Unknown TCP", "Deny by default"],
-                ["Attempted-effect ledger", "Every outbound attempt is recorded, including denies"],
-              ]}
-            />
-          }
-        >
+        <Split reverse visual={<SFIN02 rows={FIN_SPEC} />}>
           <SectionHeading title="<strong>Containment is the product surface.</strong>" />
           <Lead>
             We do not claim every workflow is automatically compliant. We claim evidence under
@@ -52,18 +48,19 @@ export function FintechPage() {
         </Split>
       </PageSection>
       <PageSection tone="sage">
-        <Note label="Existential failure" tone="block">
-          Charging a live processor, emailing a real customer, or invoking a production webhook from a twin
-          is not a warning. It is a failed containment model.
-        </Note>
+        <Split
+          visual={
+            <div className="border border-black/12 bg-[#f7f7f5] px-5 py-5">
+              <p className="text-[16px] leading-7 tracking-extra-tight text-gray-new-40">
+                Charging a live processor, emailing a real customer, or invoking a production webhook from a twin
+                is not a warning. It is a failed containment model.
+              </p>
+            </div>
+          }
+        >
+          <SectionHeading title="<strong>Existential failure.</strong>" />
+        </Split>
       </PageSection>
-      <RelatedGrid
-        items={[
-          { href: "/product/firewall", title: "Side-Effect Firewall", description: "How egress is denied and simulated." },
-          { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
-          { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
-        ]}
-      />
     </PageShell>
   );
 }

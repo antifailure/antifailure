@@ -1,8 +1,8 @@
-import { PageHeading, PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
+import { PageHeading, PageHero, PageSection, PageShell, Split } from "@/components/pages/kit";
 import { ReportScene } from "@/components/home/visuals/ReportScene";
 import { Illustrative } from "@/components/layout/Illustrative";
-import { Hairline, MonoLabel, Panel, StatusPill } from "@/components/home/visuals/primitives";
-import { cn } from "@/lib/cn";
+import { PRP01, PRP02 } from "@/components/pages/figures/product";
+import { MonoLabel, StatusPill } from "@/components/home/visuals/primitives";
 
 type Tone = "PASS" | "FAIL" | "UNVERIFIED";
 
@@ -48,49 +48,6 @@ const VERDICTS: { verdict: string; tone: Tone; title: string; body: string }[] =
 ];
 
 /** The sections af ci actually writes, in the order it writes them. */
-const CONTENTS: { label: string; value: string; tone: Tone; pill?: string }[] = [
-  {
-    label: "Workflows",
-    value: "4 passed, 1 failed, with the trace and the video behind the failure",
-    tone: "FAIL",
-  },
-  {
-    label: "Invariants",
-    value: "no account has two active subscriptions: 3 rows returned, listed in full",
-    tone: "FAIL",
-  },
-  {
-    label: "Reproduction",
-    value: "the steps to see the failure yourself, folded under the comment",
-    tone: "PASS",
-    pill: "PASS",
-  },
-  {
-    label: "Outbound",
-    value: "18 allowed, 2 captured, 1 mocked, 1 refused host nothing in the manifest mentions",
-    tone: "PASS",
-    pill: "PASS",
-  },
-  {
-    label: "Load",
-    value: "2,140 requests at 18 a second, p95 412ms on a route production serves in 180ms",
-    tone: "PASS",
-    pill: "PASS",
-  },
-  {
-    label: "Golden",
-    value: "branched from a verified golden, which is the only kind that can be branched",
-    tone: "PASS",
-    pill: "PASS",
-  },
-];
-
-const CI_CHECKS: { name: string; time: string }[] = [
-  { name: "Lint / typecheck", time: "12s" },
-  { name: "Unit tests", time: "1m 04s" },
-  { name: "Docker build", time: "2m 11s" },
-];
-
 const GATES: {
   tone: Tone;
   pr: string;
@@ -121,173 +78,6 @@ const GATES: {
   },
 ];
 
-function ToneDot({ tone }: { tone: Tone }) {
-  return (
-    <span
-      className={cn(
-        "size-1.5 shrink-0 rounded-full",
-        tone === "PASS" && "bg-[#33bf00]",
-        tone === "UNVERIFIED" && "bg-black/30",
-        tone === "FAIL" && "bg-red-600",
-      )}
-      aria-hidden
-    />
-  );
-}
-
-function GateCard({ tone, pr, title, evidence, merge }: (typeof GATES)[number]) {
-  return (
-    <Panel className="rounded-[12px] bg-white">
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
-        <span className="font-mono text-[11px] tracking-extra-tight text-black/60">{pr}</span>
-        <StatusPill tone={tone} />
-      </div>
-      <Hairline />
-      <div className="px-4 py-4">
-        <div className="font-mono text-[13px] tracking-extra-tight text-black">{title}</div>
-        <p className="mt-1.5 font-mono text-[11px] leading-4 tracking-extra-tight text-black/50">{evidence}</p>
-      </div>
-      <Hairline />
-      <div
-        className={cn(
-          "px-4 py-2.5 font-mono text-[10px] tracking-extra-tight",
-          tone === "PASS" && "text-[#285D49]",
-          tone === "UNVERIFIED" && "text-black/60",
-          tone === "FAIL" && "text-red-700",
-        )}
-      >
-        {merge}
-      </div>
-    </Panel>
-  );
-}
-
-function PrCheckChrome() {
-  return (
-    <Panel className="rounded-[12px] bg-white">
-      <div className="flex items-center justify-between gap-4 px-4 py-2.5">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="inline-flex items-center border border-black/[0.08] px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight text-black/70">
-            pr/184
-          </span>
-          <span className="truncate font-mono text-[13px] tracking-extra-tight text-black">add access_tier</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] tracking-extra-tight text-black/55">required · 1 of 4</span>
-          <StatusPill tone="FAIL">FAIL</StatusPill>
-        </div>
-      </div>
-      <Hairline />
-
-      <ul>
-        {CI_CHECKS.map((check) => (
-          <li key={check.name} className="flex items-center justify-between gap-3 px-4 py-2">
-            <div className="flex min-w-0 items-center gap-2 font-mono text-[12px] tracking-extra-tight text-black/55">
-              <ToneDot tone="PASS" />
-              <span className="truncate">{check.name}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] tabular-nums tracking-extra-tight text-black/30">{check.time}</span>
-              <StatusPill tone="PASS" />
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <Hairline />
-
-      <div className="px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-2">
-            <ToneDot tone="FAIL" />
-            <div className="min-w-0">
-              <div className="font-mono text-[12px] tracking-extra-tight text-black">
-                Antifailure / deployment safety
-              </div>
-              <div className="mt-0.5 font-mono text-[10px] tracking-extra-tight text-black/55">
-                env-08f2 · 4m 12s
-              </div>
-            </div>
-          </div>
-          <StatusPill tone="FAIL">FAIL</StatusPill>
-        </div>
-
-        <p className="mt-4 font-mono text-[13px] tracking-extra-tight text-black">
-          1 workflow failed, and 1 invariant did not hold.
-        </p>
-        <p className="mt-2 max-w-[640px] font-mono text-[11px] leading-5 tracking-extra-tight text-black/65">
-          Invariant `one_active_subscription` does not hold. No account has more than one active
-          subscription row.
-        </p>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[380px] text-left font-mono text-[11px] tracking-extra-tight tabular-nums">
-            <thead>
-              <tr className="text-black/55">
-                <th className="py-1 pr-6 font-normal">account_id</th>
-                <th className="py-1 pr-6 font-normal">active</th>
-                <th className="py-1 font-normal">latest</th>
-              </tr>
-            </thead>
-            <tbody className="text-black/70">
-              {[
-                ["acct_00418", "2", "sub_9c41"],
-                ["acct_02277", "2", "sub_a180"],
-                ["acct_09903", "3", "sub_b774"],
-              ].map((row) => (
-                <tr key={row[0]} className="border-t border-black/[0.06]">
-                  <td className="py-1 pr-6">{row[0]}</td>
-                  <td className="py-1 pr-6">{row[1]}</td>
-                  <td className="py-1">{row[2]}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="mt-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/60">
-            How to see it yourself
-          </div>
-          <p className="mt-1 font-mono text-[11px] leading-5 tracking-extra-tight text-black">
-            open /settings/billing · click Upgrade · submit · trace.zip · video.webm
-          </p>
-        </div>
-      </div>
-
-      <Hairline />
-
-      <div className="px-4 py-2">
-        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/60">In the report</div>
-      </div>
-      <Hairline />
-      {CONTENTS.map((row, i) => (
-        <div key={row.label}>
-          {i > 0 ? <Hairline /> : null}
-          <div className="flex items-center justify-between gap-4 px-4 py-2.5">
-            <div className="min-w-0">
-              <div className="font-mono text-[12px] tracking-extra-tight text-black">{row.label}</div>
-              <div className="mt-0.5 font-mono text-[11px] tracking-extra-tight text-black/60">{row.value}</div>
-            </div>
-            <StatusPill tone={row.tone}>{row.pill ?? row.tone}</StatusPill>
-          </div>
-        </div>
-      ))}
-
-      <Hairline />
-      <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <div>
-          <div className="font-mono text-[12px] tracking-extra-tight text-black/35">Merge pull request</div>
-          <div className="mt-0.5 font-mono text-[10px] tracking-extra-tight text-black/30">
-            inert · required check failed
-          </div>
-        </div>
-        <span className="border border-black/[0.08] bg-white px-2.5 py-1 font-mono text-[10px] tracking-extra-tight text-black/30">
-          Merge
-        </span>
-      </div>
-    </Panel>
-  );
-}
-
 export function ReportPage() {
   return (
     <PageShell>
@@ -299,16 +89,23 @@ export function ReportPage() {
       />
 
       <PageSection>
-        <PageHeading
-          kicker="Required check"
-          title="<strong>It looks like a GitHub check</strong> because that is the product surface."
-        />
-        <ReportScene />
-        <Illustrative>
-          One shaped run, played through. The sections, the order and the headline sentence are the
-          ones <code className="font-mono text-[12px] text-black/70">af ci</code> writes. The
-          numbers in it were chosen, not measured.
-        </Illustrative>
+        <Split
+          visual={
+            <div className="w-full max-w-[560px]">
+              <ReportScene />
+              <Illustrative>
+                One shaped run, played through. The sections, the order and the headline sentence are the
+                ones <code className="font-mono text-[12px] text-black/70">af ci</code> writes. The
+                numbers in it were chosen, not measured.
+              </Illustrative>
+            </div>
+          }
+        >
+          <PageHeading
+            kicker="Required check"
+            title="<strong>It looks like a GitHub check</strong> because that is the product surface."
+          />
+        </Split>
       </PageSection>
 
       <PageSection tone="white">
@@ -338,20 +135,19 @@ export function ReportPage() {
       </PageSection>
 
       <PageSection>
-        <PageHeading title="<strong>Attached to the pull request.</strong> Not a dataset. Not a preview URL." />
-        <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          "Error rate increased" is insufficient. When an invariant does not hold the comment carries
-          the offending rows, because a reader who has to go and run the query has been told there is
-          a problem and not what it is. When a workflow fails it carries the steps, the Playwright
-          trace and the video.
-        </p>
-        <div className="mt-12 grid grid-cols-3 gap-5 max-xl:grid-cols-1">
+        <Split visual={<PRP02 />}>
+          <PageHeading title="<strong>Attached to the pull request.</strong> Not a dataset. Not a preview URL." />
+          <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
+            "Error rate increased" is insufficient. When an invariant does not hold the comment carries
+            the offending rows, because a reader who has to go and run the query has been told there is
+            a problem and not what it is. When a workflow fails it carries the steps, the Playwright
+            trace and the video.
+          </p>
+        </Split>
+        <div className="mt-12 grid grid-cols-3 gap-x-16 gap-y-12 max-xl:grid-cols-1">
           {GATES.map((gate) => (
-            <GateCard key={gate.pr} {...gate} />
+            <PRP01 key={gate.pr} {...gate} />
           ))}
-        </div>
-        <div className="mt-5">
-          <PrCheckChrome />
         </div>
         <Illustrative label="Example finding">
           An invariant violation in the shape the comment renders one: the statement's name, its
@@ -410,26 +206,26 @@ export function ReportPage() {
       </PageSection>
 
       <PageSection tone="sage">
-        <PageHeading title="<strong>Center the deployment decision.</strong> Environment creation, data, agents, and load are supporting systems." />
-        <div className="mt-8 flex items-center gap-2">
-          <StatusPill tone="PASS" />
-          <StatusPill tone="FAIL" />
-          <StatusPill tone="UNVERIFIED" />
-        </div>
-        <p className="mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Every workflow and report answers one question: whether this deployment is safe to ship
-          against real data, real concurrency, real workers, and the deploy itself. If the product
-          becomes a bundle of tools, it has failed.
-        </p>
+        <Split
+          visual={
+            <div className="border border-black/12 bg-[#f7f7f5] px-5 py-5">
+              <div className="flex items-center gap-2">
+                <StatusPill tone="PASS" />
+                <StatusPill tone="FAIL" />
+                <StatusPill tone="UNVERIFIED" />
+              </div>
+              <p className="mt-6 text-[16px] leading-7 tracking-extra-tight text-gray-new-40">
+                Every workflow and report answers one question: whether this deployment is safe to ship
+                against real data, real concurrency, real workers, and the deploy itself. If the product
+                becomes a bundle of tools, it has failed.
+              </p>
+            </div>
+          }
+        >
+          <PageHeading title="<strong>Center the deployment decision.</strong> Environment creation, data, agents, and load are supporting systems." />
+        </Split>
       </PageSection>
 
-      <RelatedGrid
-        items={[
-          { href: "/product/load", title: "Load", description: "Where a latency regression is measured." },
-          { href: "/product/twins", title: "Isolated Twin", description: "What the run is carried out inside." },
-          { href: "/product/migrations", title: "Migration Safety", description: "The lock that a rehearsal finds." },
-        ]}
-      />
     </PageShell>
   );
 }
