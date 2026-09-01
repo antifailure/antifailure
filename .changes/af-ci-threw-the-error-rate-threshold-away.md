@@ -21,3 +21,10 @@ to compare against. `af load run` has reported that for a while, on the
 argument that a threshold which measured nothing is not a threshold that held,
 and `af ci` said nothing, so a report that could not compare read exactly like
 one that compared and was happy.
+
+And the third thing that block dropped: the second return of `o.Load`, the
+routes the generator would not send because nothing in the manifest named them
+safe. It was discarded at the call site, so `af ci --load` said the same thing
+whether the safe list let through every route or one out of forty. The request
+count cannot show it, because 500 requests at one route looks like 500 across
+forty. `af load run` has always reported it.

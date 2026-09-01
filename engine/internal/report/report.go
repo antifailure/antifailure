@@ -88,6 +88,15 @@ type Load struct {
 	ErrorRate float64
 	P95Ms     float64
 	Regressed []string
+	// Refused are the routes the generator would not send, because nothing in
+	// the manifest named them safe.
+	//
+	// Without this the comment said the same thing whether the safe list let
+	// through every route or one out of forty, so a load run that exercised a
+	// fortieth of the application read exactly like one that exercised all of
+	// it. The number of requests cannot show it: sending 500 requests at one
+	// route looks like sending 500 across forty.
+	Refused []string
 }
 
 // Egress summarises outbound traffic.
@@ -570,6 +579,10 @@ func (r Run) Markdown() string {
 			l.Sent, l.Rate, l.P95Ms, l.ErrorRate*100)
 		if len(l.Regressed) > 0 {
 			fmt.Fprintf(&b, "Slower than production: %s\n", strings.Join(l.Regressed, ", "))
+		}
+		if len(l.Refused) > 0 {
+			fmt.Fprintf(&b, "%s were not sent, because nothing in the manifest named them safe: %s\n",
+				plural(len(l.Refused), "route", "routes"), strings.Join(l.Refused, ", "))
 		}
 		b.WriteString("\n")
 	}

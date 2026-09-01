@@ -206,9 +206,9 @@ change.`),
 
 			if withLoad {
 				e.Out.Section("Generating load")
-				if res, _, lErr := o.Load(ctx, env.LoadOptions{Duration: 30 * time.Second}); lErr == nil {
+				if res, refused, lErr := o.Load(ctx, env.LoadOptions{Duration: 30 * time.Second}); lErr == nil {
 					p95, errorRate := o.Thresholds()
-					run.Load = loadReport(res, p95, errorRate, &run)
+					run.Load = loadReport(res, refused, p95, errorRate, &run)
 				}
 			}
 
@@ -573,10 +573,17 @@ func reportTeardown(e *Env, td *env.Teardown, err error) {
 // argument `af load run` already makes: a threshold that was in force and
 // measured nothing is not a threshold that held, and a report that omits it
 // reads exactly like one that checked.
-func loadReport(res *load.Result, p95Increase, errorRate float64, run *report.Run) *report.Load {
+// The `refused` return was the third defect in that block and it was DISCARDED
+// at the call site, so `af ci --load` said the same thing whether the safe list
+// let through every route or one out of forty. `af load run` has always
+// reported it. Found by `loadgolden`, which had the other half of this block.
+func loadReport(
+	res *load.Result, refused []load.Route, p95Increase, errorRate float64, run *report.Run,
+) *report.Load {
 	l := &report.Load{
 		Sent: res.Sent, Rate: res.Rate,
 		ErrorRate: res.ErrorRate, P95Ms: res.Overall.P95Ms,
+		Refused: refusedRoutes(refused),
 	}
 	for _, b := range res.Breaches(p95Increase, errorRate) {
 		l.Regressed = append(l.Regressed, b.What)
@@ -587,4 +594,22 @@ func loadReport(res *load.Result, p95Increase, errorRate float64, run *report.Ru
 				"so nothing was measured against it")
 	}
 	return l
+}
+
+// refusedRoutes names the routes the generator would not send.
+//
+// nil for an empty list rather than an empty slice, so the report's line drops
+// out entirely instead of printing a heading over nothing. A section saying
+// "0 routes were not sent" is a line the reader pays for and learns nothing
+// from.
+func refusedRoutes(refused []load.Route) []string {
+	if len(refused) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(refused))
+	for _, r := range refused {
+		out = append(out, r.String())
+	}
+	sort.Strings(out)
+	return out
 }
