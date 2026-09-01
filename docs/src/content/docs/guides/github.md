@@ -203,6 +203,89 @@ The control plane's own gate in front of this one is not configurable: it
 applies `label` behaviour to every repository, because it never reads your
 manifest, so it cannot honour `never` or `always`.
 
+## Sending events with no token at all
+
+A workflow that reports to a control plane needs a credential, and the obvious
+one is wrong. A repository secret holding an engine token is readable by every
+workflow in the repository, has to be created by a person before anything works,
+and never expires, so it is the single thing most likely to still be valid a
+year after whoever pasted it has left.
+
+So the job proves who it is instead. GitHub Actions can mint a short lived
+OpenID Connect token for a job, signed by GitHub, and the control plane
+exchanges it for an engine token that expires in fifteen minutes.
+
+```yaml
+permissions:
+  id-token: write        # without this GitHub mints nothing
+  contents: read
+```
+
+```bash
+# The identity, from the runner. ACTIONS_ID_TOKEN_REQUEST_* are set by the
+# runner only when id-token: write is granted.
+identity=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+  "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=antifailure-control-plane" | jq -r .value)
+
+# The exchange.
+curl -sS -X POST "$AF_CONTROL_PLANE/v1/auth/github-oidc" \
+  -H 'content-type: application/json' \
+  -d "{\"token\": \"$identity\"}"
+# {"token": "aft_...", "expires_at": "...", "org_id": "...", "repository": "owner/name"}
+```
+
+The audience is `antifailure-control-plane` and it is not optional. GitHub's
+default audience is your organisation's URL, which every workflow of every
+repository in the organisation gets by asking for nothing, so a token minted for
+something else entirely would be a valid credential here. Naming an audience
+makes the token useless anywhere else and makes a token minted elsewhere useless
+here.
+
+### Claim the repository first, once
+
+Before any of that works, an owner or admin claims the repository:
+
+```bash
+af token list                   # any terminal already signed in with tokens.manage
+curl -sS -X POST "$AF_CONTROL_PLANE/v1/oidc/bindings" \
+  -H "authorization: Bearer $AF_CONTROL_PLANE_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"repository": "your-org/your-repo"}'
+```
+
+**Why there is a step here at all**, because it is the part that looks like
+friction and is not. A GitHub identity token says, truthfully and with a signature nobody
+can fake, "this job runs in repository R". It says nothing about who R belongs
+to. Anybody
+with a GitHub account can create a repository, put `id-token: write` in a
+workflow, and mint a genuine, correctly signed token naming it. A control plane
+that read that claim and looked up "the organisation for that repository's
+owner" would have verified a stranger's signature perfectly and then let them
+write into whichever tenant the lookup landed on.
+
+So the claim is what grants; the token only identifies. A repository nobody has
+claimed is refused, with `"reason": "no_binding"`, and that refusal is the
+feature rather than a gap in it.
+
+You can only claim a repository whose owner your organisation has the
+Antifailure GitHub App installed on, because that installation is GitHub telling
+this control plane you control the account. One repository can be claimed by one
+organisation: a second claim is refused with `"reason": "already_claimed"`.
+
+Revoking a claim stops new exchanges **and kills the credentials that claim
+already issued**, which is what makes it a revocation rather than a note:
+
+```bash
+curl -sS -X DELETE "$AF_CONTROL_PLANE/v1/oidc/bindings/your-org/your-repo" \
+  -H "authorization: Bearer $AF_CONTROL_PLANE_TOKEN"
+# {"revoked": true, "repository": "your-org/your-repo", "tokensRevoked": 1}
+```
+
+A fork gets none of this. GitHub does not grant `id-token: write` to a pull
+request job running on a fork, so there is no identity to exchange, and the fork
+case is closed by GitHub's own rules rather than by this control plane
+remembering to check.
+
 ## Teardown, and what "torn down" means
 
 An environment that outlives its pull request is the leak this product exists to
