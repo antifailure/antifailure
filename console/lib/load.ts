@@ -562,17 +562,18 @@ export function readBreach(v: unknown): Breach | null {
  * timeouts and a thousand connection refusals are the same number and
  * completely different problems.
  */
-export const ERROR_REASONS = [
-  "timeout",
-  "connection refused",
-  "connection reset",
-  "name not resolved",
-  "malformed request",
-  "request failed",
-] as const;
-
-/** What each reason usually means, so a reader is not left with a bare string.
- *  Unknown reasons are rendered without a note rather than guessed at. */
+/**
+ * What each reason usually means, so a reader is not left with a bare string.
+ *
+ * The keys ARE the closed set `classify()` produces, and there is deliberately
+ * no second constant listing them. A separate `ERROR_REASONS` array existed
+ * here, nothing read it, and two declarations of one closed set are two things
+ * that can drift apart while both look authoritative.
+ *
+ * A reason not in this table is rendered plainly rather than dropped or
+ * guessed at, because a reason the console has not been taught is still the
+ * truth about the run.
+ */
 export const REASON_NOTES: Record<string, string> = {
   timeout: "The application did not answer inside the request deadline.",
   "connection refused": "Nothing was listening. Usually the service is not up yet.",
