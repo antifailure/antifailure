@@ -363,6 +363,16 @@ describe(
       return call(admin, 'POST', '/v1/oidc/bindings', { repository: repo })
     }
 
+    /** The exact statement claimRepository runs, so the transaction level test
+     *  exercises the mechanism the route relies on rather than a paraphrase. */
+    function sqlFor(repo: string) {
+      return rawSql`
+        INSERT INTO oidc_repository_bindings (org_id, repository)
+        VALUES (${org.orgId}::uuid, ${repo})
+        ON CONFLICT (repository) WHERE revoked_at IS NULL DO NOTHING
+        RETURNING id`
+    }
+
     /** Whether a bearer token is accepted by the engine surface. An empty batch
      *  is refused on its contents, which is a different and correct answer, so
      *  anything but 401 means the credential was accepted. */
@@ -836,6 +846,89 @@ describe(
         (first.json.binding as { id: string }).id,
         'the second claim created a second row',
       )
+    })
+
+    test('two administrators claiming at once make one claim, not an error', async () => {
+      // Two requests in flight together, which is one person double clicking or
+      // two owners on a call with one link pasted into it.
+      //
+      // Said plainly, because a test that claims more than it shows is worse
+      // than none: this does NOT reproduce the interleaving that breaks a
+      // read-then-write. It was run against that shape on purpose and passed,
+      // because the second request's read lands after the first has committed.
+      // The guarantee comes from the partial unique index and the ON CONFLICT
+      // in claimRepository, and the test below drives two overlapping
+      // transactions directly to show the index doing it. What this one
+      // covers is the ordinary observable outcome, which is worth holding on
+      // its own: one row, one audit entry, and nobody told their own
+      // repository belongs to somebody else.
+      const admin = await cliToken('owner', ['tokens.manage'])
+      const [first, second] = await Promise.all([
+        call(admin, 'POST', '/v1/oidc/bindings', { repository }),
+        call(admin, 'POST', '/v1/oidc/bindings', { repository }),
+      ])
+      assert.equal(first.status, 201, JSON.stringify(first.json))
+      assert.equal(second.status, 201, JSON.stringify(second.json))
+      assert.equal(
+        (first.json.binding as { id: string }).id,
+        (second.json.binding as { id: string }).id,
+        'the two claims are different rows, so one repository has two live claims',
+      )
+
+      const rows = await api.admin<{ n: string }[]>`
+        SELECT count(*) AS n FROM oidc_repository_bindings
+        WHERE repository = ${repository} AND revoked_at IS NULL`
+      assert.equal(Number(rows[0]!.n), 1)
+
+      // And exactly one audit entry, because the second call changed nothing.
+      const audited = await api.admin<{ n: string }[]>`
+        SELECT count(*) AS n FROM audit_entries
+        WHERE org_id = ${org.orgId} AND action = 'oidc_binding.created'`
+      assert.equal(Number(audited[0]!.n), 1)
+    })
+
+    test('the index refuses a second live claim from inside an overlapping transaction', async () => {
+      // The mechanism the fix rests on, driven where the interleaving can be
+      // forced rather than hoped for. Both transactions are open and past their
+      // reads before either inserts, which is exactly the window a
+      // read-then-write cannot survive.
+      //
+      // Under READ COMMITTED the second insert blocks on the first's index
+      // entry and, once that commits, finds the conflict and writes nothing. So
+      // the losing transaction gets an empty result rather than an error, which
+      // is what lets claimRepository answer with the existing claim instead of
+      // refusing a repository the caller already owns.
+      let releaseFirst: () => void = () => {}
+      const firstMayCommit = new Promise<void>((r) => {
+        releaseFirst = r
+      })
+      let secondHasRead: () => void = () => {}
+      const secondRead = new Promise<void>((r) => {
+        secondHasRead = r
+      })
+
+      const insert = sqlFor(repository)
+      const first = api.pool.withTenant({ orgId: org.orgId }, async (db) => {
+        const rows = await db.execute<{ id: string }>(insert)
+        // Hold the transaction open until the other one has read and tried.
+        await Promise.race([secondRead, new Promise((r) => setTimeout(r, 5000))])
+        return rows.length
+      })
+      const second = api.pool.withTenant({ orgId: org.orgId }, async (db) => {
+        await db.execute(rawSql`SELECT 1 FROM oidc_repository_bindings WHERE repository = ${repository}`)
+        secondHasRead()
+        const rows = await db.execute<{ id: string }>(insert)
+        return rows.length
+      })
+      releaseFirst()
+      await firstMayCommit
+      const [a, b] = await Promise.all([first, second])
+
+      assert.equal(a + b, 1, `the two transactions inserted ${a + b} rows between them`)
+      const rows = await api.admin<{ n: string }[]>`
+        SELECT count(*) AS n FROM oidc_repository_bindings
+        WHERE repository = ${repository} AND revoked_at IS NULL`
+      assert.equal(Number(rows[0]!.n), 1)
     })
 
     test('claims are listed with the audience a workflow has to ask for', async () => {

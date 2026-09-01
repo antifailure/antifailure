@@ -150,23 +150,6 @@ function hashToken(token: string): Buffer {
   return createHash('sha256').update(token, 'utf8').digest()
 }
 
-/**
- * The SQLSTATE underneath whatever the query builder wrapped the failure in.
- *
- * Drizzle reports a failure as "Failed query: <sql>" and hangs the driver's
- * error off `cause`, so reading `err.code` finds undefined and a branch that
- * looks like it handles a constraint violation handles nothing.
- */
-function sqlstate(err: unknown): string | undefined {
-  let cur: unknown = err
-  for (let depth = 0; depth < 8 && cur; depth += 1) {
-    const e = cur as { code?: unknown; cause?: unknown }
-    if (typeof e.code === 'string' && /^[0-9A-Z]{5}$/.test(e.code)) return e.code
-    cur = e.cause
-  }
-  return undefined
-}
-
 /** owner/name as this table stores it, or null when it is not a repository. */
 function normalizeRepository(value: string): string | null {
   const repository = value.trim().toLowerCase()
@@ -374,59 +357,63 @@ export async function claimRepository(
       )
     }
 
-    // Idempotent on a live claim. Somebody running the same command twice, or
-    // two administrators setting the same repository up, must not be told the
-    // second attempt failed.
-    const existing = await db.execute<{
+    // Insert first, and let the index arbitrate. A SELECT followed by an INSERT
+    // reads correctly and races: two administrators pressing the same button,
+    // or one person double clicking, both find nothing and both insert, and the
+    // loser of that race would be told its repository is claimed by somebody
+    // else when the claim is its own. ON CONFLICT is what makes the check and
+    // the write one decision instead of two.
+    //
+    // The conflict target names the partial index explicitly, because that is
+    // the only unique constraint on this column and a bare `(repository)` would
+    // not infer it.
+    //
+    // A 23505 cannot reach here, which matters: inside a transaction it would
+    // abort everything after it, so the recovery below could not run at all.
+    const created = await db.execute<{
       id: string
       repository: string
       created_at: Date
       last_used_at: Date | null
       revoked_at: Date | null
     }>(sql`
-      SELECT id, repository, created_at, last_used_at, revoked_at
-      FROM oidc_repository_bindings
-      WHERE repository = ${repository} AND revoked_at IS NULL`)
-    if (existing[0]) return asRow(existing[0])
+      INSERT INTO oidc_repository_bindings (org_id, repository, created_by, created_at)
+      VALUES (${input.orgId}::uuid, ${repository}, ${input.actorUserId}::uuid,
+              ${now.toISOString()})
+      ON CONFLICT (repository) WHERE revoked_at IS NULL DO NOTHING
+      RETURNING id, repository, created_at, last_used_at, revoked_at`)
 
-    const created = await db
-      .execute<{
+    if (!created[0]) {
+      // Something already holds the live claim. Whose it is decides the answer,
+      // and the tenant policy answers that for free: a row this transaction can
+      // see belongs to this organization.
+      const mine = await db.execute<{
         id: string
         repository: string
         created_at: Date
         last_used_at: Date | null
         revoked_at: Date | null
       }>(sql`
-        INSERT INTO oidc_repository_bindings (org_id, repository, created_by, created_at)
-        VALUES (${input.orgId}::uuid, ${repository}, ${input.actorUserId}::uuid,
-                ${now.toISOString()})
-        RETURNING id, repository, created_at, last_used_at, revoked_at`)
-      .catch((err: unknown) => {
-        // 23505 on the partial unique index over live rows. The select above
-        // found nothing, so the row that collided belongs to an organization
-        // this transaction cannot see, and that is the answer: one repository,
-        // one claim, and this one is not it. The other organization is not
-        // named, because the caller has not shown they may know.
-        //
-        // Through sqlstate() rather than off `err.code`, which is where this
-        // read it first and where the code never is: the query builder wraps
-        // the driver's error in a "Failed query" of its own and hangs the real
-        // one off `cause`, so the branch never ran and the collision surfaced
-        // as an unhandled 500. Caught by the test for a repository two
-        // organizations both claim.
-        if (sqlstate(err) === '23505') {
-          throw new BindingError(
-            'already_claimed',
-            `${repository} is already claimed by another organization on this control plane. ` +
-              'One repository can report to one organization. If that claim is yours, revoke it ' +
-              'there first; if it is not, it is somebody else claiming a repository they do not ' +
-              'run, which is worth reporting.',
-          )
-        }
-        throw err
-      })
+        SELECT id, repository, created_at, last_used_at, revoked_at
+        FROM oidc_repository_bindings
+        WHERE repository = ${repository} AND revoked_at IS NULL`)
+      // Ours: the same command run twice, or two administrators setting the
+      // same repository up. Answered with the claim rather than an error, and
+      // no second audit entry, because nothing changed.
+      if (mine[0]) return asRow(mine[0])
 
-    const row = asRow(created[0]!)
+      // Not ours, and the other organization is not named because the caller
+      // has not shown they may know it exists.
+      throw new BindingError(
+        'already_claimed',
+        `${repository} is already claimed by another organization on this control plane. ` +
+          'One repository can report to one organization. If that claim is yours, revoke it ' +
+          'there first; if it is not, it is somebody else claiming a repository they do not ' +
+          'run, which is worth reporting.',
+      )
+    }
+
+    const row = asRow(created[0])
     await appendAudit(db, {
       orgId: input.orgId,
       actorUserId: input.actorUserId,
