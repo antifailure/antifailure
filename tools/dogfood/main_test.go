@@ -438,6 +438,18 @@ func TestTheNightlyCorpusIsEveryExample(t *testing.T) {
 		}
 	}
 
+	// The repository's own manifest, which is not an example and is the one
+	// thing this job was actually covering before it read the matrix at all.
+	// Every leg ran the root, so fixing the interpolation without keeping the
+	// root would have removed real coverage while turning the job green. That
+	// trade is worth refusing out loud rather than in a comment somebody
+	// deletes, so it is asserted here.
+	if !inMatrix["."] {
+		t.Error("the nightly matrix does not name '.', so nothing runs the repository's " +
+			"own manifest. That was this job's only real coverage for the whole of its " +
+			"history and it must not be dropped in the course of fixing the matrix.")
+	}
+
 	found, err := filepath.Glob(filepath.Join(root, "examples", "*", "antifailure.yaml"))
 	if err != nil {
 		t.Fatalf("could not look for examples: %v", err)

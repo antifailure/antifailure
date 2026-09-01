@@ -313,11 +313,20 @@ jobs:
       # real name here was reachable only because the directory is called
       # go-api while the manifest inside it is named orders-api.
       #
+      # '.' is the repository's own manifest and it is FIRST on purpose. Before
+      # the matrix was read at all, every leg ran './antifailure.yaml' because
+      # the guard and the -C both named the root, so the one thing this job was
+      # really covering was the control plane dogfooding itself, three times in
+      # parallel under three example names. Reading the matrix correctly and
+      # nothing else would have deleted that coverage while turning the job
+      # green, which is a worse outcome than the red it replaces. So the root
+      # stays, named rather than accidental.
+      #
       # Kept honest by TestTheNightlyCorpusIsEveryExample in tools/dogfood,
-      # which fails on a name here with no manifest behind it and on an
-      # example on disk that this list leaves out.
+      # which fails on a name here with no manifest behind it, on an example on
+      # disk that this list leaves out, and on the root going missing.
       matrix:
-        manifest: [examples/django-api, examples/go-api, examples/next-app]
+        manifest: ['.', examples/django-api, examples/go-api, examples/next-app]
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -420,7 +429,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # By index rather than by manifest: an artifact name cannot hold a
-          # slash, and examples/orders-api has one.
+          # slash, and every entry in the matrix but the root has one. The
+          # index is the matrix order, so leg 0 is the repository itself and
+          # the rest follow the list above.
           name: nightly-${{ strategy.job-index }}
           path: |
             dogfood-record.json
