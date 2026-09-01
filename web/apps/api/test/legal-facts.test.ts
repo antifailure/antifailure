@@ -230,6 +230,101 @@ describe('the published retention numbers are the ones the infrastructure sets',
   })
 })
 
+describe('the deletion wording matches what the schema actually does', () => {
+  /**
+   * The strongest claim a deletion page can make is that a row CANNOT be
+   * removed, and that claim is only true if a constraint enforces it.
+   *
+   * This exists because a migration comment asserted exactly that:
+   * `audit_entries.actor_user_id` references `users` with NO ACTION, so the
+   * database refuses to delete a person who has ever acted. It does not.
+   * `0001_init.sql` declares ON DELETE SET NULL, nothing since alters it, and a
+   * live database reads `confdeltype = 'n'`. The comment was written about a
+   * guarantee nobody had built, and it was one review away from becoming
+   * published legal text.
+   *
+   * So the gate is a conditional rather than an assertion of today's state: the
+   * strong wording is permitted only alongside the strong constraint. It passes
+   * now, when the pages make the weaker claim and the constraint is weak. It
+   * passes later, when a migration adds the constraint and the pages are
+   * updated. It fails on the combination that is a lie.
+   */
+  const IRREMOVABLE = [
+    /cannot be removed/i,
+    /cannot be deleted/i,
+    /the row is retained so the audit/i,
+    /refuses to delete a person/i,
+  ]
+
+  /** What the migrations say happens to an audit entry when its actor goes. */
+  async function onDeleteForActor(): Promise<string | null> {
+    const dir = path.join(repoRoot, 'web/packages/db/migrations')
+    const { readdir } = await import('node:fs/promises')
+    const files = (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort()
+    let answer: string | null = null
+    for (const file of files) {
+      const sql = await readFile(path.join(dir, file), 'utf8')
+      // The column declaration, and any later constraint that replaces it. Last
+      // one wins, which is the order the migrations apply in.
+      for (const m of sql.matchAll(
+        /actor_user_id[\s\S]{0,120}?REFERENCES\s+users\s*\(\s*id\s*\)\s*(?:ON DELETE (SET NULL|NO ACTION|RESTRICT|CASCADE))?/gi,
+      )) {
+        // A missing ON DELETE clause means NO ACTION in SQL, and defaulting to
+        // it silently is the dangerous direction: NO ACTION is the STRONG
+        // constraint this gate permits the strong wording against. An earlier
+        // version had an off-by-one in the capture group, read SET NULL as
+        // undefined, fell back to NO ACTION, and would have certified exactly
+        // the false claim it exists to catch. So absence is reported as
+        // absence and the caller decides.
+        answer = (m[1] ?? 'ABSENT').toUpperCase()
+      }
+    }
+    return answer
+  }
+
+  it('reads the constraint it is reasoning about, so an empty parse cannot pass', async () => {
+    const found = await onDeleteForActor()
+    assert.ok(
+      found !== null,
+      'no REFERENCES users(id) was found for audit_entries.actor_user_id, so this gate is ' +
+        'reasoning about nothing. Either the column was renamed or the pattern stopped matching.',
+    )
+  })
+
+  it('permits the strong deletion wording only where a constraint enforces it', async () => {
+    const pages =
+      (await read('www/components/pages/company/Legal.tsx')) +
+      (await read('www/components/ContentSheet.tsx'))
+    const claimed = IRREMOVABLE.filter((p) => p.test(pages))
+    if (claimed.length === 0) return
+
+    const onDelete = await onDeleteForActor()
+    assert.ok(
+      // ABSENT is deliberately NOT accepted here even though SQL reads a
+      // missing clause as NO ACTION. An unstated constraint is one nobody wrote
+      // down on purpose, and this gate is about a promise somebody published.
+      onDelete === 'NO ACTION' || onDelete === 'RESTRICT',
+      `a legal page states that a row cannot be removed, and audit_entries.actor_user_id is ` +
+        `ON DELETE ${onDelete}, so the database would remove it and null the reference. Either ` +
+        `add the constraint or say the weaker thing, which is that the personal data is erased ` +
+        `and the row is kept.`,
+    )
+  })
+
+  it('records what the constraint is today, so a change to it is noticed here', async () => {
+    // Not a claim that SET NULL is right. It is where the fact is written down,
+    // so that a migration changing it turns this red and whoever changes it is
+    // sent to the page that describes deletion.
+    assert.equal(
+      await onDeleteForActor(),
+      'SET NULL',
+      'the actor reference on audit_entries changed. The deletion section of the retention ' +
+        'page describes what happens to a person who asks to be removed, and it was written ' +
+        'against SET NULL.',
+    )
+  })
+})
+
 describe('the subprocessor page describes the code that exists', () => {
   it('names a module and variables that are really there, for every conditional processor', async () => {
     // The claim being held is the weak one and the only one checkable: the code
