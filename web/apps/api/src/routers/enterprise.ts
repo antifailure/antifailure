@@ -826,9 +826,13 @@ export const accountRouter = router({
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       return c.pool.withTenant(c.tenant, async (db) => {
-        const me = await db.execute<{ github_login: string | null; email: string }>(sql`
-          SELECT github_login, email FROM users WHERE id = ${c.actor.userId}::uuid`)
-        const expected = me[0]?.github_login ?? me[0]?.email ?? ''
+        // The label, which is what the console shows in the corner and what the
+        // person can therefore read back. An earlier version asked for the
+        // GitHub login, which is the same string only for somebody who has no
+        // display name: `resolveSession` computes the label as name or login,
+        // so anybody with a name typed what they could see and was refused for
+        // a reason nothing on the screen explained.
+        const expected = c.actor.label
         if (input.confirm.trim() !== expected) {
           throw new TRPCError({
             code: 'BAD_REQUEST',

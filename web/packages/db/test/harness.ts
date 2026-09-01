@@ -312,7 +312,7 @@ export function tokenHash(value: string): Buffer {
 export async function dropTenant(admin: postgres.Sql, orgId: string): Promise<void> {
   await admin`DELETE FROM audit_entries WHERE org_id = ${orgId}`
   // Deliberately not cascaded, because the deletion record is the one row that
-  // has to outlive the organization it is about. See migrations/0021.
+  // has to outlive the organization it is about. See migrations/0022.
   await admin`DELETE FROM organization_deletions WHERE org_id = ${orgId}`
   await admin`DELETE FROM organizations WHERE id = ${orgId}`
 }

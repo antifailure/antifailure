@@ -788,7 +788,7 @@ export function createServer(options: ServerOptions) {
   // procedure would answer UNAUTHORIZED. Somebody downloading the export of a
   // deleted organization has no session at all, because the organization the
   // session belonged to no longer exists. In both cases the token in the link
-  // is what identifies the row, and the policies in migrations/0021 confine the
+  // is what identifies the row, and the policies in migrations/0022 confine the
   // caller to exactly that one.
   // -------------------------------------------------------------------------
 

@@ -896,6 +896,121 @@ function Deleting({
 }
 
 /* -------------------------------------------------------------------------
+ * Closing your own account
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Every role sees this, including viewer, because it is about the holder rather
+ * than about the organization.
+ *
+ * The copy says close and not delete, and lists what stays, because that is
+ * what the route does: `audit_entries.actor_user_id` references `users` with NO
+ * ACTION and the column is inside the hash chain, so the row cannot be removed
+ * and the entries keep the name you had at the time. A control called Delete
+ * that anonymises is a claim this product does not get to make.
+ */
+function CloseAccount({ csrf, label }: { csrf: string; label: string }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [closed, setClosed] = useState<{ removed: string[]; kept: string[] } | null>(null);
+
+  if (closed) {
+    return (
+      <Card title="Your account is closed">
+        <div className="space-y-4 px-4 py-4">
+          <div>
+            <p className="text-[13px] font-medium text-ink">What was removed</p>
+            <ul className="mt-1.5 max-w-[62ch] list-disc space-y-1 pl-5 text-[13px] leading-6 text-muted marker:text-dim">
+              {closed.removed.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <p className="text-[13px] font-medium text-ink">What was kept</p>
+            <ul className="mt-1.5 max-w-[62ch] list-disc space-y-1 pl-5 text-[13px] leading-6 text-muted marker:text-dim">
+              {closed.kept.map((k) => (
+                <li key={k}>{k}</li>
+              ))}
+            </ul>
+          </div>
+          <p className="text-[12px] leading-5 text-dim">
+            Your next request will send you to the sign-in page. Signing in again makes a new
+            account.
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card
+      title="Close your account"
+      note="Yours alone. It does not delete the organization and does not affect anybody else."
+    >
+      <div className="space-y-4 px-4 py-4">
+        <p className="max-w-[62ch] text-[13px] leading-6 text-muted">
+          Your name, email address, GitHub identity and avatar are erased, your membership of this
+          organization is removed, and every session you have signed in with stops working.
+        </p>
+        <p className="max-w-[62ch] text-[13px] leading-6 text-muted">
+          It is called closing rather than deleting because the audit log keeps what you did under
+          the name you had at the time. The log is a hash chain, so an entry cannot be rewritten,
+          and those entries go when the organization does.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="danger" onClick={() => setAsking(true)}>
+            Close my account
+          </Button>
+          {error ? <Said tone="bad">{error}</Said> : null}
+        </div>
+      </div>
+
+      <Confirm
+        open={asking}
+        title="Close your account?"
+        phrase={label}
+        confirmLabel="Close my account"
+        busy={busy}
+        error={error}
+        onCancel={() => {
+          setAsking(false);
+          setError(null);
+        }}
+        onConfirm={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            setClosed(
+              await mutate<{ removed: string[]; kept: string[] }>(
+                "account.close",
+                { confirm: label },
+                csrf,
+              ),
+            );
+            setAsking(false);
+          } catch (err) {
+            setError(saidWrong(err));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <p>
+          You lose access to this organization now. Nothing you built is removed and nobody else is
+          affected.
+        </p>
+        <p>
+          If you are the only owner, this is refused: make somebody else an owner first, or delete
+          the organization.
+        </p>
+      </Confirm>
+    </Card>
+  );
+}
+
+/* -------------------------------------------------------------------------
  * The page
  * ---------------------------------------------------------------------- */
 
@@ -934,6 +1049,7 @@ export default function SettingsPage() {
               mayDelete={mayDelete}
               onChanged={state.reload}
             />
+            <CloseAccount csrf={csrf} label={session.data?.label ?? ""} />
           </div>
         )}
       </Loaded>

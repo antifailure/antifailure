@@ -987,7 +987,7 @@ export interface HeldExport {
  * Serves the export to whoever holds the link.
  *
  * No session, no membership, no organization: after the purge none of those
- * exist. The token is the authorisation, and the policies in migrations/0021
+ * exist. The token is the authorisation, and the policies in migrations/0022
  * confine a caller declaring it to exactly this one row.
  */
 export async function readHeldExport(

@@ -339,6 +339,57 @@ describe(
         assert.match(((await third.json()) as { error: string }).error, /already been used/)
       })
 
+      /**
+       * The path that was never exercised, and that was broken.
+       *
+       * A second click on the same link returns earlier than the membership
+       * insert, on `accepted_at`, so nothing here reached the insert with a row
+       * already present until this test. What did reach it was an open
+       * invitation for somebody a GitHub sync had added in the meantime, and
+       * the code caught the duplicate key inside the transaction and carried
+       * on. postgres.js records the first failed query of a transaction and
+       * rethrows it after the callback returns, so the caller got the 23505
+       * anyway and the whole transaction rolled back: the person was refused
+       * AND the invitation was left open.
+       */
+      it('is taken up by somebody a sync added in the meantime, without failing', async () => {
+        const { token } = await invite(owner, 'raced@example.test', 'admin')
+        const joiner = await signInWithNoOrganization(h)
+        // The sync, arriving between the invitation and the click.
+        await h.admin`
+          INSERT INTO members (org_id, user_id, role, source)
+          VALUES (${org.orgId}, ${joiner.userId}, 'member', 'github')`
+
+        const accepted = await h.fetch('/auth/invitation/accept', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            cookie: joiner.cookie,
+            'x-antifailure-csrf': joiner.csrfToken,
+          },
+          body: JSON.stringify({ token }),
+        })
+        const body = await accepted.text()
+        assert.equal(accepted.status, 200, body)
+        const result = JSON.parse(body) as { alreadyMember: boolean; role: string }
+        assert.equal(result.alreadyMember, true)
+
+        // The membership that was already there is the one that stands, so the
+        // sync's role is not quietly overwritten by the invitation's.
+        const [row] = await h.admin<{ role: string; source: string }[]>`
+          SELECT role::text AS role, source FROM members
+          WHERE org_id = ${org.orgId} AND user_id = ${joiner.userId}`
+        assert.equal(row?.source, 'github')
+        assert.equal(row?.role, 'member')
+
+        // And the invitation is closed rather than left open, which is what the
+        // rolled back transaction used to leave behind.
+        const [invitation] = await h.admin<{ accepted_at: Date | null }[]>`
+          SELECT accepted_at FROM invitations
+          WHERE org_id = ${org.orgId} AND email = 'raced@example.test'`
+        assert.ok(invitation?.accepted_at, 'the invitation was left open')
+      })
+
       it('a withdrawn invitation cannot be taken up', async () => {
         const { token, id } = await invite(owner, 'withdrawn@example.test')
         await callProcedure(h, owner, 'invitations.revoke', 'mutation', { id })
@@ -809,10 +860,13 @@ describe(
 
       it('the only owner is refused, and told what to do instead', async () => {
         const owner = await signInAs(h, org, 'owner')
-        const [row] = await h.admin<{ github_login: string }[]>`
-          SELECT github_login FROM users WHERE id = ${owner.userId}`
+        // The label the console shows, which is the name when there is one.
+        // Confirming with the GitHub login instead is what a person who cannot
+        // see their own login would never type.
+        const [row] = await h.admin<{ name: string | null; github_login: string }[]>`
+          SELECT name, github_login FROM users WHERE id = ${owner.userId}`
         const { body } = await callProcedure(h, owner, 'account.close', 'mutation', {
-          confirm: row!.github_login,
+          confirm: row!.name ?? row!.github_login,
         })
         assert.equal(errorCode(body), 'BAD_REQUEST')
         assert.match(message(body), /only owner/)
@@ -833,14 +887,14 @@ describe(
       it('erases the personal data, removes the membership, and leaves the audit log intact', async () => {
         await signInAs(h, org, 'owner')
         const member = await signInAs(h, org, 'member', 'leaving')
-        const [row] = await h.admin<{ github_login: string }[]>`
-          SELECT github_login FROM users WHERE id = ${member.userId}`
+        const [row] = await h.admin<{ name: string | null; github_login: string }[]>`
+          SELECT name, github_login FROM users WHERE id = ${member.userId}`
 
         // Something they did, so there is an audit entry pointing at the row.
         await callProcedure(h, member, 'environments.teardown', 'mutation', { envId: org.envId })
 
         const { body } = await callProcedure(h, member, 'account.close', 'mutation', {
-          confirm: row!.github_login,
+          confirm: row!.name ?? row!.github_login,
         })
         const closed = data<{ closed: boolean; sessionsRevoked: number; kept: string[] }>(body)
         assert.equal(closed.closed, true)

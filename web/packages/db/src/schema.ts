@@ -65,7 +65,7 @@ export const users = pgTable('users', {
   name: text('name'),
   avatarUrl: text('avatar_url'),
   // Set when somebody closes their own account. The row survives because
-  // audit_entries points at it with NO ACTION; see migrations/0021 for why a
+  // audit_entries points at it with NO ACTION; see migrations/0022 for why a
   // delete is refused and what is erased instead.
   closedAt: timestamp('closed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -651,7 +651,7 @@ export const billingEvents = pgTable('billing_events', {
 // ---------------------------------------------------------------------------
 // Running the organization
 //
-// See migrations/0021 for the isolation, which is the part that cannot be
+// See migrations/0022 for the isolation, which is the part that cannot be
 // expressed here: three of these four tables are reached by somebody who is not
 // an ordinary member of the organization the row belongs to.
 // ---------------------------------------------------------------------------

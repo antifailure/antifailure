@@ -325,7 +325,7 @@ export async function dropOrg(admin: postgres.Sql, orgId: string): Promise<void>
   await admin`DELETE FROM audit_entries WHERE org_id = ${orgId}`
   // Deliberately not cascaded from organizations, because the deletion record
   // is the one row that has to outlive the organization it is about. See
-  // migrations/0021. A suite that left them behind would hit the partial unique
+  // migrations/0022. A suite that left them behind would hit the partial unique
   // index the next time it deleted the same organization.
   await admin`DELETE FROM organization_deletions WHERE org_id = ${orgId}`
   await admin`DELETE FROM organizations WHERE id = ${orgId}`

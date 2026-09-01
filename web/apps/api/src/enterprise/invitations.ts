@@ -17,7 +17,7 @@
 // THE ACCEPTANCE TRANSACTION HAS NO TENANT. The person accepting belongs to no
 // organization yet, so `withTenant` cannot be used: the organization is what
 // the acceptance establishes. The caller declares the token hash and the
-// policies in migrations/0021 confine it to that one invitation and to
+// policies in migrations/0022 confine it to that one invitation and to
 // inserting one membership in that invitation's organization.
 //
 // THE LINK IS RETURNED TO THE INVITER, ALWAYS. Mail is optional in this product:
@@ -260,50 +260,42 @@ export async function acceptInvitation(
         )
       }
 
-      // A savepoint and a caught unique violation, rather than the
-      // `ON CONFLICT (org_id, user_id) DO NOTHING RETURNING user_id` this
-      // obviously wants to be. That form is refused by row-level security here,
-      // and the refusal is worth writing down because it reads as the INSERT
-      // policy being wrong when the INSERT policy is fine.
+      // A bare `ON CONFLICT DO NOTHING`, and every word of that is load bearing.
       //
-      // Two separate things in that statement need to SEE the row, and this
-      // transaction has no tenant, so no SELECT policy on `members` matches it.
-      // An inference clause names a unique index, and Postgres checks the
-      // proposed row against the SELECT policies to decide what conflicts.
-      // RETURNING has to read the row back. Both were measured against a real
-      // database: the plain INSERT succeeds, adding `ON CONFLICT (org_id,
-      // user_id)` fails, adding `RETURNING` fails, and a bare
-      // `ON CONFLICT DO NOTHING` with no inference clause and no RETURNING
-      // succeeds. Every failure reports "new row violates row-level security
-      // policy", which is the WITH CHECK message, so it points at the wrong
-      // half of the statement.
+      // NO INFERENCE CLAUSE and NO RETURNING, because this transaction has no
+      // tenant and so no SELECT policy on `members` matches it. An inference
+      // clause names a unique index and Postgres checks the proposed row
+      // against the SELECT policies to decide what conflicts; RETURNING has to
+      // read the row back. Measured against a real database: the plain INSERT
+      // succeeds, adding `ON CONFLICT (org_id, user_id)` fails, adding
+      // `RETURNING` fails, and this form succeeds. Every failure reports "new
+      // row violates row-level security policy", which is the WITH CHECK
+      // message, so it points at the wrong half of the statement.
       //
-      // The alternative was to widen a policy so this transaction could read
-      // the members table. Anything wide enough to answer "is this person
-      // already here" is wide enough to hand the whole roster to anybody
-      // holding an invitation link they have not accepted.
+      // AND NOT A CAUGHT DUPLICATE KEY, which is what this was first and which
+      // was broken in the worst way: it looked correct and the savepoint
+      // genuinely worked. postgres.js records the first failed query of a
+      // transaction and rethrows it after the callback returns, whatever the
+      // callback did about it. Measured: a savepoint around the violation
+      // recovers, the callback returns normally, the caller still gets the
+      // 23505, and the whole transaction rolls back, so the membership was lost
+      // as well. The path was never exercised because a second click on the
+      // same link returns earlier than this, on `accepted_at`.
+      //
+      // `count` is what says whether a row went in. It is the affected row
+      // count the driver reports, which is 1 for an insert and 0 for a
+      // conflict, and it needs neither a read nor a returning clause.
       //
       // Somebody can genuinely be invited to an organization they are already
       // in, by an administrator who could not see them because a GitHub sync
       // added them a minute ago. That is not an error: what they want is to be
       // in the organization, and they are.
-      await db.execute(sql`SAVEPOINT joining`)
-      let alreadyMember = false
-      try {
-        await db.execute(sql`
-          INSERT INTO members (org_id, user_id, role, source, created_at, updated_at)
-          VALUES (${row.org_id}::uuid, ${input.userId}::uuid, ${row.role}, 'invitation',
-                  ${clock.now().toISOString()}, ${clock.now().toISOString()})`)
-        await db.execute(sql`RELEASE SAVEPOINT joining`)
-      } catch (err) {
-        // The savepoint is rolled back first, unconditionally. A statement that
-        // failed leaves the transaction unable to run anything else, so
-        // deciding whether to rethrow before recovering would make every
-        // unexpected error arrive as 25P02 instead of as itself.
-        await db.execute(sql`ROLLBACK TO SAVEPOINT joining`)
-        if (!isUniqueViolation(err)) throw err
-        alreadyMember = true
-      }
+      const joined = await db.execute(sql`
+        INSERT INTO members (org_id, user_id, role, source, created_at, updated_at)
+        VALUES (${row.org_id}::uuid, ${input.userId}::uuid, ${row.role}, 'invitation',
+                ${clock.now().toISOString()}, ${clock.now().toISOString()})
+        ON CONFLICT DO NOTHING`)
+      const alreadyMember = (joined as unknown as { count?: number }).count === 0
 
       await db.execute(sql`
         UPDATE invitations
@@ -356,20 +348,6 @@ function escapeHtml(value: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-}
-
-/**
- * A duplicate key, whoever wrapped it.
- *
- * The driver's error carries the SQLSTATE and the query builder wraps it, so
- * the code is one level down on a real failure and at the top level when the
- * statement was issued without the wrapper. Checked at both depths rather than
- * assumed at one, because reading the wrong one turns "they were already a
- * member" into a 500.
- */
-function isUniqueViolation(err: unknown): boolean {
-  const codes = [err, (err as { cause?: unknown })?.cause]
-  return codes.some((e) => (e as { code?: string } | undefined)?.code === '23505')
 }
 
 function stateOf(

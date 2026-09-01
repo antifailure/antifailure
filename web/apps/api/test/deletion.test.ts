@@ -12,6 +12,7 @@
 // at the database.
 
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test'
+import { readdir, readFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 import {
   available,
@@ -222,6 +223,54 @@ describe(
       const doc = (await download.json()) as { organization: { slug: string }; files: Record<string, string> }
       assert.equal(doc.organization.slug, org.slug)
       assert.ok(doc.files['README.md'])
+    })
+
+    /**
+     * The loaded gun the purge is pointing at everything else.
+     *
+     * A cascade from `organizations` removes rows whose DELETE privilege is
+     * explicitly revoked, `audit_entries` and every billing table among them,
+     * because referential integrity actions run with the table owner's
+     * privileges and bypass row level security. The test below measures that,
+     * because the deletion needs it.
+     *
+     * The consequence is that ANY other statement that removes an
+     * organizations row silently destroys that organization's billing history
+     * and its append only audit log. There is exactly one place in the shipped
+     * code that may do it, and this is what keeps it that way: a second one
+     * added anywhere under src/ fails here rather than being found afterwards.
+     *
+     * Deliberately a source check rather than a behavioural one. The behaviour
+     * is correct wherever the statement is; what must not happen is a second
+     * caller existing at all, and there is no request that can reveal one.
+     */
+    it('nothing but the deletion machine deletes an organization', async () => {
+      const root = new URL('../src/', import.meta.url)
+      const found: string[] = []
+      const walk = async (dir: URL): Promise<void> => {
+        for (const entry of await readdir(dir, { withFileTypes: true })) {
+          const child = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir)
+          if (entry.isDirectory()) {
+            await walk(child)
+            continue
+          }
+          if (!entry.name.endsWith('.ts')) continue
+          const body = await readFile(child, 'utf8')
+          // The verb, then anything, then the noun, across newlines, because
+          // SQL wraps and a line oriented grep cannot see
+          // `DELETE\n  FROM organizations`.
+          if (/\bdelete\s+from\b[\s\S]{0,120}?\borganizations\b/i.test(body)) {
+            found.push(child.pathname.slice(root.pathname.length))
+          }
+        }
+      }
+      await walk(root)
+      assert.deepEqual(
+        found.sort(),
+        ['enterprise/deletion.ts'],
+        'something other than the deletion state machine deletes an organization row, and a ' +
+          'cascade from that row removes the audit log and every billing record with it',
+      )
     })
 
     it('the purge takes the rows a bare DELETE would leave behind', async () => {
