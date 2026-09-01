@@ -80,26 +80,31 @@ export interface Jwk {
   e?: string
 }
 
-/** What a verified workflow identity token says about the job that holds it. */
+/**
+ * What a verified workflow identity token says about the job that holds it.
+ *
+ * Four claims and no more. GitHub puts a dozen in the token and the rest are
+ * left where they are rather than carried around: a field nothing reads is the
+ * same dead shape as a function nothing calls, and it is harder to see because
+ * a decoder returning everything looks thorough.
+ *
+ * The one worth naming among the ones NOT here is `sha`. For a pull request it
+ * is the MERGE commit rather than the head, so it is not the commit a result
+ * belongs to, and returning it would invite exactly that mistake. The head
+ * comes from the request body and is checked against the generation the
+ * credential is being asked for.
+ */
 export interface WorkflowIdentity {
   /** owner/name of the repository the job is running in. */
   repository: string
-  /** The GitHub numeric id of that repository's owner, which does not change
-   *  when an organization is renamed. */
-  repositoryOwner: string
   /** The run this job belongs to, which is what teardown cancels. */
   runId: number
+  /** Which attempt, so a report says which re-run produced it. */
   runAttempt: number
-  /** refs/pull/N/merge for a pull request, refs/heads/x otherwise. */
-  ref: string
-  eventName: string
-  /** The workflow file, as `owner/name/.github/workflows/f.yml@refs/...`. */
+  /** The workflow file, as `owner/name/.github/workflows/f.yml@refs/...`, which
+   *  is what makes a recorded report attributable to a workflow rather than to
+   *  a repository. */
   jobWorkflowRef: string
-  /** The commit the job is running against. For a pull request this is the
-   *  MERGE commit rather than the head, which is why the head is taken from the
-   *  request body and checked against the generation instead of being read
-   *  from here. */
-  sha: string
 }
 
 export interface VerifyOptions {
@@ -236,13 +241,9 @@ export function verifyWorkflowIdentity(token: string, options: VerifyOptions): W
 
   return {
     repository,
-    repositoryOwner: typeof claims.repository_owner === 'string' ? claims.repository_owner : '',
     runId,
     runAttempt: Number(claims.run_attempt) || 1,
-    ref: typeof claims.ref === 'string' ? claims.ref : '',
-    eventName: typeof claims.event_name === 'string' ? claims.event_name : '',
     jobWorkflowRef: typeof claims.job_workflow_ref === 'string' ? claims.job_workflow_ref : '',
-    sha: typeof claims.sha === 'string' ? claims.sha : '',
   }
 }
 

@@ -258,10 +258,11 @@ describe(
           workflow_run_id: string | null
           env_id: string | null
           attempt: number
+          reported_by: string | null
         }[]
       >`
         SELECT state::text AS state, detail, check_run_id::text AS check_run_id,
-               workflow_run_id::text AS workflow_run_id, env_id, attempt
+               workflow_run_id::text AS workflow_run_id, env_id, attempt, reported_by
         FROM pr_generations WHERE head_sha = ${headSha}`
       return rows[0] ?? null
     }
@@ -410,6 +411,9 @@ describe(
 
       const done = await generation(head)
       assert.equal(done?.state, 'passed')
+      // Attributed to the WORKFLOW that reported, out of the identity token it
+      // proved, rather than to anything the report said about itself.
+      assert.match(done!.reported_by!, /antifailure\.yml@refs\/heads\/main attempt 1/)
       assert.equal(checkFor(head)?.conclusion, 'success')
       assert.equal(checkFor(head)?.status, 'completed')
       // The environment the report named, on the comment, as a console link

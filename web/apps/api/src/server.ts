@@ -1475,6 +1475,8 @@ export function createServer(options: ServerOptions) {
       repository: identity.repository,
       headSha,
       workflowRunId: identity.runId,
+      // Which workflow, and which attempt of it, out of the verified token.
+      reportedBy: `${identity.jobWorkflowRef} attempt ${identity.runAttempt}`,
     })
     if ('refused' in issued) {
       return c.json({ error: issued.refused }, 409)
@@ -1512,7 +1514,6 @@ export function createServer(options: ServerOptions) {
       headSha,
       markdown: typeof body.markdown === 'string' ? body.markdown : null,
       report: body.report,
-      reportedBy: 'workflow identity',
     })
     if (outcome.status === 'refused') {
       return c.json({ error: outcome.detail }, 409)

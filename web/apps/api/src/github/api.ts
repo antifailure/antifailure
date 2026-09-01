@@ -217,12 +217,21 @@ export class RealRepositoryApi implements RepositoryApi {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
     if (res.status === 403) {
-      // "Resource not accessible by integration" is what GitHub says for a
-      // permission the installation does not hold, and it is checked BEFORE
-      // the resource is looked for, which is how a 403 hid a missing workflow
-      // file for an entire evening. So a 403 is reported as the permission and
-      // never as "not found".
-      throw new GitHubPermissionError(permission, grantRemedy(permission))
+      // NOT every 403. "Resource not accessible by integration" is what GitHub
+      // says for a permission the installation does not hold, and it is checked
+      // BEFORE the resource is looked for, which is how a 403 hid a missing
+      // workflow file for an entire evening. A secondary rate limit is also a
+      // 403, and reporting that as a missing grant sends somebody to an App
+      // settings page to look for something that is already there.
+      const body = await res.text().catch(() => '')
+      if (body.includes('Resource not accessible by integration')) {
+        throw new GitHubPermissionError(permission, grantRemedy(permission))
+      }
+      throw new GitHubApiError(
+        `GitHub refused this call with 403 and it is not a missing permission: ` +
+          `${body.slice(0, 200)}`,
+        403,
+      )
     }
     return res
   }

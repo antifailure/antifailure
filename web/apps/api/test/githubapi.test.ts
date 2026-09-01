@@ -133,6 +133,29 @@ describe('the GitHub repository client', () => {
     )
   })
 
+  it('does not read a rate limit as a missing permission', async () => {
+    // A secondary rate limit is a 403 too. Reporting it as a missing grant
+    // sends somebody to an App settings page to look for something that is
+    // already there, which is the same wrong-page failure as reading a
+    // still-running re-run as a permission problem.
+    answers.clear()
+    answer('POST /repos/acme/app/check-runs', 403, {
+      message: 'You have exceeded a secondary rate limit. Please wait a few minutes.',
+    })
+    await assert.rejects(
+      () => client().createCheckRun(7, 'acme/app', checkInput),
+      (err: unknown) => {
+        assert.ok(err instanceof GitHubApiError)
+        assert.ok(
+          !(err instanceof GitHubPermissionError),
+          'a rate limit was reported as a missing grant',
+        )
+        assert.match(err.message, /secondary rate limit/)
+        return true
+      },
+    )
+  })
+
   it('finds an existing check run for a commit rather than creating a second one', async () => {
     answers.clear()
     answer(

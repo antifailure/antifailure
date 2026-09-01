@@ -924,8 +924,6 @@ export interface IncomingReport {
   markdown: string | null
   /** The run as `af ci --report-json` wrote it. Decoded tolerantly. */
   report: unknown
-  /** How the caller authenticated, for the record. */
-  reportedBy: string
 }
 
 export interface ReportOutcome {
@@ -1020,7 +1018,6 @@ export async function recordReport(
             duration: decoded.duration,
             markdown: (incoming.markdown ?? '').slice(0, 60_000),
           })}::jsonb,
-          reported_by = ${incoming.reportedBy},
           finished_at = ${now.toISOString()},
           updated_at = ${now.toISOString()},
           -- SPENT BY EXPIRY, not by clearing the hash. Clearing it is what a
@@ -1391,7 +1388,17 @@ export function hashCallback(token: string): Buffer {
 export async function issueCallback(
   deps: LifecycleDeps,
   login: string,
-  claim: { repository: string; headSha: string; workflowRunId: number | null },
+  claim: {
+    repository: string
+    headSha: string
+    workflowRunId: number | null
+    /** Which workflow, and which attempt of it, out of the verified identity.
+     *  Recorded HERE rather than when the report arrives, because the report
+     *  presents the credential this call issues and not the identity that
+     *  earned it: a reader of the row learns who wrote it rather than who it
+     *  claims to be. */
+    reportedBy: string
+  },
 ): Promise<{ token: string; generationId: string } | { refused: string }> {
   const token = randomBytes(32).toString('base64url')
   const hash = hashCallback(token)
@@ -1437,6 +1444,7 @@ export async function issueCallback(
       UPDATE pr_generations
       SET callback_hash = ${hash},
           callback_expires_at = ${new Date(now.getTime() + CALLBACK_TTL_MS).toISOString()}::timestamptz,
+          reported_by = ${claim.reportedBy.slice(0, 400)},
           workflow_run_id = coalesce(workflow_run_id, ${claim.workflowRunId}),
           state = CASE WHEN state = 'queued' THEN 'running' ELSE state END,
           started_at = coalesce(started_at, ${now.toISOString()}),
