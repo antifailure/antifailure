@@ -468,10 +468,17 @@ errors:
     docs: guides/kubernetes-runtime
     retryable: false
     exit_code: 3
+  - code: AF-RUN-046
+    area: RUN
+    message: "AF_PORT_RANGE_START is set to {value}, which is not a port number."
+    next_step: "Set it to the first port of a free range, between {limit}, or unset it to use the default."
+    docs: guides/local-runtime
+    retryable: false
+    exit_code: 3
   - code: AF-RUN-009
     area: RUN
     message: "No free port was found in the range {range} to publish the environment on."
-    next_step: "Free a port in that range, or set runtime.port_from in the manifest to a range that is clear."
+    next_step: "Free a port in that range, or set AF_PORT_RANGE_START to the first port of a range that is clear."
     docs: guides/local-runtime
     retryable: true
     exit_code: 1

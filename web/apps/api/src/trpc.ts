@@ -18,6 +18,7 @@ import { permits } from './permissions.ts'
 import type { Clock } from './clock.ts'
 import type { GitHubClient } from './auth/github.ts'
 import type { Billing } from './billing/index.ts'
+import { HOSTED_ACCESS_MESSAGE, hasHostedAccess, type HostedRequiredPlan } from './hosted.ts'
 
 /** Who is making the request, once the session cookie has been resolved. */
 export interface Actor {
@@ -25,6 +26,7 @@ export interface Actor {
   label: string
   orgId: string
   role: Role
+  plan: string
 }
 
 export interface Context {
@@ -44,6 +46,9 @@ export interface Context {
    * than the process refusing to start over a feature nobody wants.
    */
   stripe: Billing | null
+  /** Null on self-hosted installations. Hosted Antifailure sets enterprise,
+   *  leaving billing reachable while operational procedures are refused. */
+  hostedRequiredPlan: HostedRequiredPlan | null
   /** Null for an unauthenticated request. */
   actor: Actor | null
   /** Where the request came from, recorded on every audit entry. */
@@ -177,6 +182,15 @@ export function orgProcedure(permission: Permission) {
           // roles have it tells a caller about the organization's structure.
           message: `This needs the ${permission} permission, which your role does not have.`,
         })
+      }
+      // Billing remains reachable because it is the path that resolves this
+      // refusal. Everything else is enforced here, where every tRPC procedure
+      // passes, rather than repeated on whichever pages happen to be visible.
+      if (
+        permission !== 'billing.manage' &&
+        !hasHostedAccess(octx.actor.plan, octx.hostedRequiredPlan)
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: HOSTED_ACCESS_MESSAGE })
       }
       return next({ ctx: octx })
     }),

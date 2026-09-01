@@ -318,6 +318,8 @@ const (
 	// {kind} {name} was not created by this runtime, so it was not
 	// removed.
 	AFRUN045 Code = "AF-RUN-045"
+	// AF_PORT_RANGE_START is set to {value}, which is not a port number.
+	AFRUN046 Code = "AF-RUN-046"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -1338,7 +1340,7 @@ var catalog = map[Code]Entry{
 		Code:      AFRUN009,
 		Area:      "RUN",
 		Message:   "No free port was found in the range {range} to publish the environment on.",
-		NextStep:  "Free a port in that range, or set runtime.port_from in the manifest to a range that is clear.",
+		NextStep:  "Free a port in that range, or set AF_PORT_RANGE_START to the first port of a range that is clear.",
 		Docs:      "guides/local-runtime",
 		Retryable: true,
 		ExitCode:  ExitFailure,
@@ -1430,6 +1432,15 @@ var catalog = map[Code]Entry{
 		Message:   "{kind} {name} was not created by this runtime, so it was not removed.",
 		NextStep:  "Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns.",
 		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN046: {
+		Code:      AFRUN046,
+		Area:      "RUN",
+		Message:   "AF_PORT_RANGE_START is set to {value}, which is not a port number.",
+		NextStep:  "Set it to the first port of a free range, between {limit}, or unset it to use the default.",
+		Docs:      "guides/local-runtime",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},

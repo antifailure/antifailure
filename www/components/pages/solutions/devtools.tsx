@@ -1,58 +1,113 @@
-import { PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
-import { SDEV01, SDEV02 } from "@/components/pages/figures/solutions";
-import { AFTER_HEADING, FeatureList, Lead, SectionHeading, Split } from "./visuals";
-
-const EVENTS = `before   Index Scan  events_created_at_idx   12ms
-after    Seq Scan    events                  410ms
-
-rows      12,403,881
-lock      ACCESS EXCLUSIVE  events  4.2s
-blocked   another session was seen waiting on it
-rewrite   events rewritten in full`;
+import { PageShell, RelatedGrid } from "@/components/pages/kit";
+import { CircularMap, DashChart, FeatureRow, Notebook, SplitHero, TaskTable } from "./well";
 
 export function DevtoolsPage() {
   return (
     <PageShell>
-      <PageHero
+      <SplitHero
         path="/solutions/devtools"
         eyebrow="Solutions · Developer tools"
         title="Schema changes on large tables."
-        lead="These teams feel it first, because their users notice p99 the same day. Measure the strongest lock held per table, how long it was held, whether another session was left waiting on it, and how the query plans moved."
-        framed={false}
-        visual={<SDEV01 />}
+        paragraphs={[
+          "The flagship wedge, felt first by teams whose users notice p99 immediately.",
+          "Measure the strongest lock held per table, how long it was held, whether another session was left waiting on it, and how the query plans moved.",
+          "Start with Postgres volume, plans, and pools, then expand.",
+        ]}
+        visual={
+          <DashChart
+            title="plan regression · events"
+            bars={[12, 18, 22, 40, 55, 70, 88, 82, 95, 90]}
+            popup={{
+              title: "events 12,403,881",
+              rows: [
+                ["baseline", "Index Scan 12ms"],
+                ["candidate", "Seq Scan 410ms"],
+                ["lock", "ACCESS SHARE 1.1s"],
+              ],
+            }}
+          />
+        }
       />
-      <PageSection tone="ruled">
-        <Split reverse visual={<SDEV02 source={EVENTS} />}>
-          <SectionHeading title="<strong>Users notice p99 immediately.</strong> Large tables plus frequent schema change." />
-          <Lead>
-            The first supported stack should be exceptional. A broad compatibility list with unreliable
-            connectors would destroy trust. Start with Postgres volume, locks and plans, then expand.
-          </Lead>
-        </Split>
-        <div className={AFTER_HEADING}>
-          <FeatureList
-            items={[
-              { title: "Large tables", body: "Exclusive locks and rewrites that never show up on a laptop database." },
-              { title: "Query plans", body: "Plan regressions under production-shaped volume." },
-              { title: "Statements", body: "Per-statement duration, so the slow one in a batch is named." },
+
+      <FeatureRow
+        stack
+        kicker="Users notice p99 immediately"
+        title="Large tables plus frequent schema change."
+        items={[
+          { title: "Large tables", body: "Exclusive locks and rewrites that never show up on a laptop database." },
+          { title: "Query plans", body: "Plan regressions under production-shaped volume." },
+          { title: "Pools", body: "Connection-pool exhaustion during migrate-and-serve." },
+        ]}
+        visual={
+          <Notebook
+            overlaySide="right"
+            tab="ALTER subscriptions"
+            rail="NOTES"
+            rows={[
+              { id: "LCK", label: "ACCESS EXCLUSIVE on subscriptions", kind: "lock", status: "BLOCK", tone: "BLOCK", bar: 18 },
+              { id: "P99", label: "Checkout p99 820ms → 6.9s", kind: "p99", status: "REGRESS", tone: "BLOCK", bar: 22 },
+              { id: "POOL", label: "Pool pressure during migrate-and-serve", kind: "pool", status: "PRESSURE", tone: "WARN", bar: 46 },
+              { id: "PLAN", label: "Seq Scan events · 410ms", kind: "plan", status: "REGRESS", tone: "BLOCK", bar: 30 },
+              { id: "RB", label: "Old app cannot decode events.v2", kind: "rollback", status: "UNSAFE", tone: "BLOCK", bar: 14 },
+            ]}
+            overlay={{
+              title: "The finding",
+              checks: [
+                "Exclusive locks and rewrites that never show up on a laptop database.",
+                "Plan regressions under production-shaped volume.",
+                "Connection-pool exhaustion during migrate-and-serve.",
+                "Old instances cannot still read the new schema.",
+                "Publish what the twin reproduced. Do not pretend unsupported components are cloned.",
+              ],
+            }}
+          />
+        }
+      />
+
+      <FeatureRow
+        reverse
+        kicker="Narrow adapters, complete stack"
+        title="Exceptional Postgres instrumentation first."
+        items={[
+          { title: "The first supported stack should be exceptional", body: "A broad compatibility list with unreliable connectors would destroy trust." },
+          { title: "Postgres first", body: "Volume, plans, and pools, then expand." },
+          { title: "Publish what the twin reproduced", body: "Do not pretend unsupported components are cloned." },
+        ]}
+        visual={
+          <CircularMap
+            shift="left"
+            tabs={["EXPAND", "BACKFILL", "CONTRACT"]}
+            active="EXPAND"
+            rings={[
+              { label: "nullable", r: 40 },
+              { label: "batches", r: 32 },
+              { label: "dual-read", r: 36 },
+              { label: "constraint", r: 28 },
             ]}
           />
-        </div>
-      </PageSection>
-      <PageSection tone="panel">
-        <Split
-          visual={
-            <div className="border border-black/12 bg-[#f7f7f5] px-5 py-5">
-              <p className="text-[16px] leading-7 tracking-extra-tight text-gray-new-40">
-                Exceptional Postgres instrumentation first. Say what the run could not measure. Do not
-                pretend unsupported components are cloned.
-              </p>
-            </div>
-          }
-        >
-          <SectionHeading title="<strong>Narrow adapters, complete stack.</strong>" />
-        </Split>
-      </PageSection>
+        }
+      />
+
+      <FeatureRow
+        kicker="The wedge"
+        title="Locks, plans, and rollback feasibility before it ships."
+        items={[
+          { title: "Lock duration", body: "The strongest mode held per table, how long it was held, and whether another session waited on it." },
+          { title: "Schema coexistence", body: "Whether old instances can still read the new schema shows up here first." },
+          { title: "Users notice p99 immediately", body: "Large tables plus frequent schema change." },
+        ]}
+        visual={
+          <TaskTable
+            heading="Tasks · schema change"
+            rows={[
+              { task: "Apply migration", status: "BLOCK", tone: "BLOCK", who: "M", date: "27.4s" },
+              { task: "Checkout p99", status: "Regressed", tone: "BLOCK", who: "C", date: "6.9s" },
+              { task: "Pool pressure", status: "Under load", tone: "WARN", who: "P", date: "wait" },
+              { task: "Rollback", status: "Unsafe", tone: "BLOCK", who: "R", date: "no" },
+            ]}
+          />
+        }
+      />
 
       <RelatedGrid
         items={[
