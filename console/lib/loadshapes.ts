@@ -1275,6 +1275,87 @@ function joinWords(parts: string[]): string {
 }
 
 /* -------------------------------------------------------------------------
+ * Reading a pasted exploration
+ * ---------------------------------------------------------------------- */
+
+/**
+ * One exploration out of a pasted document, and why a document yielded none.
+ *
+ * `af explore --json` prints an ENVELOPE: `{headline, explorations, findings,
+ * blocked}`, read off `ExploreJSON` in the engine's own CLI. The promotion
+ * route compiles ONE exploration and reads `name` and `goal` off the top level
+ * of what it is sent. So a person following this console's own instruction and
+ * pasting what the command printed got back "this document carries neither a
+ * name nor a goal", which is a refusal that names the wrong problem: the
+ * document carries both, one level down, once per goal.
+ *
+ * A run with two goals produces two explorations and only one can be promoted
+ * at a time, so unwrapping is not enough and the person has to choose. This
+ * reads the envelope, reads a bare exploration, and when it is neither says
+ * what it actually found rather than what it wanted.
+ */
+export interface PastedExploration {
+  name: string;
+  goal: string | null;
+  /** Whether the goal's own words ever appeared on a page. */
+  reached: boolean | null;
+  verdict: string | null;
+  /** The element to send, untouched. Never rebuilt out of the fields above:
+   *  the compiler reads more of it than this summary does. */
+  raw: unknown;
+}
+
+export interface Pasted {
+  explorations: PastedExploration[];
+  /** Why there is nothing to promote, in words that name what was found
+   *  rather than what was expected. */
+  refusal: string | null;
+}
+
+export function readExplorations(raw: unknown): Pasted {
+  const none = (refusal: string): Pasted => ({ explorations: [], refusal });
+  const o = obj(raw);
+  if (!o) {
+    return none(
+      "That is a JSON value rather than a document. Paste the object af explore --json printed, braces and all.",
+    );
+  }
+
+  const one = (v: unknown): PastedExploration | null => {
+    const e = obj(v);
+    const name = str(e?.name);
+    // No name, nothing to promote: the compiler refuses a document without
+    // one, and a picker entry with no label is a row nobody can choose.
+    if (!e || !name) return null;
+    return {
+      name,
+      goal: str(e.goal),
+      reached: bool(e.reached),
+      verdict: str(obj(e.outcome)?.verdict),
+      raw: e,
+    };
+  };
+
+  if (Array.isArray(o.explorations)) {
+    const found = list(o.explorations, one);
+    if (found.length > 0) return { explorations: found, refusal: null };
+    const blocked = num(o.blocked) ?? 0;
+    return none(
+      blocked > 0
+        ? `That run explored nothing: ${blocked} of its goals were blocked, so there is no path to compile into a workflow. Blocked is the runner or the environment failing to start rather than a finding about the application.`
+        : "That document carries an explorations list with nothing usable in it. An exploration needs a name before anything can be compiled from it.",
+    );
+  }
+
+  const single = one(o);
+  if (single) return { explorations: [single], refusal: null };
+  return none(
+    "That document carries no explorations list and no name of its own, so there is no exploration in it. What af explore --json prints is an object with an explorations array, and a single exploration out of that array works too.",
+  );
+}
+
+
+/* -------------------------------------------------------------------------
  * Formatting
  * ---------------------------------------------------------------------- */
 

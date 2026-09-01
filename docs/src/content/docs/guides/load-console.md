@@ -353,6 +353,17 @@ produces a load scenario: nothing in an exploration record carries a rate.
 Paste the document `af explore --json` printed. It lives on whichever machine
 ran the command and nothing sends it here on its own.
 
+That document is an envelope with one entry per goal, so a run that explored
+two goals gives you two explorations and the console asks which one to compile.
+It says what each is worth before you choose: an exploration that never reached
+its goal still compiles, and the workflow it produces asserts something nobody
+has seen happen, so it comes back `unverified` until the path exists. A
+`blocked` one is called out more sharply, because nothing was explored at all
+and `af explore --emit-workflow` skips those outright.
+
+A single exploration lifted out of the array works too, if that is what you
+have.
+
 Two things come back with the new version and neither is decoration.
 
 **What the compilation did not carry.** This list is never empty. It always
@@ -368,6 +379,11 @@ application was left unexplored.
 `af test --only` cannot find the workflow the new version selects, and the run
 comes back saying so. The control plane cannot put a file in your repository,
 and it says that rather than returning a name and letting you find out.
+
+Copy copies the block and nothing else. The notes above it are deliberately not
+emitted as YAML comments inside it, because a comment pasted into a manifest
+stays there forever; they belong beside the block, once, on the screen where
+somebody decides whether to keep the promotion.
 
 ## Who can do what
 

@@ -8,7 +8,12 @@ import { Button, Card, Empty, Field, TableSkeleton, inputClass } from "@/compone
 import { Dropped, ManifestBlock } from "@/components/load/bodies";
 import { Denied, LoadError } from "@/components/load/states";
 import { useLive } from "@/components/load/polling";
-import { promoteExploration, type Promotion } from "@/lib/load";
+import {
+  promoteExploration,
+  readExplorations,
+  type PastedExploration,
+  type Promotion,
+} from "@/lib/load";
 
 interface Repository {
   id: string;
@@ -64,6 +69,7 @@ export function Promote({
   const [fromRunId, setFromRunId] = useState("");
   const [persona, setPersona] = useState("");
   const [document, setDocument] = useState("");
+  const [chosen, setChosen] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Promotion | null>(null);
@@ -74,16 +80,25 @@ export function Promote({
   // beside the field rather than coming back as a refusal about the whole
   // request. The server parses it again and is the one that decides: this is a
   // courtesy, not a validation.
-  let parsed: unknown = null;
+  //
+  // The unwrapping is not a courtesy. `af explore --json` prints an envelope
+  // with an explorations array, the promotion route compiles ONE exploration
+  // and reads name and goal off the top level of what it is sent, and a run
+  // with two goals produces two. So pasting exactly what the command printed,
+  // which is what this screen asks for, would be refused for carrying no name.
   let parseError: string | null = null;
+  let found: PastedExploration[] = [];
   if (document.trim() !== "") {
     try {
-      parsed = JSON.parse(document);
+      const read = readExplorations(JSON.parse(document));
+      found = read.explorations;
+      parseError = read.refusal;
     } catch {
       parseError =
         "That is not JSON. It should be exactly what af explore --json printed, braces and all.";
     }
   }
+  const picked = found.find((e) => e.name === chosen) ?? found[0] ?? null;
 
   return (
     // No title on this card. It is the whole of its page and the page heading
@@ -124,7 +139,7 @@ export function Promote({
               className="px-4 py-4"
               onSubmit={async (e) => {
                 e.preventDefault();
-                if (parsed === null || parseError !== null) return;
+                if (picked === null || parseError !== null) return;
                 setBusy(true);
                 setError(null);
                 setResult(null);
@@ -132,7 +147,7 @@ export function Promote({
                   const promotion = await promoteExploration(
                     {
                       repository: chosen,
-                      exploration: parsed,
+                      exploration: picked.raw,
                       ...(slug.trim() === "" ? {} : { slug: slug.trim() }),
                       ...(fromRunId.trim() === "" ? {} : { fromRunId: fromRunId.trim() }),
                       ...(persona.trim() === "" ? {} : { persona: persona.trim() }),
@@ -207,6 +222,7 @@ export function Promote({
                     placeholder='{"name": "upgrade a plan", "goal": "reach the confirmation page", ...}'
                   />
                 </Field>
+                {found.length > 0 ? <Chooser found={found} picked={picked} onPick={setChosen} /> : null}
                 <label className="mt-2 inline-flex min-h-11 items-center gap-2 text-[12.5px] text-muted">
                   <span>Or read it from a file:</span>
                   <input
@@ -231,7 +247,7 @@ export function Promote({
                   type="submit"
                   variant="primary"
                   busy={busy}
-                  disabled={parsed === null || parseError !== null}
+                  disabled={picked === null || parseError !== null}
                 >
                   {busy ? "Compiling" : "Compile a workflow"}
                 </Button>
@@ -248,6 +264,78 @@ export function Promote({
 
       {result ? <Result result={result} /> : null}
     </Card>
+  );
+}
+
+/**
+ * Which exploration out of the pasted document.
+ *
+ * A run with two goals produces two explorations and only one is promoted at a
+ * time, so this is a choice rather than an unwrapping. It shows what each one
+ * is worth before the choice is made rather than after: an exploration that
+ * never reached its goal still compiles, and the workflow it compiles into
+ * asserts something nobody has seen happen. The control plane says that in the
+ * dropped list afterwards; saying it here as well is what lets somebody pick
+ * the other one instead.
+ *
+ * `blocked` is the harder case and it is called out rather than refused. The
+ * engine's own `af explore --emit-workflow` skips a blocked exploration
+ * outright, because nothing was explored and there is no path to compile, so a
+ * workflow made from one is made from a walk that did not happen. The control
+ * plane does not refuse it, so this screen is the only place that fact exists.
+ */
+function Chooser({
+  found,
+  picked,
+  onPick,
+}: {
+  found: PastedExploration[];
+  picked: PastedExploration | null;
+  onPick: (name: string) => void;
+}) {
+  const blocked = picked?.verdict === "blocked";
+  const unreached = picked?.reached === false;
+  return (
+    <div className="mt-3">
+      <Field
+        label={found.length === 1 ? "The exploration" : "Which exploration"}
+        hint={
+          found.length === 1
+            ? "One goal was explored, so this is the one that gets compiled."
+            : `${found.length} goals were explored. One workflow is compiled at a time.`
+        }
+      >
+        <select
+          className={inputClass}
+          value={picked?.name ?? ""}
+          onChange={(e) => onPick(e.target.value)}
+        >
+          {found.map((e) => (
+            <option key={e.name} value={e.name}>
+              {e.name}
+              {e.reached === false ? " (never reached its goal)" : ""}
+              {e.verdict === "blocked" ? " (blocked)" : ""}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {picked?.goal ? (
+        <p className="mt-2 max-w-[74ch] text-[12.5px] leading-6 text-muted">
+          The goal, which becomes the workflow&apos;s expectation:{" "}
+          <span className="text-ink">{picked.goal}</span>
+        </p>
+      ) : null}
+      {blocked || unreached ? (
+        <p
+          role="status"
+          className="mt-2 max-w-[74ch] rounded-md bg-[rgba(138,90,0,0.07)] px-3 py-2 text-[12.5px] leading-6 text-warn"
+        >
+          {blocked
+            ? "This exploration was blocked, so nothing was explored and there is no path to compile. af explore --emit-workflow skips a blocked one outright; a workflow made from it would be made from a walk that never happened."
+            : "This exploration never reached its goal, so the workflow will assert something nobody has seen happen. It compiles, and it comes back unverified until the path exists."}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -276,8 +364,24 @@ function Result({ result }: { result: Promotion }) {
 
       {/* Never summarised into a count. "3 things were dropped" is the shape of
           a notice nobody opens, and the whole value of this list is that
-          somebody reads it before trusting the workflow. */}
-      {result.dropped.length > 0 ? <Dropped dropped={result.dropped} /> : null}
+          somebody reads it before trusting the workflow.
+
+          An EMPTY list is not "nothing was dropped": the compiler seeds it
+          unconditionally with the note about the expectation being the goal,
+          so it cannot legitimately come back empty. Rendering nothing there
+          would turn a lost list into a clean bill of health, which is the
+          defect this whole area was reworked to stop. */}
+      {result.dropped.length > 0 ? (
+        <Dropped dropped={result.dropped} />
+      ) : (
+        <p role="alert" className="border-t border-rule px-4 py-4 text-[12.5px] leading-6 text-warn">
+          The control plane returned no notes about what the compilation did not carry. A
+          compilation always drops at least the expectation, because an exploration knows what it
+          was looking for and not what a passing page should say. An empty list here means
+          something lost them rather than that nothing was dropped, so read the compiled workflow
+          before trusting it.
+        </p>
+      )}
 
       {result.manifestBlock ? (
         <ManifestBlock block={result.manifestBlock} heading="Paste into antifailure.yaml" />

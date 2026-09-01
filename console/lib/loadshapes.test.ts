@@ -50,6 +50,7 @@ import {
   readRun,
   readRunDetail,
   readThreshold,
+  readExplorations,
   readWorkloadRow,
   runStateOf,
   verdictContradiction,
@@ -719,6 +720,106 @@ describe('a verdict that disagrees with its own thresholds', () => {
     // its own definition at a reader.
     assert.equal(verdictContradiction('blocked', decode([t('blocked')])), null)
     assert.equal(verdictContradiction('unverified', decode([t('unverified')])), null)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// What a person actually pastes
+// ---------------------------------------------------------------------------
+
+describe('reading a pasted exploration document', () => {
+  // `af explore --json` prints an ENVELOPE, read off ExploreJSON in
+  // engine/internal/cli/explore.go: {headline, explorations, findings,
+  // blocked}. The promotion route compiles ONE exploration and reads name and
+  // goal off the top level of what it is sent. So the console's own
+  // instruction, paste what the command printed, produced a refusal saying the
+  // document carried neither, when it carried both one level down.
+  const exploration = (over: Record<string, unknown> = {}) => ({
+    name: 'correct a customer name',
+    goal: 'change a customer name and see the change saved',
+    seed: 'a-quiet-tuesday',
+    reached: false,
+    outcome: { verdict: 'unverified', cause: 'goal_unreached' },
+    journey: [{ kind: 'goto', url: '/orders' }],
+    findings: [],
+    missing: [],
+    ...over,
+  })
+  const envelope = (explorations: unknown[], over: Record<string, unknown> = {}) => ({
+    headline: '2 goals explored, 1 reached',
+    explorations,
+    findings: [],
+    blocked: 0,
+    ...over,
+  })
+
+  test('the envelope the command prints yields one entry per goal, in order', () => {
+    const read = readExplorations(
+      envelope([exploration({ name: 'what each customer spent', reached: true }), exploration()]),
+    )
+    assert.equal(read.refusal, null)
+    assert.deepEqual(
+      read.explorations.map((e) => e.name),
+      ['what each customer spent', 'correct a customer name'],
+    )
+    assert.equal(read.explorations[0]!.reached, true)
+    assert.equal(read.explorations[1]!.reached, false)
+    assert.equal(read.explorations[1]!.verdict, 'unverified')
+  })
+
+  test('what is sent on is the element itself, not a rebuild of it', () => {
+    // The compiler reads the journey, the findings and the missing list, none
+    // of which the picker summary carries. Rebuilding an exploration out of
+    // the four fields shown would compile a workflow from a walk with no
+    // steps in it.
+    const read = readExplorations(envelope([exploration()]))
+    const raw = read.explorations[0]!.raw as Record<string, unknown>
+    assert.ok(Array.isArray(raw.journey))
+    assert.equal((raw.journey as unknown[]).length, 1)
+    assert.ok('missing' in raw)
+    assert.ok('findings' in raw)
+  })
+
+  test('a single exploration out of the array works too', () => {
+    const read = readExplorations(exploration())
+    assert.equal(read.refusal, null)
+    assert.equal(read.explorations.length, 1)
+    assert.equal(read.explorations[0]!.name, 'correct a customer name')
+  })
+
+  test('one unusable entry does not take the others with it', () => {
+    const read = readExplorations(envelope([{ goal: 'no name here' }, exploration()]))
+    assert.equal(read.explorations.length, 1)
+    assert.equal(read.explorations[0]!.name, 'correct a customer name')
+  })
+
+  test('a run where everything was blocked says that, not "no name"', () => {
+    // Blocked is the runner or the environment failing to start. Telling
+    // somebody their document has no name would send them to look at the
+    // document rather than at the run.
+    const read = readExplorations(envelope([], { blocked: 3 }))
+    assert.equal(read.explorations.length, 0)
+    assert.ok(read.refusal)
+    assert.match(read.refusal, /3 of its goals were blocked/)
+    assert.match(read.refusal, /rather than a finding about the application/)
+  })
+
+  test('an empty list with nothing blocked says something different', () => {
+    const read = readExplorations(envelope([]))
+    assert.ok(read.refusal)
+    assert.match(read.refusal, /needs a name/)
+    assert.equal(read.refusal.includes('blocked'), false)
+  })
+
+  test('a document that is neither names what it looked for', () => {
+    const read = readExplorations({ workflows: [] })
+    assert.ok(read.refusal)
+    assert.match(read.refusal, /explorations array/)
+    for (const junk of [null, 42, 'a string', [1, 2]]) {
+      const r = readExplorations(junk)
+      assert.equal(r.explorations.length, 0)
+      assert.ok(r.refusal, `${JSON.stringify(junk)} was accepted`)
+    }
   })
 })
 
