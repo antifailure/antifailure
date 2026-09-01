@@ -11,6 +11,8 @@ import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { digestOf, dispatchInputs, parseBody, BodyRefused } from '../src/workloads/bodies.ts'
+import { EVENT_TYPES } from '../src/ingest.ts'
+import { WORKLOAD_EVENT_TYPES } from '../src/workloads/projection.ts'
 import { compileExploration, ExplorationRefused } from '../src/workloads/promote.ts'
 import {
   available, startApi, seedOrg, signInAs, callProcedure, errorCode, dropOrg,
@@ -40,6 +42,30 @@ function sqlState(error: unknown): string | null {
 // ---------------------------------------------------------------------------
 // The body, which needs no database
 // ---------------------------------------------------------------------------
+
+describe('the two lists of workload event types', () => {
+  it('agree, so a type is never accepted by one and projected by neither', () => {
+    // ingest.ts declares EVENT_TYPES as string literals because a Go drift test
+    // parses that source, and projection.ts declares its own list because it
+    // decides whether an event is a workload event. Two lists is one too many,
+    // and the failure is silent in the dangerous direction: a type added to the
+    // projection and not to ingest is projected by nothing, because ingestion
+    // stores an unknown type and applies it to no row.
+    const accepted = new Set<string>(EVENT_TYPES)
+    for (const type of WORKLOAD_EVENT_TYPES) {
+      assert.ok(
+        accepted.has(type),
+        `${type} is projected but is not in EVENT_TYPES, so it is stored and applied to nothing`,
+      )
+    }
+    // And the other direction, which is a column that is always empty.
+    const projected = new Set<string>(WORKLOAD_EVENT_TYPES)
+    for (const type of EVENT_TYPES) {
+      if (!type.startsWith('workload.')) continue
+      assert.ok(projected.has(type), `${type} is accepted and nothing projects it`)
+    }
+  })
+})
 
 describe('what a workload version is allowed to say', () => {
   it('accepts the knobs each command actually has', () => {

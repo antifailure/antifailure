@@ -347,7 +347,15 @@ export async function expireOverdueCommands(
   const rows = await db.execute<{ id: string }>(sql`
     UPDATE runtime_commands SET
       state = 'expired',
-      detail = COALESCE(detail, 'no runtime confirmed this before it expired'),
+      -- Appended rather than replacing what is there. The detail already says
+      -- how the command reached a runtime, or why it could not, and that is
+      -- half of what somebody debugging a teardown needs; the other half is
+      -- that nothing ever came back. COALESCE would have kept the first and
+      -- lost the second on every command whose dispatch succeeded, which is
+      -- the common case and the one worth explaining.
+      detail = CASE WHEN detail IS NULL OR detail = ''
+                    THEN 'no runtime confirmed this before it expired'
+                    ELSE detail || '; no runtime confirmed this before it expired' END,
       lease_holder = NULL,
       lease_expires_at = NULL,
       updated_at = ${input.now.toISOString()}::timestamptz

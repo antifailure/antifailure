@@ -335,7 +335,13 @@ export async function writeReport(
       ${a.sessions}, ${a.iterations}, ${a.scheduledMs},
       ${a.workflows}, ${a.workflowsPassed}, ${a.workflowsFailed}, ${a.steps},
       ${a.findings}, ${a.goalReached}, ${a.durationMs}, ${a.source},
-      ${a.refusedRoutes}::text[])
+      -- sql.param rather than the bare array. The template inlines a JavaScript
+      -- array as a parenthesised value list, so an empty one renders as an empty
+      -- pair of brackets, which is a syntax error, and a full one renders as a
+      -- row constructor rather than as an array. Found by running it: every
+      -- report with no refused routes, which is every healthy report, failed
+      -- the whole batch with a message about the syntax near a bracket.
+      ${sql.param(a.refusedRoutes)}::text[])
     ON CONFLICT (workload_run_id) DO NOTHING`)
 
   let position = 0

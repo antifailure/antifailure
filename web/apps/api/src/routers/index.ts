@@ -55,6 +55,13 @@ const environmentsRouter = router({
     .query(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       return c.pool.withTenant(c.tenant, async (db) => {
+        // Housekeeping on a read, and the same shape workloads.list uses. A
+        // teardown that expired has to stop reading as though it were still
+        // going, and every policy on runtime_commands keys on current_org(), so
+        // a sweeper with no tenant set would match nothing and report success.
+        // One indexed update against a partial index holding only the commands
+        // that can still expire, so it costs nothing when there is nothing.
+        await expireOverdueCommands(db, { now: c.clock.now() })
         const rows = await db.execute<EnvironmentRow>(sql`
           SELECT e.id, e.env_id, e.branch, e.pull_request, e.state, e.preview_url,
                  e.runtime, e.golden_version, e.created_at, e.updated_at, e.expires_at,
@@ -86,6 +93,13 @@ const environmentsRouter = router({
     .query(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       return c.pool.withTenant(c.tenant, async (db) => {
+        // Housekeeping on a read, and the same shape workloads.list uses. A
+        // teardown that expired has to stop reading as though it were still
+        // going, and every policy on runtime_commands keys on current_org(), so
+        // a sweeper with no tenant set would match nothing and report success.
+        // One indexed update against a partial index holding only the commands
+        // that can still expire, so it costs nothing when there is nothing.
+        await expireOverdueCommands(db, { now: c.clock.now() })
         const rows = await db.execute<EnvironmentRow>(sql`
           SELECT e.id, e.env_id, e.branch, e.pull_request, e.state, e.preview_url,
                  e.runtime, e.golden_version, e.created_at, e.updated_at, e.expires_at,

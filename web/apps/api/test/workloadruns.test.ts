@@ -1,0 +1,754 @@
+// The orderings a workload run goes through, one test per cell.
+//
+// Testing that the system lands in the right state for the happy ordering is
+// not testing the system. Real callers hit the other orderings within days, and
+// the ones here are not hypothetical: an engine's events go through a sink that
+// batches for five seconds and spools to disk across process boundaries, so a
+// finish genuinely can be ingested before the start it followed, and a report
+// genuinely can arrive after the control plane has given up waiting.
+//
+// THE TABLE. Every cell has a test below and the test is named for the cell.
+//
+//   requested then callback        the ordinary case
+//   callback then run row          a report naming a run this control plane
+//                                  does not have
+//   callback with no row           the same, from another organization
+//   row with no callback           the deadline ends it as abandoned
+//   duplicate callback             the second changes nothing
+//   concurrent starts              the database decides, not a read
+//   the same request twice         one run, not two
+//   cancel during execution        a durable command, and the run waits
+//   cancel before anything claimed it   settled here and now
+//   cancel after completion        refused, and nothing is changed
+//   cancel racing completion       the completion wins and the command is
+//                                  superseded rather than failed
+//   retry of a superseded run      refused, naming the successor
+//   retry of a run still going     refused
+//   timeout with no terminal event abandoned, and a later report is a note
+//
+// And two that are not orderings but are the same class of defect: a malformed
+// element inside a report must not discard the report, and a to-one that
+// arrives as a to-many must not be read as a list.
+
+import { after, before, describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { randomUUID, createHash } from 'node:crypto'
+import { RUN_DEADLINE_MS } from '../src/workloads/store.ts'
+import {
+  available, startApi, seedOrg, signInAs, callProcedure, errorCode, dropOrg,
+  type ApiHarness, type Org, type SignedIn,
+} from './harness.ts'
+
+const hasDatabase = await available()
+
+type Answer = { status: number; body: any }
+
+describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
+  let h: ApiHarness
+  let org: Org
+  let other: Org
+  let owner: SignedIn
+  let token: string
+  let otherToken: string
+
+  before(async () => {
+    h = await startApi()
+    org = await seedOrg(h.admin, 'runs')
+    other = await seedOrg(h.admin, 'runs-other')
+    owner = await signInAs(h, org, 'owner')
+
+    await h.admin`
+      INSERT INTO github_installations (org_id, installation_id, account_login, account_type)
+      VALUES (${org.orgId}, ${Math.floor(Math.random() * 1e9)}, ${org.slug}, 'Organization')`
+    h.github.addWorkflow(org.repository, 'antifailure.yml')
+
+    token = `aft_${randomUUID().replace(/-/g, '')}`
+    await h.admin`
+      INSERT INTO engine_tokens (org_id, name, token_hash, prefix)
+      VALUES (${org.orgId}, 'ci', ${createHash('sha256').update(token).digest()}, 'aft_run')`
+    otherToken = `aft_${randomUUID().replace(/-/g, '')}`
+    await h.admin`
+      INSERT INTO engine_tokens (org_id, name, token_hash, prefix)
+      VALUES (${other.orgId}, 'ci', ${createHash('sha256').update(otherToken).digest()}, 'aft_oth')`
+  })
+
+  after(async () => {
+    await dropOrg(h.admin, org.orgId)
+    await dropOrg(h.admin, other.orgId)
+    await h.close()
+  })
+
+  // -------------------------------------------------------------------------
+  // Fixtures
+  // -------------------------------------------------------------------------
+
+  /**
+   * A workload of one kind, with one version, and an environment of its own.
+   *
+   * An environment per test rather than one shared one, and it is not tidiness.
+   * An engine claims the oldest run waiting for an ENVIRONMENT, so a test that
+   * shared one with the test before it would claim that test's leftover run and
+   * assert against the wrong row. That is an ordering bug in the suite, and the
+   * suite is about orderings, so it has to be right here first.
+   */
+  async function define(kind: string, body: unknown): Promise<{ slug: string; envId: string }> {
+    const slug = `r-${randomUUID().slice(0, 8)}`
+    const made: Answer = await callProcedure(h, owner, 'workloads.create', 'mutation', {
+      repository: org.repository,
+      slug,
+      name: slug,
+      kind,
+      body,
+    })
+    assert.equal(made.status, 200, JSON.stringify(made.body))
+
+    const envId = `env-${slug}`
+    await h.admin`
+      INSERT INTO environments (org_id, repository_id, env_id, branch, state)
+      VALUES (${org.orgId}, ${org.repoId}, ${envId}, 'main', 'running')`
+    return { slug, envId }
+  }
+
+  async function start(
+    target: { slug: string; envId: string },
+    over: Record<string, unknown> = {},
+  ): Promise<Answer> {
+    return callProcedure(h, owner, 'workloads.start', 'mutation', {
+      slug: target.slug, envId: target.envId, ...over,
+    })
+  }
+
+  /** Sends events the way an engine does: over HTTP, with a bearer token. */
+  async function send(events: unknown[], bearer = token): Promise<{ status: number; body: any }> {
+    const res = await h.fetch('/v1/events', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ events }),
+    })
+    return { status: res.status, body: await res.json() }
+  }
+
+  function event(over: Record<string, unknown>): Record<string, unknown> {
+    return {
+      id: randomUUID(),
+      sequence: 1,
+      occurredAt: h.clock.now().toISOString(),
+      ...over,
+    }
+  }
+
+  async function stateOf(runId: string): Promise<{ state: string; verdict: string | null; detail: string | null }> {
+    const rows = await h.admin<{ state: string; verdict: string | null; detail: string | null }[]>`
+      SELECT state::text AS state, verdict::text AS verdict, detail
+      FROM workload_runs WHERE id = ${runId}`
+    return rows[0]!
+  }
+
+  /** Claims a run the way an engine on a runner does. */
+  async function claim(envId: string, bearer = token): Promise<{ status: number; body: any }> {
+    const res = await h.fetch('/v1/workloads/claim', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ envId }),
+    })
+    return { status: res.status, body: await res.json() }
+  }
+
+  // -------------------------------------------------------------------------
+  // Starting
+  // -------------------------------------------------------------------------
+
+  it('starts a run, records it, and dispatches the flags the command has', async () => {
+    const target = await define('observed_load', { durationSeconds: 90, scale: 0.5 })
+    const before = h.github.dispatches.length
+    const started = await start(target)
+    assert.equal(started.status, 200, JSON.stringify(started.body))
+    assert.equal(started.body.result.data.dispatched, true)
+
+    const dispatch = h.github.dispatches[before]!
+    assert.equal(dispatch.repository, org.repository)
+    assert.equal(dispatch.ref, 'main')
+    assert.deepEqual(dispatch.inputs, {
+      command: 'load', workflows: '', duration: '90s', scale: '0.5',
+    })
+
+    const state = await stateOf(started.body.result.data.runId)
+    // Requested, not running. What exists after this call is a queued Actions
+    // run and a row saying somebody asked for one.
+    assert.equal(state.state, 'requested')
+  })
+
+  it('ordering: the same request twice is one run, not two', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const key = `key-${randomUUID().slice(0, 8)}`
+    const first = await start(target, { requestKey: key })
+    const second = await start(target, { requestKey: key })
+    assert.equal(first.body.result.data.runId, second.body.result.data.runId)
+    assert.equal(second.body.result.data.dispatched, false)
+    assert.match(second.body.result.data.note, /had already been made/)
+  })
+
+  it('ordering: concurrent starts on one definition, and the database decides', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    // Two genuinely different requests fired together. A read followed by a
+    // decision would let both through: both would see no live run.
+    const [a, b] = await Promise.all([start(target), start(target)])
+    const outcomes = [a, b].map((r) => (r.status === 200 ? 'started' : errorCode(r.body)))
+    assert.deepEqual(
+      outcomes.slice().sort(),
+      ['PRECONDITION_FAILED', 'started'],
+      `expected exactly one to win, got ${JSON.stringify(outcomes)}: ${JSON.stringify([a.body, b.body]).slice(0, 900)}`,
+    )
+    const refused = a.status === 200 ? b : a
+    assert.match(JSON.stringify(refused.body), /already .* against that environment/)
+
+    const live = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM workload_runs wr
+      JOIN workloads w ON w.id = wr.workload_id
+      WHERE w.slug = ${target.slug} AND wr.state IN ('requested', 'accepted', 'running')`
+    assert.equal(Number(live[0]!.n), 1)
+  })
+
+  it('refuses a workload run against an environment of another repository', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const [repo] = await h.admin<{ id: string }[]>`
+      INSERT INTO repositories (org_id, full_name) VALUES (${org.orgId}, ${`${org.slug}/other`})
+      RETURNING id`
+    const strangerEnv = `env-other-${randomUUID().slice(0, 6)}`
+    await h.admin`
+      INSERT INTO environments (org_id, repository_id, env_id, branch, state)
+      VALUES (${org.orgId}, ${repo!.id}, ${strangerEnv}, 'main', 'running')`
+    const refused = await start(target, { envId: strangerEnv })
+    assert.equal(errorCode(refused.body), 'PRECONDITION_FAILED')
+    assert.match(JSON.stringify(refused.body), /measures\\nnothing|measures nothing/)
+  })
+
+  // -------------------------------------------------------------------------
+  // The engine picking work up
+  // -------------------------------------------------------------------------
+
+  it('hands the waiting run to an engine that asks, with its compiled version', async () => {
+    const target = await define('http_scenario', { select: ['checkout'], seed: 3 })
+    const started = await start(target).catch(() => null)
+    // A scenario needs the newer workflow, so the dispatch is refused by the
+    // fake and the route says so. The run is still recorded, which is the whole
+    // point: it is claimable by an engine somebody starts by hand.
+    const runs = await h.admin<{ id: string }[]>`
+      SELECT wr.id FROM workload_runs wr JOIN workloads w ON w.id = wr.workload_id
+      WHERE w.slug = ${target.slug}`
+    assert.equal(runs.length, 1, 'the run was not recorded when its dispatch was refused')
+    void started
+
+    const claimed = await claim(target.envId)
+    assert.equal(claimed.status, 200)
+    assert.equal(claimed.body.run.runId, runs[0]!.id)
+    assert.equal(claimed.body.run.kind, 'http_scenario')
+    assert.deepEqual(claimed.body.run.body, { select: ['checkout'], seed: 3 })
+    assert.equal((await stateOf(runs[0]!.id)).state, 'accepted')
+
+    // And the second claim finds nothing waiting, rather than handing the same
+    // run to a second engine.
+    const again = await claim(target.envId)
+    assert.equal(again.body.run, null)
+  })
+
+  it('answers 200 with a null run when nothing is waiting, not 204', async () => {
+    // A poller that reads a status code and not a body cannot tell "nothing
+    // waiting" from "something went wrong with the shape".
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const empty = await claim(target.envId)
+    assert.equal(empty.status, 200)
+    assert.equal(empty.body.run, null)
+  })
+
+  it('will not hand one organization a run belonging to another', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    await start(target)
+    const stranger = await claim(target.envId, otherToken)
+    // The same answer as an environment that does not exist, because telling
+    // them apart is a way to ask what another organization has.
+    assert.equal(stranger.status, 404)
+  })
+
+  // -------------------------------------------------------------------------
+  // The orderings a report can arrive in
+  // -------------------------------------------------------------------------
+
+  it('ordering: requested, then started, then finished', async () => {
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+
+    const startedAt = await send([
+      event({ type: 'workload.started', sequence: 5, payload: { workload_run_id: runId } }),
+    ])
+    assert.equal(startedAt.status, 202)
+    assert.equal((await stateOf(runId)).state, 'running')
+
+    const finished = await send([
+      event({
+        type: 'workload.finished',
+        sequence: 9,
+        payload: {
+          workload_run_id: runId,
+          kind: 'observed_load',
+          outcome: 'succeeded',
+          verdict: 'pass',
+          result: {
+            sent: 1200, failures: 3, error_rate: 0.0025, rate: 40, target_rate: 40,
+            duration_ms: 30000, source: 'otlp',
+            overall: { p50_ms: 12, p90_ms: 40, p95_ms: 61, p99_ms: 120, max_ms: 900 },
+          },
+          routes: [
+            { route: 'GET /checkout', sent: 600, errors: 1, latency: { p95_ms: 61 }, baseline_p95_ms: 40, p95_increase: 1.5, has_baseline: true },
+            { route: 'GET /', sent: 600, errors: 2, latency: { p95_ms: 20 } },
+          ],
+          thresholds: [{ name: 'checkout stays quick', measure: 'p95_below_ms', threshold: 200, observed: 61, verdict: 'pass' }],
+          evidence: [{ kind: 'report', locator: '/home/runner/report.md' }],
+        },
+      }),
+    ])
+    assert.equal(finished.status, 202)
+
+    const state = await stateOf(runId)
+    assert.equal(state.state, 'succeeded')
+    // State says the work happened; verdict says what it found. Two columns,
+    // deliberately, because collapsing them is how an exit code over work that
+    // never happened reads as a pass.
+    assert.equal(state.verdict, 'pass')
+
+    const inspected: Answer = await callProcedure(h, owner, 'workloads.inspect', 'query', { runId })
+    const data = inspected.body.result.data
+    assert.equal(Number(data.result.requests), 1200)
+    assert.equal(data.routes.length, 2)
+    // No baseline and no change are different answers, and the second route had
+    // nothing to compare with.
+    assert.equal(data.routes[1].baseline_p95_ms, null)
+    assert.equal(data.routes[1].p95_increase, null)
+    assert.equal(data.thresholds.length, 1)
+    // Nothing uploaded it, so it is not claimed to be fetchable.
+    assert.equal(data.evidence[0].availability, 'runner_local')
+    // A to-one is an object or null, and a to-many is an array.
+    assert.ok(!Array.isArray(data.result))
+    assert.ok(Array.isArray(data.routes))
+  })
+
+  it('ordering: finished before started, and the start does not move it back', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+
+    await send([
+      event({
+        type: 'workload.finished',
+        sequence: 9,
+        payload: {
+          workload_run_id: runId, kind: 'browser_workflow', verdict: 'fail',
+          result: { workflows: 3, workflows_passed: 2, workflows_failed: 1, duration_ms: 4000 },
+        },
+      }),
+    ])
+    assert.equal((await stateOf(runId)).state, 'succeeded')
+
+    const late = await send([
+      event({ type: 'workload.started', sequence: 5, payload: { workload_run_id: runId } }),
+    ])
+    assert.equal(late.status, 202)
+    assert.match(late.body.outcomes[0].note, /already succeeded/)
+    assert.equal((await stateOf(runId)).state, 'succeeded')
+  })
+
+  it('ordering: a duplicate finish changes nothing and writes no second result', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    const report = {
+      workload_run_id: runId, kind: 'browser_workflow', verdict: 'pass',
+      result: { workflows: 1, duration_ms: 1000 },
+      routes: [{ route: 'GET /', sent: 1 }],
+    }
+
+    await send([event({ type: 'workload.finished', sequence: 9, payload: report })])
+    // A different event identifier carrying the same report, which is what a
+    // regenerated resend looks like: the events table cannot deduplicate it.
+    const second = await send([event({ type: 'workload.finished', sequence: 10, payload: report })])
+    assert.equal(second.body.outcomes[0].status, 'accepted')
+    assert.match(second.body.outcomes[0].note, /already succeeded/)
+
+    const results = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM workload_run_results WHERE workload_run_id = ${runId}`
+    assert.equal(Number(results[0]!.n), 1)
+    const routes = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM workload_route_metrics WHERE workload_run_id = ${runId}`
+    assert.equal(Number(routes[0]!.n), 1)
+  })
+
+  it('ordering: a report for a run this control plane does not have is stored and said out loud', async () => {
+    const answer = await send([
+      event({
+        type: 'workload.finished',
+        payload: { workload_run_id: randomUUID(), kind: 'observed_load', result: { sent: 1 } },
+      }),
+    ])
+    assert.equal(answer.status, 202)
+    assert.equal(answer.body.accepted, 1)
+    assert.equal(answer.body.unprojected, 1)
+    assert.match(answer.body.outcomes[0].note, /not a workload run this control plane has/)
+  })
+
+  it('ordering: a report from the wrong organization reaches nothing', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    // Sent with the OTHER organization's token. Row-level security makes the
+    // run invisible, so it gets the same answer as a run that does not exist.
+    const answer = await send(
+      [
+        {
+          id: randomUUID(),
+          type: 'workload.finished',
+          envId: other.envId,
+          sequence: 1,
+          occurredAt: h.clock.now().toISOString(),
+          payload: { workload_run_id: runId, kind: 'browser_workflow', result: { workflows: 1 } },
+        },
+      ],
+      otherToken,
+    )
+    assert.equal(answer.body.unprojected, 1)
+    assert.equal((await stateOf(runId)).state, 'requested')
+  })
+
+  it('refuses a report that says it is a different kind from the run it names', async () => {
+    // Not coerced. Writing the database's kind with the payload's numbers would
+    // produce a row that satisfies every constraint and means something else.
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+    const answer = await send([
+      event({
+        type: 'workload.finished',
+        payload: { workload_run_id: runId, kind: 'browser_workflow', result: { workflows: 1 } },
+      }),
+    ])
+    assert.match(answer.body.outcomes[0].note, /says it is a browser_workflow result/)
+    assert.equal((await stateOf(runId)).state, 'requested')
+  })
+
+  it('one bad route measurement does not discard the report', async () => {
+    // The failure this guards is a decoder that refuses a whole collection over
+    // one surprising element, which reads as "the run measured nothing" rather
+    // than as "the decoder refused".
+    const target = await define('observed_load', { durationSeconds: 30 })
+    const runId = (await start(target)).body.result.data.runId
+    const answer = await send([
+      event({
+        type: 'workload.finished',
+        payload: {
+          workload_run_id: runId,
+          kind: 'observed_load',
+          verdict: 'pass',
+          result: { sent: 10, overall: { p95_ms: 5 } },
+          routes: [
+            { route: 'GET /ok', sent: 5 },
+            { route: 42, sent: 'lots' },
+            { sent: 5 },
+            { route: 'GET /also-ok', sent: 5 },
+          ],
+          // A to-one where a to-many belongs. Counted as one skip and said in
+          // the note rather than silently reported as no thresholds at all.
+          thresholds: { name: 'not a list' },
+        },
+      }),
+    ])
+    assert.equal(answer.body.outcomes[0].status, 'accepted')
+    assert.match(answer.body.outcomes[0].note, /2 route measurements, 1 thresholds/)
+
+    const routes = await h.admin<{ route: string }[]>`
+      SELECT route FROM workload_route_metrics WHERE workload_run_id = ${runId} ORDER BY position`
+    assert.deepEqual(routes.map((r) => r.route), ['GET /ok', 'GET /also-ok'])
+    const result = await h.admin<{ requests: number }[]>`
+      SELECT requests FROM workload_run_results WHERE workload_run_id = ${runId}`
+    assert.equal(Number(result[0]!.requests), 10)
+  })
+
+  it('will not record evidence as uploaded when nothing can verify it', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    await send([
+      event({
+        type: 'workload.finished',
+        payload: {
+          workload_run_id: runId, kind: 'browser_workflow', result: { workflows: 1 },
+          evidence: [
+            { kind: 'trace', availability: 'uploaded', locator: 's3://b/t.zip' },
+            { kind: 'video', availability: 'uploaded', locator: 's3://b/v.webm', sha256: 'a'.repeat(64) },
+            { kind: 'screenshot', locator: '/home/runner/s.png' },
+          ],
+        },
+      }),
+    ])
+    const evidence = await h.admin<{ kind: string; availability: string }[]>`
+      SELECT kind, availability::text AS availability FROM workload_evidence
+      WHERE workload_run_id = ${runId} ORDER BY kind`
+    // Mapped to plain objects, because the driver returns a Result array with
+    // its own properties and a deep comparison against a literal fails on those
+    // rather than on the rows.
+    assert.deepEqual(
+      evidence.map((e) => ({ kind: e.kind, availability: e.availability })),
+      [
+        { kind: 'screenshot', availability: 'runner_local' },
+        { kind: 'video', availability: 'uploaded' },
+      ],
+    )
+  })
+
+  // -------------------------------------------------------------------------
+  // The deadline
+  // -------------------------------------------------------------------------
+
+  it('ordering: a run nobody ever reports on is abandoned, not failed', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+
+    h.clock.advance(RUN_DEADLINE_MS + 1000)
+    // Resolved by the next thing this organization does, which is the shape
+    // that works: a sweep with no tenant set matches nothing, because every
+    // policy on this table keys on current_org().
+    const listed: Answer = await callProcedure(h, owner, 'workloads.runs', 'query', { limit: 5 })
+    assert.equal(listed.status, 200)
+
+    const state = await stateOf(runId)
+    assert.equal(state.state, 'abandoned')
+    // Abandoned says the control plane never heard. Failed would say the engine
+    // reported a failure, and those are different things to act on.
+    assert.match(state.detail!, /may have run/)
+  })
+
+  it('ordering: a report that arrives after the deadline is a note, not a resurrection', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    h.clock.advance(RUN_DEADLINE_MS + 1000)
+    await callProcedure(h, owner, 'workloads.runs', 'query', { limit: 5 })
+    assert.equal((await stateOf(runId)).state, 'abandoned')
+
+    const late = await send([
+      event({
+        type: 'workload.finished',
+        sequence: 9,
+        payload: { workload_run_id: runId, kind: 'browser_workflow', verdict: 'pass', result: { workflows: 1 } },
+      }),
+    ])
+    assert.match(late.body.outcomes[0].note, /already abandoned/)
+    assert.equal((await stateOf(runId)).state, 'abandoned')
+    const results = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM workload_run_results WHERE workload_run_id = ${runId}`
+    assert.equal(Number(results[0]!.n), 0, 'a report about an abandoned run wrote a result anyway')
+  })
+
+  it('a heartbeat keeps a run alive, and a stale lease does not', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    const claimed = await claim(target.envId)
+    assert.equal(claimed.body.run.runId, runId)
+
+    // Most of the way to the deadline, then a heartbeat, then the rest.
+    h.clock.advance(RUN_DEADLINE_MS - 60_000)
+    const beat = await h.fetch(`/v1/workloads/runs/${runId}/heartbeat`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: '{}',
+    })
+    assert.equal(beat.status, 200)
+
+    h.clock.advance(120_000)
+    await callProcedure(h, owner, 'workloads.runs', 'query', { limit: 5 })
+    assert.equal((await stateOf(runId)).state, 'accepted', 'a heartbeat did not push the deadline')
+  })
+
+  it('tells an engine that lost its lease, rather than letting it work on', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    const stranger = await h.fetch(`/v1/workloads/runs/${runId}/heartbeat`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: '{}',
+    })
+    // Never claimed, so this token does not hold it. 409 and a sentence, so the
+    // engine stops rather than reporting at the end into nothing.
+    assert.equal(stranger.status, 409)
+    assert.match(JSON.stringify(await stranger.json()), /not held by this token/)
+  })
+
+  // -------------------------------------------------------------------------
+  // Cancelling
+  // -------------------------------------------------------------------------
+
+  it('ordering: cancel before anything claimed it is settled here and now', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    const cancelled: Answer = await callProcedure(h, owner, 'workloads.cancel', 'mutation', {
+      runId, reason: 'wrong branch',
+    })
+    assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body))
+    // No engine has it, so no engine will ever report on it. Waiting for a
+    // terminal event would leave it open until its deadline.
+    assert.equal(cancelled.body.result.data.stopped, true)
+    assert.equal(cancelled.body.result.data.commandId, null)
+    assert.equal((await stateOf(runId)).state, 'cancelled')
+  })
+
+  it('ordering: cancel during execution writes a durable command and waits', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    await claim(target.envId)
+
+    const cancelled: Answer = await callProcedure(h, owner, 'workloads.cancel', 'mutation', { runId })
+    assert.equal(cancelled.body.result.data.stopped, false)
+    const commandId = cancelled.body.result.data.commandId
+    assert.ok(commandId, 'a cancel of a claimed run left nothing for a runtime to act on')
+    // The run is not cancelled yet, and saying it was would be the same lie the
+    // old teardown told.
+    assert.equal((await stateOf(runId)).state, 'accepted')
+
+    const command = await h.admin<{ state: string }[]>`
+      SELECT state::text AS state FROM runtime_commands WHERE id = ${commandId}`
+    assert.equal(command[0]!.state, 'pending')
+
+    // And the engine reporting that it stopped is what closes it.
+    await send([
+      event({ type: 'workload.cancelled', sequence: 7, payload: { workload_run_id: runId } }),
+    ])
+    assert.equal((await stateOf(runId)).state, 'cancelled')
+    const settled = await h.admin<{ state: string; outcome: string | null }[]>`
+      SELECT state::text AS state, outcome FROM runtime_commands WHERE id = ${commandId}`
+    assert.equal(settled[0]!.state, 'acknowledged')
+    assert.equal(settled[0]!.outcome, 'done')
+  })
+
+  it('ordering: a cancel that loses the race is superseded, not failed', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    await claim(target.envId)
+    const cancelled: Answer = await callProcedure(h, owner, 'workloads.cancel', 'mutation', { runId })
+    const commandId = cancelled.body.result.data.commandId
+
+    // The engine finished the work before the cancel reached it. Nothing went
+    // wrong, and nobody should be shown a failed command for a run that simply
+    // finished first.
+    await send([
+      event({
+        type: 'workload.finished',
+        sequence: 9,
+        payload: { workload_run_id: runId, kind: 'browser_workflow', verdict: 'pass', result: { workflows: 1 } },
+      }),
+    ])
+    assert.equal((await stateOf(runId)).state, 'succeeded')
+    const settled = await h.admin<{ state: string; detail: string | null }[]>`
+      SELECT state::text AS state, detail FROM runtime_commands WHERE id = ${commandId}`
+    assert.equal(settled[0]!.state, 'superseded')
+    assert.match(settled[0]!.detail!, /finished as succeeded before the cancel/)
+  })
+
+  it('ordering: cancel after completion is refused and changes nothing', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    await send([
+      event({
+        type: 'workload.finished', sequence: 9,
+        payload: { workload_run_id: runId, kind: 'browser_workflow', verdict: 'pass', result: { workflows: 1 } },
+      }),
+    ])
+    const refused: Answer = await callProcedure(h, owner, 'workloads.cancel', 'mutation', { runId })
+    assert.equal(errorCode(refused.body), 'PRECONDITION_FAILED')
+    assert.match(JSON.stringify(refused.body), /already finished/)
+    const state = await stateOf(runId)
+    assert.equal(state.state, 'succeeded')
+    assert.equal(state.verdict, 'pass')
+  })
+
+  it('ordering: cancelling twice joins the first request rather than queueing a second', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    await claim(target.envId)
+    const first: Answer = await callProcedure(h, owner, 'workloads.cancel', 'mutation', { runId })
+    const second: Answer = await callProcedure(h, owner, 'workloads.cancel', 'mutation', { runId })
+    assert.equal(second.status, 200, JSON.stringify(second.body))
+    assert.equal(second.body.result.data.alreadyRequested, true)
+    assert.equal(second.body.result.data.commandId, first.body.result.data.commandId)
+
+    const commands = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM runtime_commands
+      WHERE kind = 'workload.cancel' AND workload_run_id = ${runId}`
+    assert.equal(Number(commands[0]!.n), 1)
+  })
+
+  // -------------------------------------------------------------------------
+  // Retrying
+  // -------------------------------------------------------------------------
+
+  it('ordering: a retry runs the same version, and marks the original superseded', async () => {
+    const target = await define('observed_load', { durationSeconds: 30, scale: 1 })
+    const runId = (await start(target)).body.result.data.runId
+    await send([
+      event({
+        type: 'workload.finished', sequence: 9,
+        payload: {
+          workload_run_id: runId, kind: 'observed_load', verdict: 'fail',
+          result: { sent: 5, overall: { p95_ms: 900 } },
+        },
+      }),
+    ])
+
+    // A newer version exists by the time somebody retries. A retry answers
+    // "was that a fluke", and answering it with a definition somebody edited in
+    // the meantime answers a different question while looking like it answered
+    // this one.
+    await callProcedure(h, owner, 'workloads.addVersion', 'mutation', {
+      slug: target.slug, body: { durationSeconds: 600, scale: 4 },
+    })
+
+    const retried: Answer = await callProcedure(h, owner, 'workloads.retry', 'mutation', { runId })
+    assert.equal(retried.status, 200, JSON.stringify(retried.body))
+    const newRunId = retried.body.result.data.runId
+
+    const versions = await h.admin<{ version: number; attempt: number; retry_of: string }[]>`
+      SELECT v.version, wr.attempt, wr.retry_of FROM workload_runs wr
+      JOIN workload_versions v ON v.id = wr.workload_version_id WHERE wr.id = ${newRunId}`
+    assert.equal(Number(versions[0]!.version), 1, 'the retry ran a version the original never used')
+    assert.equal(Number(versions[0]!.attempt), 2)
+    assert.equal(versions[0]!.retry_of, runId)
+
+    const original = await h.admin<{ superseded_by: string }[]>`
+      SELECT superseded_by FROM workload_runs WHERE id = ${runId}`
+    assert.equal(original[0]!.superseded_by, newRunId)
+  })
+
+  it('ordering: retrying a superseded run is refused, naming its successor', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    await send([
+      event({
+        type: 'workload.finished', sequence: 9,
+        payload: { workload_run_id: runId, kind: 'browser_workflow', verdict: 'fail', result: { workflows: 1 } },
+      }),
+    ])
+    const first: Answer = await callProcedure(h, owner, 'workloads.retry', 'mutation', { runId })
+    const successor = first.body.result.data.runId
+
+    // Finish the successor so the live-run index is not what refuses this.
+    await send([
+      event({
+        type: 'workload.finished', sequence: 9,
+        payload: { workload_run_id: successor, kind: 'browser_workflow', verdict: 'fail', result: { workflows: 1 } },
+      }),
+    ])
+
+    const again: Answer = await callProcedure(h, owner, 'workloads.retry', 'mutation', { runId })
+    assert.equal(errorCode(again.body), 'PRECONDITION_FAILED')
+    assert.match(JSON.stringify(again.body), new RegExp(successor))
+  })
+
+  it('ordering: retrying a run that is still going is refused', async () => {
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    const refused: Answer = await callProcedure(h, owner, 'workloads.retry', 'mutation', { runId })
+    assert.equal(errorCode(refused.body), 'PRECONDITION_FAILED')
+    assert.match(JSON.stringify(refused.body), /still requested/)
+  })
+})

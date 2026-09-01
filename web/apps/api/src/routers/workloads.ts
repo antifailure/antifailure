@@ -12,6 +12,7 @@
 // followed by a decision answers a question about a moment that has already
 // passed, and this is a control plane several people click at once.
 
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
@@ -25,7 +26,7 @@ import {
 import {
   appendVersion, findWorkload, readRun, resolveOverdueRuns, startRun, requestCancel,
   cancelUnclaimed, markSuperseded, runColumns, runJoins, versionColumns, workloadColumns,
-  uniqueViolation, TERMINAL_STATES,
+  TERMINAL_STATES,
 } from '../workloads/store.ts'
 import { createCommand, expireOverdueCommands, recordDispatch } from '../workloads/commands.ts'
 import { compileExploration, ExplorationRefused } from '../workloads/promote.ts'
@@ -256,24 +257,24 @@ export const workloadsRouter = router({
           })
         }
 
-        let workloadId: string
-        try {
-          const rows = await db.execute<{ id: string }>(sql`
-            INSERT INTO workloads (org_id, repository_id, slug, name, kind, description, created_by)
-            VALUES (${c.actor.orgId}, ${repo.id}, ${input.slug}, ${input.name},
-                    ${input.kind}::workload_kind, ${input.description ?? null}, ${c.actor.userId})
-            RETURNING id`)
-          workloadId = rows[0]!.id
-        } catch (error) {
-          if (uniqueViolation(error) === 'workloads_slug_key') {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message:
-                `${input.repository} already has a workload called ${input.slug}. ` +
-                `Archive that one or choose another name.`,
-            })
-          }
-          throw error
+        // ON CONFLICT DO NOTHING rather than a catch. A statement that raises
+        // inside this transaction cannot be recovered from: postgres.js records
+        // the first failure and rethrows it after the callback returns, whatever
+        // the callback did about it. See workloads/store.ts.
+        const rows = await db.execute<{ id: string }>(sql`
+          INSERT INTO workloads (org_id, repository_id, slug, name, kind, description, created_by)
+          VALUES (${c.actor.orgId}, ${repo.id}, ${input.slug}, ${input.name},
+                  ${input.kind}::workload_kind, ${input.description ?? null}, ${c.actor.userId})
+          ON CONFLICT DO NOTHING
+          RETURNING id`)
+        const workloadId = rows[0]?.id
+        if (!workloadId) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              `${input.repository} already has a workload called ${input.slug}. ` +
+              `Archive that one or choose another name.`,
+          })
         }
 
         const { version } = await appendVersion(db, {
@@ -592,7 +593,13 @@ export const workloadsRouter = router({
           repository: environment.repository,
           gitRef: environment.branch,
           workflowFile: input.workflow,
-          requestKey: input.requestKey ?? `${workload.id}:${environment.id}:${c.clock.now().toISOString()}`,
+          // Random when the caller does not supply one, because absent means
+          // "every call is a new run" and a timestamp is not a unique value: two
+          // requests in the same millisecond would collide and the second would
+          // be answered with the first one's run. Found by firing two starts at
+          // once against an injected clock, which is exactly the case a real
+          // console produces when a page fires on two renders.
+          requestKey: input.requestKey ?? randomUUID(),
           requestedBy: c.actor.userId,
           now: c.clock.now(),
         })

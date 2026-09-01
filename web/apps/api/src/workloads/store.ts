@@ -259,7 +259,26 @@ export async function readRun(db: Db, runId: string): Promise<RunRow | null> {
   return rows[0] ?? null
 }
 
-/** 23505, the unique violation, wherever the driver buried it. */
+/**
+ * 23505, the unique violation, wherever the driver buried it.
+ *
+ * Used only OUTSIDE a transaction. Inside one it is nearly useless, and the
+ * reason is worth writing down because it is a property of this whole codebase
+ * rather than of this file.
+ *
+ * postgres.js records the first failed query of a transaction in `uncaughtError`
+ * and rethrows it after the callback returns, whatever the callback did about
+ * it. So catching a constraint violation inside `withTenant`, rolling back to a
+ * savepoint and carrying on does not work: the recovery runs, the later
+ * statements succeed, and the transaction still rejects with the original
+ * error. Measured, not assumed: a savepoint around the insert below recovered
+ * correctly and the caller still received the PostgresError.
+ *
+ * The consequence is that every collision this code has to turn into a sentence
+ * has to be a collision it never causes. That is what ON CONFLICT DO NOTHING is
+ * for below, and it is why the read-back is not an optimisation but the only
+ * way to tell the two collisions apart.
+ */
 export function uniqueViolation(error: unknown): string | null {
   let cur: unknown = error
   for (let depth = 0; depth < 8 && cur; depth += 1) {
@@ -313,45 +332,57 @@ export interface StartOutcome {
 export async function startRun(db: Db, input: StartInput): Promise<StartOutcome> {
   const now = input.now.toISOString()
   const deadline = new Date(input.now.getTime() + RUN_DEADLINE_MS).toISOString()
-  try {
-    const rows = await db.execute<{ id: string }>(sql`
-      INSERT INTO workload_runs (
-        org_id, workload_id, workload_version_id, environment_id,
-        requested_by, requested_at, request_key, repository, git_ref,
-        workflow_file, deadline_at, attempt, retry_of, created_at, updated_at)
-      VALUES (
-        ${input.orgId}, ${input.workloadId}, ${input.versionId}, ${input.environmentId},
-        ${input.requestedBy}, ${now}::timestamptz, ${input.requestKey}, ${input.repository},
-        ${input.gitRef}, ${input.workflowFile}, ${deadline}::timestamptz,
-        ${input.attempt ?? 1}, ${input.retryOf ?? null}, ${now}::timestamptz, ${now}::timestamptz)
-      RETURNING id`)
-    return { runId: rows[0]!.id, created: true }
-  } catch (error) {
-    const constraint = uniqueViolation(error)
-    if (constraint === 'workload_runs_org_id_request_key_key') {
-      const existing = await db.execute<{ id: string }>(sql`
-        SELECT id FROM workload_runs WHERE request_key = ${input.requestKey}`)
-      return {
-        runId: existing[0]!.id,
-        created: false,
-        reason: 'This exact request had already been made, so it is the same run rather than a second one.',
-      }
+
+  // ON CONFLICT DO NOTHING with no target, so it covers BOTH unique indexes:
+  // the request key and the one live run per workload per environment. Naming
+  // one of them would leave the other raising, and a raised statement cannot be
+  // recovered from inside this transaction at all. See uniqueViolation above.
+  const inserted = await db.execute<{ id: string }>(sql`
+    INSERT INTO workload_runs (
+      org_id, workload_id, workload_version_id, environment_id,
+      requested_by, requested_at, request_key, repository, git_ref,
+      workflow_file, deadline_at, attempt, retry_of, created_at, updated_at)
+    VALUES (
+      ${input.orgId}, ${input.workloadId}, ${input.versionId}, ${input.environmentId},
+      ${input.requestedBy}, ${now}::timestamptz, ${input.requestKey}, ${input.repository},
+      ${input.gitRef}, ${input.workflowFile}, ${deadline}::timestamptz,
+      ${input.attempt ?? 1}, ${input.retryOf ?? null}, ${now}::timestamptz, ${now}::timestamptz)
+    ON CONFLICT DO NOTHING
+    RETURNING id`)
+  if (inserted[0]) return { runId: inserted[0].id, created: true }
+
+  // Which collision it was, and the two mean different things. The request key
+  // first, because a repeated request is an answer and a live run is a refusal,
+  // and a caller who sent the same key twice asked for the first thing.
+  const repeated = await db.execute<{ id: string }>(sql`
+    SELECT id FROM workload_runs WHERE request_key = ${input.requestKey}`)
+  if (repeated[0]) {
+    return {
+      runId: repeated[0].id,
+      created: false,
+      reason: 'This exact request had already been made, so it is the same run rather than a second one.',
     }
-    if (constraint === 'workload_runs_one_live') {
-      const live = await db.execute<{ id: string; state: string }>(sql`
-        SELECT id, state::text AS state FROM workload_runs
-        WHERE workload_id = ${input.workloadId} AND environment_id = ${input.environmentId}
-          AND state IN ('requested', 'accepted', 'running')`)
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message:
-          `This workload is already ${live[0]?.state ?? 'going'} against that environment, as run ` +
-          `${live[0]?.id ?? 'unknown'}. Two copies of one workload against one environment measure ` +
-          `each other rather than the application. Cancel it, or wait for it to finish.`,
-      })
-    }
-    throw error
   }
+
+  const live = await db.execute<{ id: string; state: string }>(sql`
+    SELECT id, state::text AS state FROM workload_runs
+    WHERE workload_id = ${input.workloadId} AND environment_id = ${input.environmentId}
+      AND state IN ('requested', 'accepted', 'running')`)
+  if (live[0]) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message:
+        `This workload is already ${live[0].state} against that environment, as run ` +
+        `${live[0].id}. Two copies of one workload against one environment measure ` +
+        `each other rather than the application. Cancel it, or wait for it to finish.`,
+    })
+  }
+
+  // Neither, which means something conflicted that this function does not know
+  // about. Thrown rather than returned as a null the caller would have to
+  // handle: a run that neither exists nor can be created means an index was
+  // added without this being taught about it, and that is a bug to see.
+  throw new Error('a workload run could neither be created nor read back')
 }
 
 /**
