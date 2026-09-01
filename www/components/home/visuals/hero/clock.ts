@@ -6,53 +6,78 @@ import { useInViewPlay } from "@/lib/useInViewPlay";
 import { usePausedRaf } from "@/lib/usePausedRaf";
 import { seededNoise } from "@/components/home/visuals/primitives";
 
-export type FilmProps = { active: boolean; hovered: boolean };
+export type FilmProps = { active: boolean };
 
+/**
+ * A hero film's clock. It runs once, from the first frame to the last, and
+ * then holds the last frame.
+ *
+ * It used to advance on `sec % loop`, which is a film that replays for as long
+ * as the page is open. In practice it almost never reached the wrap, because
+ * HeroServices deactivated each card at 6.4s and the loop is 8 film-seconds at
+ * 1.12x, so what a reader actually saw was every film cut off just short of its
+ * ending and reset to a blank first frame, over and over, five cards deep,
+ * forever. The loop was not even the mechanism; the rotation was.
+ *
+ * So `active` now only starts the film. Once started it plays through under its
+ * own clock and rests, and coming back into view does not rewind it: a film
+ * that replays every time it is scrolled past is the same defect wearing a
+ * different mechanism.
+ *
+ * `reducedT` is the frame somebody who asked us not to move things sees, and it
+ * is the last frame rather than the first for the same reason the film stops
+ * there: the end of these films is the composed state, and the beginning is an
+ * empty card.
+ */
 export function useHeroFilmClock({
   loop,
   active,
-  hovered,
-  hoverRange,
   stillT,
   reducedT,
 }: {
   loop: number;
   active: boolean;
-  hovered: boolean;
-  hoverRange?: readonly [number, number];
   stillT?: number;
   reducedT?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { inView, reduced } = useInViewPlay(ref, 0.15);
-  const freeze = stillT ?? 0;
-  const info = reducedT ?? freeze;
-  const [t, setT] = useState(freeze);
+  // Just inside the end, not on it. `on(t, a, b)` is exclusive at b, so a film
+  // held at exactly `loop` loses every element whose window closes with the
+  // film: the first card's candidate branch went blank at the moment it was
+  // supposed to be finished.
+  const end = loop - 0.001;
+  const poster = stillT ?? 0;
+  const resting = reducedT ?? end;
+  const [t, setT] = useState(poster);
   const [elapsedSec, setElapsedSec] = useState(0);
-  const playing = active && inView && !reduced;
+  const [started, setStarted] = useState(false);
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
-    if (playing) return;
-    setT(freeze);
-    setElapsedSec(0);
-  }, [playing, freeze]);
+    if (active) setStarted(true);
+  }, [active]);
+
+  const playing = started && inView && !reduced && !done;
 
   usePausedRaf(playing, (_now, elapsed) => {
     const sec = (elapsed / 1000) * 1.12;
-    setElapsedSec(sec);
-    if (hovered && hoverRange) {
-      const [a, b] = hoverRange;
-      setT(a + (sec % Math.max(0.001, b - a)));
+    if (sec >= end) {
+      setElapsedSec(loop);
+      setT(end);
+      setDone(true);
       return;
     }
-    setT(sec % loop);
+    setElapsedSec(sec);
+    setT(sec);
   });
 
-  let clock = freeze;
-  if (reduced) clock = info;
-  else if (playing) clock = t;
+  let clock = t;
+  if (reduced) clock = resting;
+  else if (done) clock = end;
+  else if (!started) clock = poster;
 
-  return { ref, t: clock, elapsed: playing ? elapsedSec : clock, reduced, playing, inView };
+  return { ref, t: clock, elapsed: reduced ? loop : elapsedSec, reduced, playing, inView };
 }
 
 export function span(t: number, a: number, b: number) {

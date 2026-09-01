@@ -109,25 +109,6 @@ body {
   background-size: 16px 16px, 34px 60px;
 }
 
-@keyframes film-scan {
-  0% {
-    transform: translateY(-100%);
-  }
-  100% {
-    transform: translateY(220%);
-  }
-}
-
-.hero-scan {
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(255, 255, 255, 0.08) 48%,
-    transparent 52%
-  );
-  animation: film-scan 7s linear infinite;
-}
-
 @keyframes film-stroke {
   from {
     stroke-dasharray: 1;

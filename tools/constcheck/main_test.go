@@ -468,3 +468,159 @@ func TestDeclaredReachabilityResolves(t *testing.T) {
 		}
 	}
 }
+
+// A markdown table row carries the same number of cells as its header, and a
+// row that does not is two rows welded onto one line.
+//
+// This is not hypothetical and it is not cosmetic. Merging w-monolabel joined
+// the "8.9 Design system" and "8.10 Deployment" rows of STATUS.md into a single
+// line. The table then read 8.8, 8.9, 8.11 and the Deployment row did not exist
+// as a row at all. Nothing noticed, because the file still parsed as a table
+// and the defect is invisible in a diff of two lines that are each several
+// thousand characters long.
+//
+// What makes it worth a gate rather than a rule people follow during a merge:
+// the arithmetic that identified it was 1885 + 4799 = 6684 against a single
+// line of 6685, which proves the file lost exactly one newline and no content.
+// A resolution that drops a clause is at least legible in review. A resolution
+// that drops a line break is not, and no amount of care during a merge finds
+// it. Counting cells does, every time, in a few lines.
+func TestEveryPlanTableRowHasItsHeadersCellCount(t *testing.T) {
+	root := filepath.Join("..", "..")
+	docs, err := filepath.Glob(filepath.Join(root, "docs", "plan", "*.md"))
+	if err != nil || len(docs) == 0 {
+		t.Fatalf("no plan documents found to check: %v", err)
+	}
+	more, _ := filepath.Glob(filepath.Join(root, "docs", "plan", "notes", "*.md"))
+	docs = append(docs, more...)
+
+	checked := 0
+	for _, path := range docs {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		for _, bad := range weldedRows(string(body)) {
+			t.Errorf("%s:%d has %d cells where its header has %d. "+
+				"A row with too many cells is usually two rows joined by a lost "+
+				"newline during a merge, which still parses as a table. The row "+
+				"starts: %s",
+				filepath.Base(path), bad.line, bad.cells, bad.want, bad.excerpt)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("checked no documents, so this proved nothing")
+	}
+}
+
+type weldedRow struct {
+	line    int
+	cells   int
+	want    int
+	excerpt string
+}
+
+// weldedRows returns every row whose cell count differs from the header of the
+// table it is in. A table is a run of consecutive lines starting with "|"; the
+// header is its first line and the delimiter row beneath it is skipped.
+func weldedRows(md string) []weldedRow {
+	var out []weldedRow
+	lines := strings.Split(md, "\n")
+	want, row := 0, 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "|") {
+			want, row = 0, 0
+			continue
+		}
+		n := countCellBoundaries(trimmed)
+		row++
+		if row == 1 {
+			want = n
+			continue
+		}
+		if row == 2 && strings.Trim(trimmed, "| -:") == "" {
+			continue // the delimiter row
+		}
+		if n != want {
+			excerpt := trimmed
+			if len(excerpt) > 60 {
+				excerpt = excerpt[:60] + "..."
+			}
+			out = append(out, weldedRow{line: i + 1, cells: n, want: want, excerpt: excerpt})
+		}
+	}
+	return out
+}
+
+// countCellBoundaries counts the pipes that divide cells, which is not the same
+// as counting pipes. GFM treats a pipe preceded by an odd number of backslashes
+// as literal content, and STATUS.md carries one in a code span:
+// `af model set\|show\|test\|rm`. Counting raw pipes called that row welded,
+// and a gate whose findings are not all real gets ignored along with its true
+// ones.
+func countCellBoundaries(row string) int {
+	n := 0
+	for i := 0; i < len(row); i++ {
+		if row[i] != '|' {
+			continue
+		}
+		slashes := 0
+		for j := i - 1; j >= 0 && row[j] == '\\'; j-- {
+			slashes++
+		}
+		if slashes%2 == 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// The gate has to be able to fail, so this is the exact shape of the defect:
+// two well formed rows with the newline between them removed.
+func TestAWeldedRowIsCaught(t *testing.T) {
+	good := "| a | b |\n| --- | --- |\n| 8.9 Design | built |\n| 8.10 Deploy | written |\n"
+	if bad := weldedRows(good); len(bad) != 0 {
+		t.Fatalf("a well formed table was reported: %+v", bad)
+	}
+
+	welded := "| a | b |\n| --- | --- |\n| 8.9 Design | built || 8.10 Deploy | written |\n"
+	bad := weldedRows(welded)
+	if len(bad) != 1 {
+		t.Fatalf("the welded row was not caught, got %+v", bad)
+	}
+	if bad[0].cells <= bad[0].want {
+		t.Errorf("expected more cells than the header, got %d against %d", bad[0].cells, bad[0].want)
+	}
+}
+
+// The escape has to hold in both directions, because the fix for a false
+// finding is the usual way a gate quietly stops catching the real thing.
+// STATUS.md documents `af model set\|show\|test\|rm`, whose three escaped pipes
+// GFM renders as text; a row carrying them is not welded. A pipe behind an
+// escaped backslash still divides a cell, so parity is what decides it rather
+// than the presence of a backslash.
+func TestAnEscapedPipeIsNotACellBoundary(t *testing.T) {
+	escaped := `| a | b |
+| --- | --- |
+| set\|show\|rm | built |
+`
+	if bad := weldedRows(escaped); len(bad) != 0 {
+		t.Errorf("escaped pipes were counted as cell boundaries: %+v", bad)
+	}
+
+	// Two backslashes are one escaped backslash, so the pipe after them is a
+	// real boundary and this row genuinely has one cell too many.
+	realBoundary := `| a | b |
+| --- | --- |
+| ends with a backslash \\| built | spilled |
+`
+	if bad := weldedRows(realBoundary); len(bad) != 1 {
+		t.Fatalf("a pipe behind an escaped backslash should divide a cell, got %+v", bad)
+	}
+
+	if n := countCellBoundaries(`| set\|show |`); n != 2 {
+		t.Errorf("counted %d boundaries where the row has 2", n)
+	}
+}

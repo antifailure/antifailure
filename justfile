@@ -77,6 +77,7 @@ gate: _reports
     run "prose style"                    just vale
     run "every link resolves"            just links
     run "no class that never applies"    just classcheck
+    run "no animation that never stops" just motioncheck
     run "the built docs carry their head" just docscheck
     run "the site's own claims"          just seo
     run "prose stays readable"           just readability
@@ -459,6 +460,16 @@ modecheck:
 # nothing at all. Reads the built HTML, so it needs a built www.
 classcheck:
     go run ./tools/classcheck .
+
+# No UI that animates forever while the reader does nothing.
+#
+# Reads the built stylesheet and the built HTML, never the source. Two people
+# read globals.css on the same day, both saw the one infinite rule left in it,
+# and both called it harmless because nothing in that file used it. It was
+# rendered on the front page by HeroFilm.tsx. The source says which rules
+# exist; only the render says which land on an element. Needs a built www.
+motioncheck:
+    go run ./tools/motioncheck .
 
 # Spelling, with the project dictionary in tools/docs/dictionary.txt.
 spell:
