@@ -20,6 +20,32 @@ import { rest, type Session } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
 import { Button, Field, Lede, LinkButton, Standalone, inputClass } from "@/components/ui";
 
+/**
+ * Where to come back to after signing in.
+ *
+ * A link in a pull request comment points at one page: the environment for
+ * that commit, the run, the evidence. Somebody following it who is not signed
+ * in used to get the sign-in screen and then the dashboard, with no way back
+ * to the thing they clicked, which makes every deep link this product publishes
+ * a link to the front door. /device already did this correctly and the rest of
+ * the console did not.
+ *
+ * Read off window rather than from usePathname, because the query string is
+ * half the address here: /environments?env=af-1234 and /environments are
+ * different pages to the person who followed the link. Guarded, because this
+ * console is a static export and window does not exist while it is prerendered.
+ */
+function returnTo(): string | null {
+  if (typeof window === "undefined") return null;
+  const here = window.location.pathname + window.location.search;
+  // The same shape the API's own safeRedirect accepts: a path on this origin
+  // and nothing that could be read as another one. Sending anything else would
+  // be refused there and land the person on the dashboard anyway, so it is
+  // dropped here where the reason can be written down.
+  if (!here.startsWith("/") || here.startsWith("//") || here.includes("\\")) return null;
+  return here;
+}
+
 const NAV = [
   { href: "/environments", label: "Environments", Icon: IconEnvironments },
   { href: "/runs", label: "Runs", Icon: IconRuns },
@@ -64,7 +90,11 @@ function EmailSignIn() {
     setError(null);
     setBusy(true);
     try {
-      await rest("/auth/email", { method: "POST", body: { email } });
+      const back = returnTo();
+      await rest("/auth/email", {
+        method: "POST",
+        body: back ? { email, redirect_to: back } : { email },
+      });
       setSent(true);
     } catch {
       // Ours, not theirs. Telling somebody their link is on the way when it
@@ -127,6 +157,10 @@ function SignIn({ session }: { session: Session }) {
   // rather than as "none", so an older API is a page with one button on it
   // instead of a page with none.
   const methods = session.methods ?? ["github"];
+  const back = returnTo();
+  const githubSignInHref = back
+    ? `/auth/github?redirect_to=${encodeURIComponent(back)}`
+    : "/auth/github";
   return (
     <Standalone title="Sign in" width={400}>
       <Lede>
@@ -134,7 +168,7 @@ function SignIn({ session }: { session: Session }) {
         in with the GitHub account that was invited.
       </Lede>
       <div className="mt-6">
-        <LinkButton href="/auth/github" full>
+        <LinkButton href={githubSignInHref} full>
           <GitHubMark />
           Continue with GitHub
         </LinkButton>
