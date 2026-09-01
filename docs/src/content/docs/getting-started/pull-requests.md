@@ -116,7 +116,7 @@ refused before anything starts.
 `fork_policy: label` is the default and the right starting point. A pull
 request from a fork runs code somebody outside your organisation wrote, against
 an environment holding a masked copy of your data. Nothing runs until a
-maintainer adds the label, which is a person deciding.
+maintainer adds the `antifailure:allow` label, which is a person deciding.
 
 Related: [the full GitHub configuration](/docs/guides/github/),
 [scheduling](/docs/concepts/scheduling/).

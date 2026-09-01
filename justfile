@@ -456,8 +456,17 @@ scanrepo:
     go run ./tools/scanrepo .
 
 # Every af command shown in the docs is a command that exists.
+# -count=1 for the same reason test-tools needs it, proven the same way.
+#
+# This test reads docs/src/content/docs and examples/, both outside the engine
+# module, so nothing it depends on is anything the cache watches. Measured: a
+# documentation page was edited to read `af init --wat`, a flag that does not
+# exist, and `just docexamples` answered "ok (cached)". The same test with
+# -count=1 failed on it immediately. CI already passes -count=1 through
+# `go test ./...`, so this was a local-only lie, and a local-only lie is the
+# worst kind here: CONTRIBUTING promises a green `just gate` means a green CI.
 docexamples:
-    cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists
+    cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists -count=1
 
 # The punctuation this project does not use.
 prosecheck:
