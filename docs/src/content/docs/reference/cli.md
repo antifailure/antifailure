@@ -1155,6 +1155,40 @@ af mask verify
 | --- | --- | --- |
 | `--branch` | - | Branch to check, defaulting to the checked out one. |
 
+### `af mcp`
+
+Serve the rehearsal tools to a model over the Model Context Protocol.
+
+Serve this repository's rehearsal tools to an MCP client on standard input and
+output.
+
+The agent on the other end chooses what to rehearse. It does not choose how
+safely the rehearsal runs: there is no argument on any tool that can disable
+sanitization, widen the egress policy, lower a threshold or name a database.
+Thresholds come from this project's manifest, and the verdict is decided by the
+same evaluator af ci uses, so a tool call and a pull request check cannot
+disagree about the same change.
+
+The server serves exactly this checkout. A tool call may state which project it
+believes it is talking to, and a call naming a different one is refused rather
+than followed.
+
+Standard output carries the protocol and nothing else. Progress, warnings and
+errors go to standard error, where the client's log will show them.
+
+```
+af mcp
+```
+
+```
+# Started by an MCP client, not typed. It speaks the protocol on
+# standard input and output, so running it in a terminal looks idle.
+af mcp
+# It serves exactly the checkout it starts in, so the client is
+# configured to run it there.
+af mcp
+```
+
 ### `af model`
 
 The model key the agents use on this machine.
