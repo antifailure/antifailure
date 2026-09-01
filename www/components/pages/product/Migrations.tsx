@@ -1,13 +1,4 @@
-import {
-  Callout,
-  FeatureGrid,
-  PageHeading,
-  PageHero,
-  PageSection,
-  PageShell,
-  Split,
-  Steps,
-} from "@/components/pages/kit";
+import { Callout, FeatureGrid, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split, Steps } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { PMG01, PMG02, PMG03, PMG04 } from "@/components/pages/figures/product";
 import { cn } from "@/lib/cn";
@@ -171,6 +162,14 @@ export function MigrationsPage() {
         </div>
       </PageSection>
 
+
+      <RelatedGrid
+        items={[
+          { href: "/solutions", title: "Solutions", description: "The teams who feel this first." },
+          { href: "/product/report", title: "Safety Report", description: "How the lock becomes a GitHub check." },
+          { href: "/docs/guides/invariants", title: "Invariants docs", description: "The subscriptions demo in full." },
+        ]}
+      />
     </PageShell>
   );
 }

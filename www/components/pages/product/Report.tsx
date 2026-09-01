@@ -1,4 +1,4 @@
-import { PageHeading, PageHero, PageSection, PageShell, Split } from "@/components/pages/kit";
+import { PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { ReportScene } from "@/components/home/visuals/ReportScene";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { PRP01, PRP02 } from "@/components/pages/figures/product";
@@ -227,6 +227,14 @@ export function ReportPage() {
         </Split>
       </PageSection>
 
+
+      <RelatedGrid
+        items={[
+          { href: "/product/load", title: "Load", description: "Where a latency regression is measured." },
+          { href: "/product/twins", title: "Isolated Twin", description: "What the run is carried out inside." },
+          { href: "/product/migrations", title: "Migration Safety", description: "The lock that a rehearsal finds." },
+        ]}
+      />
     </PageShell>
   );
 }

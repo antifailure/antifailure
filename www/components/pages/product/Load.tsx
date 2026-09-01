@@ -1,12 +1,4 @@
-import {
-  Callout,
-  FeatureGrid,
-  PageHeading,
-  PageHero,
-  PageSection,
-  PageShell,
-  Split,
-} from "@/components/pages/kit";
+import { Callout, FeatureGrid, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { PLD01, PLD02 } from "@/components/pages/figures/product";
 
@@ -149,6 +141,22 @@ export function LoadPage() {
           </p>
         </Split>
       </PageSection>
+
+      <RelatedGrid
+        items={[
+          {
+            href: "/product/report",
+            title: "Safety Report",
+            description: "Where a regressed route lands on the pull request.",
+          },
+          {
+            href: "/product/migrations",
+            title: "Migration Safety",
+            description: "Locks, rewrites and query plans on a branch with production's shape.",
+          },
+          { href: "/docs/concepts/load", title: "Load docs", description: "Sources, routes, and thresholds." },
+        ]}
+      />
     </PageShell>
   );
 }

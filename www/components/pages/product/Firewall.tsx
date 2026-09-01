@@ -1,11 +1,4 @@
-import {
-  Callout,
-  PageHeading,
-  PageHero,
-  PageSection,
-  PageShell,
-  Split,
-} from "@/components/pages/kit";
+import { Callout, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { PFW01, PFW02, PFW03, PFW04, PFW05, PFW06 } from "@/components/pages/figures/product";
 
@@ -95,6 +88,14 @@ export function FirewallPage() {
         </Split>
       </PageSection>
 
+
+      <RelatedGrid
+        items={[
+          { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
+          { href: "/product/report", title: "Safety Report", description: "Where the attempted effects are summarised." },
+          { href: "/docs/concepts/egress", title: "Egress docs", description: "Controls and example behavior." },
+        ]}
+      />
     </PageShell>
   );
 }

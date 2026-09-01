@@ -1,4 +1,4 @@
-import { PageHero, PageSection, PageShell } from "@/components/pages/kit";
+import { PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
 import { SDEV01, SDEV02 } from "@/components/pages/figures/solutions";
 import { AFTER_HEADING, FeatureList, Lead, SectionHeading, Split } from "./visuals";
 
@@ -53,6 +53,14 @@ export function DevtoolsPage() {
           <SectionHeading title="<strong>Narrow adapters, complete stack.</strong>" />
         </Split>
       </PageSection>
+
+      <RelatedGrid
+        items={[
+          { href: "/product/migrations", title: "Migration Safety", description: "Locks, rewrites, plans, lint." },
+          { href: "/product/load", title: "Load", description: "Production's own route mix against the branch." },
+          { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
+        ]}
+      />
     </PageShell>
   );
 }

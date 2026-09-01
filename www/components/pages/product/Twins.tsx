@@ -1,10 +1,4 @@
-import {
-  PageHeading,
-  PageHero,
-  PageSection,
-  PageShell,
-  Split,
-} from "@/components/pages/kit";
+import { PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { PTW01, PTW02, PTW03, PTW04, PTW05 } from "@/components/pages/figures/product";
 import { MonoLabel, Node } from "@/components/home/visuals/primitives";
@@ -197,6 +191,14 @@ export function TwinsPage() {
         </Split>
       </PageSection>
 
+
+      <RelatedGrid
+        items={[
+          { href: "/product/safe-state", title: "Safe State", description: "What gets restored into the twin." },
+          { href: "/product/architecture", title: "Architecture", description: "Customer-hosted data plane." },
+          { href: "/product/report", title: "Safety Report", description: "What the run says it could not measure." },
+        ]}
+      />
     </PageShell>
   );
 }

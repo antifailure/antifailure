@@ -1,4 +1,4 @@
-import { PageHero, PageSection, PageShell } from "@/components/pages/kit";
+import { PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
 import { SFIN01, SFIN02 } from "@/components/pages/figures/solutions";
 import { AFTER_HEADING, FeatureList, Lead, SectionHeading, Split } from "./visuals";
 
@@ -61,6 +61,14 @@ export function FintechPage() {
           <SectionHeading title="<strong>Existential failure.</strong>" />
         </Split>
       </PageSection>
+
+      <RelatedGrid
+        items={[
+          { href: "/product/firewall", title: "Side-Effect Firewall", description: "How egress is denied and simulated." },
+          { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
+          { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
+        ]}
+      />
     </PageShell>
   );
 }

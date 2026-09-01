@@ -1,13 +1,4 @@
-import {
-  Callout,
-  PageHeading,
-  PageHero,
-  PageSection,
-  PageShell,
-  SpecTable,
-  Split,
-  Steps,
-} from "@/components/pages/kit";
+import { Callout, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, SpecTable, Split, Steps } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { PAR01, PAR02, PAR03 } from "@/components/pages/figures/product";
 
@@ -134,6 +125,14 @@ export function ArchitecturePage() {
         </div>
       </PageSection>
 
+
+      <RelatedGrid
+        items={[
+          { href: "/product/firewall", title: "Firewall", description: "How side effects are contained." },
+          { href: "/docs", title: "Docs", description: "How a twin run works." },
+          { href: "/docs/concepts/journal", title: "Journal docs", description: "Lifecycle and isolation in full." },
+        ]}
+      />
     </PageShell>
   );
 }

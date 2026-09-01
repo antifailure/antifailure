@@ -1,4 +1,4 @@
-import { PageHero, PageSection, PageShell } from "@/components/pages/kit";
+import { PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
 import { SSAAS01, SSAAS02 } from "@/components/pages/figures/solutions";
 import {
   AFTER_HEADING,
@@ -51,6 +51,14 @@ export function SaasPage() {
           />
         </div>
       </PageSection>
+
+      <RelatedGrid
+        items={[
+          { href: "/product/migrations", title: "Migration Safety", description: "The lock on subscriptions is the first finding." },
+          { href: "/signup", title: "Sign up", description: "Join the waitlist." },
+          { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
+        ]}
+      />
     </PageShell>
   );
 }
