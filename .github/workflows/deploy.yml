@@ -267,16 +267,31 @@ jobs:
           ')
           echo "the published error catalog resolves $catalog codes"
 
-          # Drift, reported always and fatal only when the API version differs.
-          served=$(curl -sS -m 20 "$control/openapi.json" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).info.version' || echo unknown)
+          # Drift, fatal only when the two API versions actually disagree.
+          #
+          # An unreachable control plane is NOT a disagreement, and failing on it
+          # would redden a site deploy over somebody else's blip, which is how a
+          # check gets ignored. Retried a few times first, then reported and
+          # skipped: an unknown is an unknown.
           published=$(node -pe 'JSON.parse(require("fs").readFileSync("/tmp/openapi.json","utf8")).info.version')
-          if [ "$served" != "$published" ]; then
+          served=unknown
+          for attempt in $(seq 1 5); do
+            served=$(curl -sS -m 20 "$control/openapi.json" \
+              | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).info.version' 2>/dev/null || echo unknown)
+            [ "$served" != "unknown" ] && break
+            sleep 5
+          done
+          if [ "$served" = "unknown" ]; then
+            echo "::warning::$control did not serve a readable OpenAPI document, so the API"
+            echo "version the apex publishes ($published) could not be compared against it."
+          elif [ "$served" != "$published" ]; then
             echo "::error::the apex publishes API version $published and $control serves $served."
             echo "Promote the control plane, or hold this document back. A caller reading one"
             echo "version of the contract and calling the other is the failure this catches."
             exit 1
+          else
+            echo "apex and control plane agree on API version $published"
           fi
-          echo "apex and control plane agree on API version $published"
 
           # Live, not documented. A path in the document that the host does not
           # answer is the drift that actually costs a caller something, and the
