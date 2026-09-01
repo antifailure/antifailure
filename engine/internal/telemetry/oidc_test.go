@@ -82,6 +82,14 @@ type hosted struct {
 	mu sync.Mutex
 	// issued is the engine token to hand back for a verified identity.
 	issued string
+	// mintSeq, when set, is handed out one per exchange, so a test can make the
+	// second exchange return something different from the first. The last entry
+	// is repeated once the sequence runs out.
+	mintSeq []string
+	// acceptOnly, when set, is the one credential /v1/events accepts. Anything
+	// else gets a 401, which is how an expiry looks from the engine: there is no
+	// other notice.
+	acceptOnly string
 	// refuse, when set, is the status the exchange answers with instead.
 	refuse int
 
@@ -98,6 +106,9 @@ func (h *hosted) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h.exchanges++
 		h.identities = append(h.identities, req.Header.Get("authorization"))
 		issued, refuse := h.issued, h.refuse
+		if len(h.mintSeq) > 0 {
+			issued = h.mintSeq[min(h.exchanges-1, len(h.mintSeq)-1)]
+		}
 		h.mu.Unlock()
 
 		if refuse != 0 {
@@ -109,9 +120,19 @@ func (h *hosted) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"token": issued, "expires_in": 3600})
 
 	case "/v1/events":
+		presented := req.Header.Get("authorization")
 		h.mu.Lock()
-		h.ingestAuths = append(h.ingestAuths, req.Header.Get("authorization"))
+		h.ingestAuths = append(h.ingestAuths, presented)
+		acceptOnly := h.acceptOnly
 		h.mu.Unlock()
+
+		// What an expired credential looks like from the engine. The control
+		// plane does not tell it in advance and there is nothing to poll.
+		if acceptOnly != "" && presented != "Bearer "+acceptOnly {
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "This token is not valid."})
+			return
+		}
 
 		var body struct {
 			Events []controlplane.Event `json:"events"`
@@ -360,6 +381,92 @@ func TestARefusedExchangeIsReportedAndTheRunCarriesOn(t *testing.T) {
 	require.Len(t, run.log, 1, "the run is unaffected")
 	require.True(t, warnedAbout(run.warned, "not connected here"),
 		"the control plane's own reason is carried through: %v", run.warned)
+}
+
+// The credential is short lived by design, so a run outlives it.
+//
+// This is the failure that would otherwise be invisible: the sink acquires a
+// credential when the environment comes up, reports happily for fifteen
+// minutes, and then silently stops, leaving a dashboard showing a run that
+// started and never finished with nothing anywhere saying why. A 401 is the
+// only notice an expiry gives, so a 401 has to be the thing that triggers a
+// fresh exchange.
+func TestAnExpiredCredentialIsRenewedAndTheEventStillArrives(t *testing.T) {
+	r := &runner{value: "signed.workflow.identity"}
+	h := &hosted{
+		mintSeq: []string{"first-credential", "second-credential"},
+		// The first credential is already dead by the time an event is sent,
+		// which is the case a long job hits.
+		acceptOnly: "second-credential",
+	}
+
+	run := runOne(t, r, h, map[string]string{
+		identityURLEnv:   "present",
+		identityTokenEnv: "the-runners-request-token",
+	})
+
+	require.Equal(t, 2, run.plane.exchangeCount(),
+		"the refusal did not produce a second exchange")
+	require.Equal(t, []string{run.log[0].ID}, run.plane.ingested(),
+		"the event was lost to an expiry that could have been recovered from")
+	require.Equal(t,
+		[]string{"Bearer first-credential", "Bearer second-credential"},
+		run.plane.bearers(),
+		"the retry has to present the new credential, not the dead one")
+}
+
+// A refusal renewing cannot fix costs the run nothing.
+//
+// This deliberately does NOT claim to prove the renewal floor. One flush makes
+// one request, so a bounded renewal and an unbounded one both exchange twice
+// here and the count tells them apart not at all: setting RenewFloor to zero
+// leaves this test green, which is how that was established. The floor is
+// proved where it can be, at the client, by
+// TestARefusedBatchRenewsAtMostOncePerFloor in the controlplane package. What
+// this one proves is the part that belongs here: a control plane refusing
+// everything does not fail the run, does not lose the local log, and does not
+// hang the close.
+func TestARefusalRenewingCannotFixIsNotAnExchangeLoop(t *testing.T) {
+	r := &runner{value: "signed.workflow.identity"}
+	h := &hosted{
+		mintSeq: []string{"first", "second", "third", "fourth"},
+		// Nothing is ever accepted, so renewing can never help.
+		acceptOnly: "a-credential-this-control-plane-will-never-issue",
+	}
+
+	run := runOne(t, r, h, map[string]string{
+		identityURLEnv:   "present",
+		identityTokenEnv: "the-runners-request-token",
+	})
+
+	require.Empty(t, run.plane.ingested(), "nothing could have been accepted")
+	require.Len(t, run.log, 1, "and the run is unaffected either way")
+}
+
+// A token the user set is never renewed over their head.
+//
+// Re-minting on top of a credential somebody deliberately configured would
+// ignore their choice on the first refusal, and the refusal they need to see is
+// that their token is wrong rather than that a fresh one also did not work.
+func TestAnEnvironmentTokenIsNeverRenewedOverTheUsersHead(t *testing.T) {
+	r := &runner{value: "signed.workflow.identity"}
+	h := &hosted{
+		issued:     "minted-for-this-job",
+		acceptOnly: "a-credential-this-control-plane-will-never-issue",
+	}
+
+	run := runOne(t, r, h, map[string]string{
+		"AF_CONTROL_PLANE_TOKEN": "from-the-environment",
+		identityURLEnv:           "present",
+		identityTokenEnv:         "the-runners-request-token",
+	})
+
+	require.Equal(t, 0, run.plane.exchangeCount(),
+		"a configured token was quietly replaced with a minted one")
+	require.Equal(t, 0, run.runner.calls())
+	for _, presented := range run.plane.bearers() {
+		require.Equal(t, "Bearer from-the-environment", presented)
+	}
 }
 
 // A control plane older than the engine says so, rather than saying "refused".

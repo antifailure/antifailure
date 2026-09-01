@@ -214,6 +214,20 @@ func (t *Telemetry) attachControlPlane(
 		baseURL = getenv("AF_CONTROL_PLANE_URL")
 	}
 
+	// mint is how a credential is obtained from this job's identity, and it is
+	// held rather than called once because the credential is short lived and a
+	// run outlives it. The client calls it again when the control plane refuses
+	// a batch, which is the only notice an expiry ever gives.
+	mint := func(ctx context.Context) (string, error) {
+		return controlplane.TokenFromWorkflowIdentity(ctx, controlplane.WorkflowIdentityOptions{
+			Lookup: lookup, BaseURL: baseURL,
+		})
+	}
+	// renew stays nil for a token that came from the environment. That one does
+	// not expire, and re-minting over the top of a credential the user chose
+	// would quietly ignore their choice on the first 401.
+	var renew func(context.Context) (string, error)
+
 	token := controlplane.TokenFromEnvironment(lookup)
 	// An address is what says this repository uses a control plane at all.
 	//
@@ -225,9 +239,7 @@ func (t *Telemetry) attachControlPlane(
 	// instance, be refused because the repository is not connected to it, and
 	// print a warning about a service the user has never heard of.
 	if token == "" && baseURL != "" && controlplane.WorkflowIdentityAvailable(lookup) {
-		minted, err := controlplane.TokenFromWorkflowIdentity(ctx, controlplane.WorkflowIdentityOptions{
-			Lookup: lookup, BaseURL: baseURL,
-		})
+		minted, err := mint(ctx)
 		if err != nil {
 			// Reported and survived, like everything else here. The commonest
 			// reason to land on this line is a pull request from a fork, where
@@ -235,12 +247,13 @@ func (t *Telemetry) attachControlPlane(
 			return fmt.Errorf("this run is not reported to the control plane: %w", err)
 		}
 		token = minted
+		renew = mint
 	}
 	if token == "" {
 		return nil
 	}
 	client, err := controlplane.New(controlplane.Options{
-		BaseURL: baseURL, Token: token, Clock: c, Redactor: opts.Redactor,
+		BaseURL: baseURL, Token: token, Renew: renew, Clock: c, Redactor: opts.Redactor,
 	})
 	if err != nil {
 		if errors.Is(err, controlplane.ErrNotConfigured) {
