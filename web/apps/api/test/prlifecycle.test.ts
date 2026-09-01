@@ -130,7 +130,14 @@ describe(
     let api: FakeRepositoryApi
     let org: Org
     let repository: string
-    const installationId = 918_000
+    // Unique per run, like the slug below. installation_id is UNIQUE, and the
+    // row only goes away when its organization does, so a constant here makes
+    // the fixture seedable exactly once per database: any run killed before its
+    // after hook leaves the row behind and every later run dies in before with
+    // a 23505, which reads as a broken control plane rather than as a test that
+    // tried to seed itself twice.
+    const installationId =
+      918_000_000 + Number(BigInt('0x' + randomUUID().slice(0, 8)) % 100_000_000n)
     // Unique to this PROCESS, not to this file. The delivery ledger is durable,
     // so a counter that restarts at one makes every delivery of a second run a
     // replay of the first run's, answered without the handler running. The
@@ -155,6 +162,18 @@ describe(
         // issued in the future depending on the day.
         actionsJwks: jwks,
       })
+
+      // A run killed before its after hook leaves its organization behind, and
+      // the sweeper tests below read every overdue row in the database rather
+      // than only their own, because that is what the sweeper itself does. A
+      // dead predecessor's rows therefore fail this suite for reasons that have
+      // nothing to do with the code under test, and the failure lands on
+      // whichever assertion the stale row reached first. Clear them here, and
+      // only ones old enough to belong to a run that is certainly over, so a
+      // second copy of this suite running beside this one is left alone.
+      await h.admin`
+        DELETE FROM organizations
+        WHERE slug LIKE 'lifecycle-%' AND created_at < now() - interval '1 hour'`
 
       org = await seedInstalledOrg()
       repository = org.repository

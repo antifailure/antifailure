@@ -119,6 +119,7 @@ var databaseBehaviors = []Behavior{
 	{"Refresh_CallsMaskThenVerify", "A refresh applies the masking rules before it verifies, and does both.", ""},
 	{"Refresh_RefusesToPublishWhenVerificationFails", "A refresh whose verification fails publishes nothing.", ""},
 	{"List_ReturnsWhatWasCreated", "A published version appears in the listing.", ""},
+	{"List_ReturnsTheProvenanceThatWasRecorded", "A published version carries back the project it was made for, so selection can refuse another project's golden.", ""},
 	{"Branch_ReadsAKnownRow", "A branch holds the golden's data.", ""},
 	{"Branch_IsIdempotentByEnvironment", "Branching twice for one environment returns one branch, not two.", ""},
 	{"Branch_RefusesAnUnverifiedGolden", "Branching an unverified version fails with AF-MSK-001.", ""},
@@ -336,6 +337,8 @@ func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory
 		h.refreshRefusesWhenVerificationFails(ctx)
 	case "List_ReturnsWhatWasCreated":
 		h.listReturnsWhatWasCreated(ctx)
+	case "List_ReturnsTheProvenanceThatWasRecorded":
+		h.listReturnsTheProvenance(ctx)
 	case "Branch_ReadsAKnownRow":
 		h.branchReadsAKnownRow(ctx)
 	case "Branch_IsIdempotentByEnvironment":
@@ -425,6 +428,10 @@ func (h *harness) spec() provider.GoldenSpec {
 		SourceURL: secrets.New("postgres://conformance@source/db"),
 		Version:   17,
 		RulesHash: h.rulesHash(),
+		// Distinct per refresh for the same reason the rules hash is: this
+		// suite runs against shared daemons and shared accounts, so a fixed
+		// value would let one run's assertion pass on another run's golden.
+		Provenance: "gp1-conformance-" + h.rulesHash(),
 		Mask: func(_ context.Context, _ secrets.Value) error {
 			h.masked++
 			return nil
@@ -589,6 +596,45 @@ func (h *harness) listReturnsWhatWasCreated(ctx context.Context) {
 		}
 	}
 	h.t.Fatalf("version %s was published and does not appear in the listing of %d", gv.ID, len(goldens))
+}
+
+// listReturnsTheProvenance is the check that keeps golden selection working
+// for every provider rather than only for the one it was written against.
+//
+// The engine refuses to branch a version whose recorded provenance is not this
+// project's, so a provider that accepts the field on a refresh and drops it
+// before the listing turns every one of its goldens into an unbranchable one,
+// and the symptom is a full refresh on every command rather than an error.
+// That failure is invisible from inside the engine, which is why it is
+// asserted here, once, against all four providers.
+func (h *harness) listReturnsTheProvenance(ctx context.Context) {
+	spec := h.spec()
+	gv, err := h.p.RefreshGolden(ctx, spec)
+	h.trackGolden(gv.ID)
+	if err != nil {
+		h.t.Fatalf("RefreshGolden: %v", err)
+	}
+	if gv.Provenance != spec.Provenance {
+		h.t.Errorf("the refresh returned provenance %q for a version made with %q",
+			gv.Provenance, spec.Provenance)
+	}
+	goldens, err := h.p.ListGoldens(ctx)
+	if err != nil {
+		h.t.Fatalf("ListGoldens: %v", err)
+	}
+	for _, g := range goldens {
+		if g.ID != gv.ID {
+			continue
+		}
+		if g.Provenance != spec.Provenance {
+			h.t.Fatalf("version %s was published for %q and lists as %q, so the engine "+
+				"cannot tell whose golden it is and will refuse to branch it",
+				g.ID, spec.Provenance, g.Provenance)
+		}
+		return
+	}
+	h.t.Fatalf("version %s was published and does not appear in the listing of %d",
+		gv.ID, len(goldens))
 }
 
 func (h *harness) branchReadsAKnownRow(ctx context.Context) {

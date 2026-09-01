@@ -121,7 +121,8 @@ func Explain(m *schema.Manifest, width int) string {
 		fmt.Fprintf(&b, "  seeded by    %s\n", value(d.Seed, 15, width))
 	} else {
 		fmt.Fprintf(&b, "  source       %s\n",
-			value("none declared, so branches start from an empty database", 15, width))
+			value("none declared, so branches start from an empty database this "+
+				"project makes for itself, never another project's golden", 15, width))
 	}
 	fmt.Fprintf(&b, "  masking      %s\n", value(d.MaskingRules, 15, width))
 	fmt.Fprintf(&b, "  golden       %s\n", value(fmt.Sprintf("refresh %s, keep %d, storage %s",
