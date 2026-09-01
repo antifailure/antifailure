@@ -192,9 +192,8 @@ nothing.
 
 The comment carries a headline saying what the run amounted to, a link to the
 environment in the console, a row per workflow with its verdict and the detail
-behind it,
-steps for reproducing anything that did not pass, and a footer naming the
-branch, the commit, the duration and the golden it branched from.
+behind it, steps for reproducing anything that did not pass, and a footer naming
+the branch, the commit, the duration and the golden it branched from.
 
 It also carries what the data said. Every invariant the manifest declares is
 asked after the workflows, and a violated one puts the violating rows in the
