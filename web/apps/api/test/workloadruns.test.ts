@@ -294,9 +294,9 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
           outcome: 'succeeded',
           verdict: 'pass',
           result: {
-            sent: 1200, failures: 3, error_rate: 0.0025, rate: 40, target_rate: 40,
+            requests: 1200, failures: 3, error_rate: 0.0025, achieved_rate: 40, target_rate: 40,
             duration_ms: 30000, source: 'otlp',
-            overall: { p50_ms: 12, p90_ms: 40, p95_ms: 61, p99_ms: 120, max_ms: 900 },
+            p50_ms: 12, p90_ms: 40, p95_ms: 61, p99_ms: 120, max_ms: 900,
           },
           routes: [
             { route: 'GET /checkout', sent: 600, errors: 1, latency: { p95_ms: 61 }, baseline_p95_ms: 40, p95_increase: 1.5, has_baseline: true },
@@ -384,7 +384,7 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
     const answer = await send([
       event({
         type: 'workload.finished',
-        payload: { workload_run_id: randomUUID(), kind: 'observed_load', result: { sent: 1 } },
+        payload: { workload_run_id: randomUUID(), kind: 'observed_load', result: { requests: 1 } },
       }),
     ])
     assert.equal(answer.status, 202)
@@ -443,7 +443,7 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
           workload_run_id: runId,
           kind: 'observed_load',
           verdict: 'pass',
-          result: { sent: 10, overall: { p95_ms: 5 } },
+          result: { requests: 10, p95_ms: 5 },
           routes: [
             { route: 'GET /ok', sent: 5 },
             { route: 42, sent: 'lots' },
@@ -518,7 +518,7 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
         type: 'workload.finished',
         payload: {
           workload_run_id: runId, kind: 'http_scenario', verdict: 'pass',
-          result: { sent: 8, sessions: 2, overall: { p95_ms: 20 } },
+          result: { requests: 8, sessions: 2, p95_ms: 20 },
           routes: [
             { scenario: 'browse', route: 'GET /health', sent: 4, latency: { p95_ms: 12 } },
             { scenario: 'checkout', route: 'GET /health', sent: 4, latency: { p95_ms: 31 } },
@@ -592,7 +592,7 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
         payload: {
           workload_run_id: runId, kind: 'observed_load', verdict: 'fail',
           result: {
-            sent: 10, failures: 3, error_rate: 0.3, overall: { p95_ms: 40 },
+            requests: 10, failures: 3, error_rate: 0.3, p95_ms: 40,
             errors: { timeout: 2, '503': 1, 42: 'not a count' },
           },
         },
@@ -888,7 +888,7 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
         type: 'workload.finished', sequence: 9,
         payload: {
           workload_run_id: runId, kind: 'observed_load', verdict: 'fail',
-          result: { sent: 5, overall: { p95_ms: 900 } },
+          result: { requests: 5, p95_ms: 900 },
         },
       }),
     ])

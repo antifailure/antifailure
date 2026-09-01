@@ -17,6 +17,36 @@
 // object where a list belongs gets that list treated as empty and said so in
 // the note, rather than the whole event being rejected.
 //
+// THE DOCUMENT IS THE CONTRACT, AND THE ENGINE'S NATIVE RESULT IS NOT.
+//
+// An engine sends the RESULT DOCUMENT (engine/internal/workload/result.go,
+// `antifailure.workload.result/v1`). It also HAS a native result per kind, its
+// own `load.Result` and friends, which the document carries under `native` and
+// which the transport deletes before the event goes out. The two spell the same
+// measurements differently: the native load result says `sent` and `rate` and
+// nests its percentiles under `overall`, and it calls its refusals
+// `refused_as_unsafe`. The document says `requests` and `achieved_rate`, is
+// flat, and says `refused_routes`.
+//
+// This file read the NATIVE names for the run-wide aggregate of the two traffic
+// kinds. It failed silently and it failed badly: `requests` fell back to zero
+// because the CHECK needs a count, so a run that sent twelve hundred requests
+// was recorded as having sent NONE with every percentile null, while every
+// route, threshold and piece of evidence beside it decoded perfectly. A console
+// draws that as a strange run rather than as a broken decoder. Neither suite
+// could see it, because the engine tested a document it wrote itself and this
+// tested a document IT wrote itself, and nobody had put a real message on the
+// wire between them.
+//
+// So: ONE spelling here, the document's, and never both. A decoder that accepts
+// the native name too would have made the defect above invisible forever rather
+// than fixing it, because the wrong name would have kept working. Two things
+// hold it: report-seam.test.ts decodes REAL bytes an engine produced, and
+// engine/internal/controlplane/report_shape_test.go reads aggregateFor and
+// asserts every name it reaches for is one the engine's own struct tags emit.
+// That second one matches the literal `r.<name>` form, so reaching a field
+// through a variable or a lookup table would leave it green over nothing.
+//
 // TOLERANT ON THE READ BOUNDARY, STRICT ON THE WRITE BOUNDARY. Numbers arriving
 // as strings are coerced, missing optional fields are null, and out of range
 // values are dropped. The kind is the one thing that is not coerced: a payload
@@ -184,15 +214,16 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
     // from an untrusted sender and one absurd key must not take the rest with
     // it, the same rule the lists follow.
     errorReasons: counts(r.errors),
-    refusedRoutes: strings(r.refused_as_unsafe ?? r.refused_routes, 100, 300),
+    refusedRoutes: strings(r.refused_routes, 100, 300),
   }
-  // Flat first, nested second, and this is the correction that mattered most.
+  // Flat, and read straight off the result object.
   //
-  // These read `r.overall.p50_ms` and `r.sent` and `r.rate`, which are
-  // internal/load.Result's names: the engine's NATIVE type, which is precisely
-  // the document nobody sends. What arrives is the projected result the
-  // engine's `--result` writes, and it spells them `requests`,
-  // `achieved_rate`, and flat percentiles.
+  // This read the percentiles through an `overall` object, and read the count
+  // and the rate as `sent` and `rate`, which are internal/load.Result's names:
+  // the engine's NATIVE type, which is precisely the document nobody sends. What arrives is the projected result the
+  // engine's `--result` writes, and it spells them `requests`, `achieved_rate`
+  // and flat percentiles, with `refused_routes` for the refusals the native
+  // type calls `refused_as_unsafe`.
   //
   // It failed silently, which is the whole reason it survived a green suite on
   // both sides. `requests` falls back to zero because the CHECK needs a count,
@@ -204,16 +235,26 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
   //
   // Found by studio-emitters dumping the real bytes and running this file over
   // them, which is the only thing that could have found it: neither suite
-  // crossed the seam. Both spellings are accepted now, which is the tolerant
-  // read this file's own header argues for and what the route decoder beside it
-  // already did.
-  const nested = obj(r.overall)
+  // crossed the seam.
+  //
+  // ONE SPELLING, NOT BOTH, and this is a correction to a fix that accepted
+  // both. Tolerance is the right instinct for a VALUE arriving in an unexpected
+  // form, which is what this file's header argues for and what `num` does with
+  // a number written as a string. It is the wrong instinct for a NAME, because
+  // a name is the contract: accepting `sent` as well as `requests` means the
+  // decoder still works when the two ends disagree, so the disagreement stops
+  // being visible and the next one is found the same way this one was, by
+  // somebody dumping bytes. It also leaves engine/internal/controlplane/
+  // report_shape_test.go RED after a merge, naming those three names, which was
+  // checked by running that gate over both versions of this file rather than
+  // argued. That gate reads THIS function's source, so a name written here even
+  // in a comment, in the `r.` form, is a name it will report.
   const percentiles = {
-    p50Ms: num(r.p50_ms ?? nested.p50_ms, 0, 1e9),
-    p90Ms: num(r.p90_ms ?? nested.p90_ms, 0, 1e9),
-    p95Ms: num(r.p95_ms ?? nested.p95_ms, 0, 1e9),
-    p99Ms: num(r.p99_ms ?? nested.p99_ms, 0, 1e9),
-    maxMs: num(r.max_ms ?? nested.max_ms, 0, 1e9),
+    p50Ms: num(r.p50_ms, 0, 1e9),
+    p90Ms: num(r.p90_ms, 0, 1e9),
+    p95Ms: num(r.p95_ms, 0, 1e9),
+    p99Ms: num(r.p99_ms, 0, 1e9),
+    maxMs: num(r.max_ms, 0, 1e9),
   }
 
   switch (kind) {
@@ -225,17 +266,17 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
         // carry a request count and an engine that reported no number sent no
         // requests as far as anybody can tell. Saying nothing here would refuse
         // the whole row and lose the percentiles with it.
-        requests: whole(r.requests ?? r.sent, 0, 2_147_483_647) ?? 0,
+        requests: whole(r.requests, 0, 2_147_483_647) ?? 0,
         failures: whole(r.failures, 0, 2_147_483_647),
         errorRate: num(r.error_rate, 0, 1),
         targetRate: num(r.target_rate, 0, 1e9),
-        achievedRate: num(r.achieved_rate ?? r.rate, 0, 1e9),
+        achievedRate: num(r.achieved_rate, 0, 1e9),
       }
     case 'http_scenario':
       return {
         ...empty,
         ...percentiles,
-        requests: whole(r.requests ?? r.sent, 0, 2_147_483_647) ?? 0,
+        requests: whole(r.requests, 0, 2_147_483_647) ?? 0,
         failures: whole(r.failures, 0, 2_147_483_647),
         errorRate: num(r.error_rate, 0, 1),
         sessions: whole(r.sessions, 0, 1_000_000) ?? 0,
