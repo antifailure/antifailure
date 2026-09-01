@@ -13,6 +13,19 @@ It exists so a hosted control plane can ask this engine to do something without
 a second implementation of anything. Every kind executes through the same call
 `af load run`, `af load scenario`, `af test` and `af explore` already make.
 
+`af workload` is hidden from `af --help` on purpose. The commands a person runs
+are `af load run`, `af load scenario`, `af test` and `af explore`; this is what
+a control plane calls on their behalf, and it is documented here rather than in
+the command reference for that reason.
+
+```
+af workload run       --kind --select --duration --scale --seed --concurrency
+                      --run-id --branch --result --timeout --teardown
+af workload teardown  --branch --result
+af workload promote   <report.json> --only --persona --seed --against
+af workload compare   <baseline.json> <candidate.json>
+```
+
 ## Four kinds, and they stay four
 
 | Kind | Runs through | Measures |

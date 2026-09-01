@@ -268,3 +268,61 @@ load:
 		"an unsafe list that matches nothing refuses nothing, and a permissive safe list "+
 			"then sends the deletes the author wrote the entry to prevent")
 }
+
+// TestParse_ADeleteThatCarriesAnIDIsStillARefusedDelete carries the
+// documentation's own strings through the real matcher against a realistic
+// path.
+//
+// The tests above assert what normalizeRoute produced and stop there, and an
+// assertion about the normaliser is not an assertion about the decision. That
+// gap hid a second defect one layer past the first, found by golden-isolation
+// reviewing the fix: `*` covers exactly one segment, so `DELETE /*` matches
+// `DELETE /orders` and not `DELETE /orders/42`, and a delete almost always
+// carries an id.
+//
+// The safe list has to be permissive across methods for this to be visible at
+// all, and that is the shape the hazard lives in rather than a contrivance. A
+// safe list naming a method already refuses every delete on its own, so the
+// unsafe list is doing nothing there either way; it is the manifest that says
+// "send everything except these" where the unsafe list is the only thing
+// holding a delete back. Getting this wrong there is silent, which is why the
+// documentation now writes `**` and this is the guard.
+//
+// The fix was the documentation rather than the matcher: making `*` span
+// segments would change what every deployed manifest already means.
+func TestParse_ADeleteThatCarriesAnIDIsStillARefusedDelete(t *testing.T) {
+	t.Parallel()
+	m := mustParse(t, minimal+`
+load:
+  enabled: true
+  source: access_log
+  source_config:
+    path: traffic/sample
+  safe_routes: ["/**"]
+  unsafe_routes: ["POST /api/payments/**", "DELETE /**"]
+`)
+	shape := load.Shape{Routes: []load.Route{
+		{Method: "GET", Path: "/api/orders", Weight: 1},
+		{Method: "DELETE", Path: "/orders", Weight: 1},
+		{Method: "DELETE", Path: "/orders/42", Weight: 1},
+		{Method: "DELETE", Path: "/api/orders/42", Weight: 1},
+		{Method: "POST", Path: "/api/payments/charge", Weight: 1},
+	}}
+	sendable, refused := shape.Safe(m.Load.SafeRoutes, m.Load.UnsafeRoutes)
+
+	sent := []string{}
+	for _, r := range sendable.Routes {
+		sent = append(sent, r.String())
+	}
+	held := []string{}
+	for _, r := range refused {
+		held = append(held, r.String())
+	}
+	require.Equal(t, []string{"GET /api/orders"}, sent)
+	require.Equal(t, []string{
+		"DELETE /orders", "DELETE /orders/42", "DELETE /api/orders/42",
+		"POST /api/payments/charge",
+	}, held,
+		"a delete almost always carries an id, so an unsafe list that only blocks the "+
+			"top level blocks the one case nobody sends")
+}

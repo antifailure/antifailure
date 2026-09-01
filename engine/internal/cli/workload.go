@@ -35,13 +35,31 @@ import (
 func newWorkloadCommand(e *Env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workload",
-		Short: "Run a hosted workload definition and report what it measured",
+		Short: "The hosted control plane's entry point. Not a command you type",
+		// Hidden, and the reason is a naming decision rather than a technical
+		// one. The commands a person runs are af load, af test and af explore,
+		// and the product surface is called Load everywhere else: the console,
+		// the site and the manifest. A top level command introducing a fifth
+		// noun into af --help would be one more word to learn for a thing
+		// nobody types, and this repository has already deleted five product
+		// names for that reason.
+		//
+		// This is plumbing. Its own design says so: every result it writes
+		// carries the plain af load run or af test that reproduces the run,
+		// never af workload run. concepts/workloads documents it for whoever
+		// is wiring a control plane to it.
+		Hidden: true,
 		Long: strings.TrimSpace(`
+What the hosted control plane calls when somebody presses a button in the
+console. A person runs 'af load run', 'af load scenario', 'af test' or
+'af explore'; this runs one of those on their behalf and writes down what it
+measured, along with the plain command that reproduces it.
+
 A workload is a selection out of your manifest plus the knobs the command that
 runs it actually has. There are four kinds and they are not four flavours of
 one thing: a mix compiled from production telemetry, a declared HTTP journey, a
 declared browser workflow, and a seeded exploration. They measure materially
-different things and this command keeps them apart.
+different things and this keeps them apart.
 
 Everything it runs is already declared in antifailure.yaml. Nothing here can
 send traffic your manifest does not name as safe.`),

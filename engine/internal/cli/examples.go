@@ -173,22 +173,8 @@ var commandExamples = map[string]string{
 		"# Prompts for the value, or reads it from stdin. Never a flag.\n" +
 		"af secret set STRIPE_SECRET_KEY\n" +
 		"af secret set STRIPE_SECRET_KEY --stdin",
-	"af status":   "af status\naf status -o json",
-	"af workload": "af workload teardown",
-	"af workload run": "" +
-		"# The result carries the plain command that reproduces it.\n" +
-		"af workload run --kind observed_load --duration 60s --scale 1\n" +
-		"af workload run --kind http_scenario --select checkout,refund --seed 7\n" +
-		"af workload run --kind browser_workflow --select sign-in --result result.json",
-	"af workload teardown": "" +
-		"af workload teardown\n" +
-		"af workload teardown --result torn-down.json",
-	"af workload promote": "" +
-		"# Reads the report af explore -o json writes.\n" +
-		"af workload promote explored.json --only upgrade\n" +
-		"af workload promote explored.json --against promotion.json",
-	"af workload compare": "af workload compare baseline.json candidate.json",
-	"af support":          "af support bundle",
+	"af status":  "af status\naf status -o json",
+	"af support": "af support bundle",
 	"af support bundle": "" +
 		"# Redacted on the way in, with a list of what it included.\n" +
 		"af support bundle\n" +
