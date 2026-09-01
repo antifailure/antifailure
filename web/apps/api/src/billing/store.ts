@@ -178,6 +178,18 @@ export interface Reconciliation {
  * The Stripe calls happen BEFORE the transaction opens. A transaction held
  * across a network call to a third party is a transaction whose length is
  * decided by that third party.
+ *
+ * WHY THIS TAKES STRIPE'S PERIOD END AND ORGANIZATION DELETION DOES NOT. The
+ * two rules look like two authors disagreeing and they are one decision, so
+ * they are written down on both sides rather than in neither. Reconciliation
+ * is REPAIR: it runs because local state is presumed wrong, so the remote
+ * answer wins outright, and that is the whole point of the route. Revoking an
+ * entitlement is the opposite question, and the deletion state machine takes
+ * the LATER of Stripe's answer and the local row on purpose. A response that
+ * omits the period, or carries a stale one, would otherwise shorten the wait
+ * and cut off an organization that is still paid up. Being late to revoke
+ * costs a day of access somebody already bought. Being early takes away access
+ * somebody is still entitled to, and there is no symmetric mistake to make.
  */
 export async function reconcile(
   pool: Pool,
