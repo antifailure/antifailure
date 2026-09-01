@@ -68,10 +68,26 @@ change.`),
 				defer cancel()
 			}
 
+			// Before the orchestrator, which is before anything at all.
+			// A pull request from a fork the policy does not allow gets a
+			// report saying nothing ran and no environment, and the order
+			// is the security property: an orchestrator resolves providers
+			// and names an environment, so refusing after building one is
+			// refusing after doing part of what was refused.
+			if fork := forkGate(e); fork.Refused {
+				announceComment(e)
+				return skippedRun(e, forkRun(e, branch, docsBase, fork), output, jsonOutput)
+			}
+
 			o, m, err := orchestratorWithManifest(e, branch)
 			if err != nil {
 				return err
 			}
+			// github.comment, which nothing read until now. Resolved once
+			// here rather than at each of the three places a report is
+			// written, so the two exits from this command cannot disagree
+			// about whether there is a comment.
+			announceComment(e)
 			gate := report.Configure(m.Policy)
 			run := report.Run{
 				Environment: o.EnvID(), Branch: branchName(e, branch),
@@ -165,6 +181,12 @@ change.`),
 						Steps: r.Outcome.Reproduction, Trace: r.Evidence.Trace,
 					})
 				}
+				// What the run noticed that belongs to no single workflow.
+				// A synthesized response nobody's window claimed is the case
+				// this exists for, and dropping it here would put the run
+				// back where it started: the fact reaching the engine and
+				// stopping there.
+				run.Notes = append(run.Notes, test.Notes...)
 				for _, i := range test.Invariants {
 					run.Invariants = append(run.Invariants, report.Invariant{
 						Name: i.Name, Description: i.Description, Held: i.Held,
@@ -198,19 +220,8 @@ change.`),
 					e.Out.Printf("  %s %s\n", e.Out.S(StyleWarn, SymbolWarn), lErr.Error())
 					run.Notes = append(run.Notes, "the load run did not complete: "+lErr.Error())
 				default:
-					l := &report.Load{
-						Sent: res.Sent, Rate: res.Rate,
-						ErrorRate: res.ErrorRate, P95Ms: res.Overall.P95Ms,
-					}
-					p95, _ := o.Thresholds()
-					for _, b := range res.Breaches(p95, 0) {
-						l.Regressed = append(l.Regressed, b.What)
-					}
-					// The routes the shape refused to send. A run that could
-					// send one route out of forty was indistinguishable from
-					// one that sent them all.
-					l.Refused = refusedRoutes(refused)
-					run.Load = l
+					p95, errorRate := o.Thresholds()
+					run.Load = loadReport(res, refused, p95, errorRate, &run)
 				}
 			}
 
@@ -249,22 +260,6 @@ change.`),
 	cmd.Flags().StringVar(&saveBaseline, "save-baseline", "",
 		"Save this run's queries and plans, to compare a later branch against")
 	return cmd
-}
-
-// refusedRoutes names what the shape would not send.
-//
-// The second return value of Load was discarded at the one call site that had
-// it, so 'af ci --load' reported the same thing whether the safe list let
-// through every route or one out of forty.
-func refusedRoutes(refused []load.Route) []string {
-	if len(refused) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(refused))
-	for _, r := range refused {
-		out = append(out, r.String())
-	}
-	return out
 }
 
 // ciExit turns the verdict into an exit status.
@@ -591,4 +586,66 @@ func reportTeardown(e *Env, td *env.Teardown, err error) {
 	for _, p := range td.Pending {
 		e.Out.Printf("    %s/%s: %s\n", p.Kind, p.ID, p.Reason)
 	}
+}
+
+// loadReport turns a load result into the report's section, against BOTH
+// thresholds the manifest sets.
+//
+// The error rate threshold used to be thrown away here. The call was
+// `p95, _ := o.Thresholds()` and then `res.Breaches(p95, 0)`, and Breaches
+// short circuits on `errorRate > 0`, so a zero limit builds no error rate
+// breach at all. A change that failed every request under load produced an
+// empty Regressed list, never reached policy.load_regression, and merged
+// green, while `af load run` on the same manifest and the same result exited
+// non zero. Two commands, one manifest, opposite answers.
+//
+// It was invisible for a specific reason worth recording. `p95_increase` is
+// refused under the `access_log` and `none` sources, so those projects passed
+// (0, 0) and got nil back from a function that had nothing to compare. This
+// repository's OWN manifest is `source: none` with `error_rate: 0.02`, so the
+// dogfooding that would have caught it could not.
+//
+// The inert case is reported rather than passed over, which is the same
+// argument `af load run` already makes: a threshold that was in force and
+// measured nothing is not a threshold that held, and a report that omits it
+// reads exactly like one that checked.
+// The `refused` return was the third defect in that block and it was DISCARDED
+// at the call site, so `af ci --load` said the same thing whether the safe list
+// let through every route or one out of forty. `af load run` has always
+// reported it. Found by `loadgolden`, which had the other half of this block.
+func loadReport(
+	res *load.Result, refused []load.Route, p95Increase, errorRate float64, run *report.Run,
+) *report.Load {
+	l := &report.Load{
+		Sent: res.Sent, Rate: res.Rate,
+		ErrorRate: res.ErrorRate, P95Ms: res.Overall.P95Ms,
+		Refused: refusedRoutes(refused),
+	}
+	for _, b := range res.Breaches(p95Increase, errorRate) {
+		l.Regressed = append(l.Regressed, b.What)
+	}
+	if res.InertP95(p95Increase) {
+		run.Notes = append(run.Notes,
+			"load.thresholds sets p95_increase and no route had a baseline to compare against, "+
+				"so nothing was measured against it")
+	}
+	return l
+}
+
+// refusedRoutes names the routes the generator would not send.
+//
+// nil for an empty list rather than an empty slice, so the report's line drops
+// out entirely instead of printing a heading over nothing. A section saying
+// "0 routes were not sent" is a line the reader pays for and learns nothing
+// from.
+func refusedRoutes(refused []load.Route) []string {
+	if len(refused) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(refused))
+	for _, r := range refused {
+		out = append(out, r.String())
+	}
+	sort.Strings(out)
+	return out
 }

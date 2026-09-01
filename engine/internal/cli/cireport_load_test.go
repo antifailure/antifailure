@@ -16,8 +16,11 @@ import (
 func TestRefusedRoutes_NamesWhatTheShapeWouldNotSend(t *testing.T) {
 	t.Parallel()
 	require.Nil(t, refusedRoutes(nil), "an empty list must leave the report's line out entirely")
+	// Sorted rather than in the order the shape happened to carry them, so two
+	// runs of the same manifest produce the same line and a diff of two
+	// comments is about what changed.
 	require.Equal(t,
-		[]string{"POST /api/payments", "DELETE /api/items/1"},
+		[]string{"DELETE /api/items/1", "POST /api/payments"},
 		refusedRoutes([]load.Route{
 			{Method: "POST", Path: "/api/payments"},
 			{Method: "DELETE", Path: "/api/items/1"},

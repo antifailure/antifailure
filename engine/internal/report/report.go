@@ -39,7 +39,15 @@ type Run struct {
 	Insights     *Insights
 	// Notes say what could not be measured, and why. A report that silently
 	// omits a check reads exactly like a check that found nothing.
-	Notes    []string
+	Notes []string
+	// Skipped is why the check did not run at all, when it did not.
+	//
+	// A run that was refused before it started is not a run that found
+	// nothing, and the difference has to survive as far as the comment. The
+	// fork gate is what fills this: a pull request from a fork that no
+	// maintainer has approved gets a report saying so, rather than a green
+	// tick over an environment that was never created.
+	Skipped  string
 	Duration string
 	// DocsBase is where links point, so a self hosted instance can point at
 	// its own copy rather than at ours.
@@ -80,9 +88,14 @@ type Load struct {
 	ErrorRate float64
 	P95Ms     float64
 	Regressed []string
-	// Refused are the routes the shape carried that nothing in the manifest
-	// named safe, so they were never sent. Without them a run that could send
-	// one route out of forty reads exactly like one that sent all forty.
+	// Refused are the routes the generator would not send, because nothing in
+	// the manifest named them safe.
+	//
+	// Without this the comment said the same thing whether the safe list let
+	// through every route or one out of forty, so a load run that exercised a
+	// fortieth of the application read exactly like one that exercised all of
+	// it. The number of requests cannot show it: sending 500 requests at one
+	// route looks like sending 500 across forty.
 	Refused []string
 }
 
@@ -453,6 +466,13 @@ func (r Run) Markdown() string {
 
 	fmt.Fprintf(&b, "### Antifailure: %s\n\n", r.Headline())
 
+	// First, and in bold, because everything under it is the report of a run
+	// that did not happen. A reader who takes four lines off this comment has
+	// to take away that nothing was checked.
+	if r.Skipped != "" {
+		fmt.Fprintf(&b, "**This check did not run.** %s\n\n", flatten(r.Skipped))
+	}
+
 	if r.URL != "" {
 		fmt.Fprintf(&b, "Environment `%s` is at %s\n\n", r.Environment, r.URL)
 	}
@@ -561,6 +581,11 @@ func (r Run) Markdown() string {
 			fmt.Fprintf(&b, "Slower than production: %s\n", strings.Join(l.Regressed, ", "))
 		}
 		if len(l.Refused) > 0 {
+			// The verb travels with the noun, because the singular case
+			// rendered "1 route were not sent". Only the plural case had a
+			// test, and 500 requests at one route is exactly the run this line
+			// exists to describe, so the ungrammatical half is the half a
+			// reader is most likely to meet.
 			fmt.Fprintf(&b, "%s not sent, because nothing in the manifest named them safe: %s\n",
 				plural(len(l.Refused), "route was", "routes were"), strings.Join(l.Refused, ", "))
 		}
@@ -588,7 +613,10 @@ func (r Run) Markdown() string {
 		fmt.Fprintf(&b, "Not measured: %s\n\n", oneLine(n))
 	}
 
-	if r.Verdict() == VerdictBlocked {
+	// Not on a run that was refused before it started. "The environment or the
+	// runner could not carry a workflow through" is the wrong sentence for a
+	// decision somebody made on purpose, and it reads as an apology for a bug.
+	if r.Verdict() == VerdictBlocked && r.Skipped == "" {
 		fmt.Fprintf(&b,
 			"Blocked means the environment or the runner could not carry a workflow through. "+
 				"It is not counted against this change. [What blocked means](%s/concepts/verdicts)\n\n",

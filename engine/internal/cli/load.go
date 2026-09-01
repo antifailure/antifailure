@@ -71,6 +71,14 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 		Short: short,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Load is sent AT an environment rather than creating one, so this
+			// is defence in depth rather than the gate that matters. It is
+			// here because an environment left up from before the policy
+			// existed, or from a run on the base branch, is still an
+			// environment a fork's pull request can point traffic at.
+			if fork := forkGate(e); fork.Refused {
+				return refuseFork(fork)
+			}
 			o, err := orchestrator(e, branch, false)
 			if err != nil {
 				return err
