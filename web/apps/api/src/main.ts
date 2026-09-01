@@ -220,6 +220,13 @@ const { app, ingestLimiter, authLimiter } = createServer({
   signInAllowlist,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
+  // The webhook's way of invalidating a cached token. Bound to the same
+  // InstallationTokens the GitHub client mints from, because dropping a token
+  // out of a different cache from the one that holds it is the shape of fix
+  // that reads correct in a diff and changes nothing at runtime.
+  ...(installationTokens
+    ? { forgetInstallationToken: (id: number) => installationTokens.forget(id) }
+    : {}),
   stripe: billing,
   hostedRequiredPlan,
   githubAppInstallUrl,
