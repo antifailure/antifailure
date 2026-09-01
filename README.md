@@ -115,21 +115,21 @@ For self-hosting:
 docker run --rm \
   -e AF_MIGRATION_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
-  ghcr.io/antifailure/control-plane:v0.1.1 node bootstrap.mjs
+  ghcr.io/antifailure/control-plane:main-b53906a node bootstrap.mjs
 
 docker run \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
   -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
-  -p 8080:8080 ghcr.io/antifailure/control-plane:v0.1.1
+  -p 8080:8080 ghcr.io/antifailure/control-plane:main-b53906a
 ```
 
 On Kubernetes, use the chart in `deploy/helm/antifailure-control-plane`. The Helm chart is developed against kind and runs on any conformant cluster. See [self-hosting documentation](/docs/src/content/docs/self-hosting/) for configuration, operations, upgrades, and runbooks.
 
 ## Status
 
-Pre-1.0 and under construction. [docs/plan/STATUS.md](docs/plan/STATUS.md) tracks every component with one of three states: proven (it runs and its tests pass in CI), written (the code exists and its fakes pass, but it has not been exercised against the real service), and planned. That table is the honest answer to "does it do X yet", and it is updated in the same pull request as the code. Breaking changes are announced in the changelog.
+Pre-1.0 and under construction. [docs/plan/STATUS.md](docs/plan/STATUS.md) tracks every component with one of four words, and the words are the ones that file defines rather than a paraphrase of them: proven (the code exists, its tests pass, and the behavior has been exercised end to end against the real thing), written (the code exists and passes its tests against a fake that enforces the real service's validation rules, and has never talked to the real service), planned (specified, not built), and mixed (the parts are genuinely in different states, and the row says which are which). Proven does not mean it runs in CI: a suite that needs a real Neon or Supabase account cannot run on a fork's pull request, so those rows say in their own prose that they are run by hand. That table is the honest answer to "does it do X yet", and it is updated in the same pull request as the code. Breaking changes are announced in the changelog.
 
 ## Contributing
 

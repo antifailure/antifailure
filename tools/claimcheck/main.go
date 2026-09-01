@@ -65,7 +65,6 @@ var notAPath = map[string]string{
 
 	".gate-reports/": "created by `just gate` when it runs and gitignored, so it is a place output goes rather than something the repository contains",
 
-
 	"THIRD_PARTY_NOTICES.md": "generated at release time from what is actually linked, so it is deliberately absent from the tree",
 }
 
@@ -142,7 +141,10 @@ func run(root string, out io.Writer) error {
 	if err := checkDocsURLs(root, tracked, out); err != nil {
 		return err
 	}
-	return checkDocsLinks(root, tracked, out)
+	if err := checkDocsLinks(root, tracked, out); err != nil {
+		return err
+	}
+	return checkPinnedImage(root, out)
 }
 
 // docsBase is where the documentation site is served from. It is not cosmetic:
@@ -472,3 +474,242 @@ func decide(tracked map[string]bool, claims []claim, exclusions map[string]strin
 
 // ensure io/fs stays imported for the build tag free walk helpers used in tests.
 var _ fs.FileMode
+
+// ---------------------------------------------------------------------------
+// The pinned control plane image, and whether it can do what the page says.
+// ---------------------------------------------------------------------------
+
+// pinnedImage matches a published control plane image reference in a document.
+var pinnedImage = regexp.MustCompile(`ghcr\.io/[A-Za-z0-9._-]+/control-plane:([A-Za-z0-9._-]+)`)
+
+// imageEntrypoint matches a command a document tells an operator to run from
+// inside that image, such as `node apps/api/src/backup-cli.ts create-org`.
+//
+// This is the derivation that makes the check worth having. The gate does not
+// carry a list of files the procedure needs; it reads the procedure.
+var imageEntrypoint = regexp.MustCompile(`node (apps/api/src/[A-Za-z0-9._/-]+\.ts)`)
+
+// dockerfileCopy matches a COPY in the image's Dockerfile, so the mapping from
+// a path inside the image back to a path in this repository is read out of the
+// file that creates it rather than remembered here.
+var dockerfileCopy = regexp.MustCompile(`(?m)^COPY\s+([A-Za-z0-9._/-]+)\s+\./([A-Za-z0-9._/-]+)\s*$`)
+
+// shaTag matches the tag shape every automatic publish uses: the short commit
+// the image was built from, which is what makes an offline check possible.
+var shaTag = regexp.MustCompile(`^(?:main|cd)-([0-9a-f]{7,40})$`)
+
+// checkPinnedImage verifies that the image the documentation tells an operator
+// to run can complete the procedure the same page describes.
+//
+// WHY THIS EXISTS. README and two self-hosting pages pinned
+// control-plane:v0.1.1 for months. That image records revision 6a2ee3d, eight
+// hundred commits behind main, and `web/apps/api/src/backup-cli.ts` does not
+// exist at that commit. Steps 3 and 4 of a four step bring-up whose own text
+// says "the order is not optional" were `node apps/api/src/backup-cli.ts`, so
+// an operator following the page got as far as a running server with no
+// organization and no owner and no explanation. The image also has no /readyz,
+// which docs/reference/control-plane.md names as the deploy gate. Every
+// documentation gate was green the whole time, because a version tag is not a
+// path and nothing here had ever asked whether a sentence was true.
+//
+// A VERSION TAG IS REFUSED, and that is the important design decision. The
+// v0.1.1 IMAGE and the v0.1.1 GIT TAG are different trees: the tag was cut for
+// a CLI release before the Dockerfile existed, and the image was published
+// later from a different ref by workflow_dispatch, which
+// control-plane-image.yml explains in its own comments. So a version tag tells
+// a reader nothing about what is inside the image and tells this gate nothing
+// it can check without a network. A `main-<sha>` or `cd-<sha>` tag names the
+// commit it was built from, which is exactly what makes both possible.
+func checkPinnedImage(root string, out io.Writer) error {
+	docs, err := publishedDocs(root)
+	if err != nil {
+		return err
+	}
+
+	type pin struct{ tag, where string }
+	var pins []pin
+	var entrypoints []claim
+
+	for _, doc := range docs {
+		body, err := os.ReadFile(filepath.Join(root, doc))
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", doc, err)
+		}
+		lines := strings.Split(string(body), "\n")
+		hasPin := false
+		for i, line := range lines {
+			for _, m := range pinnedImage.FindAllStringSubmatch(line, -1) {
+				hasPin = true
+				pins = append(pins, pin{tag: m[1], where: fmt.Sprintf("%s:%d", doc, i+1)})
+			}
+		}
+		if !hasPin {
+			// A page that runs an entrypoint without naming an image is
+			// describing a host install, not the image, so it is not this
+			// check's business.
+			continue
+		}
+		for i, line := range lines {
+			for _, m := range imageEntrypoint.FindAllStringSubmatch(line, -1) {
+				entrypoints = append(entrypoints, claim{text: m[1], file: doc, line: i + 1})
+			}
+		}
+	}
+
+	if len(pins) == 0 {
+		report(out, "claimcheck: no published page pins a control plane image, so none was checked\n")
+		return nil
+	}
+
+	// One tag, everywhere. Two pages pinning different images is how a reader
+	// ends up following half of one procedure against the other's image.
+	tag := pins[0].tag
+	var disagree []string
+	for _, p := range pins[1:] {
+		if p.tag != tag {
+			disagree = append(disagree, p.where+" pins "+p.tag)
+		}
+	}
+	if len(disagree) > 0 {
+		report(out, "\nclaimcheck: the published pages do not agree on which image to run.\n")
+		report(out, "  %s pins %s\n", pins[0].where, tag)
+		for _, d := range disagree {
+			report(out, "  %s\n", d)
+		}
+		return fmt.Errorf("%d pages pin a different control plane image", len(disagree)+1)
+	}
+
+	commit, err := imageCommit(root, tag)
+	if err != nil {
+		report(out, "\nclaimcheck: the pinned image %s cannot be resolved to a commit in this repository.\n", tag)
+		report(out, "  %v\n", err)
+		report(out, "  Pin a tag this repository publishes automatically, main-<short sha> or\n")
+		report(out, "  cd-<sha>, which names the commit the image was built from. A version tag\n")
+		report(out, "  is refused: the only one ever published was built from a different ref\n")
+		report(out, "  than the git tag of the same name, so it describes nothing checkable.\n")
+		report(out, "  If the tag looks right, this job needs the full history: fetch-depth: 0.\n")
+		return fmt.Errorf("the pinned control plane image %s names no commit here", tag)
+	}
+
+	prefix, err := imagePathPrefix(root)
+	if err != nil {
+		return err
+	}
+
+	var missing []string
+	for _, e := range entrypoints {
+		repoPath := prefix + strings.TrimPrefix(e.text, "apps/api/")
+		if !existsAt(root, commit, repoPath) {
+			missing = append(missing, fmt.Sprintf("%s:%d runs %s, and %s does not exist at %s",
+				e.file, e.line, e.text, repoPath, tag))
+		}
+	}
+
+	// The readiness endpoint is checked by name rather than derived, because
+	// it is named as the deploy gate in docs/reference/control-plane.md and an
+	// image without it fails that gate rather than the procedure above. The
+	// v0.1.1 image is exactly this case: no /readyz at all.
+	if !mentionsAt(root, commit, "readyz", "web/apps/api/src") {
+		missing = append(missing, fmt.Sprintf(
+			"docs/reference/control-plane.md names /readyz as the deploy gate, and nothing under web/apps/api/src answers it at %s", tag))
+	}
+
+	if len(missing) > 0 {
+		report(out, "\nclaimcheck: the pinned control plane image cannot complete the documented procedure.\n")
+		report(out, "  %s was built from %s\n", tag, commit[:min(12, len(commit))])
+		for _, m := range missing {
+			report(out, "  %s\n", m)
+		}
+		report(out, "  Publish a newer image and repin, or change the procedure.\n")
+		return fmt.Errorf("%d documented step(s) the pinned image cannot run", len(missing))
+	}
+
+	report(out, "claimcheck: %d pin(s) of %s, built from %s, and all %d documented step(s) exist there\n",
+		len(pins), tag, commit[:min(12, len(commit))], len(entrypoints))
+	return nil
+}
+
+// publishedDocs lists the pages a customer reads. docs/plan is deliberately
+// absent: it is this project's own working notes, it discusses the wrong pin
+// as a known problem, and a gate that failed on a note describing a defect
+// would teach people to stop writing the notes down.
+func publishedDocs(root string) ([]string, error) {
+	docs := []string{"README.md"}
+	dir := filepath.Join(root, "docs", "src", "content", "docs")
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || (filepath.Ext(p) != ".md" && filepath.Ext(p) != ".mdx") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		docs = append(docs, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking the documentation tree: %w", err)
+	}
+	sort.Strings(docs)
+	return docs, nil
+}
+
+// imageCommit resolves a published image tag to the commit it was built from.
+func imageCommit(root, tag string) (string, error) {
+	m := shaTag.FindStringSubmatch(tag)
+	if m == nil {
+		return "", fmt.Errorf("%q is not a main-<sha> or cd-<sha> tag", tag)
+	}
+	cmd := exec.Command("git", "-C", root, "rev-parse", "--verify", m[1]+"^{commit}")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git does not know the commit %s", m[1])
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// imagePathPrefix reads the Dockerfile to learn where in this repository the
+// image's apps/api directory comes from, so the mapping cannot drift from the
+// COPY that creates it.
+func imagePathPrefix(root string) (string, error) {
+	const dockerfile = "deploy/docker/control-plane.Dockerfile"
+	body, err := os.ReadFile(filepath.Join(root, dockerfile))
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", dockerfile, err)
+	}
+	for _, m := range dockerfileCopy.FindAllStringSubmatch(string(body), -1) {
+		if strings.TrimSuffix(m[2], "/") != "apps/api" {
+			continue
+		}
+		// The Dockerfile copies package.json into ./apps/api/ first, to warm
+		// the dependency layer, and the whole directory later. Only the second
+		// one describes where a source file comes from, and the difference
+		// between them is that its source is a directory. Picking by position
+		// would silently break the first time somebody adds a layer.
+		src := strings.TrimSuffix(m[1], "/")
+		info, err := os.Stat(filepath.Join(root, src))
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		return src + "/", nil
+	}
+	return "", fmt.Errorf("%s no longer copies anything to ./apps/api, so a documented "+
+		"`node apps/api/...` command cannot be traced back to a file here", dockerfile)
+}
+
+// existsAt reports whether a path exists in the tree of one commit.
+func existsAt(root, commit, p string) bool {
+	cmd := exec.Command("git", "-C", root, "cat-file", "-e", commit+":"+p)
+	return cmd.Run() == nil
+}
+
+// mentionsAt reports whether a string appears anywhere under a path at one
+// commit. Used for behaviour that is not a file: an endpoint the server
+// answers.
+func mentionsAt(root, commit, needle, under string) bool {
+	cmd := exec.Command("git", "-C", root, "grep", "-q", "-F", needle, commit, "--", under)
+	return cmd.Run() == nil
+}

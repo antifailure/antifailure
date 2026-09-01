@@ -382,3 +382,120 @@ func TestEveryInternalDocumentationLinkResolves(t *testing.T) {
 		t.Errorf("the summary should say how many were checked, got %q", out.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The pinned control plane image.
+// ---------------------------------------------------------------------------
+
+// A tag shape the gate can check offline is the whole premise, so it is the
+// first thing tested. main-<sha> and cd-<sha> name the commit they were built
+// from; a version tag does not, because the only one ever published came from
+// a ref that is not the git tag of the same name.
+func TestOnlyACommitNamingTagIsAccepted(t *testing.T) {
+	root := filepath.Join("..", "..")
+	for _, tag := range []string{"v0.1.1", "latest", "v1", "1.2.3", "main", "main-zzzzzzz"} {
+		if _, err := imageCommit(root, tag); err == nil {
+			t.Errorf("%q resolved to a commit, and it should not have", tag)
+		}
+	}
+}
+
+// The real pin resolves, which is the half of the check a broken tag would
+// fail. It also proves the job running this has the history it needs: a
+// shallow checkout fails here rather than silently passing.
+func TestTheRealPinResolvesToACommit(t *testing.T) {
+	root := filepath.Join("..", "..")
+	docs, err := publishedDocs(root)
+	if err != nil {
+		t.Fatalf("listing published documents: %v", err)
+	}
+	var tag string
+	for _, doc := range docs {
+		body, err := os.ReadFile(filepath.Join(root, doc))
+		if err != nil {
+			t.Fatalf("reading %s: %v", doc, err)
+		}
+		if m := pinnedImage.FindStringSubmatch(string(body)); m != nil {
+			tag = m[1]
+			break
+		}
+	}
+	if tag == "" {
+		t.Skip("no published page pins a control plane image")
+	}
+	commit, err := imageCommit(root, tag)
+	if err != nil {
+		t.Fatalf("the pinned image %s does not resolve: %v", tag, err)
+	}
+	if len(commit) != 40 {
+		t.Fatalf("resolving %s gave %q, which is not a commit", tag, commit)
+	}
+}
+
+// The mapping from a path inside the image back to a path here is read out of
+// the Dockerfile. The trap it has to avoid is the package.json layer: the
+// Dockerfile copies web/apps/api/package.json to ./apps/api/ before it copies
+// the directory, and taking the first match gives a prefix that is a file.
+func TestTheImagePathPrefixIsTheDirectoryCopyNotThePackageJSON(t *testing.T) {
+	root := filepath.Join("..", "..")
+	prefix, err := imagePathPrefix(root)
+	if err != nil {
+		t.Fatalf("reading the Dockerfile: %v", err)
+	}
+	if prefix != "web/apps/api/" {
+		t.Fatalf("prefix is %q, want %q", prefix, "web/apps/api/")
+	}
+	info, err := os.Stat(filepath.Join(root, strings.TrimSuffix(prefix, "/")))
+	if err != nil || !info.IsDir() {
+		t.Fatalf("%q is not a directory in this repository", prefix)
+	}
+}
+
+// The check, run against the repository as it stands. This is the one that
+// goes red if somebody repins to an image that cannot do what the page says.
+func TestTheRealPinnedImageCanRunTheDocumentedSteps(t *testing.T) {
+	var out strings.Builder
+	if err := checkPinnedImage(filepath.Join("..", ".."), &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+}
+
+// Every published page has to name the same image. Two pages pinning two
+// images is how a reader follows half of one procedure against the other's
+// image, which is a failure that looks like a bug in the product.
+func TestPagesPinningDifferentImagesFail(t *testing.T) {
+	root := t.TempDir()
+	docs := filepath.Join(root, "docs", "src", "content", "docs")
+	if err := os.MkdirAll(docs, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"),
+		[]byte("run ghcr.io/antifailure/control-plane:main-aaaaaaa\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docs, "other.md"),
+		[]byte("run ghcr.io/antifailure/control-plane:main-bbbbbbb\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := checkPinnedImage(root, &out); err == nil {
+		t.Fatalf("two different pins passed:\n%s", out.String())
+	}
+}
+
+// A page with no pin at all is not this check's business. Said out loud
+// because the alternative, failing on every page, is how a gate gets disabled.
+func TestAPageWithNoPinIsNotChecked(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "src", "content", "docs"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"),
+		[]byte("node apps/api/src/nothing-like-this.ts\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := checkPinnedImage(root, &out); err != nil {
+		t.Fatalf("a page with no pin should not fail: %v", err)
+	}
+}
