@@ -153,17 +153,30 @@ $$;
 -- timestamp answers a question nobody asked at the cost of being more
 -- identifying than a date.
 --
--- Every milestone column is set once and never moved backwards by a late
--- event: an event that arrives out of order about a day before the one already
--- recorded moves the date EARLIER, and never later. That is what makes the
--- table converge to the same answer whatever order events arrive in, which is
--- the property the ordering tests check.
+-- WHY MILESTONES ARE COLUMNS HERE AND NOT EVENTS IN THE STREAM.
+--
+-- "The first time this organization proved something" is the number the whole
+-- funnel is aimed at, and it was an event first. It cannot be one. Emitting it
+-- means deciding, at write time, whether this is the first, which is a read and
+-- then a write, and two batches arriving at once both read null and both emit.
+-- Worse, a batch that arrives late carrying an OLDER verdict has to move the
+-- milestone earlier, and an event already written cannot be unwritten.
+--
+-- As a column it is `LEAST(existing, incoming)`, which is one statement, has no
+-- race, and converges to the same date whatever order the events arrive in.
+-- Postgres's LEAST ignores NULLs, so the first value to arrive sets it and only
+-- an earlier one moves it.
+--
+-- So the rule this table is built on: EVENTS ARE COUNTS, FACTS ARE MILESTONES.
+-- A count is commutative and a milestone is not, and mixing them is how a
+-- dashboard ends up with two different answers to "how many activated".
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE analytics_org_facts (
   org_surrogate         text PRIMARY KEY,
   first_seen_on         date NOT NULL,
   last_active_on        date NOT NULL,
+  first_event_on        date,
   first_environment_on  date,
   first_proven_run_on   date,
   first_paid_on         date,

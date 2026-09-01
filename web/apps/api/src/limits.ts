@@ -228,6 +228,26 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 200, burst: 2000, key: 'token',
     reason: 'An engine that was offline sends its backlog at once. The burst absorbs a re-connect; the rate is what one busy CI account sustains.',
   },
+  // The site beacon. The only unauthenticated write on this server, so this
+  // limit is the only thing bounding it, and the number is chosen against what
+  // a reader actually produces rather than against what the endpoint can take.
+  //
+  // A person reading the site generates one event per page view and at most a
+  // few engagements, so a busy reader is well under one a second. Keyed by
+  // address because a visitor has no token and no organization, and that is
+  // exactly the population this key exists for.
+  //
+  // Deliberately generous on burst and tight on rate: an office or a university
+  // behind one address is a real thing, and a burst of sixty covers a class
+  // opening the site at once, while two a second sustained is not a person.
+  'POST /v1/site/events': {
+    rate: 2, burst: 60, key: 'ip',
+    reason: 'A reader produces one event per page view. The burst covers many people behind one address; the sustained rate does not cover a script, which is the only defence this unauthenticated endpoint has.',
+  },
+  'OPTIONS /v1/site/events': {
+    rate: 2, burst: 60, key: 'ip',
+    reason: 'The preflight for the beacon, cached by the browser for a day. Same shape as the request it precedes, so a refused preflight and a refused post mean the same thing.',
+  },
   'GET /v1/environments/:envId': {
     rate: 10, burst: 60, key: 'token',
     reason: 'Polled by af env pull and by a CI step, not by a loop.',

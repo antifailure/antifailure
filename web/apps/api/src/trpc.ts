@@ -18,6 +18,7 @@ import { permits } from './permissions.ts'
 import type { Clock } from './clock.ts'
 import type { GitHubClient } from './auth/github.ts'
 import type { Billing } from './billing/index.ts'
+import type { Analytics } from './analytics/record.ts'
 
 /** Who is making the request, once the session cookie has been resolved. */
 export interface Actor {
@@ -44,6 +45,22 @@ export interface Context {
    * than the process refusing to start over a feature nobody wants.
    */
   stripe: Billing | null
+  /**
+   * The analytics recorder. Never null: when no surrogate secret is configured
+   * it records nothing and every method still works, so a producer never has to
+   * guard its call. A producer wrapped in a configuration check is a producer
+   * that stops being exercised by tests the day somebody forgets the variable.
+   */
+  analytics: Analytics
+  /**
+   * The organization whose members may read the analytics dashboard, by slug.
+   *
+   * Null means nobody, which is the safe default. See ServerOptions for why a
+   * permission alone cannot gate this: the dashboard shows every organization's
+   * numbers, and every organization has an owner who holds every permission
+   * inside their own.
+   */
+  analyticsOperatorOrgSlug: string | null
   /** Null for an unauthenticated request. */
   actor: Actor | null
   /** Where the request came from, recorded on every audit entry. */

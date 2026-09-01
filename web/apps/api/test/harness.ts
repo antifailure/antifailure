@@ -64,6 +64,9 @@ export interface ApiHarness {
   /** The Hono app itself, so a test can read the routes it actually serves
    *  rather than a list of the routes somebody remembered to write down. */
   app: ReturnType<typeof createServer>['app']
+  /** The same recorder the server's own producers use, so a test asserts
+   *  against what shipped rather than against a second one it built. */
+  analytics: ReturnType<typeof createServer>['analytics']
   admin: postgres.Sql
   pool: Pool
   clock: FakeClock
@@ -95,7 +98,34 @@ export interface StartApiOptions {
    *  server takes no money, which is the self-hosted default and has its own
    *  tests. */
   stripe?: Billing | null
+  /**
+   * The analytics surrogate key. Undefined gives every suite a working one, so
+   * that a producer added without a test is still exercised by the suites that
+   * happen to run through it, and a producer that has stopped recording shows
+   * up as a changed count somewhere rather than as nothing at all.
+   *
+   * Pass null for the suites that check what a control plane with analytics
+   * switched off does.
+   */
+  analyticsSecret?: Buffer | null
+  /** The organization allowed to read the dashboard, by slug. Undefined means
+   *  none, which is the production default until an operator names one. */
+  analyticsOperatorOrgSlug?: string | null
+  /** Where the marketing site is served from, for the beacon's origin check. */
+  siteOrigin?: string | null
 }
+
+/**
+ * The analytics key every suite gets unless it asks for none.
+ *
+ * A fixed value rather than a random one, so that a surrogate computed in one
+ * test is the same value in another and a test can assert on the specific
+ * property that matters: that the surrogate is NOT the organization id.
+ */
+export const TEST_ANALYTICS_SECRET = Buffer.from(
+  '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+  'hex',
+)
 
 export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
   const admin = postgres(adminUrl, {
@@ -114,10 +144,14 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
   const clock = new FakeClock()
   const github = new FakeGitHub(clock)
   const mailer = new RecordingMailer()
-  const { app } = createServer({
+  const { app, analytics } = createServer({
     pool,
     github,
     clock,
+    analyticsSecret:
+      options.analyticsSecret === undefined ? TEST_ANALYTICS_SECRET : options.analyticsSecret,
+    analyticsOperatorOrgSlug: options.analyticsOperatorOrgSlug ?? null,
+    siteOrigin: options.siteOrigin ?? 'https://www.test',
     // Configured, so the two routes exist and the catalog test covers them.
     // Nothing is sent: the mailer keeps what it was given.
     emailSignIn: { mailer, baseUrl: 'http://api.test', productName: 'Antifailure' },
@@ -136,6 +170,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
 
   return {
     app,
+    analytics,
     admin,
     pool,
     clock,

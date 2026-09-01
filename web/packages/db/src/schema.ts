@@ -678,6 +678,7 @@ export const analyticsOrgFacts = pgTable('analytics_org_facts', {
   orgSurrogate: text('org_surrogate').primaryKey(),
   firstSeenOn: date('first_seen_on').notNull(),
   lastActiveOn: date('last_active_on').notNull(),
+  firstEventOn: date('first_event_on'),
   firstEnvironmentOn: date('first_environment_on'),
   firstProvenRunOn: date('first_proven_run_on'),
   firstPaidOn: date('first_paid_on'),

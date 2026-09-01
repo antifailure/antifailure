@@ -94,6 +94,8 @@ import {
   setBudget,
 } from './providers/store.ts'
 import { openApiDocument } from './openapi.ts'
+import { createAnalytics, type Analytics } from './analytics/record.ts'
+import { beaconCors, siteBeacon } from './analytics/beacon.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { limitFor, bucketFor, ENDPOINT_LIMITS, type EndpointLimit } from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
@@ -147,6 +149,37 @@ export interface ServerOptions {
    *  gets its own, deliberately not module state: two servers in one process
    *  sharing counters means one test passes because of another. */
   metrics?: ControlPlaneMetrics
+  /**
+   * The key organization surrogates are computed under.
+   *
+   * Null turns analytics off: nothing is recorded, the site beacon answers that
+   * it is off, and the dashboard says so rather than showing an empty chart
+   * that looks like nobody came. There is deliberately no fallback to a
+   * constant, because a constant key is a surrogate anybody can recompute,
+   * which is an org_id with extra steps.
+   */
+  analyticsSecret?: Buffer | null
+  /**
+   * The organization whose members may read the analytics dashboard.
+   *
+   * The dashboard shows the whole installation: every organization's funnel, the
+   * plan mix, the acquisition channels. On a hosted control plane that is the
+   * operator's business and nobody else's, so a permission alone is not enough
+   * to gate it, because every organization has an owner and every owner holds
+   * every permission in their own organization.
+   *
+   * Null means nobody can read it, which is the safe default and is what a
+   * self-hosted installation gets until its operator names their own
+   * organization here. The route says which variable to set rather than
+   * answering an empty page.
+   */
+  analyticsOperatorOrgSlug?: string | null
+  /**
+   * Where the marketing site is served from, for the one endpoint the browser
+   * calls cross-origin. Null refuses every beacon rather than reflecting
+   * whatever Origin arrives, which is what a permissive default would do.
+   */
+  siteOrigin?: string | null
 }
 
 /**
@@ -200,6 +233,16 @@ export function createServer(options: ServerOptions) {
   // stolen-cookie or code-guessing attempt shows up.
   const ingestLimiter = new RateLimiter(clock, options.ingestLimit ?? { rate: 200, burst: 2000 })
   const authLimiter = new RateLimiter(clock, options.authLimit ?? { rate: 1, burst: 20 })
+
+  // Analytics. Off when no surrogate secret is configured, and off means every
+  // method still works and records nothing, so no producer has to check first.
+  // A producer wrapped in `if (analytics.enabled)` is a producer that stops
+  // being exercised by tests the moment somebody forgets the secret.
+  const analytics = createAnalytics({
+    secret: options.analyticsSecret ?? null,
+    clock,
+    counters: { events: metrics.analyticsEvents, rejections: metrics.analyticsRejections },
+  })
 
   // -------------------------------------------------------------------------
   // Rate limiting, before anything else does work.
@@ -1441,6 +1484,40 @@ export function createServer(options: ServerOptions) {
   })
 
   // -------------------------------------------------------------------------
+  // The site beacon
+  //
+  // The only unauthenticated write on this server, and the only route a browser
+  // on another origin may call. See analytics/beacon.ts for why that is safe:
+  // the application role cannot read the table it writes to, and the events it
+  // accepts are declared as carrying no organization at all.
+  // -------------------------------------------------------------------------
+
+  app.options('/v1/site/events', (c) => {
+    // The preflight. Answered here rather than by a wildcard handler, because a
+    // wildcard OPTIONS handler answers for every route on the server and that
+    // is how an endpoint nobody meant to expose becomes reachable from a page.
+    if (!beaconCors(c, options.siteOrigin ?? null)) return c.body(null, 403)
+    return c.body(null, 204)
+  })
+
+  app.post('/v1/site/events', async (c) => {
+    // The origin check comes first and refuses rather than answering without
+    // the header. A browser would refuse the response anyway; a non-browser
+    // caller would not, and this is the line that bounds it to the site.
+    if (!beaconCors(c, options.siteOrigin ?? null)) {
+      return c.json({ error: 'This endpoint serves the marketing site only.' }, 403)
+    }
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    const result = await siteBeacon(body, { pool: options.pool, analytics, clock })
+    return c.json(result.body, result.status as 202)
+  })
+
+  // -------------------------------------------------------------------------
   // The application API
   // -------------------------------------------------------------------------
 
@@ -1494,6 +1571,8 @@ export function createServer(options: ServerOptions) {
           clock,
           github: options.github,
           stripe: options.stripe ?? null,
+          analytics,
+          analyticsOperatorOrgSlug: options.analyticsOperatorOrgSlug ?? null,
           actor,
           origin: 'web',
           ip: c.req.header('x-forwarded-for') ?? undefined,
@@ -1530,7 +1609,7 @@ export function createServer(options: ServerOptions) {
     })
   }
 
-  return { app, ingestLimiter, authLimiter, metrics }
+  return { app, ingestLimiter, authLimiter, metrics, analytics }
 }
 
 /**
