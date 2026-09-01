@@ -191,7 +191,7 @@ promise the run cannot keep.`),
 	cmd.Flags().StringVar(&concurrency, "concurrency", "",
 		"Ceiling on requests in flight. http_scenario only")
 	cmd.Flags().StringVar(&runID, "run-id", "",
-		"The control plane's identifier for this run, echoed back in the result")
+		"Report against this hosted run rather than claiming the next one waiting")
 	cmd.Flags().StringVar(&branch, "branch", "",
 		"Branch to run against, defaulting to the checked out one")
 	cmd.Flags().StringVar(&result, "result", "",
