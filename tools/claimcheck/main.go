@@ -201,6 +201,14 @@ func checkDocsLinks(root string, tracked map[string]bool, out io.Writer) error {
 					continue
 				}
 				page := strings.Trim(strings.TrimPrefix(target, docsBase), "/")
+				// /docs/<page>.md is the Markdown behind the rendered page,
+				// emitted by docs/src/pages/[...slug].md.ts from the same
+				// content collection this checks against. So it resolves
+				// exactly when the page does, and checking the page is
+				// checking the twin. Without this the gate calls a working
+				// address a 404, which is the false finding that gets a gate
+				// weakened rather than fixed.
+				page = strings.TrimSuffix(page, ".md")
 				if page != "" && !docPageExists(tracked, page) {
 					dead = append(dead, where+" -> "+target)
 				}

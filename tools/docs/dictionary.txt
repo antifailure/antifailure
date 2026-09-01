@@ -1,7 +1,13 @@
-# Words this project uses that no general dictionary has.
 #
 # Kept as a file rather than inside cspell.json so that adding one is a one
+# Words this project uses that no general dictionary has.
 # line diff a reviewer can read, and so the list stays sorted.
+PKCE
+Procfile
+SCIM
+SIEM
+Sigstore
+TOTP
 antifailure
 autovacuum
 branchable
@@ -22,6 +28,7 @@ goleak
 gosec
 govulncheck
 kubeconfig
+llms
 lockfile
 lockfiles
 lychee
@@ -30,23 +37,17 @@ ndjson
 neon
 pgbouncer
 pgvector
-PKCE
 pooler
 postgres
-Procfile
 reprovision
-SCIM
 semgrep
-SIEM
 signups
-Sigstore
 starlight
 subsetted
 subsetter
 subsetting
 supabase
 testcontainers
-TOTP
 tripwire
 tripwires
 trufflehog
