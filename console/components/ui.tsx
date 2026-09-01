@@ -361,8 +361,13 @@ export function Button({
   disabled?: boolean;
   busy?: boolean;
 }) {
+  // whitespace-nowrap, because a two word label breaking across two lines is
+  // the shape a control has when it is in trouble, and it happened as soon as
+  // a table put a button in a narrow column at a tablet width. A button that is
+  // too wide for its column pushes the table into its own horizontal scroll,
+  // which TableWrap already provides and which is the better failure.
   const base =
-    "inline-flex h-9 items-center justify-center gap-2 rounded-md px-3.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55";
+    "inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55";
   const variants = {
     primary: "bg-ink text-white hover:bg-[#2b2b2b]",
     secondary: "border border-rule bg-card text-ink hover:border-rule-strong",
