@@ -114,6 +114,62 @@ describe('the analytics catalog is closed', () => {
     assert.equal(surrogateSecretFrom('aa'.repeat(32))?.length, 32)
   })
 
+  it('opens a savepoint, so a failed insert cannot poison the caller transaction', async () => {
+    // THE FAILURE THIS EXISTS FOR, which cost an afternoon. Postgres aborts the
+    // whole transaction on the first failed statement, so catching the error
+    // and returning is not recovering from it: every statement AFTER it fails
+    // with 25P02, and the sign-in that analytics was not allowed to break
+    // breaks one statement later with an error about something else entirely.
+    //
+    // Against a stub rather than a real database, and deliberately. The closed
+    // schema makes every CHECK constraint on the table UNREACHABLE from a
+    // caller, which is the design working: there is no payload the catalog
+    // accepts that the database refuses. The savepoint therefore guards a bug
+    // in record.ts or an operational failure, a revoked grant or a full disk,
+    // and neither of those can be provoked from a test without a change that
+    // is global to the database and would break whatever else is running.
+    //
+    // What this asserts is exactly what a stub can settle and what the removal
+    // of the savepoint would change: that the insert runs inside a nested
+    // transaction, and that a failure inside it comes back as an outcome
+    // rather than as a throw.
+    let openedNested = false
+    const failing = {
+      transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        openedNested = true
+        return fn({
+          execute: async () => {
+            throw Object.assign(new Error('insufficient_privilege'), { code: '42501' })
+          },
+        })
+      },
+      execute: async () => {
+        throw new Error('record() ran the insert outside a nested transaction')
+      },
+    }
+
+    let counted = ''
+    const analytics = createAnalytics({
+      secret: TEST_ANALYTICS_SECRET,
+      clock: new FakeClock(),
+      counters: {
+        events: { inc: (labels) => { counted = labels.outcome ?? '' } },
+        rejections: { inc() {} },
+      },
+    })
+
+    const outcome = await analytics.record(failing as never, {
+      name: 'validation.run_finished',
+      occurredAt: new Date('2026-06-30T00:00:00Z'),
+      orgId: '00000000-0000-0000-0000-000000000001',
+      payload: { kind: 'test', verdict: 'pass' },
+    })
+
+    assert.equal(outcome.status, 'failed', 'a failed insert was not reported as a failure')
+    assert.ok(openedNested, 'the insert did not run inside a nested transaction, so there is no savepoint')
+    assert.equal(counted, 'failed', 'a failed insert was not counted, so the swallow is silent')
+  })
+
   it('records nothing at all when no secret is configured', async () => {
     const off = createAnalytics({
       secret: null,
@@ -437,6 +493,41 @@ describe('the analytics stream', { skip: hasDatabase ? false : 'no Postgres at A
         payload: { kind: 'test', verdict: 'blocked' },
       })
       assert.equal((await factsFor(s))!.first_proven_run_on, null, 'blocked activated an organization')
+    })
+
+    it('the organization existing first changes nothing about the answer', async () => {
+      // The other half of the case above, written down rather than assumed.
+      // The analytics store has no foreign key to organizations by design, so
+      // whether the row exists when the event arrives must make no difference,
+      // and "it obviously does not" is how a difference goes unnoticed.
+      const early = freshOrg()
+      await record({
+        name: 'environment.created',
+        eventId: randomUUID(),
+        occurredAt: new Date('2026-06-25T00:00:00Z'),
+        orgId: early.orgId,
+        payload: { runtime_class: 'docker' },
+      })
+
+      const late = randomUUID()
+      await h.admin`
+        INSERT INTO organizations (slug, name) VALUES (${`exists-${late.slice(0, 8)}`}, 'exists')`
+      const lateSurrogate = h.analytics.surrogate(late)!
+      await record({
+        name: 'environment.created',
+        eventId: randomUUID(),
+        occurredAt: new Date('2026-06-25T00:00:00Z'),
+        orgId: late,
+        payload: { runtime_class: 'docker' },
+      })
+
+      const a = (await factsFor(early.surrogate))!
+      const b = (await factsFor(lateSurrogate))!
+      assert.deepEqual(
+        [day(a.first_seen_on), day(a.first_environment_on), Number(a.environments_created)],
+        [day(b.first_seen_on), day(b.first_environment_on), Number(b.environments_created)],
+      )
+      await h.admin`DELETE FROM organizations WHERE slug = ${`exists-${late.slice(0, 8)}`}`
     })
 
     it('one malformed event never discards the good ones around it', async () => {

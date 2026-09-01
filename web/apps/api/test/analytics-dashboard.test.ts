@@ -16,6 +16,7 @@
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import { available, callProcedure, dropOrg, errorCode, seedOrg, signInAs, startApi, type ApiHarness, type Org } from './harness.ts'
 
 const hasDatabase = await available()
@@ -142,6 +143,61 @@ describe(
         // has never run, and the page says something different for it.
         assert.ok('lastRolledUpAt' in p, `${path} cannot tell empty from never computed`)
       }
+    })
+
+    it('refuses a beacon whose clock is wrong, in both directions, and keeps the rest', async () => {
+      // A machine with a wrong clock is common, and an event dated next year
+      // sorts to the top of every chart forever. The same bound ingest.ts puts
+      // on an engine, for the same reason, and it is a per-event rejection
+      // rather than a refused batch: a tab that was asleep flushes hours of
+      // real events alongside one bad one.
+      const day = 24 * 60 * 60 * 1000
+      const now = h.clock.now().getTime()
+      const send = (events: unknown[]) =>
+        h.fetch('/v1/site/events', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: 'https://www.test' },
+          body: JSON.stringify({ events }),
+        })
+
+      // A fresh identifier per run, and this is not decoration. The identifier
+      // was derived from the clock, and the harness clock starts at a fixed
+      // instant, so the second run of this file against the same database
+      // collided with the first: the good event came back as a duplicate and
+      // the assertion below read 0 recorded. It passed alone and failed in the
+      // suite, which is the only place that difference shows.
+      const run = randomUUID()
+      const one = (at: number) => ({
+        id: `skew-${run}-${at}`,
+        name: 'site.page_viewed',
+        at: new Date(at).toISOString(),
+        session: 'a-browsing-session-identifier',
+        payload: { route: 'home', source: 'direct', entry: true },
+      })
+
+      const res = await send([one(now + 2 * day), one(now), one(now - 2 * day)])
+      assert.equal(res.status, 207, 'a batch with refusals in it did not report as partial')
+      const body = (await res.json()) as { recorded: number; rejected: number }
+      assert.equal(body.rejected, 2, 'a clock two days out in either direction was accepted')
+      assert.equal(body.recorded, 1, 'the good event in the batch was discarded with the bad ones')
+    })
+
+    it('refuses a beacon from any origin but the configured one', async () => {
+      const res = await h.fetch('/v1/site/events', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'https://someone-else.test' },
+        body: JSON.stringify({ events: [] }),
+      })
+      assert.equal(res.status, 403)
+
+      // And with no Origin at all. A browser would refuse the response anyway;
+      // a non-browser caller would not, and this is the line that bounds it.
+      const bare = await h.fetch('/v1/site/events', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ events: [] }),
+      })
+      assert.equal(bare.status, 403)
     })
 
     it('reports every catalog event, including the ones nothing has ever emitted', async () => {
