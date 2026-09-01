@@ -492,7 +492,7 @@ jobs:
         # backs starts answering with the 404 page and nothing else notices.
         run: |
           missing=0
-          for route in index environments runs masking network audit members plan keys device 404; do
+          for route in index environments runs load masking network audit members plan keys device 404; do
             if [ ! -f "console/out/$route.html" ]; then
               echo "::error::console/out/$route.html was not exported"
               missing=1
