@@ -839,6 +839,15 @@ jobs:
         # the security one was a promise to researchers.
         run: go run ./tools/claimcheck .
 
+      - name: The sidebar order is a decision rather than an accident
+        # Starlight breaks a tie in sidebar.order on file name, which the
+        # person editing a page cannot see and nothing else reports. 27 of the
+        # 78 ordered pages shared a number with a sibling, so a third of the
+        # sidebar was alphabetised by slug: "Watching a run" split the two
+        # runtime guides, "Provider limits" split the three provider pages,
+        # and On-call came before Standing up production.
+        run: go run ./tools/sidebarcheck .
+
       - name: The manifests in the documentation are ones the engine accepts
         # The gates above read style, spelling, links and repository paths. None
         # of them knows what a manifest is, and a getting started page shipped

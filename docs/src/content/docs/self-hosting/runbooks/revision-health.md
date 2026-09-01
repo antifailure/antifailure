@@ -2,7 +2,7 @@
 title: Revision health
 description: A replica is restarting in a loop, or fewer replicas are running than were asked for.
 sidebar:
-  order: 12
+  order: 11
 ---
 
 Two alerts share this page because they usually fire together and always have

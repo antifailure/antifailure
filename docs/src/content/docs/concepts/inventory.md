@@ -2,7 +2,7 @@
 title: Inventory
 description: What an environment reproduces, component by component, and what it could not.
 sidebar:
-  order: 5
+  order: 7
 ---
 
 An environment is a copy of production, and no copy is complete. The database

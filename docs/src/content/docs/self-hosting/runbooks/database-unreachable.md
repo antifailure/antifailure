@@ -2,7 +2,7 @@
 title: The database is not answering
 description: Azure reports the flexible server as not alive. This is the one unambiguous database signal.
 sidebar:
-  order: 13
+  order: 12
 ---
 
 **Alert:** `database-unreachable`. **Severity 0.**

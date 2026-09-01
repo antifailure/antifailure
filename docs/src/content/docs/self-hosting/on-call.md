@@ -2,7 +2,7 @@
 title: On-call
 description: What the rotation is, what an acknowledgement means, and what to do first for each class of page, even for a team of one.
 sidebar:
-  order: 3
+  order: 5
 ---
 
 A rotation of one person is still a rotation. Writing it down changes what

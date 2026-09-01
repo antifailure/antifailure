@@ -68,6 +68,7 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "the sidebar order is chosen"    just sidebarcheck
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
     run "prose reads like a person"      just prosecheck
@@ -722,6 +723,17 @@ forbidden:
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
+
+# The sidebar order is a decision rather than an accident.
+#
+# Starlight breaks a tie in sidebar.order on FILE NAME, which is invisible to
+# somebody editing a page and silent everywhere else. 27 of the 78 ordered
+# pages shared a number with a sibling, so a third of the sidebar was
+# alphabetised by slug while reading like a designed order: "Watching a run"
+# split the two runtime guides, "Provider limits" split the three provider
+# pages, and On-call came before Standing up production.
+sidebarcheck:
+    go run ./tools/sidebarcheck .
 
 # The built documentation carries its head, and its entity graph resolves.
 #

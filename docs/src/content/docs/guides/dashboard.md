@@ -2,7 +2,7 @@
 title: Watching a run
 description: The live dashboard, what each pane means, and what you get where there is no terminal.
 sidebar:
-  order: 3
+  order: 4
 ---
 
 `af up` prints a handful of lines and then a summary. That is the right amount

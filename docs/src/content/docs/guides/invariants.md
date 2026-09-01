@@ -2,7 +2,7 @@
 title: Invariants
 description: Statements about your data that must stay true while agents use the application.
 sidebar:
-  order: 9
+  order: 10
 ---
 
 An invariant is a read only query that must return no rows, asked of the branch

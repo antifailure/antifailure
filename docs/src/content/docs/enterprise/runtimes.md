@@ -2,7 +2,7 @@
 title: Multiple runtimes
 description: Placing an environment on the right pool when there is more than one.
 sidebar:
-  order: 3
+  order: 5
 ---
 
 *Requires an enterprise license with the `multi_runtime` feature.*

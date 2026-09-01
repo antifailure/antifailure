@@ -2,7 +2,7 @@
 title: Your own provider keys
 description: Store an Anthropic or OpenAI key, cap what it may spend, and rotate it, from the console or a terminal.
 sidebar:
-  order: 15
+  order: 20
 ---
 
 Runs use your Anthropic and OpenAI keys, not ours. You store one, you cap what

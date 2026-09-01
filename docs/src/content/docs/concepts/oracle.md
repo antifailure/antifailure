@@ -2,7 +2,7 @@
 title: The differential oracle
 description: Run a change beside the version it replaces, on the same data, and report what the two did differently.
 sidebar:
-  order: 13
+  order: 15
 ---
 
 A test says whether the application does what you told it to. The oracle says

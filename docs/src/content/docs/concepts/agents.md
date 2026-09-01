@@ -2,7 +2,7 @@
 title: Agents
 description: What the agent runner does, and why a workflow is described rather than scripted.
 sidebar:
-  order: 8
+  order: 10
 ---
 
 An agent uses the environment the way a person would: it opens the application

@@ -2,7 +2,7 @@
 title: The inbox
 description: Mail an environment sends goes here, so a flow finishes and no real address receives anything.
 sidebar:
-  order: 4
+  order: 5
 ---
 
 A host in `capture` mode is answered locally. The provider's API returns what it

@@ -2,7 +2,7 @@
 title: The certificate
 description: The certificate on the custom domain has fewer than three weeks left, or the check could not complete.
 sidebar:
-  order: 18
+  order: 17
 ---
 
 **Alert:** `certificate-expiring`. **Severity 3.** Working hours.

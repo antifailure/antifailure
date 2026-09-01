@@ -2,7 +2,7 @@
 title: Server errors
 description: The application answered 5xx more than it should have in five minutes.
 sidebar:
-  order: 11
+  order: 10
 ---
 
 **Alert:** `server-errors`. **Severity 1.** Requests are failing and customers

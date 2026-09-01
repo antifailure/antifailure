@@ -2,7 +2,7 @@
 title: Runbooks
 description: The alerts that exist, what each one means, and the page to open when one of them wakes you.
 sidebar:
-  order: 5
+  order: 8
 ---
 
 Eleven alert rules watch the hosted control plane. Each one names its runbook in

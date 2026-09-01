@@ -2,7 +2,7 @@
 title: Control plane configuration
 description: Every environment variable the control plane reads, what it does, and what happens when it is missing.
 sidebar:
-  order: 7
+  order: 8
 ---
 
 The control plane reads its configuration from the environment and refuses to

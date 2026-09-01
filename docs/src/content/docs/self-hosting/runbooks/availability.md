@@ -2,7 +2,7 @@
 title: The control plane is unreachable
 description: The availability test failed from two locations. What that rules out, and what to check in order.
 sidebar:
-  order: 10
+  order: 9
 ---
 
 **Alert:** `unreachable`. **Severity 0.** The service is down for customers.

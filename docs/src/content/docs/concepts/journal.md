@@ -2,7 +2,7 @@
 title: The journal
 description: Why every resource is recorded before it is created, and what that buys.
 sidebar:
-  order: 6
+  order: 8
 ---
 
 Antifailure writes down what it is about to create before it creates it, and

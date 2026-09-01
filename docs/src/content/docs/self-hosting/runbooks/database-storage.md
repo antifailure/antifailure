@@ -2,7 +2,7 @@
 title: Database storage
 description: The flexible server is above 80 percent of its provisioned disk.
 sidebar:
-  order: 14
+  order: 13
 ---
 
 **Alert:** `database-storage`. **Severity 2.** Hours, not minutes.

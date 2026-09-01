@@ -2,7 +2,7 @@
 title: Egress
 description: Why an environment reaches nothing by default, and what each mode does.
 sidebar:
-  order: 4
+  order: 5
 ---
 
 An environment can reach nothing on the network except the hosts listed in the

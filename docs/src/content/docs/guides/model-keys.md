@@ -2,7 +2,7 @@
 title: Your own model key
 description: Bring an Anthropic or OpenAI key, keep it on your machine, point it at a local model, and prove it works, all from a terminal.
 sidebar:
-  order: 14
+  order: 19
 ---
 
 The agents drive a real browser. To read a page and decide what a person would
