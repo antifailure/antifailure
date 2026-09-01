@@ -187,10 +187,11 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		ParentID:     parent.ID,
 		WithEndpoint: true,
 		Annotation: map[string]string{
-			AnnKind:      "golden",
-			AnnVersion:   version,
-			AnnRulesHash: spec.RulesHash,
-			AnnCreatedAt: created.Format(time.RFC3339),
+			AnnKind:       "golden",
+			AnnVersion:    version,
+			AnnRulesHash:  spec.RulesHash,
+			AnnProvenance: spec.Provenance,
+			AnnCreatedAt:  created.Format(time.RFC3339),
 		},
 	})
 	if err != nil {
@@ -247,7 +248,8 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 
 	gv := provider.GoldenVersion{
 		ID: version, CreatedAt: created, RulesHash: spec.RulesHash,
-		Verified: spec.Verify != nil, Attestation: attestation, ProviderRef: candidate.ID,
+		Provenance: spec.Provenance,
+		Verified:   spec.Verify != nil, Attestation: attestation, ProviderRef: candidate.ID,
 	}
 	if fresh, err := p.client.GetBranch(ctx, candidate.ID); err == nil {
 		gv.SizeBytes = fresh.LogicalSize
@@ -276,6 +278,7 @@ func (p *Provider) goldenFrom(b Branch) provider.GoldenVersion {
 	gv := provider.GoldenVersion{
 		ID:          b.Annotation[AnnVersion],
 		RulesHash:   b.Annotation[AnnRulesHash],
+		Provenance:  b.Annotation[AnnProvenance],
 		SizeBytes:   b.LogicalSize,
 		ProviderRef: b.ID,
 		// A branch carries the golden prefix only because a refresh renamed it

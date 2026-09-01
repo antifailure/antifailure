@@ -274,6 +274,16 @@ type Attestation struct {
 	// verified under one set of rules is not mistaken for one verified under
 	// another.
 	RulesHash string `json:"rules_hash"`
+	// Provenance identifies the project the golden was made for and the inputs
+	// that produced it, so that a machine pulling a published golden can tell
+	// whether it is looking at its own project's work or somebody else's.
+	//
+	// Signed along with everything else, which is the point of putting it
+	// here rather than only in a provider annotation: a store is shared, and a
+	// claim about whose data this is has to be one the reader can check.
+	// Omitted when empty so that an attestation written before this field
+	// existed still verifies against its own signature.
+	Provenance string `json:"provenance,omitempty"`
 	// PublicKey is the verifying key, base64.
 	PublicKey string `json:"public_key"`
 	// Signature covers the canonical form of everything above.
@@ -281,9 +291,9 @@ type Attestation struct {
 }
 
 // Sign produces a signed attestation.
-func Sign(report Report, golden, rulesHash string, key ed25519.PrivateKey) (Attestation, error) {
+func Sign(report Report, golden, rulesHash, provenance string, key ed25519.PrivateKey) (Attestation, error) {
 	a := Attestation{
-		Report: report, Golden: golden, RulesHash: rulesHash,
+		Report: report, Golden: golden, RulesHash: rulesHash, Provenance: provenance,
 		PublicKey: base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey)),
 	}
 	payload, err := a.payload()

@@ -61,9 +61,9 @@ const SHEETS: Record<
   },
   privacy: {
     title: "Privacy Notice",
-    lead: "This marketing site stores a waitlist email in your browser. No production data is collected.",
+    lead: "This marketing site takes a waitlist address. No production data is collected.",
     points: [
-      "Waitlist email is written to localStorage on this device. It is not sent to a server from this UI.",
+      "A waitlist address is sent to a server and stored, so that the sentence next to the form is true. Your browser keeps a copy as a convenience, which clearing site data removes.",
       "When a control plane exists, production-derived state is processed inside the customer boundary by default.",
       "Passwords entered in this mock form are not stored.",
     ],
