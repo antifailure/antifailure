@@ -300,7 +300,7 @@ and if it changes in one it changes in both.
 | Component | State | Notes |
 | --- | --- | --- |
 | `internal/load` shape | proven | weighted mix, Poisson arrivals, deterministic per seed |
-| `internal/load` safety | proven | every route unsafe until named; a method pattern does not cover another method |
+| `internal/load` safety | proven | every route unsafe until named; a method pattern does not cover another method. A method pattern also survives the manifest now: normalisation prefixed anything not starting with a slash with one, so the documentation's own `unsafe_routes: ["DELETE /*"]` became `/DELETE /*` and matched nothing. The safe list failing that way is loud and the unsafe list failing that way is silent, which is why it was a defect rather than an annoyance: under a permissive safe list the deletes were sent. Proven across the boundary rather than by asserting the strings, with the real matcher over a real shape. |
 | `internal/load` run | proven | measured against a real server; achieved rate reported, not the target |
 | `internal/load` access log | proven | paths normalised, or the mix collapses into a list; the arrival rate is counted from the log's timestamps, and a log without them says the rate was assumed |
 | `internal/load` OpenTelemetry source | proven | OTLP/JSON, one document or one per line, server spans only, both attribute vocabularies; production's own p95 per route becomes the baseline `p95_increase` had nothing to compare against before |
