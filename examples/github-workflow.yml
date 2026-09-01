@@ -79,7 +79,7 @@ on:
         required: false
         default: ''
       run_id:
-        description: The control plane's identifier for this run, echoed back in the result.
+        description: The control plane's identifier for this run. Leave it empty; the engine asks.
         required: false
         default: ''
 
@@ -172,6 +172,19 @@ jobs:
           AF_SEED: ${{ inputs.seed }}
           AF_CONCURRENCY: ${{ inputs.concurrency }}
           AF_RUN_ID: ${{ inputs.run_id }}
+          # Without this the run is invisible in the console.
+          #
+          # It is what `af` authenticates to the hosted control plane with, and
+          # nothing here needs it to do the work: an environment comes up, the
+          # agents run and the report is written with no token at all. What it
+          # decides is whether any of that is REPORTED. Unset, the engine sends
+          # no events, claims no hosted run, and a workload somebody started
+          # from the console is dispatched, runs, and ends as abandoned at its
+          # deadline, because the control plane never heard from it.
+          #
+          # Create one with `af token create ci` and put it in the repository's
+          # secrets. Leave it out if you do not use the hosted control plane.
+          AF_CONTROL_PLANE_TOKEN: ${{ secrets.AF_CONTROL_PLANE_TOKEN }}
           # Bring your own key. Without one the agents still run; workflows
           # that need a page read come back unverified rather than guessed at.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -217,6 +230,16 @@ jobs:
               # And it left nothing to reproduce. The result names the plain af
               # command that produces the same run on a laptop, which is the
               # only thing that makes a hosted number checkable.
+              #
+              # --run-id is normally empty and that is correct. A dispatch
+              # carries only the inputs the workflow DECLARES, GitHub reads
+              # that declaration from your DEFAULT branch, and it refuses an
+              # undeclared input with a 422 nobody can tell from a missing
+              # file. So the control plane cannot send the identifier, and the
+              # engine asks for it instead: it claims the run waiting for this
+              # environment, says when it started, says it is still going, and
+              # reports what it measured. Pass one by hand only to reproduce a
+              # particular hosted run without taking the next queued one.
               #
               # Values reach the script through the env block above rather
               # than through the script text, exactly as they did before. An
