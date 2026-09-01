@@ -156,6 +156,11 @@ promise the run cannot keep.`),
 				Teardown:       teardown,
 			})
 			if err != nil {
+				// A run with no document to write still has to say what
+				// happened to it. Returning here without a word would leave
+				// the claimed run to abandon at its deadline, which says
+				// nobody reported when somebody did.
+				reporter.Failed(cmd.Context(), err.Error())
 				return err
 			}
 			noteHostedStop(res, reporter.StoppedBy())

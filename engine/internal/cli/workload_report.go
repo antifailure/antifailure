@@ -357,6 +357,29 @@ func (h *hostedReporter) Finish(ctx context.Context, res *workload.Result) {
 	h.Close()
 }
 
+// Failed reports a run that could not produce a result document at all.
+//
+// It exists because the alternative is the defect this file closes, one level
+// up: an error return between Start and Finish leaves the run claimed, and a
+// claimed run nobody reports on ends as `abandoned`, which says the control
+// plane never heard when in fact it did and the engine had something to say.
+//
+// No measurements travel, because there are none. What travels is the sentence.
+func (h *hostedReporter) Failed(ctx context.Context, detail string) {
+	if !h.Reporting() {
+		h.Close()
+		return
+	}
+	h.stopBeating()
+	h.emit(ctx, events.WorkloadFinished, map[string]any{
+		"workload_run_id": h.runID,
+		"outcome":         "failed",
+		"state":           string(workload.StateFailed),
+		"detail":          detail,
+	})
+	h.Close()
+}
+
 // emit hands one event to the control plane sink and delivers it now.
 //
 // NOT THROUGH A BUS, AND THE THREE REASONS ARE EACH A PROPERTY THIS NEEDS.

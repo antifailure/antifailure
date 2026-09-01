@@ -121,6 +121,50 @@ acknowledgement.
 af workload teardown --result torn-down.json
 ```
 
+## Reporting to a hosted control plane
+
+Everything above works with no control plane at all, and that is the ordinary
+case: `af workload run` on a laptop measures the same things and writes the same
+document. What a control plane adds is a row somebody can watch while it
+happens.
+
+Set `AF_CONTROL_PLANE_TOKEN` where `af` runs and four things change.
+
+The run is **claimed**. A hosted run reaches your repository as a
+`workflow_dispatch`, and a dispatch carries only the inputs your workflow file
+declares. GitHub reads that declaration from your **default branch** and refuses
+an undeclared input with a 422 that looks exactly like the file being missing,
+so the control plane cannot put the run identifier in the dispatch without
+breaking every copy of the workflow already in the wild. It sends what to run,
+and the engine asks which recorded request the job belongs to. That also means a
+run whose dispatch was refused, because no App is installed or Actions are off,
+is still picked up by an engine you start by hand.
+
+The run **says when it started**, so the console shows it running rather than
+waiting to be picked up.
+
+The run **says it is still going**, once a minute. Without that a long run is
+recorded as *abandoned* at its deadline, and abandoned and failed are different
+sentences: a failure is something the engine reported, and abandoned is the
+control plane admitting it never heard.
+
+The run **reports what it measured**. The payload is the same document
+`--result` writes, so the artifact your job uploads and the numbers the console
+draws cannot disagree. A report that cannot be delivered is spooled to disk
+rather than dropped, and the next `af` command on that machine sends it.
+
+A cancel pressed in the console reaches the run on the same minute tick, stops
+the work, and is reported as cancelled. So is a lease taken by another engine,
+which is what happens when a run went quiet long enough for somebody else to
+pick it up.
+
+`--run-id` is for reproducing one particular hosted run by hand. Passing it
+claims nothing, deliberately: an engine reproducing a run on a laptop must not
+take the next queued run away from CI.
+
+Without a token none of this happens and nothing fails. The work is the thing
+and the reporting is a view of it.
+
 ## Promoting an exploration
 
 `af workload promote` compiles one exploration into the workflow definition a

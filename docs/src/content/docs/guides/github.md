@@ -212,6 +212,32 @@ The run appears in your Actions tab, and the environment appears in the console
 when the engine reports it, the same way it does for a run you started
 yourself.
 
+## The one secret without which nothing appears in the console
+
+The workflow needs `AF_CONTROL_PLANE_TOKEN` in its environment. Create one with
+`af token create ci` and put it in the repository's secrets:
+
+```yaml
+env:
+  AF_CONTROL_PLANE_TOKEN: ${{ secrets.AF_CONTROL_PLANE_TOKEN }}
+```
+
+Nothing about the work needs it. The environment comes up, the agents run, the
+report lands on the pull request, and the job exits with the right code, all
+with no token at all. What it decides is whether any of that is **reported**.
+
+Without it the engine sends no events and claims no hosted run. The console's
+environment list stays empty, and a workload somebody started from the console
+is dispatched, runs to completion, and is recorded as *abandoned* at its
+deadline, because the control plane never heard from it. That reads as a
+plumbing fault in the product and it is a missing repository secret.
+
+If a run is stuck in the console saying nobody reported on it, and the Actions
+tab shows it finishing perfectly well, this is why.
+
+Leave it out if you do not use the hosted control plane. `af ci` on a pull
+request needs none of it.
+
 ## What the comment carries
 
 One comment per pull request, edited in place rather than added to. A bot that

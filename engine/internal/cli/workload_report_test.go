@@ -757,3 +757,27 @@ func TestWithNoTokenNothingIsBuiltAndNothingIsSent(t *testing.T) {
 	h.Finish(ctx, resultFor(workload.StateSucceeded, workload.VerdictPass))
 	h.Close()
 }
+
+// A run that could not produce a document still says so.
+//
+// The path is narrow and the consequence is not: an error return between the
+// start and the report leaves the run claimed, and a claimed run nobody speaks
+// about is recorded as abandoned, which says the control plane never heard when
+// it did.
+func TestARunWithNoDocumentStillReportsAFailure(t *testing.T) {
+	f, url := newFakePlane(t)
+	f.set(func(p *fakePlane) { p.claim = runningRun("observed_load") })
+	h, _, _ := reporterFor(t, url)
+
+	h.Claim(context.Background(), "", workload.ObservedLoad)
+	h.Start(context.Background(), workload.ObservedLoad)
+	h.Failed(context.Background(), "the runner could not be started")
+
+	sent := f.sent()
+	require.Len(t, sent, 2)
+	require.Equal(t, "workload.finished", sent[1].Type)
+	require.Equal(t, "failed", sent[1].Payload["outcome"])
+	require.Equal(t, "the runner could not be started", sent[1].Payload["detail"])
+	require.NotContains(t, sent[1].Payload, "result",
+		"a run that produced no document sent measurements it does not have")
+}
