@@ -1,5 +1,6 @@
-import { PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
-import { AFTER_HEADING, FeatureList, Lead, OpenSteps, SectionHeading, WorkersScene } from "./visuals";
+import { PageHero, PageSection, PageShell } from "@/components/pages/kit";
+import { SMKT01 } from "@/components/pages/figures/solutions";
+import { AFTER_HEADING, FeatureList, Lead, OpenSteps, SectionHeading } from "./visuals";
 
 export function MarketplacesPage() {
   return (
@@ -9,7 +10,8 @@ export function MarketplacesPage() {
         eyebrow="Solutions · Marketplaces"
         title="Queues, workers, dual-writes, matching logic staging never reproduces."
         lead="The twin runs your own workers and cron services beside the web tier, on the same branched database. Production webhooks are denied inside it, and every attempt is recorded."
-        visual={<WorkersScene />}
+        framed={false}
+        visual={<SMKT01 />}
       />
       <PageSection tone="sage">
         <SectionHeading title="<strong>Timing is the bug.</strong> Services, queues, and workers are a dimension staging drops." />
@@ -38,13 +40,6 @@ export function MarketplacesPage() {
           ]}
         />
       </PageSection>
-      <RelatedGrid
-        items={[
-          { href: "/product/load", title: "Load", description: "Traffic shaped like production's access log." },
-          { href: "/product/firewall", title: "Side-Effect Firewall", description: "Partner webhooks stay captured." },
-          { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
-        ]}
-      />
     </PageShell>
   );
 }
