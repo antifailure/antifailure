@@ -349,6 +349,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	message := encodeMeta(meta{
 		Version:           version,
 		RulesHash:         spec.RulesHash,
+		Provenance:        spec.Provenance,
 		CreatedAt:         created.Format(time.RFC3339),
 		Verified:          spec.Verify != nil,
 		AttestationSHA256: sha256Hex(attestation),
@@ -374,7 +375,8 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 
 	gv := provider.GoldenVersion{
 		ID: version, CreatedAt: created, RulesHash: spec.RulesHash,
-		Verified: spec.Verify != nil, Attestation: attestation, ProviderRef: snapshotID,
+		Provenance: spec.Provenance,
+		Verified:   spec.Verify != nil, Attestation: attestation, ProviderRef: snapshotID,
 	}
 	if fresh, err := p.client.GetSnapshot(ctx, snapshotID); err == nil {
 		gv.SizeBytes = fresh.LogicalSize
@@ -446,6 +448,7 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 			CreatedAt:   m.createdAt(s.CreatedAt.Time),
 			SizeBytes:   s.LogicalSize,
 			RulesHash:   m.RulesHash,
+			Provenance:  m.Provenance,
 			Verified:    m.Verified,
 			ProviderRef: s.ID,
 		})

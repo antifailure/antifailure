@@ -213,7 +213,9 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		// branch exists, and an annotation that has to be added afterwards is
 		// one more call that can fail between verifying a golden and being able
 		// to say which rules produced it.
-		Annotation: annotation{Rules: spec.RulesHash, CreatedAt: created},
+		Annotation: annotation{
+			Rules: spec.RulesHash, Provenance: spec.Provenance, CreatedAt: created,
+		},
 	})
 	if err != nil {
 		return provider.GoldenVersion{}, err
@@ -273,6 +275,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		ID:          version,
 		CreatedAt:   created,
 		RulesHash:   spec.RulesHash,
+		Provenance:  spec.Provenance,
 		Verified:    spec.Verify != nil,
 		Attestation: attestation,
 		ProviderRef: candidate.ID,
@@ -304,6 +307,7 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 		gv := provider.GoldenVersion{
 			ID:          strings.TrimPrefix(b.Name, PrefixGolden),
 			RulesHash:   ann.Rules,
+			Provenance:  ann.Provenance,
 			ProviderRef: b.ID,
 			// A branch carries the golden prefix only because a refresh renamed
 			// it after verification returned without an error. The attestation
@@ -823,10 +827,11 @@ func joinInts(vs []int) string {
 
 // annotation is the metadata a branch carries in its git_branch field.
 type annotation struct {
-	From      string
-	EnvID     string
-	Rules     string
-	CreatedAt time.Time
+	From       string
+	EnvID      string
+	Rules      string
+	Provenance string
+	CreatedAt  time.Time
 }
 
 // String encodes an annotation as one line of key=value pairs.
@@ -836,7 +841,7 @@ type annotation struct {
 // survive naive concatenation; the encoding is here because the next value
 // somebody adds might not.
 func (a annotation) String() string {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 5)
 	add := func(k, v string) {
 		if v != "" {
 			parts = append(parts, k+"="+url.QueryEscape(v))
@@ -845,6 +850,7 @@ func (a annotation) String() string {
 	add("from", a.From)
 	add("env", a.EnvID)
 	add("rules", a.Rules)
+	add("project", a.Provenance)
 	if !a.CreatedAt.IsZero() {
 		add("created", a.CreatedAt.UTC().Format(time.RFC3339))
 	}
@@ -878,6 +884,8 @@ func parseAnnotation(s string) annotation {
 			a.EnvID = value
 		case "rules":
 			a.Rules = value
+		case "project":
+			a.Provenance = value
 		case "created":
 			if at, err := time.Parse(time.RFC3339, value); err == nil {
 				a.CreatedAt = at
