@@ -63,6 +63,7 @@ gate: _reports
     run "installs match their lockfiles" just installcheck
     run "generated files are current" just _generated
     run "release stamps a real version"  just ldcheck
+    run "release publishes what it signs" just releasecheck
     run "error catalog and code agree"   just errcheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
@@ -424,6 +425,12 @@ errcheck:
 # The release stamps version variables that exist.
 ldcheck:
     go run ./tools/ldcheck .
+
+# The release publishes every asset it signs, and the job that signs holds the
+# token that keyless signing needs. The signing half of release.yml has never
+# run, so the first tag is its first execution.
+releasecheck:
+    go run ./tools/releasecheck .
 
 # Nothing in the tree looks like a live credential.
 scanrepo:

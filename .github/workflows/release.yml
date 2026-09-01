@@ -224,6 +224,13 @@ jobs:
             dist/sbom.spdx.json
             dist/sbom.spdx.json.sigstore.json
             THIRD_PARTY_NOTICES.md
+          # Without this the action WARNS on a pattern that matches nothing and
+          # publishes anyway, green. That is the one failure this pipeline is
+          # not allowed to have: a release short an asset looks finished, and
+          # nobody goes looking for a file they were never told was missing.
+          # Read out of the action's own src/main.ts at the pinned commit, where
+          # an unmatched pattern is a console.warn unless this is set.
+          fail_on_unmatched_files: true
           generate_release_notes: true
           # Prepended above the generated commit list. A signature nobody knows
           # how to check is decoration, so the instructions ship with the thing
