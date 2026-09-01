@@ -1,0 +1,109 @@
+{
+  "duration_ms": 0,
+  "engine": {
+    "commit": "bb1579d9",
+    "edition": "oss",
+    "version": "0.0.0-dev"
+  },
+  "environment": {
+    "branch": "w-studio-engine",
+    "env_id": "aftest-04e645",
+    "url": "http://127.0.0.1:8081"
+  },
+  "evidence": [],
+  "finished_at": "2026-09-01T06:40:00Z",
+  "kind": "http_scenario",
+  "outcome": "succeeded",
+  "reproduce": {
+    "argv": [
+      "af",
+      "load",
+      "scenario",
+      "--seed",
+      "0",
+      "--concurrency",
+      "20"
+    ],
+    "command": "af load scenario --seed 0 --concurrency 20",
+    "manifest_digest": "sha256:0d1e2f",
+    "note": "run this from the repository root, against an environment that is already up for the same branch"
+  },
+  "result": {
+    "achieved_rate": null,
+    "duration_ms": 61240,
+    "error_rate": 0.004166666666666667,
+    "failures": 2,
+    "findings": null,
+    "goals": null,
+    "goals_reached": null,
+    "iterations": 120,
+    "max_ms": 690,
+    "p50_ms": 44,
+    "p90_ms": 91,
+    "p95_ms": 138,
+    "p99_ms": 262,
+    "refused_routes": [
+      "DELETE /admin/purge"
+    ],
+    "requests": 480,
+    "scheduled_ms": 60000,
+    "sessions": 40,
+    "steps": null,
+    "target_rate": null,
+    "workflows": null,
+    "workflows_blocked": null,
+    "workflows_failed": null,
+    "workflows_flaky": null,
+    "workflows_passed": null,
+    "workflows_unverified": null
+  },
+  "routes": [
+    {
+      "baseline_p95_ms": null,
+      "errors": 0,
+      "max_ms": 140,
+      "p50_ms": 20,
+      "p90_ms": 40,
+      "p95_increase": null,
+      "p95_ms": 55,
+      "p99_ms": 90,
+      "position": 0,
+      "route": "GET /",
+      "scenario": "checkout",
+      "sent": 120
+    },
+    {
+      "baseline_p95_ms": null,
+      "errors": 2,
+      "max_ms": 690,
+      "p50_ms": 60,
+      "p90_ms": 120,
+      "p95_increase": null,
+      "p95_ms": 170,
+      "p99_ms": 300,
+      "position": 1,
+      "route": "POST /api/orders",
+      "scenario": "checkout",
+      "sent": 120
+    }
+  ],
+  "run_id": "5e4a1c8e-1f0b-4a35-9a1b-0c6d2f8e7a91",
+  "schema": "antifailure.workload.result/v1",
+  "started_at": "2026-09-01T06:40:00Z",
+  "state": "succeeded",
+  "thresholds": [
+    {
+      "detail": "p95 of 138ms, under 200ms",
+      "measure": "p95_below_ms",
+      "name": "checkout is fast enough",
+      "observed": 138,
+      "position": 0,
+      "scenario": "checkout",
+      "scope": "POST /api/orders",
+      "threshold": 200,
+      "value": "pass"
+    }
+  ],
+  "verdict": "pass",
+  "workload_run_id": "5e4a1c8e-1f0b-4a35-9a1b-0c6d2f8e7a91"
+}

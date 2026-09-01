@@ -31,6 +31,50 @@
 //   a report after the       the deadline already ended the run. The report is
 //   deadline                 stored and noted, and the run keeps saying nobody
 //                            reported in time, which is the true statement.
+//   a terminal event from    REFUSED, and counted. Another engine holds the run
+//   an engine that no        and may be running it right now.
+//   longer holds the run
+//
+// THE FIFTH ROW, AND WHY IT IS NOT MERELY DEFENSIVE.
+//
+// A lease is fifteen minutes and a heartbeat extends it. An engine on a runner
+// with bad connectivity can miss several and keep the run; miss enough and the
+// lease expires and a SECOND engine polling the same environment claims it and
+// starts doing the work.
+//
+// The statement below used to be gated on the run's STATE alone. So the FIRST
+// engine's terminal event ended the run, and the second engine's report then
+// arrived against a row that was already terminal and was refused as a note.
+// The measurements of the engine that actually did the work were destroyed by
+// the engine that had lost it. The engine side closed the near end of this: an
+// engine told 409 by its heartbeat now stops reporting entirely. This closes the
+// far end, which is the half the engine cannot reach, because an engine that
+// never got an answer to a heartbeat never learns it lost anything.
+//
+// A run with NO holder still accepts a terminal event, and that arm is
+// deliberate rather than lax. Two ordinary things produce it: a run given to an
+// engine by `--run-id`, which deliberately declines to claim so that somebody
+// reproducing a hosted run does not take CI's next one, and the spool race where
+// the terminal event overtakes the claim. Refusing those would abandon runs that
+// finished.
+//
+// It cannot destroy a competing report either, and that is an argument rather
+// than a hope. `claimRun` takes a run that is `requested`, or one whose lease
+// has EXPIRED; a run in `accepted` or `running` with a null `lease_expires_at`
+// fails that comparison and is claimable by nobody. So a run with no holder that
+// an engine is working on has no second engine to lose a report to.
+//
+// The one ordering this does not make safe is a run somebody is reproducing by
+// `--run-id` while CI claims the same run. There the holder wins and the person
+// reproducing it is refused, which is the consistent rule and is visible: the
+// event is stored whole, the refusal is counted, and the sentence says which
+// engine holds it. The alternative, last writer wins, is what this whole file is
+// getting away from.
+//
+// A refusal is COUNTED on the row rather than only answered in the response.
+// An engine that stood down and was refused is proof the mechanism worked, and
+// it is what tells an abandoned run that changed hands from one whose only
+// engine died. See migration 0025.
 
 import { sql } from 'drizzle-orm'
 import type { Db } from '@antifailure/db'
@@ -75,6 +119,10 @@ export async function projectWorkloadEvent(
   db: Db,
   clock: Clock,
   orgId: string,
+  /** The token the batch was authenticated with, which is the same string
+   *  `claimRun` writes into `lease_holder`. It is what says whether the sender
+   *  still holds the run it is talking about. */
+  holder: string,
   event: { type: string; sequence?: number; occurredAt: string; payload?: Record<string, unknown> },
 ): Promise<string | null> {
   const payload = event.payload ?? {}
@@ -114,6 +162,7 @@ export async function projectWorkloadEvent(
         runId: run.id,
         kind: run.kind,
         orgId,
+        holder,
         state: 'cancelled',
         sequence,
         occurredAt: event.occurredAt,
@@ -145,6 +194,7 @@ export async function projectWorkloadEvent(
         runId: run.id,
         kind: run.kind,
         orgId,
+        holder,
         state,
         sequence,
         occurredAt: event.occurredAt,
@@ -190,6 +240,8 @@ interface Terminal {
   runId: string
   kind: WorkloadKind
   orgId: string
+  /** Who sent it. See the header's fifth row. */
+  holder: string
   state: 'succeeded' | 'failed' | 'cancelled' | 'timed_out'
   sequence: number
   occurredAt: string
@@ -205,6 +257,12 @@ interface Terminal {
  * writing the measurements and then trying to end the run, would leave a
  * duplicate report inserting rows against a run that had already been abandoned
  * and reported on, which is a history that grows a second answer.
+ *
+ * TWO CONDITIONS, NOT ONE. The state has to be live AND the sender has to be the
+ * holder, or there has to be no holder at all. State alone was the defect: it
+ * let an engine that had lost the run end it, and the report of the engine that
+ * was actually running it then arrived against a terminal row and was refused.
+ * See the header.
  */
 async function terminal(db: Db, clock: Clock, t: Terminal): Promise<string | null> {
   let report: ReturnType<typeof decodeReport> | null = null
@@ -246,9 +304,38 @@ async function terminal(db: Db, clock: Clock, t: Terminal): Promise<string | nul
       lease_expires_at = NULL,
       updated_at = ${t.now}::timestamptz
     WHERE id = ${t.runId} AND state IN ('requested', 'accepted', 'running')
+      -- Or there is no holder, which is the --run-id run nobody claimed and
+      -- the spool race where the report overtook the claim.
+      AND (lease_holder IS NULL OR lease_holder = ${t.holder})
     RETURNING id`)
 
   if (moved.length === 0) {
+    // Which of the two refusals it was, decided by a statement rather than by a
+    // read followed by a decision. The read-then-decide version has a window in
+    // which another engine claims the run between the two, and it would report
+    // the wrong one of these two sentences to whichever engine lost that race.
+    // This also records the refusal in the same breath as detecting it, so the
+    // count cannot drift from the answer that was given.
+    const unheld = await db.execute<{ holder: string }>(sql`
+      UPDATE workload_runs SET
+        unheld_reports = unheld_reports + 1,
+        unheld_report_at = ${t.now}::timestamptz,
+        updated_at = ${t.now}::timestamptz
+      WHERE id = ${t.runId}
+        AND state IN ('requested', 'accepted', 'running')
+        AND lease_holder IS NOT NULL AND lease_holder <> ${t.holder}
+      RETURNING lease_holder AS holder`)
+    if (unheld.length > 0) {
+      return (
+        `Stored, and nothing was applied: this run is held by another engine now, so this ` +
+        `report cannot end it. The lease was taken after it expired and the engine holding it ` +
+        `may be running the work right now; ending the run here would refuse that engine's ` +
+        `report when it arrives. Nothing in this event is lost, it is kept whole in the event ` +
+        `log, and the run records that an engine which no longer holds it tried to end it. ` +
+        `Stop and claim again.`
+      )
+    }
+
     const state = await db.execute<{ state: string }>(sql`
       SELECT state::text AS state FROM workload_runs WHERE id = ${t.runId}`)
     return (
