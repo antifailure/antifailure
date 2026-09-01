@@ -4,8 +4,11 @@ import { Badge, Empty, Row, Table, TableWrap, Td, Th } from "@/components/ui";
 import { RouteCell, Stat } from "@/components/load/primitives";
 import {
   REASON_NOTES,
+  VERDICT_FACTS,
   count,
   increase,
+  isNumericMeasure,
+  measured,
   ms,
   percent,
   rate,
@@ -15,6 +18,7 @@ import {
   type Evidence,
   type Results,
   type RouteResult,
+  type Verdict,
 } from "@/lib/load";
 
 /* -------------------------------------------------------------------------
@@ -157,8 +161,21 @@ export function Errors({ results }: { results: Results }) {
  * Assertions
  * ---------------------------------------------------------------------- */
 
-/** What the scenario asserted, and whether it held. Three outcomes, because an
- *  assertion nothing evaluated has not passed. */
+/**
+ * What the scenario asserted, what it concluded, and what it measured.
+ *
+ * The threshold and the observation are their own columns rather than being
+ * left inside the sentence. The engine added them for exactly this reason: a
+ * dashboard cannot chart a sentence, and "p95 was 486ms against a limit of
+ * 400ms" is a number a reader has to parse back out of prose every time.
+ *
+ * Both columns are blank for `every_request_succeeded` and `status_in`, which
+ * are not numeric comparisons and carry no number, and the observation alone
+ * is blank when nothing was sent. That is not the same as an observation of
+ * zero, so it renders as absent rather than as 0.
+ *
+ * The verdict is the product's four words, the same ones a run carries.
+ */
 export function Assertions({ assertions }: { assertions: AssertionResult[] }) {
   if (assertions.length === 0) {
     return (
@@ -168,14 +185,22 @@ export function Assertions({ assertions }: { assertions: AssertionResult[] }) {
       </Empty>
     );
   }
+  // Only draw the numeric columns when at least one assertion has a number in
+  // them. A scenario asserting only that every request succeeded would
+  // otherwise get two columns of dashes, which reads as data that failed to
+  // load rather than as a measure that has no number.
+  const numeric = assertions.some((a) => a.threshold !== null || a.observed !== null);
   return (
     <TableWrap>
       <Table>
         <thead>
           <tr>
             <Th>Assertion</Th>
+            <Th>Measure</Th>
             <Th>Scope</Th>
-            <Th>Outcome</Th>
+            {numeric ? <Th numeric>Threshold</Th> : null}
+            {numeric ? <Th numeric>Observed</Th> : null}
+            <Th>Verdict</Th>
             <Th>Detail</Th>
           </tr>
         </thead>
@@ -183,17 +208,33 @@ export function Assertions({ assertions }: { assertions: AssertionResult[] }) {
           {assertions.map((a, i) => (
             <Row key={`${a.name}-${i}`}>
               <Td>{a.name}</Td>
-              <Td label="Scope" mono>
-                {a.step ?? <span className="font-sans text-dim">whole scenario</span>}
+              <Td label="Measure" mono className="text-dim">
+                {a.measure ?? "--"}
               </Td>
-              <Td label="Outcome">
-                {a.outcome === "held" ? (
-                  <Badge tone="pass">Held</Badge>
-                ) : a.outcome === "broke" ? (
-                  <Badge tone="fail">Broke</Badge>
-                ) : (
-                  <Badge tone="warn">Not evaluated</Badge>
-                )}
+              <Td label="Scope" mono>
+                {a.scope ?? <span className="font-sans text-dim">whole scenario</span>}
+              </Td>
+              {numeric ? (
+                <Td label="Threshold" numeric>
+                  {measured(a.measure, a.threshold)}
+                </Td>
+              ) : null}
+              {numeric ? (
+                <Td label="Observed" numeric>
+                  {/* "not measured" only where there was a number to measure.
+                      every_request_succeeded and status_in have no threshold at
+                      all, so an empty cell there is the column not applying
+                      rather than a measurement that failed, and saying "not
+                      measured" would report a gap that does not exist. */}
+                  {a.observed !== null
+                    ? measured(a.measure, a.observed)
+                    : isNumericMeasure(a.measure)
+                      ? <span className="text-dim">not measured</span>
+                      : "--"}
+                </Td>
+              ) : null}
+              <Td label="Verdict">
+                <AssertionVerdict verdict={a.verdict} />
               </Td>
               <Td label="Detail" className="max-w-[40ch]">
                 {a.detail ?? "--"}
@@ -204,6 +245,19 @@ export function Assertions({ assertions }: { assertions: AssertionResult[] }) {
       </Table>
     </TableWrap>
   );
+}
+
+/**
+ * An assertion's verdict, in the product's four words.
+ *
+ * `blocked` and `unverified` are drawn apart from a failure and never as a
+ * pass, exactly as they are on a run. An assertion about requests that were
+ * never sent has not held.
+ */
+function AssertionVerdict({ verdict }: { verdict: Verdict }) {
+  if (verdict === "pass") return <Badge tone="pass">Held</Badge>;
+  if (verdict === "fail") return <Badge tone="fail">Broke</Badge>;
+  return <Badge tone="warn">{VERDICT_FACTS[verdict].label}</Badge>;
 }
 
 /** Thresholds the run exceeded, as the engine reported them. Rendered only

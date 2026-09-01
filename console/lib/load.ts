@@ -621,12 +621,33 @@ export interface Results {
   command: string | null;
 }
 
-/** An assertion and what became of it. Three outcomes, because one nothing
- *  evaluated has not held. */
+/**
+ * An assertion, what it concluded, and what it measured.
+ *
+ * The verdict is the product's SAME four words, not a private vocabulary. An
+ * earlier version of this file invented `held`, `broke` and `not_evaluated`,
+ * which was wrong twice over: the engine sends `pass`, `fail`, `blocked` and
+ * `unverified` on an assertion exactly as it does on a run, and a decoder that
+ * demanded three strings the engine never sends would have rejected every row
+ * and rendered an empty table against a perfectly good payload. Inventing the
+ * words was also the thing `load/scenario.go` warns about in as many words: a
+ * fifth and sixth vocabulary for a reader to learn, for no gain.
+ *
+ * `threshold` and `observed` are the numeric half. Both are absent for the two
+ * measures that are not numeric comparisons, and `observed` is absent when
+ * nothing was sent, which the engine's own comment is careful to call a
+ * different answer from zero.
+ */
 export interface AssertionResult {
   name: string;
-  step: string | null;
-  outcome: "held" | "broke" | "not_evaluated";
+  verdict: Verdict;
+  /** Which of the four the assertion asked for: `every_request_succeeded`,
+   *  `p95_below_ms`, `error_rate_below` or `status_in`. */
+  measure: string | null;
+  /** The route it was narrowed to. Null for a scenario wide assertion. */
+  scope: string | null;
+  threshold: number | null;
+  observed: number | null;
   detail: string | null;
 }
 
@@ -634,10 +655,46 @@ export function readAssertionResult(v: unknown): AssertionResult | null {
   const o = obj(v);
   if (!o) return null;
   const name = str(o.name);
-  const outcome = o.outcome;
-  if (!name) return null;
-  if (outcome !== "held" && outcome !== "broke" && outcome !== "not_evaluated") return null;
-  return { name, step: str(o.step), outcome, detail: str(o.detail) };
+  const verdict = verdictOf(o.verdict);
+  // No verdict, no row, for the same reason a run with no state is dropped:
+  // rendering it would mean choosing a tone, and a wrong choice there paints
+  // something inconclusive as a pass.
+  if (!name || !verdict) return null;
+  return {
+    name,
+    verdict,
+    measure: str(o.measure),
+    scope: str(o.scope) ?? str(o.step),
+    threshold: num(o.threshold),
+    observed: num(o.observed),
+    detail: str(o.detail),
+  };
+}
+
+/**
+ * A threshold or an observation, in the unit its measure implies.
+ *
+ * The engine sends both as a bare float and the unit lives in `measure`, so
+ * this is the one place that mapping is written down. `p95_below_ms` is
+ * milliseconds and `error_rate_below` is a fraction; the other two measures
+ * carry no number at all and never reach here with one.
+ */
+export function measured(measure: string | null, value: number | null): string {
+  if (value === null) return "--";
+  if (measure === "p95_below_ms") return ms(value);
+  if (measure === "error_rate_below") return percent(value);
+  // A measure this console has not been taught. The number is still true, so
+  // it is printed rather than hidden behind a dash.
+  return String(value);
+}
+
+/** The measure, in the words the scenario YAML uses, so what is read here is
+ *  what gets edited there. */
+/** The two measures that are comparisons against a number. The other two,
+ *  `every_request_succeeded` and `status_in`, carry no threshold at all, which
+ *  is a different thing from a threshold that went unmeasured. */
+export function isNumericMeasure(measure: string | null): boolean {
+  return measure === "p95_below_ms" || measure === "error_rate_below";
 }
 
 export interface Evidence {
@@ -775,8 +832,10 @@ export function verdictContradiction(
   assertions: AssertionResult[],
 ): string | null {
   if (verdict === null || !VERDICT_FACTS[verdict].conclusive) return null;
-  const broke = assertions.filter((a) => a.outcome === "broke").length;
-  const unevaluated = assertions.filter((a) => a.outcome === "not_evaluated").length;
+  const broke = assertions.filter((a) => a.verdict === "fail").length;
+  const unevaluated = assertions.filter(
+    (a) => a.verdict === "blocked" || a.verdict === "unverified",
+  ).length;
 
   if (verdict === "pass" && (broke > 0 || unevaluated > 0)) {
     // Both halves when both apply. Naming only the broken ones would leave a

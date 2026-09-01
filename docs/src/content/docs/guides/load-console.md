@@ -118,9 +118,16 @@ calling the answer a regression is how a check becomes noise.
 A deterministic scenario's assertions are shown in the scenario's own field
 names, so what you read here is what you edit in the YAML.
 
-An assertion is **held**, **broke**, or **not evaluated**. The third is not a
-pass. An assertion nothing measured has not held, and a run whose assertions
-were all unevaluated has proved nothing either way.
+Each assertion carries the same four verdicts a run does, and shows the
+threshold it declared beside what was measured against it. A `blocked` or
+`unverified` assertion is not a pass: an assertion about requests that were
+never sent has not held, and a run whose assertions were all unevaluated has
+proved nothing either way.
+
+The threshold and the observation are blank for `every_request_succeeded` and
+`status_in`, which are not numeric comparisons. The observation alone is blank
+when nothing was sent, which is a different answer from an observation of
+zero.
 
 ## Verdicts
 
