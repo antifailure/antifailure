@@ -827,7 +827,7 @@ export const workloadRuns = pgTable('workload_runs', {
   // What happened to the lease, so an abandoned run can say which kind of
   // silence it was. A run taken over by a second engine and a run whose only
   // engine died both go quiet and both end as `abandoned`, and only this side
-  // holds the facts that separate them. See migration 0025.
+  // holds the facts that separate them. See migration 0024.
   leaseTakeovers: integer('lease_takeovers').notNull().default(0),
   leaseLostAt: timestamp('lease_lost_at', { withTimezone: true }),
   unheldReports: integer('unheld_reports').notNull().default(0),
