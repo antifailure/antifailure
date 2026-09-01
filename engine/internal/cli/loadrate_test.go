@@ -28,7 +28,16 @@ func TestLoadRate_UntypedFlagsDoNotOverrideTheManifest(t *testing.T) {
 
 	// This repository's own manifest. `af explain` reads the five percent back
 	// correctly, which is what made the full rate a surprise.
+	//
+	// Its duration is 60s, which is also `af load run`'s flag default, so the
+	// defect and the fix produce the same number for duration here. A table
+	// built only on this manifest asserts nothing about the duration half, and
+	// a mutation putting the bug back survived until every case below carried
+	// a duration that could tell them apart. One row of a table can be real
+	// while its neighbour is decoration.
 	own := &schema.Load{Scale: 0.05, Duration: "60s"}
+	// The same manifest with a duration that is not the flag default.
+	distinct := &schema.Load{Scale: 0.05, Duration: "90s"}
 
 	for _, tc := range []struct {
 		name     string
@@ -39,24 +48,34 @@ func TestLoadRate_UntypedFlagsDoNotOverrideTheManifest(t *testing.T) {
 		scale    float64
 	}{{
 		name: "af load run, nothing typed, manifest decides",
+		argv: nil, cfg: distinct,
+		duration: 90 * time.Second, scale: 0.05,
+	}, {
+		// The coincidence itself, kept on purpose. It has to hold, and it
+		// cannot be the only thing that does.
+		name: "af load run, nothing typed, manifest duration equal to the default",
 		argv: nil, cfg: own,
 		duration: time.Minute, scale: 0.05,
 	}, {
-		name: "af load run --scale 2, typed, the flag decides",
-		argv: []string{"--scale", "2"}, cfg: own,
-		duration: time.Minute, scale: 2,
-	}, {
-		name: "af load run --duration 5s, one typed flag does not carry the other",
-		argv: []string{"--duration", "5s"}, cfg: own,
+		name: "af load run --duration 5s beats a manifest that says 90s",
+		argv: []string{"--duration", "5s"}, cfg: distinct,
 		duration: 5 * time.Second, scale: 0.05,
+	}, {
+		name: "af load run --scale 2 typed, and the manifest still sets the duration",
+		argv: []string{"--scale", "2"}, cfg: distinct,
+		duration: 90 * time.Second, scale: 2,
 	}, {
 		name: "af load run, nothing typed, no manifest, the command's own default",
 		argv: nil, cfg: nil,
 		duration: time.Minute, scale: 1,
 	}, {
 		name: "af load smoke, nothing typed, manifest lowers it", smoke: true,
-		argv: nil, cfg: own,
+		argv: nil, cfg: distinct,
 		duration: 10 * time.Second, scale: 0.05,
+	}, {
+		name: "af load smoke --duration 90s typed, above its own ceiling", smoke: true,
+		argv: []string{"--duration", "90s"}, cfg: distinct,
+		duration: 90 * time.Second, scale: 0.05,
 	}, {
 		name: "af load smoke, nothing typed, no manifest", smoke: true,
 		argv: nil, cfg: nil,
@@ -65,8 +84,14 @@ func TestLoadRate_UntypedFlagsDoNotOverrideTheManifest(t *testing.T) {
 		// A flag typed at the value that happens to equal the default is still
 		// a choice, and reading the variable alone cannot tell them apart.
 		name: "af load run --scale 1 typed, beats a manifest that says 0.05",
-		argv: []string{"--scale", "1"}, cfg: own,
-		duration: time.Minute, scale: 1,
+		argv: []string{"--scale", "1"}, cfg: distinct,
+		duration: 90 * time.Second, scale: 1,
+	}, {
+		// The same coincidence for the flag: 1m0s typed is a choice, and
+		// reading the variable cannot tell it from the default.
+		name: "af load run --duration 1m0s typed, beats a manifest that says 90s",
+		argv: []string{"--duration", "1m0s"}, cfg: distinct,
+		duration: time.Minute, scale: 0.05,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
