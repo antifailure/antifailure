@@ -224,7 +224,7 @@ func findingLines(e explore.Exploration) []string {
 func JourneyDigest(e explore.Exploration) string {
 	h := sha256.New()
 	for _, m := range e.Journey {
-		fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\n", m.Kind, m.URL, m.Field, m.Control)
+		_, _ = fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\n", m.Kind, m.URL, m.Field, m.Control)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

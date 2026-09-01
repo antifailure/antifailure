@@ -14,7 +14,6 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/env"
 	"github.com/antifailure/antifailure/engine/internal/explore"
 	"github.com/antifailure/antifailure/engine/internal/load"
-	"github.com/antifailure/antifailure/engine/internal/report"
 )
 
 // Projection turns what the engine measured into the flat rows a control plane
@@ -730,14 +729,3 @@ func digest(path string) (string, int64, bool) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), size, true
 }
-
-// verdictsAgree is a compile time reminder that this package's five verdict
-// strings are the product's, not a sixth vocabulary invented here.
-var verdictsAgree = func() bool {
-	for _, v := range []string{VerdictFail, VerdictFlaky, VerdictBlocked, VerdictUnverified, VerdictPass} {
-		if !report.Known(v) {
-			return false
-		}
-	}
-	return true
-}()
