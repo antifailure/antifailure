@@ -1,15 +1,19 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import postgres from 'postgres'
 import { sql } from 'drizzle-orm'
 import { createPool } from '@antifailure/db'
-import { migrate } from '@antifailure/db'
+import { migrate, migrationsDir } from '@antifailure/db'
 import { seedOrg } from './harness.ts'
-import { URL as DR_URL, dropDatabasesNamed, start as startPostgres } from './pgcontainer.ts'
+import {
+  CONTAINER, dropDatabasesNamed, keyFor, start as startPostgres, url as drUrl,
+} from './pgcontainer.ts'
 import {
   APP_ROLE,
   backup,
@@ -54,7 +58,7 @@ let workDir: string
 
 before(async () => {
   if (!(await startPostgres())) return
-  h = postgres(DR_URL, { max: 4, connect_timeout: 30, onnotice: () => {} })
+  h = postgres(drUrl(), { max: 4, connect_timeout: 30, onnotice: () => {} })
   await migrate(h)
   await h.unsafe(`ALTER ROLE ${APP_ROLE} LOGIN PASSWORD 'app-test-password'`)
   workDir = await mkdtemp(path.join(tmpdir(), 'af-dr-'))
@@ -82,11 +86,11 @@ function targetName(): string {
 }
 
 function adminUrlOf(): string {
-  return DR_URL
+  return drUrl()
 }
 
 function appUrl(): string {
-  const u = new global.URL(DR_URL)
+  const u = new global.URL(drUrl())
   u.username = APP_ROLE
   u.password = 'app-test-password'
   return u.toString()
@@ -357,7 +361,11 @@ test('the comparison notices row level security that did not come back', { timeo
 // It is treated as something this verification cannot speak for, which is the
 // honest answer and the one that makes somebody widen the check.
 test('a table this check does not look at is named rather than ignored', async (t) => {
-  const admin = postgres(DR_URL, { max: 1, onnotice: () => {} })
+  // Guarded like its eleven neighbours. It always needed a database and never
+  // said so, so on a machine with no Docker this one failed on a connection
+  // while the rest of the file skipped, which reads as a defect in the check.
+  if (skipWithoutDatabase(t)) return
+  const admin = postgres(drUrl(), { max: 1, onnotice: () => {} })
   t.after(async () => {
     await admin.unsafe('DROP SCHEMA IF EXISTS ledger CASCADE').catch(() => {})
     await admin.end({ timeout: 5 })
@@ -419,8 +427,9 @@ function blankManifestFields() {
 // the path where nothing was created, and this asserts the observable end of
 // it: the occupied database and its contents are still there afterwards.
 test('a drill refuses a database it did not create, and leaves it standing', async (t) => {
+  if (skipWithoutDatabase(t)) return
   const occupied = `af_occupied_${randomUUID().replace(/-/g, '').slice(0, 12)}`
-  const admin = postgres(DR_URL, { max: 1, onnotice: () => {} })
+  const admin = postgres(drUrl(), { max: 1, onnotice: () => {} })
   t.after(async () => {
     await admin.unsafe(`DROP DATABASE IF EXISTS "${occupied}" WITH (FORCE)`).catch(() => {})
     await admin.end({ timeout: 5 })
@@ -623,7 +632,7 @@ test('a drill over its recovery time budget reports it, and not as a broken back
 test('a scratch database comes out with two tenants that own rows', { timeout: 600_000 }, async (t) => {
   if (skipWithoutDatabase(t)) return
   const name = `af_dr_scratch_${randomUUID().replace(/-/g, '').slice(0, 8)}`
-  const admin = postgres(DR_URL, { max: 1, onnotice: () => {} })
+  const admin = postgres(drUrl(), { max: 1, onnotice: () => {} })
   t.after(async () => {
     await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`).catch(() => {})
     await admin.end({ timeout: 5 })
@@ -657,9 +666,13 @@ test('a scratch database comes out with two tenants that own rows', { timeout: 6
   )
 })
 
-test('a scratch database with one organization is refused', async (t) => {
+test('a scratch database with one organization is refused before it connects', async () => {
+  // Deliberately a URL that names no cluster. The refusal has to come from the
+  // argument rather than from the database, and pointing this at the suite's
+  // own Postgres hid that: it would have passed just as well with the check
+  // moved after the connection, and it would have needed Docker to say so.
   await assert.rejects(
-    prepareScratch(DR_URL, { orgs: 1 }),
+    prepareScratch('postgres://nobody@127.0.0.1:1/never', { orgs: 1 }),
     /at least two organizations/,
     'one tenant cannot be isolated from anybody, and a drill against it refuses nothing',
   )
@@ -667,7 +680,122 @@ test('a scratch database with one organization is refused', async (t) => {
 
 /** The admin URL pointed at one particular database. */
 function urlInto(database: string): string {
-  const u = new URL(DR_URL)
+  const u = new URL(drUrl())
   u.pathname = '/' + database
   return u.toString()
 }
+
+// ---------------------------------------------------------------------------
+// The cluster this drill runs on, which is the thing that was wrong about it
+// ---------------------------------------------------------------------------
+//
+// These are not about backup.ts. They are about whether anything above them
+// means what it says, and they exist because for a while nothing above them
+// did: the suite ran on one machine-wide container, so the database it dumped
+// carried four branches' migrations at once and the drill certified a schema
+// that was on no branch.
+//
+// Each one is written as a property of the cluster rather than of the code, so
+// a future change that puts this back on a shared cluster fails here and names
+// the reason, instead of going quietly green over somebody else's schema.
+
+test('the cluster belongs to this checkout and not to the machine', { timeout: 60_000 }, async (t) => {
+  if (skipWithoutDatabase(t)) return
+
+  // Two different checkouts must not be able to land on one container. Proved
+  // over the pure function rather than by standing up a second container,
+  // which is the only part of this that needs proving: the name is the whole
+  // of the identity.
+  assert.notEqual(
+    keyFor('/some/other/checkout'),
+    keyFor('/a/third/checkout'),
+    'two checkouts share a container key, so they would share a cluster',
+  )
+  assert.match(CONTAINER, /^af-dr-[0-9a-f]{12}$/)
+  assert.notEqual(
+    CONTAINER,
+    'af-dr-test',
+    'this is the machine-wide container the suite used to share, and sharing it is the defect',
+  )
+
+  // And the URL in hand really is that container's, asked of Docker rather
+  // than assumed from a number written down here. This is the assertion a
+  // hardcoded port cannot make: with one, a stranger already listening on it
+  // answers the probe and the whole suite runs against their cluster, and
+  // every test above passes while proving nothing about this branch.
+  //
+  // Read out of `docker ps` rather than through --filter publish=, which
+  // matches the CONTAINER port and answers nothing for a host port. Checked by
+  // running it.
+  const port = new URL(drUrl()).port
+  const { stdout } = await promisify(execFile)('docker', [
+    'ps', '--format', '{{.Names}}|{{.Ports}}',
+  ])
+  const owners = stdout
+    .split('\n')
+    .map((line) => line.trim().split('|'))
+    .filter(([, ports]) => (ports ?? '').includes(`:${port}->`))
+    .map(([name]) => name)
+  assert.deepEqual(
+    owners,
+    [CONTAINER],
+    `host port ${port} is published by ${owners.join(', ') || 'nothing docker can see'} rather ` +
+      `than by this checkout's container alone`,
+  )
+
+  // The other half of the same property, from the container's end: this is
+  // where the URL came from. A restart republishes on a different host port,
+  // so a URL captured before one points at nothing, or on a busy machine at
+  // whoever took the number. Measured: stopping and starting this container
+  // moved it from 62172 to 49741.
+  const mapping = await promisify(execFile)('docker', ['port', CONTAINER, '5432'])
+  assert.ok(
+    mapping.stdout.includes(`:${port}`),
+    `${CONTAINER} publishes ${mapping.stdout.trim()}, not the port this suite is connected to`,
+  )
+
+  // And it says whose it is. The name is a hash, so without this an abandoned
+  // checkout leaves a Postgres nobody can attribute and therefore nobody
+  // removes. One per checkout is the cost of this design and the label is what
+  // keeps that cost payable.
+  const labelled = await promisify(execFile)('docker', [
+    'inspect', '-f', '{{index .Config.Labels "af.checkout"}}', CONTAINER,
+  ])
+  assert.ok(
+    labelled.stdout.trim().length > 0,
+    `${CONTAINER} carries no af.checkout label, so an orphan of it could not be attributed`,
+  )
+})
+
+test('the ledger holds this checkout\'s migrations and nobody else\'s', { timeout: 60_000 }, async (t) => {
+  if (skipWithoutDatabase(t)) return
+
+  // THE ASSERTION THIS WHOLE CHANGE IS FOR.
+  //
+  // schema_migrations records each migration BY NAME. On the shared container
+  // that ledger accumulated every checkout's, so this database represented no
+  // branch, and a drill that certifies a schema belonging to no branch has
+  // certified nothing. It also made a renamed migration fatal: the runner sees
+  // the new name as unapplied, runs it, and dies on "already exists".
+  //
+  // So the ledger is compared against the migrations directory on disk. Equal
+  // means the database under the drill is this branch's database.
+  const onDisk = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort()
+  const applied = (await h!<{ name: string }[]>`
+    SELECT name FROM schema_migrations ORDER BY name`).map((r) => r.name)
+
+  assert.ok(onDisk.length > 0, 'no migrations on disk, so this comparison proves nothing')
+  const strangers = applied.filter((name) => !onDisk.includes(name))
+  assert.deepEqual(
+    strangers,
+    [],
+    'the ledger holds migrations that are not in this checkout, so this cluster is shared and ' +
+      'the schema being dumped belongs to no branch',
+  )
+  assert.deepEqual(
+    applied,
+    onDisk,
+    'the ledger and the migrations directory disagree, so the drill is dumping a schema that is ' +
+      'not the one this branch describes',
+  )
+})
