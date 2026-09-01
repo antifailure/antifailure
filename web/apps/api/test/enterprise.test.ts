@@ -785,7 +785,11 @@ describe(
         // Every key the manifest schema defines for an egress rule. A file
         // missing one is a policy that is quietly different from the one that
         // was enforced, and it still looks complete.
-        assert.match(file, /^ {6}paths: \[\/v1\/charges\]$/m)
+        // Quoted, because a value starting with a slash is not a plain YAML
+        // scalar. The writer is right and this assertion was wrong: the same
+        // file was parsed with the engine's own schema.Egress type with every
+        // field arriving intact.
+        assert.match(file, /^ {6}paths: \["\/v1\/charges"\]$/m)
         assert.match(file, /^ {6}methods: \[POST\]$/m)
         assert.match(file, /^ {6}rate_limit: "10\/s"$/m)
         // The NAME of the variable holding the credential, which is what the
@@ -793,7 +797,7 @@ describe(
         // control plane, so there is none here to leave out.
         assert.match(file, /^ {6}credential: STRIPE_SANDBOX_KEY$/m)
         assert.match(file, /^ {6}fixtures: fixtures\/stripe\.json$/m)
-        assert.match(file, /^ {6}webhook_path: \/webhooks\/stripe$/m)
+        assert.match(file, /^ {6}webhook_path: "\/webhooks\/stripe"$/m)
         assert.match(file, /^ {6}note: "payments"$/m)
       })
 

@@ -660,6 +660,13 @@ async function cancelSubscription(deps: DeletionDeps, orgId: string): Promise<bo
     // The LATER of what Stripe just said and what this database already
     // believed, not simply Stripe's answer.
     //
+    // The asymmetry with reconciliation is deliberate and agreed with the
+    // billing side rather than an accident of two authors. `reconcile` takes
+    // Stripe's answer as authoritative, which is right for REPAIR: it is fixing
+    // local state that is presumed wrong. Revocation is the other direction.
+    // Being late to revoke costs a deletion that finishes a day after it could
+    // have; being early revokes an organization that is still entitled.
+    //
     // Stripe is authoritative about a subscription, so preferring its number
     // looks obviously right, and it is wrong in one direction that matters: a
     // response that omits the period, or carries a stale one, would shorten the
