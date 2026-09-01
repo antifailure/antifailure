@@ -433,9 +433,9 @@ export function DpaPage() {
         <Ledger
           items={[
             "No SOC 2 report, no ISO 27001 certificate, and no third-party penetration test. None is claimed anywhere on this site.",
-            "No continuous monitoring. Alert rules and runbooks are written and version controlled, but nothing loads them, so a failure today reaches a person when a person happens to look.",
-            "No self-service account or organization deletion, and no self-service export. Both are carried out by hand against the database by somebody who can reach it. Deleting a stored model provider key is the one exception, and it is an endpoint you can call.",
-            "No production deployment. What exists is a staging control plane behind a sign-in allowlist.",
+            "Monitoring we will not vouch for from here. Alert rules, an availability test and runbooks are written and version controlled, and production is configured to create them (alerting_enabled is true in infra/terraform/stacks/control-plane/production.tfvars). Whether that configuration has been applied to the live subscription is not something you can check from outside this company, and it is not something this page will assert on your behalf. Ask for the evidence and it will be produced or the claim withdrawn.",
+            "No self-service account or organization deletion. Closing an account or removing an organization is carried out by hand against the database by somebody who can reach it. Two things you can do yourself: export your audit log, which is an endpoint, and delete a stored model provider key, which is also an endpoint. There is no self-service export of anything else.",
+            "No SLA, no support commitment, and no published uptime history. Production is deployed and answering, at app.antifailure.dev, with a separate staging deployment at app.dev.antifailure.dev. Access is invitation only. What does not exist is anything you could hold us to about how long it stays up.",
           ]}
         />
         <Prose className="mt-10">
@@ -444,6 +444,18 @@ export function DpaPage() {
             it finds them here, next to the measures that are real, than in a questionnaire answer
             that has to be walked back. The <Link href="/sla">service levels page</Link> sets out what
             would have to change first.
+          </p>
+          <p>
+            One of them had to be walked back here first. This list read &ldquo;No production
+            deployment. What exists is a staging control plane behind a sign-in allowlist,&rdquo;
+            and production was deployed and answering the whole time:{" "}
+            <code>app.antifailure.dev/readyz</code> returns ready, and staging is a separate, newer
+            deployment at <code>app.dev.antifailure.dev</code> serving a different commit. A
+            reviewer checking the address our own README gives them disproves that sentence in
+            thirty seconds, and then has cause to doubt every other line on a page whose only asset
+            is that it can be checked. It is corrected above rather than deleted, because a page
+            that quietly drops the item it got wrong is worth less than one that says which item it
+            was.
           </p>
         </Prose>
       </PageSection>

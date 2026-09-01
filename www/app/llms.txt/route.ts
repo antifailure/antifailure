@@ -1,3 +1,4 @@
+import { documentationPageCount } from "@/lib/docs-facts";
 import { INDEXABLE_ROUTES, pageName, type RouteSection } from "@/lib/routes";
 import {
   DOCS_URL,
@@ -83,9 +84,10 @@ export function GET() {
     "- A masked Postgres branch. Masking is compiled to SQL and executed in resumable",
     "  chunks, deterministic so the same customer maps to the same fake customer across",
     "  every table and every refresh. A scanner then reads back every column of every",
-    "  table looking for anything that still parses as an email, a card, a phone number",
-    "  or a key, and signs an attestation. An unverified golden cannot be branched, and",
-    "  that is enforced in code rather than in a checklist.",
+    "  table, sampling rows rather than reading all of them, looking for anything that",
+    "  still parses as an email, a card, a phone number or a key, and signs an",
+    "  attestation that records the sample size it used. An unverified golden cannot be",
+    "  branched, and that is enforced in code rather than in a checklist.",
     "- A sealed network. Every environment gets a sidecar that owns its network",
     "  namespace. Each host gets one of six modes: BLOCK refuses with a readable",
     "  decision, ALLOW passes with a rate limit, SANDBOX swaps in test credentials and",
@@ -118,7 +120,7 @@ export function GET() {
   lines.push("");
   lines.push(`- [Documentation](${DOCS_URL}): installation, concepts, guides, provider setup, and the full reference.`);
   lines.push(
-    `- [Full text of the documentation](${DOCS_URL}/llms-full.txt): all 41 documentation pages as one plain-text file. ` +
+    `- [Full text of the documentation](${DOCS_URL}/llms-full.txt): all ${documentationPageCount()} documentation pages as one plain-text file. ` +
       `Start here if you are answering a question about how to use Antifailure.`,
   );
   lines.push(`- [Source](${REPO_URL}): the engine, the runner, the adapters, and the masking catalog.`);

@@ -13,11 +13,13 @@ import {
   IconNetwork,
   IconPlan,
   IconRuns,
+  IconSettings,
   IconSignOut,
   LogoMark,
 } from "@/components/icons";
 import { rest, type Session } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
+import { may } from "@/lib/roles";
 import { Button, Field, Lede, LinkButton, Standalone, inputClass } from "@/components/ui";
 
 /**
@@ -55,7 +57,33 @@ const NAV = [
   { href: "/members", label: "Members", Icon: IconMembers },
   { href: "/plan", label: "Plan", Icon: IconPlan },
   { href: "/keys", label: "Provider keys", Icon: IconKeys },
+  { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
+
+/**
+ * The pages that stay reachable when the hosted plan has lapsed.
+ *
+ * This list is the console half of HOSTED_GATE_EXEMPT in
+ * web/apps/api/src/hosted.ts, and it exists for the reason written there: a
+ * plan gate may restrict what the product DOES for a customer, and may never
+ * restrict their ability to leave, to retrieve what is theirs, or to secure
+ * their account. That server-side exemption made billing.manage, data.export,
+ * organization.delete, account.close and sessions.manage answer over the API
+ * while every screen that reaches them was still refused here, which is a
+ * right that exists in the code and not in the product.
+ *
+ * /plan is the path that RESOLVES the refusal. /exits is the four that do not
+ * depend on resolving it.
+ *
+ * Both render inside the reduced shell below rather than as their own
+ * standalone screens, so there is ONE lapsed state with a real header and a
+ * way between the two pages, rather than a dead end per route.
+ */
+const LAPSED_NAV = [
+  { href: "/plan", label: "Plan and billing" },
+  { href: "/exits", label: "Your data and account" },
+];
+const LAPSED_PATHS = LAPSED_NAV.map((n) => n.href);
 
 /* -------------------------------------------------------------------------
  * Signed out
@@ -347,19 +375,41 @@ export function Shell({ children }: { children: ReactNode }) {
   if (!me.orgId) return <NoOrganization session={me} />;
 
   const needsPlan = me.hostedRequiredPlan && me.hostedAccess === false;
-  if (needsPlan && pathname !== "/plan") {
+  // The billing page answers under billing.manage, which only an owner holds.
+  // An admin, member or viewer sent to /plan gets a refusal, so this screen
+  // used to offer everybody exactly one action and offer three of the four
+  // roles an action that could not work.
+  const mayBill = may(me.role, "billing.manage");
+  const lapsedNav = LAPSED_NAV.filter((item) => item.href !== "/plan" || mayBill);
+  if (needsPlan && !LAPSED_PATHS.includes(pathname)) {
     return (
-      <Standalone title="Enterprise access required" width={440}>
+      <Standalone title="Enterprise access required" width={460}>
         <Lede>
           This hosted control plane serves organizations on the enterprise
-          plan. Billing stays available so an owner can subscribe or manage an
-          existing subscription.
+          plan. Environments, runs, masking, egress and the audit log are
+          closed until a subscription is in place.
+        </Lede>
+        <Lede>
+          Four things stay open whatever the plan says, because they are how
+          you leave rather than what you bought: take a copy of everything,
+          sign a session out, delete the organization, and close your account.
         </Lede>
         <div className="mt-6 space-y-3">
-          <LinkButton href="/plan" full>
-            Open plan and billing
+          {mayBill ? (
+            <LinkButton href="/plan" full>
+              Open plan and billing
+            </LinkButton>
+          ) : null}
+          <LinkButton href="/exits" full variant={mayBill ? "secondary" : "primary"}>
+            Your data and account
           </LinkButton>
-          <div className="flex justify-center">
+          {mayBill ? null : (
+            <p className="text-[12.5px] leading-6 text-muted">
+              Subscribing is an owner&rsquo;s to do, and your role is{" "}
+              {me.role ?? "unknown"}. Ask an owner to open plan and billing.
+            </p>
+          )}
+          <div className="flex justify-center pt-1">
             <SignOutButton />
           </div>
         </div>
@@ -370,18 +420,58 @@ export function Shell({ children }: { children: ReactNode }) {
   if (needsPlan) {
     return (
       <div className="min-h-dvh">
-        <header className="flex min-h-14 items-center justify-between gap-4 border-b border-rule bg-paper px-5 sm:px-8">
-          <Link href="/plan" className="flex min-h-11 items-center gap-2">
-            <LogoMark className="h-[18px] w-[18px]" />
-            <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-ink">
-              Antifailure
-            </span>
-          </Link>
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="hidden max-w-48 truncate text-[12.5px] text-muted sm:block">
-              {me.label}
-            </span>
+        <header className="border-b border-rule bg-paper">
+          <div className="mx-auto flex min-h-14 w-full max-w-[1120px] items-center justify-between gap-4 px-5 sm:px-8 lg:px-10">
+            <Link href={mayBill ? "/plan" : "/exits"} className="flex min-h-11 items-center gap-2">
+              <LogoMark className="h-[18px] w-[18px]" />
+              <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-ink">
+                Antifailure
+              </span>
+            </Link>
             <SignOutButton />
+          </div>
+          {/* The second row carries the label and the two links.
+
+              The label was on the top row and hidden below sm, which is a
+              problem on a screen that asks you to type it back: closing an
+              account confirms against it. Putting it back on the top row at
+              320 truncated it to two characters, which is worse than absent. It
+              gets its own line instead, where it fits whole at every width.
+
+              The links are hidden when only one survives the filter, which is
+              what a member, an admin or a viewer sees: a single tab, always
+              active, pointing at the page you are already on, is chrome that
+              carries no information. */}
+          <div className="mx-auto flex w-full max-w-[1120px] flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 pb-2 sm:px-8 lg:px-10">
+            {lapsedNav.length > 1 ? (
+              <nav aria-label="Available on a lapsed plan">
+                <ul className="flex flex-wrap gap-1">
+                  {lapsedNav.map((item) => {
+                    const active = pathname === item.href;
+                    return (
+                      <li key={item.href}>
+                        <Link
+                          href={item.href}
+                          aria-current={active ? "page" : undefined}
+                          className={`flex h-9 items-center rounded-md px-2.5 text-[13px] tracking-snug transition-colors ${
+                            active
+                              ? "bg-[rgba(16,16,16,0.06)] font-medium text-ink"
+                              : "text-muted hover:bg-[rgba(16,16,16,0.035)] hover:text-ink"
+                          }`}
+                        >
+                          {item.label}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </nav>
+            ) : (
+              <span />
+            )}
+            <span className="min-w-0 truncate py-1 text-[12.5px] text-muted">
+              Signed in as {me.label}
+            </span>
           </div>
         </header>
         <main>{children}</main>
