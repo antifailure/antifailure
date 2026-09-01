@@ -848,6 +848,14 @@ jobs:
         # and On-call came before Standing up production.
         run: go run ./tools/sidebarcheck .
 
+      - name: Every variable the product names at a user is documented
+        # af license install tells a paying customer to set AF_LICENSE_KEY and
+        # AF_ORG, then points them at the licensing page, and that page named
+        # neither, so the correct instructions did not exist anywhere. af doctor
+        # had the same shape with AF_PORT_RANGE_START. The control plane has had
+        # this check since config-docs.test.ts; the engine never did.
+        run: go run ./tools/varcheck .
+
       - name: The manifests in the documentation are ones the engine accepts
         # The gates above read style, spelling, links and repository paths. None
         # of them knows what a manifest is, and a getting started page shipped

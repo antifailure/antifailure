@@ -69,6 +69,7 @@ gate: _reports
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
     run "the sidebar order is chosen"    just sidebarcheck
+    run "spoken variables are documented" just varcheck
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
     run "prose reads like a person"      just prosecheck
@@ -732,6 +733,23 @@ forbidden:
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
+
+# Every variable the product names at a user is one the documentation explains.
+#
+# `af license install` tells a paying customer to set AF_LICENSE_KEY and AF_ORG,
+# then points them at the licensing page, and that page named neither. The
+# product asked for two things and sent the reader to the one page that should
+# have said what they are. `af doctor` had the same shape with
+# AF_PORT_RANGE_START. The control plane has had this check since
+# config-docs.test.ts; the engine, which is the half a customer runs on their
+# own machine, never did.
+#
+# It parses rather than greps, because the first version was line oriented and
+# returned a clean zero over AF_PORT_RANGE_START while looking straight at it:
+# `r.Remediation = fmt.Sprintf(` and the string naming the variable sit on
+# different lines.
+varcheck:
+    go run ./tools/varcheck .
 
 # The sidebar order is a decision rather than an accident.
 #
