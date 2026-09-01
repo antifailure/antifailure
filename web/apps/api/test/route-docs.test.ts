@@ -178,17 +178,35 @@ function served(documented: string, routes: Set<string>): boolean {
 async function documentedPatterns(): Promise<string[]> {
   const text = await readFile(apiRefPath, 'utf8')
   const out = new Set<string>()
-  for (const m of text.matchAll(/`(?:GET|POST|PUT|PATCH|DELETE)?\s*(\/[A-Za-z0-9/_*.:-]*)`/g)) {
+  // The braces are in the class because a page written route by route spells a
+  // parameter `{provider}`, and without them the capture stopped at the brace
+  // and yielded `/console/api/providers/`, which covers nothing. The matcher
+  // below was already right; the extractor could not see what it was matching.
+  for (const m of text.matchAll(/`(?:GET|POST|PUT|PATCH|DELETE)?\s*(\/[A-Za-z0-9/_*.:{}-]*)`/g)) {
     out.add(m[1]!)
   }
   return [...out]
 }
 
+// A route is covered by a pattern that equals it, that is a `/*` family
+// containing it, or that matches it segment for segment with either side's
+// parameter standing in for the other's.
+//
+// The parameter case is not hypothetical. A reference page written route by
+// route spells a parameter `{provider}`, which is the OpenAPI convention, while
+// Hono registers it as `:provider`. Comparing the strings makes the gate go red
+// on a page that is CORRECT, which is worse than not having the gate: the next
+// person weakens it rather than reading it. Found by running this against
+// another branch's rewrite of the page before either landed.
 function covered(route: string, patterns: string[]): boolean {
+  const isParam = (s: string) => s.startsWith(':') || (s.startsWith('{') && s.endsWith('}'))
   return patterns.some((p) => {
     if (p === route) return true
-    if (!p.endsWith('/*')) return false
-    return route.startsWith(p.slice(0, -1))
+    if (p.endsWith('/*')) return route.startsWith(p.slice(0, -1))
+    const a = p.split('/').filter(Boolean)
+    const b = route.split('/').filter(Boolean)
+    if (a.length !== b.length) return false
+    return a.every((seg, i) => seg === b[i] || (isParam(seg) && isParam(b[i]!)))
   })
 }
 
