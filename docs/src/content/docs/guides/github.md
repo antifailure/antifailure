@@ -13,19 +13,113 @@ github:
   teardown_on: [close, merge, ttl]
 ```
 
-## Two modes
+These four are printed by `af explain` and read by nothing. That is not an
+oversight and it is worth knowing before you set one: see
+[the manifest reference](/docs/reference/manifest/#github) for what happens
+instead, and why the hosted control plane cannot read your manifest.
 
-**`actions`** runs everything inside a workflow. No server, no control plane,
-nothing to host. The environment lives for the length of the job, which suits a
-repository that wants preview checks and not preview URLs somebody can open
-later.
+## Two ways to run it
 
-**`app`** uses the GitHub App and the control plane. Environments outlive the
-job, so a reviewer can open one, and the control plane holds the scheduling,
-quotas, and history. This is what a team wants once more than one person is
-reading the results.
+**Without a control plane.** Everything happens inside the workflow. No server,
+nothing to host. `af ci` brings the environment up, runs the agents, writes the
+report and tears down, and the workflow's last step posts that report as one
+comment which it edits in place. The environment lives for the length of the
+job.
 
-**`off`** disables the integration. `af up` still works locally.
+**With one.** The workflow does exactly the same work, and then tells the
+control plane what happened. The control plane publishes a **check run** the
+repository can require, maintains the comment itself, and owns the parts a
+workflow cannot do: stopping a run when the pull request closes, noticing a run
+that never reported, and keeping the history.
+
+Which one you get is decided by one repository variable, `AF_CONTROL_PLANE`.
+Set it to the control plane's address and the two extra steps in the example
+workflow run; leave it unset and they are skipped and the workflow comments for
+itself. There is no mode to configure and nothing to keep in step.
+
+## The check
+
+One check run per commit, named **Antifailure**, so a branch protection rule can
+require it. The name is stable on purpose: changing it would silently
+un-require the check on every repository that named it.
+
+| The check says | GitHub's conclusion | Merges behind a required check? |
+| --- | --- | --- |
+| Every check passed | `success` | yes |
+| A check failed | `failure` | no |
+| Blocked before anything could be checked | `action_required` | no |
+| Nothing was verified | `action_required` | no |
+| Nothing was verified: the run never reported back | `timed_out` | no |
+| Superseded by a newer commit | `cancelled` | no |
+| Waiting for a runner / Building the environment | not concluded | not yet |
+
+**Blocked and nothing-was-verified are not passes.** The temptation is GitHub's
+`neutral`, which reads as "nothing to say", and `neutral` PASSES a required
+check. A pull request whose agents never ran would then merge behind a green
+tick, which is the failure this product exists to make impossible: `af test`
+exits zero on `unverified`, so a green job means the job exited, not that
+anything was checked.
+
+GitHub's conclusion vocabulary is smaller than ours, so two of ours share
+`action_required`. They stay apart in the check's title, which is the first line
+anybody reads, and in the comment.
+
+## One comment, about one commit
+
+The comment's first line carries the commit it is about. That is not decoration:
+somebody pushes while a check is running, the first run is cancelled, the
+cancellation finishes after the second run started, and without the fence the
+comment ends up reporting a commit that is no longer the head with nothing to
+say so. A result that is stale in a way the reader cannot detect is worse than
+no result.
+
+So a run whose commit is no longer the head updates its own check, which is
+correct because that check belongs to that commit, and does not touch the
+comment.
+
+## A fork never reaches a secret
+
+A pull request from a fork runs code somebody outside your organisation wrote.
+Two independent things keep it away from your credentials, and neither is
+sufficient alone.
+
+GitHub withholds your repository's secrets and the workflow identity token from
+a pull request job running on a fork. That is GitHub's rule and it needs nothing
+from you.
+
+And the control plane issues no callback credential for a fork's commit until a
+maintainer adds the `antifailure:allow` label. **The approval is for that exact
+commit.** The next push withdraws it, because a maintainer approved code they
+read and the next push is code nobody read. The check on an unapproved fork
+commit says so, with the label to add.
+
+## Teardown, and what "torn down" means
+
+An environment that outlives its pull request is the leak this product exists to
+prevent, so teardown is asked for when the pull request closes or merges, when a
+newer commit supersedes the run, and when a check times out.
+
+**The only route this control plane has into the machine holding your
+environment is asking GitHub to cancel the run.** It holds no cluster
+credential, no kubeconfig and no address, by design, and `af ci` tears the
+environment down on every exit including a cancelled one. So teardown is:
+cancel, then come back and check, and it is not finished until GitHub says the
+run reached a terminal state.
+
+The console reports one of five states and none of them is a guess:
+
+| Teardown | What it means |
+| --- | --- |
+| nothing to remove | no environment was ever reported for this commit |
+| asked for | recorded, not confirmed |
+| in progress | a cancel has been sent and the run has not stopped yet |
+| done | the runtime confirmed it. The environment is gone |
+| gave up | there was no route to it. Says so, and names `af down` |
+
+That last row is the honest one. An environment with no live workflow run behind
+it is one nothing here can reach, and reporting it torn down would be the same
+lie the console used to tell: the button set a column and nothing anywhere read
+it, so the page said the environment was gone while the containers kept running.
 
 ## What the App must be granted
 
@@ -71,14 +165,15 @@ The run appears in your Actions tab, and the environment appears in the console
 when the engine reports it, the same way it does for a run you started
 yourself.
 
-## Comments
+## What the comment carries
 
-`comment: true` posts one comment per pull request and edits it in place rather
-than adding a new one per push. A bot that adds a comment on every push is a
-bot people mute, and a muted bot reports nothing.
+One comment per pull request, edited in place rather than added to. A bot that
+adds a comment on every push is a bot people mute, and a muted bot reports
+nothing.
 
-The comment carries a headline saying what the run amounted to, the
-environment URL, a row per workflow with its verdict and the detail behind it,
+The comment carries a headline saying what the run amounted to, a link to the
+environment in the console, a row per workflow with its verdict and the detail
+behind it,
 steps for reproducing anything that did not pass, and a footer naming the
 branch, the commit, the duration and the golden it branched from.
 
@@ -94,32 +189,6 @@ environment reached for, whether the branch read back masked, and what teardown
 removed. Each of those is ranked by the manifest's
 [policy block](/docs/concepts/verdicts/), worst first, and the ones set to
 `fail` are what stop the merge.
-
-## Forks
-
-```yaml
-  fork_policy: label     # never, label, or always
-```
-
-A pull request from a fork runs code somebody outside your organisation wrote,
-against an environment holding a masked copy of your data with real sandbox
-credentials in the proxy.
-
-`label` is the default and the right one: nothing runs until a maintainer adds
-the label, which is a person deciding. `never` refuses forks. `always` runs
-everything, and is only reasonable for a repository where every contributor
-already has write access.
-
-## Teardown
-
-```yaml
-  teardown_on: [close, merge, ttl]
-```
-
-An environment that outlives its pull request is the leak this product exists
-to prevent. Close and merge are both listed because a merged pull request is
-closed and a closed one may never be merged, and `ttl` bounds the case where
-neither happens.
 
 ## Signature verification
 
