@@ -433,9 +433,9 @@ export async function claimRun(
 export async function heartbeat(
   db: Db,
   input: { runId: string; holder: string; now: Date },
-): Promise<boolean> {
+): Promise<{ held: boolean; cancelRequested: boolean }> {
   const now = input.now.toISOString()
-  const rows = await db.execute<{ id: string }>(sql`
+  const rows = await db.execute<{ id: string; cancel_requested_at: Date | null }>(sql`
     UPDATE workload_runs SET
       lease_expires_at = ${new Date(input.now.getTime() + RUN_LEASE_MS).toISOString()}::timestamptz,
       deadline_at = ${new Date(input.now.getTime() + RUN_DEADLINE_MS).toISOString()}::timestamptz,
@@ -443,8 +443,13 @@ export async function heartbeat(
     WHERE id = ${input.runId}
       AND state IN ('accepted', 'running')
       AND lease_holder = ${input.holder}
-    RETURNING id`)
-  return rows.length > 0
+    RETURNING id, cancel_requested_at`)
+  // The cancel travels back on the beat that is already happening. Without it
+  // the only way a console cancel reaches a running engine is a poll of
+  // /v1/commands/claim, which costs a minute of latency and takes a lease on
+  // every other command it happens to return. The column is on the row this
+  // statement already updates, so it is free.
+  return { held: rows.length > 0, cancelRequested: rows[0]?.cancel_requested_at != null }
 }
 
 /**

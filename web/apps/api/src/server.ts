@@ -1538,10 +1538,10 @@ export function createServer(options: ServerOptions) {
     const engine = await engineFrom(c.req.header('authorization'))
     if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
     const runId = c.req.param('runId')
-    const held = await options.pool.withTenant({ orgId: engine.orgId }, (db) =>
+    const beat = await options.pool.withTenant({ orgId: engine.orgId }, (db) =>
       heartbeat(db, { runId, holder: engine.tokenId, now: clock.now() }),
     )
-    if (!held) {
+    if (!beat.held) {
       // Named rather than answered with a bare 404. An engine that has lost its
       // lease is about to have its run claimed by somebody else, and it needs
       // to know that rather than to keep working and report at the end.
@@ -1554,7 +1554,9 @@ export function createServer(options: ServerOptions) {
         409,
       )
     }
-    return c.json({ held: true })
+    // cancelRequested rides the beat, so an engine learns about a cancel on a
+    // request it was making anyway rather than by polling for a command.
+    return c.json({ held: true, cancelRequested: beat.cancelRequested })
   })
 
   app.post('/v1/commands/claim', async (c) => {

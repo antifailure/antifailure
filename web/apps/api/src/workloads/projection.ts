@@ -56,6 +56,14 @@ export function isWorkloadEvent(type: string): type is WorkloadEventType {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
+ * The terminal states an engine may name for itself.
+ *
+ * `abandoned` is deliberately absent: it is the control plane admitting it
+ * never heard, and an engine that is reporting has by definition been heard.
+ */
+const TERMINAL_FROM_ENGINE = new Set(['succeeded', 'failed', 'cancelled', 'timed_out'])
+
+/**
  * Applies one workload event.
  *
  * Returns null when the event was projected and a sentence when it was not. The
@@ -119,12 +127,25 @@ export async function projectWorkloadEvent(
       // same column: a run that finished cleanly and failed every threshold is
       // `succeeded` with a verdict of `fail`, and collapsing them is how an
       // exit code over work that never happened reads as a pass.
+      // `state` first, because the engine has terminal states this control
+      // plane also has and `outcome` cannot express. A run that passed its own
+      // --timeout is `timed_out`, which is an interruption rather than a
+      // failure, and reading only `outcome` recorded it as SUCCEEDED: the enum
+      // had a value nothing could ever reach, which is the same shape as a
+      // green exit code over work that never happened. Found by studio-emitters
+      // reading this switch rather than by anything running.
       const outcome = typeof payload.outcome === 'string' ? payload.outcome : 'succeeded'
+      const declared = typeof payload.state === 'string' ? payload.state : outcome
+      const state = TERMINAL_FROM_ENGINE.has(declared)
+        ? (declared as Terminal['state'])
+        : outcome === 'failed'
+          ? 'failed'
+          : 'succeeded'
       return terminal(db, clock, {
         runId: run.id,
         kind: run.kind,
         orgId,
-        state: outcome === 'failed' ? 'failed' : 'succeeded',
+        state,
         sequence,
         occurredAt: event.occurredAt,
         now,
@@ -169,7 +190,7 @@ interface Terminal {
   runId: string
   kind: WorkloadKind
   orgId: string
-  state: 'succeeded' | 'failed' | 'cancelled'
+  state: 'succeeded' | 'failed' | 'cancelled' | 'timed_out'
   sequence: number
   occurredAt: string
   now: string

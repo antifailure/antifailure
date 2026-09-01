@@ -607,6 +607,45 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
     assert.equal(row!.p50_ms, null)
   })
 
+  it('records a run that hit its own timeout as timed_out, not as succeeded', async () => {
+    // The enum had a value nothing could reach. Reading only `outcome` recorded
+    // a run that passed its own --timeout as SUCCEEDED, which is a green answer
+    // over work that was interrupted.
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    await send([
+      event({
+        type: 'workload.finished',
+        payload: {
+          workload_run_id: runId, kind: 'browser_workflow',
+          state: 'timed_out', outcome: 'failed', verdict: 'unverified',
+          result: { workflows: 1, workflows_unverified: 1 },
+        },
+      }),
+    ])
+    assert.equal((await stateOf(runId)).state, 'timed_out')
+  })
+
+  it('tells an engine on its heartbeat that a cancel is waiting', async () => {
+    // So a cancel arrives on a request the engine was making anyway, rather
+    // than a minute later on a poll that takes a lease on unrelated commands.
+    const target = await define('browser_workflow', { select: ['sign-up'] })
+    const runId = (await start(target)).body.result.data.runId
+    await claim(target.envId)
+
+    const beat = async () => {
+      const res = await h.fetch(`/v1/workloads/runs/${runId}/heartbeat`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: '{}',
+      })
+      return res.json() as Promise<{ held: boolean; cancelRequested: boolean }>
+    }
+    assert.deepEqual(await beat(), { held: true, cancelRequested: false })
+    await callProcedure(h, owner, 'workloads.cancel', 'mutation', { runId })
+    assert.deepEqual(await beat(), { held: true, cancelRequested: true })
+  })
+
   it('ordering: a run nobody ever reports on is abandoned, not failed', async () => {
     const target = await define('browser_workflow', { select: ['sign-up'] })
     const runId = (await start(target)).body.result.data.runId
