@@ -15,6 +15,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/internal/verify"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -152,6 +153,15 @@ func TestSeededGolden_SignsWhatItScanned(t *testing.T) {
 	require.NotEmpty(t, doc.Signature)
 	require.NotEqual(t, `{"rows":0}`, att)
 	require.Greater(t, doc.Report.Columns, 0, "the scan read no columns")
+
+	// The exact check af fidelity runs, rather than an inference from the
+	// fields being present. {"rows":0} unmarshals into an Attestation without
+	// error, so the constant reached this line and failed it, which is what
+	// produced the accusation.
+	var a verify.Attestation
+	require.NoError(t, json.Unmarshal([]byte(att), &a))
+	require.True(t, a.Verify(),
+		"af fidelity would tell the customer this was changed after it was signed")
 }
 
 // The claim the README makes, run rather than described: a seed that is a
