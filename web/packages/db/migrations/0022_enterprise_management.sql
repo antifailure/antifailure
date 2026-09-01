@@ -536,26 +536,38 @@ GRANT EXECUTE ON FUNCTION deletion_exports_expired(timestamptz, integer) TO anti
 -- Closing an account
 -- ---------------------------------------------------------------------------
 
--- A person may always leave, and their row may not be removed.
+-- A person may always leave, and this product chooses not to remove their row.
 --
--- `audit_entries.actor_user_id` references `users` with NO ACTION, so deleting
--- somebody who has ever done anything is refused by the database, and that is
--- deliberate rather than an oversight: an audit log whose subject can erase
--- themselves from it is not an audit log. Nulling the column instead is not
--- available either, because UPDATE on `audit_entries` is revoked to make the
--- table append-only, and because `actor_user_id` is one of the fields the hash
--- chain covers.
+-- CHOOSES, and the earlier version of this comment claimed a guarantee that does
+-- not exist. It said `audit_entries.actor_user_id` references `users` with NO
+-- ACTION so a delete is refused. It is `ON DELETE SET NULL`, declared that way
+-- in 0001_init.sql and never altered: `pg_get_constraintdef` reads
+-- "FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL". The
+-- catalog spells the action as a single letter and `n` is SET NULL, not NO
+-- ACTION, which is `a`. So a delete is not refused. It succeeds, and it nulls
+-- the actor on every audit entry that person ever wrote, which is worse than
+-- what the comment feared rather than better.
 --
--- So closing an account is an erasure of the personal data on the row rather
--- than a removal of the row: the GitHub identity, the name, the address and the
--- avatar go, the memberships and sessions go, and what stays is a row with no
--- personal data in it that the audit entries can still point at. The audit
--- entries keep the label the person had at the time, because the chain hashes
--- it, and those go when the organization does.
+-- What is true, and what the design rests on instead:
 --
--- This column is what makes that state visible. Without it, a closed account is
--- only recognisable by the shape of its nulled columns, which is a convention
--- rather than a fact and is exactly the sort of thing a later query gets wrong.
+-- Erasing the personal data is the whole of what erasure can achieve here
+-- anyway. `audit_entries.actor_label` is a COPY of the name taken at the time
+-- and it is inside the hash chain, so it cannot be rewritten whatever happens
+-- to `users`. Deleting the row would therefore not remove the person from the
+-- log; it would only break the link back to the account, and quietly, on every
+-- entry at once. Closing is not a weaker version of deleting. It is the version
+-- that leaves the log verifiable.
+--
+-- The database does not enforce this and there is no cheap way to make it. The
+-- FK could be altered to NO ACTION and DELETE could be revoked on `users`, and
+-- that is the stronger design; it is a schema change to a table every branch in
+-- flight touches, it takes a validating lock on `audit_entries`, and the
+-- migration runner allows three seconds for a lock. It belongs in its own
+-- reviewed change with a test that watches the refusal, not here.
+--
+-- What holds in the meantime is a gate rather than care: deletion.test.ts fails
+-- if anything under src/ deletes from `users` at all, the same shape as the
+-- guard on `organizations`, and it was proved able to fail.
 ALTER TABLE users ADD COLUMN closed_at timestamptz;
 
 COMMIT;

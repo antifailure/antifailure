@@ -273,6 +273,43 @@ describe(
       )
     })
 
+    /**
+     * The same guard, for the table whose comment used to claim a guarantee.
+     *
+     * `audit_entries.actor_user_id` references `users` with ON DELETE SET NULL,
+     * not NO ACTION, measured with pg_get_constraintdef rather than read off a
+     * catalog letter. So deleting a person is not refused by the database: it
+     * succeeds and nulls the actor on every entry they ever wrote, silently and
+     * all at once. `account.close` erases the personal fields and never deletes,
+     * which is right, and nothing enforced that but the absence of a second
+     * caller. This is the enforcement.
+     */
+    it('nothing deletes a person', async () => {
+      const root = new URL('../src/', import.meta.url)
+      const found: string[] = []
+      const walk = async (dir: URL): Promise<void> => {
+        for (const entry of await readdir(dir, { withFileTypes: true })) {
+          const child = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir)
+          if (entry.isDirectory()) {
+            await walk(child)
+            continue
+          }
+          if (!entry.name.endsWith('.ts')) continue
+          const body = await readFile(child, 'utf8')
+          if (/\bdelete\s+from\b[\s\S]{0,120}?\busers\b/i.test(body)) {
+            found.push(child.pathname.slice(root.pathname.length))
+          }
+        }
+      }
+      await walk(root)
+      assert.deepEqual(
+        found,
+        [],
+        'something deletes a user row, and the foreign key from audit_entries is ON DELETE SET ' +
+          'NULL, so it nulls the actor on every entry that person ever wrote',
+      )
+    })
+
     it('the purge takes the rows a bare DELETE would leave behind', async () => {
       await h.admin`
         INSERT INTO audit_entries (org_id, actor_label, action, target_type, origin, entry_hash)
