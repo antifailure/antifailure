@@ -302,6 +302,14 @@ const RUN_ROW: Record<string, unknown> = {
   cancel_requested_at: '2026-09-01T10:03:00.000Z',
   cancelled_at: '2026-09-01T10:03:30.000Z',
   dispatched_at: '2026-09-01T10:00:05.000Z',
+  // The lease columns. runColumns selects these and this fixture predated
+  // them, which is exactly the drift this gate exists to catch: the console
+  // branch and the lease work were written against different versions of the
+  // same route and only meet here.
+  lease_takeovers: 1,
+  lease_lost_at: '2026-09-01T10:02:00.000Z',
+  unheld_reports: 1,
+  unheld_report_at: '2026-09-01T10:02:30.000Z',
 }
 
 describe('a run row', () => {
