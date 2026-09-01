@@ -399,6 +399,14 @@ type DecisionJSON struct {
 	Bytes   int64  `json:"bytes,omitempty"`
 	Reason  string `json:"reason,omitempty"`
 	Error   string `json:"error,omitempty"`
+	// Synthesized says a model invented this response. A reader auditing what
+	// an environment reached needs to tell an answer that came from a server
+	// from one that came from a model, and until this was here the two were
+	// the same row.
+	Synthesized bool `json:"synthesized,omitempty"`
+	// Pack and Fixture name what answered a mocked request.
+	Pack    string `json:"pack,omitempty"`
+	Fixture string `json:"fixture,omitempty"`
 }
 
 func newNetLogCommand(env *Env) *cobra.Command {
@@ -442,6 +450,7 @@ question somebody asks after an incident.`),
 						At: d.AtRaw, Request: decisionRequest(d), Mode: d.Mode,
 						Rule: d.Rule, Allowed: d.Allowed, Status: d.Status,
 						Bytes: d.Bytes, Reason: d.Reason, Error: d.Error,
+						Synthesized: d.Synthesized, Pack: d.Pack, Fixture: d.Fixture,
 					})
 				}
 				return env.Out.JSON(docs)
@@ -514,6 +523,31 @@ func outcomeOf(d local.Decision) string {
 	// indistinguishable in this table from an application that is simply
 	// slow. That is the wrong answer to give somebody debugging latency,
 	// because it sends them to profile their own code.
+	// An invented response says so, here rather than nowhere. Before this the
+	// only difference between a charge Stripe made and one a model wrote was
+	// the word in the MODE column, and a reader auditing an incident is
+	// entitled to something less subtle than that.
+	if d.Synthesized {
+		if out == "" {
+			out = "invented by a model"
+		} else {
+			out += ", invented by a model"
+		}
+	}
+	// And a mocked one says which fixture answered it. The sidecar has
+	// recorded both halves from the beginning, against its own comment that a
+	// mock which cannot name its fixture is a mock nobody can debug.
+	if d.Fixture != "" {
+		from := "from " + d.Fixture
+		if d.Pack != "" {
+			from = "from " + d.Pack + "/" + d.Fixture
+		}
+		if out == "" {
+			out = from
+		} else {
+			out += ", " + from
+		}
+	}
 	if d.WaitedMs > 0 {
 		held := fmt.Sprintf("held %dms", d.WaitedMs)
 		if d.Limit != "" {

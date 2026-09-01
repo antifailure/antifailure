@@ -81,13 +81,22 @@ describe('dispatching a workflow against GitHub', () => {
       return new Response(status === 204 ? null : body, { status })
     }) as typeof fetch
     try {
-      await run(realClient({ for: async () => 'ghs_installation_token' }), calls)
+      await run(
+        realClient({
+          for: async () => 'ghs_installation_token',
+          revoke: async () => ({ removed: true }),
+        }),
+        calls,
+      )
     } finally {
       globalThis.fetch = original
     }
   }
 
-  function realClient(installationTokens?: { for(id: number): Promise<string> }): RealGitHubClient {
+  function realClient(installationTokens?: {
+    for(id: number): Promise<string>
+    revoke(id: number): Promise<{ removed: boolean }>
+  }): RealGitHubClient {
     return new RealGitHubClient({
       clientId: 'id',
       clientSecret: 'secret',
