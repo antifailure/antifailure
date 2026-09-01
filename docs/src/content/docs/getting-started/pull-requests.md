@@ -27,7 +27,7 @@ and a step that leaves the report:
 
 - name: Run the check
   if: steps.change.outputs.environment == 'true'
-  run: af ci --output report.md
+  run: af ci --report report.md
 ```
 
 Two steps rather than one because the installer writes its bin directory to
