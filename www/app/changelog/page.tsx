@@ -156,7 +156,12 @@ function ReleaseSection({ release }: { release: Release }) {
                     ) : null}
                     <a
                       href={`#${entry.slug}`}
-                      className="font-mono text-[11px] tracking-snug text-gray-new-40 underline decoration-black/15 underline-offset-4 hover:text-black hover:decoration-black"
+                      // inline-block with vertical padding, cancelled by an
+                      // equal negative margin: the anchor's own hit area is
+                      // 45px on a phone without the row growing. The row's
+                      // min-h-11 does not help, because a 17px anchor inside a
+                      // 44px row is still a 17px target.
+                      className="-my-3.5 inline-block min-w-0 py-3.5 font-mono text-[11px] tracking-snug text-gray-new-40 underline decoration-black/25 underline-offset-4 [overflow-wrap:anywhere] hover:text-black hover:decoration-black"
                     >
                       {entry.slug}
                     </a>
@@ -234,7 +239,12 @@ function renderSpan(span: Span, index: number): ReactNode {
       return (
         <code
           key={index}
-          className="rounded-[3px] bg-black/[0.055] px-1 py-0.5 font-mono text-[0.87em] tracking-snug text-gray-new-10"
+          // overflow-wrap: anywhere, not break-words, because a metric name is
+          // one word to the browser and break-word will not split it.
+          // `af_ingest_events_total{outcome="unprojected"}` renders 378px wide
+          // in a 350px column at 390, and pushed the whole page sideways by
+          // 12px, which is the one defect a phone pass found here.
+          className="rounded-[3px] bg-black/[0.07] px-1 py-0.5 font-mono text-[0.87em] tracking-snug text-gray-new-10 [overflow-wrap:anywhere]"
         >
           {span.text}
         </code>
