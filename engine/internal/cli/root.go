@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"text/template"
 
@@ -522,40 +523,94 @@ recoverable by replay.`),
 	return root
 }
 
-// WithSignals returns a context cancelled by an interrupt, and a function that
-// reports whether a second signal arrived.
+// WithSignals returns a context cancelled by an interrupt, a channel closed by
+// a second one, and a function that stops listening.
 //
 // The contract at the command boundary: the first signal cancels the root
 // context so that in flight work rolls back and teardown runs. The second
-// forces exit with code 10 and the journal intact, because a user pressing
-// control C twice means "stop now", and the journal is what makes stopping now
-// safe.
-func WithSignals(ctx context.Context) (context.Context, func() bool, func()) {
+// closes the forced channel, which Run turns into an exit with code 10 and the
+// journal intact, because a user pressing control C twice means "stop now",
+// and the journal is what makes stopping now safe: everything was recorded
+// before it was made, so af down still knows what to remove.
+//
+// A channel rather than a function that reports whether a second signal has
+// arrived, because the caller has to be able to WAIT on it. A second interrupt
+// matters in exactly the case where the command it is trying to stop has not
+// noticed the first one, and a command that is not coming back is never going
+// to poll. The poll shape was the whole reason this went unwired: there was no
+// moment at which anything could usefully have called it.
+func WithSignals(ctx context.Context) (context.Context, <-chan struct{}, func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 
 	forced := make(chan struct{})
+	// Closed by stop, so that the watcher ends with the run rather than
+	// blocking for ever on a channel nothing will send to again. A goroutine
+	// per call that never returns is a leak in any process that sets up
+	// signals more than once, and a failure in any test of this package.
+	done := make(chan struct{})
 	go func() {
-		<-ch
-		cancel()
-		<-ch
-		close(forced)
+		select {
+		case <-ch:
+			cancel()
+		case <-done:
+			return
+		}
+		select {
+		case <-ch:
+			close(forced)
+		case <-done:
+		}
 	}()
 
-	second := func() bool {
-		select {
-		case <-forced:
-			return true
-		default:
-			return false
-		}
-	}
+	var once sync.Once
 	stop := func() {
-		signal.Stop(ch)
-		cancel()
+		once.Do(func() {
+			signal.Stop(ch)
+			close(done)
+			cancel()
+		})
 	}
-	return ctx, second, stop
+	return ctx, forced, stop
+}
+
+// Run executes the command line and returns the exit code, abandoning the
+// command if a second interrupt arrives first.
+//
+// This is where control C twice becomes an exit. Execute waits for the command
+// to return, and the command a user is trying to stop by pressing it twice is
+// by definition one that is not returning: a provider call with no deadline, a
+// pull of an image the size of a database, an agent mid step. So the wait
+// happens here, against the forced channel, and the exit code is produced out
+// from under a command that is still running.
+//
+// Abandoning it is safe for the one reason the journal exists: every resource
+// is written down before it is created, so nothing that was made is unknown to
+// af down, whether or not the command that made it got to finish. That is why
+// the second interrupt can be honoured at all rather than merely wished for.
+//
+// forced may be nil, which means a caller that does not handle signals, and
+// Run then behaves exactly as Execute does.
+func Run(ctx context.Context, forced <-chan struct{}, args []string, opts Options) int {
+	done := make(chan int, 1)
+	go func() { done <- Execute(ctx, args, opts) }()
+
+	select {
+	case code := <-done:
+		return code
+	case <-forced:
+		stderr := opts.Stderr
+		if stderr == nil {
+			stderr = os.Stderr
+		}
+		// Stderr, and not the Output renderer: the command being abandoned
+		// still holds stdout and may be part way through a document a script
+		// is parsing. Saying where the resources went is the whole value of
+		// being allowed to stop here, so it is said plainly.
+		_, _ = fmt.Fprintln(stderr, "af: stopped on the second interrupt. Anything already created is recorded in the journal; run 'af down' to remove it.")
+		return int(aferrors.ExitInterruptedDirty)
+	}
 }
 
 // setHelpRendering makes the help and usage pages fit the terminal.
