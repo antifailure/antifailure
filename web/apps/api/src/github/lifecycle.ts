@@ -1513,7 +1513,7 @@ export async function sweepTeardowns(deps: LifecycleDeps): Promise<TeardownSweep
   // of the process and deleted zero rows, forever, because every policy on that
   // table keyed on a value the sweeper did not declare, and a DELETE that
   // matches nothing reports success.
-  const due = await deps.pool.withoutTenant(async (db) =>
+  const due = await deps.pool.withSweeper(async (db) =>
     db.execute<{ id: string; org_id: string }>(sql`
       SELECT id, org_id FROM teardown_requests
       WHERE state IN ('pending', 'leased')
@@ -1732,7 +1732,7 @@ export async function sweepGenerations(deps: LifecycleDeps): Promise<{ timedOut:
   // account scope the delivery policies are written against. Doing the UPDATE
   // here instead would match zero rows and report success, which is migration
   // 0016's defect exactly.
-  const due = await deps.pool.withoutTenant(async (db) =>
+  const due = await deps.pool.withSweeper(async (db) =>
     db.execute<{ id: string; org_id: string }>(sql`
       SELECT id, org_id FROM pr_generations
       WHERE state IN ('queued', 'running') AND deadline_at < ${now.toISOString()}::timestamptz

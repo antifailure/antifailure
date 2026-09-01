@@ -290,9 +290,15 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
       org_id, repository_id, number, head_sha, head_ref, base_ref, head_repository)
     VALUES (${orgId}, ${repoId}, 1, ${headSha}, 'feature', 'main', ${`${slug}/app`})
     RETURNING id`
+  // OVERDUE, deliberately. The sweeper policies admit a row only when it is
+  // already past its deadline, so a fixture whose generation is not overdue
+  // cannot see whether those policies leak across tenants: the row condition
+  // would be false and the cross-tenant read would come back empty for the
+  // wrong reason. A fixture that does not satisfy a policy's predicate proves
+  // nothing about that policy.
   const [generation] = await admin<{ id: string }[]>`
     INSERT INTO pr_generations (org_id, pull_request_id, head_sha, deadline_at)
-    VALUES (${orgId}, ${pullRequest!.id}, ${headSha}, now() + interval '30 minutes')
+    VALUES (${orgId}, ${pullRequest!.id}, ${headSha}, now() - interval '1 minute')
     RETURNING id`
   await admin`
     INSERT INTO teardown_requests (org_id, environment_id, env_id, repository_id, generation_id, reason)

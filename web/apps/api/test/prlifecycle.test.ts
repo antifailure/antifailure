@@ -541,6 +541,29 @@ describe(
       assert.equal(checkFor(first)?.status, 'completed')
     })
 
+    it('a comment with no commit in it is still not overwritten by an old run', async () => {
+      // The case the SHA in the comment body cannot cover, and it is a real
+      // one: a comment written by an older build of this control plane, or by
+      // the workflow's own step, carries no fence to read. So the writer
+      // compares its own head against the pull request BEFORE it looks at
+      // GitHub, and that comparison is the only thing standing between an old
+      // run and a comment it should not touch.
+      const first = sha('unfenced-first')
+      const second = sha('unfenced-second')
+      await deliver('pull_request', pullRequestPayload('opened', 33, first))
+      await deliver('workflow_run', workflowRunPayload('in_progress', first, 5021))
+      await deliver('pull_request', pullRequestPayload('synchronize', 33, second))
+
+      // Replace the comment with one carrying the marker and no commit, the
+      // way an older writer would have left it.
+      const existing = commentFor(33)!
+      await api.updateComment(installationId, repository, existing.id, `${COMMENT_MARKER} -->\nolder`)
+      const before = commentFor(33)!.body
+
+      await deliver('workflow_run', workflowRunPayload('completed', first, 5021, 'failure'))
+      assert.equal(commentFor(33)!.body, before, 'an old run overwrote a comment it could not read')
+    })
+
     // -----------------------------------------------------------------------
     // ordering: close before ready, and close during a run
     // -----------------------------------------------------------------------

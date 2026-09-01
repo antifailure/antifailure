@@ -407,13 +407,33 @@ CREATE POLICY github_delivery_writes_teardown ON teardown_requests
 -- own queue.
 -- ---------------------------------------------------------------------------
 
+-- Declared by the sweeper and by nothing else.
+--
+-- WITHOUT THIS THE POLICIES BELOW ARE A CROSS-TENANT READ, and that is not a
+-- guess: the first version of this file omitted it and the cross-tenant suite
+-- reported "bob can read 1 of alice's teardown_requests rows". Postgres ORs
+-- permissive policies, so a policy whose USING mentions no tenant WIDENS every
+-- other policy on the table rather than narrowing anything. A row condition is
+-- not isolation.
+--
+-- It is a declaration rather than a credential, the same shape as
+-- current_github_account: the value is not a secret, and what makes it
+-- believable is that only this process's own sweeper sets it. Every other
+-- scope clears it, so a request that arrived from outside cannot be running
+-- under it.
+CREATE OR REPLACE FUNCTION current_sweeper() RETURNS boolean
+  LANGUAGE sql STABLE
+  AS $$ SELECT coalesce(current_setting('antifailure.sweeper', true), '') = 'on' $$;
+
 CREATE POLICY generation_deadline_sweep ON pr_generations
   FOR SELECT TO antifailure_app
-  USING (state IN ('queued', 'running') AND deadline_at < now());
+  USING (current_sweeper()
+         AND state IN ('queued', 'running') AND deadline_at < now());
 
 CREATE POLICY teardown_claim_sweep ON teardown_requests
   FOR SELECT TO antifailure_app
-  USING (state IN ('pending', 'leased')
+  USING (current_sweeper()
+         AND state IN ('pending', 'leased')
          AND (leased_until IS NULL OR leased_until < now()));
 
 -- ---------------------------------------------------------------------------

@@ -181,6 +181,22 @@ export interface Pool {
    * result until it expires, rather than for the table.
    */
   withPullRequestCallback<T>(hash: Buffer, fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn as this process's own housekeeping, for the sweepers.
+   *
+   * A sweeper has no tenant, and on a connection with none every policy in this
+   * schema denies, so a DELETE or an UPDATE matches nothing and reports
+   * success. Migration 0016 exists because sweepDeviceAuthorizations did
+   * exactly that for the life of the process.
+   *
+   * What this declares is not a credential and does not widen anything by
+   * itself: the policies that consult it also narrow the rows to work that is
+   * already overdue, and they are SELECT only, so a sweeper reads which work is
+   * due here and writes on a connection scoped to that work's own tenant. Every
+   * other scope clears the setting, so a request that arrived from outside
+   * cannot be running under it.
+   */
+  withSweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
   /** The raw client, for migrations and tests only. */
   sql: postgres.Sql
   close(): Promise<void>
@@ -260,6 +276,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.stripe_customer': '',
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
         },
         fn,
       )
@@ -294,6 +311,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.stripe_customer': '',
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
         },
         fn,
       )
@@ -321,6 +339,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.stripe_customer': '',
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
         },
         fn,
       )
@@ -348,6 +367,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.stripe_customer': customer,
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
         },
         fn,
       )
@@ -375,6 +395,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.stripe_customer': '',
           'antifailure.github_delivery': id,
           'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
         },
         fn,
       )
@@ -398,6 +419,28 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.stripe_customer': '',
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': hash.toString('hex'),
+          'antifailure.sweeper': '',
+        },
+        fn,
+      )
+    },
+    withSweeper(fn) {
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': 'on',
         },
         fn,
       )
