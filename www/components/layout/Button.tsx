@@ -3,7 +3,7 @@ import { cn } from "@/lib/cn";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 const sizes = {
-  new: "h-11 px-7 tracking-extra-tight max-lg:h-9 max-lg:px-[18px] max-lg:text-sm",
+  new: "h-11 px-7 tracking-extra-tight max-lg:px-[18px] max-lg:text-sm",
   xxs: "h-8 px-4 text-sm tracking-extra-tight font-medium",
 } as const;
 
