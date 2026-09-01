@@ -238,9 +238,10 @@ Antifailure, and the control plane says which grant is missing in the comment
 rather than failing quietly.
 
 Subscribe to events: **Installation**, **Installation repositories**,
-**Repository**, **Pull request**, **Workflow run**, **Check run**.
+**Repository**, **Pull request**, **Workflow run**, **Check run**, **Check
+suite**.
 
-The last four are the pull request lifecycle. **Pull request** is what opens a
+The last five are the pull request lifecycle. **Pull request** is what opens a
 check on a commit and closes it when the pull request does. **Workflow run**
 binds the check to the Actions run, which is the only route this control plane
 has into the machine holding the environment. **Check run** and **Check suite**
