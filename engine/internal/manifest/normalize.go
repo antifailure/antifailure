@@ -514,13 +514,54 @@ func normalizePolicy(m *schema.Manifest) {
 	level(&p.Cleanup, schema.PolicyFail)
 }
 
+// normalizeRoute cleans a safe or unsafe route pattern without destroying it.
+//
+// A pattern is a method and a path glob, "GET /api/*", or a bare glob that
+// matches any method. That is what load.matchesAny reads and what every
+// example in the documentation is written as.
+//
+// This function used to prefix anything not starting with a slash with one, so
+// "DELETE /*" became "/DELETE /*". The matcher splits on the first space and
+// compares the method exactly, and "/DELETE" is not "DELETE", so every
+// documented pattern matched nothing. The safe list failing that way is loud,
+// because a run that may send nothing refuses everything and says so. The
+// unsafe list failing that way is silent: a list that matches nothing refuses
+// nothing, and under a permissive safe list the deletes somebody wrote the
+// entry to prevent were sent at production's rate.
+//
+// Only a method the matcher would actually compare is split off. A path
+// carrying a space is not a method and stays whole, which is what it did
+// before and what a strange entry should keep doing rather than becoming a
+// second guess.
 func normalizeRoute(r string) string {
 	r = strings.TrimSpace(r)
-	if !strings.HasPrefix(r, "/") {
-		r = "/" + r
+	if method, rest, ok := strings.Cut(r, " "); ok && isHTTPMethod(method) {
+		return strings.ToUpper(method) + " " + normalizePath(rest)
 	}
-	return path.Clean(r)
+	return normalizePath(r)
 }
+
+func normalizePath(p string) string {
+	p = strings.TrimSpace(p)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return path.Clean(p)
+}
+
+// httpMethods is the set a route pattern may name.
+//
+// A closed list rather than "anything before a space", because a path is
+// allowed to contain a space and reading one as a method would silently change
+// what the pattern means. Upper cased on the way in, since the matcher
+// compares without regard to case and two spellings of one method in a stored
+// list is a difference a reader has to decide is meaningless.
+var httpMethods = map[string]bool{
+	"GET": true, "HEAD": true, "POST": true, "PUT": true, "PATCH": true,
+	"DELETE": true, "OPTIONS": true, "TRACE": true, "CONNECT": true,
+}
+
+func isHTTPMethod(s string) bool { return httpMethods[strings.ToUpper(strings.TrimSpace(s))] }
 
 func normalizeRuntime(m *schema.Manifest) {
 	if m.Runtime == nil {
