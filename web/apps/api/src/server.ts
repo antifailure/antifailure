@@ -79,6 +79,28 @@ import { forward, ProxyError } from './providers/proxy.ts'
 import { PricingError, type Price } from './providers/pricing.ts'
 import { handleDelivery } from './github/webhook.ts'
 import {
+  accountLoginFrom,
+  claimDelivery,
+  closeDelivery,
+  releaseDelivery,
+} from './github/deliveries.ts'
+import {
+  CALLBACK_TTL_MS,
+  handleLifecycleDelivery,
+  hashCallback,
+  issueCallback,
+  recordReport,
+  type LifecycleDeps,
+} from './github/lifecycle.ts'
+import type { RepositoryApi } from './github/api.ts'
+import {
+  ActionsKeys,
+  CALLBACK_AUDIENCE,
+  kidOf,
+  TokenRefused,
+  verifyWorkflowIdentity,
+} from './github/oidc.ts'
+import {
   handleStripeDelivery,
   parseStripeEvent,
   verifyStripeSignature,
@@ -128,6 +150,22 @@ export interface ServerOptions {
    *  webhook endpoint refuses every delivery rather than accepting unsigned
    *  ones. */
   githubWebhookSecret?: string | null
+  /**
+   * Acting on a repository as the installation: check runs, the pull request
+   * comment, cancelling a run.
+   *
+   * Null means no App is configured, and the pull request lifecycle records
+   * what it learns and publishes nothing, which is a real way to run this: the
+   * deliveries still populate installations and repositories, and a deployment
+   * with no App key is not a deployment that should refuse to start.
+   */
+  githubApi?: RepositoryApi | null
+  /**
+   * GitHub's signing keys, for the workflow identity tokens a job exchanges for
+   * a callback credential. Supplied by a test so nothing reaches github.com;
+   * unset means the real key set.
+   */
+  actionsKeys?: ActionsKeys
   /** Stripe, when this installation takes money. Null is the self-hosted
    *  default: the billing routes answer PRECONDITION_FAILED naming the
    *  variables, and the webhook endpoint refuses every delivery rather than
@@ -1222,6 +1260,29 @@ export function createServer(options: ServerOptions) {
   app.post('/byok/openai/v1/chat/completions', (c) => byok(c, 'openai'))
 
   // -------------------------------------------------------------------------
+  // The pull request lifecycle's dependencies
+  //
+  // Built once, here, rather than per request. Null when there is no App: the
+  // deliveries still land and still record installations, and the parts that
+  // would publish a check say so rather than the process refusing to start
+  // over a feature a self-hosted operator may not want.
+  // -------------------------------------------------------------------------
+
+  const actionsKeys = options.actionsKeys ?? new ActionsKeys(clock)
+  const consoleBase = options.appBaseUrl ? options.appBaseUrl.replace(/\/+$/, '') : null
+  const githubApi = options.githubApi ?? null
+
+  function lifecycleDeps(): LifecycleDeps | null {
+    if (!githubApi) return null
+    return { pool: options.pool, clock, api: githubApi, consoleBase }
+  }
+
+  function bearer(header: string | undefined): string {
+    const auth = header ?? ''
+    return auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
+  }
+
+  // -------------------------------------------------------------------------
   // GitHub webhook deliveries
   // -------------------------------------------------------------------------
   //
@@ -1265,16 +1326,198 @@ export function createServer(options: ServerOptions) {
     }
 
     const event = c.req.header('x-github-event') ?? 'unknown'
+    const deliveryId = c.req.header('x-github-delivery') ?? ''
+    const login = accountLoginFrom(payload)
+
+    // A delivery with no identifier is not one GitHub sent, and the header has
+    // been on every delivery since webhooks existed. Refusing rather than
+    // handling it unfenced, because the whole point of the ledger below is
+    // that nothing here runs twice, and a delivery that cannot be recorded
+    // cannot be fenced.
+    if (!deliveryId) {
+      return c.json({ error: 'That delivery carries no x-github-delivery header.' }, 400)
+    }
+
+    // THE REPLAY FENCE. The HMAC says a delivery is genuine and says nothing
+    // about it being new, so a captured delivery verifies exactly as well the
+    // thousandth time. Everything below this writes something.
+    const claim = await claimDelivery(options.pool, clock, {
+      deliveryId,
+      event,
+      action: typeof payload.action === 'string' ? payload.action : null,
+      login,
+    })
+    if (claim.status === 'replay') {
+      // 200, because from GitHub's side this delivery succeeded, and it did:
+      // it was handled the first time it arrived.
+      return c.json(
+        { event, handled: true, replay: true, detail: claim.outcome ?? 'already handled' },
+        200,
+      )
+    }
+    if (claim.status === 'in_flight') {
+      // 503 rather than 200. Another attempt at this exact delivery is running
+      // right now; answering 200 would be reporting success for work that may
+      // still fail, and a delivery lost that way is silent on both sides.
+      c.header('retry-after', String(claim.retryAfterSeconds))
+      return c.json({ event, error: 'That delivery is being handled right now.' }, 503)
+    }
+
     try {
-      const outcome = await handleDelivery(options.pool, clock, event, payload)
-      return c.json(outcome, 200)
+      const lifecycle = lifecycleDeps()
+      const outcome = lifecycle
+        ? await handleLifecycleDelivery(lifecycle, login ?? '', event, payload)
+        : { handled: false, detail: 'no GitHub App is configured', orgId: null }
+
+      // The installation handler still sees everything the lifecycle did not
+      // act on, so installations and repositories are recorded exactly as
+      // before. Two handlers rather than one because they answer different
+      // questions: which accounts exist, and what is happening on a commit.
+      const installation = outcome.handled
+        ? null
+        : await handleDelivery(options.pool, clock, event, payload)
+
+      const detail = outcome.handled ? outcome.detail : (installation?.detail ?? outcome.detail)
+      await closeDelivery(
+        options.pool,
+        clock,
+        { deliveryId, login },
+        { orgId: outcome.orgId, outcome: detail },
+      )
+      return c.json(
+        {
+          event,
+          action: typeof payload.action === 'string' ? payload.action : null,
+          handled: outcome.handled || (installation?.handled ?? false),
+          detail,
+        },
+        200,
+      )
     } catch (err) {
       // A real failure on our side. 500 is right here and the retry is wanted:
       // a database that was briefly unreachable should not lose an
       // installation event, because nothing else will ever tell us about it.
+      //
+      // The claim goes back first. A claim that survived a failure would be
+      // read as "handled" by the retry, so one transient error would turn into
+      // a delivery refused forever while looking successful.
+      await releaseDelivery(options.pool, { deliveryId, login }).catch(() => {})
       const message = err instanceof Error ? err.message : String(err)
       return c.json({ event, error: message }, 500)
     }
+  })
+
+  // -------------------------------------------------------------------------
+  // What a job in the customer's CI reports back
+  //
+  // Two endpoints, and the first one is why there is no repository secret to
+  // paste. A job asks GitHub Actions for an identity token, GitHub signs it,
+  // and this exchanges it for a credential scoped to ONE generation: one
+  // commit, one run, expiring within the hour. GitHub does not grant that
+  // identity to a pull request job running on a fork, so the fork case is
+  // closed by GitHub's own rules rather than by this remembering to check, and
+  // it is closed a second time here because a fork's commit gets no credential
+  // until a maintainer has approved that exact commit.
+  // -------------------------------------------------------------------------
+
+  app.post('/v1/pr/callback-token', async (c) => {
+    const lifecycle = lifecycleDeps()
+    if (!lifecycle) {
+      return c.json({ error: 'This control plane has no GitHub App configured.' }, 503)
+    }
+    const presented = bearer(c.req.header('authorization'))
+    if (!presented) {
+      return c.json(
+        {
+          error:
+            'Present the workflow identity token as a bearer token. In a workflow with ' +
+            `id-token: write, ask for it with the audience ${CALLBACK_AUDIENCE}.`,
+        },
+        401,
+      )
+    }
+
+    let body: { head_sha?: unknown }
+    try {
+      body = (await c.req.json()) as { head_sha?: unknown }
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    const headSha = typeof body.head_sha === 'string' ? body.head_sha : ''
+    if (!/^[0-9a-f]{40}$/.test(headSha)) {
+      return c.json(
+        {
+          error:
+            'head_sha has to be the full forty character commit this job is checking. A result ' +
+            'belongs to one commit, so a credential is issued for one commit.',
+        },
+        400,
+      )
+    }
+
+    let identity
+    try {
+      const keys = await actionsKeys.current(kidOf(presented))
+      identity = verifyWorkflowIdentity(presented, { keys, clock })
+    } catch (err) {
+      if (err instanceof TokenRefused) {
+        // The reason is safe to return: every one of them is something the
+        // workflow author can act on, and none of them narrows a search for a
+        // valid token, because the token is signed by GitHub rather than
+        // guessed.
+        return c.json({ error: err.message, reason: err.reason }, 401)
+      }
+      throw err
+    }
+
+    const owner = identity.repository.split('/')[0] ?? ''
+    const issued = await issueCallback(lifecycle, owner, {
+      repository: identity.repository,
+      headSha,
+      workflowRunId: identity.runId,
+    })
+    if ('refused' in issued) {
+      return c.json({ error: issued.refused }, 409)
+    }
+    return c.json({
+      token: issued.token,
+      expires_in: Math.floor(CALLBACK_TTL_MS / 1000),
+      repository: identity.repository,
+      head_sha: headSha,
+    })
+  })
+
+  app.post('/v1/pr/report', async (c) => {
+    const lifecycle = lifecycleDeps()
+    if (!lifecycle) {
+      return c.json({ error: 'This control plane has no GitHub App configured.' }, 503)
+    }
+    const presented = bearer(c.req.header('authorization'))
+    if (!presented) {
+      return c.json({ error: 'Present the callback credential as a bearer token.' }, 401)
+    }
+
+    let body: { head_sha?: unknown; markdown?: unknown; report?: unknown }
+    try {
+      body = (await c.req.json()) as { head_sha?: unknown; markdown?: unknown; report?: unknown }
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    const headSha = typeof body.head_sha === 'string' ? body.head_sha : ''
+    if (!/^[0-9a-f]{40}$/.test(headSha)) {
+      return c.json({ error: 'head_sha has to be the full forty character commit.' }, 400)
+    }
+
+    const outcome = await recordReport(lifecycle, hashCallback(presented), {
+      headSha,
+      markdown: typeof body.markdown === 'string' ? body.markdown : null,
+      report: body.report,
+      reportedBy: 'workflow identity',
+    })
+    if (outcome.status === 'refused') {
+      return c.json({ error: outcome.detail }, 409)
+    }
+    return c.json({ recorded: true, state: outcome.state, detail: outcome.detail })
   })
 
   // -------------------------------------------------------------------------

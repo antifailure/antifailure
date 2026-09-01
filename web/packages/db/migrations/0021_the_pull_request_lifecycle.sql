@@ -391,6 +391,32 @@ CREATE POLICY github_delivery_writes_teardown ON teardown_requests
 -- does not conclude the join below has no policy behind it.
 
 -- ---------------------------------------------------------------------------
+-- What housekeeping may see
+--
+-- A sweeper has no tenant and no delivery, so every policy above denies it, and
+-- a DELETE or an UPDATE that matches nothing reports success. That is not a
+-- hypothetical failure mode here: migration 0016 exists because
+-- sweepDeviceAuthorizations ran for the life of the process and removed zero
+-- rows, forever, for exactly this reason.
+--
+-- SELECT and nothing more, and only over rows that are already overdue. The
+-- sweeper reads which work is due on this connection and then does the writing
+-- on a connection scoped to that work's own tenant, so nothing here needs to be
+-- able to write across tenants. A read-only policy over a row set that is
+-- already late is the narrowest thing that makes the sweeper able to see its
+-- own queue.
+-- ---------------------------------------------------------------------------
+
+CREATE POLICY generation_deadline_sweep ON pr_generations
+  FOR SELECT TO antifailure_app
+  USING (state IN ('queued', 'running') AND deadline_at < now());
+
+CREATE POLICY teardown_claim_sweep ON teardown_requests
+  FOR SELECT TO antifailure_app
+  USING (state IN ('pending', 'leased')
+         AND (leased_until IS NULL OR leased_until < now()));
+
+-- ---------------------------------------------------------------------------
 -- What the job reports with
 --
 -- The callback is a bearer credential, so it is reachable by presenting the
@@ -403,9 +429,17 @@ CREATE OR REPLACE FUNCTION current_pr_callback() RETURNS bytea
   LANGUAGE sql STABLE
   AS $$ SELECT decode(nullif(current_setting('antifailure.pr_callback_hash', true), ''), 'hex') $$;
 
+-- USING is what admits the row: the connection reaches the generation whose
+-- stored hash matches the credential it declared, and nothing else.
+--
+-- WITH CHECK permits the hash to be cleared as well as kept, which reads as a
+-- loosening and is not: a row whose hash is null is a row this declaration can
+-- no longer reach at all, so the only thing it allows is a caller giving up its
+-- own access. Refusing it would mean a report could never mark its own
+-- credential spent, which is the one thing that has to happen exactly once.
 CREATE POLICY pr_callback_reports ON pr_generations
   FOR ALL TO antifailure_app
   USING (callback_hash IS NOT NULL AND callback_hash = current_pr_callback())
-  WITH CHECK (callback_hash IS NOT NULL AND callback_hash = current_pr_callback());
+  WITH CHECK (callback_hash IS NULL OR callback_hash = current_pr_callback());
 
 COMMIT;

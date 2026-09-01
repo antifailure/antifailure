@@ -559,21 +559,30 @@ describe('the webhook endpoint', {
   })
   after(async () => {
     const rows = await api.admin<{ id: string }[]>`
-      SELECT id FROM organizations WHERE github_login = 'endpoint-test-org'`
+      SELECT id FROM organizations
+      WHERE github_login IN ('endpoint-test-org', 'replay-test-org', 'concurrent-test-org')`
     for (const row of rows) await dropOrg(api.admin, row.id)
+    await api.admin`DELETE FROM github_deliveries WHERE delivery_id LIKE 'test-delivery-%'
+      OR delivery_id LIKE 'replay-fence-%' OR delivery_id LIKE 'concurrent-fence-%'`
     await api.close()
   })
 
+  // A DIFFERENT DELIVERY IDENTIFIER EVERY TIME, unless a test asks for the same
+  // one. That is what GitHub does, and the default used to be one constant
+  // here, which made every delivery after the first a replay the moment the
+  // ledger existed. Worth keeping as a shape: a fixture that reuses an
+  // identifier is a fixture that cannot see a replay fence working OR failing.
+  let deliveries = 0
   async function deliver(
     event: string,
     payload: unknown,
-    opts: { signature?: string; secret?: string } = {},
+    opts: { signature?: string; secret?: string; deliveryId?: string } = {},
   ) {
     const body = JSON.stringify(payload)
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       'x-github-event': event,
-      'x-github-delivery': 'test-delivery',
+      'x-github-delivery': opts.deliveryId ?? `test-delivery-${(deliveries += 1)}`,
     }
     const signature = opts.signature ?? sign(body, opts.secret ?? SECRET)
     if (signature) headers['x-hub-signature-256'] = signature
@@ -675,6 +684,81 @@ describe('the webhook endpoint', {
     } finally {
       await bare.close()
     }
+  })
+
+  test('a delivery with no identifier is refused rather than handled unfenced', async () => {
+    // The header has been on every delivery since webhooks existed, so a
+    // delivery without one is not one GitHub sent. Handling it would mean
+    // handling something that cannot be recorded, and the whole point of the
+    // ledger is that nothing runs twice.
+    const body = JSON.stringify({ action: 'created' })
+    const res = await api.fetch('/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-github-event': 'installation',
+        'x-hub-signature-256': sign(body),
+      },
+      body,
+    })
+    assert.equal(res.status, 400)
+  })
+
+  test('ordering: the same delivery sent twice is handled once', async () => {
+    // The HMAC says a delivery is genuine. It says nothing at all about it
+    // being new, so a delivery captured off the wire verifies exactly as well
+    // the second time.
+    const payload = {
+      action: 'created',
+      installation: { id: 901777, account: { login: 'replay-test-org', type: 'Organization' } },
+      repositories: [{ id: 71, full_name: 'replay-test-org/one' }],
+    }
+    const first = await deliver('installation', payload, { deliveryId: 'replay-fence-1' })
+    assert.equal(first.status, 200)
+    assert.doesNotMatch(first.body, /"replay":true/)
+
+    // The second copy is answered without the handler running. Proven by the
+    // effect rather than by the answer: a delivery that ran again would
+    // rewrite updated_at on the installation row.
+    const [before] = await api.admin<{ updated_at: Date }[]>`
+      SELECT updated_at FROM github_installations WHERE installation_id = 901777`
+    const second = await deliver('installation', payload, { deliveryId: 'replay-fence-1' })
+    assert.equal(second.status, 200)
+    assert.match(second.body, /"replay":true/)
+    const [after] = await api.admin<{ updated_at: Date }[]>`
+      SELECT updated_at FROM github_installations WHERE installation_id = 901777`
+    assert.equal(
+      new Date(after!.updated_at).getTime(),
+      new Date(before!.updated_at).getTime(),
+      'the replay ran the handler again',
+    )
+
+    const [ledger] = await api.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM github_deliveries WHERE delivery_id = 'replay-fence-1'`
+    assert.equal(ledger!.n, 1)
+  })
+
+  test('ordering: two copies of one delivery arriving at once run the handler once', async () => {
+    // Concurrent rather than sequential, which is the case a primary key alone
+    // does not settle: both attempts insert, one wins, and the loser has to be
+    // told to come back rather than told it succeeded.
+    const payload = {
+      action: 'created',
+      installation: { id: 901778, account: { login: 'concurrent-test-org', type: 'Organization' } },
+    }
+    const [a, b] = await Promise.all([
+      deliver('installation', payload, { deliveryId: 'concurrent-fence-1' }),
+      deliver('installation', payload, { deliveryId: 'concurrent-fence-1' }),
+    ])
+    const statuses = [a!.status, b!.status].sort()
+    // 200 for the one that took the claim, and 503 with a Retry-After for the
+    // one that did not. Never two 200s: answering success for work that is
+    // still running is how a delivery is lost silently when that work fails.
+    assert.deepEqual(statuses, [200, 503])
+
+    const [ledger] = await api.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM github_deliveries WHERE delivery_id = 'concurrent-fence-1'`
+    assert.equal(ledger!.n, 1)
   })
 
   test('the endpoint is in the rate limit table', async () => {
