@@ -203,7 +203,9 @@ export async function buildExport(
     SELECT e.env_id, ru.kind, ru.state::text AS state, ru.started_at, ru.finished_at,
            COALESCE((
              SELECT jsonb_agg(jsonb_build_object(
-                      'workflow', v.workflow, 'value', v.value::text, 'detail', v.detail)
+                      'workflow', v.workflow, 'persona', v.persona,
+                      'value', v.value::text, 'summary', v.summary,
+                      'steps', v.steps, 'durationMs', v.duration_ms)
                       ORDER BY v.workflow)
              FROM verdicts v WHERE v.run_id = ru.id), '[]'::jsonb) AS verdicts
     FROM runs ru JOIN environments e ON e.id = ru.environment_id

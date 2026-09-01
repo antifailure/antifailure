@@ -323,5 +323,32 @@ export function errorCode(body: unknown): string | null {
 
 export async function dropOrg(admin: postgres.Sql, orgId: string): Promise<void> {
   await admin`DELETE FROM audit_entries WHERE org_id = ${orgId}`
+  // Deliberately not cascaded from organizations, because the deletion record
+  // is the one row that has to outlive the organization it is about. See
+  // migrations/0021. A suite that left them behind would hit the partial unique
+  // index the next time it deleted the same organization.
+  await admin`DELETE FROM organization_deletions WHERE org_id = ${orgId}`
   await admin`DELETE FROM organizations WHERE id = ${orgId}`
+}
+
+/** A signed-in session for somebody who belongs to no organization, which is
+ *  the state an invited person is in when they open the link. */
+export async function signInWithNoOrganization(
+  h: ApiHarness,
+  label = 'invitee',
+): Promise<SignedIn & { email: string }> {
+  const login = `${label}-${randomUUID().slice(0, 6)}`
+  const email = `${login}@example.test`
+  const [user] = await h.admin<{ id: string }[]>`
+    INSERT INTO users (github_id, github_login, email, name)
+    VALUES (${Math.floor(Math.random() * 1e12)}, ${login}, ${email}, ${label})
+    RETURNING id`
+  const issued = await issueSession(h.pool, h.clock, { userId: user!.id, orgId: null })
+  return {
+    userId: user!.id,
+    email,
+    token: issued.token,
+    csrfToken: issued.csrfToken,
+    cookie: `af_session=${issued.token}`,
+  }
 }
