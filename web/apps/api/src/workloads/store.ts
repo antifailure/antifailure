@@ -279,8 +279,8 @@ export interface RunRow extends Record<string, unknown> {
   lease_lost_at: Date | string | null
   /** How many terminal events arrived from an engine that does not hold this
    *  run and were refused, and when the last one was. A number above zero says
-   *  the engine that lost the run is ALIVE and stood down correctly, which is
-   *  what distinguishes it from one that died. */
+   *  the engine that lost the run was still alive at that moment and reached the
+   *  end of its work, which is what distinguishes it from one that died. */
   unheld_reports: number
   unheld_report_at: Date | string | null
 }

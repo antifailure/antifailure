@@ -53,9 +53,23 @@
 //
 // A run with NO holder still accepts a terminal event, and that arm is
 // deliberate rather than lax. Two ordinary things produce it: a run given to an
-// engine by `--run-id` that was never claimed, and the spool race where the
-// terminal event overtakes the claim. Refusing those would abandon runs that
+// engine by `--run-id`, which deliberately declines to claim so that somebody
+// reproducing a hosted run does not take CI's next one, and the spool race where
+// the terminal event overtakes the claim. Refusing those would abandon runs that
 // finished.
+//
+// It cannot destroy a competing report either, and that is an argument rather
+// than a hope. `claimRun` takes a run that is `requested`, or one whose lease
+// has EXPIRED; a run in `accepted` or `running` with a null `lease_expires_at`
+// fails that comparison and is claimable by nobody. So a run with no holder that
+// an engine is working on has no second engine to lose a report to.
+//
+// The one ordering this does not make safe is a run somebody is reproducing by
+// `--run-id` while CI claims the same run. There the holder wins and the person
+// reproducing it is refused, which is the consistent rule and is visible: the
+// event is stored whole, the refusal is counted, and the sentence says which
+// engine holds it. The alternative, last writer wins, is what this whole file is
+// getting away from.
 //
 // A refusal is COUNTED on the row rather than only answered in the response.
 // An engine that stood down and was refused is proof the mechanism worked, and
