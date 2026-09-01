@@ -195,10 +195,10 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 				// machine's worth of other projects' goldens as though `af up`
 				// could use any of them, and for a long time it could.
 				owner := env.Out.S(StyleWarn, "another project")
-				switch {
-				case g.Provenance == mine:
+				switch g.Provenance {
+				case mine:
 					owner = env.Out.S(StyleGood, "this project")
-				case g.Provenance == "":
+				case "":
 					owner = env.Out.S(StyleWarn, "not recorded")
 				}
 				rows = append(rows, []string{
