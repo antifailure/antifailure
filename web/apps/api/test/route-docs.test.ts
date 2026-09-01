@@ -55,6 +55,14 @@ async function registeredRoutes(): Promise<Set<string>> {
     for (const m of text.matchAll(/\bapp\.(?:get|post|put|patch|delete|all)\(\s*'([^']+)'/g)) {
       found.add(m[1]!)
     }
+    // `app.use` with a path mounts a whole family, and the tRPC router is
+    // mounted that way rather than declared route by route. Without this the
+    // scanner never saw /trpc at all, so the backward check could not have
+    // noticed if that family stopped being documented: it was passing on a
+    // route it could not see. A bare '*' is global middleware and not a family.
+    for (const m of text.matchAll(/\bapp\.use\(\s*\n?\s*'([^']+)'/g)) {
+      if (m[1] !== '*') found.add(m[1]!)
+    }
   }
   return found
 }
@@ -184,16 +192,18 @@ function covered(route: string, patterns: string[]): boolean {
   })
 }
 
-// The families reference/api.md does not mention, as of 2026-09-01.
+// Route families reference/api.md does not mention.
 //
-// This is a register of a known gap, not an exemption, and the difference is
-// the second assertion below: an entry that STOPS being missing fails just as
-// loudly as a new one appearing. So it cannot rot into a permanent allowance,
-// and the change that documents these routes is forced to empty this list in
-// the same commit. geo-contract owns the page and is fixing the content; this
-// exists so the gap cannot grow while that lands, and so it cannot be
-// forgotten once it has.
-const KNOWN_UNDOCUMENTED = ['/webhooks/', '/byok/', '/console/api/']
+// EMPTY, and it emptied itself. It held '/webhooks/', '/byok/' and
+// '/console/api/' while the page was another agent's to fix, as a register of a
+// known gap rather than an exemption: the second assertion below fails when an
+// entry STOPS being missing, so the change that documented those eight routes
+// could not land without removing them here in the same commit. That is what
+// happened.
+//
+// Leave it empty. A new family belongs on the page, not in this list, and the
+// only reason to add a row is a gap somebody else is actively closing.
+const KNOWN_UNDOCUMENTED: string[] = []
 
 describe('the HTTP paths the documentation names', () => {
   it('are all paths the server serves', async () => {

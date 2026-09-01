@@ -44,8 +44,11 @@ deployment with a separate hostname, described in
 [Control plane configuration](/docs/reference/control-plane). Self-hosted
 installations serve it wherever they put it.
 
-Everything below is authenticated, apart from the four unauthenticated routes
-at the top.
+Each row says what it accepts as proof of who is calling. The four at the top
+accept nothing, and the two webhook rows accept a signature rather than a
+credential, which is a different thing: nobody signs in to them and anybody can
+reach them, so what protects them is that the body has to have been produced by
+somebody holding the shared secret.
 
 | Path | Authentication | What it is |
 | --- | --- | --- |
@@ -59,6 +62,14 @@ at the top.
 | `POST /v1/pr/report` | that credential | What a job says about the commit it checked. |
 | `POST /webhooks/github`, `POST /webhooks/stripe` | an HMAC over the raw body | Deliveries. Verified before the body is parsed, and each one handled once. |
 | `/auth/*` | varies | GitHub sign in for a browser, and the device flow `af login` uses. |
+| `/console/api/*` | session cookie and a CSRF header | Provider keys for the console. It exists because `/v1/providers` authenticates a Bearer token for `af provider` and a browser holds a cookie, and one endpoint accepting both schemes ends up accepting the weaker one. The header comes from `GET /auth/session`. |
+| `POST /byok/anthropic/v1/messages`, `POST /byok/openai/v1/chat/completions` | an engine token in place of the provider key | The model proxy. Point `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` at `<origin>/byok/<provider>` and the same client library spends against a cap. The token arrives in whichever header that provider's client already sends, `x-api-key` or an `Authorization` bearer. |
+| `POST /webhooks/github` | an HMAC over the raw body | What GitHub delivers to. Verified over the exact bytes received, before anything is parsed. |
+| `POST /webhooks/stripe` | the `stripe-signature` header | What Stripe delivers to, when billing is configured. Also verified over the exact bytes received. |
+
+The two webhook routes are the only ones here that write anything without a
+signed-in caller, which is why the verification happens over the raw body before
+it is parsed rather than after.
 
 The two `/v1/pr` routes are how a pull request check reports its result, and
 they exist so that there is no repository secret to paste. A job asks GitHub
