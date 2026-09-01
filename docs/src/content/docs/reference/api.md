@@ -94,6 +94,31 @@ still recorded and still claimable. A run nobody ever claims ends as
 `abandoned` when its deadline passes, which is the control plane saying it never
 heard rather than a claim about whether the work happened.
 
+The lease is what stops two engines measuring the same run. A heartbeat extends
+it; enough missed heartbeats and it expires, and another engine polling the same
+environment may take the run and carry on with the work. Two rules follow, and
+both exist because getting them wrong loses measurements rather than merely
+confusing a display:
+
+An engine answered `409` by the heartbeat has lost the run and stops. It does
+not send a final event, because the engine that took the run may be running it
+right now, and ending the run from here would refuse that engine's report when
+it arrives. The result document is still written and still uploaded by the job,
+so nothing is lost locally.
+
+The control plane accepts a final event only from the engine holding the run, or
+from any engine while nothing holds it, which is the ordinary case for a run
+started by hand with `--run-id` and for a spooled event that overtook its own
+claim. An event from an engine that has lost the run is stored whole and
+answered with a sentence saying so, and it changes nothing about the run.
+
+An `abandoned` run says which kind of silence it was, because they call for
+different things. Nobody ever claimed it, so look at the dispatch. One engine
+took it and went quiet, so look at that runner. It changed hands and then went
+quiet, so look at the runner that took it. Or it changed hands and the first
+engine was still alive enough to try to end it, in which case the mechanism
+worked and the engine holding the run is the one that said nothing.
+
 Teardown works the same way from the other end. `environments.teardown` writes a
 durable command and dispatches `af down`; whichever route reaches your runtime,
 the engine's own `env.destroyed` event is the acknowledgement, and a teardown
