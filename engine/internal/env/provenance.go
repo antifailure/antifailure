@@ -140,8 +140,9 @@ func (p provenance) digest() string {
 //
 // It describes THIS project's inputs, and it is only ever printed about a
 // golden whose recorded identity is equal to this project's, so the two
-// descriptions are the same description. The pinned path does not get to use
-// it for that reason.
+// descriptions are the same description. The pinned path prints it too. It
+// may, because a pin now requires that same equality: naming a version says
+// which of this project's goldens to use, not that the check is waived.
 func (p provenance) describe() string {
 	parts := make([]string, 0, 3)
 	parts = append(parts, "made for "+p.Project)
