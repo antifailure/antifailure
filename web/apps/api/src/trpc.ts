@@ -58,15 +58,38 @@ export interface Meta {
   permission?: Permission
 }
 
+/** What the client is told when the control plane broke rather than refused.
+ *
+ * Every other tRPC code carries a message somebody wrote for the person
+ * reading it: BAD_REQUEST says which field, FORBIDDEN says which role,
+ * PRECONDITION_FAILED names the variable that is not set. Those are answers
+ * and they travel. INTERNAL_SERVER_ERROR is the one code whose message nobody
+ * wrote, so whatever threw decides what the browser prints.
+ */
+const BROKE_RATHER_THAN_REFUSED =
+  'Something went wrong on the control plane. Nothing was changed, and the reason is in its logs.'
+
 const t = initTRPC.context<Context>().meta<Meta>().create({
   errorFormatter({ shape, error }) {
+    // Both halves of the same rule, and shipping one without the other is how
+    // this got out. The stack was already withheld because it names internal
+    // paths and table names to anyone who can provoke an error. The message
+    // beside it was not, and drizzle writes a query failure as "Failed query:
+    // <the whole statement>" with the bound parameters after it, so a renamed
+    // table put the schema, the join, the WHERE clause and the source
+    // comments inside it onto the console's error card for any signed-in
+    // viewer to read. Withholding the stack and sending that is no control at
+    // all.
+    //
+    // Only this code is replaced. Every other one carries a message written
+    // for the reader, and blanking those would turn "your role cannot see
+    // this" into a shrug.
+    const broke = shape.data.code === 'INTERNAL_SERVER_ERROR'
     return {
       ...shape,
+      message: broke ? BROKE_RATHER_THAN_REFUSED : shape.message,
       data: {
         ...shape.data,
-        // The stack is deliberately not sent. A stack from the control plane
-        // names internal paths and table names to anyone who can provoke an
-        // error, and it helps nobody outside the process.
         stack: undefined,
       },
     }
