@@ -38,8 +38,12 @@ var commandExamples = map[string]string{
 		"af ci\n" +
 		"af ci --report report.json --keep",
 	"af doctor": "af doctor\naf doctor -o json",
-	"af down":   "af down\naf down --branch feature/checkout",
-	"af env":    "af env list",
+	"af start": "" +
+		"# Where you are on the first run, and the one command that moves you on.\n" +
+		"af start\n" +
+		"af start -o json",
+	"af down": "af down\naf down --branch feature/checkout",
+	"af env":  "af env list",
 	"af env list": "" +
 		"af env list\n" +
 		"af env list -o json",

@@ -1720,6 +1720,38 @@ af secret set STRIPE_SECRET_KEY --stdin
 | --- | --- | --- |
 | `--stdin` | `false` | Read the value from stdin rather than prompting. |
 
+### `af start`
+
+Say where you are on the first run, and what to run next.
+
+The first run is a sequence, and a sequence can be interrupted. This reports
+each step of it as observed on this machine right now, and names the one command
+that moves you forward.
+
+It runs nothing and writes nothing. Every answer comes from the machine rather
+than from a record of what this command last did, so closing the laptop,
+switching branches, or tearing an environment down by hand all move the answer
+with you.
+
+Two steps cannot be answered without side effects and are reported as not
+checked, with the reason and the command that does answer them. That is the
+point rather than a gap: a step reported as fine because nothing looked at it is
+how a green run over nothing happens.
+
+Exit 0 means every step is either done or simply not reached yet, which is the
+normal state of a first run in progress. Exit 3 means a step is broken and the
+next command cannot work until it is fixed.
+
+```
+af start
+```
+
+```
+# Where you are on the first run, and the one command that moves you on.
+af start
+af start -o json
+```
+
 ### `af status`
 
 Show what is running for this branch.
