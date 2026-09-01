@@ -223,12 +223,42 @@ func exchangeWorkflowIdentity(
 				"AF_CONTROL_PLANE_TOKEN to an engine token instead", hostOf(target))
 	}
 	if res.StatusCode != http.StatusOK {
-		// The control plane's refusals here are written for the workflow author
-		// and name what to fix, so the reason is worth carrying. The body is
-		// read bounded and the token is never in it on this path, because a
+		// The control plane's answers here are written for the workflow author
+		// and name what to fix, so the sentence is worth carrying whole. The
+		// body is read bounded and no token is in it on this path, because a
 		// non-200 does not carry one.
 		snippet, _ := io.ReadAll(io.LimitReader(res.Body, 2048))
-		if detail := reasonFrom(snippet); detail != "" {
+		detail := reasonFrom(snippet)
+
+		switch {
+		case res.StatusCode == http.StatusForbidden:
+			// Authenticated and not authorised, which is a different thing and
+			// has to read as one. The commonest case is a repository the
+			// control plane has never been told belongs to this organization,
+			// which is a setup step somebody has not done yet rather than a
+			// credential that failed. Framing it as a refused identity sends
+			// them to check a permission that is already correct.
+			if detail != "" {
+				return "", fmt.Errorf(
+					"controlplane: this run is not reported to the control plane yet: %s", detail)
+			}
+			return "", fmt.Errorf(
+				"controlplane: %s has not been told that this repository belongs to your "+
+					"organization, so this run is not reported", hostOf(target))
+
+		case res.StatusCode == http.StatusTooManyRequests:
+			// Said with the wait, because a rate limit with no number is a
+			// reader guessing whether to look at their own workflow.
+			if wait := retryAfter(res, 0); wait > 0 {
+				return "", fmt.Errorf(
+					"controlplane: the identity exchange is rate limited for another %s, "+
+						"so this run is not reported", wait)
+			}
+			return "", fmt.Errorf(
+				"controlplane: the identity exchange is rate limited, so this run is not reported")
+		}
+
+		if detail != "" {
 			return "", fmt.Errorf("controlplane: this job's identity was refused: %s", detail)
 		}
 		return "", fmt.Errorf("controlplane: this job's identity was refused (%d)", res.StatusCode)

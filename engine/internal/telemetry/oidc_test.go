@@ -14,6 +14,7 @@ package telemetry
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,6 +93,8 @@ type hosted struct {
 	acceptOnly string
 	// refuse, when set, is the status the exchange answers with instead.
 	refuse int
+	// retryAfter, when set, is the Retry-After the refusal carries, in seconds.
+	retryAfter int
 
 	exchanges   int
 	identities  []string
@@ -105,13 +108,16 @@ func (h *hosted) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h.mu.Lock()
 		h.exchanges++
 		h.identities = append(h.identities, req.Header.Get("authorization"))
-		issued, refuse := h.issued, h.refuse
+		issued, refuse, retryAfter := h.issued, h.refuse, h.retryAfter
 		if len(h.mintSeq) > 0 {
 			issued = h.mintSeq[min(h.exchanges-1, len(h.mintSeq)-1)]
 		}
 		h.mu.Unlock()
 
 		if refuse != 0 {
+			if retryAfter > 0 {
+				w.Header().Set("Retry-After", fmt.Sprint(retryAfter))
+			}
 			w.WriteHeader(refuse)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": "this job is not connected here"})
 			return
@@ -491,6 +497,49 @@ func TestAControlPlaneWithoutTheExchangeSaysToUpgradeIt(t *testing.T) {
 		"a 404 has to name the cause rather than read as a refusal: %v", run.warned)
 	require.True(t, warnedAbout(run.warned, "AF_CONTROL_PLANE_TOKEN"),
 		"and name the way out: %v", run.warned)
+}
+
+// A repository the control plane does not yet associate with an organization
+// is a setup step nobody has done, not a credential that failed.
+//
+// The identity verified perfectly. What is missing is the control plane knowing
+// that this repository reports for this organization, and telling somebody
+// their identity was refused sends them to check a permission that is already
+// correct. The control plane writes the sentence; the engine's job is not to
+// wrap it in the wrong noun.
+func TestARepositoryTheControlPlaneDoesNotKnowReadsAsSetupNotAuthFailure(t *testing.T) {
+	r := &runner{value: "signed.workflow.identity"}
+	h := &hosted{refuse: http.StatusForbidden}
+
+	run := runOne(t, r, h, map[string]string{
+		identityURLEnv:   "present",
+		identityTokenEnv: "the-runners-request-token",
+	})
+
+	require.Len(t, run.warned, 1, "expected exactly one warning: %v", run.warned)
+	require.NotContains(t, run.warned[0], "refused",
+		"a 403 must not read as a refused identity: %v", run.warned)
+	require.Contains(t, run.warned[0], "not connected here",
+		"and it has to carry the control plane's own sentence: %v", run.warned)
+	require.Len(t, run.log, 1, "the run is unaffected")
+}
+
+// A rate limit says how long, because a limit with no number leaves a reader
+// guessing whether the problem is theirs.
+func TestARateLimitedExchangeSaysHowLongToWait(t *testing.T) {
+	r := &runner{value: "signed.workflow.identity"}
+	h := &hosted{refuse: http.StatusTooManyRequests, retryAfter: 90}
+
+	run := runOne(t, r, h, map[string]string{
+		identityURLEnv:   "present",
+		identityTokenEnv: "the-runners-request-token",
+	})
+
+	require.Len(t, run.warned, 1, "expected exactly one warning: %v", run.warned)
+	require.Contains(t, run.warned[0], "rate limited")
+	require.Contains(t, run.warned[0], "1m30s",
+		"the wait the control plane asked for has to appear: %v", run.warned)
+	require.NotContains(t, run.warned[0], "refused")
 }
 
 // With neither a token nor a runner, nothing is attempted and nothing is said.
