@@ -210,7 +210,7 @@ func TestVerifyDatabase_SaysVerifiedOnTheStream(t *testing.T) {
 	_, _, err := o.maskDatabase(t.Context(), s, url, maskEventsKey(t), maskEventsRules(t), "h1")
 	require.NoError(t, err)
 
-	report, attestation, err := o.verifyDatabase(t.Context(), s, url, "h1")
+	report, attestation, err := o.verifyDatabase(t.Context(), s, url, "h1", "gp1-test")
 	require.NoError(t, err)
 	require.NotEmpty(t, attestation)
 	require.NoError(t, bus.Close())
@@ -241,7 +241,7 @@ func TestVerifyDatabase_ReportsEveryFindingAtErrorLevel(t *testing.T) {
 	sink := events.NewMemorySink(256)
 	bus.AddSink(sink)
 
-	report, _, err := o.verifyDatabase(t.Context(), &session{bus: bus}, url, "h1")
+	report, _, err := o.verifyDatabase(t.Context(), &session{bus: bus}, url, "h1", "gp1-test")
 	require.Error(t, err, "an unmasked database must not verify clean")
 	require.NoError(t, bus.Close())
 

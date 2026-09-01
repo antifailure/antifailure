@@ -676,7 +676,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       // result: a refusal says so, an empty result looks like an empty table.
       for (const column of ['token_hash', 'user_id', 'org_id', '*']) {
         const err = await h.pool
-          .withSweeper(async (db) =>
+          .withSessionSweeper(async (db) =>
             db.execute(sql`SELECT ${sql.raw(column)} FROM sessions LIMIT 1`),
           )
           .then(
@@ -696,7 +696,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     it('holds nothing anywhere else in the database', async () => {
       for (const table of ['users', 'organizations', 'members', 'audit_entries']) {
         const err = await h.pool
-          .withSweeper(async (db) =>
+          .withSessionSweeper(async (db) =>
             db.execute(sql`SELECT count(*) FROM ${sql.raw(table)}`),
           )
           .then(
@@ -709,7 +709,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     })
 
     it('sees expired rows and no live one', async () => {
-      const rows = await h.pool.withSweeper(async (db) =>
+      const rows = await h.pool.withSessionSweeper(async (db) =>
         db.execute<{ live: string; dead: string }>(sql`
           SELECT count(*) FILTER (WHERE expires_at > now()) AS live,
                  count(*) FILTER (WHERE expires_at <= now()) AS dead
@@ -723,7 +723,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     })
 
     it('deletes expired rows across every tenant, including the org-less one', async () => {
-      const deleted = await h.pool.withSweeper(async (db) =>
+      const deleted = await h.pool.withSessionSweeper(async (db) =>
         db.execute<{ n: string }>(sql`
           WITH gone AS (
             DELETE FROM sessions WHERE expires_at <= now() RETURNING 1
@@ -759,7 +759,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       // SET LOCAL, for the same reason every setting in client.ts is local: a
       // pooled connection returned still acting as the sweeper is read by
       // whoever borrows it next.
-      await h.pool.withSweeper(async (db) => db.execute(sql`SELECT 1`))
+      await h.pool.withSessionSweeper(async (db) => db.execute(sql`SELECT 1`))
       const rows = await h.pool.withTenant(
         { orgId: alice.orgId, userId: alice.userId },
         async (db) => db.execute<{ who: string }>(sql`SELECT current_user AS who`),

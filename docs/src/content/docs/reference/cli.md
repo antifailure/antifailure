@@ -115,7 +115,9 @@ af ci [flags]
 ```
 # What CI runs: up, migrate, test, load, gate, report, down.
 af ci
-af ci --report report.json --keep
+# --report is Markdown for a person, --report-json is the same run
+# for a program.
+af ci --report report.md --report-json report.json --keep
 ```
 
 | Flag | Default | What it does |
@@ -126,6 +128,7 @@ af ci --report report.json --keep
 | `--keep` | `false` | Leave the environment up, for debugging a failure. |
 | `--load` | `false` | Generate load as well as running the workflows. |
 | `--report` | - | Write the report here as well as to the terminal. |
+| `--report-json` | - | Write the same report here as JSON, for a program to read. |
 | `--runner` | - | Path to the runner's entry point. |
 | `--save-baseline` | - | Save this run's queries and plans, to compare a later branch against. |
 | `--timeout` | `30m0s` | Give up after this long. |

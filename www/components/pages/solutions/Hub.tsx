@@ -1,4 +1,4 @@
-import { PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
+import { PageHero, PageSection, PageShell } from "@/components/pages/kit";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { AFTER_HEADING, DirectoryList, Metrics, SectionHeading } from "./visuals";
 
@@ -55,20 +55,13 @@ export function SolutionsHubPage() {
         </p>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <SectionHeading title="<strong>Teams.</strong> Postgres, frequent deploys, and a platform engineer who owns reliability." />
         <div className={AFTER_HEADING}>
           <DirectoryList items={TEAMS} />
         </div>
       </PageSection>
 
-      <RelatedGrid
-        items={[
-          { href: "/signup", title: "Request access", description: "Invitation only. Join the list if you have not been invited." },
-          { href: "/product/migrations", title: "Migration Safety", description: "The failure mode these teams feel first." },
-          { href: "/product", title: "Product", description: "How a twin run actually decides." },
-        ]}
-      />
     </PageShell>
   );
 }

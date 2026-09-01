@@ -6,7 +6,7 @@ import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { Container } from "@/components/layout/Container";
 import { SiteLayout } from "@/components/layout/SiteLayout";
 import { SectionLabel } from "@/components/layout/SectionLabel";
-import { Cta } from "@/components/home/Cta";
+import { CopyCodeButton } from "@/components/home/media/CopyCodeButton";
 import { cn } from "@/lib/cn";
 
 /**
@@ -36,8 +36,51 @@ export function PageShell({ children }: { children: ReactNode }) {
   return (
     <SiteLayout overlay={false}>
       {children}
-      <Cta />
+      <PagesClose />
     </SiteLayout>
+  );
+}
+
+/**
+ * Closing band on every page that is not the homepage.
+ *
+ * The homepage keeps the cinematic aurora panel. Inner pages were inheriting
+ * that same tall photo, which sat as a green wash under product and solutions
+ * copy that otherwise lives on cream. This is the same words and the same
+ * buttons, set as a split like the rest of those pages.
+ */
+function PagesClose() {
+  return (
+    <section className="border-t border-black/12 bg-[#f7f7f5] safe-paddings">
+      <Container size="1600" className="py-24 max-xl:py-20 max-md:py-14">
+        <div className="grid grid-cols-2 items-end gap-x-16 gap-y-12 max-xl:grid-cols-1">
+          <div className="min-w-0">
+            <SectionLabel>Next</SectionLabel>
+            <h2 className="mt-5 text-[48px] font-normal leading-dense tracking-tighter text-pretty text-gray-new-40 max-xl:text-[40px] max-lg:text-[28px] max-md:text-[24px]">
+              <span className="text-black">Know what happens</span> before you deploy.
+            </h2>
+            <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
+              Create a disposable production twin for every risky change. Catch migration failures
+              before they reach customers.
+            </p>
+          </div>
+          <div className="flex min-w-0 flex-col items-start gap-4 max-lg:w-full">
+            <div className="flex gap-x-5 max-sm:w-full max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
+              <Button href="/signup" theme="filled">
+                Request access
+              </Button>
+              <Button href="/docs" theme="outlined">
+                Read the docs
+              </Button>
+            </div>
+            <CopyCodeButton
+              variant="white"
+              className="w-auto max-w-full border border-black/12 bg-white px-4 hover:bg-[#f7f7f5] max-xl:w-auto max-lg:w-full"
+            />
+          </div>
+        </div>
+      </Container>
+    </section>
   );
 }
 
@@ -75,51 +118,58 @@ export function PageHero({
   actions?: ReactNode | null;
   framed?: boolean;
 }) {
+  const copy = (
+    <>
+      <SectionLabel>{eyebrow}</SectionLabel>
+      <h1
+        className={cn(
+          "mt-5 text-[64px] leading-dense tracking-tighter max-xl:text-[52px] max-lg:text-[44px] max-md:text-[34px] max-sm:text-[32px]",
+          visual ? "max-w-none" : "max-w-[1100px] max-xl:max-w-[920px]",
+        )}
+      >
+        {title}
+      </h1>
+      <p className="mt-8 max-w-[640px] text-[20px] leading-snug tracking-extra-tight text-gray-new-40 max-md:text-[17px]">
+        {lead}
+      </p>
+      {actions === null ? null : (
+        <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
+          {actions ?? (
+            <>
+              <Button href="/signup" theme="filled">
+                Request access
+              </Button>
+              <Button href="/docs" theme="outlined">
+                Read the docs
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  const figure = visual ? (
+    framed ? (
+      <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">{visual}</div>
+    ) : (
+      visual
+    )
+  ) : null;
+
   return (
     <section className="pt-28 pb-16 safe-paddings max-lg:pt-16 max-md:pt-12 max-md:pb-10">
       <Container size="1600">
         {path ? <PageJsonLd path={path} /> : null}
         {path ? <Breadcrumbs path={path} /> : null}
-        <SectionLabel>{eyebrow}</SectionLabel>
-        <h1 className="mt-5 max-w-[1100px] text-[64px] leading-dense tracking-tighter max-xl:max-w-[920px] max-xl:text-[52px] max-lg:text-[44px] max-md:text-[34px] max-sm:text-[32px]">
-          {title}
-        </h1>
-        <p className="mt-8 max-w-[640px] text-[20px] leading-snug tracking-extra-tight text-gray-new-40 max-md:text-[17px]">
-          {lead}
-        </p>
-        {actions === null ? null : (
-          <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
-            {actions ?? (
-              <>
-                <Button href="/signup" theme="filled">
-                  Request access
-                </Button>
-                <Button href="/docs" theme="outlined">
-                  Read the docs
-                </Button>
-              </>
-            )}
+        {figure ? (
+          <div className="grid grid-cols-2 items-start gap-x-16 gap-y-12 max-xl:grid-cols-1">
+            <div className="min-w-0">{copy}</div>
+            <div className="min-w-0 max-w-[560px]">{figure}</div>
           </div>
+        ) : (
+          copy
         )}
-        {visual ? (
-          framed ? (
-            <div className="relative mt-16 max-md:mt-12">
-              <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white md:max-xl:overflow-visible">
-                {visual}
-              </div>
-              <div
-                className="pointer-events-none absolute inset-0 rounded-[12px] max-xl:hidden"
-                style={{
-                  background:
-                    "linear-gradient(to right, transparent 72%, #f7f7f5 100%), linear-gradient(to bottom, transparent 78%, #f7f7f5 100%)",
-                }}
-                aria-hidden
-              />
-            </div>
-          ) : (
-            <div className="mt-16 max-md:mt-12">{visual}</div>
-          )
-        ) : null}
       </Container>
     </section>
   );
@@ -132,15 +182,28 @@ export function PageSection({
 }: {
   children: ReactNode;
   className?: string;
-  tone?: "plain" | "sage" | "white";
+  /**
+   * Named for what the band paints, not for a colour it stopped painting.
+   *
+   * These were "sage" and "white". This branch takes the sage out of the
+   * inner pages, so "sage" was emitting bg-white and "white" was emitting no
+   * background at all and inheriting the page's #f7f7f5. Both names were then
+   * wrong, and inverted with respect to each other, across forty call sites.
+   *
+   * plain: the page ground, no rule above it.
+   * panel: a raised white band with a rule above it and more air.
+   * ruled: the page ground with a rule above it.
+   */
+  tone?: "plain" | "panel" | "ruled";
 }) {
   return (
     <section
       className={cn(
         "safe-paddings",
         tone === "plain" && "py-28 max-xl:py-20 max-md:py-14",
-        tone === "sage" && "bg-sage py-32 max-xl:py-24 max-md:py-16",
-        tone === "white" && "border-t border-black/12 py-28 max-xl:py-20 max-md:py-14",
+        tone === "panel" &&
+          "border-t border-black/12 bg-white py-32 max-xl:py-24 max-md:py-16",
+        tone === "ruled" && "border-t border-black/12 py-28 max-xl:py-20 max-md:py-14",
         className,
       )}
     >
@@ -209,12 +272,12 @@ export function Split({
   return (
     <div
       className={cn(
-        "grid grid-cols-2 items-center gap-x-16 gap-y-10 max-xl:grid-cols-1",
+        "grid grid-cols-2 items-start gap-x-16 gap-y-12 max-xl:grid-cols-1",
         reverse && "[&>*:first-child]:max-xl:order-2",
       )}
     >
       <div className={cn("min-w-0", reverse && "xl:order-2")}>{children}</div>
-      <div className="min-w-0">{visual}</div>
+      <div className="min-w-0 max-w-[560px]">{visual}</div>
     </div>
   );
 }

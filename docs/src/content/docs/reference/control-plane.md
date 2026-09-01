@@ -35,6 +35,7 @@ is a process that fails in production rather than at deploy time.
 | `AF_GITHUB_APP_ID` | unset | The numeric App ID from the GitHub App's settings page. Needed together with the private key and the webhook secret; setting some and not others stops the process at startup rather than producing a half-working App. |
 | `AF_GITHUB_APP_PRIVATE_KEY` | unset | The PEM GitHub generated when the App's private key was created, or that PEM base64 encoded. Literal `\n` sequences are turned back into newlines, because most ways of getting a multi-line value into a container flatten it, and the resulting key fails with a message about DECODER routines that sends you somewhere else entirely. |
 | `AF_GITHUB_APP_WEBHOOK_SECRET` | unset | The webhook secret set on the App. Every delivery is verified against it before its body is parsed. Unset means `/webhooks/github` answers 503 rather than accepting unsigned deliveries. |
+| `AF_GITHUB_APP_INSTALL_URL` | unset | The public `https://github.com/apps/<slug>/installations/new` address. When it is set, a person who signs in without an organization gets an **Install the GitHub App** action instead of a dead-end empty state. Any other origin or path stops the process at startup. |
 | `AF_GITHUB_API_BASE` | `https://api.github.com` | Where the GitHub API lives. For GitHub Enterprise Server, and for tests. |
 | `AF_MODEL_PRICES` | unset | What a model costs, as `model=input/output` in US dollars per million tokens, comma separated: `claude-sonnet-5=3/15,gpt-4.1=2/8`. Adds to the built-in defaults rather than replacing them. A model with no price is **refused** rather than charged nothing, because a request that spends money and adds nothing to the total is a spend cap that does not cap spending. A malformed entry stops the process at startup rather than being skipped, since a skipped entry is a model silently falling back to another price. |
 | `AF_PROVIDER_KEY_SECRET` | unset | 32 bytes of base64, the secret that seals customers' Anthropic and OpenAI keys. Generate one with `openssl rand -base64 32`. Unset means keys cannot be stored at all: saving one is refused rather than written in the clear. It must not live in the same place as the database, or a database dump carries both halves. Anything other than 32 bytes stops the process at startup rather than failing later on the one action the feature exists for. |
@@ -43,6 +44,7 @@ is a process that fails in production rather than at deploy time.
 | `AF_STRIPE_PRICE_TEAM` | unset | The Stripe price the `team` plan is sold at. A subscription for a price that is not named here is recorded and does **not** change the plan: somebody who bought through a link nobody configured has paid, and entitling them to the free plan would take away capacity they just bought. |
 | `AF_STRIPE_PRICE_ENTERPRISE` | unset | The Stripe price the `enterprise` plan is sold at. |
 | `AF_STRIPE_API_BASE` | `https://api.stripe.com` | Where the Stripe API lives. For tests, which point it at the engine's own Stripe mock pack, and for nothing else. |
+| `AF_HOSTED_REQUIRED_PLAN` | unset | Set to `enterprise` on a hosted control plane that is sold only to enterprise organizations. Authentication, sign-out and billing remain reachable; browser procedures, CLI provider operations, model proxy requests and engine ingestion are refused until Stripe grants the enterprise plan. Any other value stops the process. Setting this while billing is off also stops the process, because otherwise no customer could satisfy the gate. Leave it unset when self-hosting. |
 | `AF_CONSOLE_DIR` | `/app/console-out` | Where the console's build is. The published image carries it at the default and nothing needs setting. Point it elsewhere only if you build `console/` yourself. A directory that is not there is not fatal: the API serves normally, the start-up log says the console is missing, and every page answers with that sentence rather than a blank 404 that reads like a routing bug. |
 
 ## Set on the engine, not here
@@ -73,6 +75,21 @@ to any account added to the allowlist before it is invited anywhere.
 
 Both are needed. The allowlist is a closed door; the installation check is what
 makes an open one safe.
+
+When sign-ups are open and `AF_GITHUB_APP_INSTALL_URL` is set, a new customer
+can complete the whole path without an operator: sign in with GitHub, install
+the App on an organization, then choose **Check my GitHub membership**. The
+second OAuth exchange reads the installation GitHub just created and grants the
+membership. The first GitHub administrator to claim an empty organization
+becomes its owner under the rule below.
+
+On an enterprise-only hosted deployment that owner lands on Plan. Checkout is
+the only path that can grant the required plan; `billing.set` is refused, so an
+owner cannot turn a free organization into an enterprise one without Stripe.
+The signed subscription webhook changes the plan. **Refresh from Stripe** asks
+Stripe for every subscription belonging to that customer and repairs the same
+state when a webhook never arrives, including the case where no local
+subscription row exists yet.
 
 ## What role somebody gets
 

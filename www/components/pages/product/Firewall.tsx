@@ -1,136 +1,6 @@
-import {
-  Callout,
-  PageHeading,
-  PageHero,
-  PageSection,
-  PageShell,
-  RelatedGrid,
-  Split,
-} from "@/components/pages/kit";
+import { Callout, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
-import { FailClosedScene } from "@/components/home/visuals/FailClosedScene";
-import {
-  Hairline,
-  MonoLabel,
-  Panel,
-  QueueChip,
-  Receipt,
-  StatusPill,
-} from "@/components/home/visuals/primitives";
-
-type LedgerTone = "PASS" | "FAIL";
-
-type LedgerEntry = {
-  method: string;
-  dest: string;
-  action: string;
-  receipt: string;
-  tone: LedgerTone;
-  bypass?: boolean;
-};
-
-const LEDGER: LedgerEntry[] = [
-  {
-    method: "POST",
-    dest: "api.stripe.com/v1/charges",
-    action: "mock",
-    receipt: "ch_sim_08f2",
-    tone: "PASS",
-  },
-  {
-    method: "POST",
-    dest: "api.sendgrid.com/v3/mail/send",
-    action: "capture",
-    receipt: "msg_sim_2a91",
-    tone: "PASS",
-  },
-  {
-    method: "POST",
-    dest: "hooks.slack.com/services/T0/B0",
-    action: "capture",
-    receipt: "req_sim_91c0",
-    tone: "PASS",
-  },
-  {
-    method: "POST",
-    dest: "api.openai.com/v1/chat/completions",
-    action: "mock",
-    receipt: "mock_5b12",
-    tone: "PASS",
-  },
-  {
-    method: "GET",
-    dest: "api.prod.internal/v1/health",
-    action: "production-host",
-    receipt: "deny_01",
-    tone: "FAIL",
-  },
-  {
-    // Was `TCP 18.4.2.9:443 DENY deny_02`, a direct-IP attempt drawn as a row
-    // in the decision log. A direct-IP connection never reaches the gateway:
-    // the twin has no route to a public address, so the packet fails at the
-    // network and there is nothing to write a row about. It is blocked harder
-    // than a ledger row implies and it is not logged. A CONNECT to an unlisted
-    // name does reach the gateway, is refused there, and is what this row is.
-    method: "CONNECT",
-    dest: "example.com:443",
-    action: "DENY",
-    receipt: "deny_02",
-    tone: "FAIL",
-    bypass: true,
-  },
-];
-
-const FEATURED = [
-  {
-    provider: "Stripe",
-    op: "POST /v1/charges",
-    body: "Answered from the stateful pack that ships with the engine. Clone-local, not live.",
-    tone: "PASS" as const,
-    chip: "mock",
-    receipt: (
-      <>
-        ch_sim_08f2
-        <br />
-        $49.00 · cus_sim_11
-        <br />
-        clone-local · not live
-      </>
-    ),
-  },
-  {
-    provider: "SendGrid",
-    op: "POST /v3/mail/send",
-    body: "Render and capture. Never deliver.",
-    tone: "PASS" as const,
-    chip: "capture",
-    receipt: (
-      <>
-        MIME · captured copy
-        <br />
-        Subject: Order #4182
-        <br />
-        NEVER DELIVERED
-      </>
-    ),
-  },
-  {
-    provider: "Unknown host",
-    op: "CONNECT example.com:443",
-    body: "No rule names it, and the default is block. Refused at the gateway with a row in the log.",
-    tone: "FAIL" as const,
-    chip: "DENY",
-    receipt: (
-      <>
-        deny_02
-        <br />
-        no rule matches · default block
-        <br />
-        fail closed
-      </>
-    ),
-  },
-] as const;
+import { PFW01, PFW02, PFW03, PFW04, PFW05, PFW06 } from "@/components/pages/figures/product";
 
 const CONTROLS = [
   { title: "No default egress", body: "There is no default public internet route from the twin." },
@@ -148,86 +18,27 @@ export function FirewallPage() {
         title="The twin cannot act on the real world."
         lead="No default public egress. Clone-local DNS. A stateful Stripe that answers offline, mail rendered and captured rather than sent. Unknown destinations are denied and written to the attempted-effect ledger."
         framed={false}
-        visual={<FailClosedScene />}
+        visual={<PFW01 />}
       />
 
       <PageSection>
-        <PageHeading
-          kicker="Attempted-effect ledger"
-          title="<strong>Every outbound attempt is recorded, including the denials.</strong> Six per-host modes, from refusing outright to answering from an offline pack. Never a live processor."
-        />
-        <ul className="mt-14 grid grid-cols-3 gap-5 max-xl:grid-cols-1">
-          {FEATURED.map((item) => (
-            <li key={item.provider}>
-              <Panel className="flex h-full flex-col rounded-[12px] bg-white p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <MonoLabel tone="reader">{item.provider}</MonoLabel>
-                  <StatusPill tone={item.tone}>{item.tone}</StatusPill>
-                </div>
-                <div className="mt-4 font-mono text-[13px] tracking-extra-tight text-black">{item.op}</div>
-                <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">{item.body}</p>
-                <div className="mt-5 flex flex-wrap items-center gap-2">
-                  <QueueChip blocked={item.tone === "FAIL"}>{item.chip}</QueueChip>
-                </div>
-                <div className="mt-auto pt-5">
-                  <Receipt>{item.receipt}</Receipt>
-                </div>
-              </Panel>
-            </li>
-          ))}
+        <Split visual={<PFW05 />}>
+          <PageHeading
+            kicker="Attempted-effect ledger"
+            title="<strong>Every outbound attempt is recorded, including the denials.</strong> Six per-host modes, from refusing outright to answering from an offline pack. Never a live processor."
+          />
+        </Split>
+        <ul className="mt-14 grid grid-cols-3 gap-x-16 gap-y-12 max-xl:grid-cols-1">
+          <li>
+            <PFW02 />
+          </li>
+          <li>
+            <PFW03 />
+          </li>
+          <li>
+            <PFW04 />
+          </li>
         </ul>
-
-        <Panel className="mt-8 flex flex-col rounded-[12px] bg-white">
-          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 px-5 py-3">
-            <MonoLabel>ATTEMPTED-EFFECT LEDGER</MonoLabel>
-            <div className="flex flex-wrap items-center gap-5 font-mono text-[11px] tabular-nums tracking-extra-tight text-black/55">
-              <span>
-                rows <span className="text-black">{LEDGER.length}</span>
-              </span>
-              <span>
-                escaped <span className="text-[#285D49]">0</span>
-              </span>
-              <span>
-                critical <span className="text-red-700">2</span>
-              </span>
-              <StatusPill tone="PASS">FAIL CLOSED</StatusPill>
-            </div>
-          </div>
-          <Hairline />
-          <ul>
-            {LEDGER.map((row) => (
-              <li
-                key={row.receipt}
-                className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-black/[0.08] px-5 py-3 last:border-b-0"
-              >
-                {/* w-16 rather than w-10, because CONNECT is seven characters
-                    and overflowed a forty pixel column into the destination
-                    beside it. */}
-                <span className="w-16 shrink-0 font-mono text-[10px] tracking-extra-tight text-black/55">
-                  {row.method}
-                </span>
-                {/* basis-[180px] so the destination takes a line of its own
-                    rather than being squeezed to nothing between the fixed
-                    columns, which is what it did on a phone: the row wraps
-                    instead. truncate is the backstop for a destination longer
-                    than a narrow line. */}
-                <span className="min-w-0 flex-1 basis-[180px] truncate font-mono text-[12px] tracking-extra-tight text-black">
-                  {row.dest}
-                </span>
-                <QueueChip blocked={row.bypass}>{row.action}</QueueChip>
-                <StatusPill tone={row.tone}>{row.tone}</StatusPill>
-                <span className="w-[88px] shrink-0 text-right font-mono text-[10px] tracking-extra-tight text-black/60">
-                  {row.receipt}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <Hairline />
-          <div className="flex flex-wrap items-center gap-2 px-5 py-3">
-            <QueueChip>duplicate would have been live.</QueueChip>
-            <QueueChip blocked>unknown destination · denied inside the twin</QueueChip>
-          </div>
-        </Panel>
         <Illustrative>
           Six rows chosen to show mocked calls, captured messages and denials. The hosts, the modes
           and the decision log are real:{" "}
@@ -241,43 +52,8 @@ export function FirewallPage() {
         </Illustrative>
       </PageSection>
 
-      <PageSection tone="white">
-        <Split
-          visual={
-            <Panel className="flex flex-col rounded-[12px] bg-white">
-              <div className="flex items-center justify-between gap-3 px-5 py-3">
-                <MonoLabel>BYPASS BLOCKED</MonoLabel>
-                <StatusPill tone="FAIL">DENY</StatusPill>
-              </div>
-              <Hairline />
-              <div className="px-5 py-5">
-                <div className="font-mono text-[13px] tracking-extra-tight text-black">TCP 18.4.2.9:443</div>
-                <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">
-                  Direct-IP skip of clone-local DNS. There is no route out of the twin to a public
-                  address, so the connection does not fail a rule, it fails at the network.
-                </p>
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <QueueChip blocked>ip-bypass</QueueChip>
-                  <QueueChip blocked>unknown TCP</QueueChip>
-                  <QueueChip>no default public egress</QueueChip>
-                </div>
-                {/* Not a ledger row. The decision log records what the
-                    gateway decided, and this connection never got to it. What
-                    the caller sees is the syscall failing, and what proves it
-                    is the conformance behaviour rather than a receipt. */}
-                <Receipt className="mt-5 bg-white">
-                  connect ENETUNREACH
-                  <br />
-                  dest: 18.4.2.9:443
-                  <br />
-                  no route · not a rule that can be edited
-                  <br />
-                  Egress_CannotBeBypassedByAddress
-                </Receipt>
-              </div>
-            </Panel>
-          }
-        >
+      <PageSection tone="ruled">
+        <Split visual={<PFW06 />}>
           <PageHeading title="<strong>Containment is not a rule you can edit.</strong> A direct-IP attempt does not get out." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Clone-local DNS is not enough if the twin dials an address. The gateway matches domain, IP,
@@ -298,16 +74,20 @@ export function FirewallPage() {
         </Split>
       </PageSection>
 
-      <PageSection tone="sage">
-        <PageHeading title="<strong>Charging a live processor is an existential failure.</strong> Not a warning. Not a retry." />
-        <div className="mt-10 max-w-[720px]">
-          <Callout label="Existential failure" tone="block">
-            Charging cards, emailing users, or invoking production webhooks from a twin is a failed
-            containment model. Read-only forwarding exists only for explicitly approved endpoints. Request
-            and response redaction is mandatory. The ledger is the proof.
-          </Callout>
-        </div>
+      <PageSection tone="panel">
+        <Split
+          visual={
+            <Callout label="Existential failure" tone="block">
+              Charging cards, emailing users, or invoking production webhooks from a twin is a failed
+              containment model. Read-only forwarding exists only for explicitly approved endpoints. Request
+              and response redaction is mandatory. The ledger is the proof.
+            </Callout>
+          }
+        >
+          <PageHeading title="<strong>Charging a live processor is an existential failure.</strong> Not a warning. Not a retry." />
+        </Split>
       </PageSection>
+
 
       <RelatedGrid
         items={[

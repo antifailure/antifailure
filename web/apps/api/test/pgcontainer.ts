@@ -118,6 +118,28 @@ export function url(): string {
 }
 
 /**
+ * A token unique to this process, put in the name of every database this run
+ * creates so that the cleanup can find its own and nothing else.
+ *
+ * The container above is reused when it is already running, which is right
+ * when one person runs one suite at a time and wrong the moment two runs
+ * overlap, because they share a CLUSTER. The sweep used to drop every `af_dr_`
+ * database on it with `WITH (FORCE)`, and FORCE means terminate whoever is
+ * connected. So a run finishing would reach into a run still going, kill its
+ * connections and delete the database it was restoring into. What came back
+ * was an ECONNRESET halfway through a restore, or a missing database, or a
+ * stall, none of which name the cause and all of which read as a defect in the
+ * backup code.
+ *
+ * The container is now per checkout rather than per machine, which is the
+ * other half and is argued at the top of this file. That leaves the overlap
+ * this token is for: the same checkout running the suite twice at once, whose
+ * two processes do share a cluster and cannot be told apart by anything but
+ * the names they create.
+ */
+export const RUN = `${process.pid.toString(36)}${Date.now().toString(36).slice(-4)}`
+
+/**
  * The Postgres major this machine has a client for.
  *
  * The suite starts a server matching the newest pg_dump it can find rather than
@@ -247,13 +269,21 @@ export async function start(): Promise<boolean> {
   throw new Error(`${CONTAINER} did not accept a connection within two minutes:\n${logs}`)
 }
 
-/** Removes every database this suite made, by name prefix.
+/**
+ * Removes databases by name prefix.
  *
- *  This drops with FORCE, which disconnects whoever is using the database, and
- *  on the machine-wide container it took other runs' restore targets while they
- *  were restoring into them. It is safe now because the cluster belongs to this
- *  checkout, and the guard below is what makes that a fact rather than an
- *  assumption: without a resolved URL there is nothing to fall back to. */
+ * This drops with FORCE, which disconnects whoever is using the database, and
+ * on the machine-wide container it took other runs' restore targets while they
+ * were restoring into them. Two things stop that now, and both are needed.
+ *
+ * The cluster belongs to this checkout, and the guard in url() is what makes
+ * that a fact rather than an assumption: without a resolved URL there is
+ * nothing to fall back to. That settles other CHECKOUTS.
+ *
+ * Callers still pass a prefix carrying RUN, because one checkout can run this
+ * suite twice at once and a bare `af_dr_` would take the other process's
+ * databases with it: see RUN.
+ */
 export async function dropDatabasesNamed(prefix: string): Promise<void> {
   const admin = postgres(url(), { max: 1, connect_timeout: 30, onnotice: () => {} })
   try {

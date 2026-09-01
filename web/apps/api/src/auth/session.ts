@@ -110,6 +110,7 @@ export interface ResolvedSession {
   orgSlug: string | null
   label: string
   role: Role | null
+  plan: string | null
   /** What a mutating request must present, derived from the token the caller
    *  already holds. */
   csrfToken: string
@@ -197,7 +198,7 @@ export async function resolveSession(
   )
 
   if (!base) return null
-  if (!base.orgId) return { ...base, orgSlug: null, role: null }
+  if (!base.orgId) return { ...base, orgSlug: null, role: null, plan: null }
 
   // Read on every request rather than carried in the session. Removing
   // somebody from an organization has to take effect on their next request,
@@ -207,15 +208,19 @@ export async function resolveSession(
   // read on every single request and a second query for a label is a second
   // query on every page of the application.
   const scoped = await pool.withTenant({ orgId: base.orgId, userId: base.userId }, async (db) => {
-    const rows = await db.execute<{ role: Role | null; slug: string | null }>(sql`
-      SELECT m.role, o.slug
+    const rows = await db.execute<{ role: Role | null; slug: string | null; plan: string }>(sql`
+      SELECT m.role, o.slug, o.plan
       FROM organizations o
       LEFT JOIN members m ON m.org_id = o.id AND m.user_id = ${base.userId}
       WHERE o.id = ${base.orgId}`)
-    return { role: rows[0]?.role ?? null, slug: rows[0]?.slug ?? null }
+    return {
+      role: rows[0]?.role ?? null,
+      slug: rows[0]?.slug ?? null,
+      plan: rows[0]?.plan ?? null,
+    }
   })
 
-  return { ...base, role: scoped.role, orgSlug: scoped.slug }
+  return { ...base, role: scoped.role, orgSlug: scoped.slug, plan: scoped.plan }
 }
 
 export async function revokeSession(pool: Pool, token: string): Promise<void> {
@@ -237,19 +242,20 @@ export async function revokeSession(pool: Pool, token: string): Promise<void> {
  * sweeper has none of the three, so the DELETE matched no row and reported
  * success. A statement that matches nothing does not raise.
  *
- * withSweeper enters a role of its own for the length of this transaction. The
- * policy admitting that role restricts it to rows already expired by the
- * DATABASE's clock, and the WHERE below restricts it to rows expired by the
- * APPLICATION's. A row has to be past both to be deleted, so the cutoff passed
- * from here can only ever narrow what is removed, never widen it: this cannot
- * reach a live session even if the clock it is given is wrong.
+ * withSessionSweeper enters a role of its own for the length of this
+ * transaction. The policy admitting that role restricts it to rows already
+ * expired by the DATABASE's clock, and the WHERE below restricts it to rows
+ * expired by the APPLICATION's. A row has to be past both to be deleted, so
+ * the cutoff passed from here can only ever narrow what is removed, never
+ * widen it: this cannot reach a live session even if the clock it is given is
+ * wrong.
  *
  * The count comes from RETURNING a constant rather than a column, because the
  * sweeper is granted SELECT on expires_at and on nothing else. Returning id
  * would be refused, which is the right refusal in the wrong place.
  */
 export async function sweepSessions(pool: Pool, clock: Clock): Promise<number> {
-  return pool.withSweeper(async (db) => {
+  return pool.withSessionSweeper(async (db) => {
     const rows = await db.execute<{ n: string }>(sql`
       WITH gone AS (
         DELETE FROM sessions WHERE expires_at <= ${clock.now().toISOString()} RETURNING 1

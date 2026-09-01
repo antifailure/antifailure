@@ -12,6 +12,7 @@ import {
   RelatedGrid,
   SpecTable,
 } from "@/components/pages/kit";
+import { BACKUP_RECOVERY, LOG_RETENTION } from "@/lib/legal-facts";
 import {
   NOT_ENGAGED,
   SUBPROCESSOR_CHANGES,
@@ -79,6 +80,15 @@ function CounselNotice({ children }: { children: ReactNode }) {
   );
 }
 
+
+/** A published number spelled as a word, at the start of a sentence. The words
+ *  live in legal-facts.ts so a test can hold them to the Terraform that sets
+ *  them, and they are lower case there because most of their uses are mid
+ *  sentence. */
+function cap(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
 export function PrivacyPage() {
   return (
     <PageShell>
@@ -122,7 +132,7 @@ export function PrivacyPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading title="<strong>Sanitization happens where the data already lives.</strong>" />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
@@ -143,15 +153,30 @@ export function PrivacyPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
-        <PageHeading title="<strong>There is no billing, so there are no payment records.</strong>" />
+      <PageSection tone="panel">
+        <PageHeading title="<strong>No card ever reaches this product.</strong>" />
         <Prose className="mt-10">
           <p>
-            No payment processor is connected to any part of this product. No card details, billing
-            addresses, or invoices exist anywhere in it. An organization carries a plan name, which
-            sets its rate limits and quotas, and that is the whole of what a reader might call
-            billing data today. If that changes, the processor will appear on the{" "}
-            <Link href="/subprocessors">subprocessor list</Link> before it processes anything.
+            That part is unconditional and it is architectural rather than a promise: checkout and
+            the billing portal are pages Stripe hosts, so a card is entered on Stripe&rsquo;s own
+            form and never passes through anything here. No card details or billing addresses exist
+            anywhere in this product and none can.
+          </p>
+          <p>
+            What is conditional is everything else. The control plane contains a real Stripe
+            integration, and it is active only where <code>AF_STRIPE_SECRET_KEY</code> and{" "}
+            <code>AF_STRIPE_WEBHOOK_SECRET</code> are set. Where they are, Stripe holds the
+            customer, subscription and invoice records for that deployment and is a processor for
+            it, listed on the <Link href="/subprocessors">subprocessor page</Link>. Where they are
+            not, the billing routes refuse and name the missing variables, and an organization
+            carries nothing but a plan name, which sets its rate limits and quotas. The control
+            plane says which of the two it is on the first line it logs when it starts.
+          </p>
+          <p>
+            This page previously said there was no billing at all. That was true when it was
+            written and stopped being true when the billing work landed, which is the reason the
+            numbers and capabilities on these pages are now checked against the code by a test
+            rather than kept in step by hand.
           </p>
         </Prose>
       </PageSection>
@@ -242,7 +267,7 @@ export function TermsPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading title="<strong>What these terms do not say.</strong>" />
         <Ledger items={NOT_CLAIMED} />
       </PageSection>
@@ -302,7 +327,7 @@ export function DpaPage() {
           enforceable. It must be reviewed before anybody relies on it.
         </CounselNotice>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading kicker="Parties" title="<strong>Who is agreeing, and under which law.</strong>" />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
@@ -359,7 +384,7 @@ export function DpaPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="Security"
           title="<strong>The measures that exist</strong>, described as what the code does rather than as a category."
@@ -397,7 +422,7 @@ export function DpaPage() {
               ],
               [
                 "Recoverability",
-                "Fourteen days of point-in-time recovery on the hosted database. A restore is verified against a manifest taken at backup time and then asked, through the unprivileged role, to refuse a cross-tenant read.",
+                `${cap(BACKUP_RECOVERY.production.words)} days of point-in-time recovery on the production database, with geo-redundant backup storage. Staging keeps ${BACKUP_RECOVERY.staging.words} days in one region. A restore is verified against a manifest taken at backup time and then asked, through the unprivileged role, to refuse a cross-tenant read.`,
               ],
             ]}
           />
@@ -422,7 +447,7 @@ export function DpaPage() {
           </p>
         </Prose>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="Obligations"
           title="<strong>What we would owe you</strong>, and how quickly the honest answer is a range."
@@ -528,7 +553,7 @@ export function SubprocessorsPage() {
           </div>
         ))}
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="Engaged only under a condition"
           title="<strong>Model providers receive nothing unless you give us a key.</strong>"
@@ -560,7 +585,7 @@ export function SubprocessorsPage() {
           </div>
         ))}
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="Not engaged"
           title="<strong>The vendors a reviewer asks about next</strong>, and why each one is absent."
@@ -597,7 +622,7 @@ export function SubprocessorsPage() {
           </p>
         </Prose>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading title="<strong>Change log.</strong>" />
         <ChangeLog entries={SUBPROCESSOR_CHANGES} />
       </PageSection>
@@ -651,7 +676,7 @@ export function ServiceLevelsPage() {
           ]}
         />
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="True anyway"
           title="<strong>The part that survives our outage.</strong> The thing that gates your pull request does not run here."
@@ -679,7 +704,7 @@ export function ServiceLevelsPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="What is deployed"
           title="<strong>A production control plane and a staging one</strong>, and only two people can sign in to either."
@@ -697,7 +722,7 @@ export function ServiceLevelsPage() {
               ],
               [
                 "Backups",
-                "Production is configured for thirty-five days of point-in-time recovery with geo-redundant backup storage, so a region losing its storage does not take the backups with it. Staging keeps fourteen days in one region with geo-redundancy off. A standby is not a backup: a bad migration reaches it instantly.",
+                `Production is configured for ${BACKUP_RECOVERY.production.words} days of point-in-time recovery with geo-redundant backup storage, so a region losing its storage does not take the backups with it. Staging keeps ${BACKUP_RECOVERY.staging.words} days in one region with geo-redundancy off. A standby is not a backup: a bad migration reaches it instantly.`,
               ],
               [
                 "Monitoring",
@@ -792,15 +817,19 @@ export function DataRetentionPage() {
               ],
               [
                 "Model provider keys",
-                "Until you delete them. Deletion is an endpoint you can call, not a request you have to send us.",
+                "Removal is an endpoint you can call, not a request you have to send us, and it stops the key working immediately. It marks the record revoked rather than deleting the row, so the encrypted value remains until the row is removed with the organization. Rotating a key does the same to the one it replaces.",
               ],
               [
                 "Waitlist addresses",
-                "Until the waitlist is closed or you ask for removal. Signing up twice updates one row rather than adding a second.",
+                "Until the waitlist is closed or you ask for removal, which is carried out by hand: nothing in the site reads the list back and there is no removal endpoint. Signing up twice updates one row rather than adding a second. Your browser also keeps a copy of the address you submitted, which clearing site data removes.",
               ],
               [
                 "Database backups",
-                "Fourteen days of point-in-time recovery. A deletion is reflected in every backup only after that window has passed.",
+                `${cap(BACKUP_RECOVERY.production.words)} days of point-in-time recovery on production, ${BACKUP_RECOVERY.staging.words} on staging. A deletion is reflected in every backup only after that window has passed.`,
+              ],
+              [
+                "Operational logs",
+                `${cap(LOG_RETENTION.production.words)} days on production and ${LOG_RETENTION.staging.words} on staging, in Azure Monitor. They hold request paths, status codes and timings, and never a request body, a token or a snapshot.`,
               ],
               [
                 "Masked dumps",
@@ -810,7 +839,7 @@ export function DataRetentionPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="Precision"
           title="<strong>What the event retention actually does</strong>, including the part that is not exact."
@@ -836,7 +865,7 @@ export function DataRetentionPage() {
           ]}
         />
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading kicker="Deletion" title="<strong>How to have data deleted, and what happens then.</strong>" />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
@@ -855,11 +884,15 @@ export function DataRetentionPage() {
               ],
               [
                 "Backups",
-                "A deletion applies to the live database immediately and to backups only as they age out, over the fourteen day recovery window. Restoring a backup within that window restores the deleted rows, and any deletion request is applied again afterwards.",
+                `A deletion applies to the live database immediately and to backups only as they age out, over the ${BACKUP_RECOVERY.production.words} day recovery window on production and ${BACKUP_RECOVERY.staging.words} on staging. Restoring a backup within that window restores the deleted rows, and any deletion request is applied again afterwards.`,
               ],
               [
                 "The audit log",
                 "Entries about an organization are removed with the organization. They are not removed individually, for the chaining reason above.",
+              ],
+              [
+                "A person who asks to be removed",
+                "Their personal fields are erased and the account row is kept. The row is kept by choice, not because the database refuses: the audit log references it with ON DELETE SET NULL and the delete would succeed. What it would also do is set a column that is inside the hash chain to null, so every entry that person ever wrote would stop hashing to its recorded hash and the organization\u2019s audit log would report itself as altered. Erasing the fields removes the personal data; deleting the row would remove the ability to prove nothing else had been changed.",
               ],
             ]}
           />

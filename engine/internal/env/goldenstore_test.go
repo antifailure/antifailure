@@ -88,7 +88,8 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	storeDir := t.TempDir()
 
 	// Machine one. It has the production credential and a subset block.
-	first, firstGoldens, stopFirst := requireOrchestrator(t, "publisher", sourceURL, storeDir)
+	first, firstGoldens, stopFirst := requireOrchestrator(
+		t, storeProject, "publisher", sourceURL, storeDir)
 	defer stopFirst()
 
 	refreshed, err := first.RefreshGolden(ctx)
@@ -116,15 +117,16 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	// Machine two. Same manifest, same store, and NO production credential at
 	// all, which is the point: a runner that cannot reach production is
 	// exactly what this is for.
-	second, secondGoldens, stopSecond := requireOrchestrator(t, "puller", "", storeDir)
+	second, secondGoldens, stopSecond := requireOrchestrator(
+		t, storeProject, "puller", "", storeDir)
 	defer stopSecond()
 
 	// The two machines share this laptop's Docker daemon, so they share its
 	// image store, and pretending otherwise would be a fiction the assertion
 	// then has to work around. What is real and is asserted below is that the
-	// second machine has NO production credential: its manifest has no
-	// source_url_env, so it could not refresh even if it wanted to, and the
-	// only way it can end up with data is through the store.
+	// second machine has NO production credential: PROD_URL is unset in its
+	// environment, so it could not refresh even if it wanted to, and the only
+	// way it can end up with data is through the store.
 	pulled, err := second.PullGolden(ctx, "")
 	secondGoldens.add(pulled.Version)
 	require.NoError(t, err)
@@ -161,6 +163,75 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	require.Equal(t, int64(0), americans, "and it is still a slice rather than everything")
 }
 
+// A shared store does not make one project's golden everybody's.
+//
+// `af golden pull` with no version named takes the newest complete object in
+// the store, and a store is shared by a fleet on purpose. Without a check on
+// whose golden it is, the newest object in a bucket several projects publish
+// to would be restored into whichever project asked, and every later `af up`
+// there would branch it as its own: the same defect as the local one, one
+// layer further out and with the data crossing a machine boundary on the way.
+//
+// The refusal is by name so somebody can act on it, and naming a version
+// explicitly does not get around it, because the check is on the attestation
+// rather than on which version was chosen.
+func TestPull_RefusesAGoldenPublishedByAnotherProject(t *testing.T) {
+	if os.Getenv("AF_SKIP_DOCKER") != "" {
+		t.Skip("skipped: AF_SKIP_DOCKER is set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+
+	sourceURL, stopSource := requireSourceDatabase(t, ctx)
+	defer stopSource()
+	storeDir := t.TempDir()
+
+	publisher, publisherGoldens, stopPublisher := requireOrchestrator(
+		t, storeProject, "publisher", sourceURL, storeDir)
+	defer stopPublisher()
+
+	refreshed, err := publisher.RefreshGolden(ctx)
+	publisherGoldens.add(refreshed.Version)
+	require.NoError(t, err)
+	require.NotEmpty(t, refreshed.Published, "the golden reached the store")
+
+	// A different project, everything else identical: the same store, the same
+	// provider, the same Postgres version, the same declared source variable
+	// and the same subset. Only the manifest name differs, which is the thing
+	// that says whose work this is.
+	stranger, strangerGoldens, stopStranger := requireOrchestrator(
+		t, "some-other-app", "puller", "", storeDir)
+	defer stopStranger()
+
+	pulled, err := stranger.PullGolden(ctx, "")
+	if pulled != nil {
+		strangerGoldens.add(pulled.Version)
+	}
+	require.Error(t, err, "another project's published golden was restored into this one")
+	require.Contains(t, err.Error(), "AF-DB-015")
+
+	// And naming it explicitly is refused for the same reason, so the refusal
+	// is not merely a property of how the newest version is chosen.
+	pulled, err = stranger.PullGolden(ctx, refreshed.Version)
+	if pulled != nil {
+		strangerGoldens.add(pulled.Version)
+	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "AF-DB-015")
+
+	// The counter check, so this test cannot pass by the pull being broken for
+	// everybody: the project that published it can still pull it.
+	owner, ownerGoldens, stopOwner := requireOrchestrator(
+		t, storeProject, "puller", "", storeDir)
+	defer stopOwner()
+	ok, err := owner.PullGolden(ctx, "")
+	if ok != nil {
+		ownerGoldens.add(ok.Version)
+	}
+	require.NoError(t, err, "the project that published this golden must still be able to pull it")
+	require.True(t, ok.Verified)
+}
+
 func TestPull_RefusesAVersionWhosePublishDidNotFinish(t *testing.T) {
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
 		t.Skip("skipped: AF_SKIP_DOCKER is set")
@@ -177,7 +248,7 @@ func TestPull_RefusesAVersionWhosePublishDidNotFinish(t *testing.T) {
 	require.NoError(t, store.Put(ctx, golden.DumpName("gv_halfpublished"), 3,
 		strings.NewReader("abc")))
 
-	o, _, stop := requireOrchestrator(t, "puller", "", storeDir)
+	o, _, stop := requireOrchestrator(t, storeProject, "puller", "", storeDir)
 	defer stop()
 
 	_, err = o.PullGolden(ctx, "gv_halfpublished")
@@ -284,16 +355,46 @@ func replaceDatabase(url, name string) string {
 	return url[:at+1] + rest[:slash+1] + name + suffix
 }
 
+// storeProject is the manifest name both machines in the store test declare.
+//
+// One name, because they are one project: a runner pulling what a laptop
+// published is the same repository checked out somewhere else, and a golden is
+// selected by the project it was made for. The fixture used to give them two
+// names, app-publisher and app-puller, while its own comment said "same
+// manifest", and nothing noticed because selection did not look at the name.
+const storeProject = "app-goldenstore"
+
 // requireOrchestrator builds one machine's engine: its own state directory,
 // its own Docker provider namespace, and a manifest pointing at the store.
+//
+// project and branch are separate parameters because they are separate
+// properties and the difference is the point of the fixture. Two machines of
+// ONE project differ by branch, which a golden's identity ignores, so what one
+// publishes the other may branch. A different project differs by name, which
+// the identity includes, so it may not.
+//
+// sourceURL is the CREDENTIAL and not the declaration. Both machines declare
+// source_url_env: PROD_URL, because both are the same manifest; only the
+// publisher has a value for it. That asymmetry is the whole reason a golden's
+// identity records the variable's NAME rather than the resolved host: a runner
+// that could resolve production would not need the store.
 func requireOrchestrator(
-	t *testing.T, name, sourceURL, storeDir string,
+	t *testing.T, project, branch, sourceURL, storeDir string,
 ) (*Orchestrator, *ownGoldens, func()) {
 	t.Helper()
+	one := 1
 	env := map[string]string{"AF_GOLDEN_STORE": storeDir}
 	db := &schema.Database{
-		Provider: schema.DBDocker,
-		Version:  testPostgresMajor,
+		Provider:     schema.DBDocker,
+		Version:      testPostgresMajor,
+		SourceURLEnv: "PROD_URL",
+		Subset: &schema.Subset{
+			Enabled:          true,
+			SeedTable:        "regions",
+			SeedWhere:        "code = 'eu'",
+			MaxRows:          1000,
+			FollowDependents: &one,
+		},
 		Golden: &schema.Golden{
 			Retain:     3,
 			Storage:    schema.StorageLocal,
@@ -302,21 +403,12 @@ func requireOrchestrator(
 	}
 	if sourceURL != "" {
 		env["PROD_URL"] = sourceURL
-		db.SourceURLEnv = "PROD_URL"
-		one := 1
-		db.Subset = &schema.Subset{
-			Enabled:          true,
-			SeedTable:        "regions",
-			SeedWhere:        "code = 'eu'",
-			MaxRows:          1000,
-			FollowDependents: &one,
-		}
 	}
 
 	o, err := New(Options{
 		Root:     t.TempDir(),
-		Manifest: &schema.Manifest{Name: "app-" + name, Database: db},
-		Branch:   "main",
+		Manifest: &schema.Manifest{Name: project, Database: db},
+		Branch:   branch,
 		Clock:    clock.New(),
 		Getenv:   func(k string) string { return env[k] },
 		Secrets: secrets.NewChain(secrets.NewCISource(func(k string) (string, bool) {
@@ -434,7 +526,7 @@ func TestOrchestratorTeardown_LeavesGoldensItDidNotCreate(t *testing.T) {
 		})
 	}
 
-	o, mine, stop := requireOrchestrator(t, "teardown", "", t.TempDir())
+	o, mine, stop := requireOrchestrator(t, storeProject, "teardown", "", t.TempDir())
 	// Only one of the two is claimed, which is the whole point.
 	mine.add(ours)
 	stop()

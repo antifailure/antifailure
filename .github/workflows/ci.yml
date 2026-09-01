@@ -458,6 +458,15 @@ jobs:
       - run: npm ci --no-audit --no-fund
         working-directory: console
 
+      - name: The console's own unit tests
+        # console/ is not one of web/'s workspaces, so `npm test --workspaces`
+        # never reaches it and a test file added here would be decoration. This
+        # step is what makes it a gate. It runs before the build because it is
+        # seconds against minutes, and a failure here is about the code rather
+        # than about Next.
+        run: npm test
+        working-directory: console
+
       - name: Build the console
         # The control plane serves this build from its own origin, and the
         # image asserts the directory is not empty. Building it here means a

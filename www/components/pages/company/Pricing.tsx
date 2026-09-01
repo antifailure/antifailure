@@ -167,7 +167,7 @@ export function PricingPage() {
           ))}
         </ul>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="Value metrics"
           title="<strong>We meter what the twin actually does.</strong> Not how many agents you named."
