@@ -653,7 +653,7 @@ export const billingEvents = pgTable('billing_events', {
 // ---------------------------------------------------------------------------
 // Analytics
 //
-// A closed stream, deliberately carrying no org_id. See migrations/0024: an
+// A closed stream, deliberately carrying no org_id. See migrations/0025: an
 // org_id would make these tables joinable back to a customer, which is the one
 // property the surrogate exists to remove. They are absent from
 // tenantScopedTables below for that reason and are named in the cross-tenant

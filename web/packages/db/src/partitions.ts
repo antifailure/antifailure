@@ -56,7 +56,7 @@ export const EVENTS: PartitionedTable = {
  *
  * There is no SELECT grant on it, so a read already raises 42501 rather than
  * returning zero rows. This is the second lock: a GRANT added later by somebody
- * who did not read migrations/0024 still cannot open a read.
+ * who did not read migrations/0025 still cannot open a read.
  */
 export const ANALYTICS_EVENTS: PartitionedTable = {
   name: 'analytics_events',
