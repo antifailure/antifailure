@@ -104,6 +104,15 @@ export interface GitHubAccountOptions {
   login: string
 }
 
+/** What a verified delivery declares while it is being claimed and handled. */
+export interface GitHubDeliveryOptions {
+  /** GitHub's x-github-delivery header, which identifies one delivery and is
+   *  stable across GitHub's own retries of it. */
+  deliveryId: string
+  /** The account login the verified payload named, when it named one. */
+  login?: string | null
+}
+
 export interface Pool {
   /** Runs fn inside a transaction scoped to one tenant. */
   withTenant<T>(tenant: Tenant, fn: (db: Db) => Promise<T>, opts?: UnscopedOptions): Promise<T>
@@ -146,6 +155,48 @@ export interface Pool {
    * believable is the HMAC over the raw body, checked before this is called.
    */
   withStripeCustomer<T>(customerId: string, fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn scoped to one GitHub delivery, for claiming and closing it.
+   *
+   * Separate from withGitHubAccount because the claim happens BEFORE the
+   * account is known, and has to happen for a delivery about an account this
+   * installation has never heard of. Such a delivery has no account to key on,
+   * so keying the ledger on the account would mean the one delivery most worth
+   * recording is the one that cannot be recorded.
+   *
+   * The account is declared as well when the payload named one, so the same
+   * transaction can write the delivery's own row and the rows it is about.
+   */
+  withGitHubDelivery<T>(
+    delivery: GitHubDeliveryOptions,
+    fn: (db: Db) => Promise<T>,
+  ): Promise<T>
+  /**
+   * Runs fn scoped to one pull request generation, for the job reporting back.
+   *
+   * A job in the customer's CI has no session and no tenant. What it holds is
+   * a credential this control plane issued for exactly one generation, and the
+   * policy in 0021 lets the connection reach the row whose stored hash matches
+   * the one declared here. So a leaked callback is good for one commit's
+   * result until it expires, rather than for the table.
+   */
+  withPullRequestCallback<T>(hash: Buffer, fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn as this process's own housekeeping, for the sweepers.
+   *
+   * A sweeper has no tenant, and on a connection with none every policy in this
+   * schema denies, so a DELETE or an UPDATE matches nothing and reports
+   * success. Migration 0016 exists because sweepDeviceAuthorizations did
+   * exactly that for the life of the process.
+   *
+   * What this declares is not a credential and does not widen anything by
+   * itself: the policies that consult it also narrow the rows to work that is
+   * already overdue, and they are SELECT only, so a sweeper reads which work is
+   * due here and writes on a connection scoped to that work's own tenant. Every
+   * other scope clears the setting, so a request that arrived from outside
+   * cannot be running under it.
+   */
+  withSweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
   /** The raw client, for migrations and tests only. */
   sql: postgres.Sql
   close(): Promise<void>
@@ -223,6 +274,9 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.device_user_code': '',
           'antifailure.github_account': '',
           'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
         },
         fn,
       )
@@ -255,6 +309,9 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.device_user_code': opts?.deviceUserCode ?? '',
           'antifailure.github_account': '',
           'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
         },
         fn,
       )
@@ -280,6 +337,9 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.device_user_code': '',
           'antifailure.github_account': account,
           'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
         },
         fn,
       )
@@ -305,6 +365,82 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.device_user_code': '',
           'antifailure.github_account': '',
           'antifailure.stripe_customer': customer,
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
+        },
+        fn,
+      )
+    },
+    withGitHubDelivery(delivery, fn) {
+      const id = delivery.deliveryId.trim()
+      if (!id) {
+        // An empty setting makes the policy deny, which reads as a delivery
+        // that was already handled rather than as a bug, and a delivery read
+        // as already handled is a delivery silently dropped.
+        throw new Error('withGitHubDelivery needs a delivery identifier')
+      }
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': (delivery.login ?? '').trim().toLowerCase(),
+          'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': id,
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
+        },
+        fn,
+      )
+    },
+    withPullRequestCallback(hash, fn) {
+      if (!hash || hash.length === 0) {
+        throw new Error('withPullRequestCallback needs the hash of a callback credential')
+      }
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': hash.toString('hex'),
+          'antifailure.sweeper': '',
+        },
+        fn,
+      )
+    },
+    withSweeper(fn) {
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': 'on',
         },
         fn,
       )

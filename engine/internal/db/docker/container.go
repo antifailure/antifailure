@@ -145,31 +145,12 @@ func (p *Provider) startWithRetry(
 		// construction and the next port is very likely free. The attempts are
 		// bounded so that a machine with no free ports at all still reports
 		// that rather than looping.
-		if isPortTaken(err) && attempt < portRetries {
+		if dockerutil.IsPortTaken(err) && attempt < dockerutil.PortRetries {
 			return p.startWithRetry(ctx, name, img, labels, attempt+1)
 		}
 		return started{}, fmt.Errorf("db.docker: start the container %s: %w", name, err)
 	}
 	return started{id: resp.ID, name: name, port: port}, nil
-}
-
-// portRetries bounds how many times a lost race is retried.
-//
-// Three, because each attempt takes a different port and the chance of losing
-// three races in a row is negligible unless something is wrong in a way more
-// attempts would not fix.
-const portRetries = 3
-
-// isPortTaken reports whether the daemon refused because the host port was
-// already bound.
-//
-// Matched on the message because the daemon does not give this a distinct
-// error type. The match is deliberately narrow: a broader one would swallow a
-// real networking failure and retry it three times before reporting it.
-func isPortTaken(err error) bool {
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "port is already allocated") ||
-		strings.Contains(msg, "address already in use")
 }
 
 func isNoSpace(err error) bool {

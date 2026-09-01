@@ -183,6 +183,36 @@ async function openSignIn(
   return { path: null, tried };
 }
 
+/** watermark is the highest sequence the inbox holds right now.
+ *
+ * Read before the button is pressed, and it is the whole correctness of a
+ * retry. `waitFor` deliberately looks at what already arrived before it waits,
+ * because the message is usually captured before anybody starts waiting for
+ * it. That is right for a message that need only exist, and wrong for one that
+ * has to be NEW: a magic link is single use, so a second attempt that matches
+ * the first attempt's message follows a token the first attempt already spent
+ * and the application answers "This sign-in link is no longer valid."
+ *
+ * It was a race rather than a certainty, which is why it survived: whether the
+ * fresh message had landed by the first poll decided it. Driving this
+ * repository's own six workflows produced two that signed in and four that did
+ * not, from one code path, in one run.
+ *
+ * A floor rather than a filter on time, because the sequence is the only thing
+ * that orders two messages captured in the same millisecond.
+ */
+async function watermark(inbox: InboxSource, floor: number): Promise<number> {
+  try {
+    const messages = await inbox.list(200);
+    return messages.reduce((highest, m) => (m.seq > highest ? m.seq : highest), floor);
+  } catch {
+    // An inbox that cannot be read here cannot be read a moment later either,
+    // and waitFor says so far better than this could. Carrying on with the
+    // caller's floor keeps the diagnosis in the one place that has it.
+    return floor;
+  }
+}
+
 /** signIn drives one persona through its strategy. */
 export async function signIn(
   page: Page,
@@ -271,13 +301,16 @@ async function signInWithLink(
       detail: `The persona ${persona.name} signs in by magic link, and no inbox is available to read it from.`,
     };
   }
+  // Before the button, never after. A message already in the inbox is not the
+  // answer to a request that has not been made yet.
+  const floor = await watermark(inbox, after);
   await page.fill(FIELD.email, persona.email);
   await page.click(CONTROL.sendLink);
 
   const want: Match = { to: persona.email, hasLink: true };
   let message: Message;
   try {
-    message = await waitFor(inbox, want, { timeoutMs, after });
+    message = await waitFor(inbox, want, { timeoutMs, after: floor });
   } catch (err) {
     return {
       ok: false, blocked: true,
@@ -317,12 +350,15 @@ async function signInWithCode(
     };
   }
 
+  // Before the button, for the reason on watermark. A one time code is spent
+  // the same way a link is.
+  const floor = await watermark(inbox, after);
   await page.fill(persona.login === 'sms_code' ? FIELD.phone : FIELD.email, recipient);
   await page.click(CONTROL.sendLink);
 
   let message: Message;
   try {
-    message = await waitFor(inbox, { to: recipient, hasCode: true }, { timeoutMs, after });
+    message = await waitFor(inbox, { to: recipient, hasCode: true }, { timeoutMs, after: floor });
   } catch (err) {
     return { ok: false, blocked: true, detail: err instanceof Error ? err.message : String(err) };
   }

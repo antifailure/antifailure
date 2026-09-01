@@ -20,6 +20,32 @@ import { rest, type Session } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
 import { Button, Field, Lede, LinkButton, Standalone, inputClass } from "@/components/ui";
 
+/**
+ * Where to come back to after signing in.
+ *
+ * A link in a pull request comment points at one page: the environment for
+ * that commit, the run, the evidence. Somebody following it who is not signed
+ * in used to get the sign-in screen and then the dashboard, with no way back
+ * to the thing they clicked, which makes every deep link this product publishes
+ * a link to the front door. /device already did this correctly and the rest of
+ * the console did not.
+ *
+ * Read off window rather than from usePathname, because the query string is
+ * half the address here: /environments?env=af-1234 and /environments are
+ * different pages to the person who followed the link. Guarded, because this
+ * console is a static export and window does not exist while it is prerendered.
+ */
+function returnTo(): string | null {
+  if (typeof window === "undefined") return null;
+  const here = window.location.pathname + window.location.search;
+  // The same shape the API's own safeRedirect accepts: a path on this origin
+  // and nothing that could be read as another one. Sending anything else would
+  // be refused there and land the person on the dashboard anyway, so it is
+  // dropped here where the reason can be written down.
+  if (!here.startsWith("/") || here.startsWith("//") || here.includes("\\")) return null;
+  return here;
+}
+
 const NAV = [
   { href: "/environments", label: "Environments", Icon: IconEnvironments },
   { href: "/runs", label: "Runs", Icon: IconRuns },
@@ -64,7 +90,11 @@ function EmailSignIn() {
     setError(null);
     setBusy(true);
     try {
-      await rest("/auth/email", { method: "POST", body: { email } });
+      const back = returnTo();
+      await rest("/auth/email", {
+        method: "POST",
+        body: back ? { email, redirect_to: back } : { email },
+      });
       setSent(true);
     } catch {
       // Ours, not theirs. Telling somebody their link is on the way when it
@@ -127,14 +157,19 @@ function SignIn({ session }: { session: Session }) {
   // rather than as "none", so an older API is a page with one button on it
   // instead of a page with none.
   const methods = session.methods ?? ["github"];
+  const back = returnTo();
+  const githubSignInHref = back
+    ? `/auth/github?redirect_to=${encodeURIComponent(back)}`
+    : "/auth/github";
   return (
     <Standalone title="Sign in" width={400}>
       <Lede>
-        This control plane is invitation only while it is in development. Sign
-        in with the GitHub account that was invited.
+        {session.signupsOpen
+          ? "Sign in with GitHub. On your first visit, you will connect the organization and repositories this control plane should serve."
+          : "This control plane is invitation only. Sign in with the GitHub account that was invited."}
       </Lede>
       <div className="mt-6">
-        <LinkButton href="/auth/github" full>
+        <LinkButton href={githubSignInHref} full>
           <GitHubMark />
           Continue with GitHub
         </LinkButton>
@@ -173,9 +208,21 @@ function NoOrganization({ session }: { session: Session }) {
         yet. Not an empty dashboard. Nothing.
       </Lede>
       <Lede>
-        Membership follows a GitHub App installation. Once the app is installed
-        on an organization you belong to, this page becomes that organization.
+        Membership follows a GitHub App installation. Install it on the
+        organization you want to connect, then ask GitHub to check your
+        membership again.
       </Lede>
+      {session.githubAppInstallUrl ? (
+        <div className="mt-6 space-y-3">
+          <LinkButton href={session.githubAppInstallUrl} full>
+            <GitHubMark />
+            Install the GitHub App
+          </LinkButton>
+          <LinkButton href="/auth/github" full variant="secondary">
+            Check my GitHub membership
+          </LinkButton>
+        </div>
+      ) : null}
       <div className="mt-6">
         <SignOutButton />
       </div>
@@ -251,6 +298,7 @@ function Who({ session }: { session: Session }) {
 
 export function Shell({ children }: { children: ReactNode }) {
   const session = useSessionContext();
+  const pathname = usePathname();
   const [menu, setMenu] = useState(false);
   const closer = useRef<HTMLButtonElement>(null);
 
@@ -297,6 +345,49 @@ export function Shell({ children }: { children: ReactNode }) {
   const me = session.data as Session;
   if (!me.signedIn) return <SignIn session={me} />;
   if (!me.orgId) return <NoOrganization session={me} />;
+
+  const needsPlan = me.hostedRequiredPlan && me.hostedAccess === false;
+  if (needsPlan && pathname !== "/plan") {
+    return (
+      <Standalone title="Enterprise access required" width={440}>
+        <Lede>
+          This hosted control plane serves organizations on the enterprise
+          plan. Billing stays available so an owner can subscribe or manage an
+          existing subscription.
+        </Lede>
+        <div className="mt-6 space-y-3">
+          <LinkButton href="/plan" full>
+            Open plan and billing
+          </LinkButton>
+          <div className="flex justify-center">
+            <SignOutButton />
+          </div>
+        </div>
+      </Standalone>
+    );
+  }
+
+  if (needsPlan) {
+    return (
+      <div className="min-h-dvh">
+        <header className="flex min-h-14 items-center justify-between gap-4 border-b border-rule bg-paper px-5 sm:px-8">
+          <Link href="/plan" className="flex min-h-11 items-center gap-2">
+            <LogoMark className="h-[18px] w-[18px]" />
+            <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-ink">
+              Antifailure
+            </span>
+          </Link>
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="hidden max-w-48 truncate text-[12.5px] text-muted sm:block">
+              {me.label}
+            </span>
+            <SignOutButton />
+          </div>
+        </header>
+        <main>{children}</main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[232px_1fr]">

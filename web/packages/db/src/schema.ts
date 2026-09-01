@@ -53,7 +53,7 @@ export const verdictValue = pgEnum('verdict_value', [
   'pass', 'fail', 'flaky', 'blocked', 'unverified',
 ])
 
-// Workload Studio. See migrations/0021_workload_studio.sql for why these four
+// Load definitions and runs. See migrations/0023_load_definitions_and_runs.sql for why these four
 // kinds stay four kinds, and why a run's state and its verdict are two columns.
 export const workloadKind = pgEnum('workload_kind', [
   'observed_load', 'http_scenario', 'browser_workflow', 'exploration',
@@ -666,11 +666,11 @@ export const billingEvents = pgTable('billing_events', {
 })
 
 // ---------------------------------------------------------------------------
-// Workload Studio
+// Load definitions and runs
 // ---------------------------------------------------------------------------
 
 /** A named, versioned thing to run against an environment. See
- *  migrations/0021_workload_studio.sql: the kind is on the definition because
+ *  migrations/0023_load_definitions_and_runs.sql: the kind is on the definition because
  *  the four kinds measure materially different things, and there is no common
  *  intermediate representation behind them. */
 export const workloads = pgTable('workloads', {
@@ -833,7 +833,7 @@ export const workloadEvidence = pgTable('workload_evidence', {
 
 /** What the control plane is asking a runtime to do, durably, with a lease and
  *  an acknowledgement. A teardown that is only a column update is a teardown
- *  that never happens; see migrations/0021_workload_studio.sql. */
+ *  that never happens; see migrations/0023_load_definitions_and_runs.sql. */
 export const runtimeCommands = pgTable('runtime_commands', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').notNull(),
@@ -856,6 +856,100 @@ export const runtimeCommands = pgTable('runtime_commands', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+// The pull request lifecycle. See migrations/0021.
+// ---------------------------------------------------------------------------
+
+/** The seven states one attempt against one head commit can be in. blocked and
+ *  unverified are not passes, here or anywhere downstream of here. */
+export const prGenerationState = pgEnum('pr_generation_state', [
+  'queued', 'running', 'passed', 'failed', 'blocked', 'unverified', 'cancelled',
+])
+
+export const githubDeliveries = pgTable('github_deliveries', {
+  deliveryId: text('delivery_id').primaryKey(),
+  orgId: uuid('org_id'),
+  accountLogin: text('account_login'),
+  event: text('event').notNull(),
+  action: text('action'),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  handledAt: timestamp('handled_at', { withTimezone: true }),
+  outcome: text('outcome'),
+}, (t) => [index('github_deliveries_org_idx').on(t.orgId, t.receivedAt)])
+
+export const pullRequests = pgTable('pull_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  repositoryId: uuid('repository_id').notNull(),
+  number: integer('number').notNull(),
+  title: text('title'),
+  headSha: text('head_sha').notNull(),
+  headRef: text('head_ref').notNull(),
+  baseRef: text('base_ref').notNull(),
+  headRepository: text('head_repository').notNull(),
+  fromFork: boolean('from_fork').notNull().default(false),
+  draft: boolean('draft').notNull().default(false),
+  state: text('state').notNull().default('open'),
+  approvedSha: text('approved_sha'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  commentId: bigint('comment_id', { mode: 'number' }),
+  commentSha: text('comment_sha'),
+  commentUpdatedAt: timestamp('comment_updated_at', { withTimezone: true }),
+  openedAt: timestamp('opened_at', { withTimezone: true }),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('pull_requests_repository_id_number_key').on(t.repositoryId, t.number),
+  index('pull_requests_org_idx').on(t.orgId, t.updatedAt),
+])
+
+export const prGenerations = pgTable('pr_generations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  pullRequestId: uuid('pull_request_id').notNull(),
+  headSha: text('head_sha').notNull(),
+  attempt: integer('attempt').notNull().default(1),
+  state: prGenerationState('state').notNull().default('queued'),
+  detail: text('detail'),
+  checkRunId: bigint('check_run_id', { mode: 'number' }),
+  workflowRunId: bigint('workflow_run_id', { mode: 'number' }),
+  callbackHash: bytea('callback_hash'),
+  callbackExpiresAt: timestamp('callback_expires_at', { withTimezone: true }),
+  reportedBy: text('reported_by'),
+  envId: text('env_id'),
+  verdict: jsonb('verdict'),
+  supersededBy: uuid('superseded_by'),
+  queuedAt: timestamp('queued_at', { withTimezone: true }).notNull().defaultNow(),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  deadlineAt: timestamp('deadline_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('pr_generations_pull_request_id_head_sha_key').on(t.pullRequestId, t.headSha),
+  index('pr_generations_org_idx').on(t.orgId, t.queuedAt),
+])
+
+export const teardownRequests = pgTable('teardown_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  environmentId: uuid('environment_id'),
+  envId: text('env_id'),
+  repositoryId: uuid('repository_id'),
+  workflowRunId: bigint('workflow_run_id', { mode: 'number' }),
+  generationId: uuid('generation_id'),
+  reason: text('reason').notNull(),
+  requestedBy: uuid('requested_by'),
+  state: text('state').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  leaseHolder: text('lease_holder'),
+  leasedUntil: timestamp('leased_until', { withTimezone: true }),
+  lastError: text('last_error'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('teardown_requests_org_idx').on(t.orgId, t.requestedAt)])
+
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
@@ -870,4 +964,6 @@ export const tenantScopedTables = [
   workloads, workloadVersions, workloadRuns, workloadRunResults,
   workloadRouteMetrics, workloadThresholdVerdicts, workloadEvidence,
   runtimeCommands,
+
+  githubDeliveries, pullRequests, prGenerations, teardownRequests,
 ] as const

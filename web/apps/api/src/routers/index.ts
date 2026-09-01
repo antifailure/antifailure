@@ -19,8 +19,8 @@ import {
   createEnvironment, agentsRouter, loadRouter, dispatch, installationFor, workflowFile,
 } from './dispatch.ts'
 import { runtimesRouter } from './runtimes.ts'
-import { workloadsRouter, recordDispatch } from './workloads.ts'
-import { createCommand, expireOverdueCommands, teardownFor } from '../workloads/commands.ts'
+import { workloadsRouter } from './workloads.ts'
+import { expireOverdueCommands } from '../workloads/commands.ts'
 import { billingRouter } from './billing.ts'
 import { subscriptionsRouter } from './subscriptions.ts'
 
@@ -108,14 +108,7 @@ const environmentsRouter = router({
           WHERE e.env_id = ${input.envId}`)
         const env = rows[0]
         if (!env) throw notFound('environment', input.envId)
-        // The environment row says torn_down the moment somebody asks for a
-        // teardown, because the quota counts what is not torn down and a person
-        // freeing a slot has to free it. That optimism is what made the old
-        // teardown a lie, so the command that says whether a runtime actually
-        // confirmed it travels beside the row. A to-one, so it is an object or
-        // null and never an array.
-        const teardown = await teardownFor(db, env.id)
-        return { ...env, teardown }
+        return env
       })
     }),
 
@@ -159,32 +152,22 @@ const environmentsRouter = router({
     }),
 
   /**
-   * Asks for an environment to be removed, and makes the asking durable.
+   * Asks for an environment to be removed, and records the asking.
    *
-   * WHAT THIS USED TO BE. An UPDATE, and a comment saying the engine that holds
-   * the containers reads the row and does the removing. Nothing reads the row.
-   * There is no query anywhere in the engine against `environments`, no poller
-   * and no endpoint that would serve one, so the containers, the database
-   * branch, the proxy and the DNS record stayed exactly where they were while
-   * the console said the environment was gone. A request that produces nothing
-   * but a column change is not a teardown.
+   * IT NO LONGER MARKS THE ROW TORN DOWN. That is the whole change and it is
+   * the difference between a button that works and one that looks like it
+   * does. This used to set `state = 'torn_down'` and return, with a comment
+   * saying the engine holding the containers reads this and does the removing.
+   * Nothing read it. Not the engine, not a sweeper, not anything: the containers
+   * kept running and the console said they were gone, which is worse than the
+   * button not existing, because somebody who saw "torn down" stopped looking.
    *
-   * WHAT IT IS NOW. Three things in one transaction and one call after it:
-   *
-   *   the row is marked, as before, because the quota counts environments that
-   *     are not torn down and somebody freeing a slot has to free it;
-   *   a runtime command is written, which is durable, leased, acknowledged and
-   *     expiring, so "requested" and "confirmed" stop being one optimistic
-   *     column;
-   *   the customer's own workflow is dispatched with `command: down`, which
-   *     runs `af down` on the branch the environment belongs to.
-   *
-   * The dispatch is best effort and its failure is recorded on the command
-   * rather than thrown: an organization with no App installed, or a repository
-   * still carrying a workflow with no `down` case, still has a durable request
-   * that an engine can claim. What closes the loop in either case is the
-   * engine's own `env.destroyed`, which arrives as `environment.torn_down` and
-   * acknowledges the command; see ingest.ts.
+   * So it writes a request, and `sweepTeardowns` works through them. The
+   * environments row moves only on an ACKNOWLEDGEMENT: the workflow run holding
+   * it reached a terminal state at GitHub, or the engine reported the teardown
+   * over /v1/events. Where there is no route to the runtime at all, the request
+   * is given up on after its attempts and says so in as many words, naming
+   * `af down`, rather than reporting a cleanup that never happened.
    */
   teardown: orgProcedure('environments.teardown')
     .input(z.object({
@@ -194,74 +177,74 @@ const environmentsRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
-      const prepared = await c.pool.withTenant(c.tenant, async (db) => {
-        await expireOverdueCommands(db, { now: c.clock.now() })
-        const rows = await db.execute<{ id: string; branch: string; repository: string }>(sql`
-          UPDATE environments e
-          SET state = 'torn_down', torn_down_at = ${c.clock.now().toISOString()},
-              updated_at = ${c.clock.now().toISOString()}
-          FROM repositories r
-          WHERE r.id = e.repository_id AND e.env_id = ${input.envId} AND e.state <> 'torn_down'
-          RETURNING e.id, e.branch, r.full_name AS repository`)
-        if (rows.length === 0) throw notFound('environment', input.envId)
-        const environment = rows[0]!
+      return c.pool.withTenant(c.tenant, async (db) => {
+        const rows = await db.execute<{
+          id: string
+          state: string
+          repository_id: string
+        }>(sql`
+          SELECT id, state::text AS state, repository_id FROM environments
+          WHERE env_id = ${input.envId}`)
+        const environment = rows[0]
+        if (!environment) throw notFound('environment', input.envId)
+        if (environment.state === 'torn_down') {
+          return { requested: false, envId: input.envId, teardown: 'acknowledged' as const }
+        }
 
-        const command = await createCommand(db, {
-          orgId: c.actor.orgId,
-          kind: 'environment.teardown',
-          environmentId: environment.id,
-          payload: { envId: input.envId, reason: input.reason ?? null },
-          requestedBy: c.actor.userId,
-          now: c.clock.now(),
-        })
+        // The workflow run that built it, when this environment came from a
+        // pull request. It is the only route this control plane has into the
+        // machine holding the containers, so the request carries it: without
+        // one the sweeper has nothing to reach and says so instead of pretending.
+        const runs = await db.execute<{ workflow_run_id: string | null; generation_id: string }>(sql`
+          SELECT g.workflow_run_id::text AS workflow_run_id, g.id AS generation_id
+          FROM pr_generations g
+          WHERE g.env_id = ${input.envId}
+          ORDER BY g.queued_at DESC LIMIT 1`)
+        const run = runs[0] ?? null
+
+        const requested = await db.execute<{ id: string }>(sql`
+          INSERT INTO teardown_requests (
+            org_id, environment_id, env_id, repository_id, workflow_run_id, generation_id,
+            reason, requested_by, requested_at, updated_at)
+          SELECT ${c.actor.orgId}::uuid, ${environment.id}::uuid, ${input.envId},
+                 ${environment.repository_id}::uuid, ${run?.workflow_run_id ?? null}::bigint,
+                 ${run?.generation_id ?? null}::uuid,
+                 ${input.reason ?? 'asked for in the console'}, ${c.actor.userId}::uuid,
+                 ${c.clock.now().toISOString()}::timestamptz, ${c.clock.now().toISOString()}::timestamptz
+          -- One live request per environment. Pressing the button twice is a
+          -- person wondering whether the first press worked, not a second
+          -- instruction, and two rows would be two cancels and one confusing
+          -- history.
+          WHERE NOT EXISTS (
+            SELECT 1 FROM teardown_requests t
+            WHERE t.env_id = ${input.envId} AND t.state IN ('pending', 'leased'))
+          RETURNING id`)
 
         await audit(db, c, {
-          action: 'environment.torn_down',
+          action: 'environment.teardown_requested',
           targetType: 'environment',
           targetId: input.envId,
-          detail: { reason: input.reason ?? null, commandId: command.id },
+          detail: {
+            reason: input.reason ?? null,
+            // Said in the audit entry as well as in the response, because the
+            // question a reader of the log asks first is whether there was
+            // anything to reach.
+            route: run?.workflow_run_id ? 'the workflow run that built it' : 'none',
+          },
         })
-        return { environment, command }
+        return {
+          requested: true,
+          envId: input.envId,
+          teardown: 'pending' as const,
+          // Said out loud, because "requested" and "removed" are different
+          // things and this endpoint used to report the second while doing the
+          // first. `already` covers the second press.
+          pending:
+            requested.length === 0
+              ? 'A teardown was already asked for and has not been confirmed yet.'
+              : 'The environment disappears here when the runtime confirms it is gone.',
+        }
       })
-
-      // Outside the transaction, so a slow GitHub is not a row lock held open
-      // against everybody else in the same organization.
-      let dispatched = false
-      let dispatchDetail = 'no runtime was reached yet; an engine can claim this command'
-      try {
-        const installation = await installationFor(c)
-        await dispatch(
-          c,
-          installation,
-          prepared.environment.repository,
-          input.workflow,
-          prepared.environment.branch,
-          { command: 'down', workflows: '', duration: '', scale: '' },
-        )
-        dispatched = true
-        dispatchDetail = `dispatched ${input.workflow} on ${prepared.environment.branch}`
-      } catch (error) {
-        // Recorded, not thrown. The command is the request and it survives a
-        // refusal; throwing here would leave the caller believing nothing was
-        // recorded when the durable half of the teardown is already written.
-        dispatchDetail =
-          `the dispatch was refused: ` +
-          `${error instanceof TRPCError ? error.message : String(error)}`.slice(0, 1500)
-      }
-      await c.pool.withTenant(c.tenant, async (db) => {
-        await recordDispatch(db, prepared.command.id, dispatchDetail)
-      })
-
-      return {
-        requested: true,
-        envId: input.envId,
-        /** What to watch to learn whether a runtime actually confirmed it. The
-         *  environment row says torn_down the moment this is asked for; this
-         *  says whether anything acted on it. */
-        commandId: prepared.command.id,
-        dispatched,
-        detail: dispatchDetail,
-      }
     }),
 })
 

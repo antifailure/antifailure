@@ -212,8 +212,9 @@ Repository permissions, and what each one is actually for:
 | --- | --- | --- |
 | Metadata | Read-only | Mandatory for every App. |
 | Contents | Read-only | Reading the manifest and the workflow file. |
-| Pull requests | Read and write | The report comment, and the pull request a masking rule change becomes. |
-| Actions | Read and write | The console's **Create environment**, **Run agents** and **Run load**. |
+| Pull requests | Read and write | The one comment per pull request, and the pull request a masking rule change becomes. |
+| Actions | Read and write | The console's **Create environment**, **Run agents** and **Run load**, and cancelling the run that holds an environment when a pull request closes. |
+| Checks | Read and write | The one check run per commit that a branch protection rule can require. |
 
 Organization permissions:
 
@@ -231,25 +232,54 @@ through `dispatchWorkflow` in `web/apps/api/src/auth/github.ts`, and without the
 permission GitHub answers 404, which is the same answer it gives for a missing
 workflow file.
 
-**Checks is not on this list and should not be granted.** Nothing in this
-repository calls the Checks API. The only two files that speak to GitHub are
-`web/apps/api/src/auth/github.ts` and `web/apps/api/src/github/app.ts`, and
-neither creates a check run. A permission granted for a feature that does not
-exist is one nobody will remove later, because nobody will be able to tell
-whether something depends on it.
+**Checks used to say "do not grant this" here, and that was right at the time:
+nothing called the Checks API.** Something does now. Without it, a pull request
+gets the comment and no check run, so no branch protection rule can require
+Antifailure, and the control plane says which grant is missing in the comment
+rather than failing quietly.
 
 Subscribe to events: **Installation**, **Installation repositories**,
-**Repository**.
+**Repository**, **Pull request**, **Workflow run**, **Check run**, **Check
+suite**.
 
-That is the whole list `web/apps/api/src/github/webhook.ts` acts on. **Pull
-request** and **Push** are deliberately absent: nothing handles them, and an
-event nobody consumes is delivery-log noise that makes a real failed delivery
-harder to find. **Member** and **Membership** are absent for a sharper reason:
-the handler names them and answers `handled: false`, because membership is
-resolved at sign-in and reconciled by **Sync from GitHub** on the Members page.
-Subscribing to them looks like membership is event driven and it is not.
-Adding any of these later is an edit to the App's settings rather than a
-reinstall, so there is no cost to leaving them off now.
+The last five are the pull request lifecycle. **Pull request** is what opens a
+check on a commit and closes it when the pull request does. **Workflow run**
+binds the check to the Actions run, which is the only route this control plane
+has into the machine holding the environment. **Check run** and **Check suite**
+are the two Re-run buttons: GitHub sends the first when somebody re-runs one
+check and the second when they re-run all of them from the checks page, so
+subscribing to only one leaves the other doing nothing at all. Each is handled
+in `web/apps/api/src/github/lifecycle.ts`.
+
+**Push** is still deliberately absent: nothing handles it, and an event nobody
+consumes is delivery-log noise that makes a real failed delivery harder to find.
+**Member** and **Membership** are absent for a sharper reason: the handler names
+them and answers `handled: false`, because membership is resolved at sign-in and
+reconciled by **Sync from GitHub** on the Members page. Subscribing to them
+looks like membership is event driven and it is not.
+
+### Adding either of these to an App that already exists
+
+Widening an App's permissions **does not grant them**. GitHub raises a request
+against every existing installation and nothing changes until a person accepts
+it, so the App's settings page can read `Checks: Read and write` while every
+installation still holds none of it. That is not a hypothetical: it cost most of
+an hour on `Actions: write`, where a 403 was read as a code problem for as long
+as it took somebody to look at the installation rather than at the App.
+
+1. The App's settings, **Permissions and events**, Repository permissions,
+   **Checks** to Read and write, then **Save**.
+2. The same page, **Subscribe to events**, tick **Pull request**, **Workflow
+   run** and **Check run**, then **Save**. Event subscriptions take effect
+   without anybody accepting anything; only the permission needs step 3.
+3. For every account the App is installed on: its **Installed GitHub Apps**
+   settings, the App, **Review request**, **Accept new permissions**.
+
+An installation token minted before step 3 is cached for an hour and carries
+none of the new grant, so a permission accepted at 00:38 can still be refused at
+01:30, and the refusal looks exactly like the permission never having been
+granted. Restarting the control plane clears it, because those tokens live only
+in memory and nothing writes them anywhere.
 
 Then, on the App's page, **Generate a private key**. GitHub downloads a `.pem`
 and never shows it again. Note the numeric **App ID** at the top of the page.

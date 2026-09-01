@@ -18,12 +18,15 @@ import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
+import { RealRepositoryApi } from './github/api.ts'
+import { sweepGenerations, sweepTeardowns, type LifecycleDeps } from './github/lifecycle.ts'
 import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
 import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
 import { RealStripeClient, stripeConfigFrom } from './billing/index.ts'
+import { githubAppInstallUrlFrom, hostedRequiredPlanFrom } from './hosted.ts'
 
 function required(name: string, ...fallbacks: string[]): string {
   for (const n of [name, ...fallbacks]) {
@@ -76,6 +79,17 @@ console.log(
     ? `GitHub App ${appConfig.appId} is configured: webhook deliveries are verified and membership can be synced`
     : 'no GitHub App: webhook deliveries are refused and membership cannot be synced (AF_GITHUB_APP_ID is not set)',
 )
+
+// Acting on a repository as the installation: check runs, the pull request
+// comment, cancelling a run. Absent when there is no App, and the lifecycle
+// then records what deliveries tell it and publishes nothing, which is what a
+// self-hosted control plane with no App should do rather than refuse to start.
+const githubApi = installationTokens
+  ? new RealRepositoryApi({
+      tokens: installationTokens,
+      ...(process.env.AF_GITHUB_API_BASE ? { apiBase: process.env.AF_GITHUB_API_BASE } : {}),
+    })
+  : null
 
 const github = new RealGitHubClient({
   clientId: required('AF_GITHUB_CLIENT_ID'),
@@ -160,6 +174,27 @@ console.log(`model prices configured for ${Object.keys(modelPrices).length} mode
 const stripe = stripeConfigFrom(process.env)
 console.log(stripe.summary)
 
+let hostedRequiredPlan
+let githubAppInstallUrl
+try {
+  hostedRequiredPlan = hostedRequiredPlanFrom(process.env.AF_HOSTED_REQUIRED_PLAN)
+  githubAppInstallUrl = githubAppInstallUrlFrom(process.env.AF_GITHUB_APP_INSTALL_URL)
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err))
+  process.exit(2)
+}
+if (hostedRequiredPlan && !stripe.config) {
+  console.error(
+    'AF_HOSTED_REQUIRED_PLAN is set but billing is off. Configure all four Stripe variables so an organization can satisfy the gate.',
+  )
+  process.exit(2)
+}
+console.log(
+  hostedRequiredPlan
+    ? `hosted access requires the ${hostedRequiredPlan} plan`
+    : 'no hosted plan gate: this installation serves every plan',
+)
+
 // Located once, here, and said out loud either way. A control plane running
 // without its console is a legitimate way to run this; a control plane that
 // silently answers 404 on every page because a COPY was dropped from a
@@ -179,8 +214,11 @@ const { app, ingestLimiter, authLimiter } = createServer({
   stripe: stripe.config
     ? { config: stripe.config, client: new RealStripeClient(stripe.config) }
     : null,
+  hostedRequiredPlan,
+  githubAppInstallUrl,
   modelPrices,
   consoleBuild,
+  githubApi,
   ...(emailSignIn ? { emailSignIn } : {}),
 })
 
@@ -229,6 +267,45 @@ const housekeeping = setInterval(
   5 * 60 * 1000,
 )
 housekeeping.unref()
+
+// The pull request lifecycle's own housekeeping, and it is not the same shape
+// as the sweeps above.
+//
+// Those are about table size: expiry is checked on every read, so being late
+// costs nothing but rows. These two are about correctness. A check that never
+// concludes holds a merge forever with no explanation, and a teardown that is
+// never confirmed is somebody's containers still running on a machine they are
+// paying for. Both had to be started HERE and not merely written, which is the
+// failure this repository has shipped more than once: a sweeper with a comment
+// saying what it keeps under control, and no caller.
+if (githubApi) {
+  const lifecycle: LifecycleDeps = {
+    pool,
+    clock: systemClock,
+    api: githubApi,
+    consoleBase: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL ?? null,
+    // Names this replica in a lease, so a request stuck under one says which
+    // process has it rather than only that somebody does.
+    holder: process.env.HOSTNAME ?? 'control-plane',
+  }
+  // A minute. The teardown lease is a minute, so a slower interval would mean
+  // a request whose holder died waits for the sweep rather than for the lease,
+  // and the lease would be decorative.
+  const lifecycleSweep = setInterval(
+    () => {
+      void sweepGenerations(lifecycle).catch((err) => console.error('generation sweep', err))
+      void sweepTeardowns(lifecycle).catch((err) => console.error('teardown sweep', err))
+    },
+    60 * 1000,
+  )
+  lifecycleSweep.unref()
+  console.log('the pull request lifecycle is running: checks, one comment per pull request, teardown')
+} else {
+  console.log(
+    'no GitHub App: pull request checks and comments are not published, and no teardown ' +
+      'request can reach a workflow run',
+  )
+}
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`control plane listening on :${info.port}`)

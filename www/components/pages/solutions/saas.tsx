@@ -1,67 +1,111 @@
-import { PageHero, PageSection, PageShell, RelatedGrid } from "@/components/pages/kit";
-import {
-  AFTER_HEADING,
-  FeatureList,
-  Lead,
-  Metrics,
-  SectionHeading,
-  SpecRows,
-  Split,
-  TenantSubsetScene,
-} from "./visuals";
+import { PageShell, RelatedGrid } from "@/components/pages/kit";
+import { CircularMap, DashChart, FeatureRow, Notebook, SplitHero, TaskTable } from "./well";
 
 export function SaasPage() {
   return (
     <PageShell>
-      <PageHero
+      <SplitHero
         path="/solutions/saas"
         eyebrow="Solutions · B2B SaaS"
         title="Daily deploys. Expanding schemas. Staging that drifted years ago."
-        lead="The first twin should catch the migration that locks subscriptions during peak traffic, against sanitized tenant-shaped state rather than a fixture dump."
-        visual={<TenantSubsetScene />}
+        paragraphs={[
+          "The first twin should catch the migration that locks subscriptions during peak traffic.",
+          "Against sanitized tenant-shaped state, not a fixture dump.",
+          "Checkout and seat changes run against sanitized accounts.",
+        ]}
+        visual={
+          <Notebook
+            tab="subscriptions · peak"
+            rail="NOTES"
+            rows={[
+              { id: "org_a8c1", label: "acme-prod · 12.4k seats", kind: "org", status: "MASK", tone: "WARN", bar: 72 },
+              { id: "org_n3w2", label: "northwind · 3.1k seats", kind: "org", status: "MASK", tone: "WARN", bar: 58 },
+              { id: "org_h91e", label: "helix · children follow", kind: "org", status: "DROP", tone: "BLOCK", bar: 12 },
+              { id: "sub_51Hq", label: "past_due · referential keep", kind: "sub", status: "KEEP", tone: "PASS", bar: 90 },
+              { id: "inv_9f2a", label: "open invoice · join valid", kind: "inv", status: "KEEP", tone: "PASS", bar: 84 },
+            ]}
+            overlay={{
+              title: "Sanitization evidence",
+              checks: [
+                "Account identifiers replaced inside the customer boundary.",
+                "Referential subset of orgs, seats, subscriptions, invoices.",
+                "Long-tail and malformed historical seats kept when the parent is kept.",
+                "helix dropped. Children follow parent.",
+                "Tokens and sessions deleted, not masked.",
+              ],
+            }}
+          />
+        }
       />
-      <PageSection tone="sage">
-        <SectionHeading title="<strong>Tenant-shaped state.</strong> Checkout and seat changes against sanitized accounts." />
-        <div className={AFTER_HEADING}>
-          <Metrics
-            items={[
-              { value: "Daily", label: "or weekly production deploys. Staging cannot keep up with schema change." },
-              { value: "N tenants", label: "Long-tail accounts and malformed historical seats that fixtures omit." },
-              { value: "Rare rows", label: "The historical account whose shape no fixture has, and which the constraint fails on." },
+
+      <FeatureRow
+        kicker="Tenant-shaped state"
+        title="Checkout and seat changes against sanitized accounts."
+        items={[
+          { title: "Tenant-shaped state", body: "Referential subsets of accounts, seats, and billing without production identities." },
+          { title: "Checkout and upgrades", body: "Critical workflows under production-shaped concurrency." },
+          { title: "Schema coexistence", body: "Old application instances still running while the new column lands." },
+        ]}
+        visual={
+          <DashChart
+            title="Deploy cadence vs staging drift"
+            bars={[28, 36, 44, 40, 62, 70, 88, 76, 92, 84]}
+            popup={{
+              title: "Daily / weekly",
+              rows: [
+                ["Deploys", "Daily"],
+                ["Tenants", "N long-tail"],
+                ["Schema", "Old + new"],
+              ],
+            }}
+          />
+        }
+      />
+
+      <FeatureRow
+        reverse
+        kicker="Staging"
+        title="Staging differs in too many dimensions at once."
+        items={[
+          { title: "Unit, integration, and a manual staging check", body: "A change can pass all three and still fail in production." },
+          { title: "Tenant shape, concurrency, and schema coexistence", body: "The twin reproduces all three, then reports whether the deploy is safe." },
+          { title: "Old + new", body: "The previous release runs against the new schema, so a column it can no longer select is a finding and not a rollback." },
+        ]}
+        visual={
+          <CircularMap
+            tabs={["BASELINE", "CANDIDATE", "TWIN"]}
+            active="TWIN"
+            rings={[
+              { label: "orgs", r: 42 },
+              { label: "seats", r: 34 },
+              { label: "subs", r: 28 },
+              { label: "invoices", r: 38 },
             ]}
           />
-        </div>
-      </PageSection>
-      <PageSection tone="white">
-        <Split
-          visual={
-            <SpecRows
-              rows={[
-                ["Restore", "Referential subset of orgs, seats, subscriptions, invoices"],
-                ["Mask", "Account identifiers replaced inside the customer boundary"],
-                ["Exercise", "Checkout, upgrades, and seat changes at production-shaped concurrency"],
-                ["Decide", "Pass or fail on the pull request, then destroy the twin"],
-              ]}
-            />
-          }
-        >
-          <SectionHeading title="<strong>Staging differs in too many dimensions at once.</strong>" />
-          <Lead>
-            A change can pass unit, integration, end-to-end, and a manual staging check, then still
-            fail in production. The twin reproduces tenant shape and production's route mix, then
-            reports whether the deploy is safe.
-          </Lead>
-        </Split>
-        <div className={AFTER_HEADING}>
-          <FeatureList
-            items={[
-              { title: "Tenant-shaped state", body: "Referential subsets of accounts, seats, and billing without production identities." },
-              { title: "Checkout and upgrades", body: "Critical workflows under production-shaped concurrency." },
-              { title: "Rehearsed migrations", body: "The pending migrations applied to a branch with production's row counts, before they reach it." },
+        }
+      />
+
+      <FeatureRow
+        kicker="The run"
+        title="Pass, warning, or block on the pull request, then destroy the twin."
+        items={[
+          { title: "Restore", body: "The subset comes back first, so every step after it runs against rows that still join." },
+          { title: "Mask", body: "Identifiers are replaced before anything reads them, and the raw snapshot never leaves the customer's cloud." },
+          { title: "Exercise", body: "Checkout, upgrades, and seat changes at production-shaped concurrency." },
+        ]}
+        visual={
+          <TaskTable
+            heading="Twin run · subscriptions"
+            rows={[
+              { task: "Restore subset", status: "Completed", tone: "PASS", who: "T", date: "00:04" },
+              { task: "Mask identifiers", status: "Completed", tone: "PASS", who: "S", date: "00:07" },
+              { task: "Exercise checkout", status: "In progress", tone: "WARN", who: "W", date: "00:11" },
+              { task: "Decide on the PR", status: "BLOCK", tone: "BLOCK", who: "R", date: "00:18" },
             ]}
           />
-        </div>
-      </PageSection>
+        }
+      />
+
       <RelatedGrid
         items={[
           { href: "/product/migrations", title: "Migration Safety", description: "The lock on subscriptions is the first finding." },
