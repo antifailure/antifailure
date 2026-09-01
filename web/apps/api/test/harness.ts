@@ -159,8 +159,9 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
  * this arrangement is what found five defects in the shipped pack.
  *
  * A request no route matches answers 501 rather than 404, because 404 is a real
- * answer here: getSubscription reads it as "Stripe has never heard of this",
- * and a missing ROUTE must never be mistaken for a missing OBJECT.
+ * answer here: the subscription and invoice list calls read it as "Stripe holds
+ * nothing for this customer" and return an empty collection, so a missing ROUTE
+ * must never be mistaken for a customer who genuinely has nothing.
  */
 export async function stripeAgainstMockPack(
   overrides: Partial<StripeConfig> = {},

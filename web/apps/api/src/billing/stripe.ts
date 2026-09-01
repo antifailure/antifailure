@@ -99,11 +99,6 @@ export interface StripeClient {
   /** The hosted page somebody changes a plan, a card, or a cancellation on. */
   createPortalSession(input: { customerId: string; returnUrl: string }): Promise<{ url: string }>
 
-  /** What Stripe currently believes about a subscription. Null when Stripe has
-   *  never heard of it, which is a real answer during reconciliation and not an
-   *  error. */
-  getSubscription(id: string): Promise<StripeSubscription | null>
-
   /** Every subscription Stripe holds for one customer. This is the recovery
    *  path when the creation webhook never arrived and no local row exists yet. */
   listSubscriptions(customerId: string, limit: number): Promise<StripeSubscription[]>
@@ -189,16 +184,6 @@ export class RealStripeClient implements StripeClient {
     const url = text(session.url)
     if (!url) throw new StripeError('Stripe returned a portal session with no address to send anybody to.')
     return { url }
-  }
-
-  async getSubscription(id: string): Promise<StripeSubscription | null> {
-    const found = await this.get(`/v1/subscriptions/${encodeURIComponent(id)}`)
-    // A subscription Stripe has never heard of is a real answer here rather
-    // than a failure: reconciliation asks about a row that may have been
-    // created against a different Stripe account, and throwing would stop the
-    // sweep at the first bad row instead of fixing the rest.
-    if (found === null) return null
-    return subscriptionOf(found)
   }
 
   async listSubscriptions(customerId: string, limit: number): Promise<StripeSubscription[]> {
