@@ -999,8 +999,15 @@ generate:
 #
 # A machine with no keyring daemon skips rather than fails. That is correct: the
 # chain's whole design is that an unavailable source is named and stepped over.
+#
+# -count=1 because it was NOT the same command, which made the sentence above
+# false. keyring.yml:68 has always passed -count=1 and this did not, and the
+# test reads the operating system's credential store, which is as far outside
+# the module as a dependency gets, so nothing it touches is anything the cache
+# watches. Measured: 20.677s, then `ok (cached)` on the second run. A gate that
+# certifies this machine's keychain works, by not looking at the keychain.
 keyring:
-    cd engine && go test ./internal/secrets/
+    cd engine && go test ./internal/secrets/ -count=1
 
 # Lint the code the other platforms compile.
 #
