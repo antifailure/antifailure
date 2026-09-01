@@ -448,15 +448,25 @@ func normalizeLoad(m *schema.Manifest) {
 	if l.Thresholds == nil {
 		l.Thresholds = &schema.LoadThresholds{}
 	}
-	if l.Thresholds.P95Increase == 0 {
+	// Only under a source that carries a baseline. p95_increase divides a
+	// measured p95 by production's own p95 for that route, and a combined
+	// format log line has no duration in it, so under access_log or none the
+	// default was a threshold the report listed and no route could ever be
+	// measured against. Filling it in there produced the exact shape this
+	// repository keeps finding: a configured check, evaluated zero times,
+	// reported green. A threshold somebody writes under those sources is
+	// refused by the validator; this is the half the validator cannot see,
+	// because the engine set it rather than the author.
+	if l.Thresholds.P95Increase == 0 && l.Source == schema.LoadOTel {
 		l.Thresholds.P95Increase = 0.25
 	}
 	if l.Thresholds.ErrorRate == 0 {
 		l.Thresholds.ErrorRate = 0.01
 	}
-	if l.Thresholds.QueryCountIncrease == 0 {
-		l.Thresholds.QueryCountIncrease = 0.2
-	}
+	// No default for query_count_increase. Nothing reads it, so filling it in
+	// put a threshold on every manifest that could not affect any verdict.
+	// Writing one is refused by the validator, which names the check that does
+	// compare statement counts.
 	for i, r := range l.SafeRoutes {
 		l.SafeRoutes[i] = normalizeRoute(r)
 	}

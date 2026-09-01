@@ -66,7 +66,11 @@ type Runtime struct {
 type Options struct {
 	Clock    clock.Clock
 	Redactor *redact.Redactor
-	// PortFrom is where published ports are allocated.
+	// Getenv reads the environment, so that a test can move the port range
+	// without moving the process's. Nil reads the process environment.
+	Getenv func(string) string
+	// PortFrom is where published ports are allocated. Zero resolves
+	// AF_PORT_RANGE_START, and the default under that.
 	PortFrom int
 	// ReadyTimeout bounds a readiness wait. Zero uses the default.
 	ReadyTimeout time.Duration
@@ -80,6 +84,12 @@ type Options struct {
 	// lifetime, because it creates nothing.
 	TTL time.Duration
 }
+
+// PublishedPortOffset separates the runtime's published ports from the database
+// provider's, which allocates from the base itself. The allocator searches a
+// span of 2000 from wherever it starts, so anything smaller would let the two
+// ranges meet.
+const PublishedPortOffset = 3000
 
 // DefaultReadyTimeout is long enough for a framework that compiles on first
 // request and short enough that a service which will never answer is reported
@@ -102,9 +112,15 @@ func New(opts Options) (*Runtime, error) {
 		opts.ReadyTimeout = DefaultReadyTimeout
 	}
 	if opts.PortFrom <= 0 {
+		from, err := dockerutil.PortRangeFrom(opts.Getenv)
+		if err != nil {
+			return nil, err
+		}
 		// Above the database provider's range, so the two cannot argue over a
 		// port and produce a failure that looks like a race because it is one.
-		opts.PortFrom = dockerutil.DefaultPortFrom + 3000
+		// Moving the base moves both together, which is what keeps that true
+		// for a user who moved it.
+		opts.PortFrom = from + PublishedPortOffset
 	}
 	return &Runtime{
 		cli: cli, clock: opts.Clock, redactor: opts.Redactor,

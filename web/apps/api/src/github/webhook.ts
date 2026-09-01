@@ -22,6 +22,8 @@
 import { sql } from 'drizzle-orm'
 import type { Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
+import type { GitHubClient } from '../auth/github.ts'
+import { grantMembership } from '../auth/signin.ts'
 import { verifySignature } from './app.ts'
 
 export class WebhookError extends Error {}
@@ -38,6 +40,12 @@ export interface WebhookOutcome {
 interface Account {
   login: string
   type: string
+}
+
+/** The GitHub account that performed the action, on every delivery. */
+interface Sender {
+  id?: number
+  login?: string
 }
 
 interface Repo {
@@ -61,6 +69,14 @@ export async function handleDelivery(
   clock: Clock,
   event: string,
   payload: Record<string, unknown>,
+  github?: GitHubClient | null,
+  /**
+   * Drops the cached installation token, when there is a cache to drop from.
+   *
+   * Optional because the webhook has to work with no App configured, which is
+   * every self-hosted control plane that has not created one yet.
+   */
+  forgetTokens?: (installationId: number) => void,
 ): Promise<WebhookOutcome> {
   const action = typeof payload.action === 'string' ? payload.action : null
   const installation = payload.installation as
@@ -77,6 +93,25 @@ export async function handleDelivery(
       if (typeof id !== 'number' || !account?.login) {
         return { event, action, handled: false, detail: 'no installation in the payload' }
       }
+      // Every `installation` action changes what a token minted for it is
+      // worth, so the cached one is dropped before any of them is handled.
+      //
+      // This is the fix for an hour of wrong answers that a person actually
+      // sat through. An installation token is cached for its full hour, GitHub
+      // invalidates the outstanding ones the moment a grant changes, and
+      // `new_permissions_accepted` is that moment. On 2026-08-31 the Actions
+      // write grant was accepted at 00:38:54Z against a process that had
+      // minted a token at 00:35:58Z, so the console answered 403 until roughly
+      // 01:36Z while the permission it was complaining about had already been
+      // granted. Nothing invalidated the token, because `forget` had no
+      // callers anywhere in the tree.
+      //
+      // Unconditional across the actions rather than matched to
+      // `new_permissions_accepted` alone: suspend, unsuspend and deleted all
+      // change what the token can do, `created` can arrive for an id a failed
+      // earlier attempt already cached, and dropping a token that did not need
+      // dropping costs one mint.
+      forgetTokens?.(id)
       if (action === 'deleted') {
         await forgetInstallation(pool, account.login, id)
         return { event, action, handled: true, detail: `installation ${id} removed` }
@@ -94,11 +129,19 @@ export async function handleDelivery(
       // suspension. See rememberInstallation.
       const orgId = await rememberInstallation(pool, clock, account, id, { live: true })
       await rememberRepositories(pool, clock, account.login, orgId, repos)
+      const adopted = await adoptInstaller(pool, clock, github ?? null, {
+        orgId,
+        account,
+        installationId: id,
+        sender: payload.sender as Sender | undefined,
+      })
       return {
         event,
         action,
         handled: true,
-        detail: `installation ${id} for ${account.login}, ${repos.length} repositories`,
+        detail:
+          `installation ${id} for ${account.login}, ${repos.length} repositories` +
+          (adopted ? `, ${adopted} adopted` : ''),
       }
     }
 
@@ -160,6 +203,10 @@ export async function handleDelivery(
     // GitHub reports for THAT person at the moment they sign in. Writing
     // membership from a webhook would create rows for people who have never
     // signed in and have no user row to point at.
+    //
+    // adoptInstaller above is not an exception to that rule, it is the one
+    // case that satisfies it: the installer is named by the delivery, and it
+    // acts only when a user row for them already exists.
     case 'member':
     case 'organization':
       return { event, action, handled: false, detail: 'membership is resolved at sign-in' }
@@ -296,6 +343,91 @@ async function archiveRepositories(
         WHERE org_id = ${orgId}::uuid AND full_name = ${repo.full_name}`)
     }
   })
+}
+
+/**
+ * Gives the person who installed the App the organization it just created.
+ *
+ * THIS IS AN ORDERING FIX AND THE ORDERING IS THE COMMON ONE. Signing in and
+ * installing the App are two events with no guaranteed order, and the flow the
+ * product actually recommends puts them in the order this repairs: somebody
+ * signs in, has no organization because nothing is installed yet, and follows
+ * the button that installs it. Sign-in already handles installation-then-signin
+ * because it reads the installation table on the way through. The reverse
+ * arrived at a tenant that existed, that they administered, and that nothing
+ * would ever attach them to, because the only writer of membership had already
+ * run. They were left pressing a second sign-in to re-run an exchange they had
+ * just completed, on a page that could not say why.
+ *
+ * So the late-created row resolves itself on creation rather than waiting for
+ * an event that already fired.
+ *
+ * The three conditions, all required, none of them a guess. GitHub signed the
+ * delivery. The delivery names the sender, and a user row already exists for
+ * that GitHub id, which means this is somebody who has signed in here rather
+ * than a stranger being given an account. And the role still comes from
+ * GitHub through the same grantMembership the sign-in path uses, rather than
+ * from a second membership writer with its own rules: two writers that agree
+ * today are two writers that disagree after the next change to either.
+ *
+ * Returns the login it adopted, or null when there was nobody to adopt, which
+ * is the ordinary case for an installation by somebody who has never signed in.
+ */
+async function adoptInstaller(
+  pool: Pool,
+  clock: Clock,
+  github: GitHubClient | null,
+  input: { orgId: string; account: Account; installationId: number; sender: Sender | undefined },
+): Promise<string | null> {
+  // No client configured means no way to ask GitHub for a role, and guessing
+  // one is what the null answer from roleIn exists to prevent.
+  if (!github) return null
+  const senderId = input.sender?.id
+  const senderLogin = input.sender?.login
+  if (typeof senderId !== 'number' || typeof senderLogin !== 'string' || !senderLogin) return null
+
+  const user = await pool.withoutTenant(
+    async (db) => {
+      const rows = await db.execute<{ id: string; name: string | null; github_login: string }>(sql`
+        SELECT id, name, github_login FROM users WHERE github_id = ${senderId}`)
+      return rows[0] ?? null
+    },
+    { githubIds: [senderId] },
+  )
+  // Nobody by that id has ever signed in. Nothing to attach, and inventing a
+  // user row from a webhook is the thing the comment above refuses.
+  if (!user) return null
+
+  await grantMembership(pool, clock, github, {
+    orgId: input.orgId,
+    installationId: input.installationId,
+    orgLogin: input.account.login,
+    userId: user.id,
+    login: senderLogin,
+    label: user.name || user.github_login,
+    personalAccount:
+      input.account.type === 'User' &&
+      input.account.login.toLowerCase() === senderLogin.toLowerCase(),
+  })
+
+  // The session they are holding right now, so the tab they left open on the
+  // empty state becomes the organization without a second sign-in.
+  //
+  // Only a session that is in no organization. A session already inside a
+  // tenant is somebody working, and moving it would take them out of the
+  // organization they are looking at because a colleague installed the App
+  // somewhere else. own_sessions is the policy that permits this: it is their
+  // own session, and the tenant is one they now belong to.
+  await pool.withTenant({ orgId: input.orgId, userId: user.id }, async (db) => {
+    await db.execute(sql`
+      UPDATE sessions SET org_id = ${input.orgId}::uuid
+      WHERE user_id = ${user.id}::uuid
+        AND org_id IS NULL
+        AND revoked_at IS NULL
+        AND expires_at > ${clock.now().toISOString()}`)
+  })
+
+  return senderLogin
 }
 
 /**

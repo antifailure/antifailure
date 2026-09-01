@@ -24,7 +24,18 @@ class FakePage implements Page {
     if (this.signInAt === null) return true;
     return this.signInAt.some((p) => this.current.endsWith(p));
   }
-  async click(control: RegExp) { this.clicked.push(control.source); }
+  /** What the application does when a control is pressed.
+   *
+   * A sign-in message is captured in response to the request, never before it.
+   * Modelling that ordering here is what the tests below are about: an inbox
+   * seeded up front describes an application that sent the message before
+   * anybody asked, which no application does. */
+  onClick: (() => void) | undefined;
+
+  async click(control: RegExp) {
+    this.clicked.push(control.source);
+    this.onClick?.();
+  }
   async waitForAny(patterns: readonly RegExp[]): Promise<RegExp | null> {
     if (this.outcome === null) return null;
     return patterns.find((p) => p.source === this.outcome!.source) ?? null;
@@ -35,8 +46,37 @@ class FakePage implements Page {
 
 class FakeInbox implements InboxSource {
   messages: Message[];
-  constructor(messages: Message[]) { this.messages = messages; }
-  async list(): Promise<readonly Message[]> { return this.messages; }
+  /** What has been sent but not captured yet, and how many more reads it
+   *  takes to arrive.
+   *
+   * Delivery is not instant and the difference is the whole bug: a poll that
+   * happens before the new message lands sees only the old one. An inbox that
+   * hands over the fresh message on the first read cannot express that, and a
+   * test written against one passes whether or not the floor is there. */
+  #inFlight: { readonly reads: number; readonly message: Message } | undefined;
+  #reads = 0;
+
+  constructor(messages: Message[] = []) { this.messages = messages; }
+
+  async list(): Promise<readonly Message[]> {
+    this.#reads++;
+    if (this.#inFlight && this.#reads > this.#inFlight.reads) {
+      this.messages.push(this.#inFlight.message);
+      this.#inFlight = undefined;
+    }
+    return this.messages;
+  }
+
+  /** deliver captures one message immediately, for a flow with nothing to
+   *  race against. */
+  deliver(message: Message) { this.messages.push(message); }
+
+  /** deliverAfter captures one message once the inbox has been read that many
+   *  more times, which is what a message in flight looks like from here. */
+  deliverAfter(reads: number, message: Message) {
+    this.#reads = 0;
+    this.#inFlight = { reads, message };
+  }
 }
 
 const owner: Persona = {
@@ -89,11 +129,12 @@ test('a page that says nothing is reported as saying nothing', async () => {
 
 test('a magic link is read from the inbox and followed', async () => {
   const page = new FakePage(/welcome back/i);
-  const inbox = new FakeInbox([{
+  const inbox = new FakeInbox();
+  page.onClick = () => inbox.deliver({
     seq: 3, at: '', provider: 'resend', kind: 'email',
     to: ['owner@example.test'], subject: 'Your sign in link',
     link: 'https://app.test/auth/callback?token=xyz',
-  }]);
+  });
 
   const result = await signIn(page, { ...owner, login: 'magic_link' }, {
     baseURL: 'https://app.test', inbox, timeoutMs: 1_000,
@@ -120,10 +161,11 @@ test('a magic link that never arrives is blocked and says what did arrive', asyn
 
 test('a one time code is read from the inbox and entered', async () => {
   const page = new FakePage(/dashboard/i);
-  const inbox = new FakeInbox([{
+  const inbox = new FakeInbox();
+  page.onClick = () => inbox.deliver({
     seq: 2, at: '', provider: 'resend', kind: 'email',
     to: ['owner@example.test'], subject: 'Your code', code: '481920',
-  }]);
+  });
 
   const result = await signIn(page, { ...owner, login: 'email_code' }, {
     baseURL: 'https://app.test', inbox, timeoutMs: 1_000,
@@ -156,4 +198,60 @@ test('fields are matched by accessible name, anchored', () => {
   assert.ok(!FIELD.password.test('Forgot your password?'));
   assert.ok(CONTROL.signIn.test('Sign in'));
   assert.ok(!CONTROL.signIn.test('Sign in with Google'));
+});
+
+test('a retry does not follow the link the previous attempt already spent', async () => {
+  // A magic link is single use, and waitFor deliberately looks at what already
+  // arrived before it waits: right for a message that need only exist, wrong
+  // for one that has to be new. Without a floor read before the button is
+  // pressed, a second attempt matched the first attempt's message and followed
+  // a token the application had already burned, and the application answered
+  // "This sign-in link is no longer valid."
+  //
+  // It was a race rather than a certainty, which is how it survived. Driving
+  // this repository's own six workflows against a real environment produced
+  // two that signed in and four that did not, out of one code path in one run.
+  const spent = 'https://app.test/auth/callback?token=already-used';
+  const fresh = 'https://app.test/auth/callback?token=asked-for-just-now';
+  const inbox = new FakeInbox([{
+    seq: 7, at: '', provider: 'resend', kind: 'email',
+    to: ['owner@example.test'], subject: 'Sign in', link: spent,
+  }]);
+  const page = new FakePage(/welcome back/i);
+  // One read later, so the first poll sees only the spent message. That is the
+  // race as it actually happened, and a delivery on the first read would pass
+  // with or without the fix.
+  page.onClick = () => inbox.deliverAfter(1, {
+    seq: 8, at: '', provider: 'resend', kind: 'email',
+    to: ['owner@example.test'], subject: 'Sign in', link: fresh,
+  });
+
+  const result = await signIn(page, { ...owner, login: 'magic_link' }, {
+    baseURL: 'https://app.test', inbox, timeoutMs: 1_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(page.visited.includes(fresh), 'followed the link it just asked for');
+  assert.ok(!page.visited.includes(spent), 'did not follow the spent one');
+});
+
+test('a code the previous attempt already used is not entered again', async () => {
+  // The same rule, for the same reason: a one time code is spent the same way
+  // a link is.
+  const inbox = new FakeInbox([{
+    seq: 4, at: '', provider: 'resend', kind: 'email',
+    to: ['owner@example.test'], subject: 'Your code', code: '111111',
+  }]);
+  const page = new FakePage(/dashboard/i);
+  page.onClick = () => inbox.deliverAfter(1, {
+    seq: 5, at: '', provider: 'resend', kind: 'email',
+    to: ['owner@example.test'], subject: 'Your code', code: '222222',
+  });
+
+  const result = await signIn(page, { ...owner, login: 'email_code' }, {
+    baseURL: 'https://app.test', inbox, timeoutMs: 1_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(page.filled[FIELD.code.source], '222222');
 });

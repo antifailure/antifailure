@@ -205,6 +205,62 @@ name.
 | `idle_sleep` | Suspend after this long with no traffic. |
 | `domain` | Wildcard domain for preview URLs. |
 
+## `github`
+
+| Key | Read by | Notes |
+| --- | --- | --- |
+| `mode` | `af explain` only | `actions`, `app` or `off`. Which half does the work is decided by your workflow, which has the address of a control plane or does not. |
+| `comment` | `af change`, `af ci` | Whether to maintain one comment on the pull request. |
+| `fork_policy` | `af ci`, `af up`, `af test`, `af load run` | `never`, `label` or `always`. Read from the BASE branch, not from the pull request. |
+| `teardown_on` | `af explain` only | Accepted and read by nothing. Teardown is unconditional. |
+
+**`fork_policy`** is enforced in the engine, before an environment is named and
+before the Docker daemon is touched, on `pull_request` and on
+`pull_request_target`. The policy is read from the base branch rather than from
+the checked out tree, because the manifest is a file in your repository and a
+fork's pull request carries its own copy of it: reading the setting from there
+would let anybody lift their own restriction. A checkout that does not carry
+the base branch falls back to `label` and says so. See
+[Forks](/docs/guides/github/#forks).
+
+The control plane applies `label` behaviour to every repository regardless of
+what this says, and cannot do otherwise, for the reason two paragraphs down. Its
+approval covers that exact commit: the next push withdraws it.
+
+**`comment: false`** makes `af change` and `af ci` write `comment=false` to
+`GITHUB_OUTPUT`, and the workflow's comment step is gated on it. The report
+files are still written. That is the distinction the setting draws: do not
+comment, not do not produce a report. The same `report.md` is the job summary
+and the payload a control plane is sent, and a publish step that reads a file
+somebody deleted fails rather than skipping. Outside GitHub Actions there is no
+pull request for the setting to be about and nothing changes. Which half writes
+the comment is still not this setting's business: with a control plane it
+maintains one and the workflow's own step stands down, and without one the
+workflow comments for itself.
+
+**`mode` and `teardown_on` are read by `af explain` only**, and that is worth
+being blunt about rather than leaving somebody to find out by setting one.
+Removing `close` from `teardown_on` does not stop a closed pull request being
+torn down, and no combination of its values turns teardown off. Teardown is
+always asked for when the pull request closes or merges, when a newer commit
+supersedes the run, and when the check times out, because a run that is stopping
+leaks its environment if nothing cleans up after it. `af ci` tears down before
+it writes the report, whatever the outcome, including on a cancelled job. The
+`ttl` outcome is real and comes from a different key,
+[`runtime.max_ttl`](#runtime).
+
+The reason those two are inert is architectural rather than an oversight, and it
+is the sentence the whole product rests on: **the hosted control plane never
+reads your manifest.** The manifest lives in your repository beside your code,
+and the control plane holds organizations, policy and aggregated reports. A
+control plane that read the manifest would be a control plane that had to fetch
+your repository, which is the boundary this product exists to keep. Anything in
+this block that only a control plane could act on is therefore not acted on.
+
+A test in `internal/manifest` fails if one of these fields gains a reader
+without this table being updated, and if a new field is added to the block
+without being classified, so this list cannot go quietly out of date.
+
 ## When the manifest is wrong
 
 ```

@@ -159,44 +159,6 @@ export function IsoTwoPlanes({
   );
 }
 
-export function IsoWorkers() {
-  const planes = [
-    { y: 72, label: "MATCHING" },
-    { y: 118, label: "NOTIFY" },
-    { y: 164, label: "SETTLE" },
-  ];
-  const labelCol = 336;
-  return (
-    <DrawWell>
-      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
-        <BoxedLabel x={16} y={14} text="WEBHOOK BLOCKED" />
-        <line x1="134" y1="22" x2="268" y2="62" stroke="#C43D3D" strokeDasharray="2 3" />
-        <rect x="268" y="58" width="8" height="8" fill="#C43D3D" />
-        {planes.map((p) => (
-          <g key={p.label}>
-            <path
-              d={`M64 ${p.y} L268 ${p.y} L304 ${p.y + 26} L100 ${p.y + 26} Z`}
-              fill="rgba(255,255,255,0.7)"
-              stroke="rgba(0,0,0,0.4)"
-            />
-            <line
-              x1="300"
-              y1={p.y + 13}
-              x2={labelCol - 4}
-              y2={p.y + 13}
-              stroke="rgba(0,0,0,0.28)"
-              strokeDasharray="2 3"
-            />
-            <BoxedLabel x={labelCol} y={p.y + 5} text={p.label} />
-          </g>
-        ))}
-        <path d="M48 216 L278 216 L320 250 L90 250 Z" fill="rgba(51,191,0,0.1)" stroke="#33bf00" />
-        <BoxedLabel x={210 - labelWidth("BRANCHED DB") / 2} y={256} text="BRANCHED DB" accent />
-      </svg>
-    </DrawWell>
-  );
-}
-
 export function DiamondSchematic({
   nodes,
 }: {
@@ -280,46 +242,6 @@ export function KeepBar({ kept }: { kept: number }) {
         {Math.round(kept * 100)}% kept · joins valid
       </text>
     </svg>
-  );
-}
-
-export function CycleSchematic({ nodes }: { nodes: string[] }) {
-  const labels = nodes.map((n) => n.toUpperCase());
-  const placements = [
-    { x: 210, y: 48, lx: 210 - labelWidth(labels[0]) / 2, ly: 14 },
-    { x: 332, y: 140, lx: 344, ly: 132 },
-    { x: 210, y: 232, lx: 210 - labelWidth(labels[2]) / 2, ly: 250 },
-    { x: 88, y: 140, lx: 10, ly: 132 },
-  ];
-  return (
-    <DrawWell>
-      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
-        <circle cx="210" cy="140" r="68" fill="none" stroke="rgba(0,0,0,0.22)" />
-        {placements.map((p, i) => (
-          <g key={labels[i]}>
-            <circle cx={p.x} cy={p.y} r="5" fill="#111" />
-            <BoxedLabel x={p.lx} y={p.ly} text={labels[i]} />
-          </g>
-        ))}
-      </svg>
-    </DrawWell>
-  );
-}
-
-export function GatewaySchematic() {
-  return (
-    <DrawWell>
-      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
-        <rect x="70" y="112" width="148" height="72" fill="none" stroke="rgba(0,0,0,0.45)" />
-        <BoxedLabel x={102} y={140} text="GATEWAY" />
-        <rect x="250" y="52" width="132" height="60" fill="rgba(51,191,0,0.1)" stroke="#33bf00" />
-        <BoxedLabel x={264} y={74} text="STRIPE PACK" accent />
-        <line x1="218" y1="136" x2="250" y2="92" stroke="rgba(0,0,0,0.35)" />
-        <circle cx="316" cy="192" r="20" fill="none" stroke="#C43D3D" />
-        <path d="M305 181 L327 203 M327 181 L305 203" stroke="#C43D3D" />
-        <BoxedLabel x={258} y={226} text="LIVE PROCESSOR" />
-      </svg>
-    </DrawWell>
   );
 }
 

@@ -94,16 +94,20 @@ type Provider struct {
 type Options struct {
 	// Version is the Postgres major version.
 	Version int
-	// PortFrom is where to start allocating published ports.
+	// PortFrom is where to start allocating published ports. Zero resolves
+	// AF_PORT_RANGE_START, and the default under that.
 	PortFrom int
+	// Getenv reads the environment, so that a test can move the port range
+	// without moving the process's. Nil reads the process environment.
+	Getenv func(string) string
 	// SeedSQL initialises a golden candidate when no source is configured.
 	SeedSQL string
 	// Clock is the time source.
 	Clock clock.Clock
 }
 
-// DefaultPortFrom is high enough to sit above the ephemeral range on every
-// platform, so an allocation does not collide with an outbound connection.
+// DefaultPortFrom is where this provider starts allocating when nothing moves
+// it. The reasoning about the ephemeral range is on the constant it takes.
 const DefaultPortFrom = dockerutil.DefaultPortFrom
 
 // New returns a provider talking to the local Docker daemon.
@@ -112,7 +116,11 @@ func New(opts Options) (*Provider, error) {
 		opts.Version = 17
 	}
 	if opts.PortFrom == 0 {
-		opts.PortFrom = DefaultPortFrom
+		from, err := dockerutil.PortRangeFrom(opts.Getenv)
+		if err != nil {
+			return nil, err
+		}
+		opts.PortFrom = from
 	}
 	if opts.Clock == nil {
 		opts.Clock = clock.New()
@@ -258,6 +266,9 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	if spec.RulesHash != "" {
 		changes = append(changes, `LABEL `+dockerutil.LabelRules+`=`+spec.RulesHash)
 	}
+	if spec.Provenance != "" {
+		changes = append(changes, `LABEL `+dockerutil.LabelProvenance+`=`+spec.Provenance)
+	}
 	if attestation != "" {
 		changes = append(changes, `LABEL `+dockerutil.LabelAttestation+`=`+
 			base64.StdEncoding.EncodeToString([]byte(attestation)))
@@ -272,7 +283,8 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 
 	gv := provider.GoldenVersion{
 		ID: version, CreatedAt: p.clock.Now().UTC(), RulesHash: spec.RulesHash,
-		Verified: spec.Verify != nil, Attestation: attestation, ProviderRef: tag,
+		Provenance: spec.Provenance,
+		Verified:   spec.Verify != nil, Attestation: attestation, ProviderRef: tag,
 	}
 	if info, err := p.cli.ImageInspect(ctx, tag); err == nil {
 		gv.SizeBytes = info.Size
@@ -340,8 +352,9 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 				SizeBytes: img.Size, ProviderRef: tag,
 				// A committed image only exists because verification passed;
 				// the commit is the last step of a refresh.
-				Verified:  true,
-				RulesHash: img.Labels[dockerutil.LabelRules],
+				Verified:   true,
+				RulesHash:  img.Labels[dockerutil.LabelRules],
+				Provenance: img.Labels[dockerutil.LabelProvenance],
 			}
 			if raw := img.Labels[dockerutil.LabelAttestation]; raw != "" {
 				if decoded, decErr := base64.StdEncoding.DecodeString(raw); decErr == nil {

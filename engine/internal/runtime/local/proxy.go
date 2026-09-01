@@ -404,6 +404,24 @@ type Decision struct {
 	// looked in af net log exactly like a slow application.
 	WaitedMs int64  `json:"waited_ms"`
 	Limit    string `json:"limit"`
+	// Synthesized marks a response a model invented rather than a server
+	// returning it, so a workflow that touched one reports unverified rather
+	// than passed.
+	//
+	// The sidecar has written this since synth existed and nothing on this
+	// side of the boundary had a field for it, so `json.Unmarshal` dropped it
+	// silently and every consumer downstream, `af net log` and the report and
+	// the runner's verdict, saw a synthesized call as an ordinary allowed one.
+	// The promise that a synthesized response comes back unverified was made
+	// in five places and could not be kept by any of them, because the fact
+	// never left the proxy.
+	Synthesized bool `json:"synthesized"`
+	// Pack and Fixture name what answered a mocked request. Dropped the same
+	// way and for the same reason, against a comment in the sidecar saying "a
+	// mock that cannot say which fixture produced a response is a mock nobody
+	// can debug".
+	Pack    string `json:"pack"`
+	Fixture string `json:"fixture"`
 }
 
 // Decisions reads the sidecar's decision log for an environment.

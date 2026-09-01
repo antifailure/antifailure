@@ -1,4 +1,4 @@
-import { PageHeading, PageHero, PageSection, PageShell, Split } from "@/components/pages/kit";
+import { PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { ReportScene } from "@/components/home/visuals/ReportScene";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { PRP01, PRP02 } from "@/components/pages/figures/product";
@@ -108,7 +108,7 @@ export function ReportPage() {
         </Split>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="Five verdicts"
           title="<strong>A run that could not answer says so</strong> instead of blaming the change."
@@ -155,7 +155,7 @@ export function ReportPage() {
         </Illustrative>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading title="<strong>What the report does not contain</strong> is written down too." />
         <p className="mt-6 max-w-[640px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
           A passing run that hides its own gaps is worth less than a failing one. Migration findings
@@ -163,8 +163,8 @@ export function ReportPage() {
           command you run rather than a section of this check. A load threshold produces a listed
           regression here and exits non-zero under{" "}
           <code className="font-mono text-[15px] text-black">af load</code>; the check's verdict comes
-          from the workflows and the invariants. A route your trace export has not shown enough of
-          carries no baseline, and the report says "no baseline" rather than inventing one.
+          from the workflows and the invariants. A route the traffic source could not measure carries
+          no baseline, and the report says &ldquo;no baseline&rdquo; rather than inventing one.
         </p>
         <div className="mt-12 max-w-[720px] border-t border-black/10 pt-8">
           <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">How close the twin got</MonoLabel>
@@ -193,9 +193,10 @@ export function ReportPage() {
           <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">Thresholds that exist</MonoLabel>
           <ul className="mt-5 space-y-3 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
             <li>
-              <span className="font-mono text-[14px] text-black">p95_increase</span>, default 0.25.
-              Applied per route, against the p95 in your own trace export, and never to a route with
-              no baseline.
+              <span className="font-mono text-[14px] text-black">p95_increase</span>, default 0.25
+              under a trace export. Applied per route, against production&rsquo;s own p95 for that
+              route, and never to a route with no baseline. An access log carries no durations, so
+              the manifest refuses the threshold there rather than listing one that cannot fire.
             </li>
             <li>
               <span className="font-mono text-[14px] text-black">error_rate</span>, default 0.01.
@@ -205,7 +206,7 @@ export function ReportPage() {
         </div>
       </PageSection>
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split
           visual={
             <div className="border border-black/12 bg-[#f7f7f5] px-5 py-5">
@@ -226,6 +227,14 @@ export function ReportPage() {
         </Split>
       </PageSection>
 
+
+      <RelatedGrid
+        items={[
+          { href: "/product/load", title: "Load", description: "Where a latency regression is measured." },
+          { href: "/product/twins", title: "Isolated Twin", description: "What the run is carried out inside." },
+          { href: "/product/migrations", title: "Migration Safety", description: "The lock that a rehearsal finds." },
+        ]}
+      />
     </PageShell>
   );
 }

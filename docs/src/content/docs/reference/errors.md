@@ -388,9 +388,9 @@ The subset could not be taken: {detail}
 
 ### AF-DB-012
 
-No golden matches this manifest's masking rules, and {count} were made under different ones.
+No golden here was made for this project, and {count} were made for something else.
 
-**What to do.** Run 'af golden refresh' to make one from the source this manifest names.
+**What to do.** Run 'af golden refresh' to make one from the source this manifest names. A golden is chosen by the project it was made for, the database it was copied from, the masking rules, the subset and the Postgres version, so one belonging to another project on this machine is never branched here.
 
 | | |
 | --- | --- |
@@ -415,6 +415,18 @@ The database seed command failed: {detail}
 No database branch exists for {env}.
 
 **What to do.** Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens/) |
+
+### AF-DB-015
+
+The published golden {version} in {store} was made for a different project.
+
+**What to do.** Name a version this project published with 'af golden pull <version>', or run 'af golden refresh' on a machine that can reach the source. A store is shared, so the newest object in it is not necessarily yours.
 
 | | |
 | --- | --- |
@@ -608,6 +620,20 @@ The environment does not reproduce {dimension}, which the manifest requires: {de
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/inventory](/docs/concepts/inventory/) |
 
+## GitHub
+
+### AF-GH-003
+
+Nothing ran, because of the fork policy on the base branch. {detail}
+
+**What to do.** Add the antifailure:allow label to the pull request, or change github.fork_policy on the base branch.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [getting-started/pull-requests](/docs/getting-started/pull-requests/) |
+
 ## Infrastructure
 
 ### AF-INF-002
@@ -689,6 +715,18 @@ The scenario at {path} could not be read: {detail}
 The scenario {scenario} proved nothing: {detail}
 
 **What to do.** A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load/) |
+
+### AF-LOD-016
+
+The p95_increase threshold proved nothing: {detail}
+
+**What to do.** The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone.
 
 | | |
 | --- | --- |
@@ -1058,7 +1096,7 @@ Service {service} exited with code {code} during startup.
 
 No free port was found in the range {range} to publish the environment on.
 
-**What to do.** Free a port in that range, or set runtime.port_from in the manifest to a range that is clear.
+**What to do.** Free a port in that range, or set AF_PORT_RANGE_START to the first port of a range that is clear.
 
 | | |
 | --- | --- |
@@ -1173,6 +1211,18 @@ This runtime cannot do that: {detail}
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+
+### AF-RUN-046
+
+AF_PORT_RANGE_START is set to {value}, which is not a port number.
+
+**What to do.** Set it to the first port of a free range, between {limit}, or unset it to use the default.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/local-runtime](/docs/guides/local-runtime/) |
 
 ## Secrets
 

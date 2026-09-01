@@ -730,6 +730,7 @@ func (o *Orchestrator) newRuntime() (provider.Runtime, error) {
 	case schema.RuntimeLocal:
 		return local.New(local.Options{
 			Clock: o.opts.Clock, Redactor: o.opts.Redactor, TTL: o.ttl(),
+			Getenv: o.opts.Getenv,
 		})
 	case schema.RuntimeKubernetes:
 		return o.newKubernetesRuntime(cfg)
@@ -794,7 +795,9 @@ func (o *Orchestrator) resolveProxyImage(ctx context.Context) (string, error) {
 	if image := getenv("AF_PROXY_IMAGE"); image != "" {
 		return image, nil
 	}
-	builder, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	builder, err := local.New(local.Options{
+		Clock: o.opts.Clock, Redactor: o.opts.Redactor, Getenv: o.opts.Getenv,
+	})
 	if err != nil {
 		return "", aferrors.Coded(aferrors.AFRUN044, "detail",
 			"the egress sidecar image is built on a local container daemon and none "+
@@ -837,7 +840,7 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 	switch kind {
 	case schema.DBDocker:
 		p, err := dockerdb.New(dockerdb.Options{
-			Version: databaseVersion(m), Clock: o.opts.Clock,
+			Version: databaseVersion(m), Clock: o.opts.Clock, Getenv: o.opts.Getenv,
 		})
 		if err != nil {
 			return nil, err
@@ -950,32 +953,50 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 
 // pickGolden chooses the version a branch is made from.
 //
-// Verified, and made under the rules this manifest declares. It returns how
-// many verified versions were refused for the second reason so that the
-// caller can say something better than "no golden": a store with six goldens
-// in it and none of them usable here is a different situation from an empty
-// one, and telling them apart is the difference between "run af golden
-// refresh" and "something is wrong".
+// Verified, and made for this project. It returns how many verified versions
+// were refused for the second reason so that the caller can say something
+// better than "no golden": a store with six goldens in it and none of them
+// usable here is a different situation from an empty one, and telling them
+// apart is the difference between "run af golden refresh" and "something is
+// wrong".
 //
-// A version that records no rules at all is refused too, and that is the part
-// worth arguing about. The first version of this accepted one, reasoning that
-// a missing record should not break a machine that had goldens on it already.
-// That reasoning is wrong: a golden whose provenance is unknown cannot be shown
-// to match this manifest, and branching it is exactly the cross contamination
+// A version that records no provenance at all is refused too, and that is the
+// part worth arguing about. The first version of this accepted one, reasoning
+// that a missing record should not break a machine that had goldens on it
+// already. That reasoning is wrong: a golden whose origin is unknown cannot be
+// shown to belong here, and branching it is exactly the cross contamination
 // this exists to stop. It is not hypothetical. With the lenient rule in place,
-// bringing the control plane up branched an empty golden the masking test suite
-// had published minutes earlier, and the environment came up with a schema and
-// no data in it.
+// bringing the control plane up branched an empty golden the masking test
+// suite had published minutes earlier, and the environment came up with a
+// schema and no data in it.
+//
+// That is the half the previous author closed. This is the other half, and it
+// was the common case rather than the corner one. The predicate used to be the
+// masking rules digest, which answers "were these masked the same way" and not
+// "may this environment branch that". Two unrelated projects with no
+// masking.yaml declare the same rules, namely none, so they hashed to the same
+// eight bytes and shared one pool. Reproduced with the released binary and two
+// ordinary Express repositories: acme-billing refreshed a golden from its
+// production database; nova-shop declared no database at all, printed in its
+// own manifest that "branches will start empty", and came up holding
+// acme-billing's customers and regions tables with acme-billing's rows in
+// them. See internal/env/provenance.go for what the identity is made of and
+// why each part of it survives the reuse that has to keep working.
 //
 // Refusing costs a refresh, and the error says to run one. Accepting costs
 // somebody a preview built on another project's data, and says nothing.
-func pickGolden(goldens []provider.GoldenVersion, wantRules string) (string, int) {
+func pickGolden(goldens []provider.GoldenVersion, want string) (string, int) {
 	refused := 0
 	for _, g := range goldens {
 		if !g.Verified {
 			continue
 		}
-		if g.RulesHash != wantRules {
+		// Compared against the empty string as well as against want, because
+		// want is never empty: provenance always carries at least the manifest
+		// name and the major version. A version recording nothing would
+		// otherwise match a caller that could not compute its own identity,
+		// which is the lenient rule this comment exists to refuse.
+		if g.Provenance == "" || g.Provenance != want {
 			refused++
 			continue
 		}
@@ -1468,29 +1489,29 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
 
-	// Which rules produced it, not merely that something produced it.
+	// Whose golden it is, not merely that something produced it.
 	//
-	// The store is per repository and a repository holds more than one
-	// manifest. Selecting the newest verified golden and nothing else means a
-	// preview of one project branches a masked copy of another project's
-	// database, which is what actually happened here: bringing the control
-	// plane up branched a golden an example had refreshed thirty seconds
-	// earlier, and the environment came up with the wrong schema entirely.
-	// Copying one project's data into another project's preview is the failure
-	// this product is sold to prevent.
+	// The pool is shared. The Docker provider keeps goldens as images on a
+	// machine wide daemon, and a configured store is shared by a fleet on
+	// purpose, so selecting the newest verified golden and nothing else means
+	// a preview of one project branches a masked copy of another project's
+	// database. That happened twice. First with no filter at all: bringing the
+	// control plane up branched a golden an example had refreshed thirty
+	// seconds earlier. Then again with a filter on the masking rules digest,
+	// which looks like a project key and is not one, because two projects with
+	// no masking.yaml declare identical rules and hash to the same value.
 	//
-	// The rules digest is the right key and it was already recorded for this,
-	// unread: GoldenVersion.RulesHash says it "identifies the masking rules
-	// that produced it, so that a rules change can be detected without
-	// re-reading the data". Matching on it is stronger than matching on a
-	// name, because it also refuses a golden of the right database masked
-	// under rules somebody has since changed, which is a golden whose
-	// attestation is about a different question than the one being asked.
-	_, wantRules, rulesErr := o.rules()
-	if rulesErr != nil {
-		return "", zero, secrets.Value{}, secrets.Value{}, rulesErr
+	// The identity that does separate projects is built in provenance.go, out
+	// of the manifest name, the variable naming production, the seed command,
+	// the masking digest, the subset and the major version. It is exact
+	// equality rather than a prefix or a subset match: a golden either was
+	// made for this work or it was not.
+	prov, provErr := o.provenanceOf()
+	if provErr != nil {
+		return "", zero, secrets.Value{}, secrets.Value{}, provErr
 	}
-	version, refused := pickGolden(goldens, wantRules)
+	want := prov.digest()
+	version, refused := pickGolden(goldens, want)
 	// A configured source and nothing to branch is a refusal rather than an
 	// empty database.
 	//
@@ -1514,7 +1535,13 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	if pinned := o.opts.PinGolden; pinned != "" {
 		version = ""
 		for _, g := range goldens {
-			if g.ID == pinned && g.Verified {
+			// The provenance is checked on this path too. A pin says which of
+			// this project's goldens to use, not that the check is waived, and
+			// the only thing standing between a pin and another project's data
+			// is that today's only caller happens to pass a version it made
+			// itself. That is a property of the caller and not of this code,
+			// and the next caller will not know it was load bearing.
+			if g.ID == pinned && g.Verified && g.Provenance == want {
 				version = g.ID
 				break
 			}
@@ -1523,8 +1550,8 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			return "", zero, secrets.Value{}, secrets.Value{}, aferrors.Coded(
 				aferrors.AFORC009, "version", pinned)
 		}
-		o.progress("branching the database from " + version + ", pinned by the caller")
-		return o.branchFrom(ctx, s, version)
+		return o.branchFrom(ctx, s, version,
+			"pinned by the caller, "+prov.describe())
 	}
 
 	// A cron expression on a laptop has nothing to fire it, so the next
@@ -1568,6 +1595,16 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 		gv, refreshErr := s.dbProv.RefreshGolden(ctx, provider.GoldenSpec{
 			Version:   databaseVersion(o.opts.Manifest),
 			RulesHash: seedRulesHash(seed),
+			// Recorded here as well as on the refresh path, and it is what
+			// makes this golden reusable at all. Before provenance existed
+			// this branch stamped seedRulesHash(seed), which for a project
+			// with no seed is the literal string "empty", while selection
+			// asked for the digest of an empty rule set. Those two never
+			// matched, so a project with no production database built a fresh
+			// golden on every single `af up` and branched it once. The fix for
+			// the leak is also the fix for that: one identity, written by
+			// every path that publishes and read by the path that selects.
+			Provenance: want,
 			// No source database is configured, so the golden is built from
 			// nothing. Where the manifest names a seed command, that command
 			// is what puts data in it; otherwise the schema arrives with the
@@ -1595,7 +1632,7 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			events.F("phase", "golden"), events.F("version", version),
 			events.F("verified", true))
 	}
-	return o.branchFrom(ctx, s, version)
+	return o.branchFrom(ctx, s, version, prov.describe())
 }
 
 // branchFrom creates this environment's branch of a chosen golden.
@@ -1604,13 +1641,21 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 // as a chosen one. Two copies of the journal, branch and connection string
 // sequence would be two places to forget to record an intent, and a branch
 // created before its journal entry is a branch teardown cannot find.
+//
+// origin says where the golden came from, in a clause a person can check. The
+// line used to be "branching the database from gv_20260901033741_74234e98" and
+// nothing else, which reads exactly the same when the choice is right as when
+// it is wrong: the run that branched an unrelated project's production data
+// printed that sentence and looked correct. A decision nobody can check is one
+// refactor away from an incorrect one nobody notices.
 func (o *Orchestrator) branchFrom(
-	ctx context.Context, s *session, version string,
+	ctx context.Context, s *session, version, origin string,
 ) (string, provider.Branch, secrets.Value, secrets.Value, error) {
 	var zero provider.Branch
-	o.progress("branching the database from " + version)
+	o.progress("branching the database from " + version + ", " + origin)
 	o.event(s, events.DBBranching, "branching from "+version,
-		events.F("phase", "branching"), events.F("version", version))
+		events.F("phase", "branching"), events.F("version", version),
+		events.F("origin", origin))
 
 	// Recorded against the provider that is about to create it, not against
 	// "docker". The provider name is the first half of the key the compensating

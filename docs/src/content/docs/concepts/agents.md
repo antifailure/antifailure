@@ -46,6 +46,25 @@ It is worth it for the flows that matter and wasteful for a unit test.
 what the verdict is decided against. Without it, an agent that clicked around
 and got nowhere can be reported as having finished.
 
+Afterwards is the word to read twice. An expectation is checked against the page
+the workflow ends on, so naming something that is only on the page it starts
+from asks for a page that cannot exist, and the workflow can never pass however
+well it works. A sign-in workflow expects the signed in state, not the button it
+pressed to get there.
+
+With no model key, the check is made against the page's visible text. Two
+consequences worth knowing before you write one:
+
+- A sentence about your product ("the totals are right") usually shares no word
+  with the page, so it can be neither confirmed nor contradicted, and the run
+  comes back `unverified` rather than passing. Name what the page says.
+- A placeholder is not visible text. `filter by action` inside an empty input is
+  what a browser shows and not what it reports, so an expectation naming one
+  never matches. Name a heading, a label, or a value instead.
+
+A model key removes both limits, because the model reads the page rather than
+matching words against it.
+
 ## Budgets
 
 ```yaml
