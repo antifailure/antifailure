@@ -159,6 +159,10 @@ somebody from the organization signs them out in the same transaction, so there
 is no window in which a person who is no longer a member still has a working
 session. Both need `sessions.manage`; removal needs `members.manage`.
 
+A session that is not used for twelve hours stops working, and no session lives
+longer than thirty days however active. The list shows when each one expires so
+that a session which is about to go on its own can be left alone.
+
 ### Taking a copy
 
 **Download a copy**, under Settings, produces one JSON file holding people,

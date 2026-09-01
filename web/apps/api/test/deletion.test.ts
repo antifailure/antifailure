@@ -139,6 +139,14 @@ describe(
         },
       )
       const atStripe = (await created.json()) as { id: string }
+      // The mock pack mints identifiers from a counter that starts at zero for
+      // each pack instance, and a pack instance lives for one run of this file.
+      // So a run against a database that still holds rows from an earlier run
+      // collides on `subscriptions_stripe_subscription_id_key` at its first
+      // subscription, which reads as a bug in the code under test. Clearing the
+      // one row makes the fixture independent of what was left behind.
+      await h.admin`
+        DELETE FROM subscriptions WHERE stripe_subscription_id = ${atStripe.id}`
       await h.admin`
         INSERT INTO subscriptions (
           org_id, stripe_subscription_id, stripe_customer_id, plan, status, quantity,
