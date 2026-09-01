@@ -264,7 +264,7 @@ case "${home:+$shell_name}" in
   zsh)
     profile="${ZDOTDIR:-$home}/.zshrc"
     profile_line=$export_line
-    session_line="$export_line && af doctor"
+    session_line="$export_line && af start"
     ;;
   bash)
     # macOS terminals start login shells, which read .bash_profile and never
@@ -276,7 +276,7 @@ case "${home:+$shell_name}" in
       profile="$home/.bashrc"
     fi
     profile_line=$export_line
-    session_line="$export_line && af doctor"
+    session_line="$export_line && af start"
     ;;
   fish)
     # fish_add_path rather than a set -gx line, because it both persists and
@@ -285,7 +285,7 @@ case "${home:+$shell_name}" in
     # It also refuses to add a path twice by itself.
     profile="$home/.config/fish/config.fish"
     profile_line=$fish_line
-    session_line="$fish_line && af doctor"
+    session_line="$fish_line && af start"
     ;;
 esac
 
@@ -299,28 +299,33 @@ in_profile() {
   return 1
 }
 
-# af doctor is the first of the three, and the paste line below already runs it,
-# so a list printed after that line starts at the second.
+# One command rather than three.
+#
+# This printed `af doctor`, `af runner install` and `af init`, in that order,
+# which was right about the order and wrong about the shape. Three commands is a
+# sequence, a sequence can be interrupted, and nothing in it told somebody who
+# came back an hour later which of the three they had already run. Worse, the
+# list stopped at the third: `af init` writes a manifest and leaves the reader
+# in front of a manifest with no idea that `af up` comes next.
+#
+# `af start` is the whole path, and it reports where you are on it every time
+# you run it, so the installer only has to name one thing and the product
+# carries the rest. It reads the machine and never writes to it, so a reader who
+# pastes it before they have decided anything has changed nothing.
 next_steps() {
-  say "  af doctor          check this machine"
-  next_steps_rest ""
+  say "  af start           where you are, and what to run next"
 }
 # ${1:-} rather than $1, because set -u turns a call that forgets the argument
-# into "unbound variable" printed where the next steps belong, which is how the
-# numbering change first ran.
+# into "unbound variable" printed where the next steps belong, which is how an
+# earlier version of this first ran.
 next_steps_rest() {
-  say "  ${1:-}af runner install  finish the agent runner, which needs node"
-  say "  ${1:-}af init            read your repository and write a manifest"
+  say "  ${1:-}af start           where you are, and what to run next"
 }
 
-# The same three for a branch that could not put af on the PATH, so the reader
-# gets something that runs rather than a name that will not resolve. No aligned
-# gloss column here: a full path plus a description does not fit in eighty
-# columns, and a wrapped command is a command somebody pastes wrong.
+# The same command for a branch that could not put af on the PATH, so the reader
+# gets something that runs rather than a name that will not resolve.
 next_steps_full() {
-  say "     $1/af doctor"
-  say "     $1/af runner install"
-  say "     $1/af init"
+  say "     $1/af start"
 }
 
 # Said by the installer rather than left for af runner install to discover,
@@ -468,8 +473,8 @@ else
     say "     $export_line"
   fi
   say ""
-  say "2. Until then af answers to its full path. Check the machine, finish the"
-  say "   runner, which needs node, then read your repository into a manifest:"
+  say "2. Until then af answers to its full path. This says where you are on the"
+  say "   first run and what to run next, every time you run it:"
   say ""
   next_steps_full "$(display_path "$BIN_DIR")"
 fi

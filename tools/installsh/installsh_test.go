@@ -295,8 +295,12 @@ func assertPrintedFullPathsRun(t *testing.T, s *session, out string) {
 		}
 		found++
 	}
-	if found != 3 {
-		t.Errorf("expected the three next steps as full paths, found %d\n--- output ---\n%s", found, out)
+	// One, not three. The installer used to print af doctor, af runner install
+	// and af init, which was right about the order and wrong about the shape:
+	// nothing in a printed list tells somebody who came back an hour later
+	// which of them they had already run. af start reports that itself.
+	if found != 1 {
+		t.Errorf("expected one next step as a full path, found %d\n--- output ---\n%s", found, out)
 	}
 }
 
@@ -383,7 +387,7 @@ func TestThePastedLineFixesTheCurrentTerminal(t *testing.T) {
 
 	paste := ""
 	for _, c := range printedCommands(out) {
-		if strings.Contains(c, "&& af doctor") {
+		if strings.Contains(c, "&& af start") {
 			paste = c
 		}
 	}
@@ -393,7 +397,7 @@ func TestThePastedLineFixesTheCurrentTerminal(t *testing.T) {
 
 	// A shell with the installer's PATH and no profile sourced, which is what
 	// the terminal that ran curl | sh actually is.
-	cmd := exec.Command(zshPath(t), "-c", strings.Replace(paste, "af doctor", "af", 1))
+	cmd := exec.Command(zshPath(t), "-c", strings.Replace(paste, "af start", "af", 1))
 	cmd.Env = []string{"HOME=" + s.home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "TERM=dumb"}
 	got, err := cmd.CombinedOutput()
 	if err != nil {
@@ -461,7 +465,7 @@ func TestAlreadyOnPathWritesNothingExtraAndSaysNothingAboutPath(t *testing.T) {
 	out := s.install()
 
 	contains(t, out, "Next:")
-	contains(t, out, "af doctor")
+	contains(t, out, "af start")
 	absent(t, out, "start here")
 	assertEveryPrintedAfIsReachable(t, out, true)
 	if s.read(".zshrc") != before {
@@ -685,7 +689,7 @@ func TestNoHomeStillInstalls(t *testing.T) {
 		t.Fatalf("install.sh failed with no HOME: %v\n%s", err, out)
 	}
 	contains(t, string(out), "HOME is not set")
-	contains(t, string(out), filepath.Join(prefix, "bin")+"/af doctor")
+	contains(t, string(out), filepath.Join(prefix, "bin")+"/af start")
 	assertEveryPrintedAfIsReachable(t, string(out), false)
 	assertPrintedFullPathsRun(t, s, string(out))
 	if _, err := os.Stat(filepath.Join(prefix, "bin", "af")); err != nil {

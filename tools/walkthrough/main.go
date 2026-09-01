@@ -6,6 +6,15 @@
 // told to type actually gets them to a running environment, and says how long
 // they wait for it.
 //
+// It used to stop at "a running environment", which was half the path and the
+// less interesting half. The product's claim is that agents drive the
+// application and return a verdict with evidence, and nothing in this walked
+// that: af runner install, af test and the artifacts a run leaves behind were
+// all outside the only check that follows the documented sequence. They are in
+// it now, and af test is asserted to have EXAMINED something rather than to
+// have exited zero, because a run that reached no workflow at all exits zero
+// too.
+//
 // Usage:
 //
 //	go run ./tools/walkthrough .                 run it, print the timings
@@ -19,6 +28,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -58,6 +68,9 @@ type world struct {
 	dir string
 	af  string
 	url string
+	// envID is what af up called the environment, which is the directory the
+	// artifacts land in.
+	envID string
 }
 
 func walk(root, example string, budget time.Duration) error {
@@ -83,11 +96,93 @@ func walk(root, example string, budget time.Duration) error {
 	}()
 
 	steps := []step{
+		{"af start", func(ctx context.Context, w *world) error {
+			// The command the installer points at, run first because it is
+			// what a new reader runs first. Exit 3 is a legitimate answer
+			// here, so this reads the report rather than the status: it has
+			// to name a next command, or somebody who ran it learned where
+			// they were and not what to do.
+			out, _ := w.af_(ctx, "start")
+			if !strings.Contains(out, "Your first run") {
+				return fmt.Errorf("af start printed no report:\n%s", out)
+			}
+			if !strings.Contains(out, "Next") {
+				return fmt.Errorf("af start named nothing to run next:\n%s", out)
+			}
+			return nil
+		}},
 		{"af doctor", func(ctx context.Context, w *world) error {
 			// The first thing the quickstart says to run, and the one that is
 			// supposed to explain a machine that cannot do this yet.
 			_, err := w.af_(ctx, "doctor")
 			return err
+		}},
+		{"af runner install", func(ctx context.Context, w *world) error {
+			// A runner already on this machine is not reinstalled, because
+			// this walks a developer's own home directory as well as a fresh
+			// CI runner, and clobbering somebody's installed runner mid
+			// session is not this command's business.
+			//
+			// The skip is refused wherever CI is set, for the reason this
+			// repository keeps relearning: a skip reads as a pass, and on a
+			// runner that starts from nothing there is no honest reason to
+			// take it.
+			if out, err := w.af_(ctx, "runner", "check"); err == nil {
+				if os.Getenv("CI") != "" {
+					return fmt.Errorf("the runner is already installed on a CI runner, "+
+						"which should start from nothing, so this step would prove nothing:\n%s", out)
+				}
+				fmt.Println("  (already installed, so this step did not exercise the install)")
+				return nil
+			}
+			_, err := w.af_(ctx, "runner", "install")
+			return err
+		}},
+		{"af runner check", func(ctx context.Context, w *world) error {
+			// After the install rather than only before it, because the
+			// install is what this asserts: a check that passes only because
+			// it ran on a machine that was already set up has checked nothing.
+			//
+			// Read as JSON rather than as text. The first version matched the
+			// words in the rendered report and went red against a runner that
+			// was correctly pinned, because the terminal had wrapped the line
+			// between "pinned by" and "package-lock.json". A check that reads
+			// prose is measuring the wrap.
+			out, err := w.af_(ctx, "runner", "check", "-o", "json")
+			if err != nil {
+				return fmt.Errorf("the runner is not ready after af runner install: %w", err)
+			}
+			var report struct {
+				Complete bool `json:"complete"`
+				Checks   []struct {
+					Name, Result, Detail string
+				} `json:"checks"`
+			}
+			if jsonErr := json.Unmarshal([]byte(out), &report); jsonErr != nil {
+				return fmt.Errorf("af runner check did not return a document this can read: %w\n%s",
+					jsonErr, out)
+			}
+			if !report.Complete {
+				return fmt.Errorf("af runner check exited 0 and reports the runner incomplete:\n%s", out)
+			}
+			deps := ""
+			for _, c := range report.Checks {
+				if c.Name == "dependencies" {
+					deps = c.Detail
+				}
+			}
+			if deps == "" {
+				return fmt.Errorf("af runner check reported nothing about the dependencies:\n%s", out)
+			}
+			// The lockfile is what makes two people installing one release get
+			// one tree, and a release that stopped shipping it would otherwise
+			// pass every check here with a differently resolved set.
+			if !strings.Contains(deps, "pinned by package-lock.json") {
+				return fmt.Errorf("the runner installed without a lockfile, so its dependencies "+
+					"are whatever npm resolved today rather than what this release was tested "+
+					"with: %s", deps)
+			}
+			return nil
 		}},
 		{"af explain", func(ctx context.Context, w *world) error {
 			out, err := w.af_(ctx, "explain")
@@ -105,6 +200,7 @@ func walk(root, example string, budget time.Duration) error {
 				return err
 			}
 			w.url = jsonField(out, "url")
+			w.envID = jsonField(out, "env_id")
 			if w.url == "" {
 				return errors.New("up reported no URL, so there is nothing for a person to open")
 			}
@@ -122,6 +218,72 @@ func walk(root, example string, budget time.Duration) error {
 			}
 			if !strings.Contains(out, `"running":true`) && !strings.Contains(out, `"running": true`) {
 				return fmt.Errorf("status does not say the environment is running:\n%s", out)
+			}
+			return nil
+		}},
+		{"af test", func(ctx context.Context, w *world) error {
+			// The exit code is deliberately not the assertion.
+			//
+			// af test exits 0 on unverified, and blocked does not count
+			// against a run, so a run that never reached a single workflow
+			// exits 0 exactly like a run where everything passed. That is how
+			// an entire nightly corpus was green having never once reached an
+			// agent. What is asserted here is that the run EXAMINED the
+			// workflows the manifest declares, and that at least one of them
+			// reached a real verdict about the application.
+			out, testErr := w.af_(ctx, "test", "-o", "json")
+			counts, err := verdictCounts(out)
+			if err != nil {
+				return fmt.Errorf("%w; af test said:\n%s", err, out)
+			}
+			total := counts["passed"] + counts["failed"] + counts["flaky"] +
+				counts["blocked"] + counts["unverified"]
+			if total == 0 {
+				return fmt.Errorf("af test returned a verdict for no workflow at all, "+
+					"which is a green run over nothing:\n%s", out)
+			}
+			if counts["passed"]+counts["failed"]+counts["flaky"] == 0 {
+				return fmt.Errorf("all %d workflows came back blocked or unverified, so this "+
+					"run says nothing about the application:\n%s", total, out)
+			}
+			if testErr != nil && counts["failed"] > 0 {
+				return fmt.Errorf("%d of %d workflows failed against the example: %w",
+					counts["failed"], total, testErr)
+			}
+			return testErr
+		}},
+		{"the evidence", func(_ context.Context, w *world) error {
+			// A verdict with no video, trace or console log behind it is an
+			// opinion. The product's claim is evidence, so the walkthrough
+			// looks for it on disk rather than taking the summary's word.
+			if w.envID == "" {
+				return errors.New("af up reported no environment id, so there is nowhere to look")
+			}
+			dir := filepath.Join(w.dir, ".antifailure", "artifacts", w.envID)
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				return fmt.Errorf("no artifacts under %s, so the run produced a verdict and "+
+					"nothing to check it against: %w", dir, err)
+			}
+			if len(entries) == 0 {
+				return fmt.Errorf("%s is empty, so the run produced a verdict and nothing to "+
+					"check it against", dir)
+			}
+			return nil
+		}},
+		{"af start again", func(ctx context.Context, w *world) error {
+			// The resumability claim, checked rather than asserted in a
+			// comment: after everything above, the same command reports the
+			// environment as running and the evidence as present. A first run
+			// somebody walked away from here is one they can walk back into.
+			out, _ := w.af_(ctx, "start")
+			for _, want := range []string{"an environment", "evidence on disk"} {
+				if !strings.Contains(out, want) {
+					return fmt.Errorf("af start no longer reports %q:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "none yet") {
+				return fmt.Errorf("af start reports no evidence after af test ran:\n%s", out)
 			}
 			return nil
 		}},
@@ -215,6 +377,38 @@ func reachable(ctx context.Context, url string) error {
 		}
 	}
 	return fmt.Errorf("%s never answered: %w", url, last)
+}
+
+// verdictCounts reads the five verdict totals out of af test's JSON.
+//
+// Read rather than trusted: a document missing them is reported as an error
+// here, because a zero read out of an absent field looks exactly like a zero
+// read out of a run that examined nothing, and only one of those is a defect
+// in the product.
+func verdictCounts(doc string) (map[string]int, error) {
+	var parsed struct {
+		Passed     *int `json:"passed"`
+		Failed     *int `json:"failed"`
+		Flaky      *int `json:"flaky"`
+		Blocked    *int `json:"blocked"`
+		Unverified *int `json:"unverified"`
+	}
+	if err := json.Unmarshal([]byte(doc), &parsed); err != nil {
+		return nil, fmt.Errorf("af test did not return a document this can read: %w", err)
+	}
+	fields := map[string]*int{
+		"passed": parsed.Passed, "failed": parsed.Failed, "flaky": parsed.Flaky,
+		"blocked": parsed.Blocked, "unverified": parsed.Unverified,
+	}
+	out := map[string]int{}
+	for name, value := range fields {
+		if value == nil {
+			return nil, fmt.Errorf("af test returned no %q count, so this cannot tell a run "+
+				"that examined nothing from one that passed", name)
+		}
+		out[name] = *value
+	}
+	return out, nil
 }
 
 // jsonField reads one string field out of a document, without a struct for a
