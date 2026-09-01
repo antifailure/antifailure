@@ -707,10 +707,30 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
     assert.equal(Number(row!.max_ms), 900)
   })
 
-  it('still reads the engine native spelling, so an older engine is not silently zeroed', async () => {
+  it('does NOT read the engine native spelling, and that is deliberate', async () => {
+    // This replaced a test asserting the opposite, and the premise it rested on
+    // is false rather than merely arguable. It said accepting `sent`, `rate` and
+    // a nested `overall` protects an older engine from being silently zeroed.
+    // There is no such engine. No engine ever emitted `workload.finished` at
+    // all before the release that introduced the result document, which is the
+    // gap the emitters work closed, and `hostedPayload` deletes `native` from
+    // the payload before it goes out, so the native spelling has never once
+    // been on this wire and cannot be.
+    //
+    // Tolerance is right for a VALUE arriving in an unexpected form: `num`
+    // takes a number written as a string, because that is a real thing a JSON
+    // encoder in another language does. It is wrong for a NAME, because the
+    // name is the contract. A decoder that reads both keeps working while the
+    // two ends disagree, which is exactly how a run that sent twelve hundred
+    // requests recorded as having sent none for as long as it did.
+    //
+    // And it is checkable rather than a matter of taste:
+    // engine/internal/controlplane/report_shape_test.go reads this decoder's
+    // source and fails on any name the engine does not send. Accepting both
+    // leaves that gate RED after a merge, naming the three.
     const target = await define('observed_load', { durationSeconds: 30 })
     const runId = (await start(target)).body.result.data.runId
-    await send([
+    const answer = await send([
       event({
         type: 'workload.finished',
         payload: {
@@ -719,12 +739,17 @@ describe('a workload run', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
         },
       }),
     ])
+    assert.equal(answer.status, 202)
+
     const [row] = await h.admin<Record<string, string | null>[]>`
       SELECT requests, achieved_rate, p95_ms FROM workload_run_results
       WHERE workload_run_id = ${runId}`
-    assert.equal(Number(row!.requests), 77)
-    assert.equal(Number(row!.achieved_rate), 9.5)
-    assert.equal(Number(row!.p95_ms), 33)
+    // Zero rather than 77, and null rather than the two numbers. The run is
+    // still recorded, because refusing the row would lose the rest of the
+    // report with it, and the zero is the CHECK's requirement showing through.
+    assert.equal(Number(row!.requests), 0)
+    assert.equal(row!.achieved_rate, null)
+    assert.equal(row!.p95_ms, null)
   })
 
   it('ordering: a run nobody ever reports on is abandoned, not failed', async () => {
