@@ -1,36 +1,46 @@
 /**
  * The Load area's data boundary.
  *
- * Every `load.*` path the console calls is named in this file and nowhere else,
- * so the contract with the control plane is one file to reconcile rather than a
- * grep across a dozen components.
+ * Every `workloads.*` path the console calls is named in this file and nowhere
+ * else, so the contract with the control plane is one file to reconcile rather
+ * than a grep across a dozen components.
  *
- * The shapes here are the ENGINE'S, read out of `engine/internal/load` rather
- * than designed to suit the screen. That is deliberate and it cost a rewrite:
- * the first version of this file invented a percentile set, a signed
- * millisecond delta and a generic threshold row, all of which read plausibly
- * and none of which the engine produces. A console whose vocabulary differs
- * from the tool's makes every report a translation, and a translation is where
- * a number quietly changes meaning.
+ * WHY THE URL SAYS LOAD AND THE ROUTES SAY WORKLOADS. The `/load` address and
+ * the nav entry are what a person reads, and they stay. The tRPC key is not
+ * user facing, and `load.run` already exists on the control plane as a
+ * different thing: a one off dispatch with no definition behind it. Putting
+ * `load.runs.*` beside it would make two adjacent keys mean different things,
+ * with the special case reading as the general one.
+ *
+ * WHAT A DEFINITION ACTUALLY IS, because this is the correction that shaped
+ * the file. A version is not a document. All four runnable things are declared
+ * in the CUSTOMER'S manifest and selected by name: `af load scenario --only
+ * checkout`, `af test --only sign-up`, `af explore --only upgrade`. None of
+ * them takes a document and none could, because a scenario is checked against
+ * the manifest's safe route list before anything is sent, and a control plane
+ * able to hand an engine an arbitrary journey could send traffic the customer
+ * never allowed. So a version is a SELECTION plus the knobs the command
+ * actually declares, and this file models that and nothing larger.
  *
  * Three rules run through it.
  *
  * A number the control plane did not record arrives as `null`, never as zero.
- * `P95Increase` is the sharpest case: 0 is a legitimate value meaning no
- * change AND the zero value of the field, which is exactly why the engine
- * carries `HasBaseline` beside it.
+ * `p95_increase` is the sharpest case: 0 is a legitimate value meaning no
+ * change AND the zero value of the column, which is why the schema constrains
+ * it to exist exactly when a baseline does.
  *
- * A verdict that is not a verdict is never drawn as one. `blocked` and
- * `unverified` are two of the product's four words and neither means the
- * software is fine.
+ * A verdict that is not a verdict is never drawn as one. There are FIVE, not
+ * four: `flaky` is one of them, and a decoder that dropped it would render a
+ * run that found something as "No verdict", which is an absence displayed
+ * where there is a finding.
  *
- * And observed traffic, an authored scenario and an exploration are three
- * different things. The third is not even a load source: `af explore` compiles
- * a discovery into a manifest workflow for `af test`, not into a scenario, so
- * it is modelled apart from the other two rather than beside them.
+ * And state is not verdict. State says whether the work happened; verdict says
+ * what it found. Neither implies the other, which is why they are two columns
+ * on the run and two badges on the screen. A run that finishes cleanly and
+ * fails every threshold is succeeded and fail.
  */
 
-import { query, mutate } from "@/lib/api";
+import { mutate, query } from "@/lib/api";
 
 /* -------------------------------------------------------------------------
  * Reading foreign data
@@ -44,10 +54,10 @@ export function str(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
 }
 
-/** A number, or null. Accepts the string form a driver hands back for numeric
- *  columns, but rejects the empty string, because `Number("")` is 0 and a stat
- *  tile reading zero for something nothing measured is the defect this whole
- *  file is shaped around. */
+/** A number, or null. Accepts the string form a driver hands back for a bigint
+ *  or a numeric column, but rejects the empty string, because `Number("")` is 0
+ *  and a stat tile reading zero for something nothing measured is the defect
+ *  this whole file is shaped around. */
 export function num(v: unknown): number | null {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
   if (typeof v === "string" && v.trim() !== "") {
@@ -79,361 +89,125 @@ function obj(v: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** Read snake_case first, camelCase second, so either serialiser works. */
+/** Read snake_case first, camelCase second. The run and workload rows come
+ *  straight out of SQL and are snake_case; a version body was written by a zod
+ *  schema and is camelCase. One reader handles both rather than two. */
 function pick(o: Record<string, unknown>, snake: string, camel: string): unknown {
   return o[snake] !== undefined ? o[snake] : o[camel];
 }
 
 /* -------------------------------------------------------------------------
- * Where the traffic comes from
+ * The four kinds
  * ---------------------------------------------------------------------- */
 
 /**
- * The two things that can be sent at a twin.
+ * What a workload is, and the command a run of it becomes.
  *
- * Two, not three. Exploration is not here, and leaving it out is the point:
- * `explore.Compile` returns a `schema.Workflow`, so an exploration produces
- * something `af test` runs, not something `af load` sends. Listing it as a
- * third source would put a lie in the type system, and every screen built on
- * that type would inherit it.
+ * Four kinds, and deliberately no shared shape between them. They measure
+ * materially different things: a mix has no order, a journey has no browser, a
+ * workflow has no request rate, and an exploration has no pass. The schema
+ * carries a CHECK refusing a result of one kind wearing another's columns, and
+ * this file keeps the same separation rather than flattening it back out.
  */
-export type SourceKind = "observed" | "deterministic";
+export type Kind = "observed_load" | "http_scenario" | "browser_workflow" | "exploration";
 
-export const SOURCE_KINDS: readonly SourceKind[] = ["observed", "deterministic"];
+export const KINDS: readonly Kind[] = [
+  "observed_load",
+  "http_scenario",
+  "browser_workflow",
+  "exploration",
+];
 
-export function sourceKindOf(v: unknown): SourceKind | null {
-  return v === "observed" || v === "deterministic" ? v : null;
+export function kindOf(v: unknown): Kind | null {
+  return v === "observed_load" ||
+    v === "http_scenario" ||
+    v === "browser_workflow" ||
+    v === "exploration"
+    ? v
+    : null;
 }
 
 /**
- * What each kind is, and what a result from it is worth.
+ * What each kind is, what a result from it is worth, and what it measures.
  *
- * `reproducible` is the field that earns this table. It is the difference
- * between a number you can hand somebody and one you can only ask them to
- * believe, and the answer is not the same for the two kinds.
+ * `reproducible` earns its place here. It is the difference between a number
+ * you can hand somebody and one you can only ask them to believe, and the
+ * answer is not the same for the four.
  */
-export const SOURCE_FACTS: Record<
-  SourceKind,
-  { noun: string; provenance: string; what: string; reproducible: string }
+export const KIND_FACTS: Record<
+  Kind,
+  {
+    noun: string;
+    command: string;
+    what: string;
+    reproducible: string;
+    /** What a run of it produces, so a reader knows which table to look at. */
+    measures: string;
+  }
 > = {
-  observed: {
-    noun: "Observed",
-    provenance: "Measured",
+  observed_load: {
+    noun: "Observed load",
+    command: "af load run",
     what: "A weighted mix read from what production actually served, compiled from an OTLP export or an access log. The mix is the point: what breaks under real traffic is the page nobody thinks about that is nine percent of requests.",
     reproducible:
-      "As a shape. The mix and the rate replay exactly, and the picker is seeded so two runs send the same sequence. The individual production requests it was derived from do not replay.",
+      "As a shape. The mix and the rate replay, and the generator is seeded so two runs send the same sequence. The individual production requests it was derived from do not replay.",
+    measures: "Requests, the rate it managed against the rate it aimed for, and latency per route.",
   },
-  deterministic: {
-    noun: "Deterministic",
-    provenance: "Authored",
-    what: "A scenario somebody wrote and committed: named steps in an order, with think time between them, and assertions that say what holding up means.",
+  http_scenario: {
+    noun: "Scenario",
+    command: "af load scenario",
+    what: "Journeys somebody wrote into the manifest and this version selects by name: steps in an order, with think time between them, and assertions that say what holding up means.",
     reproducible:
-      "Exactly. The same scenario at the same seed plans the same requests in the same order.",
+      "Exactly. The same scenarios at the same seed plan the same requests in the same order.",
+    measures: "Requests and sessions, latency per route, and one row per assertion.",
+  },
+  browser_workflow: {
+    noun: "Workflow",
+    command: "af test",
+    what: "Workflows out of the manifest, driven in a real browser by an agent. This asks whether a journey still works, which is a different question from how fast it is under load.",
+    reproducible:
+      "As an outcome rather than as a sequence. An agent reads the page it is on, so two runs can reach the same result by different routes.",
+    measures: "One count per outcome across the workflows it selected, and the steps it took.",
+  },
+  exploration: {
+    noun: "Exploration",
+    command: "af explore",
+    what: "An agent choosing its own way through the application from a goal and a seed, which is the other way a route nobody wrote down gets found.",
+    reproducible: "At the same seed, the same wander.",
+    measures: "Which goals were reached, and what the agent found on the way.",
   },
 };
-
-/**
- * One route in a mix, as the engine names it.
- *
- * `Route.String()` in the engine renders "METHOD /path" and this keeps the two
- * halves apart so a table can align the method column. Weight is the share of
- * production's traffic the route carried.
- */
-export interface Route {
-  method: string | null;
-  path: string;
-  weight: number | null;
-}
-
-export function readRoute(v: unknown): Route | null {
-  const o = obj(v);
-  if (!o) return null;
-  // The engine also serialises a route as one string. Accept both, because a
-  // reader that only understood the split form would render an empty table
-  // against a perfectly good payload.
-  const joined = str(o.route);
-  if (joined && !str(o.path)) {
-    const parts = joined.split(" ");
-    return parts.length > 1
-      ? { method: parts[0]!, path: parts.slice(1).join(" "), weight: num(o.weight) }
-      : { method: null, path: joined, weight: num(o.weight) };
-  }
-  const path = str(o.path);
-  if (!path) return null;
-  return { method: str(o.method), path, weight: num(o.weight) };
-}
-
-export interface ObservedSource {
-  kind: "observed";
-  /** Where the mix came from, real traffic or a guess. The engine carries this
-   *  out of the run for exactly this reason. */
-  origin: string | null;
-  sample: string | null;
-  windowStart: string | null;
-  windowEnd: string | null;
-  requestsObserved: number | null;
-  /** The compiled mix, weighted. */
-  routes: Route[];
-  /**
-   * Routes the safety patterns excluded.
-   *
-   * `Shape.Safe` returns these alongside the shape it kept, and showing them
-   * is worth more than hiding them: every route is unsafe until a pattern says
-   * otherwise, so a mix that looks thin is usually a safe list that is too
-   * narrow rather than traffic that was not there.
-   */
-  excluded: Route[];
-}
-
-export interface Step {
-  name: string | null;
-  request: string;
-  thinkMs: number | null;
-  jitterMs: number | null;
-  afterMs: number | null;
-  /** Steps sent at the same time as this one. Flattening them into siblings
-   *  would present a different scenario from the one that runs. */
-  parallel: Step[];
-}
-
-/** An assertion, in the scenario's own field names. A console that renamed
- *  `p95_below_ms` to "latency threshold" makes somebody translate back to the
- *  YAML every time they want to change it. */
-export interface Assertion {
-  name: string;
-  step: string | null;
-  everyRequestSucceeded: boolean | null;
-  p95BelowMs: number | null;
-  errorRateBelow: number | null;
-  statusIn: number[];
-}
-
-export interface DeterministicSource {
-  kind: "deterministic";
-  path: string | null;
-  scenarioName: string | null;
-  description: string | null;
-  steps: Step[];
-  assertions: Assertion[];
-}
-
-export type LoadSource = ObservedSource | DeterministicSource;
-
-function readStep(v: unknown, depth = 0): Step | null {
-  const o = obj(v);
-  if (!o) return null;
-  const request = str(o.request);
-  if (!request) return null;
-  return {
-    name: str(o.name),
-    request,
-    thinkMs: num(pick(o, "think_ms", "thinkMs")),
-    jitterMs: num(pick(o, "jitter_ms", "jitterMs")),
-    afterMs: num(pick(o, "after_ms", "afterMs")),
-    // Bounded, because a cycle in the payload would otherwise recurse until
-    // the tab dies. The scenario schema nests one level in practice.
-    parallel: depth > 3 ? [] : list(o.parallel, (s) => readStep(s, depth + 1)),
-  };
-}
-
-export function readAssertion(v: unknown): Assertion | null {
-  const o = obj(v);
-  if (!o) return null;
-  const name = str(o.name);
-  if (!name) return null;
-  return {
-    name,
-    step: str(o.step),
-    everyRequestSucceeded: bool(pick(o, "every_request_succeeded", "everyRequestSucceeded")),
-    p95BelowMs: num(pick(o, "p95_below_ms", "p95BelowMs")),
-    errorRateBelow: num(pick(o, "error_rate_below", "errorRateBelow")),
-    statusIn: list(pick(o, "status_in", "statusIn"), num),
-  };
-}
-
-export function readSource(kind: SourceKind, v: unknown): LoadSource | null {
-  const o = obj(v);
-  if (!o) return null;
-  if (kind === "observed") {
-    return {
-      kind: "observed",
-      origin: str(o.origin) ?? str(o.source),
-      sample: str(o.sample),
-      windowStart: str(pick(o, "window_start", "windowStart")),
-      windowEnd: str(pick(o, "window_end", "windowEnd")),
-      requestsObserved: num(pick(o, "requests_observed", "requestsObserved")),
-      routes: list(o.routes, readRoute),
-      excluded: list(o.excluded, readRoute),
-    };
-  }
-  return {
-    kind: "deterministic",
-    path: str(o.path),
-    scenarioName: str(pick(o, "scenario", "scenarioName")),
-    description: str(o.description),
-    steps: list(o.steps, (s) => readStep(s)),
-    assertions: list(o.assertions, readAssertion),
-  };
-}
-
-/**
- * Which knobs each kind can actually set.
- *
- * Read off the engine's own flag sets rather than chosen for the form:
- * `af load run` declares exactly --duration, --scale, --seed and --branch, and
- * `af load scenario` declares --seed, --concurrency, --only and --branch. The
- * hosted adapter refuses a knob when, and only when, the plain command has no
- * flag for it, with AF-WLD-002, so a form offering concurrency on an observed
- * mix is a control that exists to be refused.
- *
- * That is the failure this console warns about elsewhere and had built into
- * its own start form: every kind was offered every knob, so two of the three
- * on each kind would have come back refused.
- *
- * `select` is required for a scenario and an empty one is refused, because
- * `af load scenario` with no --only runs everything the manifest declares, and
- * a manifest that later gains a scenario would silently change what a saved
- * source runs.
- */
-export interface Knobs {
-  duration: boolean;
-  scale: boolean;
-  seed: boolean;
-  concurrency: boolean;
-  select: "required" | "no";
-  /** What this kind cannot set, and the command that is the reason. */
-  refused: { knob: string; because: string }[];
-}
-
-export const KNOBS: Record<SourceKind, Knobs> = {
-  observed: {
-    duration: true,
-    scale: true,
-    seed: true,
-    concurrency: false,
-    select: "no",
-    refused: [
-      {
-        knob: "Concurrency",
-        because:
-          "af load run has no --concurrency flag. Accepting it and running at the generator's own default would produce a run that did not do what its author asked, with nothing in the result saying so.",
-      },
-    ],
-  },
-  deterministic: {
-    duration: false,
-    scale: false,
-    seed: true,
-    concurrency: true,
-    select: "required",
-    refused: [
-      {
-        knob: "Duration and scale",
-        because:
-          "af load scenario has neither flag. A journey runs its steps in order for as long as they take; it does not send at a rate.",
-      },
-    ],
-  },
-};
-
-export interface SourceRow {
-  id: string;
-  name: string;
-  kind: SourceKind;
-  repository: string | null;
-  version: number | null;
-  updatedAt: string | null;
-  createdAt: string | null;
-  /** Null when the control plane did not count them, which is not none. */
-  runCount: number | null;
-  lastRunAt: string | null;
-  /** The verdict of the most recent run, so a list says which sources are
-   *  currently unhappy without opening each one. */
-  lastVerdict: Verdict | null;
-}
-
-export function readSourceRow(v: unknown): SourceRow | null {
-  const o = obj(v);
-  if (!o) return null;
-  const id = str(o.id);
-  const kind = sourceKindOf(o.kind);
-  // No kind, no row. Rendering one would mean picking a form for it, and
-  // picking is the flattening this module refuses to do.
-  if (!id || !kind) return null;
-  return {
-    id,
-    name: str(o.name) ?? id,
-    kind,
-    repository: str(o.repository),
-    version: num(o.version),
-    updatedAt: str(pick(o, "updated_at", "updatedAt")),
-    createdAt: str(pick(o, "created_at", "createdAt")),
-    runCount: num(pick(o, "run_count", "runCount")),
-    lastRunAt: str(pick(o, "last_run_at", "lastRunAt")),
-    lastVerdict: verdictOf(pick(o, "last_verdict", "lastVerdict")),
-  };
-}
-
-export interface SourceDetail extends SourceRow {
-  source: LoadSource | null;
-}
-
-export function readSourceDetail(v: unknown): SourceDetail | null {
-  const o = obj(v);
-  if (!o) return null;
-  const base = readSourceRow(o);
-  if (!base) return null;
-  return { ...base, source: readSource(base.kind, o.source) };
-}
-
-export interface Version {
-  id: string;
-  version: number | null;
-  createdAt: string | null;
-  author: string | null;
-  note: string | null;
-  runCount: number | null;
-}
-
-export function readVersion(v: unknown): Version | null {
-  const o = obj(v);
-  if (!o) return null;
-  const id = str(o.id);
-  if (!id) return null;
-  return {
-    id,
-    version: num(o.version),
-    createdAt: str(pick(o, "created_at", "createdAt")),
-    author: str(o.author),
-    note: str(o.note),
-    runCount: num(pick(o, "run_count", "runCount")),
-  };
-}
 
 /* -------------------------------------------------------------------------
  * Verdicts and run state
  * ---------------------------------------------------------------------- */
 
 /**
- * The product's four words, and no fifth.
+ * The product's five words, and no sixth.
  *
- * `engine/internal/load/scenario.go` declares exactly these and says why: they
- * are what `report.Run.Verdict` and a workflow result already use, and a
- * scenario that invented "regressed" would give a reader a sixth vocabulary to
- * learn for no gain. The console does not get to invent one either.
+ * FIVE. `verdict_value` in migration 0001 declares pass, fail, flaky, blocked
+ * and unverified, and every one of them can land on a run and on a threshold.
+ * A four word type was the defect this file was reworked to fix: `flaky` fell
+ * through the decoder, `verdictOf` answered null, and a run that had found
+ * something rendered as "No verdict". An absence shown where there is a
+ * finding is wrong in the worst direction, because nobody investigates a blank.
  */
-export type Verdict = "pass" | "fail" | "blocked" | "unverified";
+export type Verdict = "pass" | "fail" | "flaky" | "blocked" | "unverified";
+
+const VERDICTS = new Set<string>(["pass", "fail", "flaky", "blocked", "unverified"]);
 
 export function verdictOf(v: unknown): Verdict | null {
-  return v === "pass" || v === "fail" || v === "blocked" || v === "unverified" ? v : null;
+  return typeof v === "string" && VERDICTS.has(v) ? (v as Verdict) : null;
 }
 
 /**
  * What a verdict means, and whether it is a judgement at all.
  *
- * `conclusive` is false for the two that say nothing about the software. It is
- * what the run screen keys off to refuse to present a threshold table as a
- * finding.
+ * `conclusive` is false for the two that say nothing about the software, and
+ * it is what the run screen keys off to refuse to present a threshold table as
+ * a finding. `flaky` is conclusive and is NOT a pass: something was measured
+ * and it answered differently on repeat, which is a real finding about the
+ * software and the reason it is toned as a warning rather than as a success.
  */
 export const VERDICT_FACTS: Record<
   Verdict,
@@ -442,40 +216,59 @@ export const VERDICT_FACTS: Record<
   pass: {
     label: "Pass",
     conclusive: true,
-    meaning: "Every assertion was evaluated and every one of them held.",
+    meaning: "Everything that was evaluated held.",
   },
   fail: {
     label: "Fail",
     conclusive: true,
-    meaning: "At least one assertion was evaluated and did not hold.",
+    meaning: "At least one thing was evaluated and did not hold.",
+  },
+  flaky: {
+    label: "Flaky",
+    conclusive: true,
+    meaning:
+      "The same check answered differently on repeat. That is a finding rather than a fluke: a result nobody can rely on is not a result. Flaky is not a pass.",
   },
   blocked: {
     label: "Blocked",
     conclusive: false,
     meaning:
-      "The traffic never reached the application, so nothing here is a judgement about it. Blocked is not a pass.",
+      "The work never reached the application, so nothing here is a judgement about it. Blocked is not a pass.",
   },
   unverified: {
     label: "Unverified",
     conclusive: false,
     meaning:
-      "The run finished and its assertions could not be evaluated, so it proved nothing either way. Unverified is not a pass.",
+      "It finished and nothing could be evaluated, so it proved nothing either way. Unverified is not a pass.",
   },
 };
 
-/** Where a run is, which is a different question from what it decided. A run
- *  that is still going has no verdict yet, and one that was cancelled never
- *  will have. */
-export type RunState = "queued" | "starting" | "running" | "cancelling" | "cancelled" | "finished" | "errored";
+/**
+ * Where a run is, which is a different question from what it found.
+ *
+ * Eight values, straight off `workload_run_state`. The console writes the
+ * first, an engine claiming the run writes the second, the engine's own events
+ * write the next five, and the deadline writes the last one.
+ */
+export type RunState =
+  | "requested"
+  | "accepted"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "timed_out"
+  | "abandoned";
 
 const RUN_STATES = new Set<string>([
-  "queued",
-  "starting",
+  "requested",
+  "accepted",
   "running",
-  "cancelling",
+  "succeeded",
+  "failed",
   "cancelled",
-  "finished",
-  "errored",
+  "timed_out",
+  "abandoned",
 ]);
 
 export function runStateOf(v: unknown): RunState | null {
@@ -483,43 +276,410 @@ export function runStateOf(v: unknown): RunState | null {
 }
 
 export function isRunning(s: RunState): boolean {
-  return s === "queued" || s === "starting" || s === "running" || s === "cancelling";
+  return s === "requested" || s === "accepted" || s === "running";
 }
 
 export function isTerminal(s: RunState): boolean {
-  return s === "cancelled" || s === "finished" || s === "errored";
+  return !isRunning(s);
 }
 
 export const STATE_FACTS: Record<RunState, { label: string; meaning: string }> = {
-  queued: { label: "Queued", meaning: "Accepted, waiting for a runner." },
-  starting: { label: "Starting", meaning: "The runner has it and is bringing the environment up." },
-  running: { label: "Running", meaning: "Sending traffic now." },
-  cancelling: {
-    label: "Stopping",
-    meaning: "Stop requested. Waiting for the runner to acknowledge it.",
+  requested: {
+    label: "Requested",
+    meaning:
+      "Recorded here and asked of GitHub Actions. No engine has picked it up yet, so nothing is running.",
+  },
+  accepted: {
+    label: "Accepted",
+    meaning: "An engine has claimed this run and is bringing the environment up.",
+  },
+  running: { label: "Running", meaning: "The engine is doing the work now." },
+  succeeded: {
+    label: "Succeeded",
+    meaning:
+      "The engine did the work and reported. What it FOUND is the verdict beside this, which is a separate answer: a run can succeed and fail every threshold in it.",
+  },
+  failed: {
+    label: "Failed",
+    meaning: "The engine reported that the work itself failed.",
   },
   cancelled: {
     label: "Cancelled",
     meaning:
-      "Stopped before it finished, so it reached no verdict and anything measured covers only the part that ran.",
+      "Stopped before it finished, so anything measured covers only the part that ran and is not a measurement of the whole.",
   },
-  finished: { label: "Finished", meaning: "The run completed and reported a verdict." },
-  errored: {
-    label: "Errored",
-    meaning: "The runner itself failed. This says nothing about the application under test.",
+  timed_out: {
+    label: "Timed out",
+    meaning: "The engine reported that it ran out of time before finishing.",
+  },
+  abandoned: {
+    label: "Abandoned",
+    meaning:
+      "The deadline passed with no engine reporting. That is not a failure, because a failure is something an engine told us. It may well have run: what is missing is the report, not necessarily the work.",
   },
 };
 
 /* -------------------------------------------------------------------------
- * Results, as the engine measures them
+ * Definitions
+ * ---------------------------------------------------------------------- */
+
+export interface WorkloadRow {
+  id: string;
+  slug: string;
+  name: string;
+  kind: Kind;
+  description: string | null;
+  repository: string | null;
+  archivedAt: string | null;
+  createdAt: string | null;
+  latestVersion: number | null;
+  /** Null when the control plane did not count them, which is not none. */
+  runs: number | null;
+  /** The state and verdict of the most recent run, so a list says which
+   *  workloads are currently unhappy without opening each one. One LATERAL
+   *  join produces all three, so they always describe the same run. */
+  lastState: RunState | null;
+  lastVerdict: Verdict | null;
+  lastRunAt: string | null;
+}
+
+export function readWorkloadRow(v: unknown): WorkloadRow | null {
+  const o = obj(v);
+  if (!o) return null;
+  const slug = str(o.slug);
+  const kind = kindOf(o.kind);
+  // No slug and no kind, no row. The slug is the identifier every link and
+  // every call uses, and rendering a row of an unknown kind would mean picking
+  // a result table for it, which is the flattening this module refuses.
+  if (!slug || !kind) return null;
+  return {
+    id: str(o.id) ?? slug,
+    slug,
+    name: str(o.name) ?? slug,
+    kind,
+    description: str(o.description),
+    repository: str(o.repository),
+    archivedAt: str(pick(o, "archived_at", "archivedAt")),
+    createdAt: str(pick(o, "created_at", "createdAt")),
+    latestVersion: num(pick(o, "latest_version", "latestVersion")),
+    runs: num(o.runs),
+    lastState: runStateOf(pick(o, "last_state", "lastState")),
+    lastVerdict: verdictOf(pick(o, "last_verdict", "lastVerdict")),
+    lastRunAt: str(pick(o, "last_run_at", "lastRunAt")),
+  };
+}
+
+/* -------------------------------------------------------------------------
+ * What a version says
+ * ---------------------------------------------------------------------- */
+
+/**
+ * A version body, per kind.
+ *
+ * Every field maps to a flag the kind's command actually declares. There is
+ * deliberately no shared body type and no optional field carried across kinds:
+ * the control plane parses these with a STRICT schema and refuses an unknown
+ * key rather than dropping it, because a misspelled `durationSecond` that is
+ * silently ignored is a workload that runs and does not do what its author
+ * wrote.
+ */
+export type Body =
+  | { kind: "observed_load"; durationSeconds: number | null; scale: number | null }
+  | { kind: "http_scenario"; select: string[]; seed: number | null; concurrency: number | null }
+  | {
+      kind: "browser_workflow";
+      select: string[];
+      /** Written only by a promotion: the manifest block that has to be in the
+       *  repository before `select` can find the workflow. */
+      manifestBlock: string | null;
+      /** What the promotion's compilation could not carry, one sentence each.
+       *  Never empty when it is present. */
+      dropped: string[];
+    }
+  | { kind: "exploration"; select: string[]; seed: string | null };
+
+export function readBody(kind: Kind, v: unknown): Body | null {
+  const o = obj(v);
+  if (!o) return null;
+  const select = list(o.select, str);
+  switch (kind) {
+    case "observed_load":
+      return {
+        kind,
+        durationSeconds: num(pick(o, "duration_seconds", "durationSeconds")),
+        scale: num(o.scale),
+      };
+    case "http_scenario":
+      return { kind, select, seed: num(o.seed), concurrency: num(o.concurrency) };
+    case "browser_workflow":
+      return {
+        kind,
+        select,
+        manifestBlock: str(pick(o, "manifest_block", "manifestBlock")),
+        dropped: list(o.dropped, str),
+      };
+    case "exploration":
+      return { kind, select, seed: str(o.seed) };
+  }
+}
+
+/**
+ * The body as the control plane's schema wants it back.
+ *
+ * Absent rather than null for every optional knob, because the schema is
+ * strict and `z.number().optional()` refuses null. An omitted key means the
+ * command's own default, which is a different thing from a value of zero and
+ * the only way to say "do not pass this flag".
+ */
+export function bodyToInput(body: Body): Record<string, unknown> {
+  const some = (k: string, v: number | string | null): Record<string, unknown> =>
+    v === null ? {} : { [k]: v };
+  switch (body.kind) {
+    case "observed_load":
+      return { ...some("durationSeconds", body.durationSeconds), ...some("scale", body.scale) };
+    case "http_scenario":
+      return {
+        select: body.select,
+        ...some("seed", body.seed),
+        ...some("concurrency", body.concurrency),
+      };
+    case "browser_workflow":
+      return {
+        select: body.select,
+        ...some("manifestBlock", body.manifestBlock),
+        ...(body.dropped.length > 0 ? { dropped: body.dropped } : {}),
+      };
+    case "exploration":
+      return { select: body.select, ...some("seed", body.seed) };
+  }
+}
+
+/**
+ * Which knobs each kind can actually set, and what it cannot.
+ *
+ * Read off the engine's own flag sets and off the workflow inputs a dispatch
+ * is allowed to send, rather than chosen for the form. A form offering
+ * concurrency on an observed mix is a control that exists to be refused, and
+ * that is the failure this console warns about elsewhere.
+ *
+ * `refused` is shown rather than hidden. A reader who finds no concurrency box
+ * and no explanation assumes the console forgot; one who is told `af load run`
+ * has no such flag has learned something about the product.
+ */
+export interface Knobs {
+  duration: boolean;
+  scale: boolean;
+  /** How the command spells a seed, or that it takes none here. `af explore
+   *  --seed` takes a string and `af load scenario --seed` takes a whole
+   *  number, which is why this is not a boolean. */
+  seed: "number" | "string" | "no";
+  concurrency: boolean;
+  select: "required" | "optional" | "no";
+  /** What the selection names, in the manifest's own words. */
+  selects: string;
+  /** What an empty selection means, for the kind that allows one. */
+  emptyMeans: string | null;
+  refused: { knob: string; because: string }[];
+}
+
+export const KNOBS: Record<Kind, Knobs> = {
+  observed_load: {
+    duration: true,
+    scale: true,
+    seed: "no",
+    concurrency: false,
+    select: "no",
+    selects: "",
+    emptyMeans: null,
+    refused: [
+      {
+        knob: "A selection",
+        because:
+          "The shape comes from whatever the manifest points at, an OTLP export or an access log, so there is nothing here to name. af load run has no --only flag.",
+      },
+      {
+        knob: "Concurrency",
+        because:
+          "af load run has no --concurrency flag. Accepting one and running at the generator's own default would produce a run that did not do what its author asked, with nothing in the result saying so.",
+      },
+      {
+        knob: "Seed",
+        because:
+          "af load run does take --seed, and a dispatch cannot carry one here: the workflow this product shipped before Studio declares four inputs, command, workflows, duration and scale, and sending a fifth is a 422 from GitHub. Observed load stays inside those four so it keeps working against every repository that has not copied the newer workflow.",
+      },
+    ],
+  },
+  http_scenario: {
+    duration: false,
+    scale: false,
+    seed: "number",
+    concurrency: true,
+    select: "required",
+    selects: "scenario",
+    emptyMeans: null,
+    refused: [
+      {
+        knob: "Duration and scale",
+        because:
+          "af load scenario has neither flag. A journey runs its steps in order for as long as they take; it does not send at a rate.",
+      },
+    ],
+  },
+  browser_workflow: {
+    duration: false,
+    scale: false,
+    seed: "no",
+    concurrency: false,
+    select: "optional",
+    selects: "workflow",
+    emptyMeans:
+      "Empty means every workflow the manifest declares, which is what af test with no --only does.",
+    refused: [
+      {
+        knob: "Duration, scale, seed and concurrency",
+        because:
+          "af test declares none of them. It drives a browser through named workflows rather than sending traffic at a rate.",
+      },
+    ],
+  },
+  exploration: {
+    duration: false,
+    scale: false,
+    seed: "string",
+    concurrency: false,
+    select: "required",
+    selects: "goal",
+    emptyMeans: null,
+    refused: [
+      {
+        knob: "Duration, scale and concurrency",
+        because:
+          "af explore declares none of them. It walks one goal at a time from a seed rather than sending traffic.",
+      },
+    ],
+  },
+};
+
+export interface Version {
+  id: string;
+  version: number;
+  body: Body | null;
+  bodyDigest: string | null;
+  notes: string | null;
+  source: "authored" | "promoted";
+  promotedFromRunId: string | null;
+  createdAt: string | null;
+}
+
+export function readVersion(kind: Kind, v: unknown): Version | null {
+  const o = obj(v);
+  if (!o) return null;
+  const id = str(o.id);
+  const version = num(o.version);
+  // A version with no number cannot be named on a start request, so a row that
+  // has lost it is a row nothing can act on.
+  if (!id || version === null) return null;
+  const source = o.source === "promoted" ? "promoted" : "authored";
+  return {
+    id,
+    version,
+    body: readBody(kind, o.body),
+    bodyDigest: str(pick(o, "body_digest", "bodyDigest")),
+    notes: str(o.notes),
+    source,
+    promotedFromRunId: str(pick(o, "promoted_from_run_id", "promotedFromRunId")),
+    createdAt: str(pick(o, "created_at", "createdAt")),
+  };
+}
+
+/* -------------------------------------------------------------------------
+ * Runs
+ * ---------------------------------------------------------------------- */
+
+export interface RunRow {
+  id: string;
+  workloadSlug: string | null;
+  kind: Kind | null;
+  version: number | null;
+  state: RunState;
+  /** Null until the run reaches one, and null forever on a run nothing
+   *  reported. A run still going has no verdict, and inventing one for the
+   *  list would be the console's own version of a green run over nothing. */
+  verdict: Verdict | null;
+  envId: string | null;
+  repository: string | null;
+  gitRef: string | null;
+  attempt: number | null;
+  retryOf: string | null;
+  supersededBy: string | null;
+  /** The code the ENGINE reported, out of the errors catalogue. Never invented
+   *  here: an abandoned run deliberately carries none, because no engine
+   *  reported it, and a code that looks catalogued and is not sends somebody
+   *  to an errors reference that does not have it. */
+  failureCode: string | null;
+  detail: string | null;
+  /** The `af` command the engine reported. A console that finds null says no
+   *  command was recorded rather than assembling one that would drift from
+   *  what ran. */
+  reproduceCommand: string | null;
+  manifestDigest: string | null;
+  requestedAt: string | null;
+  acceptedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  deadlineAt: string | null;
+  cancelRequestedAt: string | null;
+  cancelledAt: string | null;
+  dispatchedAt: string | null;
+}
+
+export function readRun(v: unknown): RunRow | null {
+  const o = obj(v);
+  if (!o) return null;
+  const id = str(o.id);
+  const state = runStateOf(o.state);
+  // No state, no row. Rendering a run whose state the console does not know
+  // means choosing a tone for it, and a wrong choice there paints something
+  // inconclusive as a pass.
+  if (!id || !state) return null;
+  return {
+    id,
+    workloadSlug: str(pick(o, "workload_slug", "workloadSlug")),
+    kind: kindOf(o.kind),
+    version: num(o.version),
+    state,
+    verdict: verdictOf(o.verdict),
+    envId: str(pick(o, "env_id", "envId")),
+    repository: str(o.repository),
+    gitRef: str(pick(o, "git_ref", "gitRef")),
+    attempt: num(o.attempt),
+    retryOf: str(pick(o, "retry_of", "retryOf")),
+    supersededBy: str(pick(o, "superseded_by", "supersededBy")),
+    failureCode: str(pick(o, "failure_code", "failureCode")),
+    detail: str(o.detail),
+    reproduceCommand: str(pick(o, "reproduce_command", "reproduceCommand")),
+    manifestDigest: str(pick(o, "manifest_digest", "manifestDigest")),
+    requestedAt: str(pick(o, "requested_at", "requestedAt")),
+    acceptedAt: str(pick(o, "accepted_at", "acceptedAt")),
+    startedAt: str(pick(o, "started_at", "startedAt")),
+    finishedAt: str(pick(o, "finished_at", "finishedAt")),
+    deadlineAt: str(pick(o, "deadline_at", "deadlineAt")),
+    cancelRequestedAt: str(pick(o, "cancel_requested_at", "cancelRequestedAt")),
+    cancelledAt: str(pick(o, "cancelled_at", "cancelledAt")),
+    dispatchedAt: str(pick(o, "dispatched_at", "dispatchedAt")),
+  };
+}
+
+/* -------------------------------------------------------------------------
+ * Results, as the control plane records them
  * ---------------------------------------------------------------------- */
 
 /**
  * A latency distribution.
  *
- * Exactly the engine's five, and no sixth. The first version of this file had
- * a p75 that `load.Latency` does not produce, which would have rendered a rung
- * on every chart that no measurement backed.
+ * Exactly the engine's five and no sixth. An earlier draft of this file had a
+ * p75 that nothing produces, which would have drawn a rung on every chart that
+ * no measurement backed.
  */
 export interface Latency {
   p50Ms: number | null;
@@ -529,8 +689,7 @@ export interface Latency {
   maxMs: number | null;
 }
 
-export function readLatency(v: unknown): Latency {
-  const o = obj(v) ?? {};
+export function readLatency(o: Record<string, unknown>): Latency {
   return {
     p50Ms: num(pick(o, "p50_ms", "p50Ms")),
     p90Ms: num(pick(o, "p90_ms", "p90Ms")),
@@ -552,20 +711,163 @@ export function percentiles(l: Latency): { label: string; ms: number }[] {
       ["max", l.maxMs],
     ] as const
   )
-    .filter(([, ms]) => ms !== null)
-    .map(([label, ms]) => ({ label, ms: ms as number }));
+    .filter(([, value]) => value !== null)
+    .map(([label, value]) => ({ label, ms: value as number }));
+}
+
+export function hasLatency(l: Latency): boolean {
+  return percentiles(l).length > 0;
+}
+
+/**
+ * What each error reason usually means, so a reader is not left with a bare
+ * string.
+ *
+ * The keys ARE the closed set the load runner produces, plus an HTTP status of
+ * 500 or above spelled as its number, which cannot be enumerated here. A
+ * reason not in this table is rendered plainly rather than dropped or guessed
+ * at, because a reason the console has not been taught is still the truth
+ * about the run.
+ */
+export const REASON_NOTES: Record<string, string> = {
+  timeout: "The application did not answer inside the request deadline.",
+  "connection refused": "Nothing was listening. Usually the service is not up yet.",
+  "connection reset": "The connection was closed mid request, often a crash or a restart.",
+  "name not resolved":
+    "DNS did not answer for the host, which under a deny all egress policy is what a blocked host looks like.",
+  "malformed request":
+    "The request could not be built. This is the scenario or the mix, not the application.",
+  "request failed": "A transport error the runner could not classify further.",
+};
+
+export function readErrorReasons(v: unknown): { reason: string; count: number }[] {
+  const o = obj(v);
+  if (!o) return [];
+  const out: { reason: string; count: number }[] = [];
+  for (const [reason, raw] of Object.entries(o)) {
+    const n = num(raw);
+    if (n !== null && n > 0) out.push({ reason, count: n });
+  }
+  // Commonest first. The order is the finding: it says which failure to chase.
+  return out.sort((a, b) => b.count - a.count);
+}
+
+/**
+ * One run's measurements.
+ *
+ * One interface with a column per measure rather than four, because that is
+ * how the row is stored and a CHECK in the schema already guarantees only one
+ * kind's columns are filled. The renderers switch on `kind` and read only the
+ * group that kind owns; nothing here averages across them.
+ */
+export interface RunResult {
+  kind: Kind;
+  /** Traffic. observed_load and http_scenario. */
+  requests: number | null;
+  failures: number | null;
+  errorRate: number | null;
+  targetRate: number | null;
+  /** What it achieved. The gap between this and the target is the first thing
+   *  worth looking at: reporting the target instead is how a load test says
+   *  everything was fine while the queue grew. */
+  achievedRate: number | null;
+  latency: Latency;
+  /** A journey. http_scenario. */
+  sessions: number | null;
+  iterations: number | null;
+  scheduledMs: number | null;
+  /** A browser. browser_workflow. Five counts and not two, because a real
+   *  `af test` run returned 0 passed, 0 failed, 0 flaky, 0 blocked and 1
+   *  unverified: with passed and failed alone a console draws a run that did
+   *  nothing as a run with no failures. */
+  workflows: number | null;
+  workflowsPassed: number | null;
+  workflowsFailed: number | null;
+  workflowsFlaky: number | null;
+  workflowsBlocked: number | null;
+  workflowsUnverified: number | null;
+  steps: number | null;
+  /** A wander. exploration. */
+  findings: number | null;
+  goals: number | null;
+  goalsReached: number | null;
+
+  durationMs: number | null;
+  /** Where the traffic mix came from, so a reader can tell production's shape
+   *  from a default. */
+  source: string | null;
+  errorReasons: { reason: string; count: number }[];
+  /** Routes the manifest's safe list refused, which is why a blocked scenario
+   *  is blocked. */
+  refusedRoutes: string[];
+  recordedAt: string | null;
+}
+
+export function readResult(v: unknown): RunResult | null {
+  const o = obj(v);
+  if (!o) return null;
+  const kind = kindOf(o.kind);
+  // No kind, no result. Every renderer below chooses its columns by kind, and
+  // a result that will not say which one it is cannot be read at all.
+  if (!kind) return null;
+  return {
+    kind,
+    requests: num(o.requests),
+    failures: num(o.failures),
+    errorRate: num(pick(o, "error_rate", "errorRate")),
+    targetRate: num(pick(o, "target_rate", "targetRate")),
+    achievedRate: num(pick(o, "achieved_rate", "achievedRate")),
+    latency: readLatency(o),
+    sessions: num(o.sessions),
+    iterations: num(o.iterations),
+    scheduledMs: num(pick(o, "scheduled_ms", "scheduledMs")),
+    workflows: num(o.workflows),
+    workflowsPassed: num(pick(o, "workflows_passed", "workflowsPassed")),
+    workflowsFailed: num(pick(o, "workflows_failed", "workflowsFailed")),
+    workflowsFlaky: num(pick(o, "workflows_flaky", "workflowsFlaky")),
+    workflowsBlocked: num(pick(o, "workflows_blocked", "workflowsBlocked")),
+    workflowsUnverified: num(pick(o, "workflows_unverified", "workflowsUnverified")),
+    steps: num(o.steps),
+    findings: num(o.findings),
+    goals: num(o.goals),
+    goalsReached: num(pick(o, "goals_reached", "goalsReached")),
+    durationMs: num(pick(o, "duration_ms", "durationMs")),
+    source: str(o.source),
+    errorReasons: readErrorReasons(pick(o, "error_reasons", "errorReasons")),
+    refusedRoutes: list(pick(o, "refused_routes", "refusedRoutes"), str),
+    recordedAt: str(pick(o, "recorded_at", "recordedAt")),
+  };
+}
+
+/** How far short of the target the run fell, as a fraction, or null when
+ *  either number is missing. Positive means it did not keep up. */
+export function rateShortfall(r: RunResult): number | null {
+  if (r.targetRate === null || r.achievedRate === null || r.targetRate <= 0) return null;
+  return (r.targetRate - r.achievedRate) / r.targetRate;
+}
+
+/**
+ * A browser run that reported nothing either way.
+ *
+ * The exit code zero over nothing defect, moved into a table and read back
+ * out. A run with workflows to do, none passed and none failed, has not found
+ * that the software is fine: it has found that nothing was checked.
+ */
+export function nothingWasChecked(r: RunResult): boolean {
+  if (r.kind !== "browser_workflow") return false;
+  const attempted = (r.workflowsPassed ?? 0) + (r.workflowsFailed ?? 0) + (r.workflowsFlaky ?? 0);
+  return (r.workflows ?? 0) > 0 && attempted === 0;
 }
 
 /**
  * One route's measurement.
  *
- * `hasBaseline` is carried rather than inferred, and that is the whole reason
- * this interface is not simpler. `p95Increase` is a RATIO whose zero value is
- * also a legitimate reading, so "no baseline" and "no change" are the same
- * number and only the flag tells them apart. The engine added the flag for
- * this reason and the console keeps it for the same one.
+ * `scenario` is carried and is not folded into the route, because two
+ * scenarios in one run can send the same route and their two p95 values do not
+ * average into a p95. The unique index is on the pair for that reason.
  */
-export interface RouteResult {
+export interface RouteMetric {
+  scenario: string | null;
   route: string;
   sent: number | null;
   errors: number | null;
@@ -573,160 +875,76 @@ export interface RouteResult {
   baselineP95Ms: number | null;
   /** A ratio. 0.31 is thirty one percent slower than the baseline. */
   p95Increase: number | null;
-  hasBaseline: boolean;
 }
 
-export function readRouteResult(v: unknown): RouteResult | null {
+export function readRouteMetric(v: unknown): RouteMetric | null {
   const o = obj(v);
   if (!o) return null;
   const route = str(o.route);
   if (!route) return null;
   return {
+    scenario: str(o.scenario),
     route,
     sent: num(o.sent),
     errors: num(o.errors),
-    latency: readLatency(o.latency),
+    latency: readLatency(o),
     baselineP95Ms: num(pick(o, "baseline_p95_ms", "baselineP95Ms")),
     p95Increase: num(pick(o, "p95_increase", "p95Increase")),
-    hasBaseline: bool(pick(o, "has_baseline", "hasBaseline")) ?? false,
   };
 }
 
-/** The comparison for one route, or null when there is nothing to compare
- *  against. Never zero for absent. */
-export function increase(r: RouteResult): number | null {
-  return r.hasBaseline ? (r.p95Increase ?? 0) : null;
-}
-
-/** One threshold the run exceeded, in the engine's own shape. */
-export interface Breach {
-  what: string;
-  limit: number | null;
-  measured: number | null;
-  detail: string | null;
-}
-
-export function readBreach(v: unknown): Breach | null {
-  const o = obj(v);
-  if (!o) return null;
-  const what = str(o.what);
-  if (!what) return null;
-  return { what, limit: num(o.limit), measured: num(o.measured), detail: str(o.detail) };
+/**
+ * The comparison for one route, or null when there is nothing to compare
+ * against. Never zero for absent.
+ *
+ * Both halves are required rather than defaulting the ratio to zero, because
+ * zero means no regression and the schema constrains the pair to exist
+ * together. A row that arrives with only one of them is a row the console
+ * cannot interpret, and guessing would report a clean comparison that nobody
+ * made.
+ */
+export function increase(r: RouteMetric): number | null {
+  return r.baselineP95Ms !== null && r.p95Increase !== null ? r.p95Increase : null;
 }
 
 /**
- * Errors by reason.
+ * One threshold, what it concluded, and what it measured.
  *
- * The engine's `classify()` produces a closed set of six, and the reason is the
- * only part of an error count that tells somebody what to do. A thousand
- * timeouts and a thousand connection refusals are the same number and
- * completely different problems.
+ * The verdict is the product's same five words, not a private vocabulary, and
+ * `measure` is text rather than an enum because the engine adds one by
+ * releasing and a customer's database should not need a migration to record a
+ * measure it was sent.
  */
-/**
- * What each reason usually means, so a reader is not left with a bare string.
- *
- * The keys ARE the closed set `classify()` produces, and there is deliberately
- * no second constant listing them. A separate `ERROR_REASONS` array existed
- * here, nothing read it, and two declarations of one closed set are two things
- * that can drift apart while both look authoritative.
- *
- * A reason not in this table is rendered plainly rather than dropped or
- * guessed at, because a reason the console has not been taught is still the
- * truth about the run.
- */
-export const REASON_NOTES: Record<string, string> = {
-  timeout: "The application did not answer inside the request deadline.",
-  "connection refused": "Nothing was listening. Usually the service is not up yet.",
-  "connection reset": "The connection was closed mid-request, often a crash or a restart.",
-  "name not resolved": "DNS did not answer for the host, which under a deny-all egress policy is what a blocked host looks like.",
-  "malformed request": "The request could not be built. This is the scenario or the mix, not the application.",
-  "request failed": "A transport error the runner could not classify further.",
-};
-
-export function readErrors(v: unknown): { reason: string; count: number }[] {
-  const o = obj(v);
-  if (!o) return [];
-  const out: { reason: string; count: number }[] = [];
-  for (const [reason, raw] of Object.entries(o)) {
-    const count = num(raw);
-    if (count !== null && count > 0) out.push({ reason, count });
-  }
-  // Commonest first. The order is the finding: it says which failure to chase.
-  return out.sort((a, b) => b.count - a.count);
-}
-
-export interface Results {
-  /** True while these numbers cover only what has landed so far. */
-  partial: boolean;
-  /** Where the mix came from, as the run recorded it. */
-  origin: string | null;
-  /** What the run aimed for. */
-  targetRate: number | null;
-  /** What it achieved. The gap between this and the target is the first thing
-   *  worth looking at: reporting the target instead is how a load test says
-   *  everything was fine while the queue grew. */
-  rate: number | null;
-  sent: number | null;
-  durationSeconds: number | null;
-  errorRate: number | null;
-  errors: { reason: string; count: number }[];
-  overall: Latency;
-  routes: RouteResult[];
-  breaches: Breach[];
-  assertions: AssertionResult[];
-  evidence: Evidence[];
-  /** The command that reproduces this run, as the control plane recorded it at
-   *  dispatch. Never assembled here: a command the console rebuilds drifts
-   *  from the one that ran, and being the same one is the point. */
-  command: string | null;
-}
-
-/**
- * An assertion, what it concluded, and what it measured.
- *
- * The verdict is the product's SAME four words, not a private vocabulary. An
- * earlier version of this file invented `held`, `broke` and `not_evaluated`,
- * which was wrong twice over: the engine sends `pass`, `fail`, `blocked` and
- * `unverified` on an assertion exactly as it does on a run, and a decoder that
- * demanded three strings the engine never sends would have rejected every row
- * and rendered an empty table against a perfectly good payload. Inventing the
- * words was also the thing `load/scenario.go` warns about in as many words: a
- * fifth and sixth vocabulary for a reader to learn, for no gain.
- *
- * `threshold` and `observed` are the numeric half. Both are absent for the two
- * measures that are not numeric comparisons, and `observed` is absent when
- * nothing was sent, which the engine's own comment is careful to call a
- * different answer from zero.
- */
-export interface AssertionResult {
+export interface ThresholdVerdict {
+  scenario: string | null;
   name: string;
-  verdict: Verdict;
-  /** Which of the four the assertion asked for: `every_request_succeeded`,
-   *  `p95_below_ms`, `error_rate_below` or `status_in`. */
-  measure: string | null;
   /** The route it was narrowed to. Null for a scenario wide assertion. */
   scope: string | null;
+  measure: string | null;
   threshold: number | null;
   observed: number | null;
+  verdict: Verdict;
   detail: string | null;
 }
 
-export function readAssertionResult(v: unknown): AssertionResult | null {
+export function readThreshold(v: unknown): ThresholdVerdict | null {
   const o = obj(v);
   if (!o) return null;
   const name = str(o.name);
-  const verdict = verdictOf(o.verdict);
-  // No verdict, no row, for the same reason a run with no state is dropped:
-  // rendering it would mean choosing a tone, and a wrong choice there paints
-  // something inconclusive as a pass.
+  // The column is `value` and it is a verdict. No verdict, no row, for the
+  // same reason a run with no state is dropped: rendering it would mean
+  // choosing a tone, and a wrong choice paints something inconclusive as a
+  // pass.
+  const verdict = verdictOf(o.value ?? o.verdict);
   if (!name || !verdict) return null;
   return {
+    scenario: str(o.scenario),
     name,
-    verdict,
+    scope: str(o.scope),
     measure: str(o.measure),
-    scope: str(o.scope) ?? str(o.step),
     threshold: num(o.threshold),
     observed: num(o.observed),
+    verdict,
     detail: str(o.detail),
   };
 }
@@ -748,8 +966,6 @@ export function measured(measure: string | null, value: number | null): string {
   return String(value);
 }
 
-/** The measure, in the words the scenario YAML uses, so what is read here is
- *  what gets edited there. */
 /** The two measures that are comparisons against a number. The other two,
  *  `every_request_succeeded` and `status_in`, carry no threshold at all, which
  *  is a different thing from a threshold that went unmeasured. */
@@ -757,342 +973,511 @@ export function isNumericMeasure(measure: string | null): boolean {
   return measure === "p95_below_ms" || measure === "error_rate_below";
 }
 
-export interface Evidence {
-  id: string;
+/**
+ * Whether the bytes behind a piece of evidence can actually be fetched.
+ *
+ * Three values and not a boolean. `runner_local` is the honest one: a trace at
+ * a path on the CI runner, on a machine that no longer exists. Reports in this
+ * product have carried exactly those paths, and a console that renders one as
+ * a link sends somebody to a 404 and blames itself.
+ */
+export type Availability = "uploaded" | "runner_local" | "not_retained";
+
+export function availabilityOf(v: unknown): Availability | null {
+  return v === "uploaded" || v === "runner_local" || v === "not_retained" ? v : null;
+}
+
+export const AVAILABILITY_FACTS: Record<
+  Availability,
+  { label: string; fetchable: boolean; meaning: string }
+> = {
+  uploaded: {
+    label: "Kept",
+    fetchable: true,
+    meaning: "Stored, with a checksum to verify it against.",
+  },
+  runner_local: {
+    label: "On the runner",
+    fetchable: false,
+    meaning:
+      "It was written to a path on the CI runner and never uploaded. The machine is gone, so the path is a record of where it was rather than somewhere to fetch it from.",
+  },
+  not_retained: {
+    label: "Dropped",
+    fetchable: false,
+    meaning: "It existed and retention did not keep it.",
+  },
+};
+
+export interface EvidenceItem {
   kind: string;
   label: string | null;
-  href: string | null;
-  retained: boolean | null;
+  availability: Availability;
+  locator: string;
+  sha256: string | null;
+  sizeBytes: number | null;
 }
 
-export function readEvidence(v: unknown): Evidence | null {
+export function readEvidence(v: unknown): EvidenceItem | null {
   const o = obj(v);
   if (!o) return null;
-  const id = str(o.id);
   const kind = str(o.kind);
-  if (!id || !kind) return null;
-  return { id, kind, label: str(o.label), href: str(o.href), retained: bool(o.retained) };
-}
-
-export function readResults(v: unknown): Results | null {
-  const o = obj(v);
-  if (!o) return null;
+  const locator = str(o.locator);
+  const availability = availabilityOf(o.availability);
+  // Every one of the three is NOT NULL in the schema, and availability is what
+  // decides whether this is a link or a note. A row missing it cannot be drawn
+  // without guessing which, and the wrong guess is a broken link.
+  if (!kind || !locator || !availability) return null;
   return {
-    partial: bool(o.partial) ?? false,
-    origin: str(o.origin) ?? str(o.source),
-    targetRate: num(pick(o, "target_rate", "targetRate")),
-    rate: num(o.rate),
-    sent: num(o.sent),
-    durationSeconds: num(pick(o, "duration_seconds", "durationSeconds")),
-    errorRate: num(pick(o, "error_rate", "errorRate")),
-    errors: readErrors(o.errors),
-    overall: readLatency(o.overall),
-    routes: list(o.routes, readRouteResult),
-    breaches: list(o.breaches, readBreach),
-    assertions: list(o.assertions, readAssertionResult),
-    evidence: list(o.evidence, readEvidence),
-    command: str(o.command),
+    kind,
+    label: str(o.label),
+    availability,
+    locator,
+    sha256: str(o.sha256),
+    sizeBytes: num(pick(o, "size_bytes", "sizeBytes")),
   };
-}
-
-/** How far short of the target the run fell, as a fraction, or null when
- *  either number is missing. Positive means it did not keep up. */
-export function rateShortfall(r: Results): number | null {
-  if (r.targetRate === null || r.rate === null || r.targetRate <= 0) return null;
-  return (r.targetRate - r.rate) / r.targetRate;
 }
 
 /* -------------------------------------------------------------------------
- * Runs
+ * The stop request
  * ---------------------------------------------------------------------- */
 
-export interface RunRow {
+/**
+ * Where a cancellation got to.
+ *
+ * A stop is a durable command rather than a flag, because the control plane
+ * cannot reach a runtime and marking a row and hoping is not a cancellation.
+ * `acknowledged` is about this table and `outcome` is about the world, which
+ * is why they are two fields.
+ */
+export type CommandState =
+  | "pending"
+  | "claimed"
+  | "acknowledged"
+  | "failed"
+  | "expired"
+  | "superseded";
+
+const COMMAND_STATES = new Set<string>([
+  "pending",
+  "claimed",
+  "acknowledged",
+  "failed",
+  "expired",
+  "superseded",
+]);
+
+export const COMMAND_FACTS: Record<CommandState, { label: string; meaning: string }> = {
+  pending: {
+    label: "Waiting",
+    meaning: "The stop is recorded. No runtime has picked it up yet.",
+  },
+  claimed: { label: "Claimed", meaning: "A runtime has taken the stop and is acting on it." },
+  acknowledged: {
+    label: "Acknowledged",
+    meaning: "A runtime confirmed it acted. What it did is beside this.",
+  },
+  failed: {
+    label: "Failed",
+    meaning: "A runtime tried to stop the run and reported that it could not.",
+  },
+  expired: {
+    label: "Never confirmed",
+    meaning:
+      "The command's deadline passed with nothing acknowledging it. The run may still be going out there.",
+  },
+  superseded: { label: "Superseded", meaning: "A later command replaced this one." },
+};
+
+export interface CancelCommand {
   id: string;
-  sourceId: string | null;
-  sourceName: string | null;
-  kind: SourceKind | null;
-  state: RunState;
-  /** Null until the run reaches one, and null forever on a cancelled run. A
-   *  run that is still going has no verdict, and inventing one for the list
-   *  would be the console's own version of a green run over nothing. */
-  verdict: Verdict | null;
-  envId: string | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  createdAt: string | null;
+  state: CommandState;
+  outcome: string | null;
+  detail: string | null;
+  requestedAt: string | null;
+  acknowledgedAt: string | null;
 }
 
-export function readRun(v: unknown): RunRow | null {
+export function readCancel(v: unknown): CancelCommand | null {
   const o = obj(v);
   if (!o) return null;
   const id = str(o.id);
-  const state = runStateOf(o.state);
-  // No state, no row. Rendering a run whose state the console does not know
-  // means choosing a tone for it, and a wrong choice there paints something
-  // inconclusive as a pass.
+  const state =
+    typeof o.state === "string" && COMMAND_STATES.has(o.state) ? (o.state as CommandState) : null;
   if (!id || !state) return null;
   return {
     id,
-    sourceId: str(pick(o, "source_id", "sourceId")),
-    sourceName: str(pick(o, "source_name", "sourceName")),
-    kind: sourceKindOf(o.kind),
     state,
-    verdict: verdictOf(o.verdict),
-    envId: str(pick(o, "env_id", "envId")),
-    startedAt: str(pick(o, "started_at", "startedAt")),
-    finishedAt: str(pick(o, "finished_at", "finishedAt")),
-    createdAt: str(pick(o, "created_at", "createdAt")),
+    outcome: str(o.outcome),
+    detail: str(o.detail),
+    requestedAt: str(pick(o, "requested_at", "requestedAt")),
+    acknowledgedAt: str(pick(o, "acknowledged_at", "acknowledgedAt")),
   };
 }
 
-export interface RunDetail extends RunRow {
-  results: Results | null;
-  /** Why it stopped, when the state does not say it. */
-  detail: string | null;
-  scale: number | null;
-  durationSeconds: number | null;
-  concurrency: number | null;
-  version: number | null;
-  safe: string[];
-  unsafe: string[];
+/* -------------------------------------------------------------------------
+ * One run, whole
+ * ---------------------------------------------------------------------- */
+
+export interface RunDetail {
+  run: RunRow;
+  /**
+   * Null until the run reaches a terminal state, and that is not a gap.
+   * Nothing writes a result row before a terminal transition, so a running run
+   * genuinely has none. An earlier draft of this console carried a "partial
+   * results" state for the case where a running run had some of its numbers;
+   * that state could never fire and it was deleted rather than kept.
+   */
+  result: RunResult | null;
+  routes: RouteMetric[];
+  thresholds: ThresholdVerdict[];
+  evidence: EvidenceItem[];
+  cancel: CancelCommand | null;
 }
 
 export function readRunDetail(v: unknown): RunDetail | null {
   const o = obj(v);
   if (!o) return null;
-  const base = readRun(o);
-  if (!base) return null;
+  const run = readRun(o.run);
+  if (!run) return null;
+  // A to-one embed is an object or null and a to-many is an array, said
+  // explicitly because getting it backwards on this side is what makes one
+  // surprising row blank a whole page.
   return {
-    ...base,
-    results: readResults(o.results),
-    detail: str(o.detail),
-    scale: num(o.scale),
-    durationSeconds: num(pick(o, "duration_seconds", "durationSeconds")),
-    concurrency: num(o.concurrency),
-    version: num(o.version),
-    safe: list(o.safe, str),
-    unsafe: list(o.unsafe, str),
+    run,
+    result: readResult(o.result),
+    routes: list(o.routes, readRouteMetric),
+    thresholds: list(o.thresholds, readThreshold),
+    evidence: list(o.evidence, readEvidence),
+    cancel: readCancel(o.cancel),
   };
 }
 
 /**
- * A run whose verdict disagrees with its own assertions.
+ * A run whose verdict disagrees with the thresholds under it.
  *
  * This exists because of the specific way this product has been wrong before:
  * a nightly corpus reported six passing workflows having never once reached an
  * agent, and every summary anybody read said green. The console cannot correct
- * a verdict the engine computed, but it can refuse to present a contradiction
- * quietly.
+ * a verdict the control plane recorded, but it can refuse to present a
+ * contradiction quietly.
  *
  * Only a conclusive verdict is checked. Flagging a blocked run for having
- * unevaluated assertions would be restating its own definition at a reader.
+ * unevaluated thresholds would be restating its own definition at a reader.
  */
 export function verdictContradiction(
   verdict: Verdict | null,
-  assertions: AssertionResult[],
+  thresholds: ThresholdVerdict[],
 ): string | null {
   if (verdict === null || !VERDICT_FACTS[verdict].conclusive) return null;
-  const broke = assertions.filter((a) => a.verdict === "fail").length;
-  const unevaluated = assertions.filter(
-    (a) => a.verdict === "blocked" || a.verdict === "unverified",
+  const broke = thresholds.filter((t) => t.verdict === "fail").length;
+  const unstable = thresholds.filter((t) => t.verdict === "flaky").length;
+  const unevaluated = thresholds.filter(
+    (t) => t.verdict === "blocked" || t.verdict === "unverified",
   ).length;
 
-  if (verdict === "pass" && (broke > 0 || unevaluated > 0)) {
-    // Both halves when both apply. Naming only the broken ones would leave a
-    // reader believing the rest held, which is the quieter half of the same
-    // mistake: an assertion nothing measured has not passed either.
+  if (verdict === "pass" && broke + unstable + unevaluated > 0) {
+    // Every half that applies, not just the loudest. Naming only the broken
+    // ones would leave a reader believing the rest held, which is the quieter
+    // half of the same mistake: a threshold nothing measured has not passed.
     const parts: string[] = [];
     if (broke > 0) {
-      parts.push(broke === 1 ? "one assertion below broke" : `${broke} of the assertions below broke`);
+      parts.push(
+        broke === 1 ? "one threshold below broke" : `${broke} of the thresholds below broke`,
+      );
+    }
+    if (unstable > 0) {
+      parts.push(unstable === 1 ? "one came back flaky" : `${unstable} came back flaky`);
     }
     if (unevaluated > 0) {
-      parts.push(unevaluated === 1 ? "one was never evaluated" : `${unevaluated} were never evaluated`);
+      parts.push(
+        unevaluated === 1 ? "one was never evaluated" : `${unevaluated} were never evaluated`,
+      );
     }
     const tail =
       broke > 0
-        ? "A run cannot pass over an assertion that broke, so one of the two records is wrong."
-        : "An assertion nothing measured has not held, so this pass covers less than it appears to.";
-    return `This run is recorded as a pass, but ${parts.join(" and ")}. ${tail}`;
+        ? "A run cannot pass over a threshold that broke, so one of the two records is wrong."
+        : unstable > 0
+          ? "A threshold that answers differently on repeat has not held, so this pass covers less than it appears to."
+          : "A threshold nothing measured has not held, so this pass covers less than it appears to.";
+    return `This run is recorded as a pass, but ${joinWords(parts)}. ${tail}`;
   }
   if (verdict === "fail" && broke === 0) {
-    return "This run is recorded as a failure, but no assertion below broke. Whatever failed it is not in this table.";
+    return "This run is recorded as a failure, and no threshold below broke. Whatever failed it is not in this table.";
   }
   return null;
 }
 
-/* -------------------------------------------------------------------------
- * Exploration
- *
- * Kept apart from the two load sources above, because it is not one. `af
- * explore` drives a real browser from a seed and compiles what it reached into
- * a manifest WORKFLOW, which `af test` runs. It never produces a load
- * scenario. Modelling it beside observed and deterministic would put that
- * confusion in the type system, where every screen would inherit it.
- * ---------------------------------------------------------------------- */
-
-export interface Discovery {
-  id: string;
-  /** What the agent reached, in the manifest's own words. */
-  title: string;
-  persona: string | null;
-  seed: string | null;
-  reachedAt: string | null;
-  steps: number | null;
-  /** The workflow name it became, once promoted. Not a scenario id. */
-  workflowName: string | null;
-}
-
-export function readDiscovery(v: unknown): Discovery | null {
-  const o = obj(v);
-  if (!o) return null;
-  const id = str(o.id);
-  const title = str(o.title) ?? str(o.name);
-  if (!id || !title) return null;
-  return {
-    id,
-    title,
-    persona: str(o.persona),
-    seed: str(o.seed),
-    reachedAt: str(pick(o, "reached_at", "reachedAt")),
-    steps: num(o.steps),
-    workflowName: str(pick(o, "workflow_name", "workflowName")),
-  };
-}
-
-export interface Exploration {
-  id: string;
-  entryUrl: string | null;
-  seed: string | null;
-  budgetSeconds: number | null;
-  startedAt: string | null;
-  discoveries: Discovery[];
-}
-
-export function readExploration(v: unknown): Exploration | null {
-  const o = obj(v);
-  if (!o) return null;
-  const id = str(o.id);
-  if (!id) return null;
-  return {
-    id,
-    entryUrl: str(pick(o, "entry_url", "entryUrl")),
-    seed: str(o.seed),
-    budgetSeconds: num(pick(o, "budget_seconds", "budgetSeconds")),
-    startedAt: str(pick(o, "started_at", "startedAt")),
-    discoveries: list(o.discoveries, readDiscovery),
-  };
+/** "a", "a and b", "a, b and c". Written out because three clauses joined with
+ *  " and " twice reads as a list somebody forgot to punctuate. */
+function joinWords(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 /* -------------------------------------------------------------------------
  * The calls
+ *
+ * WHAT IS NOT HERE, AND WHY IT IS SAID RATHER THAN HIDDEN.
+ *
+ * Neither list route takes a cursor. Both take a limit that the control plane
+ * caps at 200 and both answer with a bare array, so there is no `nextCursor`
+ * to decode and this file does not invent one: a decoder written for a shape
+ * the server does not produce is the exact defect this module was reworked to
+ * remove.
+ *
+ * What a bare array under a cap does is truncate silently, and a table that
+ * looks complete and is not is worse than a slow page. So every list asks for
+ * one more row than it shows, and `Windowed.more` says whether the control
+ * plane had another one. The screen then either offers a wider window or says
+ * plainly that it has hit the cap. Nothing here estimates a total: the
+ * response carries no count, and "50 of about 200" would be a number the
+ * console made up.
  * ---------------------------------------------------------------------- */
 
-export interface Page<T> {
+/** The largest limit `workloads.list` and `workloads.runs` accept. Asking for
+ *  more is refused by the input schema rather than clamped, so this is a real
+ *  ceiling and not a default. */
+export const LIST_CAP = 200;
+
+export interface Windowed<T> {
   items: T[];
-  nextCursor: string | null;
+  /** The control plane had at least one more row than this window shows. */
+  more: boolean;
+  /** The window that produced these rows, so a footer can say what widening
+   *  it would do and whether it is already at the cap. */
+  limit: number;
 }
 
-function readPage<T>(v: unknown, key: string, each: (item: unknown) => T | null): Page<T> {
-  const o = obj(v);
-  return { items: list(o?.[key], each), nextCursor: str(o?.nextCursor) };
+/**
+ * Asks for one more row than it will show, so "there are more" is something
+ * the server answered rather than something the console assumed from a full
+ * page.
+ *
+ * `more` is counted off the RAW array and not off the decoded one. The
+ * decoders drop a row they cannot read, so a window of fifty one that came
+ * back with one unreadable row would decode to fifty and report that the list
+ * ended, which is the truncation this whole shape exists to prevent, arrived
+ * at a different way.
+ *
+ * At the cap there is no extra row to ask for, so `more` falls back to the
+ * window being exactly full. That is a weaker claim and the footer says so in
+ * different words.
+ */
+async function fetchWindow<T>(
+  limit: number,
+  fetch: (ask: number) => Promise<unknown>,
+  each: (item: unknown) => T | null,
+): Promise<Windowed<T>> {
+  const capped = Math.min(limit, LIST_CAP);
+  const ask = Math.min(capped + 1, LIST_CAP);
+  const raw = await fetch(ask);
+  const returned = Array.isArray(raw) ? raw.length : 0;
+  const rows = list(raw, each);
+  if (ask > capped) return { items: rows.slice(0, capped), more: returned > capped, limit: capped };
+  return { items: rows, more: returned >= LIST_CAP, limit: capped };
 }
 
-export async function listSources(input: {
-  kind?: SourceKind;
+export async function listWorkloads(input: {
+  kind?: Kind;
   repository?: string;
+  includeArchived?: boolean;
   limit?: number;
-  cursor?: string;
-}): Promise<Page<SourceRow>> {
-  return readPage(
-    await query<unknown>("load.sources.list", { limit: 50, ...input }),
-    "sources",
-    readSourceRow,
+}): Promise<Windowed<WorkloadRow>> {
+  const { limit = 50, ...rest } = input;
+  return fetchWindow(
+    limit,
+    (ask) => query<unknown>("workloads.list", { ...rest, limit: ask }),
+    readWorkloadRow,
   );
 }
 
-export async function getSource(id: string): Promise<SourceDetail | null> {
-  return readSourceDetail(await query<unknown>("load.sources.get", { id }));
+export interface WorkloadDetail {
+  workload: WorkloadRow;
+  versions: Version[];
+  runs: RunRow[];
 }
 
-export async function listVersions(id: string): Promise<Version[]> {
-  return readPage(
-    await query<unknown>("load.sources.versions", { id, limit: 50 }),
-    "versions",
-    readVersion,
-  ).items;
+export async function getWorkload(slug: string): Promise<WorkloadDetail | null> {
+  const raw = obj(await query<unknown>("workloads.get", { slug }));
+  if (!raw) return null;
+  const workload = readWorkloadRow(raw.workload);
+  if (!workload) return null;
+  return {
+    workload,
+    versions: list(raw.versions, (v) => readVersion(workload.kind, v)),
+    runs: list(raw.runs, readRun),
+  };
 }
 
 export async function listRuns(input: {
-  sourceId?: string;
+  slug?: string;
+  envId?: string;
+  state?: RunState;
   limit?: number;
-  cursor?: string;
-}): Promise<Page<RunRow>> {
-  return readPage(await query<unknown>("load.runs.list", { limit: 50, ...input }), "runs", readRun);
+}): Promise<Windowed<RunRow>> {
+  const { limit = 50, ...rest } = input;
+  return fetchWindow(limit, (ask) => query<unknown>("workloads.runs", { ...rest, limit: ask }), readRun);
 }
 
-export async function getRun(runId: string): Promise<RunDetail | null> {
-  return readRunDetail(await query<unknown>("load.runs.get", { runId }));
+export async function inspectRun(runId: string): Promise<RunDetail | null> {
+  return readRunDetail(await query<unknown>("workloads.inspect", { runId }));
+}
+
+/* -------------------------------------------------------------------------
+ * Writing
+ * ---------------------------------------------------------------------- */
+
+export async function createWorkload(
+  input: {
+    repository: string;
+    slug: string;
+    name: string;
+    kind: Kind;
+    description?: string;
+    body: Body;
+  },
+  csrf: string,
+): Promise<{ slug: string; version: number | null }> {
+  const raw = obj(
+    await mutate<unknown>("workloads.create", { ...input, body: bodyToInput(input.body) }, csrf),
+  );
+  return { slug: str(raw?.slug) ?? input.slug, version: num(raw?.version) };
+}
+
+export async function addVersion(
+  input: { slug: string; body: Body; notes?: string },
+  csrf: string,
+): Promise<{ version: number | null; created: boolean; note: string | null }> {
+  const raw = obj(
+    await mutate<unknown>(
+      "workloads.addVersion",
+      {
+        slug: input.slug,
+        body: bodyToInput(input.body),
+        ...(input.notes ? { notes: input.notes } : {}),
+      },
+      csrf,
+    ),
+  );
+  return {
+    version: num(raw?.version),
+    created: bool(raw?.created) ?? false,
+    note: str(raw?.note),
+  };
+}
+
+export async function archiveWorkload(
+  input: { slug: string; reason?: string },
+  csrf: string,
+): Promise<void> {
+  await mutate("workloads.archive", input, csrf);
+}
+
+/**
+ * What a promotion produced.
+ *
+ * `dropped` and `manifestBlock` are the whole point of the screen that shows
+ * this, and neither may be summarised away. `dropped` is never empty: every
+ * promotion carries at least the note that the expectation is the goal rather
+ * than a passing page's words. And until the block is in the repository's
+ * antifailure.yaml, `af test --only` cannot find the workflow this version
+ * selects, so a promotion that returned a slug and nothing else would look
+ * finished and would not be.
+ */
+export interface Promotion {
+  slug: string | null;
+  version: number | null;
+  /** False when the workload already existed and this added a version to it. */
+  created: boolean;
+  dropped: string[];
+  manifestBlock: string | null;
+}
+
+export async function promoteExploration(
+  input: {
+    repository: string;
+    slug?: string;
+    fromRunId?: string;
+    exploration: unknown;
+    persona?: string;
+  },
+  csrf: string,
+): Promise<Promotion> {
+  const raw = obj(await mutate<unknown>("workloads.promote", input, csrf));
+  return {
+    slug: str(raw?.slug),
+    version: num(raw?.version),
+    created: bool(raw?.created) ?? false,
+    dropped: list(raw?.dropped, str),
+    manifestBlock: str(pick(raw ?? {}, "manifest_block", "manifestBlock")),
+  };
 }
 
 /**
  * What a start request may carry.
  *
- * Every field here maps to a flag the kind's command actually declares. There
- * is deliberately no `safe` or `unsafe`: neither `af load run` nor `af load
- * scenario` has such a flag, because the safe list is a manifest decision
- * rather than a per-run one, and offering it here would invent a capability
- * the engine does not have.
+ * Three fields, and every knob is missing on purpose. Duration, scale, seed
+ * and concurrency live in the VERSION, so changing the scale makes a new
+ * version and comparing scale 1 against scale 4 is comparing two versions
+ * rather than two runs whose settings are only recorded in a form somebody has
+ * closed.
+ *
+ * `version` absent means the latest, which is what a Run button means.
  */
 export interface StartInput {
-  sourceId: string;
+  slug: string;
   envId: string;
-  /** Observed only. */
-  scale?: number;
-  /** Observed only. Seconds; the command takes a Go duration and the control
-   *  plane formats it, so the console cannot send "1 hour" and have it refused
-   *  after the job has started. */
-  durationSeconds?: number;
-  /** Deterministic only. */
-  concurrency?: number;
-  /** Deterministic only, and required: an empty selection is refused. */
-  select?: string[];
-  /** Both kinds. A number, which is what makes two runs send the same
-   *  sequence. */
-  seed?: number;
+  version?: number;
+  /** Makes a repeated request one run. The console sends the same value on a
+   *  double click; without one every call is a new run. */
+  requestKey?: string;
 }
 
-export async function startRun(input: StartInput, csrf: string): Promise<{ runId: string | null }> {
-  const raw = await mutate<unknown>("load.runs.start", input, csrf);
-  return { runId: str(obj(raw)?.runId) };
+export interface Started {
+  runId: string | null;
+  /** False when the run was recorded and GitHub was not asked, which happens
+   *  when an identical request had already been made. */
+  dispatched: boolean;
+  note: string | null;
 }
 
-export async function cancelRun(runId: string, csrf: string): Promise<void> {
-  await mutate("load.runs.cancel", { runId }, csrf);
+export async function startRun(input: StartInput, csrf: string): Promise<Started> {
+  const raw = obj(await mutate<unknown>("workloads.start", input, csrf));
+  return {
+    runId: str(raw?.runId),
+    dispatched: bool(raw?.dispatched) ?? false,
+    note: str(raw?.note) ?? str(raw?.pending),
+  };
 }
 
-export async function retryRun(runId: string, csrf: string): Promise<{ runId: string | null }> {
-  const raw = await mutate<unknown>("load.runs.retry", { runId }, csrf);
-  return { runId: str(obj(raw)?.runId) };
+export interface Cancelled {
+  /** True when the run had not been claimed by anything, so it is already
+   *  over. False means a command is waiting for a runtime to confirm. */
+  stopped: boolean;
+  commandId: string | null;
+  alreadyRequested: boolean;
 }
 
-export async function listExplorations(input: { limit?: number } = {}): Promise<Exploration[]> {
-  return readPage(
-    await query<unknown>("load.explorations.list", { limit: 20, ...input }),
-    "explorations",
-    readExploration,
-  ).items;
-}
-
-/** Compile a discovery into a manifest workflow. The result is YAML for
- *  `antifailure.yaml`, which is what `af explore --emit-workflow` prints. It is
- *  not a load scenario and this function does not pretend otherwise. */
-export async function promoteDiscovery(
-  input: { explorationId: string; discoveryId: string; name: string },
+export async function cancelRun(
+  input: { runId: string; reason?: string },
   csrf: string,
-): Promise<{ workflowName: string | null; yaml: string | null }> {
-  const raw = await mutate<unknown>("load.explorations.promote", input, csrf);
-  const o = obj(raw);
-  return { workflowName: str(pick(o ?? {}, "workflow_name", "workflowName")), yaml: str(o?.yaml) };
+): Promise<Cancelled> {
+  const raw = obj(await mutate<unknown>("workloads.cancel", input, csrf));
+  return {
+    stopped: bool(raw?.stopped) ?? false,
+    commandId: str(raw?.commandId),
+    alreadyRequested: bool(raw?.alreadyRequested) ?? false,
+  };
+}
+
+export async function retryRun(runId: string, csrf: string): Promise<Started> {
+  const raw = obj(await mutate<unknown>("workloads.retry", { runId }, csrf));
+  return {
+    runId: str(raw?.runId),
+    dispatched: bool(raw?.dispatched) ?? false,
+    note: str(raw?.note) ?? str(raw?.pending),
+  };
 }
 
 /* -------------------------------------------------------------------------
@@ -1137,4 +1522,26 @@ export function seconds(value: number | null): string {
   const m = Math.floor(value / 60);
   const s = Math.round(value % 60);
   return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
+
+/** A duration recorded in milliseconds, read as a length of time. Under a
+ *  minute it keeps the millisecond precision it was measured at, because a
+ *  scenario that took 840ms rounding to "1s" loses the only interesting part. */
+export function duration(msValue: number | null): string {
+  if (msValue === null) return "--";
+  return msValue < 60_000 ? ms(msValue) : seconds(msValue / 1000);
+}
+
+/** A size, or "--". Binary units, because that is what a file listing on the
+ *  runner that produced it would have said. */
+export function bytes(value: number | null): string {
+  if (value === null) return "--";
+  const units = ["B", "KiB", "MiB", "GiB"];
+  let n = value;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i += 1;
+  }
+  return `${i === 0 ? n : n.toFixed(1)} ${units[i]}`;
 }

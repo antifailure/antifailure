@@ -3,34 +3,37 @@
 import { useState } from "react";
 import { may } from "@/lib/roles";
 import { useSessionContext } from "@/components/session";
-import { Button, Card, Empty, When } from "@/components/ui";
+import { Button, Card, CellLink, Empty, When } from "@/components/ui";
 import {
+  Fact,
+  Facts,
+  KindMark,
   LatencyLadder,
-  Provenance,
   StateBadge,
   VerdictBadge,
   VerdictNote,
 } from "@/components/load/primitives";
 import {
-  Assertions,
-  Breaches,
-  Errors,
+  CancelState,
+  ErrorReasons,
   EvidenceList,
+  RefusedRoutes,
+  ResultSummary,
   Routes,
-  Throughput,
+  Thresholds,
 } from "@/components/load/results";
 import { Command, LoadError, PartialNotice, RunSkeleton } from "@/components/load/states";
 import { StaleNotice, useInterval, useLive } from "@/components/load/polling";
 import {
+  COMMAND_FACTS,
+  KIND_FACTS,
   STATE_FACTS,
-  VERDICT_FACTS,
   cancelRun,
-  count,
-  getRun,
+  duration,
+  hasLatency,
+  inspectRun,
   isRunning,
-  isTerminal,
   retryRun,
-  seconds,
   verdictContradiction,
   type RunDetail,
 } from "@/lib/load";
@@ -38,93 +41,112 @@ import {
 /**
  * How often a run still in flight is asked about again.
  *
- * Six seconds rather than one. A load run is minutes long, so a second would
- * be sixty requests a minute per open tab to learn something that moves on the
+ * Six seconds rather than one. A run is minutes long, so a second would be
+ * sixty requests a minute per open tab to learn something that moves on the
  * order of tens of seconds, and every one of those costs the same tenant's
  * database the run is already competing with.
  */
 const POLL_MS = 6000;
 
-/** What was asked for, so a number in the results can be read against it. */
-function Settings({ run }: { run: RunDetail }) {
-  const rows: [string, string][] = [
-    ["Version", run.version === null ? "not recorded" : `v${run.version}`],
-    ["Scale", run.scale === null ? "not recorded" : `${run.scale}x the source's rate`],
-    ["Duration asked for", seconds(run.durationSeconds)],
-    ["Concurrency", count(run.concurrency)],
-    ["Environment", run.envId ?? "not recorded"],
-  ];
-  return (
-    <dl className="grid gap-x-8 gap-y-4 px-4 py-4 sm:grid-cols-3">
-      {rows.map(([k, v]) => (
-        <div key={k} className="min-w-0">
-          <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">{k}</dt>
-          <dd className="mt-1 break-words text-[13px] text-ink">{v}</dd>
-        </div>
-      ))}
-    </dl>
-  );
+/** Whether this kind of run measures traffic, which decides whether a latency
+ *  ladder and an error breakdown are tables that apply or tables of dashes. */
+function sendsTraffic(kind: string | null): boolean {
+  return kind === "observed_load" || kind === "http_scenario";
 }
 
 /**
- * Which routes the run was allowed to touch.
+ * When each thing happened, and what has not happened yet.
  *
- * These come from the manifest, not from the form that started the run.
- * Neither `af load run` nor `af load scenario` has a --safe or --unsafe flag,
- * so the safe list is a decision committed alongside the code rather than one
- * somebody makes per run, and the console shows it read only for that reason.
- *
- * Both lists are shown and the default is said outright. Every route is unsafe
- * until a safe pattern matches it, so showing the safe list alone would let a
- * reader assume the rest were sent too.
+ * The deadline is here rather than hidden, because it is the difference
+ * between a run that is late and a run that is over. A run passes it and
+ * becomes abandoned, which is not a failure, and somebody watching a slow run
+ * is owed the moment that will happen.
  */
-function Policy({ run }: { run: RunDetail }) {
-  if (run.safe.length === 0 && run.unsafe.length === 0) {
-    return (
-      <Empty title="No patterns in the manifest">
-        This repository declares neither list under `load`. Every route is
-        unsafe until a safe pattern matches it, so a manifest with no safe list
-        sends nothing at all.
-      </Empty>
-    );
-  }
+function Timeline({ run }: { run: RunDetail["run"] }) {
   return (
-    <div className="grid gap-6 px-4 py-4 sm:grid-cols-2">
-      {(
-        [
-          ["Safe", run.safe, "Matched by one of these, so it was sent."],
-          ["Unsafe", run.unsafe, "Named explicitly as allowed to change state on the twin."],
-        ] as const
-      ).map(([label, patterns, note]) => (
-        <div key={label} className="min-w-0">
-          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">{label}</p>
-          <p className="mt-1 text-[12px] leading-5 text-dim">{note}</p>
-          {patterns.length === 0 ? (
-            <p className="mt-2 text-[13px] text-muted">None.</p>
-          ) : (
-            <ul className="mt-2 space-y-1">
-              {patterns.map((p) => (
-                <li key={p} className="break-all font-mono text-[12.5px] text-ink">
-                  {p}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ))}
-    </div>
+    <Facts columns={3}>
+      <Fact label="Requested">
+        <When value={run.requestedAt} />
+      </Fact>
+      <Fact label="Dispatched">
+        {run.dispatchedAt ? (
+          <When value={run.dispatchedAt} />
+        ) : (
+          <span className="text-muted">GitHub was never asked</span>
+        )}
+      </Fact>
+      <Fact label="Claimed by an engine">
+        {run.acceptedAt ? (
+          <When value={run.acceptedAt} />
+        ) : (
+          <span className="text-muted">not yet</span>
+        )}
+      </Fact>
+      <Fact label="Started">
+        {run.startedAt ? <When value={run.startedAt} /> : <span className="text-muted">not yet</span>}
+      </Fact>
+      <Fact label="Finished">
+        {run.finishedAt ? (
+          <When value={run.finishedAt} />
+        ) : (
+          <span className="text-muted">not yet</span>
+        )}
+      </Fact>
+      <Fact label={isRunning(run.state) ? "Gives up at" : "Deadline was"}>
+        <When value={run.deadlineAt} />
+      </Fact>
+    </Facts>
   );
 }
 
-export function RunView({ runId, onClose }: { runId: string; onClose: () => void }) {
+/** Where the run came from and where it ran, which is what makes it
+ *  reproducible by anybody other than the person who started it. */
+function Provenance({ run }: { run: RunDetail["run"] }) {
+  return (
+    <Facts columns={3}>
+      <Fact label="Environment">
+        {run.envId ? <code className="break-all font-mono text-[12.5px]">{run.envId}</code> : "--"}
+      </Fact>
+      <Fact label="Repository">{run.repository ?? "--"}</Fact>
+      <Fact label="Branch">
+        {run.gitRef ? <code className="break-all font-mono text-[12.5px]">{run.gitRef}</code> : "--"}
+      </Fact>
+      <Fact label="Version">{run.version === null ? "--" : `v${run.version}`}</Fact>
+      <Fact label="Attempt">
+        {run.attempt === null ? "--" : run.attempt === 1 ? "The first" : `Number ${run.attempt}`}
+      </Fact>
+      <Fact label="Manifest">
+        {run.manifestDigest ? (
+          <code className="break-all font-mono text-[11.5px]">
+            {run.manifestDigest.slice(0, 16)}
+          </code>
+        ) : (
+          <span className="text-muted">not recorded</span>
+        )}
+      </Fact>
+    </Facts>
+  );
+}
+
+export function RunView({
+  runId,
+  onClose,
+  onOpenRun,
+  onOpenWorkload,
+}: {
+  runId: string;
+  onClose: () => void;
+  onOpenRun: (id: string) => void;
+  onOpenWorkload: (slug: string) => void;
+}) {
   const session = useSessionContext();
   const csrf = session.data?.csrfToken ?? "";
-  const canRun = may(session.data?.role, "load.run");
+  const canRun = may(session.data?.role, "workloads.run");
 
   // useLive rather than useApi: a refresh must not blank a screen that is
   // already showing results, and a failed refresh must not throw them away.
-  const state = useLive<RunDetail | null>(() => getRun(runId), [runId]);
-  const run = state.data;
+  const state = useLive<RunDetail | null>(() => inspectRun(runId), [runId]);
+  const detail = state.data;
 
   const [acting, setActing] = useState<"cancel" | "retry" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -133,7 +155,7 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
    *  waiting a poll interval. Rolled back if the server refuses. */
   const [stopping, setStopping] = useState(false);
 
-  useInterval(run !== null && isRunning(run.state), POLL_MS, state.reload);
+  useInterval(detail !== null && isRunning(detail.run.state), POLL_MS, state.reload);
 
   if (state.status === "error" && state.error) {
     return (
@@ -145,10 +167,7 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
     );
   }
   if (state.status === "loading") return <RunSkeleton />;
-  if (run === null || run === undefined) {
-    // Reachable: the id in the address bar names nothing and the control plane
-    // answers with no row rather than a 404. Treating that as a wait would be a
-    // screen that never resolves.
+  if (detail === null || detail === undefined) {
     return (
       <Empty title="That run is not here" action={<Button onClick={onClose}>Back to Load</Button>}>
         The address names a run that does not exist, or one that belongs to
@@ -157,11 +176,11 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
     );
   }
 
-  const results = run.results;
-  const contradiction = verdictContradiction(run.verdict, results?.assertions ?? []);
-  const partial =
-    results !== null && (results.partial || isRunning(run.state) || run.state === "cancelled");
-  const conclusive = run.verdict !== null && VERDICT_FACTS[run.verdict].conclusive;
+  const run = detail.run;
+  const result = detail.result;
+  const contradiction = verdictContradiction(run.verdict, detail.thresholds);
+  const traffic = sendsTraffic(run.kind);
+  const stopRequested = run.cancelRequestedAt !== null || stopping;
 
   return (
     <div className="space-y-6">
@@ -176,16 +195,17 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
           retrying={state.refreshing}
         />
       ) : null}
+
       <Card
-        title="Load run"
+        title="Run"
         note={run.id}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {canRun && isRunning(run.state) && run.state !== "cancelling" ? (
+            {canRun && isRunning(run.state) ? (
               <Button
                 variant="danger"
                 busy={acting === "cancel"}
-                disabled={stopping}
+                disabled={stopRequested}
                 onClick={async () => {
                   setActing("cancel");
                   setActionError(null);
@@ -194,8 +214,14 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
                   // rather than after the next poll, and rolls back on refusal.
                   setStopping(true);
                   try {
-                    await cancelRun(run.id, csrf);
-                    setNote("Stop requested. The runner acknowledges it on its next check in.");
+                    const stopped = await cancelRun({ runId: run.id }, csrf);
+                    setNote(
+                      stopped.stopped
+                        ? "Nothing had claimed this run, so it is over now rather than waiting for a runtime to confirm."
+                        : stopped.alreadyRequested
+                          ? "A stop had already been asked for. This changed nothing."
+                          : "Stop requested. A runtime confirms it below when it acts, and the request expires if none ever does.",
+                    );
                     state.reload();
                   } catch (e) {
                     setStopping(false);
@@ -205,10 +231,10 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
                   }
                 }}
               >
-                {stopping ? "Stopping" : "Stop this run"}
+                {stopRequested ? "Stopping" : "Stop this run"}
               </Button>
             ) : null}
-            {canRun && isTerminal(run.state) ? (
+            {canRun && !isRunning(run.state) && run.supersededBy === null ? (
               <Button
                 busy={acting === "retry"}
                 onClick={async () => {
@@ -216,11 +242,11 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
                   setActionError(null);
                   setNote(null);
                   try {
-                    const { runId: next } = await retryRun(run.id, csrf);
+                    const next = await retryRun(run.id, csrf);
                     setNote(
-                      next
-                        ? `Started again as ${next}.`
-                        : "Started again. It appears in the list once the runner takes it.",
+                      next.runId
+                        ? `Started again as ${next.runId}. It runs the same version, which is what makes it an answer to whether this was a fluke.`
+                        : "Started again. It appears in the list once an engine takes it.",
                     );
                     state.reload();
                   } catch (e) {
@@ -241,107 +267,170 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
           <div className="flex flex-wrap items-center gap-3">
             <VerdictBadge verdict={run.verdict} />
             <StateBadge state={run.state} />
-            {run.kind ? <Provenance kind={run.kind} /> : null}
-            {run.sourceName ? <span className="text-[13px] text-muted">{run.sourceName}</span> : null}
+            {run.kind ? <KindMark kind={run.kind} /> : null}
+            {run.workloadSlug ? (
+              <button
+                type="button"
+                onClick={() => onOpenWorkload(run.workloadSlug as string)}
+                className="text-[13px] text-ink underline decoration-[rgba(16,16,16,0.25)] underline-offset-4 hover:decoration-ink"
+              >
+                {run.workloadSlug}
+              </button>
+            ) : null}
           </div>
+
+          {/* Both sentences, because state and verdict are two answers and
+              neither implies the other. A run that succeeded and failed every
+              threshold needs the second sentence to make sense of the first. */}
+          <p className="mt-2 max-w-[70ch] text-[12.5px] leading-6 text-muted">
+            {STATE_FACTS[run.state].meaning}
+          </p>
           <VerdictNote verdict={run.verdict} />
-          {run.verdict === null ? (
-            <p className="mt-2 max-w-[64ch] text-[12.5px] leading-6 text-muted">
-              {STATE_FACTS[run.state].meaning}
-            </p>
-          ) : null}
+
           {run.detail ? (
             <p className="mt-2 max-w-[70ch] text-[12.5px] leading-6 text-muted">{run.detail}</p>
           ) : null}
-          <p className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px] text-dim">
-            <span>
-              Started <When value={run.startedAt ?? run.createdAt} />
-            </span>
-            {run.finishedAt ? (
-              <span>
-                Finished <When value={run.finishedAt} />
-              </span>
-            ) : null}
-            {isRunning(run.state) ? (
-              // Said in words rather than shown as something that moves. A
-              // reader who wants it sooner has a button; one who does not is
-              // not being waved at.
-              <span>Rechecking every {POLL_MS / 1000} seconds</span>
-            ) : null}
-          </p>
+          {run.failureCode ? (
+            <p className="mt-2 text-[12.5px] leading-6 text-muted">
+              Error code{" "}
+              <code className="font-mono text-[12px] text-ink">{run.failureCode}</code>, as the
+              engine reported it.
+            </p>
+          ) : null}
+
+          {run.retryOf || run.supersededBy ? (
+            <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] leading-6 text-muted">
+              {run.retryOf ? (
+                <span>
+                  A retry of{" "}
+                  <button
+                    type="button"
+                    onClick={() => onOpenRun(run.retryOf as string)}
+                    className="font-mono text-[12px] text-ink underline decoration-[rgba(16,16,16,0.25)] underline-offset-4 hover:decoration-ink"
+                  >
+                    {run.retryOf}
+                  </button>
+                </span>
+              ) : null}
+              {run.supersededBy ? (
+                <span>
+                  Already retried, as{" "}
+                  <button
+                    type="button"
+                    onClick={() => onOpenRun(run.supersededBy as string)}
+                    className="font-mono text-[12px] text-ink underline decoration-[rgba(16,16,16,0.25)] underline-offset-4 hover:decoration-ink"
+                  >
+                    {run.supersededBy}
+                  </button>
+                  . Retry that one instead: two independent successors to one failure is a history
+                  nobody can read.
+                </span>
+              ) : null}
+            </p>
+          ) : null}
+
+          {isRunning(run.state) ? (
+            // Said in words rather than shown as something that moves. A
+            // reader who wants it sooner has a button; one who does not is not
+            // being waved at.
+            <p className="mt-3 text-[12px] text-dim">
+              Rechecking every {POLL_MS / 1000} seconds.
+            </p>
+          ) : null}
+
           {actionError ? (
-            <p role="alert" className="mt-3 text-[12.5px] leading-6 text-fail">
+            <p role="alert" className="mt-3 max-w-[74ch] text-[12.5px] leading-6 text-fail">
               {actionError}
             </p>
           ) : note ? (
-            <p role="status" className="mt-3 text-[12.5px] leading-6 text-muted">
+            <p role="status" className="mt-3 max-w-[74ch] text-[12.5px] leading-6 text-muted">
               {note}
             </p>
           ) : null}
         </div>
-        <Settings run={run} />
+        <Provenance run={run} />
+        <div className="border-t border-rule">
+          <Timeline run={run} />
+        </div>
       </Card>
 
-      {results === null ? (
+      {detail.cancel ? (
+        <Card title="The stop request" note="A stop is a command a runtime has to confirm.">
+          <CancelState
+            state={detail.cancel.state}
+            outcome={detail.cancel.outcome}
+            detail={detail.cancel.detail}
+            requestedAt={detail.cancel.requestedAt}
+            acknowledgedAt={detail.cancel.acknowledgedAt}
+            label={COMMAND_FACTS[detail.cancel.state].label}
+            meaning={COMMAND_FACTS[detail.cancel.state].meaning}
+          />
+        </Card>
+      ) : null}
+
+      {result === null ? (
         <Card title="Results">
-          <Empty title={isRunning(run.state) ? "Nothing measured yet" : "Nothing was measured"}>
+          <Empty title={isRunning(run.state) ? "Nothing reported yet" : "Nothing was reported"}>
             {isRunning(run.state)
-              ? "The runner has not reported a measurement yet. This fills in as it reports."
-              : "This run stored no measurement. There is nothing here to read, which is not the same as a run that measured zero."}
+              ? "Nothing is written here until the run reaches an end, so this is empty for every run that is still going rather than partly filled in."
+              : run.state === "abandoned"
+                ? "No engine ever reported on this run, so there is nothing to read. That is a gap in the reporting and not a measurement of zero."
+                : "This run reached an end and stored no measurement. There is nothing here to read, which is not the same as a run that measured zero."}
           </Empty>
         </Card>
       ) : (
         <>
           <Card
-            title="Throughput"
-            note={results.origin ? `Mix compiled from ${results.origin}.` : undefined}
-          >
-            {partial ? (
-              <PartialNotice reason={run.state === "cancelled" ? "cancelled" : "running"} />
-            ) : null}
-            <Throughput results={results} />
-            {results.durationSeconds !== null ? (
-              <p className="border-t border-rule px-4 py-2.5 text-[12px] text-dim">
-                Measured over {seconds(results.durationSeconds)}.
-              </p>
-            ) : null}
-          </Card>
-
-          <Card title="Latency" note="The whole run together. The tail is what a user notices.">
-            {results.overall.p50Ms === null &&
-            results.overall.p95Ms === null &&
-            results.overall.p99Ms === null ? (
-              <Empty title="No distribution recorded">
-                This run stored no percentiles. An empty ladder is shown rather
-                than one drawn at zero, because a p99 of nothing and an
-                unmeasured p99 are different facts.
-              </Empty>
-            ) : (
-              <LatencyLadder latency={results.overall} />
-            )}
-          </Card>
-
-          <Card
-            title="Errors"
-            note="By reason. A thousand timeouts and a thousand refused connections are the same number and different problems."
-          >
-            <Errors results={results} />
-          </Card>
-
-          <Card
-            title="Assertions"
+            title="What it measured"
             note={
-              conclusive
-                ? "What the source asserted, and whether it held."
-                : "Read these against the verdict above. This run reached no verdict."
+              result.source
+                ? `${KIND_FACTS[result.kind].measures} The mix was compiled from ${result.source}.`
+                : KIND_FACTS[result.kind].measures
+            }
+          >
+            {run.state === "cancelled" || run.state === "timed_out" ? (
+              <PartialNotice reason={run.state} />
+            ) : null}
+            <ResultSummary result={result} />
+            <RefusedRoutes routes={result.refusedRoutes} />
+          </Card>
+
+          {traffic ? (
+            <Card title="Latency" note="The whole run together. The tail is what a user notices.">
+              {hasLatency(result.latency) ? (
+                <LatencyLadder latency={result.latency} />
+              ) : (
+                <Empty title="No distribution recorded">
+                  This run stored no percentiles. An empty ladder is shown rather than one drawn at
+                  zero, because a p99 of nothing and an unmeasured p99 are different facts.
+                </Empty>
+              )}
+            </Card>
+          ) : null}
+
+          {traffic ? (
+            <Card
+              title="Errors"
+              note="By reason. A thousand timeouts and a thousand refused connections are the same number and different problems."
+            >
+              <ErrorReasons result={result} />
+            </Card>
+          ) : null}
+
+          <Card
+            title="Thresholds"
+            note={
+              run.verdict === null
+                ? "Read these against the verdict above. This run reached no verdict."
+                : "What the manifest asserted, and whether it held."
             }
           >
             {/* A contradiction between the verdict and the table under it is
                 said out loud rather than left to be noticed. The console cannot
-                correct a verdict the engine computed, but a nightly corpus in
-                this product once reported six passing workflows having never
-                reached an agent, and presenting that combination quietly is how
-                it survives. */}
+                correct a verdict the control plane recorded, but a nightly
+                corpus in this product once reported six passing workflows
+                having never reached an agent, and presenting that combination
+                quietly is how it survives. */}
             {contradiction ? (
               <p
                 role="alert"
@@ -350,34 +439,31 @@ export function RunView({ runId, onClose }: { runId: string; onClose: () => void
                 {contradiction}
               </p>
             ) : null}
-            <Assertions assertions={results.assertions} />
-            {results.breaches.length > 0 ? (
-              <div className="border-t border-rule">
-                <p className="px-4 pt-4 text-[11px] font-medium uppercase tracking-[0.08em] text-dim">
-                  Thresholds exceeded
-                </p>
-                <Breaches breaches={results.breaches} />
-              </div>
-            ) : null}
+            <Thresholds thresholds={detail.thresholds} />
           </Card>
 
-          <Card title="Routes" note="Against production's own p95, worst regression first.">
-            <Routes routes={results.routes} />
+          {traffic || detail.routes.length > 0 ? (
+            <Card title="Routes" note="Against production's own p95, worst regression first.">
+              <Routes routes={detail.routes} />
+            </Card>
+          ) : null}
+
+          <Card title="Evidence" note="What the run left behind, and whether it can still be read.">
+            <EvidenceList evidence={detail.evidence} />
           </Card>
 
-          <Card title="Evidence">
-            <EvidenceList evidence={results.evidence} />
-          </Card>
-
-          <Card title="Reproduce this run" note="As the control plane recorded it at dispatch.">
-            <Command command={results.command} />
+          <Card
+            title="Reproduce this run"
+            note={
+              result.durationMs === null
+                ? undefined
+                : `It took ${duration(result.durationMs)} the first time.`
+            }
+          >
+            <Command command={run.reproduceCommand} />
           </Card>
         </>
       )}
-
-      <Card title="Route policy" note="From the manifest. Not a per-run setting: neither load command has a flag for it.">
-        <Policy run={run} />
-      </Card>
     </div>
   );
 }

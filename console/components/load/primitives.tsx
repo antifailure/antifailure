@@ -3,39 +3,43 @@
 import type { ReactNode } from "react";
 import { Badge, type Tone } from "@/components/ui";
 import {
-  SOURCE_FACTS,
+  KIND_FACTS,
   STATE_FACTS,
   VERDICT_FACTS,
   ms,
+  percentiles,
+  type Kind,
   type Latency,
   type RunState,
-  type SourceKind,
   type Verdict,
-  percentiles,
 } from "@/lib/load";
 
 /* -------------------------------------------------------------------------
- * Provenance
+ * Kind
  * ---------------------------------------------------------------------- */
 
 /**
- * A mark for where a load source's traffic came from.
+ * A mark for what a workload is.
  *
- * Two glyphs, two words, and deliberately no colour. Provenance is not a
- * verdict: measured traffic is not better or worse than authored traffic, it
- * is a different thing to trust. Giving each a hue would put more colours on a
+ * Four glyphs, four words, and deliberately no colour. A kind is not a
+ * verdict: an exploration is not better or worse than a scenario, it is a
+ * different thing to trust. Giving each a hue would put four more colours on a
  * page whose green and red already mean pass and fail, and a reader would
  * spend the first minute working out whether the blue one was good news.
  *
- * The glyphs are not interchangeable decoration. A stepped profile for a mix
- * that was measured, a pinned document for one that was written down.
+ * The glyphs are not interchangeable decoration. A stepped profile for traffic
+ * that was measured, a snaking path for a journey somebody wrote, a browser
+ * frame for a workflow driven in one, and a compass for an agent choosing its
+ * own way.
  */
-const MARKS: Record<SourceKind, string> = {
-  observed: "M2 11.5h2.6V7.4h2.6V4h2.6v7.5H13",
-  deterministic: "M4 2.8h8v10.4l-4-2.3-4 2.3zM6.4 6h3.2",
+const MARKS: Record<Kind, string> = {
+  observed_load: "M2.6 11.6h2.4V8.2h2.4V4.6h2.4v7h3.4",
+  http_scenario: "M2.8 12.2c2.4 0 2.4-4.2 5.2-4.2s2.8-4 5.2-4",
+  browser_workflow: "M2.8 3.8h10.4v8.4H2.8zM2.8 6.4h10.4M4.6 5.1h.01",
+  exploration: "M8 2.6a5.4 5.4 0 1 0 0 10.8A5.4 5.4 0 0 0 8 2.6zM10.2 5.8 8.9 8.9 5.8 10.2 7.1 7.1z",
 };
 
-export function Provenance({ kind, className = "" }: { kind: SourceKind; className?: string }) {
+export function KindMark({ kind, className = "" }: { kind: Kind; className?: string }) {
   return (
     <span className={`inline-flex items-center gap-1.5 whitespace-nowrap ${className}`}>
       <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 shrink-0 text-dim" fill="none" aria-hidden>
@@ -48,7 +52,7 @@ export function Provenance({ kind, className = "" }: { kind: SourceKind; classNa
         />
       </svg>
       <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted">
-        {SOURCE_FACTS[kind].noun}
+        {KIND_FACTS[kind].noun}
       </span>
     </span>
   );
@@ -62,9 +66,12 @@ export function Provenance({ kind, className = "" }: { kind: SourceKind; classNa
  * The colour a verdict is drawn in.
  *
  * Written out rather than reaching for `toneFor`, which reads "ready", "ok"
- * and "active" as a pass by name and would drop `blocked` and `unverified`
- * through to neutral. A blocked run rendered as unremarkable is the whole
- * failure this product has already had once.
+ * and "active" as a pass by name and would drop three of these five through to
+ * neutral. A blocked run rendered as unremarkable is the whole failure this
+ * product has already had once.
+ *
+ * `flaky` is amber and not green, which is the point of it being here at all.
+ * A check that answers differently on repeat has found something.
  */
 export function verdictTone(v: Verdict): Tone {
   if (v === "pass") return "pass";
@@ -73,11 +80,11 @@ export function verdictTone(v: Verdict): Tone {
 }
 
 /**
- * What a run decided, or that it has not decided anything.
+ * What a run found, or that it has not found anything.
  *
  * A run with no verdict does not get a blank cell. "No verdict" is a real
- * answer and it is the correct one for a run that is still going or was
- * stopped, where a blank reads as a value that failed to load.
+ * answer and it is the correct one for a run still going or one nothing ever
+ * reported on, where a blank reads as a value that failed to load.
  */
 export function VerdictBadge({ verdict }: { verdict: Verdict | null }) {
   if (verdict === null) return <Badge tone="neutral">No verdict</Badge>;
@@ -87,29 +94,38 @@ export function VerdictBadge({ verdict }: { verdict: Verdict | null }) {
 /**
  * Where a run is.
  *
- * Static, with nothing that moves. A load run that is genuinely in flight is
- * the most tempting place in this console for a throbbing dot, and it is still
+ * Static, with nothing that moves. A run that is genuinely in flight is the
+ * most tempting place in this console for a throbbing dot, and it is still
  * wrong: the word "Running" says the same thing, holds still, and does not
  * compete with the numbers underneath it for a reader's eye.
  *
- * Amber for everything unsettled and neutral for cancelled, which is the one
- * outcome that is over and is not a judgement. That split is deliberate: with
- * both neutral, a run in flight and a run somebody stopped rendered
- * identically, which is the defect `toneFor`'s own comment records being fixed
- * once already, when an environment still building looked like one torn down.
+ * Three tones for eight values, and the split is the argument this whole
+ * screen rests on. Amber for the three that are unsettled. Neutral for
+ * `succeeded` and `cancelled`, because neither is a judgement: succeeding is
+ * about the work happening and the verdict beside it says what it found. Red
+ * for the two an engine reported as a failure of the work.
+ *
+ * `abandoned` is amber and NOT red, deliberately. Nothing failed; the control
+ * plane never heard. Drawing it as a failure would tell a reader the change is
+ * broken when what is broken is the reporting.
  */
 export function StateBadge({ state }: { state: RunState }) {
-  const tone: Tone = state === "cancelled" ? "neutral" : state === "finished" ? "neutral" : "warn";
+  const tone: Tone =
+    state === "failed" || state === "timed_out"
+      ? "fail"
+      : state === "succeeded" || state === "cancelled"
+        ? "neutral"
+        : "warn";
   return <Badge tone={tone}>{STATE_FACTS[state].label}</Badge>;
 }
 
-/** The sentence under a verdict, for the two that are not judgements. A pass
- *  or a fail needs no explanation, and putting one under every verdict turns
- *  the note into furniture by the time it matters. */
+/** The sentence under a verdict, for the three that need one. A pass or a fail
+ *  needs no explanation, and putting one under every verdict turns the note
+ *  into furniture by the time it matters. */
 export function VerdictNote({ verdict }: { verdict: Verdict | null }) {
   if (verdict === null) return null;
   const fact = VERDICT_FACTS[verdict];
-  if (fact.conclusive) return null;
+  if (verdict === "pass" || verdict === "fail") return null;
   return <p className="mt-2 max-w-[64ch] text-[12.5px] leading-6 text-muted">{fact.meaning}</p>;
 }
 
@@ -120,7 +136,7 @@ export function VerdictNote({ verdict }: { verdict: Verdict | null }) {
 /**
  * One measurement.
  *
- * Takes an already-formatted string, and "--" is a real answer meaning the run
+ * Takes an already formatted string, and "--" is a real answer meaning the run
  * did not record it. That is why it is a string and not a number: there is no
  * value this component could substitute for a missing measurement that would
  * not be an invention.
@@ -134,15 +150,43 @@ export function Stat({
   label: string;
   value: string;
   note?: ReactNode;
-  tone?: "fail" | "warn";
+  tone?: "fail" | "warn" | "pass";
 }) {
-  const colour = tone === "fail" ? "text-fail" : tone === "warn" ? "text-warn" : "text-ink";
+  const colour =
+    tone === "fail"
+      ? "text-fail"
+      : tone === "warn"
+        ? "text-warn"
+        : tone === "pass"
+          ? "text-pass"
+          : "text-ink";
   return (
     <div className="min-w-0">
       <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">{label}</dt>
       <dd className={`tnum mt-1 text-[19px] font-semibold tracking-tighter ${colour}`}>{value}</dd>
       {note ? <p className="mt-0.5 text-[11.5px] leading-5 text-dim">{note}</p> : null}
     </div>
+  );
+}
+
+/** A labelled fact in a definition grid. Text rather than a number, so a
+ *  sentence and a git ref sit in the same shape a stat does not fit. */
+export function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">{label}</dt>
+      <dd className="mt-1 break-words text-[13px] leading-6 text-ink">{children}</dd>
+    </div>
+  );
+}
+
+export function Facts({ children, columns = 2 }: { children: ReactNode; columns?: 2 | 3 }) {
+  return (
+    <dl
+      className={`grid gap-x-8 gap-y-4 px-4 py-4 ${columns === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
+    >
+      {children}
+    </dl>
   );
 }
 

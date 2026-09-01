@@ -18,12 +18,12 @@ import { Bar, Button, Card, TableSkeleton } from "@/components/ui";
  *
  *   denied        a role thing. Retrying will fail identically forever.
  *   disconnected  the request never arrived. Retrying is the entire remedy.
- *   missing       the id in the address bar is not a thing. Go back to the list.
+ *   missing       the name in the address bar is not a thing. Go back to the list.
  *   failed        the control plane answered and said no. Retrying may help.
  *
- * `disconnected` is the one worth having on its own. `useApi` turns a thrown
- * fetch into status 0 with code NETWORK, and without this branch that renders
- * as "The control plane answered 0", which is both untrue and useless.
+ * `disconnected` is the one worth having on its own. A thrown fetch arrives as
+ * status 0 with code NETWORK, and without this branch that renders as "The
+ * control plane answered 0", which is both untrue and useless.
  */
 export function LoadError({
   error,
@@ -39,7 +39,7 @@ export function LoadError({
   const disconnected = error.status === 0 || error.code === "NETWORK";
 
   const title = denied
-    ? "Your role cannot see load runs"
+    ? "Your role cannot see workloads"
     : missing
       ? "That is not here"
       : disconnected
@@ -47,11 +47,11 @@ export function LoadError({
         : "That did not load";
 
   const body = denied
-    ? "Reading load sources and their runs needs a role that holds environments.view. An owner or an admin can change yours on the Members page."
+    ? "Reading workloads and their runs needs a role that holds workloads.view. Every role except viewer holds it, and an owner or an admin can change yours on the Members page."
     : missing
-      ? "The address names a source or a run that does not exist, or one that belongs to another organization. It may have been deleted."
+      ? "The address names a workload or a run that does not exist, or one that belongs to another organization. A workload that has been archived is not here either."
       : disconnected
-        ? "The request did not reach the control plane, so nothing is known about the state of your load runs. This is a connection problem rather than an answer."
+        ? "The request did not reach the control plane, so nothing is known about the state of your runs. This is a connection problem rather than an answer."
         : error.message;
 
   return (
@@ -76,7 +76,7 @@ export function LoadError({
  * ---------------------------------------------------------------------- */
 
 /**
- * A wait shaped like a definition detail, not a generic grey box.
+ * A wait shaped like a workload's detail, not a generic grey box.
  *
  * The point of a skeleton is that nothing moves when the data lands. This one
  * has the header block, the two-column fact grid and the table that the loaded
@@ -84,11 +84,11 @@ export function LoadError({
  * reflow under a reader who has already started looking at it. Static, like
  * every other skeleton in this console.
  */
-export function SourceSkeleton() {
+export function WorkloadSkeleton() {
   // No role="status" on this wrapper. TableSkeleton carries one of its own, and
   // nesting two live regions made a screen reader announce "Loading" twice, as
-  // "LoadingLoading the source". One announcement, from the shared component,
-  // is also what every other screen in this console does.
+  // "LoadingLoading the workload". One announcement, from the shared
+  // component, is also what every other screen in this console does.
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-rule bg-card">
@@ -114,7 +114,7 @@ export function SourceSkeleton() {
 /** A wait shaped like the run detail: a status line, four stat tiles, then
  *  the result tables. */
 export function RunSkeleton() {
-  // See SourceSkeleton: one live region, and it is TableSkeleton's.
+  // See WorkloadSkeleton: one live region, and it is TableSkeleton's.
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-rule bg-card">
@@ -145,22 +145,28 @@ export function RunSkeleton() {
  * ---------------------------------------------------------------------- */
 
 /**
- * A banner over numbers that are not final.
+ * A banner over numbers that cover less than was asked for.
  *
- * Two ways to arrive here and they need different words. A run still going has
- * results that will change; a cancelled run has results that will not, but
- * that cover less than was asked for. Both are dangerous read as a finished
- * measurement, and neither is dangerous once it is labelled.
+ * There used to be a third case here, a run still going whose results had
+ * partly landed. It was deleted rather than kept because it can never happen:
+ * nothing writes a result row before a terminal transition, so a running run
+ * has no result at all and this banner had no way to be reached from that
+ * state. A branch that cannot fire is a branch nobody can find the defect in.
+ *
+ * The two that remain are real and need different words. A cancelled run
+ * stopped when somebody asked; a timed out one stopped because the engine ran
+ * out of time. Both are dangerous read as a finished measurement, and neither
+ * is dangerous once it is labelled.
  */
-export function PartialNotice({ reason }: { reason: "running" | "cancelled" }) {
+export function PartialNotice({ reason }: { reason: "cancelled" | "timed_out" }) {
   return (
     <p
       role="status"
       className="border-b border-rule bg-[rgba(138,90,0,0.07)] px-4 py-2.5 text-[12.5px] leading-6 text-warn"
     >
-      {reason === "running"
-        ? "These numbers cover the part of the run that has landed so far. They will change while it is still going."
-        : "This run was cancelled, so these numbers cover only the part that ran. They are not a measurement of the whole run."}
+      {reason === "cancelled"
+        ? "This run was stopped before it finished, so these numbers cover only the part that ran. They are not a measurement of the whole run."
+        : "This run ran out of time, so these numbers cover only what it got through. They are not a measurement of the whole run."}
     </p>
   );
 }
@@ -172,11 +178,11 @@ export function PartialNotice({ reason }: { reason: "running" | "cancelled" }) {
 /**
  * The command that reproduces this run.
  *
- * Shown exactly as the control plane recorded it at dispatch, and never
- * rebuilt here from the form's values. A console that assembles the command
- * from what the fields say produces something that looks authoritative and
- * drifts the first time a default changes on either side, and the only reason
- * to print a command at all is that it is the same one.
+ * Shown exactly as the ENGINE reported it, and never rebuilt here from the
+ * version's values. A console that assembles the command from what a body says
+ * produces something that looks authoritative and drifts the first time a
+ * default changes on either side, and the only reason to print a command at
+ * all is that it is the same one.
  *
  * The copy button is a real button beside the code rather than an icon floating
  * over its corner, because the docs site shipped exactly that and the button
@@ -196,9 +202,9 @@ export function Command({ command }: { command: string | null }) {
   if (command === null) {
     return (
       <p className="px-4 py-4 text-[13px] leading-6 text-muted">
-        The control plane did not record a command for this run, so there is
-        nothing here that is guaranteed to reproduce it. Rebuilding one from the
-        settings above would look authoritative and would not be.
+        No engine has reported a command for this run, so there is nothing here
+        that is guaranteed to reproduce it. Rebuilding one from the version
+        above would look authoritative and would not be.
       </p>
     );
   }
@@ -252,8 +258,8 @@ export function Command({ command }: { command: string | null }) {
 /**
  * A control a role may not use, replaced by the reason rather than removed.
  *
- * Removing it is the usual choice and it is worse here: a viewer sent a link to
- * a load source who finds no way to run it cannot tell whether the product
+ * Removing it is the usual choice and it is worse here: a viewer sent a link
+ * to a workload who finds no way to run it cannot tell whether the product
  * lacks the feature or their role lacks the permission. Saying which is what
  * turns a dead end into a thing to go and ask for.
  */

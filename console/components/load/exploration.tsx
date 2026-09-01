@@ -1,304 +1,288 @@
 "use client";
 
 import { useState } from "react";
-import { useApi } from "@/lib/api";
+import { query } from "@/lib/api";
 import { may } from "@/lib/roles";
 import { useSessionContext } from "@/components/session";
-import {
-  Badge,
-  Button,
-  Card,
-  Empty,
-  Row,
-  Table,
-  TableSkeleton,
-  TableWrap,
-  Td,
-  Th,
-  When,
-} from "@/components/ui";
-import { LoadError } from "@/components/load/states";
-import {
-  count,
-  listExplorations,
-  promoteDiscovery,
-  seconds,
-  type Discovery,
-  type Exploration,
-} from "@/lib/load";
+import { Button, Card, Empty, Field, TableSkeleton, inputClass } from "@/components/ui";
+import { Dropped, ManifestBlock } from "@/components/load/bodies";
+import { Denied, LoadError } from "@/components/load/states";
+import { useLive } from "@/components/load/polling";
+import { promoteExploration, type Promotion } from "@/lib/load";
+
+interface Repository {
+  id: string;
+  full_name: string;
+}
 
 /**
- * Exploration, on the Load page and deliberately not presented as load.
+ * Turning an exploration into a workflow that runs every time.
  *
- * `af explore` drives a real browser from a seed and compiles what it reached
- * into a manifest WORKFLOW, through `explore.Compile`, which returns a
- * `schema.Workflow`. It does not produce a load scenario and it never has.
+ * WHAT THIS IS, BECAUSE IT IS EASY TO OVERSELL. An exploration is a goal and a
+ * seed: the agent reads each page, chooses where to go, and records the moves
+ * it made. Promotion compiles that into a manifest WORKFLOW, which `af test`
+ * runs. It does NOT produce a load scenario and it never has, because nothing
+ * in an exploration record carries a rate.
  *
- * It is on this page because this is where somebody looking for "where does
- * the traffic come from" arrives, and finding nothing about exploration here
- * would send them away with the wrong model. It is in its own card, with its
- * own heading and an explicit sentence, because putting it in the sources
- * table beside observed and deterministic would teach the opposite of the
- * truth. An earlier draft of this console did exactly that, and modelled
- * promotion as turning a discovery into a load scenario, which would have been
- * a lie carried in the type system where every screen inherits it.
+ * TWO THINGS THIS SCREEN MUST NOT SUMMARISE, and they are the reason it is a
+ * screen at all rather than a button.
+ *
+ * The dropped list. A compilation always leaves something behind, starting
+ * with the expectation: an exploration knows what it was looking for and does
+ * not know what a passing page should say. That list is never empty, and a
+ * promotion that returned a name and quietly dropped things would look
+ * finished and would not be. Each line is a sentence somebody has to read
+ * before deciding whether to keep the promotion.
+ *
+ * The manifest block. `af test --only <name>` selects out of the customer's
+ * own manifest, and the control plane cannot put a file in somebody's
+ * repository. So a promoted version is a definition plus an instruction, and a
+ * control plane admitting it cannot finish the job is the honest core of the
+ * feature.
+ *
+ * The document comes from the person rather than from the control plane,
+ * because that is where it is. `af explore --json` prints it on whichever
+ * machine ran the command, and nothing uploads it.
  */
-
-/**
- * Promotion, applied optimistically and rolled back if the server refuses.
- *
- * A discovery is a row somebody is looking at when they press the button, so
- * the row changes immediately and reverts with the reason if the call fails.
- * The alternative, a spinner for a whole round trip on a list of ten rows, is
- * how a console comes to feel slow while being fast.
- *
- * The rollback is the part worth writing rather than assuming. An optimistic
- * update with no failure path is not optimism, it is a lie that usually gets
- * away with it.
- */
-function useOptimisticPromotion(reload: () => void) {
+export function Promote({
+  fromWorkload,
+  onPromoted,
+}: {
+  /** Prefilled when somebody arrived from an exploration workload, so the
+   *  promotion lands on the workload they were looking at rather than on a new
+   *  one named after the document. */
+  fromWorkload?: string | null;
+  onPromoted: (slug: string) => void;
+}) {
   const session = useSessionContext();
   const csrf = session.data?.csrfToken ?? "";
-  // Keyed by discovery id: the name it optimistically became.
-  const [applied, setApplied] = useState<Record<string, string>>({});
-  const [pending, setPending] = useState<string | null>(null);
-  const [error, setError] = useState<{ id: string; message: string } | null>(null);
+  const canEdit = may(session.data?.role, "workloads.edit");
+  const repositories = useLive<Repository[]>(() => query("repositories.list", {}), []);
 
-  async function promote(explorationId: string, discovery: Discovery, name: string) {
-    setPending(discovery.id);
-    setError(null);
-    // Applied before the request, which is the whole point.
-    setApplied((a) => ({ ...a, [discovery.id]: name }));
+  const [repository, setRepository] = useState("");
+  const [slug, setSlug] = useState(fromWorkload ?? "");
+  const [fromRunId, setFromRunId] = useState("");
+  const [persona, setPersona] = useState("");
+  const [document, setDocument] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<Promotion | null>(null);
+
+  if (!canEdit) return <Denied what="Promote an exploration" />;
+
+  // Parsed here as well as on the server, so a paste that is not JSON is said
+  // beside the field rather than coming back as a refusal about the whole
+  // request. The server parses it again and is the one that decides: this is a
+  // courtesy, not a validation.
+  let parsed: unknown = null;
+  let parseError: string | null = null;
+  if (document.trim() !== "") {
     try {
-      const { workflowName } = await promoteDiscovery(
-        { explorationId, discoveryId: discovery.id, name },
-        csrf,
-      );
-      // Take the server's name over the one that was typed: it may have
-      // normalised it, and showing the typed one would be the console
-      // disagreeing with the manifest about what exists.
-      if (workflowName) setApplied((a) => ({ ...a, [discovery.id]: workflowName }));
-      reload();
-    } catch (e) {
-      // Roll back to exactly the previous state, which is the absence of a key
-      // rather than an empty string: an empty string would render as a promoted
-      // workflow with no name.
-      setApplied((a) => {
-        const next = { ...a };
-        delete next[discovery.id];
-        return next;
-      });
-      setError({
-        id: discovery.id,
-        message: e instanceof Error ? e.message : "That discovery could not be promoted.",
-      });
-    } finally {
-      setPending(null);
+      parsed = JSON.parse(document);
+    } catch {
+      parseError =
+        "That is not JSON. It should be exactly what af explore --json printed, braces and all.";
     }
   }
 
-  return { applied, pending, error, promote, clearError: () => setError(null) };
-}
-
-function Discoveries({
-  exploration,
-  canPromote,
-  reload,
-}: {
-  exploration: Exploration;
-  canPromote: boolean;
-  reload: () => void;
-}) {
-  const { applied, pending, error, promote, clearError } = useOptimisticPromotion(reload);
-  const [naming, setNaming] = useState<string | null>(null);
-  const [name, setName] = useState("");
-
-  if (exploration.discoveries.length === 0) {
-    return (
-      <Empty title="This exploration found nothing">
-        The agent did not reach anything it could report. That is a result
-        rather than a failure: it means the seed and the budget did not take it
-        anywhere new.
-      </Empty>
-    );
-  }
-
-  return (
-    <>
-      {error ? (
-        <p role="alert" className="border-b border-rule px-4 py-2.5 text-[12.5px] leading-6 text-fail">
-          {error.message}{" "}
-          <button
-            type="button"
-            onClick={clearError}
-            className="underline decoration-[rgba(179,38,30,0.4)] underline-offset-4 hover:decoration-fail"
-          >
-            Dismiss
-          </button>
-        </p>
-      ) : null}
-      <TableWrap>
-        <Table>
-          <thead>
-            <tr>
-              <Th>What it reached</Th>
-              <Th>Persona</Th>
-              <Th numeric>Steps</Th>
-              <Th>Reached</Th>
-              <Th>Workflow</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {exploration.discoveries.map((d) => {
-              const workflow = applied[d.id] ?? d.workflowName;
-              return (
-                <Row key={d.id}>
-                  <Td>{d.title}</Td>
-                  <Td label="Persona">{d.persona ?? "--"}</Td>
-                  <Td label="Steps" numeric>
-                    {count(d.steps)}
-                  </Td>
-                  <Td label="Reached">
-                    <When value={d.reachedAt} />
-                  </Td>
-                  <Td label="Workflow">
-                    {workflow ? (
-                      <span className="flex flex-wrap items-center gap-2">
-                        <Badge tone="pass">In the manifest</Badge>
-                        <code className="font-mono text-[12px] text-ink">{workflow}</code>
-                      </span>
-                    ) : !canPromote ? (
-                      <span className="text-[12.5px] text-dim">Your role cannot promote</span>
-                    ) : naming === d.id ? (
-                      <form
-                        className="flex flex-wrap items-center gap-2"
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          if (name.trim() === "") return;
-                          setNaming(null);
-                          void promote(exploration.id, d, name.trim());
-                          setName("");
-                        }}
-                      >
-                        <label className="sr-only" htmlFor={`promote-${d.id}`}>
-                          Workflow name for the discovery {d.title}
-                        </label>
-                        <input
-                          id={`promote-${d.id}`}
-                          autoFocus
-                          className="h-9 w-[22ch] rounded-md border border-rule bg-card px-2.5 text-[13px] text-ink outline-none placeholder:text-dim focus:border-rule-strong"
-                          placeholder="upgrade-a-plan"
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                        />
-                        <Button type="submit" variant="primary" disabled={name.trim() === ""}>
-                          Add to the manifest
-                        </Button>
-                        <Button
-                          onClick={() => {
-                            setNaming(null);
-                            setName("");
-                          }}
-                        >
-                          Cancel
-                        </Button>
-                      </form>
-                    ) : (
-                      <Button
-                        busy={pending === d.id}
-                        onClick={() => {
-                          setNaming(d.id);
-                          setName("");
-                        }}
-                      >
-                        {pending === d.id ? "Adding" : "Make a workflow"}
-                      </Button>
-                    )}
-                  </Td>
-                </Row>
-              );
-            })}
-          </tbody>
-        </Table>
-      </TableWrap>
-    </>
-  );
-}
-
-export function Explorations() {
-  const session = useSessionContext();
-  const canPromote = may(session.data?.role, "agents.run");
-  const state = useApi<Exploration[]>(() => listExplorations(), []);
-
   return (
     <Card
-      title="Exploration"
-      note="An agent choosing its own way through the product, from a seed."
+      title="Promote an exploration"
+      note="Compiles what an agent found into a workflow your manifest can run."
     >
-      {/* Said before the table, not after it. Somebody arriving at the Load
-          page and seeing "exploration" will assume it is a third kind of
-          traffic unless told otherwise in the first sentence they read. */}
       <div className="border-b border-rule px-4 py-3">
         <p className="max-w-[74ch] text-[12.5px] leading-6 text-muted">
           This does not produce load. <code className="font-mono">af explore</code> drives a real
-          browser and compiles what it reached into a workflow for your manifest, which{" "}
-          <code className="font-mono">af test</code> runs. It is here because it is the other way a
-          route nobody wrote down gets found, and a discovery is worth nothing until somebody
-          commits it.
+          browser and this compiles what it reached into a workflow for your manifest, which{" "}
+          <code className="font-mono">af test</code> runs. Paste the document{" "}
+          <code className="font-mono">af explore --json</code> printed: it lives on the machine that
+          ran the command, and nothing sends it here on its own.
         </p>
-        {/* Its own line rather than a link inside the sentence. An inline link
-            in running prose is 17px tall and cannot be made 44 without
-            breaking the line box, so the honest fix is to stop making it
-            inline. It reads better too: the sentence explains, the link acts,
-            and neither is doing the other's job. */}
-        <a
-          className="mt-1 inline-flex min-h-11 items-center gap-1.5 text-[12.5px] text-ink underline decoration-[rgba(16,16,16,0.25)] underline-offset-4 hover:decoration-ink"
-          href="/runs"
-        >
-          See the workflow runs
-        </a>
       </div>
 
-      {state.status === "error" && state.error ? (
-        <LoadError error={state.error} retry={state.reload} />
-      ) : state.status === "loading" || state.data === null ? (
-        <TableSkeleton rows={3} cols={5} />
-      ) : state.data.length === 0 ? (
-        <Empty title="No explorations recorded">
-          Run `af explore` against an environment and what it reaches appears
-          here, with the workflow each discovery became.
+      {repositories.status === "error" && repositories.error ? (
+        <LoadError error={repositories.error} retry={repositories.reload} />
+      ) : repositories.status === "loading" || repositories.data === null ? (
+        <TableSkeleton rows={2} cols={2} />
+      ) : repositories.data.length === 0 ? (
+        <Empty title="No repository connected">
+          A workflow belongs to a repository's manifest, so there is nowhere to
+          put one until the GitHub App is installed on at least one.
         </Empty>
       ) : (
-        <div className="divide-y divide-rule">
-          {state.data.map((e) => (
-            <div key={e.id}>
-              <dl className="grid gap-x-8 gap-y-3 px-4 py-3 sm:grid-cols-3">
-                <div className="min-w-0">
-                  <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">
-                    Entry point
-                  </dt>
-                  <dd className="mt-1 break-all font-mono text-[12.5px] text-ink">
-                    {e.entryUrl ?? "not recorded"}
-                  </dd>
-                </div>
-                <div className="min-w-0">
-                  <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">
-                    Seed
-                  </dt>
-                  <dd className="mt-1 font-mono text-[12.5px] text-ink">{e.seed ?? "not recorded"}</dd>
-                </div>
-                <div className="min-w-0">
-                  <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">
-                    Budget
-                  </dt>
-                  <dd className="mt-1 text-[13px] text-ink">{seconds(e.budgetSeconds)}</dd>
-                </div>
-              </dl>
-              <Discoveries exploration={e} canPromote={canPromote} reload={state.reload} />
-            </div>
-          ))}
-        </div>
+        (() => {
+          const chosen =
+            repositories.data.find((r) => r.full_name === repository)?.full_name ??
+            repositories.data[0]!.full_name;
+          return (
+            <form
+              className="px-4 py-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (parsed === null || parseError !== null) return;
+                setBusy(true);
+                setError(null);
+                setResult(null);
+                try {
+                  const promotion = await promoteExploration(
+                    {
+                      repository: chosen,
+                      exploration: parsed,
+                      ...(slug.trim() === "" ? {} : { slug: slug.trim() }),
+                      ...(fromRunId.trim() === "" ? {} : { fromRunId: fromRunId.trim() }),
+                      ...(persona.trim() === "" ? {} : { persona: persona.trim() }),
+                    },
+                    csrf,
+                  );
+                  setResult(promotion);
+                  if (promotion.slug) onPromoted(promotion.slug);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "That did not work.");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Repository">
+                  <select
+                    className={inputClass}
+                    value={chosen}
+                    onChange={(e) => setRepository(e.target.value)}
+                  >
+                    {repositories.data.map((r) => (
+                      <option key={r.id} value={r.full_name}>
+                        {r.full_name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  label="Workload"
+                  hint="Optional. Left empty, this makes one named after the exploration; naming an existing browser workflow adds a version to it instead."
+                >
+                  <input
+                    className={inputClass}
+                    value={slug}
+                    onChange={(e) => setSlug(e.target.value)}
+                    placeholder="upgrade-a-plan"
+                  />
+                </Field>
+                <Field
+                  label="From which run"
+                  hint="Optional. The exploration run this document came from, so the version is attributed to it rather than to a paste."
+                >
+                  <input
+                    className={inputClass}
+                    value={fromRunId}
+                    onChange={(e) => setFromRunId(e.target.value)}
+                    placeholder="the run id"
+                  />
+                </Field>
+                <Field label="Persona" hint="Optional. Who the workflow should sign in as.">
+                  <input
+                    className={inputClass}
+                    value={persona}
+                    onChange={(e) => setPersona(e.target.value)}
+                    placeholder="a returning customer"
+                  />
+                </Field>
+              </div>
+
+              <div className="mt-3">
+                <Field
+                  label="The exploration"
+                  hint="What af explore --json printed."
+                  error={parseError}
+                >
+                  <textarea
+                    className={`${inputClass} min-h-[9rem] font-mono text-[12.5px] leading-6`}
+                    value={document}
+                    onChange={(e) => setDocument(e.target.value)}
+                    placeholder='{"name": "upgrade a plan", "goal": "reach the confirmation page", ...}'
+                  />
+                </Field>
+                <label className="mt-2 inline-flex min-h-11 items-center gap-2 text-[12.5px] text-muted">
+                  <span>Or read it from a file:</span>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    className="text-[12.5px] text-muted file:mr-2 file:h-9 file:rounded-md file:border file:border-rule file:bg-card file:px-3 file:text-[13px] file:font-medium file:text-ink"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      // Read in the browser rather than uploaded. There is no
+                      // upload endpoint and there should not be one: the
+                      // document goes to the control plane inside the call that
+                      // compiles it and nowhere else.
+                      void file.text().then(setDocument);
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <Button
+                  type="submit"
+                  variant="primary"
+                  busy={busy}
+                  disabled={parsed === null || parseError !== null}
+                >
+                  {busy ? "Compiling" : "Compile a workflow"}
+                </Button>
+                {error ? (
+                  <p role="alert" className="max-w-[74ch] text-[12.5px] leading-6 text-fail">
+                    {error}
+                  </p>
+                ) : null}
+              </div>
+            </form>
+          );
+        })()
       )}
+
+      {result ? <Result result={result} /> : null}
     </Card>
+  );
+}
+
+/**
+ * What the promotion produced, and what it did not.
+ *
+ * The order is the argument. The name comes first because that is what was
+ * asked for, then the two admissions, and the block last because it is the
+ * thing to go and do. A screen that led with the block would read as though
+ * the job were done.
+ */
+function Result({ result }: { result: Promotion }) {
+  return (
+    <div className="border-t border-rule">
+      <div className="bg-[rgba(30,122,58,0.06)] px-4 py-3">
+        <p role="status" className="max-w-[74ch] text-[12.5px] leading-6 text-ink">
+          Compiled into{" "}
+          <code className="break-all font-mono text-[12.5px]">{result.slug ?? "a workflow"}</code>
+          {result.version === null ? "" : ` as v${result.version}`}
+          {result.created
+            ? ", a workload that did not exist until now."
+            : ", added beside what that workload already said."}{" "}
+          It cannot run yet. The block below has to be in your repository first.
+        </p>
+      </div>
+
+      {/* Never summarised into a count. "3 things were dropped" is the shape of
+          a notice nobody opens, and the whole value of this list is that
+          somebody reads it before trusting the workflow. */}
+      {result.dropped.length > 0 ? <Dropped dropped={result.dropped} /> : null}
+
+      {result.manifestBlock ? (
+        <ManifestBlock block={result.manifestBlock} heading="Paste into antifailure.yaml" />
+      ) : (
+        <p className="px-4 py-4 text-[12.5px] leading-6 text-warn" role="alert">
+          The control plane did not return a manifest block for this promotion. Without one there is
+          nothing to paste, and <code className="font-mono">af test --only</code> will not find the
+          workflow this version selects.
+        </p>
+      )}
+    </div>
   );
 }
