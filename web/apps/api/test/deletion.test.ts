@@ -294,16 +294,22 @@ describe(
       assert.equal(token!.revoked_at, null, 'credentials went while the customer was still paying')
       assert.ok(await orgExists())
 
-      // A sweep while the wait is on does nothing, and says so.
-      const during = await resumeDeletions(deps)
-      assert.equal(during.advanced, 0)
+      // A sweep while the wait is on leaves THIS organization alone. The
+      // assertion is on the organization rather than on the sweep's counters:
+      // other tests in this file leave records behind that the sweep also picks
+      // up, and a count is a fact about the whole database.
+      await resumeDeletions(deps)
       assert.ok(await orgExists())
+      const held = await record()
+      assert.equal(held.credentials_revoked_at, null)
 
       // Past the end of the period.
       h.clock.advance(new Date(deletion.waitingUntil!).getTime() - h.clock.now().getTime() + 1000)
-      const afterwards = await resumeDeletions(deps)
-      assert.equal(afterwards.advanced, 1)
+      await resumeDeletions(deps)
       assert.equal(await orgExists(), false)
+      const finished = await record()
+      assert.ok(finished.purged_at)
+      assert.equal(finished.engine_tokens_revoked, 1)
     })
 
     /**
@@ -514,11 +520,14 @@ describe(
         SELECT suspended_at FROM organizations WHERE id = ${org.orgId}`
       assert.equal(row!.suspended_at, null)
 
-      // And it stops moving. A sweep afterwards must not pick it up.
+      // And it stops moving. A sweep afterwards must not pick this one up,
+      // whatever it does with the records other tests left behind.
       h.clock.advance(30 * 24 * 60 * 60 * 1000)
-      const swept = await resumeDeletions(deps)
-      assert.equal(swept.examined, 0)
+      await resumeDeletions(deps)
       assert.ok(await orgExists())
+      const stopped = await record()
+      assert.ok(stopped.cancelled_at)
+      assert.equal(stopped.credentials_revoked_at, null)
     })
 
     it('calling it off does not lift a suspension somebody else applied', async () => {
@@ -571,7 +580,7 @@ describe(
 
       h.clock.advance(8 * 24 * 60 * 60 * 1000)
       const swept = await resumeDeletions(deps)
-      assert.equal(swept.exportsDestroyed, 1)
+      assert.ok(swept.exportsDestroyed >= 1, 'the sweep destroyed nothing')
 
       const after = await h.fetch(`/exports/deletion?token=${encodeURIComponent(token)}`)
       assert.equal(after.status, 404)

@@ -460,7 +460,13 @@ export async function advanceDeletion(
     let moved = false
     if (step === 'stop_work') moved = await stopWork(deps, orgId)
     else if (step === 'cancel_subscription') moved = await cancelSubscription(deps, orgId)
-    else if (step === 'await_entitlement_end') moved = await refreshEntitlement(deps, orgId)
+    else if (step === 'await_entitlement_end') {
+      // Waiting is never progress. Reporting otherwise would make the
+      // request-time loop spin through its whole budget on a record that is
+      // going to sit for a month.
+      await refreshEntitlement(deps, orgId)
+      moved = false
+    }
     else if (step === 'revoke_credentials') moved = await revokeCredentials(deps, orgId)
     else if (step === 'export') moved = await produceExport(deps, orgId)
     else if (step === 'purge') moved = await purge(deps, orgId)
@@ -734,12 +740,19 @@ async function cancelSubscription(deps: DeletionDeps, orgId: string): Promise<bo
  * of being late is a deletion that finishes a day after it could have, and the
  * cost of being early is breaking something somebody paid for.
  *
- * This reports no progress even when it moves the date, because waiting is not
- * progress: reporting otherwise would make the request-time loop spin through
- * its whole budget on a record that is going to sit for a month.
+ * It is called from two places and the second one is the one that matters. The
+ * wait calls it, which keeps the date on screen fresh. REVOCATION calls it too,
+ * and without that the protection is not there at all: `deletions_due` and the
+ * derived step both read the STORED end, so once the original date passes the
+ * record moves to revocation and would never re-read the subscription that had
+ * meanwhile extended it. Measured, not reasoned about: the ordering test purged
+ * an organization that was still entitled until this call was added here.
+ *
+ * Returns whether the wait is still on after the refresh, so the caller can
+ * stop rather than having to ask again.
  */
 async function refreshEntitlement(deps: DeletionDeps, orgId: string): Promise<boolean> {
-  await deps.pool.withTenant({ orgId }, async (db) => {
+  return deps.pool.withTenant({ orgId }, async (db) => {
     const rows = await db.execute<{
       entitlement_ends_at: Date | string | null
       subscription_id: string | null
@@ -747,22 +760,26 @@ async function refreshEntitlement(deps: DeletionDeps, orgId: string): Promise<bo
       SELECT entitlement_ends_at, subscription_id FROM organization_deletions
       WHERE org_id = ${orgId}::uuid AND purged_at IS NULL AND cancelled_at IS NULL`)
     const row = rows[0]
-    if (!row || !row.entitlement_ends_at || !row.subscription_id) return
+    if (!row) return false
+    if (!row.entitlement_ends_at) return false
 
-    const endsAt = asDate(row.entitlement_ends_at)
-    const fresh = await db.execute<{ current_period_end: Date | string | null }>(sql`
-      SELECT current_period_end FROM subscriptions
-      WHERE org_id = ${orgId}::uuid AND stripe_subscription_id = ${row.subscription_id}`)
-    const end = fresh[0]?.current_period_end
-    if (!end || asDate(end).getTime() <= endsAt.getTime()) return
-
-    await db.execute(sql`
-      UPDATE organization_deletions
-      SET entitlement_ends_at = ${asDate(end).toISOString()},
-          updated_at = ${deps.clock.now().toISOString()}
-      WHERE org_id = ${orgId}::uuid AND purged_at IS NULL AND cancelled_at IS NULL`)
+    let endsAt = asDate(row.entitlement_ends_at)
+    if (row.subscription_id) {
+      const fresh = await db.execute<{ current_period_end: Date | string | null }>(sql`
+        SELECT current_period_end FROM subscriptions
+        WHERE org_id = ${orgId}::uuid AND stripe_subscription_id = ${row.subscription_id}`)
+      const end = fresh[0]?.current_period_end
+      if (end && asDate(end).getTime() > endsAt.getTime()) {
+        endsAt = asDate(end)
+        await db.execute(sql`
+          UPDATE organization_deletions
+          SET entitlement_ends_at = ${endsAt.toISOString()},
+              updated_at = ${deps.clock.now().toISOString()}
+          WHERE org_id = ${orgId}::uuid AND purged_at IS NULL AND cancelled_at IS NULL`)
+      }
+    }
+    return endsAt.getTime() > deps.clock.now().getTime()
   })
-  return false
 }
 
 // ---------------------------------------------------------------------------
@@ -786,6 +803,13 @@ async function refreshEntitlement(deps: DeletionDeps, orgId: string): Promise<bo
  * link.
  */
 async function revokeCredentials(deps: DeletionDeps, orgId: string): Promise<boolean> {
+  // Before anything is taken away, and this is where the wait is actually
+  // enforced. Both the due query and the derived step read the stored end, so a
+  // subscription that was extended after the cancellation would have moved this
+  // record to revocation on the original date and nothing else would have
+  // looked again.
+  if (await refreshEntitlement(deps, orgId)) return false
+
   const installations = await deps.pool.withTenant({ orgId }, async (db) =>
     db.execute<{ id: string; installation_id: string }>(sql`
       SELECT id, installation_id FROM github_installations WHERE suspended_at IS NULL`),
@@ -955,6 +979,7 @@ export interface HeldExport {
   generatedAt: string | null
   expiresAt: string
   sizeBytes: number
+  /** Null when this was a describe rather than a download. */
   document: unknown
 }
 
@@ -969,7 +994,20 @@ export async function readHeldExport(
   pool: Pool,
   clock: Clock,
   token: string,
-): Promise<{ found: false; reason: string } | { found: true; value: HeldExport }> {
+  /**
+   * Whether this is the download or a look at it.
+   *
+   * The page a link opens describes the export before offering it, so it calls
+   * this too, and counting that as a download would make the count a measure of
+   * how many times somebody opened the page. `describe` also leaves the
+   * document out of the answer, which is the difference between a metadata
+   * request and several megabytes of JSON.
+   */
+  mode: 'download' | 'describe' = 'download',
+): Promise<
+  | { found: false; state: 'unknown' | 'destroyed' | 'expired' | 'not_ready'; reason: string }
+  | { found: true; value: HeldExport }
+> {
   const tokenHash = hashExportToken(token)
   return pool.withoutTenant(
     async (db) => {
@@ -989,32 +1027,48 @@ export async function readHeldExport(
         JOIN organization_deletions d ON d.id = e.deletion_id
         WHERE e.token_hash = ${tokenHash}`)
       const row = rows[0]
-      if (!row) return { found: false as const, reason: 'That download link is not valid.' }
+      // A state as well as a sentence, because the page has to title itself
+      // differently for the two cases that are not the same thing: a link that
+      // was never valid, and a valid link for an export the deletion has not
+      // produced yet. Titling the second "not valid" tells somebody to go and
+      // find another link when the one they have is the right one.
+      if (!row) {
+        return {
+          found: false as const,
+          state: 'unknown' as const,
+          reason: 'That download link is not valid.',
+        }
+      }
       if (row.destroyed_at) {
         return {
           found: false as const,
+          state: 'destroyed' as const,
           reason: 'That export has been destroyed. Downloads are only available for a limited time.',
         }
       }
       if (asDate(row.expires_at).getTime() <= clock.now().getTime()) {
         return {
           found: false as const,
+          state: 'expired' as const,
           reason: 'That export has expired. Downloads are only available for a limited time.',
         }
       }
       if (!row.exported_at) {
         return {
           found: false as const,
+          state: 'not_ready' as const,
           reason:
             'The export is not ready yet. It is produced once the deletion has stopped work, ' +
             'ended billing and revoked credentials.',
         }
       }
 
-      await db.execute(sql`
-        UPDATE organization_deletion_exports
-        SET downloaded_at = ${clock.now().toISOString()}, download_count = download_count + 1
-        WHERE token_hash = ${tokenHash}`)
+      if (mode === 'download') {
+        await db.execute(sql`
+          UPDATE organization_deletion_exports
+          SET downloaded_at = ${clock.now().toISOString()}, download_count = download_count + 1
+          WHERE token_hash = ${tokenHash}`)
+      }
 
       return {
         found: true as const,
@@ -1024,7 +1078,7 @@ export async function readHeldExport(
           generatedAt: iso(row.exported_at),
           expiresAt: iso(row.expires_at)!,
           sizeBytes: Number(row.size_bytes),
-          document: row.document,
+          document: mode === 'download' ? row.document : null,
         },
       }
     },

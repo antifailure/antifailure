@@ -853,8 +853,36 @@ export function createServer(options: ServerOptions) {
 
     const token = c.req.query('token') ?? ''
     if (!token) return c.json({ error: 'That link is missing its token.' }, 400)
-    const held = await readHeldExport(options.pool, clock, token)
-    if (!held.found) return c.json({ error: held.reason }, 404)
+
+    // `describe` answers the page that the link opens, which has to say whether
+    // the export is still there BEFORE it offers a download. Without it the
+    // page shows a button and a person with a dead link finds out by pressing
+    // it and getting nothing, which is indistinguishable from a broken browser.
+    const describe = c.req.query('describe') === '1'
+    const held = await readHeldExport(
+      options.pool,
+      clock,
+      token,
+      describe ? 'describe' : 'download',
+    )
+    if (!held.found) {
+      // 404 for a link that names nothing, 409 for one that names an export
+      // which is not ready yet. The second is a real link and the caller should
+      // come back rather than go looking for another one.
+      return c.json(
+        { error: held.reason, state: held.state },
+        held.state === 'not_ready' ? 409 : 404,
+      )
+    }
+    if (describe) {
+      return c.json({
+        organization: held.value.organization,
+        slug: held.value.slug,
+        generatedAt: held.value.generatedAt,
+        expiresAt: held.value.expiresAt,
+        sizeBytes: held.value.sizeBytes,
+      })
+    }
 
     // A file rather than a page. The console fetches this and saves it, and an
     // operator with the link and curl gets the same bytes.

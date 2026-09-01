@@ -560,13 +560,18 @@ function ExportCard({ csrf, slug }: { csrf: string; slug: string }) {
  * Deleting the organization
  * ---------------------------------------------------------------------- */
 
+/** "1 environment", not "1 environments". */
+function count(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 const STEPS: { key: Deletion["step"]; label: string; detail: (d: Deletion) => string }[] = [
   {
     key: "stop_work",
     label: "Stop what is running",
     detail: (d) =>
       d.stoppedWork
-        ? `${d.stoppedWork.environments} environments torn down, ${d.stoppedWork.runs} runs cancelled`
+        ? `${count(d.stoppedWork.environments, "environment")} torn down, ${count(d.stoppedWork.runs, "run")} cancelled`
         : "Environments are torn down and queued runs are cancelled",
   },
   {
@@ -592,7 +597,12 @@ const STEPS: { key: Deletion["step"]; label: string; detail: (d: Deletion) => st
     label: "Revoke credentials",
     detail: (d) =>
       d.revokedCredentials
-        ? `${d.revokedCredentials.engineTokens} engine tokens, ${d.revokedCredentials.providerKeys} provider keys, ${d.revokedCredentials.sessions} sessions, ${d.revokedCredentials.installations} App installations`
+        ? [
+            count(d.revokedCredentials.engineTokens, "engine token"),
+            count(d.revokedCredentials.providerKeys, "provider key"),
+            count(d.revokedCredentials.sessions, "session"),
+            count(d.revokedCredentials.installations, "App installation"),
+          ].join(", ")
         : "Engine tokens, provider keys, sessions and the GitHub App installation",
   },
   {
@@ -871,9 +881,9 @@ function Deleting({
         }}
       >
         <p>
-          This deletes {settings.counts.repositories} repositories, {settings.counts.members}{" "}
-          people, every environment, every run and verdict, the masking rules, the egress policy,
-          the billing history and the audit log.
+          This deletes {count(settings.counts.repositories, "repository", "repositories")},{" "}
+          {count(settings.counts.members, "person", "people")}, every environment, every run and
+          verdict, the masking rules, the egress policy, the billing history and the audit log.
         </p>
         <p>
           Your database is not touched, because none of it is here: no snapshot, no masked branch
