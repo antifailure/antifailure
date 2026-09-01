@@ -90,6 +90,18 @@ jobs:
         # caught it: each did exactly what it was asked.
         run: go run ./tools/ldcheck .
 
+      - name: The release publishes what it signs
+        # The signing and bill of materials half of release.yml has never
+        # run: v0.1.0 and v0.1.1 both predate it, so the first tag is the
+        # first execution and the first look at the result is after it is
+        # published. This asks the three questions that are silent in the
+        # wrong direction there. The loudest is that
+        # softprops/action-gh-release defaults `fail_on_unmatched_files` to
+        # false, so a `files:` pattern matching nothing is a warning in the
+        # log and a green step, and the release goes out short an asset
+        # looking finished.
+        run: go run ./tools/releasecheck .
+
       - name: The one command runs what this workflow runs
         # CONTRIBUTING.md promises that a green `just gate` means a green CI.
         # Nothing watched that, so a job added here would quietly stop being

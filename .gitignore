@@ -149,6 +149,7 @@ runner/artifacts/
 /proxysrc
 /readability
 /release
+/releasecheck
 /reltar
 /schemadoc
 /sbomcheck
