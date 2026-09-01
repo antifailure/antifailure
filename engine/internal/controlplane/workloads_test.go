@@ -142,13 +142,54 @@ func TestHeartbeatNamesTheRunInThePath(t *testing.T) {
 	var sawPath string
 	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawPath = r.URL.Path
-		_, _ = w.Write([]byte(`{"held":true}`))
+		_, _ = w.Write([]byte(`{"held":true,"cancelRequested":false}`))
 	}))
-	if err := c.Heartbeat(context.Background(), claimedRunID); err != nil {
+	cancelRequested, err := c.Heartbeat(context.Background(), claimedRunID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if sawPath != "/v1/workloads/runs/"+claimedRunID+"/heartbeat" {
 		t.Fatalf("heartbeat posted to %q", sawPath)
+	}
+	if cancelRequested {
+		t.Fatal("no cancel was requested and the beat reported one")
+	}
+}
+
+// The cancel rides the beat.
+//
+// This is the whole reason there is no command client in this package. The
+// alternative was a poll of /v1/commands/claim beside every heartbeat, which
+// cost a minute of latency on top of the beat and took a lease on every
+// unrelated command it happened to return.
+func TestHeartbeatCarriesTheCancelBack(t *testing.T) {
+	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"held":true,"cancelRequested":true}`))
+	}))
+	cancelRequested, err := c.Heartbeat(context.Background(), claimedRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cancelRequested {
+		t.Fatal("a cancel was waiting and the beat did not carry it back")
+	}
+}
+
+// An older control plane answers `{held: true}` and means no cancel.
+//
+// No version negotiation, deliberately: an absent field decodes to false, which
+// is what it means. A client that refused the shape, or defaulted it to true,
+// would stop every run against a control plane one release behind.
+func TestAHeartbeatWithNoCancelFieldMeansNoCancel(t *testing.T) {
+	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"held":true}`))
+	}))
+	cancelRequested, err := c.Heartbeat(context.Background(), claimedRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelRequested {
+		t.Fatal("an absent cancelRequested was read as a cancel, which stops a healthy run")
 	}
 }
 
@@ -167,7 +208,7 @@ func TestALostLeaseIsATypedErrorCarryingTheReason(t *testing.T) {
 			` is not held by this token. It may have finished, been cancelled, or had its ` +
 			`lease taken after it expired. Stop and claim again."}`))
 	}))
-	err := c.Heartbeat(context.Background(), claimedRunID)
+	_, err := c.Heartbeat(context.Background(), claimedRunID)
 	var lost *controlplane.LeaseLost
 	if !errors.As(err, &lost) {
 		t.Fatalf("a 409 should be a LeaseLost, got %v", err)
@@ -187,60 +228,12 @@ func TestAnUnreachableControlPlaneIsNotALostLease(t *testing.T) {
 	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
-	err := c.Heartbeat(context.Background(), claimedRunID)
+	_, err := c.Heartbeat(context.Background(), claimedRunID)
 	if err == nil {
 		t.Fatal("a 502 was reported as a successful heartbeat")
 	}
 	var lost *controlplane.LeaseLost
 	if errors.As(err, &lost) {
 		t.Fatal("a 502 was reported as a lost lease, which would stop a healthy run")
-	}
-}
-
-func TestClaimCommandsReadsTheCancelForARun(t *testing.T) {
-	var sawLimit float64
-	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		sawLimit, _ = body["limit"].(float64)
-		_, _ = w.Write([]byte(`{"commands":[
-		  {"id":"c1","kind":"workload.cancel","envId":"pr-42",
-		   "workloadRunId":"` + claimedRunID + `","payload":{},"attempts":1}
-		]}`))
-	}))
-	commands, err := c.ClaimCommands(context.Background(), "pr-42", 5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sawLimit != 5 {
-		t.Fatalf("the limit was sent as %v", sawLimit)
-	}
-	if len(commands) != 1 {
-		t.Fatalf("decoded %d commands", len(commands))
-	}
-	if commands[0].Kind != controlplane.CommandCancelWorkload {
-		t.Fatalf("kind %q", commands[0].Kind)
-	}
-	if commands[0].WorkloadRunID != claimedRunID {
-		t.Fatalf("the run this cancel is about decoded as %q", commands[0].WorkloadRunID)
-	}
-}
-
-// An empty list and an absent field are the same answer and both mean nothing
-// is waiting. Never nil, so a caller can range over the answer without asking
-// whether the question was understood.
-func TestClaimCommandsWithNothingWaitingIsAnEmptyList(t *testing.T) {
-	c, _ := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	commands, err := c.ClaimCommands(context.Background(), "pr-42", 5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if commands == nil {
-		t.Fatal("an absent commands field decoded as nil rather than as an empty list")
-	}
-	if len(commands) != 0 {
-		t.Fatalf("decoded %d commands out of nothing", len(commands))
 	}
 }

@@ -66,18 +66,10 @@ import (
 // heartbeat, so a smaller interval buys a tighter bound on nothing anybody
 // waits for.
 //
-// The same tick asks whether a cancel is waiting, so this is also the longest a
-// pressed cancel takes to reach a run. A minute is the number that has to be
-// defensible for that reason rather than for the lease.
+// The beat also carries back whether somebody has asked the run to stop, so
+// this is the longest a pressed cancel takes to reach a run. A minute is the
+// number that has to be defensible for that reason rather than for the lease.
 const hostedHeartbeat = time.Minute
-
-// hostedCommandBatch bounds one poll for commands.
-//
-// Small on purpose. This engine is looking for the cancel of one run, and a
-// claim takes a lease on everything it returns, so asking for more would take
-// leases on teardowns this process has no intention of carrying out and leave
-// them to expire.
-const hostedCommandBatch = 5
 
 // hostedReporter is one hosted run's connection to the control plane.
 //
@@ -295,7 +287,7 @@ func (h *hostedReporter) beat(ctx context.Context, work context.Context, cancel 
 	}
 }
 
-// tick is one heartbeat and one look for a cancel.
+// tick is one heartbeat, which is also the one question about a cancel.
 //
 // It returns the sentence to stop the work with, or empty to keep going, and
 // whether the reason was a lost lease. Two things stop the work and they are
@@ -303,8 +295,15 @@ func (h *hostedReporter) beat(ctx context.Context, work context.Context, cancel 
 // lease that was taken and a cancel somebody pressed lead a reader to different
 // places. The boolean beside it is not a duplicate of the sentence; it decides
 // whether anything more is reported at all.
+//
+// One request rather than two. The cancel used to be a separate poll of
+// /v1/commands/claim, which cost a minute of latency on top of this one and
+// took a lease on every unrelated command it happened to return. The control
+// plane now answers it on the beat, off the same row this statement already
+// updates.
 func (h *hostedReporter) tick(ctx context.Context) (string, bool) {
-	if err := h.client.Heartbeat(ctx, h.runID); err != nil {
+	cancelRequested, err := h.client.Heartbeat(ctx, h.runID)
+	if err != nil {
 		var lost *controlplane.LeaseLost
 		if errors.As(err, &lost) {
 			return "the control plane says this engine no longer holds the run: " + lost.Error(), true
@@ -316,16 +315,8 @@ func (h *hostedReporter) tick(ctx context.Context) (string, bool) {
 		h.warn("a heartbeat could not be sent: " + err.Error())
 		return "", false
 	}
-
-	commands, err := h.client.ClaimCommands(ctx, h.envID, hostedCommandBatch)
-	if err != nil {
-		h.warn("the pending commands could not be read: " + err.Error())
-		return "", false
-	}
-	for _, c := range commands {
-		if c.Kind == controlplane.CommandCancelWorkload && c.WorkloadRunID == h.runID {
-			return "a cancel was requested in the control plane", false
-		}
+	if cancelRequested {
+		return "a cancel was requested in the control plane", false
 	}
 	return "", false
 }
@@ -553,7 +544,14 @@ func hostedPayload(res *workload.Result, runID, claimedKind string) map[string]a
 		return map[string]any{
 			"workload_run_id": runID,
 			"outcome":         "failed",
-			"state":           string(res.State),
+			// `failed`, and NOT the engine's own state, which is the trap here.
+			// The work may well have run perfectly; what failed is this run,
+			// because nothing the work produced belongs to the row it would be
+			// written against. Sending the engine's state was safe only while
+			// the control plane read `outcome` and ignored `state`: it now
+			// prefers `state`, so a job that succeeded at the wrong kind would
+			// be recorded as a clean success carrying no measurements at all.
+			"state": string(workload.StateFailed),
 			"detail": fmt.Sprintf(
 				"this job ran a %s workload and the control plane's run is a %s, so nothing it "+
 					"measured belongs on that run. The dispatch and the definition disagree.",
@@ -563,17 +561,20 @@ func hostedPayload(res *workload.Result, runID, claimedKind string) map[string]a
 	return payload
 }
 
-// hostedOutcome is the one word the control plane reads to decide whether the
-// work happened.
+// hostedOutcome is the coarse word beside the exact state.
 //
-// A timed out run reports `failed`, and the loss is deliberate rather than
-// overlooked. The control plane's own state enum has `timed_out` and its
-// projection does not yet read one from an event: anything that is not the
-// literal `failed` is recorded as `succeeded`. So sending `timed_out` today
-// would record a run that never finished as one that did, which is the
-// green-over-nothing this product has already shipped once. The document keeps
-// the exact state in `state`, so the distinction is on the row's own event and
-// a projection that learns the word later loses nothing.
+// The control plane reads `state` first and falls back to this. It did not
+// always: the projection read only `outcome`, mapped anything that was not the
+// literal `failed` to `succeeded`, and so recorded a run that passed its own
+// deadline as one that finished. Its own enum had a `timed_out` value nothing
+// could ever reach, which is the same shape as a green exit code over work that
+// never happened, and this engine sent `failed` for a timed out run as a
+// deliberate safe lie while that was true.
+//
+// It is no longer a lie and it is still sent, because the fallback is what an
+// older control plane reads and because `failed` is the honest coarse answer
+// for a run that did not finish. The exact word travels in `state`, which is
+// the one that decides.
 func hostedOutcome(state workload.State) string {
 	switch state {
 	case workload.StateFailed, workload.StateTimedOut:

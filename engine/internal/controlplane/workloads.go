@@ -141,7 +141,25 @@ func (e *LeaseLost) Error() string {
 	return fmt.Sprintf("the control plane no longer holds run %s for this engine", e.RunID)
 }
 
-// Heartbeat says this engine is still working on a run.
+// heartbeatResponse is what the endpoint answers a held run with.
+//
+// `cancelRequested` rides the beat rather than being polled for, and that is
+// the whole reason there is no command client here. Before it existed the only
+// way a console cancel reached a running engine was a poll of
+// /v1/commands/claim, which cost a minute of latency and took a lease on every
+// unrelated command it happened to return on the way past. The column is on the
+// row the heartbeat already updates.
+//
+// An absent field decodes to false, which is the safe default and the reason
+// this needs no version negotiation: an older control plane that answers
+// `{held: true}` reads as no cancel, which is what it means.
+type heartbeatResponse struct {
+	Held            bool `json:"held"`
+	CancelRequested bool `json:"cancelRequested"`
+}
+
+// Heartbeat says this engine is still working on a run, and asks in the same
+// breath whether somebody has asked it to stop.
 //
 // It pushes the lease and the deadline together, so a run that keeps reporting
 // is never abandoned for taking a long time, and a run whose engine died is
@@ -151,91 +169,29 @@ func (e *LeaseLost) Error() string {
 // A LeaseLost is the interesting failure and the one a caller must act on. Any
 // other error is the network, and a caller should keep working: a heartbeat
 // that could not be sent says nothing about whether the work is going well.
-func (c *Client) Heartbeat(ctx context.Context, runID string) error {
+func (c *Client) Heartbeat(ctx context.Context, runID string) (bool, error) {
 	if strings.TrimSpace(runID) == "" {
-		return errors.New("controlplane: a run identifier is required to heartbeat")
+		return false, errors.New("controlplane: a run identifier is required to heartbeat")
 	}
 	res, err := c.do(ctx, http.MethodPost,
 		"/v1/workloads/runs/"+url.PathEscape(runID)+"/heartbeat", bytes.NewReader([]byte(`{}`)))
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode == http.StatusConflict {
-		return &LeaseLost{RunID: runID, Detail: c.errorSentence(res)}
+		return false, &LeaseLost{RunID: runID, Detail: c.errorSentence(res)}
 	}
 	if res.StatusCode != http.StatusOK {
-		return c.statusError(res)
-	}
-	return nil
-}
-
-// Command is one durable instruction the control plane is waiting to have
-// carried out.
-type Command struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
-	// EnvID is the environment an engine knows, or empty when the command
-	// names a run instead.
-	EnvID string `json:"envId"`
-	// WorkloadRunID is the run a workload.cancel is about.
-	WorkloadRunID string         `json:"workloadRunId"`
-	Payload       map[string]any `json:"payload"`
-	Attempts      int            `json:"attempts"`
-}
-
-// CommandCancelWorkload is the kind that asks a run to stop.
-const CommandCancelWorkload = "workload.cancel"
-
-type commandsResponse struct {
-	Commands []Command `json:"commands"`
-}
-
-// ClaimCommands takes the durable commands waiting for an environment.
-//
-// This is how a cancel pressed in a console reaches a run that is already
-// going. Nothing else carries it: the claim endpoint refuses a run that has a
-// cancel outstanding, and the heartbeat answers whether the lease is held
-// rather than whether somebody asked for a stop, so an engine that never asks
-// here runs a cancelled workload to completion.
-//
-// Deliberately reachable while an organization is suspended, on the control
-// plane's side. A suspension stops new work and a cancel is the opposite of
-// new work.
-func (c *Client) ClaimCommands(ctx context.Context, envID string, limit int) ([]Command, error) {
-	request := map[string]any{}
-	if strings.TrimSpace(envID) != "" {
-		request["envId"] = envID
-	}
-	if limit > 0 {
-		request["limit"] = limit
-	}
-	body, err := json.Marshal(request)
-	if err != nil {
-		return nil, fmt.Errorf("controlplane: %w", err)
+		return false, c.statusError(res)
 	}
 
-	res, err := c.do(ctx, http.MethodPost, "/v1/commands/claim", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
-
-	if res.StatusCode != http.StatusOK {
-		return nil, c.statusError(res)
-	}
-	var out commandsResponse
+	var out heartbeatResponse
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("controlplane: the response was not the expected shape: %w", err)
+		return false, fmt.Errorf("controlplane: the response was not the expected shape: %w", err)
 	}
-	// Never nil, so a caller can range over the answer without asking whether
-	// the question was understood. An empty list and an absent field are the
-	// same answer here and both mean nothing is waiting.
-	if out.Commands == nil {
-		return []Command{}, nil
-	}
-	return out.Commands, nil
+	return out.CancelRequested, nil
 }
 
 // errorSentence pulls the control plane's own explanation out of a refusal.

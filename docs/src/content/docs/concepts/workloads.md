@@ -153,8 +153,9 @@ The run **reports what it measured**. The payload is the same document
 draws cannot disagree. A report that cannot be delivered is spooled to disk
 rather than dropped, and the next `af` command on that machine sends it.
 
-A cancel pressed in the console reaches the run on the same minute tick, stops
-the work, and is reported as cancelled.
+A cancel pressed in the console rides back on that same heartbeat, so it reaches
+the run within a minute without the engine asking a second question. The work
+stops and the run is reported as cancelled.
 
 A lease taken by another engine also stops the work, and is the one case where
 nothing more is reported. That happens when a run went quiet long enough for

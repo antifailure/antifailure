@@ -69,19 +69,20 @@ type fakePlane struct {
 	// heartbeat is the status the next heartbeat is answered with. 200 unless
 	// a test says otherwise.
 	heartbeat int
-	// commands is the body POST /v1/commands/claim answers with.
-	commands string
+	// cancelRequested is what the heartbeat answers back. The cancel rides the
+	// beat, so there is no command endpoint here at all any more.
+	cancelRequested bool
 	// eventsStatus lets a test make the ingestion endpoint unreachable.
 	eventsStatus int
 
 	// events is every event that reached the wire, in order.
 	events []controlplane.Event
-	// beats and polls count the two halves of a tick.
-	beats, polls int
+	// beats counts the heartbeats answered.
+	beats int
 
-	// beat and poll are signalled after each is answered, so a test can wait
+	// beat is signalled after each heartbeat is answered, so a test can wait
 	// for the effect of advancing the clock instead of guessing at a duration.
-	beat, poll chan struct{}
+	beat chan struct{}
 
 	// holdTerminal, when set, stops the terminal event mid-flight: the handler
 	// signals holding and then waits for it to be closed. That is the only way
@@ -96,9 +97,7 @@ func newFakePlane(t *testing.T) (*fakePlane, string) {
 	f := &fakePlane{
 		claim:     `{"run":null}`,
 		heartbeat: http.StatusOK,
-		commands:  `{"commands":[]}`,
 		beat:      make(chan struct{}, 64),
-		poll:      make(chan struct{}, 64),
 	}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
@@ -120,17 +119,11 @@ func (f *fakePlane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"error":"Run ` + testRunID +
 				` is not held by this token. Stop and claim again."}`))
 		} else {
-			_, _ = w.Write([]byte(`{"held":true}`))
+			_, _ = w.Write([]byte(`{"held":true,"cancelRequested":` +
+				map[bool]string{true: "true", false: "false"}[f.cancelRequested] + `}`))
 		}
 		select {
 		case f.beat <- struct{}{}:
-		default:
-		}
-	case r.URL.Path == "/v1/commands/claim":
-		f.polls++
-		_, _ = w.Write([]byte(f.commands))
-		select {
-		case f.poll <- struct{}{}:
 		default:
 		}
 	case r.URL.Path == "/v1/events":
@@ -362,7 +355,7 @@ func TestAnExplicitRunIdentifierClaimsNothing(t *testing.T) {
 // Cancellation
 // ---------------------------------------------------------------------------
 
-func TestACancelCommandStopsTheWorkAndReportsItCancelled(t *testing.T) {
+func TestACancelRequestStopsTheWorkAndReportsItCancelled(t *testing.T) {
 	f, url := newFakePlane(t)
 	f.set(func(p *fakePlane) { p.claim = runningRun("observed_load") })
 	h, fake, _ := reporterFor(t, url)
@@ -370,10 +363,7 @@ func TestACancelCommandStopsTheWorkAndReportsItCancelled(t *testing.T) {
 	h.Claim(context.Background(), "", workload.ObservedLoad)
 	ctx := h.Start(context.Background(), workload.ObservedLoad)
 
-	f.set(func(p *fakePlane) {
-		p.commands = `{"commands":[{"id":"c1","kind":"workload.cancel","envId":"pr-42",` +
-			`"workloadRunId":"` + testRunID + `","payload":{},"attempts":1}]}`
-	})
+	f.set(func(p *fakePlane) { p.cancelRequested = true })
 	beatOnce(t, f, fake)
 
 	select {
@@ -395,45 +385,15 @@ func TestACancelCommandStopsTheWorkAndReportsItCancelled(t *testing.T) {
 	require.Contains(t, sent[1].Payload["detail"], "cancel was requested in the control plane")
 }
 
-// A cancel naming a different run is not this run's cancel.
+// The cancel of another run can no longer reach this engine at all.
 //
-// The claim takes a lease on everything it returns, so an engine polling for
-// its own cancel sees other runs' commands, and acting on one would stop a
-// healthy run because somebody cancelled a different one.
-func TestACancelForAnotherRunIsIgnored(t *testing.T) {
-	f, url := newFakePlane(t)
-	f.set(func(p *fakePlane) { p.claim = runningRun("observed_load") })
-	h, fake, _ := reporterFor(t, url)
-
-	h.Claim(context.Background(), "", workload.ObservedLoad)
-	ctx := h.Start(context.Background(), workload.ObservedLoad)
-
-	f.set(func(p *fakePlane) {
-		p.commands = `{"commands":[{"id":"c1","kind":"workload.cancel","envId":"pr-42",` +
-			`"workloadRunId":"a-different-run","payload":{},"attempts":1}]}`
-	})
-	beatOnce(t, f, fake)
-	select {
-	case <-f.poll:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the commands were never polled")
-	}
-
-	// A second tick, and it is the assertion rather than a nicety. Reading
-	// ctx.Err() straight after the poll reads it before the goroutine has
-	// decided anything, so the check passes whatever the decision was: a
-	// version that cancelled on any run at all went green here. Waiting for a
-	// heartbeat that could only be sent by a loop that did NOT stop is what
-	// makes this a measurement.
-	beatOnce(t, f, fake)
-
-	require.NoError(t, ctx.Err(), "another run's cancel stopped this one")
-	require.Empty(t, h.StoppedBy())
-
-	h.Finish(context.Background(), resultFor(workload.StateSucceeded, workload.VerdictPass))
-	sent := f.sent()
-	require.Equal(t, "workload.finished", sent[len(sent)-1].Type)
-}
+// There used to be a cell here for it, and it is deliberately deleted rather
+// than kept. The cancel arrived on a poll of /v1/commands/claim, which returns
+// whatever is waiting for the ENVIRONMENT, so this engine saw other runs'
+// cancels and had to check the run identifier on each. The control plane now
+// answers the cancel on the heartbeat, which names one run in its path, so the
+// condition that guard defended against is unreachable by construction. A test
+// of an impossible condition is a test that can never fail.
 
 // A cancel racing the completion, where the completion wins.
 //
@@ -576,8 +536,7 @@ func TestOnlyALostLeaseSilencesTheReport(t *testing.T) {
 		stop  func(*fakePlane)
 	}{
 		{"a cancel pressed in the console", workload.StateCancelled, func(p *fakePlane) {
-			p.commands = `{"commands":[{"id":"c1","kind":"workload.cancel","envId":"pr-42",` +
-				`"workloadRunId":"` + testRunID + `","payload":{},"attempts":1}]}`
+			p.cancelRequested = true
 		}},
 		{"a heartbeat the control plane never answered", workload.StateSucceeded, func(p *fakePlane) {
 			p.heartbeat = http.StatusBadGateway
@@ -714,6 +673,52 @@ func TestAKindMismatchReportsAFailureAndNoMeasurements(t *testing.T) {
 		"a load aggregate was sent to a run the control plane holds as a browser workflow")
 	require.NotContains(t, report, "routes")
 	require.Contains(t, report["detail"], "disagree")
+	// And the state agrees with the outcome, which is the half that was wrong.
+	// The work itself succeeded here, and sending the ENGINE's state was safe
+	// only while the control plane read `outcome` and ignored `state`. It now
+	// prefers `state`, so `succeeded` beside `outcome: failed` would record a
+	// clean success carrying no measurements at all.
+	require.Equal(t, "failed", report["state"],
+		"a job that succeeded at the wrong kind would be recorded as a successful run")
+}
+
+// No payload this reporter can produce may claim the work happened while
+// telling the control plane it failed.
+//
+// A property rather than a list, and the reason is that the two fields are read
+// by different code on the other side: `state` decides the run's state and
+// `outcome` is the fallback for a control plane that does not read `state`. A
+// payload where they disagree means one of the two readers is being lied to,
+// and which one depends on a version this engine cannot see.
+func TestNoPayloadDisagreesWithItselfAboutWhetherTheWorkHappened(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		state       workload.State
+		claimedKind string
+	}{
+		{"a clean run", workload.StateSucceeded, "observed_load"},
+		{"a failed run", workload.StateFailed, "observed_load"},
+		{"a run past its deadline", workload.StateTimedOut, "observed_load"},
+		{"a cancelled run", workload.StateCancelled, "observed_load"},
+		{"a run whose kind disagrees with the claim", workload.StateSucceeded, "browser_workflow"},
+		{"a failed run whose kind also disagrees", workload.StateFailed, "browser_workflow"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			payload := hostedPayload(resultFor(c.state, workload.VerdictPass), testRunID, c.claimedKind)
+			state, _ := payload["state"].(string)
+			outcome, _ := payload["outcome"].(string)
+			require.NotEmpty(t, state, "every payload carries the exact state")
+			require.NotEmpty(t, outcome, "and the coarse word an older control plane reads")
+			if outcome == "failed" {
+				require.NotEqual(t, "succeeded", state,
+					"outcome says the work did not happen and state says it did; whichever "+
+						"the control plane reads, the other one is a lie")
+			}
+			if state == "succeeded" {
+				require.Equal(t, "succeeded", outcome, "the same disagreement, from the other side")
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,8 @@ still names a run by hand, and claims nothing, so reproducing a hosted run on a
 laptop cannot take the next queued run away from CI.
 
 A cancel pressed in the console now reaches a run that is already going, and
-stops it. So does a lease taken by another engine, which is what happens after
+stops it. It arrives on the heartbeat the engine is already making rather than
+on a poll of its own, so there is no command client in the engine at all. So does a lease taken by another engine, which is what happens after
 a run has gone quiet long enough for somebody else to pick it up. In that one
 case the engine stops and then says nothing more, because the control plane's
 terminal statement is gated on the run's state rather than on who holds it: a
