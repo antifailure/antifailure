@@ -555,6 +555,18 @@ func hostedPayload(res *workload.Result, runID, claimedKind string) map[string]a
 	// engine release, nothing can query it, and it is the largest field in the
 	// document. The file `--result` writes keeps it, which is where a person
 	// debugging one run wants it.
+	//
+	// ONE THING IS LOST HERE AND THE FIX IS NOT TO PUT `native` BACK. An
+	// exploration's `goal_unreached` finding names the words that never appeared
+	// on any page, "these never appeared anywhere: correct, spelling, mistake",
+	// which is the single most useful thing for somebody debugging why a goal
+	// came back unreached. The projection carries `Findings` as a COUNT and that
+	// text lives only in `native`, so it reaches nowhere a console can read it.
+	//
+	// The answer is to promote that one field into the result document, beside
+	// the counts, not to restore the blob. Declining to store `native` was
+	// correct for the reasons above, and a reader who concludes otherwise from
+	// this gap will reintroduce a column whose shape moves with every release.
 	delete(payload, "native")
 
 	if claimedKind != "" && claimedKind != string(res.Kind) {

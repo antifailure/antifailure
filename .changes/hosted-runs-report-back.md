@@ -49,6 +49,15 @@ it in, and says how many more there were. The scenario path beside it had always
 named its failing scenario, which is why nobody saw this: both read correctly on
 their own.
 
+A hosted exploration whose goal could not be reached used to FAIL THE JOB.
+`docs/concepts/exploration` promises that an exploration cannot fail your build,
+and that promise held for `af explore` and broke for `af workload run --kind
+exploration`, which is the path the console drives. An unreached goal is now a
+pass and the unreached goal travels in the detail, where it is a finding.
+Nothing ran at all is still blocked and still exits non-zero, which is the half
+of the original reasoning that had to survive: a run that measured nothing must
+not look like a run that found nothing.
+
 Two siblings had the same gap. An exploration that missed a goal said nothing,
 on the reasoning that an exploration can never fail so the blank never lands
 under a red verdict; it lands under `unverified`, which is not a pass, and the

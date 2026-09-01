@@ -929,7 +929,9 @@ func TestAnExplorationThatMissedItsGoalSaysWhichOne(t *testing.T) {
 	}}
 	res := execute(t, context.Background(), r,
 		workload.Request{Kind: "exploration", Select: "sign up,check out"}, nil)
-	require.Equal(t, workload.VerdictUnverified, res.Verdict)
+	// A pass, and the unreached goal still travels in the DETAIL. The verdict
+	// says the run happened and found no fault; the detail carries the finding.
+	require.Equal(t, workload.VerdictPass, res.Verdict)
 	require.Contains(t, res.Detail, "check out did not reach its goal")
 
 	two := &fakeRunner{envID: "demo-main-abc123", exploreReport: &explore.Report{
@@ -968,7 +970,7 @@ func TestAnExplorationThatMissedItsGoalSaysWhichOne(t *testing.T) {
 //
 // An exploration cannot fail a build, which docs/concepts/exploration states,
 // so a wander that found a wall is a finding rather than a defect.
-func TestADeadEndIsUnverifiedRatherThanBlocked(t *testing.T) {
+func TestADeadEndIsAPassRatherThanBlockedOrUnverified(t *testing.T) {
 	reached := explore.Exploration{Name: "what-each-customer-spent", Reached: true}
 	reached.Outcome.Verdict = workload.VerdictPass
 	deadEnd := explore.Exploration{Name: "correct-a-customer-name", Reached: false}
@@ -985,9 +987,18 @@ func TestADeadEndIsUnverifiedRatherThanBlocked(t *testing.T) {
 
 	require.Equal(t, workload.StateSucceeded, res.State,
 		"the work happened; a dead end is a finding and not a run that could not be carried out")
-	require.Equal(t, workload.VerdictUnverified, res.Verdict)
-	require.NotEqual(t, workload.VerdictBlocked, res.Verdict,
-		"a page with no control to press was reported as a run that could not proceed")
+	// PASS, and this is the assertion that changed. It used to be `unverified`,
+	// and workloadOutcome maps unverified to a non-zero exit, so a hosted
+	// exploration of a page offering no control to press FAILED THE JOB while
+	// behaving exactly as designed. docs/concepts/exploration promises that an
+	// exploration cannot fail your build, and that promise has to hold for the
+	// hosted path too, because that is the one the console drives.
+	require.Equal(t, workload.VerdictPass, res.Verdict,
+		"a goal that could not be reached failed the build, which the documentation "+
+			"promises never happens")
+	// The exit code that follows from this verdict is asserted in internal/cli,
+	// where the decision is made. Splitting it is not a gap: the verdict is this
+	// package's answer and the code is that one's.
 	require.Contains(t, res.Detail, "correct-a-customer-name did not reach its goal",
 		"the one useful thing to say about this run is which goal was not reached")
 
@@ -1003,4 +1014,21 @@ func TestADeadEndIsUnverifiedRatherThanBlocked(t *testing.T) {
 		Kind: "exploration", Select: "correct-a-customer-name"}, nil)
 	require.Equal(t, workload.VerdictBlocked, res.Verdict)
 	require.Contains(t, res.Detail, "the browser could not be started")
+}
+
+// Nothing ran at all is still loud, which is the half of the old reasoning that
+// survives.
+//
+// `af test` exits zero on unverified and that is how a nightly corpus went
+// green having never reached an agent, so a run that MEASURED NOTHING must not
+// look like a run that FOUND NOTHING. An exploration with no explorations in it
+// is exactly that case, and it keeps its blocked verdict and its non-zero exit.
+func TestAnExplorationThatNeverRanIsStillBlockedAndStillExitsNonZero(t *testing.T) {
+	r := &fakeRunner{envID: "next-app-main-abc123",
+		exploreReport: &explore.Report{Explorations: nil}}
+	res := execute(t, context.Background(), r,
+		workload.Request{Kind: "exploration", Select: "sign up"}, nil)
+	require.Equal(t, workload.VerdictBlocked, res.Verdict)
+	require.NotEqual(t, workload.VerdictPass, res.Verdict,
+		"nobody looked and the run reported a pass")
 }

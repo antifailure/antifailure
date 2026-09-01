@@ -475,17 +475,42 @@ func projectExploration(res *Result, opts Options, out *explore.Report) {
 // af explore cannot fail a build. A goal that was not reached is unverified: a
 // wander that did not get there has not shown the application is broken, it
 // has shown that a seeded wander did not find the way.
+// explorationVerdict is the run's one word answer, and it is `pass` unless the
+// exploration could not be carried out.
+//
+// A GOAL THAT WAS NOT REACHED IS NOT A FAILING RUN. It used to roll up to
+// `unverified`, and workloadOutcome maps unverified to a NON-ZERO exit, so a
+// hosted exploration of a page offering no control to press failed the job
+// while behaving exactly as designed. docs/concepts/exploration promises the
+// opposite in as many words: an exploration cannot fail your build.
+//
+// The reasoning that produced the old rollup is sound and is why the empty case
+// below is untouched: `af test` exits zero on unverified, and that single fact
+// is how a nightly corpus in this repository went green having never reached an
+// agent, so a run that MEASURED NOTHING must not look like a run that FOUND
+// NOTHING. An exploration that found a wall is not that case. It ran, it
+// explored, and it established something: that the goal is unreachable from
+// there. The unreached goal travels in the DETAIL, where it is a finding, and
+// findings do not fail builds.
+//
+// The empty case is separable and stays. No explorations at all means nobody
+// looked, which is `blocked`, and blocked keeps its non-zero exit. So the two
+// halves of the original reasoning are both preserved: nothing ran is still
+// loud, and looking and finding a wall is quiet.
+//
+// Narrowing the documentation to name one command was the alternative and it
+// was refused: a promise that holds for `af explore` and breaks for
+// `af workload run --kind exploration` is a promise a customer discovers is
+// conditional at the worst moment, and the hosted path is the one the console
+// drives.
 func explorationVerdict(out *explore.Report) string {
 	if len(out.Explorations) == 0 {
 		return VerdictBlocked
 	}
 	worst := VerdictPass
 	for _, e := range out.Explorations {
-		switch {
-		case e.Outcome.Verdict == VerdictBlocked:
+		if e.Outcome.Verdict == VerdictBlocked {
 			worst = worseOf(worst, VerdictBlocked)
-		case !e.Reached:
-			worst = worseOf(worst, VerdictUnverified)
 		}
 	}
 	return worst

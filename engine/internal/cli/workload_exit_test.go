@@ -163,3 +163,37 @@ func exitCodeOfCommand(err error) int {
 	}
 	return int(aferrors.ExitCodeOf(err))
 }
+
+// The exit code a hosted exploration produces, which is the half a person feels.
+//
+// docs/concepts/exploration promises that an exploration cannot fail your
+// build. That promise used to hold for `af explore` and break for
+// `af workload run --kind exploration`, because a goal that was not reached
+// rolled up to `unverified` and this table maps unverified to AFWLD013, a
+// non-zero exit. So the hosted path, which is the one the console drives,
+// failed the job on a page that had no control to press.
+//
+// Both halves are asserted here because they are one decision: an exploration
+// that looked exits zero, and an exploration that never ran does not.
+func TestAHostedExplorationCannotFailTheBuildUnlessItNeverRan(t *testing.T) {
+	looked := &workload.Result{
+		Kind: workload.Exploration, State: workload.StateSucceeded,
+		Verdict: workload.VerdictPass,
+		Detail:  "correct-a-customer-name did not reach its goal",
+	}
+	_, _, clean := workloadOutcome(looked)
+	require.True(t, clean,
+		"an exploration that explored and found a wall failed the build, which the "+
+			"documentation promises never happens")
+	require.NoError(t, codedOutcome(looked))
+
+	neverRan := &workload.Result{
+		Kind: workload.Exploration, State: workload.StateSucceeded,
+		Verdict: workload.VerdictBlocked,
+		Detail:  "no goal was explored, so nothing was found",
+	}
+	_, _, clean = workloadOutcome(neverRan)
+	require.False(t, clean,
+		"nobody looked and the job passed, which is the green over nothing this "+
+			"table exists to prevent")
+}
