@@ -16,6 +16,8 @@ import { RealStripeClient } from '../src/billing/stripe.ts'
 import type { StripeConfig } from '../src/billing/plans.ts'
 import type { Billing } from '../src/billing/index.ts'
 import type { HostedRequiredPlan } from '../src/hosted.ts'
+import type { RepositoryApi } from '../src/github/api.ts'
+import { ActionsKeys } from '../src/github/oidc.ts'
 import { MockPack, loadPack } from './mockpack.ts'
 
 export const adminUrl =
@@ -119,6 +121,22 @@ export interface StartApiOptions {
   /** The plan required by a hosted deployment. Null is the self-hosted default. */
   hostedRequiredPlan?: HostedRequiredPlan | null
   githubAppInstallUrl?: string
+  /** Acting on a repository as the installation. Undefined means no App, which
+   *  is a real way to run this: deliveries still record installations and
+   *  nothing is published. */
+  githubApi?: RepositoryApi | null
+  /**
+   * GitHub's signing key set, as a JSON string, for the workflow identity
+   * tokens a job exchanges for a callback credential.
+   *
+   * Given as a function rather than as an ActionsKeys, because ActionsKeys
+   * needs the harness's own FakeClock and a test cannot hold that until after
+   * startApi has returned. A key set read against the wall clock while the
+   * token was minted against the fake one is expired or issued in the future
+   * depending on the day, which is the worst kind of flake: it depends on when
+   * somebody runs the suite.
+   */
+  actionsJwks?: () => string
 }
 
 /**
@@ -190,6 +208,17 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     stripe: options.stripe ?? null,
     hostedRequiredPlan: options.hostedRequiredPlan ?? null,
     githubAppInstallUrl: options.githubAppInstallUrl,
+    githubApi: options.githubApi ?? null,
+    ...(options.actionsJwks
+      ? {
+          actionsKeys: new ActionsKeys(clock, {
+            fetchImpl: async () =>
+              new Response(options.actionsJwks!(), {
+                headers: { 'content-type': 'application/json' },
+              }),
+          }),
+        }
+      : {}),
   })
 
   return {

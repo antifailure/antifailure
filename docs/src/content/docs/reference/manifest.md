@@ -205,6 +205,48 @@ name.
 | `idle_sleep` | Suspend after this long with no traffic. |
 | `domain` | Wildcard domain for preview URLs. |
 
+## `github`
+
+| Key | Read by | Notes |
+| --- | --- | --- |
+| `mode` | `af explain` only | `actions`, `app` or `off`. |
+| `comment` | `af explain` only | Whether to maintain one comment on the pull request. |
+| `fork_policy` | `af explain` only | `never`, `label` or `always`. |
+| `teardown_on` | `af explain` only | Which events tear the environment down. |
+
+**Read by `af explain` only** means what it says, and it is worth being blunt
+about rather than leaving somebody to find out by setting one. These four are
+validated, defaulted, printed by `af explain`, and consumed by nothing else.
+Setting `fork_policy: always` does not make a fork run, and removing `close`
+from `teardown_on` does not stop a closed pull request being torn down.
+
+The reason is architectural rather than an oversight, and it is the same
+sentence the whole product rests on: **the hosted control plane never reads your
+manifest.** The manifest lives in your repository beside your code, and the
+control plane holds organizations, policy and aggregated reports. A control
+plane that read the manifest would be a control plane that had to fetch your
+repository, which is the boundary this product exists to keep.
+
+What happens instead, so you can decide whether you need these at all:
+
+- A pull request from a **fork** is always blocked until a maintainer adds the
+  `antifailure:allow` label, and the approval covers that exact commit: the next
+  push withdraws it. That is `fork_policy: label` behaviour, permanently, and it
+  is the only one of the three that is safe to apply to a repository whose
+  manifest the control plane cannot see.
+- **Teardown** is always asked for when the pull request closes or merges, when
+  a newer commit supersedes the run, and when the check times out. A run that is
+  stopping leaks its environment if nothing cleans up after it, so this is not a
+  setting.
+- The **comment** is maintained by whichever half is doing the work. With a
+  control plane, it maintains one comment and the workflow's own comment step
+  is skipped; without one, the workflow comments for itself. See
+  [GitHub](/docs/guides/github/).
+
+A test in `internal/manifest` fails if one of these fields gains a reader
+without this table being updated, and if a new field is added to the block
+without being classified, so this list cannot go quietly out of date.
+
 ## When the manifest is wrong
 
 ```

@@ -132,7 +132,7 @@ export function PrivacyPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading title="<strong>Sanitization happens where the data already lives.</strong>" />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
@@ -153,7 +153,7 @@ export function PrivacyPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading title="<strong>No card ever reaches this product.</strong>" />
         <Prose className="mt-10">
           <p>
@@ -164,14 +164,13 @@ export function PrivacyPage() {
           </p>
           <p>
             What is conditional is everything else. The control plane contains a real Stripe
-            integration, and it is active only where{" "}
-            <code>AF_STRIPE_SECRET_KEY</code> and <code>AF_STRIPE_WEBHOOK_SECRET</code> are set.
-            Where they are, Stripe holds the customer, subscription and invoice records for that
-            deployment and is a processor for it, listed on the{" "}
-            <Link href="/subprocessors">subprocessor page</Link>. Where they are not, the billing
-            routes refuse and name the missing variables, and an organization carries nothing but a
-            plan name, which sets its rate limits and quotas. The control plane says which of the
-            two it is on the first line it logs when it starts.
+            integration, and it is active only where <code>AF_STRIPE_SECRET_KEY</code> and{" "}
+            <code>AF_STRIPE_WEBHOOK_SECRET</code> are set. Where they are, Stripe holds the
+            customer, subscription and invoice records for that deployment and is a processor for
+            it, listed on the <Link href="/subprocessors">subprocessor page</Link>. Where they are
+            not, the billing routes refuse and name the missing variables, and an organization
+            carries nothing but a plan name, which sets its rate limits and quotas. The control
+            plane says which of the two it is on the first line it logs when it starts.
           </p>
           <p>
             This page previously said there was no billing at all. That was true when it was
@@ -268,7 +267,7 @@ export function TermsPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading title="<strong>What these terms do not say.</strong>" />
         <Ledger items={NOT_CLAIMED} />
       </PageSection>
@@ -328,7 +327,7 @@ export function DpaPage() {
           enforceable. It must be reviewed before anybody relies on it.
         </CounselNotice>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading kicker="Parties" title="<strong>Who is agreeing, and under which law.</strong>" />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
@@ -385,7 +384,7 @@ export function DpaPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="Security"
           title="<strong>The measures that exist</strong>, described as what the code does rather than as a category."
@@ -448,7 +447,7 @@ export function DpaPage() {
           </p>
         </Prose>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="Obligations"
           title="<strong>What we would owe you</strong>, and how quickly the honest answer is a range."
@@ -554,7 +553,7 @@ export function SubprocessorsPage() {
           </div>
         ))}
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="Engaged only under a condition"
           title="<strong>Model providers receive nothing unless you give us a key.</strong>"
@@ -586,7 +585,7 @@ export function SubprocessorsPage() {
           </div>
         ))}
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="Not engaged"
           title="<strong>The vendors a reviewer asks about next</strong>, and why each one is absent."
@@ -623,7 +622,7 @@ export function SubprocessorsPage() {
           </p>
         </Prose>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading title="<strong>Change log.</strong>" />
         <ChangeLog entries={SUBPROCESSOR_CHANGES} />
       </PageSection>
@@ -677,7 +676,7 @@ export function ServiceLevelsPage() {
           ]}
         />
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="True anyway"
           title="<strong>The part that survives our outage.</strong> The thing that gates your pull request does not run here."
@@ -705,7 +704,7 @@ export function ServiceLevelsPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading
           kicker="What is deployed"
           title="<strong>A production control plane and a staging one</strong>, and only two people can sign in to either."
@@ -844,7 +843,7 @@ export function DataRetentionPage() {
           />
         </div>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="Precision"
           title="<strong>What the event retention actually does</strong>, including the part that is not exact."
@@ -870,7 +869,7 @@ export function DataRetentionPage() {
           ]}
         />
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading kicker="Deletion" title="<strong>How to have data deleted, and what happens then.</strong>" />
         <div className="mt-14 max-md:mt-10">
           <SpecTable
@@ -897,7 +896,7 @@ export function DataRetentionPage() {
               ],
               [
                 "A person who asks to be removed",
-                "Their personal fields are erased and the account row is kept. The row is kept by choice, not because the database refuses: the audit log references it with ON DELETE SET NULL and the delete would succeed. What it would also do is set a column that is inside the hash chain to null, so every entry that person ever wrote would stop hashing to its recorded hash and the organization's audit log would report itself as altered. Erasing the fields removes the personal data; deleting the row would remove the ability to prove nothing else had been changed.",
+                "Their personal fields are erased and the account row is kept. The row is kept by choice, not because the database refuses: the audit log references it with ON DELETE SET NULL and the delete would succeed. What it would also do is set a column that is inside the hash chain to null, so every entry that person ever wrote would stop hashing to its recorded hash and the organization\u2019s audit log would report itself as altered. Erasing the fields removes the personal data; deleting the row would remove the ability to prove nothing else had been changed.",
               ],
             ]}
           />

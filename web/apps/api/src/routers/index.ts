@@ -134,30 +134,96 @@ const environmentsRouter = router({
       })
     }),
 
+  /**
+   * Asks for an environment to be removed, and records the asking.
+   *
+   * IT NO LONGER MARKS THE ROW TORN DOWN. That is the whole change and it is
+   * the difference between a button that works and one that looks like it
+   * does. This used to set `state = 'torn_down'` and return, with a comment
+   * saying the engine holding the containers reads this and does the removing.
+   * Nothing read it. Not the engine, not a sweeper, not anything: the containers
+   * kept running and the console said they were gone, which is worse than the
+   * button not existing, because somebody who saw "torn down" stopped looking.
+   *
+   * So it writes a request, and `sweepTeardowns` works through them. The
+   * environments row moves only on an ACKNOWLEDGEMENT: the workflow run holding
+   * it reached a terminal state at GitHub, or the engine reported the teardown
+   * over /v1/events. Where there is no route to the runtime at all, the request
+   * is given up on after its attempts and says so in as many words, naming
+   * `af down`, rather than reporting a cleanup that never happened.
+   */
   teardown: orgProcedure('environments.teardown')
     .input(z.object({ envId: z.string(), reason: z.string().max(500).optional() }))
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       return c.pool.withTenant(c.tenant, async (db) => {
-        const rows = await db.execute<{ id: string; state: string }>(sql`
-          UPDATE environments
-          SET state = 'torn_down', torn_down_at = ${c.clock.now().toISOString()},
-              updated_at = ${c.clock.now().toISOString()}
-          WHERE env_id = ${input.envId} AND state <> 'torn_down'
-          RETURNING id, state::text AS state`)
-        if (rows.length === 0) throw notFound('environment', input.envId)
+        const rows = await db.execute<{
+          id: string
+          state: string
+          repository_id: string
+        }>(sql`
+          SELECT id, state::text AS state, repository_id FROM environments
+          WHERE env_id = ${input.envId}`)
+        const environment = rows[0]
+        if (!environment) throw notFound('environment', input.envId)
+        if (environment.state === 'torn_down') {
+          return { requested: false, envId: input.envId, teardown: 'acknowledged' as const }
+        }
+
+        // The workflow run that built it, when this environment came from a
+        // pull request. It is the only route this control plane has into the
+        // machine holding the containers, so the request carries it: without
+        // one the sweeper has nothing to reach and says so instead of pretending.
+        const runs = await db.execute<{ workflow_run_id: string | null; generation_id: string }>(sql`
+          SELECT g.workflow_run_id::text AS workflow_run_id, g.id AS generation_id
+          FROM pr_generations g
+          WHERE g.env_id = ${input.envId}
+          ORDER BY g.queued_at DESC LIMIT 1`)
+        const run = runs[0] ?? null
+
+        const requested = await db.execute<{ id: string }>(sql`
+          INSERT INTO teardown_requests (
+            org_id, environment_id, env_id, repository_id, workflow_run_id, generation_id,
+            reason, requested_by, requested_at, updated_at)
+          SELECT ${c.actor.orgId}::uuid, ${environment.id}::uuid, ${input.envId},
+                 ${environment.repository_id}::uuid, ${run?.workflow_run_id ?? null}::bigint,
+                 ${run?.generation_id ?? null}::uuid,
+                 ${input.reason ?? 'asked for in the console'}, ${c.actor.userId}::uuid,
+                 ${c.clock.now().toISOString()}::timestamptz, ${c.clock.now().toISOString()}::timestamptz
+          -- One live request per environment. Pressing the button twice is a
+          -- person wondering whether the first press worked, not a second
+          -- instruction, and two rows would be two cancels and one confusing
+          -- history.
+          WHERE NOT EXISTS (
+            SELECT 1 FROM teardown_requests t
+            WHERE t.env_id = ${input.envId} AND t.state IN ('pending', 'leased'))
+          RETURNING id`)
 
         await audit(db, c, {
-          action: 'environment.torn_down',
+          action: 'environment.teardown_requested',
           targetType: 'environment',
           targetId: input.envId,
-          detail: { reason: input.reason ?? null },
+          detail: {
+            reason: input.reason ?? null,
+            // Said in the audit entry as well as in the response, because the
+            // question a reader of the log asks first is whether there was
+            // anything to reach.
+            route: run?.workflow_run_id ? 'the workflow run that built it' : 'none',
+          },
         })
         await adopted(db, c, 'environment_torn_down')
-        // The row is marked here; the engine that holds the containers reads
-        // this and does the removing. The control plane has no route into a
-        // developer's machine and must never pretend otherwise.
-        return { requested: true, envId: input.envId }
+        return {
+          requested: true,
+          envId: input.envId,
+          teardown: 'pending' as const,
+          // Said out loud, because "requested" and "removed" are different
+          // things and this endpoint used to report the second while doing the
+          // first. `already` covers the second press.
+          pending:
+            requested.length === 0
+              ? 'A teardown was already asked for and has not been confirmed yet.'
+              : 'The environment disappears here when the runtime confirms it is gone.',
+        }
       })
     }),
 })
