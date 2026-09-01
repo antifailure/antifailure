@@ -109,13 +109,14 @@ the checks behind this page still describe what is about to run. Ask, rather
 than assume:
 
 ```sh
-git diff --stat 499d28b..origin/main -- \
+git diff --stat 8389faf..origin/main -- \
   .github/workflows/release.yml .github/workflows/cd.yml \
-  tools/release/ tools/sbomcheck/ tools/ldcheck/ deploy/cd/ install.sh \
+  tools/release/ tools/sbomcheck/ tools/ldcheck/ tools/relnotes/ \
+  tools/tagsync/ deploy/cd/ install.sh \
   web/packages/db/migrations/
 ```
 
-Empty output means this page still holds. Anything in the first six paths means
+Empty output means this page still holds. Anything outside `migrations/` means
 the pipeline changed and the rehearsal behind this page no longer covers it. A
 new file under `migrations/` means production is being asked to apply a
 migration nobody on this page has read, and that one is worth stopping for: a
