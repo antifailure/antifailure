@@ -768,12 +768,18 @@ var siteClaims = []siteClaim{
 		// also says the engine does not use it.
 		requires: regexp.MustCompile(`(?i)not a client certificate|rather than mutual TLS|never used mutual TLS`),
 		premise: [2]string{"engine/internal/controlplane/client.go",
-			`req.Header.Set("authorization", "Bearer "+c.token)`},
-		reason: "the engine authenticates with a bearer token, not a client certificate, " +
-			"and the token is good for ninety days (CLI_TOKEN_TTL_MS). The architecture " +
-			"page claimed short-lived mTLS four times and both halves were false. If " +
-			"client certificates are ever really used, delete this rule; the premise " +
-			"beside it is what tells you the day that happens",
+			`req.Header.Set("authorization", "Bearer "+c.bearer())`},
+		reason: "the engine authenticates with a bearer token, not a client certificate. " +
+			"The architecture page claimed short-lived mTLS four times and both halves " +
+			"were false. If client certificates are ever really used, delete this rule; " +
+			"the premise beside it is what tells you the day that happens. " +
+			"The premise anchored on `c.token` until the credential became mutable: it " +
+			"is now read through c.bearer() under a mutex, because a token minted from a " +
+			"workflow identity is short lived and is replaced in place when the control " +
+			"plane refuses a batch. The header is the fact worth anchoring and it is " +
+			"unchanged; only the accessor moved. The half of the old reason about ninety " +
+			"days is gone with it, because it is now true of a pasted CLI token and false " +
+			"of a minted one, and a premise that is half true anchors nothing",
 	},
 	{
 		name:      "there is no hosted control plane",
