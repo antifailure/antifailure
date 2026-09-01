@@ -61,8 +61,9 @@ jobs:
         # nothing compared. Its generator ran in exactly one place, release.yml,
         # which writes it into the published artifact rather than checking it,
         # so the committed copy drifted 49 modules behind with every step green.
-        # What ships was right and what a legal reader opens in this repository
-        # was not, which is the half of the problem no release job can see.
+        # A release published a fresh file while this repository carried a stale
+        # one, and the stale one is what a legal review opens. No release job
+        # can see that half of it, because it never reads the committed copy.
         run: |
           go run ./tools/errgen
           go run ./tools/proxysrc
