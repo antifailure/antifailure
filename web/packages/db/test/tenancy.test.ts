@@ -95,6 +95,14 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'or the user code the caller already holds, the same shape as oauth_states',
       ],
       ['schema_migrations', "the schema's own bookkeeping, not tenant data"],
+      [
+        'platform_controls',
+        'configuration for the installation rather than data belonging to a tenant, so there ' +
+          'is no org_id to key a policy on. Reading is open to the application role on purpose: ' +
+          'every request has to be able to learn that the installation is paused. Writing is ' +
+          'gated on antifailure.platform_admin, which only pool.withPlatformAdmin sets, so no ' +
+          'tenant-scoped connection can change a switch. See migrations/0029.',
+      ],
     ])
 
     // Partitions are excluded because a partition is storage for its parent

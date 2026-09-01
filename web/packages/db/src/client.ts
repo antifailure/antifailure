@@ -205,6 +205,21 @@ export interface Pool {
    * cannot be running under it.
    */
   withSweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn on a connection allowed to CHANGE the installation's switches.
+   *
+   * Not an RLS bypass and not a wider tenant. `platform_controls` has no
+   * org_id to key a policy on, so its write policy is gated on the setting
+   * this declares and nothing else in this file sets. That is what makes a
+   * bug in an ordinary tenant route unable to disable signups: the statement
+   * matches no policy and writes nothing, rather than being stopped by a
+   * permission check somebody could forget to add.
+   *
+   * It grants nothing over tenant data. Every tenant-scoped policy keys on
+   * current_org(), which is empty here, so this connection reads no
+   * organization's rows at all.
+   */
+  withPlatformAdmin<T>(fn: (db: Db) => Promise<T>): Promise<T>
   /** The raw client, for migrations and tests only. */
   sql: postgres.Sql
   close(): Promise<void>
@@ -290,6 +305,12 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          // Cleared explicitly on both general purpose scopes. set_config is
+          // transaction local so it would revert anyway; stating it here means
+          // the guarantee that an ordinary route cannot write the
+          // installation's switches is readable in this function rather than
+          // inferred from the third argument to set_config.
+          'antifailure.platform_admin': '',
         },
         fn,
       )
@@ -331,6 +352,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          'antifailure.platform_admin': '',
         },
         fn,
       )
@@ -464,6 +486,30 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': 'on',
+        },
+        fn,
+      )
+    },
+    withPlatformAdmin(fn) {
+      return scoped(
+        {
+          // Every tenant key cleared, so this connection reads no
+          // organization's rows. It is narrower than withoutTenant, not wider.
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
+          'antifailure.platform_admin': 'on',
         },
         fn,
       )

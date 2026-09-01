@@ -125,6 +125,7 @@ import { openApiDocument } from './openapi.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { limitFor, bucketFor, ENDPOINT_LIMITS, type EndpointLimit } from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
+import { engagedReason } from './admin/controls.ts'
 import {
   HOSTED_ACCESS_MESSAGE,
   hasHostedAccess,
@@ -243,6 +244,20 @@ export const GRANTABLE_SCOPES: readonly string[] = [
   'tokens.manage',
 ]
 
+
+
+/**
+ * The reason maintenance is engaged, or null.
+ *
+ * Named so that the catalog entry in admin/controls.ts can point at a real
+ * function and a test can assert the pointer is not stale. It reads on a
+ * connection with no tenant, which the read policy on platform_controls
+ * deliberately admits: every request has to be able to learn that the
+ * installation is paused, including requests that have no organization yet.
+ */
+export async function refuseDuringMaintenance(pool: Pool): Promise<string | null> {
+  return pool.withoutTenant((db) => engagedReason(db, 'maintenance'))
+}
 
 export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
@@ -366,6 +381,52 @@ export function createServer(options: ServerOptions) {
     if (!c.res.headers.get('content-security-policy')) {
       c.header('content-security-policy', "default-src 'none'; frame-ancestors 'none'")
     }
+  })
+
+  // -------------------------------------------------------------------------
+  // Maintenance mode.
+  // -------------------------------------------------------------------------
+  //
+  // Refuses everything that CHANGES something, for every organization, while
+  // the installation's maintenance switch is engaged. Four things are
+  // deliberately still allowed, and each one is the difference between a pause
+  // and an outage this product caused:
+  //
+  //   Reads. An operator and a customer can both still see what the state is,
+  //   which is what people do first when something is paused.
+  //
+  //   /auth. If signing in were refused, the operator who engaged maintenance
+  //   could not authenticate to release it, and the only way back would be a
+  //   deploy or a psql session. That is the canonical way a maintenance mode
+  //   becomes the incident.
+  //
+  //   /v1/events. Engines keep reporting. Refusing ingestion does not pause
+  //   anything, it loses the record of work that ran anyway.
+  //
+  //   The admin portal's own procedures. The switch has to be reachable from
+  //   the surface that owns it, and the matching prefix is asserted by a test
+  //   rather than trusted, because a rename here is a lockout.
+  //
+  // Enforced before the routes rather than inside each one, because the failure
+  // this guards against is a route somebody adds later and does not think
+  // about, which is the same reason ENDPOINT_LIMITS is a list rather than a
+  // decorator.
+  const MAINTENANCE_EXEMPT_PREFIXES = ['/auth/', '/v1/events', '/trpc/admin.']
+  app.use('*', async (c, next) => {
+    const method = c.req.method.toUpperCase()
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next()
+    const path = new URL(c.req.url).pathname
+    if (MAINTENANCE_EXEMPT_PREFIXES.some((p) => path.startsWith(p))) return next()
+    const reason = await refuseDuringMaintenance(options.pool)
+    if (reason === null) return next()
+    return c.json(
+      {
+        error:
+          `This installation is paused for maintenance: ${reason}. Nothing has been lost, ` +
+          `everything can still be read, and work that was already running is untouched.`,
+      },
+      503,
+    )
   })
 
   // Liveness. Deliberately a static literal that touches nothing: it answers

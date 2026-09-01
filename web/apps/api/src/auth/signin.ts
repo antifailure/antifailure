@@ -20,6 +20,7 @@ import { appendAudit } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import type { GitHubClient, GitHubUser } from './github.ts'
 import type { Role } from '../permissions.ts'
+import { engagedReason } from '../admin/controls.ts'
 
 /** How long the browser has to come back from GitHub. */
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000
@@ -132,6 +133,37 @@ export interface CompletedSignIn {
  * Consuming the state and exchanging the code both happen before anything is
  * written, so a replayed callback cannot create a user or a session.
  */
+
+/**
+ * Refuses somebody this installation has never seen while sign-ups are paused.
+ *
+ * Named so that the catalog entry in admin/controls.ts points at a real
+ * function, and exported so a test can drive it directly as well as through
+ * the callback.
+ *
+ * A known account is never refused. That is the entire difference between this
+ * and the allowlist, and it is the reason the switch is safe to reach for: an
+ * operator pausing sign-ups during an incident must not also be signing out
+ * every customer who is mid-task.
+ */
+export async function refuseNewAccounts(pool: Pool, githubId: number): Promise<void> {
+  const reason = await pool.withoutTenant((db) => engagedReason(db, 'signups'))
+  if (reason === null) return
+  const known = await pool.withoutTenant(
+    async (db) => {
+      const rows = await db.execute<{ n: string }>(sql`
+        SELECT count(*) AS n FROM users WHERE github_id = ${githubId}`)
+      return Number(rows[0]?.n ?? 0) > 0
+    },
+    { githubIds: [githubId] },
+  )
+  if (known) return
+  throw new SignInError(
+    `New sign-ups are paused on this installation: ${reason}. ` +
+      `Accounts that already exist are unaffected.`,
+  )
+}
+
 export async function completeSignIn(
   pool: Pool,
   clock: Clock,
@@ -174,6 +206,22 @@ export async function completeSignIn(
         'GitHub account to the allowlist.',
     )
   }
+
+  // The installation's sign-up switch, checked in the same place and for the
+  // same reason as the allowlist above: before the user row, before the
+  // membership lookup, before anything is written.
+  //
+  // It refuses only people this installation has never seen. An allowlist
+  // refuses everybody not named on it, including somebody who has been signing
+  // in for a year, and that is the right shape for an allowlist and the wrong
+  // shape for a pause. What an operator wants during an incident is "stop new
+  // accounts appearing", not "lock out the customers".
+  //
+  // The githubIds declaration is what makes the read possible at all: see
+  // migrations/0006, writing to users is permitted and reading it is not,
+  // except for the ids the caller names. The id here came from GitHub moments
+  // ago for the person holding this code.
+  await refuseNewAccounts(pool, user.id)
 
   const orgs = await github.organizationsFor(accessToken)
 
