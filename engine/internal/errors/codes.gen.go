@@ -93,13 +93,16 @@ const (
 	AFDB010 Code = "AF-DB-010"
 	// The subset could not be taken: {detail}
 	AFDB011 Code = "AF-DB-011"
-	// No golden matches this manifest's masking rules, and {count} were
-	// made under different ones.
+	// No golden here was made for this project, and {count} were made for
+	// something else.
 	AFDB012 Code = "AF-DB-012"
 	// The database seed command failed: {detail}
 	AFDB013 Code = "AF-DB-013"
 	// No database branch exists for {env}.
 	AFDB014 Code = "AF-DB-014"
+	// The published golden {version} in {store} was made for a different
+	// project.
+	AFDB015 Code = "AF-DB-015"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
@@ -666,8 +669,8 @@ var catalog = map[Code]Entry{
 	AFDB012: {
 		Code:      AFDB012,
 		Area:      "DB",
-		Message:   "No golden matches this manifest's masking rules, and {count} were made under different ones.",
-		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names.",
+		Message:   "No golden here was made for this project, and {count} were made for something else.",
+		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names. A golden is chosen by the project it was made for, the database it was copied from, the masking rules, the subset and the Postgres version, so one belonging to another project on this machine is never branched here.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -686,6 +689,15 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "No database branch exists for {env}.",
 		NextStep:  "Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB015: {
+		Code:      AFDB015,
+		Area:      "DB",
+		Message:   "The published golden {version} in {store} was made for a different project.",
+		NextStep:  "Name a version this project published with 'af golden pull <version>', or run 'af golden refresh' on a machine that can reach the source. A store is shared, so the newest object in it is not necessarily yours.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,

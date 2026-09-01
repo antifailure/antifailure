@@ -67,6 +67,20 @@ describe('signing in and installing, in both orders', {
    * is exactly the shape of dead code this repository keeps shipping: it
    * compiles, it reads as a feature, and the behaviour never happens.
    */
+  // Unique per delivery, the way GitHub's own identifier is. The endpoint fences
+  // on it: a delivery arriving twice is answered without the handler running,
+  // and one with no identifier at all is refused rather than handled unfenced,
+  // because a delivery that cannot be recorded cannot be fenced. A fixture that
+  // sent no header, or the same one every time, would be a fixture that does
+  // not look like GitHub.
+  //
+  // Reusing one id for every delivery would be worse than omitting it: the
+  // second delivery would come back 200 as a replay having run nothing, and the
+  // test below that sends the same installation twice on purpose would pass
+  // while proving nothing.
+  let deliveries = 0
+  const deliveryRun = randomUUID().slice(0, 8)
+
   async function deliver(payload: Record<string, unknown>): Promise<Response> {
     const body = JSON.stringify(payload)
     return h.fetch('/webhooks/github', {
@@ -74,6 +88,7 @@ describe('signing in and installing, in both orders', {
       headers: {
         'content-type': 'application/json',
         'x-github-event': 'installation',
+        'x-github-delivery': `installorder-${deliveryRun}-${(deliveries += 1)}`,
         'x-hub-signature-256':
           'sha256=' + createHmac('sha256', SECRET).update(body, 'utf8').digest('hex'),
       },
@@ -225,6 +240,12 @@ describe('signing in and installing, in both orders', {
     const first = await membership(login)
     assert.equal(first?.role, 'owner')
 
+    // A DIFFERENT delivery identifier on purpose, which `deliver` gives it.
+    // Reusing one would make the endpoint answer this as a replay without
+    // running the handler at all, and the test would pass while proving
+    // nothing about whether adoptInstaller is idempotent. The endpoint's fence
+    // and the handler's idempotence are two separate properties and this test
+    // is about the second.
     assert.equal((await deliver(payload)).status, 200)
     const second = await membership(login)
     assert.deepEqual(second, first, 'a redelivery changed the membership it had already written')

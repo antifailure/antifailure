@@ -217,8 +217,14 @@ func forkRun(e *Env, branch, docsBase string, d forkDecision) report.Run {
 //
 // What stops that being a silent pass is the report: the headline is "Nothing
 // ran." and the first line under it is bold and says the check did not run.
-func skippedRun(e *Env, run report.Run, output string) error {
-	writeReport(e, run, output)
+//
+// Both report files, not just the Markdown one. main's `--report-json` landed
+// after this was written, and the workflow's publish step runs only when
+// report.json exists. Writing the Markdown alone here would make a refused fork
+// the one outcome a control plane never hears about, which is the outcome it
+// most needs in order to say what label to add.
+func skippedRun(e *Env, run report.Run, output, jsonOutput string) error {
+	writeReport(e, run, output, jsonOutput)
 	return nil
 }
 
