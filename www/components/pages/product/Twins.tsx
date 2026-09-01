@@ -1,10 +1,4 @@
-import {
-  PageHeading,
-  PageHero,
-  PageSection,
-  PageShell,
-  Split,
-} from "@/components/pages/kit";
+import { PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { PTW01, PTW02, PTW03, PTW04, PTW05 } from "@/components/pages/figures/product";
 import { MonoLabel, Node } from "@/components/home/visuals/primitives";
@@ -137,7 +131,7 @@ export function TwinsPage() {
         </Illustrative>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <Split visual={<PTW03 items={ISOLATION} />}>
           <PageHeading
             title="<strong>Isolation is a spec, not a hope.</strong> An unresolved secret fails closed and stops the run."
@@ -151,7 +145,7 @@ export function TwinsPage() {
         </Split>
       </PageSection>
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split visual={<PTW04 />}>
           <PageHeading title="<strong>A preview URL is not the product.</strong> The twin exists to answer whether the deployment is safe, then it is destroyed." />
           <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
@@ -197,6 +191,14 @@ export function TwinsPage() {
         </Split>
       </PageSection>
 
+
+      <RelatedGrid
+        items={[
+          { href: "/product/safe-state", title: "Safe State", description: "What gets restored into the twin." },
+          { href: "/product/architecture", title: "Architecture", description: "Customer-hosted data plane." },
+          { href: "/product/report", title: "Safety Report", description: "What the run says it could not measure." },
+        ]}
+      />
     </PageShell>
   );
 }

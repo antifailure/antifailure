@@ -1,13 +1,5 @@
 import { Illustrative } from "@/components/layout/Illustrative";
-import {
-  Callout,
-  FeatureGrid,
-  PageHeading,
-  PageHero,
-  PageSection,
-  PageShell,
-  Split,
-} from "@/components/pages/kit";
+import { Callout, FeatureGrid, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { PSS01, PSS02, PSS03, PSS04 } from "@/components/pages/figures/product";
 
 export function SafeStatePage() {
@@ -34,7 +26,7 @@ export function SafeStatePage() {
           ]}
         />
       </PageSection>
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <Split visual={<PSS02 />}>
           <PageHeading title="<strong>A 12% subset that still joins.</strong> Dropped parents take their children. Rare rows stay." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
@@ -66,7 +58,7 @@ export function SafeStatePage() {
           </p>
         </Split>
       </PageSection>
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split visual={<PSS04 />}>
           <PageHeading
             kicker="Customer-hosted masking"
@@ -84,6 +76,14 @@ export function SafeStatePage() {
           </div>
         </Split>
       </PageSection>
+
+      <RelatedGrid
+        items={[
+          { href: "/product/firewall", title: "Side-Effect Firewall", description: "The twin cannot act on the real world." },
+          { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
+          { href: "/product/migrations", title: "Migration Safety", description: "What a branch with production's shape shows." },
+        ]}
+      />
     </PageShell>
   );
 }

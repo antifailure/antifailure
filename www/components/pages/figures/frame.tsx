@@ -62,8 +62,21 @@ export function FigLabel({
   );
 }
 
-export function FigCmd({ children }: { children: ReactNode }) {
+export function FigCmd({ children, dark = false }: { children: ReactNode; dark?: boolean }) {
   return (
-    <span className="font-mono text-[11px] tracking-extra-tight text-[#33bf00]">{children}</span>
+    <span
+      className={cn(
+        "font-mono text-[11px] tracking-extra-tight",
+        // Two class strings rather than a default plus an override, because cn
+        // is a plain join: an override would put both colours on the element
+        // and let stylesheet order pick. The neon green is only legible on the
+        // dark frame. On the light one it measures 2.28:1 against #f7f7f5,
+        // where 4.5:1 is the floor, so the light frame takes the same
+        // #285D49 the product pages already use for green ink on cream.
+        dark ? "text-[#33bf00]" : "text-[#285D49]",
+      )}
+    >
+      {children}
+    </span>
   );
 }

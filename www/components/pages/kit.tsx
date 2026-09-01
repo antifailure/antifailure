@@ -182,16 +182,28 @@ export function PageSection({
 }: {
   children: ReactNode;
   className?: string;
-  tone?: "plain" | "sage" | "white";
+  /**
+   * Named for what the band paints, not for a colour it stopped painting.
+   *
+   * These were "sage" and "white". This branch takes the sage out of the
+   * inner pages, so "sage" was emitting bg-white and "white" was emitting no
+   * background at all and inheriting the page's #f7f7f5. Both names were then
+   * wrong, and inverted with respect to each other, across forty call sites.
+   *
+   * plain: the page ground, no rule above it.
+   * panel: a raised white band with a rule above it and more air.
+   * ruled: the page ground with a rule above it.
+   */
+  tone?: "plain" | "panel" | "ruled";
 }) {
   return (
     <section
       className={cn(
         "safe-paddings",
         tone === "plain" && "py-28 max-xl:py-20 max-md:py-14",
-        tone === "sage" &&
+        tone === "panel" &&
           "border-t border-black/12 bg-white py-32 max-xl:py-24 max-md:py-16",
-        tone === "white" && "border-t border-black/12 py-28 max-xl:py-20 max-md:py-14",
+        tone === "ruled" && "border-t border-black/12 py-28 max-xl:py-20 max-md:py-14",
         className,
       )}
     >

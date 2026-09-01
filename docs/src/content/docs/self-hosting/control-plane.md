@@ -32,6 +32,29 @@ teardown reads the local journal rather than the control plane.
 
 ## Running one
 
+### Which tag to run
+
+`main-b53906a` is a published image, and the tag names the commit it was built
+from. Every push to `main` publishes `main-<short sha>`, so a newer one is
+usually available; list what exists with
+
+```sh
+curl -s "https://ghcr.io/token?scope=repository:antifailure/control-plane:pull&service=ghcr.io" \
+  | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' \
+  | xargs -I{} curl -s -H "Authorization: Bearer {}" \
+    https://ghcr.io/v2/antifailure/control-plane/tags/list
+```
+
+**Do not run `:latest` or `:v0.1.1`.** They are the same image, and it predates
+this page. The `v0.1.1` git tag was cut for a CLI release before the Dockerfile
+existed, so the image under that name was published later from a different
+commit; it has no `/readyz`, and `apps/api/src/backup-cli.ts` is not in it, so
+steps 3 and 4 below cannot run against it. A tag that names its commit is the
+only one this project can hold itself to, and `tools/claimcheck` fails the build
+if the tag pinned on this page is one whose commit does not carry every file the
+page tells you to run.
+
+
 Four steps, and the order is not optional. The first two stand the server up.
 The second two give it a tenant and an owner, and skipping them is the mistake
 that makes a fresh control plane look broken: a tenant normally begins when
@@ -44,7 +67,7 @@ organization, no page in the console can be reached, and nothing explains why.
 docker run --rm \
   -e AF_MIGRATION_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
-  ghcr.io/antifailure/control-plane:v0.1.1 node bootstrap.mjs
+  ghcr.io/antifailure/control-plane:main-b53906a node bootstrap.mjs
 
 # 2. Serve. Note what is absent: no migration credential, and no AF_MIGRATE.
 docker run \
@@ -52,7 +75,7 @@ docker run \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
   -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
-  -p 8080:8080 ghcr.io/antifailure/control-plane:v0.1.1
+  -p 8080:8080 ghcr.io/antifailure/control-plane:main-b53906a
 ```
 
 ```sh

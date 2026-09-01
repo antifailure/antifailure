@@ -1,13 +1,4 @@
-import {
-  Callout,
-  FeatureGrid,
-  PageHeading,
-  PageHero,
-  PageSection,
-  PageShell,
-  Split,
-  Steps,
-} from "@/components/pages/kit";
+import { Callout, FeatureGrid, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split, Steps } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { PMG01, PMG02, PMG03, PMG04 } from "@/components/pages/figures/product";
 import { cn } from "@/lib/cn";
@@ -61,7 +52,7 @@ export function MigrationsPage() {
         visual={<PMG01 captions={CAPTIONS} />}
       />
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split visual={<PMG02 />}>
           <PageHeading
             kicker="The finding"
@@ -97,7 +88,7 @@ export function MigrationsPage() {
         </Illustrative>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <Split visual={<PMG03 source={INSIGHTS} />}>
           <PageHeading title="<strong>Measured, not inferred.</strong> The lock comes from pg_locks and the rewrite from Postgres itself." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
@@ -171,6 +162,14 @@ export function MigrationsPage() {
         </div>
       </PageSection>
 
+
+      <RelatedGrid
+        items={[
+          { href: "/solutions", title: "Solutions", description: "The teams who feel this first." },
+          { href: "/product/report", title: "Safety Report", description: "How the lock becomes a GitHub check." },
+          { href: "/docs/guides/invariants", title: "Invariants docs", description: "The subscriptions demo in full." },
+        ]}
+      />
     </PageShell>
   );
 }

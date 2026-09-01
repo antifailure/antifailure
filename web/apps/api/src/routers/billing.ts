@@ -64,7 +64,8 @@ async function plans(c: OrgContext) {
       holding: { environments: Number(row.environments), goldens: Number(row.goldens) },
       // Said in the payload rather than only in a comment, because the console
       // renders it and somebody reading the API has to know too.
-      takesPayment: false,
+      takesPayment: c.stripe !== null,
+      hostedRequiredPlan: c.hostedRequiredPlan,
     }
   })
 }
@@ -83,6 +84,13 @@ export const billingRouter = router({
     .input(z.object({ plan: z.enum(PLANS), reason: z.string().max(500).optional() }))
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
+      if (c.stripe || c.hostedRequiredPlan) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            'This installation derives paid plans from Stripe. Use checkout or the billing portal; the plan cannot be set directly.',
+        })
+      }
       const changed = await c.pool.withTenant(c.tenant, async (db) => {
         const rows = await db.execute<{ plan: string }>(sql`
           UPDATE organizations

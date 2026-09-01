@@ -65,28 +65,51 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 say "Downloading $name"
 fetch "$base/$name.tar.gz" "$tmp/$name.tar.gz" || die "could not download $base/$name.tar.gz"
 
-# The checksum is checked rather than assumed. A download over a hijacked
-# network is exactly the thing a tool that runs unreviewed code should not
-# shrug at.
-if fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null; then
-  expected=$(grep " $name.tar.gz\$" "$tmp/checksums.txt" | awk '{print $1}' | head -1)
-  if [ -n "$expected" ]; then
-    if command -v shasum >/dev/null 2>&1; then
-      actual=$(shasum -a 256 "$tmp/$name.tar.gz" | awk '{print $1}')
-    elif command -v sha256sum >/dev/null 2>&1; then
-      actual=$(sha256sum "$tmp/$name.tar.gz" | awk '{print $1}')
-    else
-      actual=""
-      say "warning: no sha256 tool was found, so the download was not verified"
-    fi
-    if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
-      die "the download does not match its published checksum; refusing to install"
-    fi
-    [ -n "$actual" ] && say "Checksum verified"
+# The checksum is checked rather than assumed, and there is no path through
+# this block that installs an unverified archive.
+#
+# IT USED TO FAIL OPEN THREE WAYS, and README told people it did not. A missing
+# checksums.txt printed a warning and installed; a machine with neither shasum
+# nor sha256sum printed a warning and installed; a checksums.txt with no line
+# for this archive skipped the comparison in silence. Only a positive mismatch
+# stopped anything. Every one of those is the case an attacker arranges: the
+# whole point of tampering with a download is that you also control what else
+# the same server hands out, so "the checksum file was not there" is not the
+# benign case, it is the interesting one.
+#
+# A warning inside `curl | sh` is worth nothing anyway. It scrolls past on a
+# machine that is already executing the thing being warned about.
+#
+# The cost of closing it is real and it is small: an installer that stops on a
+# release with no checksums.txt. Both published releases have one, the release
+# workflow builds it from the per-artifact .sha256 files and signs it with
+# sigstore, and it verifies the archives against it before publishing. So this
+# refuses nothing that exists today, and it refuses everything that should be
+# refused tomorrow.
+need_sum() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    return 1
   fi
-else
-  say "warning: no checksum file was published for $VERSION"
-fi
+}
+
+fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null \
+  || die "no checksums.txt was published for $VERSION, so the download cannot be verified; refusing to install"
+
+expected=$(grep " $name.tar.gz\$" "$tmp/checksums.txt" | awk '{print $1}' | head -1)
+[ -n "$expected" ] \
+  || die "checksums.txt for $VERSION names no $name.tar.gz, so the download cannot be verified; refusing to install"
+
+actual=$(need_sum "$tmp/$name.tar.gz") \
+  || die "neither shasum nor sha256sum is on this machine, so the download cannot be verified; refusing to install"
+
+[ "$actual" = "$expected" ] \
+  || die "the download does not match its published checksum; refusing to install"
+
+say "Checksum verified"
 
 tar -C "$tmp" -xzf "$tmp/$name.tar.gz"
 mkdir -p "$BIN_DIR" "$PREFIX"

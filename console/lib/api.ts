@@ -29,6 +29,11 @@ export interface Session {
   /** The ways in this deployment offers, when signed out. Absent from an
    *  older control plane, which is read as GitHub alone rather than as none. */
   methods?: string[];
+  signupsOpen?: boolean;
+  githubAppInstallUrl?: string;
+  plan?: string | null;
+  hostedRequiredPlan?: string | null;
+  hostedAccess?: boolean;
 }
 
 export class ApiError extends Error {

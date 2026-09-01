@@ -93,13 +93,16 @@ const (
 	AFDB010 Code = "AF-DB-010"
 	// The subset could not be taken: {detail}
 	AFDB011 Code = "AF-DB-011"
-	// No golden matches this manifest's masking rules, and {count} were
-	// made under different ones.
+	// No golden here was made for this project, and {count} were made for
+	// something else.
 	AFDB012 Code = "AF-DB-012"
 	// The database seed command failed: {detail}
 	AFDB013 Code = "AF-DB-013"
 	// No database branch exists for {env}.
 	AFDB014 Code = "AF-DB-014"
+	// The published golden {version} in {store} was made for a different
+	// project.
+	AFDB015 Code = "AF-DB-015"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
@@ -158,6 +161,8 @@ const (
 	AFGH001 Code = "AF-GH-001"
 	// The GitHub API rejected the request: {detail}
 	AFGH002 Code = "AF-GH-002"
+	// Nothing ran, because of the fork policy on the base branch. {detail}
+	AFGH003 Code = "AF-GH-003"
 
 	// Infrastructure
 	// The cloud API returned a quota error for {quota} in {region}.
@@ -184,6 +189,8 @@ const (
 	AFLOD014 Code = "AF-LOD-014"
 	// The scenario {scenario} proved nothing: {detail}
 	AFLOD015 Code = "AF-LOD-015"
+	// The p95_increase threshold proved nothing: {detail}
+	AFLOD016 Code = "AF-LOD-016"
 
 	// Manifest
 	// No antifailure.yaml was found in {path} or any parent directory.
@@ -316,6 +323,8 @@ const (
 	// {kind} {name} was not created by this runtime, so it was not
 	// removed.
 	AFRUN045 Code = "AF-RUN-045"
+	// AF_PORT_RANGE_START is set to {value}, which is not a port number.
+	AFRUN046 Code = "AF-RUN-046"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -660,8 +669,8 @@ var catalog = map[Code]Entry{
 	AFDB012: {
 		Code:      AFDB012,
 		Area:      "DB",
-		Message:   "No golden matches this manifest's masking rules, and {count} were made under different ones.",
-		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names.",
+		Message:   "No golden here was made for this project, and {count} were made for something else.",
+		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names. A golden is chosen by the project it was made for, the database it was copied from, the masking rules, the subset and the Postgres version, so one belonging to another project on this machine is never branched here.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -680,6 +689,15 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "No database branch exists for {env}.",
 		NextStep:  "Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB015: {
+		Code:      AFDB015,
+		Area:      "DB",
+		Message:   "The published golden {version} in {store} was made for a different project.",
+		NextStep:  "Name a version this project published with 'af golden pull <version>', or run 'af golden refresh' on a machine that can reach the source. A store is shared, so the newest object in it is not necessarily yours.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -873,6 +891,15 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitAuth,
 	},
+	AFGH003: {
+		Code:      AFGH003,
+		Area:      "GH",
+		Message:   "Nothing ran, because of the fork policy on the base branch. {detail}",
+		NextStep:  "Add the antifailure:allow label to the pull request, or change github.fork_policy on the base branch.",
+		Docs:      "getting-started/pull-requests",
+		Retryable: false,
+		ExitCode:  ExitPolicyDenied,
+	},
 	AFINF001: {
 		Code:      AFINF001,
 		Area:      "INF",
@@ -959,6 +986,15 @@ var catalog = map[Code]Entry{
 		Area:      "LOD",
 		Message:   "The scenario {scenario} proved nothing: {detail}",
 		NextStep:  "A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFLOD016: {
+		Code:      AFLOD016,
+		Area:      "LOD",
+		Message:   "The p95_increase threshold proved nothing: {detail}",
+		NextStep:  "The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone.",
 		Docs:      "concepts/load",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
@@ -1327,7 +1363,7 @@ var catalog = map[Code]Entry{
 		Code:      AFRUN009,
 		Area:      "RUN",
 		Message:   "No free port was found in the range {range} to publish the environment on.",
-		NextStep:  "Free a port in that range, or set runtime.port_from in the manifest to a range that is clear.",
+		NextStep:  "Free a port in that range, or set AF_PORT_RANGE_START to the first port of a range that is clear.",
 		Docs:      "guides/local-runtime",
 		Retryable: true,
 		ExitCode:  ExitFailure,
@@ -1419,6 +1455,15 @@ var catalog = map[Code]Entry{
 		Message:   "{kind} {name} was not created by this runtime, so it was not removed.",
 		NextStep:  "Remove it yourself if you meant to, or use an environment id this runtime placed. 'af env list' shows the ones it owns.",
 		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN046: {
+		Code:      AFRUN046,
+		Area:      "RUN",
+		Message:   "AF_PORT_RANGE_START is set to {value}, which is not a port number.",
+		NextStep:  "Set it to the first port of a free range, between {limit}, or unset it to use the default.",
+		Docs:      "guides/local-runtime",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},

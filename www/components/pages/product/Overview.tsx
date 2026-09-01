@@ -1,13 +1,4 @@
-import {
-  Faq,
-  type FaqItem,
-  PageHeading,
-  PageHero,
-  PageSection,
-  PageShell,
-  Split,
-  Steps,
-} from "@/components/pages/kit";
+import { Faq, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split, Steps, type FaqItem } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { POV01, POV02, POV03, POV04 } from "@/components/pages/figures/product";
 import { MonoLabel, StatusPill } from "@/components/home/visuals/primitives";
@@ -83,7 +74,7 @@ const PRODUCT_FAQ: FaqItem[] = [
   {
     question: "How do I know the masking actually worked?",
     answer:
-      "A scanner reads back every column of every table looking for anything that still parses as an email, a card number, a phone number, or a key, then signs an attestation. An unverified golden cannot be branched, and that is enforced in code rather than in a checklist.",
+      "A scanner reads back every column of every table, sampling rows rather than reading all of them, looking for anything that still parses as an email, a card number, a phone number, or a key, then signs an attestation that records the sample size. An unverified golden cannot be branched, and that is enforced in code rather than in a checklist.",
   },
   {
     question: "What stops a test run from emailing real customers or charging a real card?",
@@ -159,7 +150,7 @@ export function OverviewPage() {
         </div>
       </PageSection>
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <Split visual={<POV02 rows={STAGING_ROWS} />}>
           <PageHeading title="<strong>The question staging cannot answer.</strong> What happens when this change meets real data, concurrency, workers, and the deploy process." />
           <p className="mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
@@ -217,7 +208,7 @@ export function OverviewPage() {
         </div>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="ruled">
         <PageHeading title="<strong>The output is a decision.</strong> Not a dataset. Not a preview URL alone." />
         <ul className="relative mt-16 grid grid-cols-3 gap-x-16 max-xl:grid-cols-1 max-xl:gap-y-10">
           {VERDICTS.map((item) => (
@@ -257,6 +248,14 @@ export function OverviewPage() {
         <Faq path="/product" items={PRODUCT_FAQ} />
       </PageSection>
 
+
+      <RelatedGrid
+        items={[
+          { href: "/product/twins", title: "Isolated Twin", description: "How the orchestrator provisions and tears down." },
+          { href: "/product/migrations", title: "Migration Safety", description: "Locks, rewrites and plans, before it ships." },
+          { href: "/docs", title: "Docs", description: "How a twin run works, end to end." },
+        ]}
+      />
     </PageShell>
   );
 }
