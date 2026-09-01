@@ -243,7 +243,8 @@ export async function handleLifecycleDelivery(
     case 'workflow_run':
       return handleWorkflowRun(deps, login, payload)
     case 'check_run':
-      return handleCheckRun(deps, login, payload)
+    case 'check_suite':
+      return handleRerequest(deps, login, payload)
     default:
       return {
         handled: false,
@@ -804,10 +805,20 @@ async function markRunning(
 interface CheckRunPayload {
   action: string
   check_run?: { id?: number; head_sha?: string }
+  check_suite?: { id?: number; head_sha?: string }
   repository?: { full_name?: string }
 }
 
-async function handleCheckRun(
+/**
+ * The Re-run button, in both of its shapes.
+ *
+ * GitHub has two. Re-run on one check sends `check_run` rerequested, and
+ * "Re-run all checks" on the checks page sends `check_suite` rerequested.
+ * Handling only the first leaves the button most people press doing nothing at
+ * all, with no error anywhere, which is the shape of defect this repository
+ * keeps finding. Both carry the head commit and that is all this needs.
+ */
+async function handleRerequest(
   deps: LifecycleDeps,
   login: string,
   raw: Record<string, unknown>,
@@ -821,7 +832,9 @@ async function handleCheckRun(
     }
   }
   const repository = payload.repository?.full_name
-  const headSha = payload.check_run?.head_sha
+  // Either shape. check_run carries the commit for one check, check_suite for
+  // all of them, and both name the same commit.
+  const headSha = payload.check_run?.head_sha ?? payload.check_suite?.head_sha
   if (!repository || !headSha) {
     return {
       handled: false,

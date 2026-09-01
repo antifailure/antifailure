@@ -15,7 +15,7 @@
 
 import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { createHmac, generateKeyPairSync } from 'node:crypto'
+import { createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import {
   appConfigFrom,
   appJwt,
@@ -562,8 +562,8 @@ describe('the webhook endpoint', {
       SELECT id FROM organizations
       WHERE github_login IN ('endpoint-test-org', 'replay-test-org', 'concurrent-test-org')`
     for (const row of rows) await dropOrg(api.admin, row.id)
-    await api.admin`DELETE FROM github_deliveries WHERE delivery_id LIKE 'test-delivery-%'
-      OR delivery_id LIKE 'replay-fence-%' OR delivery_id LIKE 'concurrent-fence-%'`
+    await api.admin`DELETE FROM github_deliveries WHERE delivery_id LIKE ${'%-' + run} 
+      OR delivery_id LIKE ${'test-delivery-' + run + '-%'}`
     await api.close()
   })
 
@@ -572,6 +572,11 @@ describe('the webhook endpoint', {
   // here, which made every delivery after the first a replay the moment the
   // ledger existed. Worth keeping as a shape: a fixture that reuses an
   // identifier is a fixture that cannot see a replay fence working OR failing.
+  // Unique to this PROCESS. The ledger is durable, so a fixed identifier makes
+  // every delivery of a second run a replay of the first run's, and a suite
+  // that died before its cleanup would leave every later run reporting the
+  // state its predecessor left.
+  const run = randomUUID().slice(0, 8)
   let deliveries = 0
   async function deliver(
     event: string,
@@ -582,7 +587,9 @@ describe('the webhook endpoint', {
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       'x-github-event': event,
-      'x-github-delivery': opts.deliveryId ?? `test-delivery-${(deliveries += 1)}`,
+      'x-github-delivery': opts.deliveryId
+        ? `${opts.deliveryId}-${run}`
+        : `test-delivery-${run}-${(deliveries += 1)}`,
     }
     const signature = opts.signature ?? sign(body, opts.secret ?? SECRET)
     if (signature) headers['x-hub-signature-256'] = signature
@@ -734,7 +741,7 @@ describe('the webhook endpoint', {
     )
 
     const [ledger] = await api.admin<{ n: number }[]>`
-      SELECT count(*)::int AS n FROM github_deliveries WHERE delivery_id = 'replay-fence-1'`
+      SELECT count(*)::int AS n FROM github_deliveries WHERE delivery_id = ${`replay-fence-1-${run}`}`
     assert.equal(ledger!.n, 1)
   })
 
@@ -757,7 +764,7 @@ describe('the webhook endpoint', {
     assert.deepEqual(statuses, [200, 503])
 
     const [ledger] = await api.admin<{ n: number }[]>`
-      SELECT count(*)::int AS n FROM github_deliveries WHERE delivery_id = 'concurrent-fence-1'`
+      SELECT count(*)::int AS n FROM github_deliveries WHERE delivery_id = ${`concurrent-fence-1-${run}`}`
     assert.equal(ledger!.n, 1)
   })
 

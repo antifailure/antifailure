@@ -129,6 +129,13 @@ describe(
     let org: Org
     let repository: string
     const installationId = 918_000
+    // Unique to this PROCESS, not to this file. The delivery ledger is durable,
+    // so a counter that restarts at one makes every delivery of a second run a
+    // replay of the first run's, answered without the handler running. The
+    // symptom is a test that passes on a fresh database and fails on a re-run,
+    // reporting the state its predecessor left rather than anything about the
+    // code, which is the least debuggable shape a test can have.
+    const deliveryRun = randomUUID().slice(0, 8)
     let deliveries = 0
 
     before(async () => {
@@ -152,6 +159,7 @@ describe(
     })
 
     after(async () => {
+      await h.admin`DELETE FROM github_deliveries WHERE delivery_id LIKE ${'lifecycle-' + deliveryRun + '-%'}`
       await dropOrg(h.admin, org.orgId)
       await h.close()
     })
@@ -182,7 +190,7 @@ describe(
         headers: {
           'content-type': 'application/json',
           'x-github-event': event,
-          'x-github-delivery': `lifecycle-${(deliveries += 1)}`,
+          'x-github-delivery': `lifecycle-${deliveryRun}-${(deliveries += 1)}`,
           'x-hub-signature-256': sign(body),
         },
         body,
@@ -714,6 +722,48 @@ describe(
       assert.equal((await generation(head))?.state, 'failed')
       assert.equal(checkFor(head)?.conclusion, 'failure')
     })
+
+    // -----------------------------------------------------------------------
+    // The Re-run button, in both of its shapes
+    // -----------------------------------------------------------------------
+
+    for (const shape of ['check_run', 'check_suite'] as const) {
+      it(`${shape} rerequested queues another attempt on the same commit`, async () => {
+        // GitHub has two Re-run buttons and they send different events: one on
+        // a single check, one on the checks page for all of them. Handling only
+        // the first leaves the one most people press doing nothing at all, with
+        // no error anywhere.
+        const head = sha(`rerun-${shape}`)
+        const number = shape === 'check_run' ? 40 : 41
+        const runId = shape === 'check_run' ? 5030 : 5031
+        await deliver('pull_request', pullRequestPayload('opened', number, head))
+        api.addWorkflowRun({ id: runId, repository, status: 'in_progress', conclusion: null, headSha: head })
+        await deliver('workflow_run', workflowRunPayload('in_progress', head, runId))
+        await deliver('workflow_run', workflowRunPayload('completed', head, runId, 'failure'))
+        assert.equal((await generation(head))?.state, 'blocked')
+        assert.equal((await generation(head))?.attempt, 1)
+        // GitHub's own view of the run, which is what a re-run acts on. The
+        // delivery above says the run ended; this is the run having ended.
+        api.finishWorkflowRun(runId, 'failure')
+
+        await deliver(shape, {
+          action: 'rerequested',
+          [shape]: { id: 900, head_sha: head },
+          repository: { full_name: repository, owner: { login: org.slug } },
+          organization: { login: org.slug },
+          installation: { id: installationId },
+        })
+
+        const again = await generation(head)
+        assert.equal(again?.state, 'queued')
+        assert.equal(again?.attempt, 2)
+        assert.equal(again?.detail, null)
+        // Re-running the RUN, not dispatching the workflow: a dispatch names a
+        // ref and a ref moves, so somebody pressing Re-run on an older commit
+        // would get a run against whatever the branch points at now.
+        assert.equal(api.workflowRunById(runId)?.reruns, 1)
+      })
+    }
 
     // -----------------------------------------------------------------------
     // ordering: timeout
