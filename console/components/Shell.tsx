@@ -8,13 +8,13 @@ import {
   IconAudit,
   IconEnvironments,
   IconKeys,
+  IconLoad,
   IconMasking,
   IconMembers,
   IconNetwork,
   IconPlan,
   IconRuns,
   IconSignOut,
-  IconWorkloads,
   LogoMark,
 } from "@/components/icons";
 import { rest, type Session } from "@/lib/api";
@@ -24,7 +24,7 @@ import { Button, Field, Lede, LinkButton, Standalone, inputClass } from "@/compo
 const NAV = [
   { href: "/environments", label: "Environments", Icon: IconEnvironments },
   { href: "/runs", label: "Runs", Icon: IconRuns },
-  { href: "/workloads", label: "Workloads", Icon: IconWorkloads },
+  { href: "/load", label: "Load", Icon: IconLoad },
   { href: "/masking", label: "Masking", Icon: IconMasking },
   { href: "/network", label: "Network", Icon: IconNetwork },
   { href: "/audit", label: "Audit", Icon: IconAudit },

@@ -12,7 +12,7 @@ import { Bar, Button, Card, TableSkeleton } from "@/components/ui";
  * Why this did not load, told apart rather than lumped together.
  *
  * The shared `ErrorState` in ui.tsx splits two ways, forbidden and everything
- * else, which is right for the screens it was written for. The Studio needs
+ * else, which is right for the screens it was written for. This area needs
  * four, because the four have four different remedies and offering "Try again"
  * to somebody whose role is wrong is a button that exists to be refused:
  *
@@ -25,7 +25,7 @@ import { Bar, Button, Card, TableSkeleton } from "@/components/ui";
  * fetch into status 0 with code NETWORK, and without this branch that renders
  * as "The control plane answered 0", which is both untrue and useless.
  */
-export function WorkloadError({
+export function LoadError({
   error,
   retry,
   back,
@@ -39,19 +39,19 @@ export function WorkloadError({
   const disconnected = error.status === 0 || error.code === "NETWORK";
 
   const title = denied
-    ? "Your role cannot see workloads"
+    ? "Your role cannot see load runs"
     : missing
-      ? "That workload is not here"
+      ? "That is not here"
       : disconnected
         ? "The control plane did not answer"
         : "That did not load";
 
   const body = denied
-    ? "Reading workloads needs a role that holds environments.view. An owner or an admin can change yours on the Members page."
+    ? "Reading load sources and their runs needs a role that holds environments.view. An owner or an admin can change yours on the Members page."
     : missing
-      ? "The address names a definition or a run that does not exist, or that belongs to another organization. It may have been deleted."
+      ? "The address names a source or a run that does not exist, or one that belongs to another organization. It may have been deleted."
       : disconnected
-        ? "The request did not reach the control plane, so nothing is known about the state of your workloads. This is a connection problem rather than an answer."
+        ? "The request did not reach the control plane, so nothing is known about the state of your load runs. This is a connection problem rather than an answer."
         : error.message;
 
   return (
@@ -84,10 +84,10 @@ export function WorkloadError({
  * reflow under a reader who has already started looking at it. Static, like
  * every other skeleton in this console.
  */
-export function DefinitionSkeleton() {
+export function SourceSkeleton() {
   // No role="status" on this wrapper. TableSkeleton carries one of its own, and
   // nesting two live regions made a screen reader announce "Loading" twice, as
-  // "LoadingLoading the workload". One announcement, from the shared component,
+  // "LoadingLoading the source". One announcement, from the shared component,
   // is also what every other screen in this console does.
   return (
     <div className="space-y-6">
@@ -114,7 +114,7 @@ export function DefinitionSkeleton() {
 /** A wait shaped like the run detail: a status line, four stat tiles, then
  *  the result tables. */
 export function RunSkeleton() {
-  // See DefinitionSkeleton: one live region, and it is TableSkeleton's.
+  // See SourceSkeleton: one live region, and it is TableSkeleton's.
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-rule bg-card">
@@ -160,7 +160,7 @@ export function PartialNotice({ reason }: { reason: "running" | "cancelled" }) {
     >
       {reason === "running"
         ? "These numbers cover the part of the run that has landed so far. They will change while it is still going."
-        : "This run was cancelled, so these numbers cover only the part that ran. They are not a measurement of the whole workload."}
+        : "This run was cancelled, so these numbers cover only the part that ran. They are not a measurement of the whole run."}
     </p>
   );
 }
@@ -252,10 +252,10 @@ export function Command({ command }: { command: string | null }) {
 /**
  * A control a role may not use, replaced by the reason rather than removed.
  *
- * Removing it is the usual choice and it is worse here: a viewer who has been
- * sent a link to a workload and finds no way to run it cannot tell whether the
- * product lacks the feature or their role lacks the permission. Saying which
- * is what turns a dead end into a thing to go and ask for.
+ * Removing it is the usual choice and it is worse here: a viewer sent a link to
+ * a load source who finds no way to run it cannot tell whether the product
+ * lacks the feature or their role lacks the permission. Saying which is what
+ * turns a dead end into a thing to go and ask for.
  */
 export function Denied({ what }: { what: string }) {
   return (

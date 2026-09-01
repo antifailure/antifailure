@@ -19,20 +19,19 @@ import {
   When,
   inputClass,
 } from "@/components/ui";
-import { RunStatusBadge } from "@/components/workloads/primitives";
-import { SourceHeader, SourceView } from "@/components/workloads/sources";
-import { DefinitionSkeleton, Denied, WorkloadError } from "@/components/workloads/states";
+import { StateBadge, VerdictBadge } from "@/components/load/primitives";
+import { SourceHeader, SourceView } from "@/components/load/sources";
+import { Denied, LoadError, SourceSkeleton } from "@/components/load/states";
 import {
   count,
-  getDefinition,
+  getSource,
   listRuns,
   listVersions,
-  promoteDiscovery,
   startRun,
-  type Definition,
   type RunRow,
+  type SourceDetail,
   type Version,
-} from "@/lib/workloads";
+} from "@/lib/load";
 
 interface Environment {
   env_id: string;
@@ -44,21 +43,13 @@ interface Environment {
 /**
  * Starting a run.
  *
- * Baseline and candidate are two presses rather than one, and that is
- * deliberate. A single "compare" button would have to choose when to run each
- * side, and the honest answer is that a baseline is measured against the code
- * before the change and a candidate against the code after it, which is two
- * moments a console cannot schedule on somebody's behalf. Naming the side
- * makes the comparison something a person assembles from two real runs rather
- * than something the product implies it did.
+ * The safe and unsafe patterns are on this form and not buried in a settings
+ * page, because they decide what the run is allowed to do to the twin and a
+ * person pressing Start should be looking at them. The placeholder is a glob
+ * in the engine's own syntax, "GET /api/*", rather than a bare path, since
+ * that is what the matcher takes.
  */
-function Start({
-  definition,
-  onStarted,
-}: {
-  definition: Definition;
-  onStarted: () => void;
-}) {
+function Start({ source, onStarted }: { source: SourceDetail; onStarted: () => void }) {
   const session = useSessionContext();
   const csrf = session.data?.csrfToken ?? "";
   const environments = useApi<{ environments: Environment[] }>(
@@ -67,21 +58,20 @@ function Start({
   );
 
   const [envId, setEnvId] = useState("");
-  const [execution, setExecution] = useState<"baseline" | "candidate">("candidate");
   const [scale, setScale] = useState("1");
   const [duration, setDuration] = useState("60");
   const [concurrency, setConcurrency] = useState("");
-  const [safe, setSafe] = useState("");
+  const [safe, setSafe] = useState("GET /api/*");
   const [unsafe, setUnsafe] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState<string | null>(null);
 
-  const numbers = (v: string) => {
+  const positive = (v: string) => {
     const n = Number(v);
     return v.trim() !== "" && Number.isFinite(n) && n > 0 ? n : undefined;
   };
-  const routes = (v: string) =>
+  const patterns = (v: string) =>
     v
       .split(",")
       .map((r) => r.trim())
@@ -90,10 +80,10 @@ function Start({
   return (
     <Card
       title="Start a run"
-      note="Sends this workload at an environment that is already up, and records the result against this definition."
+      note="Sends this source at an environment that is already up, and records the result here."
     >
       {environments.status === "error" && environments.error ? (
-        <WorkloadError error={environments.error} retry={environments.reload} />
+        <LoadError error={environments.error} retry={environments.reload} />
       ) : environments.status === "loading" || environments.data === null ? (
         <TableSkeleton rows={2} cols={3} />
       ) : (
@@ -112,8 +102,8 @@ function Start({
                   </a>
                 }
               >
-                A workload needs a twin to send traffic at. Ask for an
-                environment, and this fills once the engine reports it is up.
+                Load needs a twin to send traffic at. Ask for an environment,
+                and this fills once the engine reports it is up.
               </Empty>
             );
           }
@@ -129,18 +119,17 @@ function Start({
                 try {
                   const { runId } = await startRun(
                     {
-                      definitionId: definition.id,
+                      sourceId: source.id,
                       envId: chosen,
-                      execution,
-                      ...(numbers(scale) === undefined ? {} : { scale: numbers(scale) }),
-                      ...(numbers(duration) === undefined
+                      ...(positive(scale) === undefined ? {} : { scale: positive(scale) }),
+                      ...(positive(duration) === undefined
                         ? {}
-                        : { durationSeconds: numbers(duration) }),
-                      ...(numbers(concurrency) === undefined
+                        : { durationSeconds: positive(duration) }),
+                      ...(positive(concurrency) === undefined
                         ? {}
-                        : { concurrency: numbers(concurrency) }),
-                      ...(routes(safe).length ? { safeRoutes: routes(safe) } : {}),
-                      ...(routes(unsafe).length ? { unsafeRoutes: routes(unsafe) } : {}),
+                        : { concurrency: positive(concurrency) }),
+                      ...(patterns(safe).length ? { safe: patterns(safe) } : {}),
+                      ...(patterns(unsafe).length ? { unsafe: patterns(unsafe) } : {}),
                     },
                     csrf,
                   );
@@ -171,21 +160,6 @@ function Start({
                     ))}
                   </select>
                 </Field>
-                <Field
-                  label="Side"
-                  hint="Which half of the comparison this run is."
-                >
-                  <select
-                    className={inputClass}
-                    value={execution}
-                    onChange={(e) =>
-                      setExecution(e.target.value === "baseline" ? "baseline" : "candidate")
-                    }
-                  >
-                    <option value="baseline">baseline</option>
-                    <option value="candidate">candidate</option>
-                  </select>
-                </Field>
                 <Field label="Scale" hint="A multiplier on the source's own rate.">
                   <input
                     className={inputClass}
@@ -204,41 +178,40 @@ function Start({
                     placeholder="60"
                   />
                 </Field>
-                <Field
-                  label="Concurrency"
-                  hint="Empty leaves the engine's own default."
-                >
+                <Field label="Concurrency" hint="Empty leaves the engine's own default.">
                   <input
                     className={inputClass}
                     inputMode="numeric"
                     value={concurrency}
                     onChange={(e) => setConcurrency(e.target.value)}
-                    placeholder=""
                   />
                 </Field>
-                <Field label="Safe routes" hint="Comma separated. Read only.">
+                <Field
+                  label="Safe patterns"
+                  hint="Comma separated globs. Nothing is sent unless it matches one."
+                >
                   <input
                     className={inputClass}
                     value={safe}
                     onChange={(e) => setSafe(e.target.value)}
-                    placeholder="/api/products, /api/search"
+                    placeholder="GET /api/*"
                   />
                 </Field>
                 <Field
-                  label="Unsafe routes"
-                  hint="Comma separated. Allowed to change state on the twin."
+                  label="Unsafe patterns"
+                  hint="Named explicitly as allowed to change state on the twin."
                 >
                   <input
                     className={inputClass}
                     value={unsafe}
                     onChange={(e) => setUnsafe(e.target.value)}
-                    placeholder="/api/checkout"
+                    placeholder="POST /api/cart"
                   />
                 </Field>
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <Button type="submit" variant="primary" busy={busy}>
-                  {busy ? "Starting" : `Start the ${execution} run`}
+                  {busy ? "Starting" : "Start the run"}
                 </Button>
                 {error ? (
                   <p role="alert" className="text-[12.5px] leading-6 text-fail">
@@ -248,7 +221,12 @@ function Start({
                   <p role="status" className="text-[12.5px] leading-6 text-muted">
                     {started}
                   </p>
-                ) : null}
+                ) : (
+                  <p className="text-[12.5px] leading-6 text-dim">
+                    Every route is unsafe until a safe pattern matches it, so an empty safe list
+                    sends nothing.
+                  </p>
+                )}
               </div>
             </form>
           );
@@ -258,20 +236,17 @@ function Start({
   );
 }
 
-/** Every version of the definition, so a result can be read against the thing
- *  that produced it. */
 function Versions({ id }: { id: string }) {
   const state = useApi<Version[]>(() => listVersions(id), [id]);
   return (
     <Card title="Versions" note="An edit makes a new version. A run records which one it used.">
       {state.status === "error" && state.error ? (
-        <WorkloadError error={state.error} retry={state.reload} />
+        <LoadError error={state.error} retry={state.reload} />
       ) : state.status === "loading" || state.data === null ? (
         <TableSkeleton rows={3} cols={4} />
       ) : state.data.length === 0 ? (
         <Empty title="No version history">
-          Nothing has been recorded against this definition since it was
-          created.
+          Nothing has been recorded against this source since it was created.
         </Empty>
       ) : (
         <TableWrap>
@@ -290,11 +265,11 @@ function Versions({ id }: { id: string }) {
                 <Row key={v.id}>
                   <Td>{v.version === null ? "--" : `v${v.version}`}</Td>
                   <Td label="Created">
-                    <When value={v.created_at} />
+                    <When value={v.createdAt} />
                   </Td>
                   <Td label="By">{v.author ?? "--"}</Td>
                   <Td label="Runs" numeric>
-                    {count(v.run_count)}
+                    {count(v.runCount)}
                   </Td>
                   <Td label="Note" className="max-w-[40ch]">
                     {v.note ?? "--"}
@@ -309,18 +284,26 @@ function Versions({ id }: { id: string }) {
   );
 }
 
-function RunsFor({ id, onOpen, nonce }: { id: string; onOpen: (runId: string) => void; nonce: number }) {
-  const state = useApi<{ items: RunRow[] }>(() => listRuns({ definitionId: id }), [id, nonce]);
+function RunsFor({
+  id,
+  onOpen,
+  nonce,
+}: {
+  id: string;
+  onOpen: (runId: string) => void;
+  nonce: number;
+}) {
+  const state = useApi<{ items: RunRow[] }>(() => listRuns({ sourceId: id }), [id, nonce]);
   return (
-    <Card title="Runs" note="Every run of this workload, newest first.">
+    <Card title="Runs" note="Every run of this source, newest first.">
       {state.status === "error" && state.error ? (
-        <WorkloadError error={state.error} retry={state.reload} />
+        <LoadError error={state.error} retry={state.reload} />
       ) : state.status === "loading" || state.data === null ? (
-        <TableSkeleton rows={4} cols={4} />
+        <TableSkeleton rows={4} cols={5} />
       ) : state.data.items.length === 0 ? (
         <Empty title="Never run">
-          This workload has been defined but never sent anywhere. Start it above
-          and the result lands here.
+          This source is configured and has never been sent anywhere. Start it
+          above and the result lands here.
         </Empty>
       ) : (
         <TableWrap>
@@ -328,13 +311,12 @@ function RunsFor({ id, onOpen, nonce }: { id: string; onOpen: (runId: string) =>
             <thead>
               <tr>
                 {/* When, not which id. Every row here is a run of the same
-                    workload, so the id distinguishes nothing a person is
-                    looking for, and a truncated one leading the row reads as a
-                    word that got cut off. The id is still the last column for
-                    anybody who needs to quote it. */}
+                    source, so the id distinguishes nothing a person is looking
+                    for, and a truncated one leading the row reads as a word
+                    that got cut off. */}
                 <Th>Started</Th>
-                <Th>Side</Th>
-                <Th>Status</Th>
+                <Th>Verdict</Th>
+                <Th>State</Th>
                 <Th>Finished</Th>
                 <Th>Run</Th>
               </tr>
@@ -343,16 +325,18 @@ function RunsFor({ id, onOpen, nonce }: { id: string; onOpen: (runId: string) =>
               {state.data.items.map((r) => (
                 <Row key={r.id} onClick={() => onOpen(r.id)}>
                   <Td>
-                    <CellLink href={`/workloads?run=${encodeURIComponent(r.id)}`}>
-                      <When value={r.started_at ?? r.created_at} />
+                    <CellLink href={`/load?run=${encodeURIComponent(r.id)}`}>
+                      <When value={r.startedAt ?? r.createdAt} />
                     </CellLink>
                   </Td>
-                  <Td label="Side">{r.execution ?? "--"}</Td>
-                  <Td label="Status">
-                    <RunStatusBadge status={r.status} />
+                  <Td label="Verdict">
+                    <VerdictBadge verdict={r.verdict} />
+                  </Td>
+                  <Td label="State">
+                    <StateBadge state={r.state} />
                   </Td>
                   <Td label="Finished">
-                    {r.finished_at ? <When value={r.finished_at} /> : <span className="text-dim">not yet</span>}
+                    {r.finishedAt ? <When value={r.finishedAt} /> : <span className="text-dim">not yet</span>}
                   </Td>
                   <Td label="Run" mono className="text-dim">
                     {r.id}
@@ -367,7 +351,7 @@ function RunsFor({ id, onOpen, nonce }: { id: string; onOpen: (runId: string) =>
   );
 }
 
-export function DefinitionView({
+export function SourceDetailView({
   id,
   onClose,
   onOpenRun,
@@ -377,33 +361,26 @@ export function DefinitionView({
   onOpenRun: (runId: string) => void;
 }) {
   const session = useSessionContext();
-  const csrf = session.data?.csrfToken ?? "";
   const canRun = may(session.data?.role, "load.run");
-
-  const state = useApi<Definition | null>(() => getDefinition(id), [id]);
+  const state = useApi<SourceDetail | null>(() => getSource(id), [id]);
   const [runNonce, setRunNonce] = useState(0);
-  const [promoting, setPromoting] = useState<string | null>(null);
-  const [promoteError, setPromoteError] = useState<string | null>(null);
 
   if (state.status === "error" && state.error) {
     return (
-      <WorkloadError
+      <LoadError
         error={state.error}
         retry={state.reload}
-        back={<Button onClick={onClose}>Back to workloads</Button>}
+        back={<Button onClick={onClose}>Back to Load</Button>}
       />
     );
   }
-  if (state.status === "loading") return <DefinitionSkeleton />;
-  const definition = state.data;
-  if (definition === null || definition === undefined) {
+  if (state.status === "loading") return <SourceSkeleton />;
+  const source = state.data;
+  if (source === null || source === undefined) {
     return (
-      <Empty
-        title="That workload is not here"
-        action={<Button onClick={onClose}>Back to workloads</Button>}
-      >
-        The address names a definition that does not exist, or one that belongs
-        to another organization.
+      <Empty title="That source is not here" action={<Button onClick={onClose}>Back to Load</Button>}>
+        The address names a source that does not exist, or one that belongs to
+        another organization.
       </Empty>
     );
   }
@@ -411,46 +388,22 @@ export function DefinitionView({
   return (
     <div className="space-y-6">
       <Card
-        title={definition.name}
-        note={definition.repository ?? undefined}
+        title={source.name}
+        note={source.repository ?? undefined}
         actions={<Button onClick={onClose}>Close</Button>}
       >
-        <SourceHeader kind={definition.kind} />
-        {definition.description ? (
-          <p className="border-b border-rule px-4 py-3 text-[13px] leading-6 text-muted">
-            {definition.description}
-          </p>
-        ) : null}
-        <SourceView
-          source={definition.source}
-          canPromote={canRun}
-          promoting={promoting}
-          promoteError={promoteError}
-          onPromote={async (discoveryId, name) => {
-            setPromoting(discoveryId);
-            setPromoteError(null);
-            try {
-              await promoteDiscovery({ definitionId: definition.id, discoveryId, name }, csrf);
-              state.reload();
-            } catch (e) {
-              setPromoteError(
-                e instanceof Error ? e.message : "That discovery could not be promoted.",
-              );
-            } finally {
-              setPromoting(null);
-            }
-          }}
-        />
+        <SourceHeader kind={source.kind} />
+        <SourceView source={source.source} />
       </Card>
 
       {canRun ? (
-        <Start definition={definition} onStarted={() => setRunNonce((n) => n + 1)} />
+        <Start source={source} onStarted={() => setRunNonce((n) => n + 1)} />
       ) : (
         <Denied what="Start a run" />
       )}
 
-      <RunsFor id={definition.id} onOpen={onOpenRun} nonce={runNonce} />
-      <Versions id={definition.id} />
+      <RunsFor id={source.id} onOpen={onOpenRun} nonce={runNonce} />
+      <Versions id={source.id} />
     </div>
   );
 }
