@@ -192,6 +192,12 @@ chosen yet.
 For maintainers. Everything below runs from a tag and nothing runs from a
 branch, because a release built from a branch is a release nobody can reproduce.
 
+The same tag also deploys the hosted control plane, which this page does not
+cover because it is not something a person verifying a download needs to know.
+[Cutting a release](/docs/self-hosting/releasing/) is the operational runbook:
+what green looks like at every stage of both workflows, and what to do when one
+of them goes red.
+
 1. Confirm the gates are green on the commit you are about to tag. `just gate`
    locally, and CI green on the merge.
 2. Write the release's section in `CHANGELOG.md`, headed `## vX.Y.Z`. The
