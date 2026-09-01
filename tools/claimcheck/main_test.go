@@ -523,6 +523,7 @@ func TestEveryRuleCanFail(t *testing.T) {
 		rule, text string
 	}{
 		{"mutual TLS to the control plane", "The agent authenticates with short-lived mTLS."},
+		{"there is no production deployment", "No production deployment. What exists is staging."},
 		{"there is no hosted control plane", "There is no hosted control plane yet."},
 		{"the build runs inside the sandbox", "It builds and runs your services inside a sandbox."},
 		{"the scanner reads every row", "A scanner reads back every column of every table."},
@@ -545,6 +546,25 @@ func TestEveryRuleCanFail(t *testing.T) {
 // has to say the rows are a sample when it does. Both halves are tested,
 // because a rule that fired on the corrected sentence too would be answered by
 // deleting the sentence.
+// The two sided rules must accept the sentence that DENIES the claim, which is
+// the sentence the honest correction has to write. `analytics` found this on
+// its own gate: a pattern a true sentence can contain pushes whoever hits it
+// away from the true wording and toward the false one, and a lookbehind papers
+// over one phrasing and fails on the next.
+func TestTheTwoSidedRulesAcceptTheDenial(t *testing.T) {
+	real := filepath.Join("..", "..")
+	for _, body := range []string{
+		"It is a bearer token, not a client certificate. This is ordinary TLS rather than mutual TLS.\n",
+		"This page said \"No production deployment\", and production was deployed the whole time.\n",
+	} {
+		root := siteFixture(t, real, "www/lib/fixture.ts", body)
+		var out strings.Builder
+		if err := checkSiteClaims(root, &out); err != nil {
+			t.Errorf("the denial was refused: %v\n%s", err, out.String())
+		}
+	}
+}
+
 func TestTheReadBackRuleAcceptsTheDisclosedVersion(t *testing.T) {
 	root := siteFixture(t, filepath.Join("..", ".."), "www/lib/fixture.ts",
 		"A scanner reads back every column of every table, sampling rows rather than all of them.\n")

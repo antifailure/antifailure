@@ -757,6 +757,16 @@ var siteClaims = []siteClaim{
 	{
 		name:      "mutual TLS to the control plane",
 		forbidden: regexp.MustCompile(`(?i)\bmutual TLS\b|\bmTLS\b`),
+		// TWO SIDED, and it started as a plain ban. `analytics` hit the same
+		// trap on a different gate: a substring cannot tell a claim from its
+		// negation, and a pattern a true sentence can contain pushes whoever
+		// hits it AWAY from the true wording. "this is ordinary TLS rather
+		// than mutual TLS" is the sentence this page has to be able to write,
+		// and the first version of this rule refused it. A lookbehind would
+		// paper over that one phrasing and fail on the next, so the rule asks
+		// for the denial instead: a page may name mutual TLS only where it
+		// also says the engine does not use it.
+		requires: regexp.MustCompile(`(?i)not a client certificate|rather than mutual TLS|never used mutual TLS`),
 		premise: [2]string{"engine/internal/controlplane/client.go",
 			`req.Header.Set("authorization", "Bearer "+c.token)`},
 		reason: "the engine authenticates with a bearer token, not a client certificate, " +
@@ -793,6 +803,22 @@ var siteClaims = []siteClaim{
 			"per column. The engine discloses it in the attestation and no customer " +
 			"facing page did. A page may describe the read-back, and it has to say " +
 			"that the rows are a sample when it does",
+	},
+	{
+		name:      "there is no production deployment",
+		forbidden: regexp.MustCompile(`(?i)no production deployment`),
+		// Two sided for the same reason as the rule above: the correction has
+		// to quote the sentence it is correcting, and an honest-disclosure
+		// page that cannot name the item it got wrong is worth less than one
+		// that can.
+		requires: regexp.MustCompile(`(?i)production was deployed|production is deployed`),
+		premise:  [2]string{".github/workflows/cd.yml", "PRODUCTION_URL"},
+		reason: "app.antifailure.dev/readyz returns ready, and staging is a separate, " +
+			"newer deployment at app.dev.antifailure.dev serving a different commit. The " +
+			"sentence sat on the DPA inside the paragraph explaining that a security " +
+			"review will find every gap on the list, so a reviewer checking the address " +
+			"our own README gives them disproved it in thirty seconds and then had cause " +
+			"to doubt every other line on a page whose only asset is that it can be checked",
 	},
 	{
 		name:      "a documentation page count nothing counted",
@@ -952,14 +978,6 @@ type claimException struct {
 // licence nobody granted, and it fails the build. Same rule as notAPath above,
 // for the same reason.
 var siteClaimExceptions = []claimException{
-	{
-		file: "www/components/pages/product/Architecture.tsx",
-		rule: "mutual TLS to the control plane",
-		line: "This is ordinary TLS rather than mutual TLS.",
-		reason: "the sentence that denies mutual TLS. The page has to be able to say " +
-			"what it is not, because a reader who was told mTLS for months needs the " +
-			"correction stated rather than the words quietly removed",
-	},
 	{
 		file: "www/components/AuthScreen.tsx",
 		rule: "there is no hosted control plane",
