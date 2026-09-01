@@ -408,8 +408,44 @@ describe('the subprocessor page describes the code that exists', () => {
     }
   })
 
-  // The assertion that the site loads no third-party script lives on the branch
-  // that adds the beacon, not here. On this branch the claim is unconditionally
-  // true because there is no analytics code at all, so there is nothing for a
-  // gate to compare it against.
+  it('keeps the analytics claim and the analytics code in step, in both directions', async () => {
+    // CONDITIONAL ON THE FILE, NOT ON A FLAG, and that idea is integrator7's
+    // rather than mine. I had deleted this assertion on the branch where the
+    // beacon does not exist, which means somebody has to remember to put it
+    // back the day it does. Keying it on whether the file is there makes it
+    // start asserting on its own, which is the exact failure mode this whole
+    // file exists to prevent.
+    //
+    // The refinement is that BOTH states are asserted rather than one being a
+    // silent skip. A skip reads as a pass, and the two halves of this pair can
+    // drift apart in either direction: a beacon added while the page still says
+    // the site loads no analytics, or the page rewritten to describe a beacon
+    // that is not there. One of those was a real near miss: the branch that
+    // adds the beacon also rewrites this claim, and landing the rewrite without
+    // the beacon would have published a site that counts page views when it
+    // does not.
+    const page = await read('www/lib/subprocessors.ts')
+    const beacon = await read('www/lib/analytics.ts').catch(() => null)
+
+    if (beacon === null) {
+      assert.match(
+        page,
+        /This site loads no analytics and no third-party script/,
+        'there is no www/lib/analytics.ts, so the subprocessor page must still say the site ' +
+          'loads no analytics. It says something else, which means the claim was rewritten ' +
+          'for a beacon that is not in this tree.',
+      )
+      return
+    }
+
+    assert.match(
+      page,
+      /no script from another origin/,
+      'a beacon exists and the subprocessor page still claims the site loads no analytics',
+    )
+    assert.ok(
+      !/https?:\/\/(?!127\.0\.0\.1)/.test(beacon.replace(/CONTROL_PLANE_URL/g, '')),
+      'the site beacon now names an external address, so the no-third-party claim needs revisiting',
+    )
+  })
 })
