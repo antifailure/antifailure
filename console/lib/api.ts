@@ -109,6 +109,15 @@ export async function rest<T>(
   return (await res.json()) as T;
 }
 
+/** Whatever a rejected fetch threw, as the error the screens render. A fetch
+ *  that never reached the control plane rejects with a TypeError, which
+ *  carries no status and no code of ours. */
+function asApiError(e: unknown): ApiError {
+  return e instanceof ApiError
+    ? e
+    : new ApiError("The control plane could not be reached.", 0, "NETWORK");
+}
+
 type State<T> =
   | { status: "loading"; data: null; error: null }
   | { status: "ready"; data: T; error: null }
@@ -138,18 +147,7 @@ export function useApi<T>(fn: () => Promise<T>, deps: unknown[] = []) {
       })
       .catch((error: unknown) => {
         if (!alive.current) return;
-        setState({
-          status: "error",
-          data: null,
-          error:
-            error instanceof ApiError
-              ? error
-              : new ApiError(
-                  "The control plane could not be reached.",
-                  0,
-                  "NETWORK",
-                ),
-        });
+        setState({ status: "error", data: null, error: asApiError(error) });
       });
     return () => {
       alive.current = false;
@@ -164,4 +162,92 @@ export function useApi<T>(fn: () => Promise<T>, deps: unknown[] = []) {
 /** The signed-in session, or the absence of one. */
 export function useSession() {
   return useApi<Session>(() => rest<Session>("/auth/session"), []);
+}
+
+/**
+ * A list that arrives one page at a time, with what is on screen kept.
+ *
+ * `useApi` cannot do this. It resets to `{status: "loading", data: null}` on
+ * every dependency change, which is right for one fetch and wrong for a second
+ * page: asking for more would blank the rows the reader is looking at and then
+ * replace them with the next page rather than adding to it.
+ *
+ * The three list routes page three different ways and none of them can be
+ * guessed at from the outside, so the caller supplies the fetch: `runs.recent`
+ * takes `before` and returns `nextCursor`, `environments.list` takes `cursor`
+ * and returns `nextCursor`, and `audit.list` takes `before` as a number and
+ * returns a bare array, where a full page is the only signal that there is
+ * another. Each page adapts its own route and this holds the rows.
+ *
+ * The failure of a later page is kept apart from the failure of the first,
+ * because they are different events for the reader: the first leaves nothing on
+ * screen and the second leaves a correct partial list that is still worth
+ * reading. So `error` blanks the list and `moreError` sits under it.
+ */
+export function usePages<Row>(
+  fetchPage: (cursor: string | null) => Promise<{ rows: Row[]; next: string | null }>,
+  deps: unknown[] = [],
+) {
+  const [data, setData] = useState<Row[]>([]);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [error, setError] = useState<ApiError | null>(null);
+  const [next, setNext] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [moreError, setMoreError] = useState<ApiError | null>(null);
+  const [nonce, setNonce] = useState(0);
+  const alive = useRef(true);
+  const run = useRef(fetchPage);
+  run.current = fetchPage;
+
+  useEffect(() => {
+    alive.current = true;
+    setStatus("loading");
+    setData([]);
+    setError(null);
+    setNext(null);
+    setMoreError(null);
+    run
+      .current(null)
+      .then((page) => {
+        if (!alive.current) return;
+        setData(page.rows);
+        setNext(page.next);
+        setStatus("ready");
+      })
+      .catch((e: unknown) => {
+        if (!alive.current) return;
+        setError(asApiError(e));
+        setStatus("error");
+      });
+    return () => {
+      alive.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, nonce]);
+
+  const more = useCallback(() => {
+    if (busy || next === null) return;
+    setBusy(true);
+    setMoreError(null);
+    run
+      .current(next)
+      .then((page) => {
+        if (!alive.current) return;
+        setData((held) => [...held, ...page.rows]);
+        setNext(page.next);
+      })
+      .catch((e: unknown) => {
+        if (!alive.current) return;
+        setMoreError(asApiError(e));
+      })
+      .finally(() => {
+        if (alive.current) setBusy(false);
+      });
+  }, [busy, next]);
+
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  // `data` rather than `rows` so this drops into `Loaded` where a `useApi`
+  // was, which is what keeps the loading and error branches in one place
+  // instead of being written out again on every page that pages.
+  return { status, data, error, hasMore: next !== null, more, busy, moreError, reload };
 }
