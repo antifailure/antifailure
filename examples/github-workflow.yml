@@ -40,18 +40,24 @@ on:
         required: true
         default: up
         type: choice
-        # The four workload kinds are spelled the way the control plane spells
-        # them, rather than as verbs of their own. One vocabulary across the
-        # boundary means no translation table, and a translation table is a
-        # place to be wrong that has no reason to exist. The three older verbs
-        # still resolve, so a copy of this file from before the workload
-        # command existed keeps working.
+        # Verbs rather than the control plane's kind names, and the reason is
+        # not aesthetic. GitHub reads this trigger definition from YOUR
+        # DEFAULT BRANCH, and refuses a dispatch carrying a value the file does
+        # not declare with a 422, which is indistinguishable from the file
+        # being missing. Renaming these would make every copy of this file
+        # already in the wild start failing on the two values that work today.
+        #
+        # So the verbs stay and the list grows. `scenario` and `explore` need
+        # this newer file; `up`, `down`, `agents` and `load` work on the older
+        # one too. af workload run accepts both spellings and its result says
+        # which kind a verb resolved to.
         options:
           - up
-          - observed_load
-          - http_scenario
-          - browser_workflow
-          - exploration
+          - down
+          - agents
+          - load
+          - scenario
+          - explore
       workflows:
         description: Comma separated names this workload selects. Empty means all of them.
         required: false
@@ -185,6 +191,12 @@ jobs:
               ;;
             ci)
               af ci --report report.md --report-json report.json
+              ;;
+            down)
+              # The real teardown, with an acknowledgement saying what was
+              # removed and what is still standing. A row marked torn down
+              # while the containers keep running is worse than a failure.
+              af workload teardown --result teardown-result.json
               ;;
             *)
               # Everything else is a workload, and one command runs all four

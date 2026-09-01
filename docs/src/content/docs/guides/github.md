@@ -175,7 +175,7 @@ on:
       command:
         type: choice
         default: up
-        options: [up, observed_load, http_scenario, browser_workflow, exploration]
+        options: [up, down, agents, load, scenario, explore]
       workflows:   { required: false, default: '' }
       duration:    { required: false, default: '' }
       scale:       { required: false, default: '' }
@@ -184,12 +184,19 @@ on:
       run_id:      { required: false, default: '' }
 ```
 
-`up` brings the environment up. The four other values are the
-[workload kinds](/docs/concepts/workloads/), and the step that handles them is
-one `af workload run` invocation rather than a case arm per kind. That command
-refuses an input its kind's command has no flag for, rather than dropping it,
-and writes a result document carrying what was measured and the plain `af`
-command that reproduces it.
+`up` and `down` bring the environment up and take it away. The four other
+values run a [workload](/docs/concepts/workloads/), and the step that handles
+them is one `af workload run` invocation rather than a case arm per verb. That
+command refuses an input the verb's own command has no flag for, rather than
+dropping it, and writes a result document carrying what was measured and the
+plain `af` command that reproduces it.
+
+The values are verbs rather than the kind names the control plane stores, and
+that is deliberate. GitHub reads this trigger list from your **default
+branch** and answers a dispatch carrying an undeclared value with a 422, which
+looks exactly like the file being missing. Renaming them would make every copy
+of this file already in the wild start failing on the values that work today.
+`scenario` and `explore` need this newer file; the rest work on the older one.
 
 `examples/github-workflow.yml` carries the whole file. Two things about this
 cost an afternoon if you meet them the hard way: GitHub reads the trigger list
@@ -197,9 +204,8 @@ from the **default branch**, so adding `workflow_dispatch` on a feature branch
 alone changes nothing, and a dispatch to a workflow without it answers 404
 rather than saying what is wrong.
 
-The older `agents` and `load` values still resolve, to `browser_workflow` and
-`observed_load`, so a copy of this file taken before the workload command
-existed keeps working.
+`agents` resolves to a browser workflow and `load` to an observed load mix. The
+result says which kind a verb resolved to, so nobody has to infer it.
 
 The control plane records nothing about the environment when it dispatches.
 The run appears in your Actions tab, and the environment appears in the console
