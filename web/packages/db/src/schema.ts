@@ -838,6 +838,62 @@ export const teardownRequests = pgTable('teardown_requests', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index('teardown_requests_org_idx').on(t.orgId, t.requestedAt)])
 
+/* ---------------------------------------------------------------------------
+ * The operator portal (0029)
+ *
+ * Deliberately absent from tenantScopedTables below. None of these three has an
+ * org_id and none of them should: an operator is not a tenant, and the audit
+ * row records what an operator did rather than something an organization owns.
+ * ------------------------------------------------------------------------ */
+
+export const adminUsers = pgTable('admin_users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull(),
+  name: text('name').notNull(),
+  role: text('role').notNull(),
+  /** Null until provisioned, and a null hash cannot be signed in against. */
+  passwordHash: bytea('password_hash'),
+  passwordSalt: bytea('password_salt'),
+  passwordSetAt: timestamp('password_set_at', { withTimezone: true }),
+  isRoot: boolean('is_root').notNull().default(false),
+  suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+  suspendedReason: text('suspended_reason'),
+  lastSignedInAt: timestamp('last_signed_in_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const adminSessions = pgTable('admin_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tokenHash: bytea('token_hash').notNull(),
+  adminUserId: uuid('admin_user_id').notNull(),
+  ip: inet('ip'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+})
+
+export const adminAuditEntries = pgTable('admin_audit_entries', {
+  seq: bigserial('seq', { mode: 'number' }).primaryKey(),
+  adminUserId: uuid('admin_user_id'),
+  actorLabel: text('actor_label').notNull(),
+  action: text('action').notNull(),
+  targetType: text('target_type').notNull(),
+  targetId: text('target_id'),
+  /** The tenant an action concerned, when it concerned one. Not org_id: the
+   *  row belongs to the platform, not to that tenant. */
+  subjectOrgId: uuid('subject_org_id'),
+  subjectOrgLabel: text('subject_org_label'),
+  origin: text('origin').notNull(),
+  ip: inet('ip'),
+  detail: jsonb('detail').notNull().default({}),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  prevHash: text('prev_hash'),
+  entryHash: text('entry_hash').notNull(),
+})
+
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
