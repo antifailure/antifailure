@@ -190,27 +190,42 @@ site's own web fonts, so the type is the reader's system stack with the site's
 type scale and tracking applied over it, and every colour is copied by value
 from the console's palette.
 
-## The one manual step
+## The two steps left for a person
 
-Publishing `status-data` as a URL is a repository setting: **Settings > Pages
-> Deploy from a branch > `status-data` / `/ (root)`**. Nothing in this
-repository can flip that switch, the same way nothing in `deploy.yml` can set
-the static site's publish token. Both are one person's action, once, and both
-say so in the workflow that is otherwise ready and waiting. Until it is set,
-the workflow still runs. It still writes `status-data`, and the record is
-still there to read with `git log` or by cloning that branch. There is simply
-no public URL yet.
+Neither of these can be done from inside this repository, the same way nothing
+in `deploy.yml` can set the static site's publish token. Both are one person's
+action, once, and everything either one depends on is already built and
+running.
 
-A `status.antifailure.dev` subdomain is a second, separate action, and it is
-optional. GitHub Pages serves the branch at a `github.io` address without it.
-Pointing a subdomain at that address is a `CNAME` record and a custom domain
-entry in the same Pages settings.
+**Turn on Pages.** Settings > Pages > Build and deployment > Deploy from a
+branch > branch `status-data`, folder `/ (root)` > Save. The page appears at
+`https://antifailure.github.io/antifailure/` within a minute or two of the
+next probe. That address needs nothing else: the page carries its own
+stylesheet and asks for no other file, so serving it under a path prefix
+changes nothing about how it renders. Until this is done the workflow still
+runs, still writes `status-data`, and the record is still readable with
+`git log` or by cloning that branch. There is simply no public URL.
 
-Note what the subdomain must not be: a route on `antifailure.dev`. That
-hostname is the Static Web App, so serving the status page from it would put
-the page and the site it reports on in the same Azure region, and an Azure
-event would take both down together. That is the exact failure this whole
-design avoids.
+**Optionally, point a subdomain at it.** A `CNAME` for `status` in the
+`antifailure.dev` zone, targeting `antifailure.github.io`, plus the same name
+entered under Settings > Pages > Custom domain, which writes a `CNAME` file
+into `status-data`. The probe only ever stages `history.json`, `daily.json`
+and `index.html`, so that file survives every push it makes.
+
+Read the order of those two the way the first one is written: **enable Pages
+first and publish the `github.io` address, rather than waiting for the
+subdomain.** The subdomain is the nicer link and it is the weaker one. The
+`antifailure.dev` zone is Azure DNS, so resolving `status.antifailure.dev`
+puts a piece of Azure back in the path to the page whose entire purpose is to
+be readable when Azure is having a bad day. It is a much smaller dependency
+than hosting would be, and cached resolutions soften it further, but it is not
+nothing, and `antifailure.github.io` has none of it. Publish both and give the
+`github.io` address as the fallback in the incident note.
+
+What the subdomain must not be is a route on `antifailure.dev` itself. That
+hostname is the Static Web App, so serving this page from it would put the
+page and the site it reports on in the same Azure region, and one event would
+take both down together. That is the exact failure this whole design avoids.
 
 ## What this is not
 
