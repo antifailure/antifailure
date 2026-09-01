@@ -283,19 +283,31 @@ export function RunView({
             {run.kind ? <KindMark kind={run.kind} /> : null}
           </div>
 
-          {/* Both sentences, because state and verdict are two answers and
-              neither implies the other. A run that succeeded and failed every
-              threshold needs the second sentence to make sense of the first. */}
-          {/* text-pretty, because these two sit one under the other at the same
-              measure and the second one's last line was a single word. */}
-          <p className="mt-2 max-w-[70ch] text-pretty text-[12.5px] leading-6 text-muted">
-            {STATE_FACTS[run.state].meaning}
-          </p>
-          <VerdictNote verdict={run.verdict} />
+          {/* What happened to THIS run first, then what its state means, and
+              the second only when it adds something.
 
+              The control plane records a detail on an abandoned run that says
+              the same thing this console's own sentence about `abandoned`
+              says, so printing both was a stutter: two paragraphs, one fact.
+              The row's detail wins because it is specific, and it can also
+              carry something the state cannot, such as a dispatch GitHub
+              refused. `succeeded` is the exception and keeps its sentence
+              either way, because there the point is that the state is not the
+              verdict, which no detail is going to say.
+
+              text-pretty: these sit one under the other at one measure, and
+              the last line of the second was a single word. */}
           {run.detail ? (
-            <p className="mt-2 max-w-[70ch] text-[12.5px] leading-6 text-muted">{run.detail}</p>
+            <p className="mt-2 max-w-[70ch] text-pretty text-[12.5px] leading-6 text-muted">
+              {run.detail}
+            </p>
           ) : null}
+          {run.detail === null || run.state === "succeeded" ? (
+            <p className="mt-2 max-w-[70ch] text-pretty text-[12.5px] leading-6 text-muted">
+              {STATE_FACTS[run.state].meaning}
+            </p>
+          ) : null}
+          <VerdictNote verdict={run.verdict} />
           {run.failureCode ? (
             <p className="mt-2 text-[12.5px] leading-6 text-muted">
               Error code{" "}
