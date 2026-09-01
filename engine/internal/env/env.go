@@ -730,6 +730,7 @@ func (o *Orchestrator) newRuntime() (provider.Runtime, error) {
 	case schema.RuntimeLocal:
 		return local.New(local.Options{
 			Clock: o.opts.Clock, Redactor: o.opts.Redactor, TTL: o.ttl(),
+			Getenv: o.opts.Getenv,
 		})
 	case schema.RuntimeKubernetes:
 		return o.newKubernetesRuntime(cfg)
@@ -794,7 +795,9 @@ func (o *Orchestrator) resolveProxyImage(ctx context.Context) (string, error) {
 	if image := getenv("AF_PROXY_IMAGE"); image != "" {
 		return image, nil
 	}
-	builder, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
+	builder, err := local.New(local.Options{
+		Clock: o.opts.Clock, Redactor: o.opts.Redactor, Getenv: o.opts.Getenv,
+	})
 	if err != nil {
 		return "", aferrors.Coded(aferrors.AFRUN044, "detail",
 			"the egress sidecar image is built on a local container daemon and none "+
@@ -837,7 +840,7 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 	switch kind {
 	case schema.DBDocker:
 		p, err := dockerdb.New(dockerdb.Options{
-			Version: databaseVersion(m), Clock: o.opts.Clock,
+			Version: databaseVersion(m), Clock: o.opts.Clock, Getenv: o.opts.Getenv,
 		})
 		if err != nil {
 			return nil, err

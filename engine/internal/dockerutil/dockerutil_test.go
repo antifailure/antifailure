@@ -1,6 +1,7 @@
 package dockerutil_test
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -172,4 +173,62 @@ func TestHost_FallsBackToTheUnixSocket(t *testing.T) {
 	h := dockerutil.Host()
 	require.NotEmpty(t, h)
 	require.True(t, strings.Contains(h, "://"), "an endpoint is a URL, and errors print it")
+}
+
+func TestPortRangeFrom_DefaultsWhenTheVariableIsUnset(t *testing.T) {
+	t.Parallel()
+	from, err := dockerutil.PortRangeFrom(func(string) string { return "" })
+	require.NoError(t, err)
+	require.Equal(t, dockerutil.DefaultPortFrom, from)
+}
+
+func TestPortRangeFrom_MovesTheRangeTheVariableNames(t *testing.T) {
+	t.Parallel()
+	from, err := dockerutil.PortRangeFrom(func(k string) string {
+		require.Equal(t, "AF_PORT_RANGE_START", k)
+		return " 51000 "
+	})
+	require.NoError(t, err)
+	require.Equal(t, 51000, from)
+}
+
+func TestPortRangeFrom_RefusesAValueThatCannotBeAPort(t *testing.T) {
+	t.Parallel()
+	// Silently ignoring a value the user set would leave them looking at the
+	// range they were trying to move away from with nothing to explain it, so
+	// every one of these is an error that names the variable.
+	for _, raw := range []string{"no", "80", "70000", "-1", "43000ports", "65535"} {
+		_, err := dockerutil.PortRangeFrom(func(string) string { return raw })
+		require.Error(t, err, "%q is not a usable range start", raw)
+		var coded *aferrors.Error
+		require.True(t, aferrors.As(err, &coded))
+		require.Contains(t, coded.Message(), "AF_PORT_RANGE_START")
+		require.Contains(t, coded.Message(), raw)
+	}
+}
+
+func TestIsPortTaken_MatchesBothWaysTheDaemonSaysIt(t *testing.T) {
+	t.Parallel()
+	// Both messages come from the daemon: the first when another container
+	// holds the port, the second when a process on the host does. Both were
+	// observed against a real daemon, and both mean the same retry.
+	require.True(t, dockerutil.IsPortTaken(errors.New(
+		"Error response from daemon: driver failed programming external "+
+			"connectivity on endpoint x: Bind for 127.0.0.1:46000 failed: "+
+			"port is already allocated")))
+	require.True(t, dockerutil.IsPortTaken(errors.New(
+		"Error response from daemon: ports are not available: exposing port "+
+			"TCP 127.0.0.1:50133 -> 127.0.0.1:0: listen tcp4 127.0.0.1:50133: "+
+			"bind: address already in use")))
+
+	// Narrow on purpose. A retry of any of these would spend four attempts
+	// arriving at the same answer more slowly.
+	require.False(t, dockerutil.IsPortTaken(nil))
+	require.False(t, dockerutil.IsPortTaken(errors.New(
+		"Error response from daemon: permission denied while trying to "+
+			"connect to the Docker daemon socket")))
+	require.False(t, dockerutil.IsPortTaken(errors.New(
+		"Cannot connect to the Docker daemon at unix:///var/run/docker.sock")))
+	require.False(t, dockerutil.IsPortTaken(errors.New(
+		"Error response from daemon: no such image")))
 }
