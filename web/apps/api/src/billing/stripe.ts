@@ -98,6 +98,15 @@ export interface StripeClient {
 
   /** The hosted page somebody changes a plan, a card, or a cancellation on. */
   createPortalSession(input: { customerId: string; returnUrl: string }): Promise<{ url: string }>
+  /**
+   * Changes where the receipts go.
+   *
+   * Stripe puts this address on every invoice and every receipt it sends, so a
+   * billing contact recorded only in this database would be a setting that
+   * looks changed and changes nothing a customer's finance department ever
+   * sees. This is the write that makes it real.
+   */
+  updateCustomerEmail(customerId: string, email: string): Promise<StripeCustomer>
 
   /** What Stripe currently believes about a subscription. Null when Stripe has
    *  never heard of it, which is a real answer during reconciliation and not an
@@ -185,6 +194,11 @@ export class RealStripeClient implements StripeClient {
     const url = text(session.url)
     if (!url) throw new StripeError('Stripe returned a portal session with no address to send anybody to.')
     return { url }
+  }
+
+  async updateCustomerEmail(customerId: string, email: string): Promise<StripeCustomer> {
+    const body = new URLSearchParams({ email })
+    return customerOf(await this.post(`/v1/customers/${encodeURIComponent(customerId)}`, body))
   }
 
   async getSubscription(id: string): Promise<StripeSubscription | null> {

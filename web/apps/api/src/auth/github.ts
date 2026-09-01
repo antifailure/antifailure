@@ -74,6 +74,21 @@ export interface GitHubClient {
     ref: string,
     inputs: Record<string, string>,
   ): Promise<void>
+  /**
+   * Uninstalls the App from an account, for an organization that is being
+   * deleted.
+   *
+   * `removed` false means GitHub had no such installation, which is success
+   * rather than failure: a deletion that is re-entered reaches this twice.
+   * The refusal that matters is a throw, and it stops the deletion rather than
+   * letting it purge an organization whose App is still installed and still
+   * able to dispatch workflows.
+   *
+   * Returns `configured: false` when no GitHub App is set up at all, which is
+   * the ordinary self-hosted case. The caller records that it did not call
+   * GitHub rather than recording that GitHub said no.
+   */
+  revokeInstallation(installationId: number): Promise<{ configured: boolean; removed: boolean }>
 }
 
 export interface GitHubConfig {
@@ -82,9 +97,13 @@ export interface GitHubConfig {
   redirectUri: string
   apiBase?: string
   webBase?: string
-  /** Mints installation tokens. Absent when no GitHub App is configured, and
-   *  membersOf says so rather than returning an empty list. */
-  installationTokens?: { for(installationId: number): Promise<string> }
+  /** Mints installation tokens, and removes installations. Absent when no
+   *  GitHub App is configured, and membersOf says so rather than returning an
+   *  empty list. */
+  installationTokens?: {
+    for(installationId: number): Promise<string>
+    revoke(installationId: number): Promise<{ removed: boolean }>
+  }
 }
 
 export class GitHubError extends Error {}
@@ -290,6 +309,16 @@ export class RealGitHubClient implements GitHubClient {
    * trigger list from the DEFAULT branch, so a workflow that only gained
    * `workflow_dispatch` on a feature branch cannot be dispatched at all.
    */
+  async revokeInstallation(installationId: number): Promise<{ configured: boolean; removed: boolean }> {
+    const tokens = this.config.installationTokens
+    // No App configured at all. Reported rather than thrown: a self-hosted
+    // control plane with no GitHub App has no installation to remove, and a
+    // deletion must not stop on the absence of a thing that was never there.
+    if (!tokens) return { configured: false, removed: false }
+    const { removed } = await tokens.revoke(installationId)
+    return { configured: true, removed }
+  }
+
   async dispatchWorkflow(
     installationId: number,
     repository: string,
