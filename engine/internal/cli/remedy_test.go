@@ -2,8 +2,14 @@ package cli_test
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -91,8 +97,16 @@ func resolve(root *cobra.Command, words []string) (cmd *cobra.Command, flags []s
 		cmd = child
 	}
 	for ; i < len(words); i++ {
-		if strings.HasPrefix(words[i], "--") {
-			flags = append(flags, strings.TrimPrefix(words[i], "--"))
+		if !strings.HasPrefix(words[i], "--") {
+			continue
+		}
+		// A remedy ends in a full stop and a sentence ends in one wherever the
+		// flag is the last word, so "af init --force." named a flag called
+		// "force." and was reported as missing. The punctuation is not part of
+		// the flag.
+		name := strings.TrimRight(strings.TrimPrefix(words[i], "--"), ".,;:!?)'\"")
+		if name != "" {
+			flags = append(flags, name)
 		}
 	}
 	return cmd, flags, unknownCommand
@@ -115,6 +129,13 @@ func isCommandLike(w string) bool {
 // hasFlag asks the command whether it would accept the flag, inherited
 // persistent flags included, because that is what the reader's shell will do.
 func hasFlag(cmd *cobra.Command, name string) bool {
+	// cobra adds --help when it executes a command, not when the tree is
+	// built, so an un-executed tree says every command lacks the one flag all
+	// of them have. Asked for here so that this answers what the binary would
+	// accept rather than what the tree happens to hold right now: without it,
+	// "af --help lists every command" was reported as naming a flag that does
+	// not exist.
+	cmd.InitDefaultHelpFlag()
 	if cmd.Flags().Lookup(name) != nil {
 		return true
 	}
@@ -254,5 +275,93 @@ func TestTheExtractorFindsCommandsInEveryShapeTheCatalogUses(t *testing.T) {
 		if strings.Join(got, "|") != strings.Join(c.want, "|") {
 			t.Errorf("from %q got %v, want %v", c.text, got, c.want)
 		}
+	}
+}
+
+// The same class again, one level over: a command named in a string the engine
+// PRINTS, rather than in the catalog or in a page.
+//
+// `af init` writes a README into .antifailure telling the reader that if they
+// delete the journal while an environment is running they should run
+// `af down --all`. There is no --all. That one is the most durable of the three
+// instances of that exact flag, because it is written to a file on disk rather
+// than printed once, and neither the catalog sweep nor the documentation sweep
+// could see it: it is a Go string literal.
+//
+// Scoped to FLAGS on purpose, and the limit is written here rather than in a
+// report. A bare invented command name cannot be separated from prose in a
+// string literal: "run af down again", "af golden refresh has nothing to
+// compile" and "af down clears it" are all ordinary sentences that start with a
+// real command, and a rule that read the next word as a subcommand would report
+// every one of them. Measured rather than assumed: over these files the naive
+// version produced roughly thirty findings and about a third were sentences.
+// A flag is unambiguous, because prose does not contain --words, and the flags
+// are where both live defects were.
+//
+// So this cannot see `af summon` written into a string. The catalog sweep and
+// the documentation sweep can, in the places they cover.
+
+// goStringLiterals returns every string constant in a package's non test files,
+// read through go/parser rather than with a regular expression so that raw
+// strings, escapes and backticks are what Go says they are.
+func goStringLiterals(t *testing.T, dir string) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", dir, err)
+	}
+	var out []string
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				lit, ok := n.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					return true
+				}
+				if s, uerr := strconv.Unquote(lit.Value); uerr == nil {
+					out = append(out, s)
+				}
+				return true
+			})
+		}
+	}
+	return out
+}
+
+func TestEveryCommandTheEnginePrintsNamesAFlagThatExists(t *testing.T) {
+	root := cli.RootForDocs()
+	var problems []string
+	invocations := 0
+
+	for _, dir := range []string{".", filepath.Join("..", "env"), filepath.Join("..", "errors")} {
+		for _, s := range goStringLiterals(t, dir) {
+			for _, in := range findInvocations(s) {
+				invocations++
+				cmd, flags, _ := resolve(root, in.words)
+				for _, f := range flags {
+					if !hasFlag(cmd, f) {
+						problems = append(problems, fmt.Sprintf(
+							"%s: %q names --%s, and '%s' has %s",
+							dir, in.raw, f, cmd.CommandPath(), flagNames(cmd)))
+					}
+				}
+			}
+		}
+	}
+
+	// A floor, because a walk that parsed nothing reports no problems and looks
+	// exactly like a clean tree. There were over a hundred of these when this
+	// was written.
+	if invocations < 40 {
+		t.Errorf("only %d commands were found in the engine's strings, so the scan has stopped matching",
+			invocations)
+	}
+	sort.Strings(problems)
+	if len(problems) > 0 {
+		t.Errorf("the engine prints an instruction naming a flag that does not exist:\n  %s",
+			strings.Join(problems, "\n  "))
 	}
 }

@@ -524,8 +524,10 @@ so an interrupted run resumes rather than restarts, and the event log.
 It never holds a secret, and it never holds customer data.
 
 Deleting it is safe but not free: the journal is how teardown knows what to
-remove. If you delete it while an environment is running, run 'af down --all'
-afterwards so that the leak detector reconciles against the provider instead.
+remove. If you delete it while an environment is running, run
+'af env prune --older-than 0' afterwards: it inventories the provider rather
+than reading the journal, so it can still find what the journal no longer
+names.
 `) + "\n"
 	return writeAtomic(filepath.Join(dir, "README.md"), []byte(readme), 0o600)
 }
