@@ -99,6 +99,23 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
         'admin_notes',
         'an operator\'s words about a customer rather than the customer\'s data; ' +
           'the application role holds no grant on it at all, which the test below proves',
+
+        'admin_users',
+        'an operator is not a tenant. The row is the platform\'s own identity, deliberately ' +
+          'unrelated to users, and it is reachable only by declaring the email being signed in ' +
+          'as or by holding a live operator session',
+      ],
+      [
+        'admin_sessions',
+        'belongs to an operator, not an organization; reachable by presenting the hash of the ' +
+          'cookie it was issued as, the same shape as the policy on sessions',
+      ],
+      [
+        'admin_audit_entries',
+        'the platform\'s own chain. It carries subject_org_id rather than org_id ON PURPOSE: ' +
+          'the row records what an operator did and belongs to the platform, so a column named ' +
+          'org_id would claim a tenancy it does not have and would put this table into the ' +
+          "loops below, which demand an isolation it is not supposed to have",
       ],
     ])
 
