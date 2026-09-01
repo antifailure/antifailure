@@ -41,16 +41,18 @@ export interface CommentInput {
   /** True when the state is unverified because the deadline passed rather than
    *  because the run said so. */
   timedOut: boolean
-  repository: string
-  pullNumber: number
   headSha: string
   attempt: number
   /** One sentence saying why this state, when there is one. */
   detail: string | null
   /** The report `af ci --report` produced, when a run got that far. */
   reportMarkdown: string | null
+  /** The engine's own name for the environment, for the console link. The
+   *  ADDRESS it came up on is deliberately not a field: the engine's report
+   *  already carries it, `reachable` rewrites it so it is not offered as a link
+   *  to the reader's own machine, and a second copy here would be a second
+   *  place to forget that. */
   envId: string | null
-  previewUrl: string | null
   teardown: TeardownState
   /** Where the console lives, so a self-hosted installation links to its own.
    *  Absent means no console link is offered, which is honest: a link to a

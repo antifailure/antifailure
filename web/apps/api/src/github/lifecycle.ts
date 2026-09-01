@@ -385,7 +385,7 @@ async function handlePullRequest(
         }
       }
       await withdrawFork(deps, login, stored.id)
-      await stopWork(deps, login, stored.id, null, 'the approval label was removed')
+      await stopWork(deps, login, stored.id, 'the approval label was removed')
       return {
         handled: true,
         detail: 'approval withdrawn',
@@ -393,7 +393,7 @@ async function handlePullRequest(
       }
     }
     case 'converted_to_draft': {
-      await stopWork(deps, login, stored.id, null, 'the pull request went back to draft')
+      await stopWork(deps, login, stored.id, 'the pull request went back to draft')
       return {
         handled: true,
         detail: 'draft, so nothing is running',
@@ -405,7 +405,6 @@ async function handlePullRequest(
         deps,
         login,
         stored.id,
-        null,
         payload.pull_request?.merged
           ? 'the pull request was merged'
           : 'the pull request was closed',
@@ -610,7 +609,6 @@ async function stopWork(
   deps: LifecycleDeps,
   login: string,
   pullRequestId: string,
-  headSha: string | null,
   reason: string,
 ): Promise<void> {
   const now = deps.clock.now()
@@ -623,9 +621,15 @@ async function stopWork(
           updated_at = ${now.toISOString()},
           callback_hash = NULL,
           callback_expires_at = NULL
+      -- EVERY open generation of this pull request, not one commit's. There
+      -- is only ever one open at a time, because starting a generation
+      -- supersedes the others, but a pull request closing has to stop whatever
+      -- is running rather than whatever the delivery happened to name: the
+      -- close payload carries the head at close time, and a run started
+      -- against an earlier commit is exactly the one nobody would think to
+      -- stop.
       WHERE pull_request_id = ${pullRequestId}::uuid
         AND state IN ('queued', 'running')
-        ${headSha ? sql`AND head_sha = ${headSha}` : sql``}
       RETURNING id`),
   )
 
@@ -1170,15 +1174,12 @@ export async function publish(
   const input = {
     state: state.generation.state,
     timedOut,
-    repository: state.repository,
-    pullNumber: state.pullRequest.number,
     headSha: state.generation.head_sha,
     attempt: state.generation.attempt,
     detail: state.generation.detail,
     reportMarkdown:
       typeof verdict.markdown === 'string' && verdict.markdown ? verdict.markdown : null,
     envId: state.generation.env_id,
-    previewUrl: typeof verdict.url === 'string' ? verdict.url : null,
     teardown: state.teardown,
     consoleBase: deps.consoleBase,
     checksUnavailable: null as string | null,

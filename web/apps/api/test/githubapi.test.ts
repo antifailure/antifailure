@@ -25,11 +25,7 @@ import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import {
-  GitHubApiError,
-  GitHubPermissionError,
-  RealRepositoryApi,
-} from '../src/github/api.ts'
+import { GitHubApiError, GitHubPermissionError, RealRepositoryApi } from '../src/github/api.ts'
 import { COMMENT_MARKER, reachable, shaOfComment, commentBody } from '../src/github/render.ts'
 import { decodeReport } from '../src/github/lifecycle.ts'
 import { stateFromReport } from '../src/github/states.ts'
@@ -157,15 +153,11 @@ describe('the GitHub repository client', () => {
 
   it('finds the comment it maintains by its marker, and skips what does not decode', async () => {
     answers.clear()
-    answer(
-      'GET /repos/acme/app/issues/12/comments?per_page=100&sort=created&direction=desc',
-      200,
-      [
-        { id: 1, body: null },
-        { id: 2, body: 'somebody else said this' },
-        { id: 3, body: `${COMMENT_MARKER} sha=${'b'.repeat(40)} attempt=1 -->\nours` },
-      ],
-    )
+    answer('GET /repos/acme/app/issues/12/comments?per_page=100&sort=created&direction=desc', 200, [
+      { id: 1, body: null },
+      { id: 2, body: 'somebody else said this' },
+      { id: 3, body: `${COMMENT_MARKER} sha=${'b'.repeat(40)} attempt=1 -->\nours` },
+    ])
     const found = await client().findComment(7, 'acme/app', 12, COMMENT_MARKER)
     assert.equal(found?.id, 3)
     assert.equal(shaOfComment(found!.body), 'b'.repeat(40))
@@ -213,7 +205,11 @@ describe('the GitHub repository client', () => {
   it('reads an unrecognised run status as still running rather than as finished', async () => {
     answers.clear()
     // The safe direction. Teardown waits rather than declaring a live run over.
-    answer('GET /repos/acme/app/actions/runs/9', 200, { id: 9, status: 42, head_sha: 'c'.repeat(40) })
+    answer('GET /repos/acme/app/actions/runs/9', 200, {
+      id: 9,
+      status: 42,
+      head_sha: 'c'.repeat(40),
+    })
     const run = await client().workflowRun(7, 'acme/app', 9)
     assert.equal(run?.status, 'unknown')
     assert.notEqual(run?.status, 'completed')
@@ -254,14 +250,11 @@ describe('what reaches a pull request comment', () => {
     const body = commentBody({
       state: 'failed',
       timedOut: false,
-      repository: 'acme/app',
-      pullNumber: 4,
       headSha: 'd'.repeat(40),
       attempt: 1,
       detail: '1 passed, 1 failed, 0 flaky, 0 blocked, 0 unverified.',
       reportMarkdown: '<!-- antifailure:report -->\n### Antifailure: a check failed\n',
       envId: 'af-orders-9c1a',
-      previewUrl: 'http://127.0.0.1:46001',
       teardown: 'acknowledged',
       consoleBase: 'https://app.antifailure.dev',
       checksUnavailable: null,
@@ -281,14 +274,11 @@ describe('what reaches a pull request comment', () => {
     const body = commentBody({
       state: 'queued',
       timedOut: false,
-      repository: 'acme/app',
-      pullNumber: 4,
       headSha: 'e'.repeat(40),
       attempt: 1,
       detail: null,
       reportMarkdown: null,
       envId: null,
-      previewUrl: null,
       teardown: 'none',
       consoleBase: null,
       checksUnavailable: 'Open the App settings and grant checks: write.',
