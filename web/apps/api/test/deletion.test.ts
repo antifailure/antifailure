@@ -153,6 +153,12 @@ describe(
     })
 
     it('refuses a second deletion while one is live', async () => {
+      // A subscription, so the first request stops at the wait rather than
+      // finishing. With nothing to wait for it runs all the way to the purge
+      // inside the request, which revokes the caller's own session, and the
+      // second call is then UNAUTHORIZED rather than a refusal about the
+      // deletion. That is correct behaviour and it is not what this asserts.
+      await subscribe(h.clock.now().getTime() + 10 * 24 * 60 * 60 * 1000)
       await request()
       const again = await callProcedure(h, owner, 'deletion.request', 'mutation', {
         confirm: org.slug,

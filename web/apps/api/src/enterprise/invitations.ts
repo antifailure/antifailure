@@ -260,17 +260,50 @@ export async function acceptInvitation(
         )
       }
 
-      // ON CONFLICT DO NOTHING rather than a read first. Somebody can be
-      // invited to an organization they are already in, by an administrator who
-      // could not see them because they were added by a GitHub sync a minute
-      // ago. Refusing that would be correct and useless: what they want is to
-      // be in the organization, and they are.
-      const joined = await db.execute<{ user_id: string }>(sql`
-        INSERT INTO members (org_id, user_id, role, source, created_at, updated_at)
-        VALUES (${row.org_id}::uuid, ${input.userId}::uuid, ${row.role}, 'invitation',
-                ${clock.now().toISOString()}, ${clock.now().toISOString()})
-        ON CONFLICT (org_id, user_id) DO NOTHING
-        RETURNING user_id`)
+      // A savepoint and a caught unique violation, rather than the
+      // `ON CONFLICT (org_id, user_id) DO NOTHING RETURNING user_id` this
+      // obviously wants to be. That form is refused by row-level security here,
+      // and the refusal is worth writing down because it reads as the INSERT
+      // policy being wrong when the INSERT policy is fine.
+      //
+      // Two separate things in that statement need to SEE the row, and this
+      // transaction has no tenant, so no SELECT policy on `members` matches it.
+      // An inference clause names a unique index, and Postgres checks the
+      // proposed row against the SELECT policies to decide what conflicts.
+      // RETURNING has to read the row back. Both were measured against a real
+      // database: the plain INSERT succeeds, adding `ON CONFLICT (org_id,
+      // user_id)` fails, adding `RETURNING` fails, and a bare
+      // `ON CONFLICT DO NOTHING` with no inference clause and no RETURNING
+      // succeeds. Every failure reports "new row violates row-level security
+      // policy", which is the WITH CHECK message, so it points at the wrong
+      // half of the statement.
+      //
+      // The alternative was to widen a policy so this transaction could read
+      // the members table. Anything wide enough to answer "is this person
+      // already here" is wide enough to hand the whole roster to anybody
+      // holding an invitation link they have not accepted.
+      //
+      // Somebody can genuinely be invited to an organization they are already
+      // in, by an administrator who could not see them because a GitHub sync
+      // added them a minute ago. That is not an error: what they want is to be
+      // in the organization, and they are.
+      await db.execute(sql`SAVEPOINT joining`)
+      let alreadyMember = false
+      try {
+        await db.execute(sql`
+          INSERT INTO members (org_id, user_id, role, source, created_at, updated_at)
+          VALUES (${row.org_id}::uuid, ${input.userId}::uuid, ${row.role}, 'invitation',
+                  ${clock.now().toISOString()}, ${clock.now().toISOString()})`)
+        await db.execute(sql`RELEASE SAVEPOINT joining`)
+      } catch (err) {
+        // The savepoint is rolled back first, unconditionally. A statement that
+        // failed leaves the transaction unable to run anything else, so
+        // deciding whether to rethrow before recovering would make every
+        // unexpected error arrive as 25P02 instead of as itself.
+        await db.execute(sql`ROLLBACK TO SAVEPOINT joining`)
+        if (!isUniqueViolation(err)) throw err
+        alreadyMember = true
+      }
 
       await db.execute(sql`
         UPDATE invitations
@@ -281,7 +314,7 @@ export async function acceptInvitation(
         orgId: row.org_id,
         organization: row.org_name,
         role: row.role,
-        alreadyMember: joined.length === 0,
+        alreadyMember,
       }
     },
     { invitationTokenHash: tokenHash },
@@ -323,6 +356,20 @@ function escapeHtml(value: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+/**
+ * A duplicate key, whoever wrapped it.
+ *
+ * The driver's error carries the SQLSTATE and the query builder wraps it, so
+ * the code is one level down on a real failure and at the top level when the
+ * statement was issued without the wrapper. Checked at both depths rather than
+ * assumed at one, because reading the wrong one turns "they were already a
+ * member" into a 500.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  const codes = [err, (err as { cause?: unknown })?.cause]
+  return codes.some((e) => (e as { code?: string } | undefined)?.code === '23505')
 }
 
 function stateOf(

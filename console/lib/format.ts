@@ -38,11 +38,20 @@ export function ago(value: string | Date | null | undefined): string {
   if (Number.isNaN(d.getTime())) return "";
   const s = Math.round((Date.now() - d.getTime()) / 1000);
   if (Math.abs(s) < 60) return "just now";
+  // Future instants read forwards, and this is not a nicety. Every caller until
+  // now passed a timestamp from the past, so the absolute values below were
+  // never negative and nobody saw what they produce: a session that expires in
+  // a month rendered as "-30d ago", which is a phrase that means nothing and
+  // looks like a bug in the clock rather than in the wording. The sessions table
+  // is the first screen to show a time that has not happened yet.
+  const ahead = s < 0;
+  const say = (value: number, unit: string): string =>
+    ahead ? `in ${Math.abs(value)}${unit}` : `${value}${unit} ago`;
   const m = Math.round(s / 60);
-  if (Math.abs(m) < 60) return `${m}m ago`;
+  if (Math.abs(m) < 60) return say(m, "m");
   const h = Math.round(m / 60);
-  if (Math.abs(h) < 48) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
+  if (Math.abs(h) < 48) return say(h, "h");
+  return say(Math.round(h / 24), "d");
 }
 
 export function usd(value: number | null | undefined): string {

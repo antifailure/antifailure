@@ -115,6 +115,117 @@ back and sign in. It needs `members.manage`, it refuses an empty member list
 from GitHub rather than removing every owner, and it records what it changed in
 the audit log.
 
+## Running the organization
+
+Everything on this page is reachable by whoever the role table says can reach
+it. The console hides what a role cannot do; the server refuses it, and the
+refusal is what the permission matrix tests, one route against each of the four
+roles.
+
+### Inviting somebody who is not in your GitHub organization
+
+Membership follows the GitHub App installation, which is right for engineers and
+useless for the two cases every company has: a finance person who needs the
+billing page and no repository access, and a contractor who is not in the GitHub
+organization at all. **Invitations** on the Members page sends a link.
+
+The link carries a token that exists only in the link. What is stored is its
+hash, the same way a session is stored, so a leaked backup is a list of hashes
+rather than a list of ways into your organization. Two consequences worth
+knowing before you use it:
+
+- **The link is shown to you as well as sent.** A control plane with no
+  `AF_MAIL_FROM` cannot send anything, and an invitation that only existed as an
+  email would silently do nothing there. Copy it and send it however you like.
+- **Sending it again produces a NEW link and the old one stops working.** The
+  original cannot be resent because it is not stored. That is also the better
+  behaviour: an invitation forwarded to the wrong person is invalidated by
+  asking for a fresh one.
+
+A link expires after fourteen days. An invitation stays good after the person
+who sent it has left, because it was authorised when it was sent, and the record
+keeps their name as it was at the time. Accepting adds the account that is
+signed in, which is not necessarily the address the invitation was sent to: the
+token is the proof and the address is a label.
+
+### Signing people out
+
+**Signed in now**, under Settings, lists every live session in the organization
+with who it belongs to, where it came from and when it was last used, and marks
+the one you are reading it in. It never shows a token or a hash of one.
+
+Signing a session out takes effect on that session's next request. Removing
+somebody from the organization signs them out in the same transaction, so there
+is no window in which a person who is no longer a member still has a working
+session. Both need `sessions.manage`; removal needs `members.manage`.
+
+### Taking a copy
+
+**Download a copy**, under Settings, produces one JSON file holding people,
+invitations, repositories, masking rules, egress policy, environments, runs,
+verdicts, runtimes, credentials by name, billing history and the audit log. It
+needs `data.export`.
+
+Every reference in it is the name you already use: a repository is `owner/name`,
+a person is their login, an environment is its env id. There is not one internal
+identifier in the file. Inside it, `files` holds text keyed by path, and those
+are the parts you can put straight back: `masking.yaml` is a masking file the
+engine reads as it is, and `egress.yaml` is the `egress:` block from
+`antifailure.yaml`.
+
+What it deliberately does not contain is listed in the file itself, under
+`notIncluded`, with the reason for each. Engine token values and provider key
+material are the important two: an export carrying either would be a way into
+your CI.
+
+### Deleting an organization
+
+`organization.delete` is held by an owner and nobody else. It is not a delete
+statement, and the order is the point:
+
+| Step | What happens |
+| --- | --- |
+| Stop what is running | Every environment is marked torn down, every queued or running run is cancelled, and the organization is suspended so nothing new can be started. |
+| End the subscription | Cancelled at Stripe at the end of the period you have paid for. Nothing is refunded and nothing is taken away early. |
+| Wait | Nothing else happens until that period ends. Everything still reads, and the deletion can still be called off. |
+| Revoke credentials | Engine tokens, provider keys, sessions, and the GitHub App installation, which is removed at GitHub rather than only marked here. |
+| Produce the export | The same document as **Download a copy**, taken before anything is removed, because afterwards there is nothing left to build one from. |
+| Delete | The organization and every row belonging to it, including the audit log. |
+
+Two things follow from that order and both matter.
+
+**A deletion that is interrupted picks up where it stopped.** Each step records
+that it happened in the same transaction as the change it describes, so a
+process that dies between two steps leaves a record saying exactly which
+happened. The control plane retries on its own, and **Continue now** does the
+next step immediately.
+
+**The download link is shown once, when you ask for the deletion.** After the
+organization is gone there is no membership left to authorise a download, so the
+link is the authorisation. Keep it. It works for seven days, and **Destroy the
+copy** removes the held document early if you would rather we did not keep one.
+
+Your database is not touched by any of this, because none of it is here: no
+snapshot, no masked branch and no captured request body ever reaches this
+control plane.
+
+### Closing your own account
+
+Every role can close their own account, including `viewer`. It erases your name,
+address, GitHub identity and avatar, removes your memberships, and signs you out
+everywhere. Signing in again afterwards creates a new account.
+
+It is called closing rather than deleting because the row is not removed. The
+audit log references it, and that reference is deliberately one the database
+refuses to break: an audit log whose subject can erase themselves from it is not
+an audit log. The entries keep the name you had at the time, because the log is
+a hash chain and rewriting an entry breaks it, and they go when the organization
+does.
+
+The only refusal is the last owner of an organization. An organization with no
+owner cannot grant anybody the permission to become one, so make somebody else
+an owner first, or delete the organization.
+
 ## Health
 
 Two endpoints, answering two different questions. Point the right thing at the

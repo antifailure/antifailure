@@ -230,8 +230,12 @@ describe(
           },
           body: JSON.stringify({ token }),
         })
-        assert.equal(accepted.status, 200, await accepted.text())
-        const result = (await accepted.json()) as { orgId: string; role: string; alreadyMember: boolean }
+        // The body is read once and asserted on, because reading it for the
+        // failure message and then again for the value makes a passing run
+        // throw "Body has already been read" instead of passing.
+        const body = await accepted.text()
+        assert.equal(accepted.status, 200, body)
+        const result = JSON.parse(body) as { orgId: string; role: string; alreadyMember: boolean }
         assert.equal(result.orgId, org.orgId)
         assert.equal(result.role, 'viewer')
         assert.equal(result.alreadyMember, false)
@@ -278,7 +282,7 @@ describe(
           },
           body: JSON.stringify({ token }),
         })
-        assert.equal(accepted.status, 200, await accepted.text())
+        assert.equal(accepted.status, 200, await accepted.clone().text())
       })
 
       it('a second invitation to the same address is refused, and allowed again after a withdrawal', async () => {

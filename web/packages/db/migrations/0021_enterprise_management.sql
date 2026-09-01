@@ -393,6 +393,24 @@ CREATE POLICY invitation_holder_accepts ON invitations
   USING (token_hash = current_invitation_token())
   WITH CHECK (token_hash = current_invitation_token());
 
+-- The organization the invitation names.
+--
+-- Not optional, and its absence does not look like a refusal. The lookup joins
+-- invitations to organizations to say which company somebody is being asked to
+-- join, and the tenant policy on organizations compares against current_org(),
+-- which is NULL in a transaction that has no tenant. The join then matched
+-- nothing, the lookup returned null, and the page said the invitation was not
+-- valid. A policy that cannot match looks exactly like a row that is not there.
+--
+-- SELECT only, and only the one organization the declared token names. The name
+-- is information the token holder is entitled to: they were sent it, and a page
+-- that asked somebody to sign in before telling them what for is how an
+-- invitation gets mistaken for a phishing attempt.
+CREATE POLICY invitation_holder_reads_org ON organizations
+  FOR SELECT TO antifailure_app
+  USING (id = (SELECT i.org_id FROM invitations i
+               WHERE i.token_hash = current_invitation_token()));
+
 -- The membership the acceptance creates.
 --
 -- INSERT only, and the organization is not the caller's to choose: it is read

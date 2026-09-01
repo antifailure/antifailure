@@ -268,7 +268,11 @@ function viewOf(
     waitingUntil: step === 'await_entitlement_end' ? iso(row.entitlement_ends_at) : null,
     export: exportRow
       ? {
-          available: exportRow.destroyed_at === null,
+          // There is a document AND it has not been destroyed. The row is
+          // created when the deletion is requested, so it exists long before
+          // the export step fills it, and "not destroyed" alone would report an
+          // empty row as a download somebody could take.
+          available: exportRow.destroyed_at === null && Number(exportRow.size_bytes) > 0,
           expiresAt: iso(exportRow.expires_at),
           sizeBytes: Number(exportRow.size_bytes),
           downloads: exportRow.download_count,
@@ -493,7 +497,11 @@ export async function runToCompletion(
   let moved = false
   for (let i = 0; i < maxSteps; i++) {
     const result = await advanceDeletion(deps, orgId)
-    view = result.view
+    // The last view that exists, not the last view returned. A deletion that
+    // has finished has no live record, so the call after the purge answers
+    // null, and taking it would report "there is no deletion" to the person who
+    // just watched one complete.
+    if (result.view) view = result.view
     if (!result.moved) break
     moved = true
   }
@@ -539,8 +547,11 @@ async function stopWork(deps: DeletionDeps, orgId: string): Promise<boolean> {
       UPDATE environments SET state = 'torn_down', torn_down_at = ${now}, updated_at = ${now}
       WHERE state <> 'torn_down' RETURNING id`)
 
+    // No updated_at on this table. It has created_at, started_at and
+    // finished_at and nothing else about time, which is right for a row that
+    // describes one run rather than a record somebody edits.
     const runs = await db.execute<{ id: string }>(sql`
-      UPDATE runs SET state = 'cancelled', finished_at = ${now}, updated_at = ${now}
+      UPDATE runs SET state = 'cancelled', finished_at = ${now}
       WHERE state IN ('queued', 'running') RETURNING id`)
 
     await db.execute(sql`
@@ -640,9 +651,20 @@ async function cancelSubscription(deps: DeletionDeps, orgId: string): Promise<bo
         throw err
       }
     }
-    entitlementEndsAt =
-      cancelled?.currentPeriodEnd ??
-      (live.current_period_end ? asDate(live.current_period_end) : null)
+    // The LATER of what Stripe just said and what this database already
+    // believed, not simply Stripe's answer.
+    //
+    // Stripe is authoritative about a subscription, so preferring its number
+    // looks obviously right, and it is wrong in one direction that matters: a
+    // response that omits the period, or carries a stale one, would shorten the
+    // wait and revoke credentials on an organization that is still entitled.
+    // Taking the later of the two costs a day when this database is stale and
+    // costs a paying customer their access when Stripe's answer is. That is the
+    // same rule the wait applies on every pass, for the same reason.
+    entitlementEndsAt = later(
+      cancelled?.currentPeriodEnd ?? null,
+      live.current_period_end ? asDate(live.current_period_end) : null,
+    )
 
     if (cancelled) {
       await deps.pool.withTenant({ orgId }, async (db) => {
@@ -1137,4 +1159,11 @@ function iso(v: Date | string | null): string | null {
 
 function asDate(v: Date | string): Date {
   return v instanceof Date ? v : new Date(v)
+}
+
+/** The later of two instants, either of which may be absent. */
+function later(a: Date | null, b: Date | null): Date | null {
+  if (!a) return b
+  if (!b) return a
+  return a.getTime() >= b.getTime() ? a : b
 }
