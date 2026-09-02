@@ -1,7 +1,7 @@
 # added
 
 Version 1.0. The commitment is written down surface by surface in
-[what is stable](/docs/reference/stability/) rather than made as a blanket
+[what is stable](/docs/reference/stability) rather than made as a blanket
 claim: a manifest declaring `version: 1`, the commands with their flags and
 exit codes, the documented `--output json` fields, the provider interfaces and
 the error codes. Breaking any of those costs a major version. The page also

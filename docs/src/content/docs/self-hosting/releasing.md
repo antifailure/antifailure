@@ -15,7 +15,7 @@ download changes the moment the release is created. Two workflows fire on the
 same tag, they run in parallel, and neither knows the other exists.
 
 This page is the order to do it in and the thing to look at after each step.
-[Releases and how to verify one](/docs/security/releases/) is the companion
+[Releases and how to verify one](/docs/security/releases) is the companion
 page, written for the person downloading a release rather than the person
 cutting one.
 
@@ -126,7 +126,7 @@ all, and both are cheap here and expensive later. `relnotes` refuses a
 same check runs inside `release.yml`, where the only remedy is deleting a tag
 people may already have fetched. `tagsync` refuses a version pin naming a tag
 nobody published, and holds the four version literals in [verifying a
-release](/docs/security/releases/) to the version at the top of the changelog.
+release](/docs/security/releases) to the version at the top of the changelog.
 
 **4. The release notes are written before the tag, not after it.**
 
@@ -420,7 +420,7 @@ curl -sS https://app.antifailure.dev/readyz
 | `NEW REVISION FAILED TO START` | The revision never reached Running | Traffic never moved. The new revision is deactivated |
 | `healthy but wrong build` | The origin answers, on the previous commit | The rollout did not happen. This is the check that exists to catch exactly that, and it is doing its job |
 | `ROLLED BACK` | The deploy failed and the damage was contained | The previous revision is serving again. The job still fails, which is correct: a successful rollback is not a successful deploy |
-| `ROLLBACK DID NOT RESTORE HEALTH` | Both builds are unhealthy | This needs a person. Start at [Operations](/docs/self-hosting/operations/) |
+| `ROLLBACK DID NOT RESTORE HEALTH` | Both builds are unhealthy | This needs a person. Start at [Operations](/docs/self-hosting/operations) |
 
 ### The three migration budgets, and which one can kill something
 
