@@ -350,8 +350,8 @@ An exploration finds a route nobody wrote down. Promotion compiles what it
 found into a **workflow** for your manifest, which `af test` runs. It never
 produces a load scenario: nothing in an exploration record carries a rate.
 
-Paste the document `af explore --json` printed. It lives on whichever machine
-ran the command and nothing sends it here on its own.
+Paste the document `af explore --output json` printed. It lives on
+whichever machine ran the command and nothing sends it here on its own.
 
 That document is an envelope with one entry per goal, so a run that explored
 two goals gives you two explorations and the console asks which one to compile.
@@ -376,9 +376,10 @@ defect to fix rather than an outcome to assert, and it says how much of the
 application was left unexplored.
 
 **The block to paste into `antifailure.yaml`.** Until that block is committed,
-`af test --only` cannot find the workflow the new version selects, and the run
-comes back saying so. The control plane cannot put a file in your repository,
-and it says that rather than returning a name and letting you find out.
+`af test` cannot find the workflow the new version selects, even when you
+name it with `--only`, and the run comes back saying so. The control plane
+cannot put a file in your repository, and it says that rather than returning
+a name and letting you find out.
 
 Copy copies the block and nothing else. The notes above it are deliberately not
 emitted as YAML comments inside it, because a comment pasted into a manifest
