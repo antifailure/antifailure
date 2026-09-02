@@ -634,9 +634,11 @@ func siteFixture(t *testing.T, real, name, body string) string {
 		mustWrite(t, filepath.Join(root, filepath.FromSlash(c.premise[0])), string(src))
 	}
 	// AuthScreen is a premise and also a file the real tree exempts, so the
-	// exemption has something to excuse in the fixture too.
+	// exemption has something to excuse in the fixture too. Chrome carries the
+	// second exemption on that rule: it is where the note about the deleted
+	// AuthModal lives now.
 	for _, f := range []string{
-		"www/components/AuthScreen.tsx", "www/components/AuthModal.tsx",
+		"www/components/AuthScreen.tsx", "www/components/Chrome.tsx",
 		"www/lib/routes.ts", "www/components/pages/product/Architecture.tsx",
 	} {
 		src, err := os.ReadFile(filepath.Join(real, filepath.FromSlash(f)))
