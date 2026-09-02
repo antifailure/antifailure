@@ -33,6 +33,7 @@ helm	value	config.appBaseUrl	string	optional
 helm	value	config.eventArchiveDir	string	optional
 helm	value	config.eventRetentionMonths	string	optional
 helm	value	config.insecureCookies	bool	optional
+helm	value	config.operatorSetsPlan	bool	optional
 helm	value	config.poolMax	number	optional
 helm	value	config.port	number	optional
 helm	value	config.signinAllowlist	null	optional
