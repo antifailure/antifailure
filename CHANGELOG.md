@@ -6,6 +6,14 @@ tag with no section here, or with an empty one, does not publish at all.
 Releases before v1.0.0 predate this file and their notes are on the GitHub
 releases page.
 
+Anything between a `<!-- relnotes:omit -->` line and a `<!-- relnotes:end -->`
+one stays in this file and is replaced, in the published notes, by a link to
+the changelog on the site. This file is a reference document people search; a
+release note is the first thing somebody deciding whether to use this reads,
+and the per change entries are what make it a wall. `just relnotes` refuses an
+unbalanced marker, a second region in one section, an empty region, and a
+section that omits all of itself.
+
 ## v1.0.0
 
 The first stable release, and the first since v0.1.1 on 26 August 2026.
@@ -223,6 +231,8 @@ manifest or pipeline does.
   always promised that an exploration cannot fail your build, and the promise
   held for `af explore` and broke for the path the console drives. A run that
   measured nothing at all is still blocked and still exits non zero.
+
+<!-- relnotes:omit -->
 
 ### Added
 
@@ -892,6 +902,8 @@ it.
   which assumed those were the same place. Run from a subdirectory it reported
   that no runner source existed while standing inside a checkout that had one,
   and told the reader to install a runner they already had.
+
+<!-- relnotes:end -->
 
 ### Security
 
