@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -65,26 +66,43 @@ type LicenseJSON struct {
 	ExpiresAt string   `json:"expires_at,omitempty"`
 }
 
+// communityMessage is what a binary with nothing attached says about itself.
+const communityMessage = "This is the community edition. It has no license and needs none."
+
+// declaredEdition is what the running binary says it is, and reports whether it
+// said anything at all.
+//
+// One reader for the two commands that report an edition, because they had two
+// and the answers disagreed inside one binary. af license status asked the
+// context and said enterprise; af version printed a package variable that no
+// build ever wrote and said community. An administrator reading the first was
+// told their licence works and an auditor reading the second was told the
+// opposite, and neither could tell which one to believe.
+//
+// A community build attaches nothing and gets the sentence this command has
+// always printed; the enterprise binary attaches what it worked out at startup.
+// The default is the honest one: a build that forgets to attach anything is
+// described as the community edition rather than claiming to be licensed.
+//
+// The second return value matters and is not the same question as the first. A
+// binary can declare itself and still be the community edition, and only the
+// caller can decide what to print for a licence that was never installed.
+func declaredEdition(ctx context.Context) (edition.Status, bool) {
+	status, declared := edition.From(ctx)
+	if !declared || status.Name == "" {
+		return edition.Status{Name: "community", State: "none", Message: communityMessage}, false
+	}
+	return status, true
+}
+
 func newLicenseStatusCommand(e *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "What this installation is licensed for",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			const communityMessage = "This is the community edition. It has no license and needs none."
 			registered := extension.Default.Registered()
-
-			// The running binary declares what it is. A community build
-			// attaches nothing and gets the sentence this command has always
-			// printed; the enterprise binary attaches what it worked out at
-			// startup. Without this the enterprise binary reports itself as the
-			// community edition, which is not a cosmetic problem: it is the one
-			// command an administrator runs to find out whether their licence
-			// is working, answering that they do not have one.
-			status, declared := edition.From(cmd.Context())
-			if !declared {
-				status = edition.Status{Name: "community", State: "none", Message: communityMessage}
-			}
+			status, declared := declaredEdition(cmd.Context())
 
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(LicenseJSON{

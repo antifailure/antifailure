@@ -149,3 +149,130 @@ func TestEveryDeclaredSourceIsReadable(t *testing.T) {
 		}
 	}
 }
+
+// The other direction, and the one this command was blind to. cli.Edition sat
+// in this exact group, nothing stamped it, ldcheck passed, and every enterprise
+// binary shipped reporting itself as the community edition.
+func TestFindsAVariableDeclaredBesideAStampedOne(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "root.go", `package cli
+
+var (
+	Version   = "dev"
+	Commit    = "none"
+	BuildDate = "unknown"
+	Edition   = "community"
+)
+`)
+	got, err := unstamped(dir, map[string]bool{"Version": true, "Commit": true, "BuildDate": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "Edition" {
+		t.Fatalf("unstamped = %v, want [Edition]", got)
+	}
+}
+
+// The positive control. A check that refuses everything passes its own suite
+// just as happily as one that works, and this repository has shipped that too.
+func TestAGroupInWhichEverythingIsStampedIsClean(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "root.go", `package cli
+
+var (
+	Version   = "dev"
+	Commit    = "none"
+	BuildDate = "unknown"
+)
+`)
+	got, err := unstamped(dir, map[string]bool{"Version": true, "Commit": true, "BuildDate": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("unstamped = %v, want nothing", got)
+	}
+}
+
+// A package may hold any number of unrelated package level strings. Demanding a
+// -X for each would fire on things nobody meant as a release stamp, and a gate
+// whose findings are not all real stops being read.
+func TestIgnoresStringsInOtherDeclarations(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "root.go", `package cli
+
+var (
+	Version = "dev"
+)
+
+var defaultRegistry = "ghcr.io"
+
+var (
+	usage = "af [command]"
+	name  = "af"
+)
+`)
+	got, err := unstamped(dir, map[string]bool{"Version": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("unstamped = %v, want nothing: none of those is in the stamped group", got)
+	}
+}
+
+// A constant beside the stamped variables is a deliberate statement that the
+// value is fixed at compile time. The linker cannot write to one, so demanding
+// a flag for it would ask for the single thing that silently does nothing.
+func TestDoesNotDemandAFlagForAConstant(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "root.go", `package cli
+
+var (
+	Version = "dev"
+)
+
+const Channel = "stable"
+`)
+	got, err := unstamped(dir, map[string]bool{"Version": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("unstamped = %v, want nothing", got)
+	}
+}
+
+// A non string in the stamped group is not reportable as unstamped, because -X
+// could not write it either. hasStringVar is what refuses that, and reporting it
+// here as well would print two findings for one mistake.
+func TestDoesNotReportANonStringAsUnstamped(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "root.go", `package cli
+
+var (
+	Version = "dev"
+	Retries = 3
+)
+`)
+	got, err := unstamped(dir, map[string]bool{"Version": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("unstamped = %v, want nothing", got)
+	}
+}
+
+// The live tree, so that the group the release actually stamps stays covered by
+// this command rather than only by the fixtures above.
+func TestTheRealStampedGroupHoldsNothingUnstamped(t *testing.T) {
+	got, err := unstamped("../../engine/internal/cli",
+		map[string]bool{"Version": true, "Commit": true, "BuildDate": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("%v is declared beside the release variables and no build stamps it", got)
+	}
+}

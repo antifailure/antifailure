@@ -266,11 +266,11 @@ the database a question. It answers `200` with the build, or `503` with the
 reason:
 
 ```json
-{ "ready": true, "version": "v0.2.0", "commit": "31ce3f7" }
+{ "ready": true, "version": "v1.0.0", "commit": "31ce3f7" }
 ```
 
 ```json
-{ "ready": false, "version": "v0.2.0", "commit": "31ce3f7",
+{ "ready": false, "version": "v1.0.0", "commit": "31ce3f7",
   "reason": "password authentication failed for user \"af_app\"" }
 ```
 
