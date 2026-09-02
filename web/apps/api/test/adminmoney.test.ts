@@ -1013,28 +1013,31 @@ describe('every money operation is reachable, or says exactly how far it got', a
     }
   })
 
-  it('records that the operator router is not mounted, and where the mount goes', async () => {
-    // The remaining gap, asserted rather than described, so it cannot be
-    // forgotten and cannot be quietly half-done.
+  it('the operator routes are composed into the tree that is actually served', async () => {
+    // The last link, and the one that used to be missing. `adminRouter` is
+    // mounted into `appRouter` and served on /trpc; these three sub-routers are
+    // composed into it, so the operations are reachable rather than merely
+    // implemented.
     //
-    // `adminMoneyRouter` is complete and tested through `createCaller`, and no
-    // HTTP endpoint serves it. Mounting it is the boundary owner's: the
-    // operator cookie is `__Host-` and `SameSite=Strict`, which closes ordinary
-    // cross-site forgery, but the product's own /trpc guard exists because
-    // SameSite is site-scoped rather than origin-scoped and a subdomain an
-    // attacker controls is inside it. A mount without that guard would be a
-    // real vulnerability rather than a missing feature, so this lane does not
-    // add one.
-    //
-    // WHEN IT IS MOUNTED this test fails, which is the point: come back, read
-    // the paragraph above, confirm the guard is there, and delete the test.
+    // Asserted here rather than trusted, because "called from a router" and
+    // "reachable over HTTP" are two questions and collapsing them is how a
+    // feature ships half-wired: for several commits these routes existed,
+    // passed their tests, and no endpoint served them.
+    const composed = await readFile(path.join(src, 'admin', 'router.ts'), 'utf8')
+    for (const name of ['adminBillingRouter', 'adminEntitlementsRouter', 'adminFlagsRouter']) {
+      assert.ok(composed.includes(name), `${name} is not composed into adminRouter`)
+    }
+    const tree = await readFile(path.join(src, 'routers', 'index.ts'), 'utf8')
+    assert.ok(/admin:\s*adminRouter/.test(tree), 'adminRouter is not mounted into appRouter')
+
+    // And the guard that has to be there before money moves over a cookie. The
+    // operator cookie is SameSite=Strict, which closes ordinary cross-site
+    // forgery; this is the rest, because SameSite is site-scoped rather than
+    // origin-scoped and a subdomain an attacker controls is inside it.
     const server = await readFile(path.join(src, 'server.ts'), 'utf8')
-    assert.equal(
-      /adminMoneyRouter/.test(server),
-      false,
-      'server.ts now mentions adminMoneyRouter. If it is mounted with the same cross-site ' +
-        'guard /trpc has, delete this test; the operations are reachable and the note above ' +
-        'is stale.',
+    assert.ok(
+      server.includes('adminCsrfMatches'),
+      'operator mutations are served with no cross-site token check',
     )
   })
 })

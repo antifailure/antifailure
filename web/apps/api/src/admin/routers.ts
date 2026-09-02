@@ -654,10 +654,3 @@ export const adminFlagsRouter = router({
       })
     }),
 })
-
-/** The operator tree this lane owns, for the mount in server.ts. */
-export const adminMoneyRouter = router({
-  billing: adminBillingRouter,
-  entitlements: adminEntitlementsRouter,
-  flags: adminFlagsRouter,
-})

@@ -359,6 +359,7 @@ export function Button({
   variant = "secondary",
   disabled = false,
   busy = false,
+  full = false,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -366,6 +367,12 @@ export function Button({
   variant?: "primary" | "secondary" | "danger";
   disabled?: boolean;
   busy?: boolean;
+  /** Fills its container. `LinkButton` has had this since it was written and
+   *  `Button` did not, which is why a sign-in form's submit rendered as a
+   *  narrow box in the middle of a full-width field. The two components are
+   *  the same box and a person cannot see which is an anchor, so they take
+   *  the same props. */
+  full?: boolean;
 }) {
   // whitespace-nowrap, because a two word label breaking across two lines is
   // the shape a control has when it is in trouble, and it happened as soon as
@@ -385,7 +392,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled || busy}
       aria-busy={busy || undefined}
-      className={`${base} ${variants[variant]}`}
+      className={`${base} ${variants[variant]} ${full ? "w-full" : ""}`}
     >
       {children}
     </button>
