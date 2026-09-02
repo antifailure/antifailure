@@ -155,9 +155,13 @@ manifest or pipeline does.
   on its output, so a pull request that touches nothing any check exercises no
   longer gets an environment. It checks out with `fetch-depth: 0`, because a one
   commit deep clone has no merge base to diff against.
-- The documentation now runs the control plane image as
-  `ghcr.io/antifailure/control-plane:latest` rather than naming a version. The
-  tag is moved by the push of a `v*` tag and never by a build off `main`.
+- The documentation runs the control plane image as
+  `ghcr.io/antifailure/control-plane:main-b53906a` rather than the version tag it
+  named before. A `main-<sha>` tag names the commit the image was built from, so
+  `tools/claimcheck` can prove offline that the pinned image can complete the
+  procedure the page describes. A version tag cannot, because the only one ever
+  published was built from a different ref than the git tag of the same name,
+  and `latest` cannot either.
 - A run in which no workflow reached a verdict about the application exits `9`
   rather than `0`. A real failure still exits `8`, so a pipeline reading the
   number can tell "your change broke something" from "nothing was tested". Both
@@ -221,11 +225,15 @@ manifest or pipeline does.
   calls on your behalf; the commands a person runs are `af load run`,
   `af load scenario`, `af test` and `af explore`. Its flags are documented under
   Workloads instead.
-- The dispatch workflow template calls `af workload run` rather than assembling
-  flags in a shell case statement, and its `command` input keeps its verbs. `up`,
-  `down`, `agents` and `load` work on an older copy of the file; `scenario` and
-  `explore` need this one. An input the case statement had no flag for used to
-  be dropped without a word and is now refused by name.
+- The dispatch workflow template runs a workload through `af workload run`, and
+  its `command` input keeps its verbs. `up`, `down`, `agents` and `load` work on
+  an older copy of the file; `scenario` and `explore` need this one. A knob
+  `af workload run` has no flag for is refused by name rather than dropped
+  without a word, which is what the case statement it replaced did. That holds
+  for the workload kinds and not yet for two verbs: the template still answers
+  `scenario` and `explore` with steps of their own that call `af load scenario`
+  and `af explore` directly, so a `duration` or a `scale` sent to either is
+  still dropped in silence.
 - An exploration run through `af workload run --kind exploration` no longer
   fails the job when a goal is not reached. `docs/concepts/exploration` has
   always promised that an exploration cannot fail your build, and the promise
