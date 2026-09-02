@@ -523,6 +523,7 @@ var knownKeys = []string{
 	"p95_increase", "error_rate", "query_count_increase",
 	"migration_lock", "warn_ms", "fail_ms", "migration_failed", "migration_rewrite",
 	"migration_lint", "plan_regression", "load_regression", "egress_surprise",
+	"workflows_unverified",
 	"masking", "cleanup",
 	"p95_increase", "error_rate", "query_count_increase", "require",
 	"ttl", "max_ttl", "idle_sleep", "domain", "namespace_prefix", "kubeconfig_context",

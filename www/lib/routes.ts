@@ -35,6 +35,8 @@ export type Route = {
   priority: number;
   /** Parent path, for the breadcrumb trail. Undefined at the root. */
   parent?: string;
+  /** A more specific Schema.org page type when WebPage is too broad. */
+  schemaType?: "AboutPage" | "ContactPage";
 };
 
 export const ROUTES: readonly Route[] = [
@@ -211,6 +213,19 @@ export const ROUTES: readonly Route[] = [
     parent: "/",
   },
 
+  {
+    path: "/changelog",
+    title: pageTitle("Changelog"),
+    description:
+      "Every change to the engine, the control plane and the site, written when it was made and dated by the commit that landed it.",
+    summary:
+      "What has changed and when, newest first, built from the repository's own changelog fragments.",
+    section: "company",
+    indexable: true,
+    priority: 0.6,
+    parent: "/",
+  },
+
   // Writing
   {
     path: "/blog",
@@ -288,6 +303,35 @@ export const ROUTES: readonly Route[] = [
     indexable: true,
     priority: 0.3,
     parent: "/terms",
+  },
+
+  // Trust and contact. Kept as real pages rather than footer-only labels so a
+  // person or agent can verify what the project is and which channels work.
+  {
+    path: "/about",
+    title: pageTitle("About"),
+    description:
+      "What Antifailure builds, how a run produces evidence, where the project stands, and the limits it states plainly.",
+    summary:
+      "What Antifailure is, how it works, its public status record, and what it does not promise.",
+    section: "company",
+    indexable: true,
+    priority: 0.7,
+    parent: "/",
+    schemaType: "AboutPage",
+  },
+  {
+    path: "/contact",
+    title: pageTitle("Contact"),
+    description:
+      "Verified routes for private security reports, public product work, community discussion, documentation, and hosted-product interest.",
+    summary:
+      "Working routes for private security reports, product issues, questions, documentation, and hosted-product interest.",
+    section: "company",
+    indexable: true,
+    priority: 0.6,
+    parent: "/",
+    schemaType: "ContactPage",
   },
 
   // Utility. Real pages, deliberately not in the index: they are a waitlist

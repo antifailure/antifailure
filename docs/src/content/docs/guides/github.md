@@ -16,7 +16,7 @@ github:
 `comment` and `fork_policy` are read and acted on by the engine. `mode` and
 `teardown_on` are printed by `af explain` and read by nothing, which is not an
 oversight and is worth knowing before you set one: see
-[the manifest reference](/docs/reference/manifest/#github) for what happens
+[the manifest reference](/docs/reference/manifest#github) for what happens
 instead, and why the hosted control plane cannot read your manifest.
 
 ## Two ways to run it
@@ -218,26 +218,40 @@ a workflow `af ci` tears down before it writes the report, including on a failed
 job and including on a cancelled one, and the runner goes away at the end of the
 job regardless. The `ttl` outcome is real and is configured somewhere else: the
 ceiling on how long an environment may live is
-[`runtime.max_ttl`](/docs/reference/manifest/), and that one is read. `af explain`
+[`runtime.max_ttl`](/docs/reference/manifest), and that one is read. `af explain`
 says so against the setting, so the manifest and the command agree.
 
 ## What the App must be granted
 
-[Standing up production](/docs/self-hosting/production/#8-create-the-production-github-app)
+[Standing up production](/docs/self-hosting/production#8-create-the-production-github-app)
 carries the permission and event lists, with what each one is for and why the
 rest are refused. It is one list rather than two so that they cannot drift.
 
 The one worth knowing here: the console's controls need **Actions: write**, and
-GitHub answers a dispatch with 404 whether the App lacks that permission, the
-workflow file is missing, or the App was never installed on that repository. A
-missing permission looks exactly like a missing file.
+declaring it on the App is not the same as holding it. Widening an existing
+App's permissions asks every installation to accept the new grant and changes
+nothing until somebody does, so the App's settings page can read Actions: write
+while every installation of it still refuses a dispatch.
+
+GitHub does not name the state it refuses in, so the console works it out and
+says which of these it is:
+
+| What GitHub answers | What it can mean |
+| --- | --- |
+| `403 Resource not accessible by integration` | The installation holds no Actions write, **or** the App was never given that repository. |
+| `404 Not Found` | There is no workflow file of that name on the default branch, **or** no repository of that name this App can see. |
+| `422` | The branch does not exist, the workflow declares no `workflow_dispatch` trigger, or it does not declare the inputs the console sends. |
+
+A missing permission is checked before the workflow file is looked for, so a
+403 hides whether the file is even there: granting the permission can reveal a
+second thing to fix.
 
 ## Starting a run from the console
 
-The console's **Create environment**, **Run agents** and **Run load** controls
-do not run anything on the control plane. They dispatch a run of your own
-workflow, in your own repository, on the branch the environment is on. Your
-database, your secrets and your captured traffic stay where they already are.
+The console's **Create environment** control and its workload controls do not
+run anything on the control plane. They dispatch a run of your own workflow, in
+your own repository, on the branch the environment is on. Your database, your
+secrets and your captured traffic stay where they already are.
 
 That needs two things. The App has Actions write, above. And the workflow
 accepts a dispatch:
@@ -247,23 +261,77 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      command:     { type: choice, options: [up, agents, load], default: up }
+      command:
+        type: choice
+        default: up
+        options: [up, down, agents, load, scenario, explore]
       workflows:   { required: false, default: '' }
       duration:    { required: false, default: '' }
       scale:       { required: false, default: '' }
+      seed:        { required: false, default: '' }
+      concurrency: { required: false, default: '' }
+      run_id:      { required: false, default: '' }
 ```
 
-`examples/github-workflow.yml` carries the whole file, including the step that
-turns each input into the flag it belongs to. Two things about this cost an
-afternoon if you meet them the hard way: GitHub reads the trigger list from the
-**default branch**, so adding `workflow_dispatch` on a feature branch alone
-changes nothing, and a dispatch to a workflow without it answers 404 rather
-than saying what is wrong.
+`up` and `down` bring the environment up and take it away. The four other
+values run a [workload](/docs/concepts/workloads), and the step that handles
+them is one `af workload run` invocation rather than a case arm per verb. That
+command refuses an input the verb's own command has no flag for, rather than
+dropping it, and writes a result document carrying what was measured and the
+plain `af` command that reproduces it.
+
+The values are verbs rather than the kind names the control plane stores, and
+that is deliberate. GitHub reads this trigger list from your **default
+branch** and answers a dispatch carrying an undeclared value with a 422, which
+looks exactly like the file being missing. Renaming them would make every copy
+of this file already in the wild start failing on the values that work today.
+`scenario` and `explore` need this newer file; the rest work on the older one.
+
+`examples/github-workflow.yml` carries the whole file. Two things about this
+cost an afternoon if you meet them the hard way: GitHub reads the trigger list
+from the **default branch**, so adding `workflow_dispatch` on a feature branch
+alone changes nothing, and a dispatch to a workflow without it answers 404
+rather than saying what is wrong.
+
+The console checks all of that when you choose a repository, not when you press
+the button, and says what is missing in the form. It does not disable the
+button: the check can be a few seconds out of date by the width of whatever you
+just did on GitHub, and a form that refuses to submit because of a stale read
+is worse than one that tries and tells you.
+
+`agents` resolves to a browser workflow and `load` to an observed load mix. The
+result says which kind a verb resolved to, so nobody has to infer it.
 
 The control plane records nothing about the environment when it dispatches.
 The run appears in your Actions tab, and the environment appears in the console
 when the engine reports it, the same way it does for a run you started
 yourself.
+
+## The one secret without which nothing appears in the console
+
+The workflow needs `AF_CONTROL_PLANE_TOKEN` in its environment. Create one with
+`af token create ci` and put it in the repository's secrets:
+
+```yaml
+env:
+  AF_CONTROL_PLANE_TOKEN: ${{ secrets.AF_CONTROL_PLANE_TOKEN }}
+```
+
+Nothing about the work needs it. The environment comes up, the agents run, the
+report lands on the pull request, and the job exits with the right code, all
+with no token at all. What it decides is whether any of that is **reported**.
+
+Without it the engine sends no events and claims no hosted run. The console's
+environment list stays empty, and a workload somebody started from the console
+is dispatched, runs to completion, and is recorded as *abandoned* at its
+deadline, because the control plane never heard from it. That reads as a
+plumbing fault in the product and it is a missing repository secret.
+
+If a run is stuck in the console saying nobody reported on it, and the Actions
+tab shows it finishing perfectly well, this is why.
+
+Leave it out if you do not use the hosted control plane. `af ci` on a pull
+request needs none of it.
 
 ## What the comment carries
 
@@ -286,7 +354,7 @@ migrations rehearsed against a branch of the golden, the locks they held, what
 Postgres rewrote, the lint findings, the plans that changed, the hosts the
 environment reached for, whether the branch read back masked, and what teardown
 removed. Each of those is ranked by the manifest's
-[policy block](/docs/concepts/verdicts/), worst first, and the ones set to
+[policy block](/docs/concepts/verdicts), worst first, and the ones set to
 `fail` are what stop the merge.
 
 ## Signature verification
@@ -311,4 +379,4 @@ Almost always a permission the App was not granted, or a token from a workflow
 with a narrower `permissions:` block than the job needs. The message carries
 GitHub's own words, which name the missing scope.
 
-Related: [scheduling](/docs/concepts/scheduling/), [the control plane](/docs/self-hosting/control-plane/).
+Related: [scheduling](/docs/concepts/scheduling), [the control plane](/docs/self-hosting/control-plane).

@@ -25,7 +25,7 @@ const attrOf = (tag: string, key: string, value: string) =>
   head.find((t) => t.tag === tag && t.attrs?.[key] === value)?.attrs;
 
 // Read the canonical Starlight already computed rather than rebuilding it from
-// Astro.url. `base` is /docs and `trailingSlash` is ignore, so reconstructing
+// Astro.url. `base` is /docs and `trailingSlash` is "never", so reconstructing
 // it by hand is three chances to disagree with the tag on the same page.
 const canonical = attrOf("link", "rel", "canonical")?.href;
 

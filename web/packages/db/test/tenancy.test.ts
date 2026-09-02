@@ -95,6 +95,11 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'or the user code the caller already holds, the same shape as oauth_states',
       ],
       ['schema_migrations', "the schema's own bookkeeping, not tenant data"],
+      [
+        'admin_notes',
+        'an operator\'s words about a customer rather than the customer\'s data; ' +
+          'the application role holds no grant on it at all, which the test below proves',
+      ],
       // The analytics tables carry a keyed hash of the organization rather than
       // its id, and that is the whole point of them: see migrations/0027. An
       // org_id here would make the stream joinable back to a customer, so the
@@ -131,6 +136,54 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       `these tables are isolated by nothing this suite knows about:\n  ${unclassified.join('\n  ')}\n` +
         'Give the table an org_id, or record why it does not need one.',
     )
+  })
+
+  /**
+   * The claim the classification above makes, actually tested.
+   *
+   * Listing admin_notes as "deliberately global" is a sentence in a test file,
+   * and a sentence is not an isolation mechanism. What keeps an operator's
+   * private note about a customer away from that customer is that the
+   * application role holds no grant on the table, so every statement it can
+   * construct is refused by the database before any policy is consulted.
+   *
+   * Asserted as 42501 specifically. A SELECT that merely returns no rows would
+   * pass a weaker assertion and would mean something completely different: it
+   * would mean the table IS reachable and simply happened to be empty, which
+   * is the state this suite exists to distinguish from isolation.
+   */
+  it('the application role cannot read or write an operator\'s notes', async () => {
+    const [note] = await h.admin<{ id: string }[]>`
+      INSERT INTO admin_notes (subject_type, subject_id, body, author_label)
+      VALUES ('user', ${alice.userId}, 'a note the tenant must never see', 'the fixture')
+      RETURNING id`
+
+    // Read, on a connection that has a tenant, which is the strongest position
+    // the application is ever in.
+    const read = await h.pool
+      .withTenant({ orgId: alice.orgId, userId: alice.userId }, async (db) => {
+        await db.execute(sql`SELECT body FROM admin_notes`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.equal(
+      read?.code,
+      '42501',
+      'the application role could reach admin_notes; an operator note is not tenant data',
+    )
+
+    const write = await h.pool
+      .withTenant({ orgId: alice.orgId, userId: alice.userId }, async (db) => {
+        await db.execute(sql`DELETE FROM admin_notes WHERE id = ${note!.id}::uuid`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.equal(write?.code, '42501', 'the application role could delete an operator note')
+
+    // Still there, so the refusals above were refusals rather than statements
+    // that quietly matched nothing.
+    const [left] = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM admin_notes WHERE id = ${note!.id}::uuid`
+    assert.equal(Number(left!.n), 1)
+    await h.admin`DELETE FROM admin_notes WHERE id = ${note!.id}::uuid`
   })
 
   it('every tenant-scoped table has row-level security enabled and a policy', async () => {
@@ -341,6 +394,141 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       err.code,
       '42501',
       `expected ownership to be refused, got ${err.code}: ${err.message}`,
+    )
+  })
+
+  /**
+   * The admin portal's backdoor, and the wall around it.
+   *
+   * Migration 0023 creates a role that CAN read every tenant, which is a
+   * deliberate hole and is the only way to answer a support question without
+   * asking the customer to paste their data into a ticket. The property that
+   * makes it a bounded hole rather than an unbounded one is that the
+   * application cannot climb into it: the request path holds antifailure_app's
+   * credential, and reaching antifailure_admin would mean either being a
+   * member of that role or opening a second connection with a password this
+   * process is not given.
+   *
+   * ---------------------------------------------------------------------
+   * WHY THIS IS A ROLE AND NOT A POLICY, and the alternative that was built
+   * and rejected. Recorded here rather than in the migration because that
+   * file has been applied and migrate.ts digests its whole body, so its
+   * prose is frozen: a comment-only edit throws exactly like a DDL edit, on
+   * every database that already ran it. This is the only copy.
+   * ---------------------------------------------------------------------
+   *
+   * First, a correction to what that migration says. Its comment claims
+   * BYPASSRLS is the only mechanism that reads two tenants at once. It is
+   * not. Policies are OR'd, so a permissive policy keyed on a credential the
+   * caller already holds widens just as effectively with no role privilege at
+   * all. That is not a hypothetical: the design was BUILT, it was shown to
+   * work on a real cluster with FORCE ROW LEVEL SECURITY on and row_security
+   * untouched, and it was rejected afterwards. The conclusion below survives;
+   * the reason the migration gives for it does not.
+   *
+   * It was rejected on three grounds, and the third is the one that decides.
+   *
+   * COST THAT SCALES. A policy per table is a boundary whose size grows with
+   * the schema, so it is one somebody eventually forgets to extend. That is
+   * not a prediction either. A single review of the rejected design, of a
+   * schema written hours earlier by a careful author, found three separate
+   * omissions: an operator could read the audit log but not append to it, so
+   * the first refund would have raised on the audit write with the money
+   * already moved; five billing tables were missing from the cross-tenant
+   * read set; and four more were not classified at all.
+   *
+   * CREDENTIAL RATHER THAN CLAIM. A role attribute is a credential the
+   * application cannot be granted its way into, because reaching it means
+   * holding a password this process is not given. A policy keyed on a session
+   * hash is reachable by anyone who can present that hash, which is a claim
+   * rather than a credential, and claims travel.
+   *
+   * LOUD RATHER THAN SILENT, which is the deciding one. The two mechanisms
+   * fail in opposite directions. A missing PRIVILEGE raises permission denied
+   * immediately and names itself. A false POLICY predicate matches zero rows
+   * and REPORTS SUCCESS. Dropping one policy from the rejected design was
+   * tried deliberately: the operator read zero organizations and nothing
+   * raised. So the failure mode of a forgotten policy is a portal that shows
+   * an empty page indistinguishable from a tenant that has no data, and the
+   * failure mode of a forgotten grant is a stack trace. Given that somebody
+   * WILL forget one, the mechanism that shouts is the correct one.
+   *
+   * ---------------------------------------------------------------------
+   * THREE THINGS ABOUT THIS ROLE THAT ARE EASY TO GET WRONG
+   * ---------------------------------------------------------------------
+   *
+   * BYPASSRLS grants NO TABLE PRIVILEGES AT ALL. It is about policies, and
+   * policies only. A role holding it and nothing else gets 42501 on every
+   * statement it attempts, which is what happened to the first code written
+   * against this role.
+   *
+   * ALTER DEFAULT PRIVILEGES covers only what it enumerates, and the one in
+   * migration 0023 enumerates SELECT. Future tables are therefore readable
+   * and not writable, and an operator write needs an explicit INSERT or
+   * UPDATE grant naming the table. That is deliberate, and it is why the
+   * write grants in that file are a short enumerated list rather than a
+   * second blanket.
+   *
+   * Role ATTRIBUTES are not inherited through membership; PRIVILEGES are.
+   * That asymmetry is why the assertion below is about SET ROLE rather than
+   * about inheritance, and it produces the silent failure a third time, now
+   * inside the role mechanism itself. Measured on Postgres 17 against two
+   * organizations:
+   *
+   *   a role holding only BYPASSRLS            permission denied (42501)
+   *   a member of it, reading directly         0 rows, and NO error
+   *   that same parent role, reading directly  2 rows
+   *   the member again, after SET ROLE         2 rows
+   *
+   * The second line is the trap. Membership hands over the GRANTS, so the
+   * statement is permitted and nothing raises, and withholds the ATTRIBUTE,
+   * so the policies still apply and it reads nothing. An operator in that
+   * state sees an empty portal and no error to search for. SET ROLE is what
+   * hands over both, because assuming a role assumes its attributes, which is
+   * why that is the statement this test tries.
+   *
+   * SET ROLE is the specific attack. It needs no password and no new
+   * connection, so if antifailure_admin were ever granted to antifailure_app,
+   * which is one careless GRANT away and would look tidy in a migration, then
+   * every handler in the product would be one statement from reading the
+   * whole database. Nothing else in this suite would notice, because every
+   * other assertion here is about policies, and a role with BYPASSRLS is not
+   * subject to policies at all.
+   */
+  it('the application role cannot become the admin role', async () => {
+    const [admin] = await h.admin<{ rolbypassrls: boolean; rolcanlogin: boolean }[]>`
+      SELECT rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = 'antifailure_admin'`
+    assert.ok(admin, 'migration 0023 did not create antifailure_admin')
+    // If this is ever false the admin portal reads zero rows and every page
+    // renders an empty state that looks like a product with no customers.
+    assert.equal(admin.rolbypassrls, true, 'the admin role cannot actually bypass row-level security')
+
+    // No membership. This is the grant that must never be written.
+    const members = await h.admin<{ member: string }[]>`
+      SELECT m.rolname AS member
+      FROM pg_auth_members am
+      JOIN pg_roles r ON r.oid = am.roleid
+      JOIN pg_roles m ON m.oid = am.member
+      WHERE r.rolname = 'antifailure_admin'`
+    assert.deepEqual(
+      members.map((r) => r.member),
+      [],
+      'something has been granted the admin role; the application must never be able to SET ROLE into it',
+    )
+
+    // And the statement itself, refused, rather than only the catalog being
+    // the right shape. A catalog assertion proves the grant is absent today;
+    // this proves what happens when somebody tries.
+    const escalated = await h.pool
+      .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+        await db.execute(sql`SET ROLE antifailure_admin`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.ok(escalated, 'the application role became the admin role')
+    assert.equal(
+      escalated.code,
+      '42501',
+      `expected SET ROLE to be refused, got ${escalated.code}: ${escalated.message}`,
     )
   })
 

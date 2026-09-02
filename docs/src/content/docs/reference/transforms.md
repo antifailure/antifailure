@@ -115,4 +115,4 @@ golden, which is what makes `link` work and what makes a masked database
 self-consistent. Across goldens the key differs, so the mapping cannot be
 reversed by diffing two refreshes.
 
-Related: [masking](/docs/concepts/masking/), [verification](/docs/concepts/verification/).
+Related: [masking](/docs/concepts/masking), [verification](/docs/concepts/verification).

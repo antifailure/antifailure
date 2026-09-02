@@ -217,6 +217,68 @@ describe('installation tokens', () => {
       new Response('{}', { status: 404 })) as unknown as typeof fetch)
     await assert.rejects(() => tokens.for(42), /App ID does not match the private key/)
   })
+
+  /**
+   * The lookup that answers "was Actions write actually granted here".
+   *
+   * It is the only honest answer to that question, and the reason it exists is
+   * a distinction nothing else in this file makes: an App DECLARING a
+   * permission and an installation HOLDING it are different facts. Widening an
+   * App's permissions asks every installation to accept the new grant and
+   * changes nothing at all until a person does, so the App's own settings page
+   * can read `actions: write` while every installation of it still refuses a
+   * dispatch with 403.
+   */
+  describe('which installation covers a repository', () => {
+    function answering(status: number, body: string, seen: string[] = []) {
+      return new InstallationTokens(config, clock, (async (input: string | URL) => {
+        seen.push(String(input))
+        return new Response(body, { status })
+      }) as unknown as typeof fetch)
+    }
+
+    test('reports the permissions the installation actually holds', async () => {
+      const seen: string[] = []
+      const tokens = answering(
+        200,
+        JSON.stringify({ id: 157834739, permissions: { actions: 'write', metadata: 'read' } }),
+        seen,
+      )
+      const installed = await tokens.onRepository('acme/store front')
+      assert.deepEqual(installed, {
+        id: 157834739,
+        permissions: { actions: 'write', metadata: 'read' },
+      })
+      // Owner and name are two path segments, not one containing a %2F, and
+      // the name is still escaped inside its own segment.
+      assert.match(seen[0]!, /\/repos\/acme\/store%20front\/installation$/)
+    })
+
+    test('an installation GitHub reports without a permissions map is empty, not undefined', async () => {
+      // A caller reads `permissions.actions`, and an undefined map there is a
+      // TypeError on the diagnosis path rather than an answer on it.
+      const tokens = answering(200, JSON.stringify({ id: 7 }))
+      assert.deepEqual((await tokens.onRepository('acme/storefront'))?.permissions, {})
+    })
+
+    test('404 is the answer and not a failure', async () => {
+      // It is what GitHub says both for a repository this App holds no
+      // installation on and for one that does not exist. Null lets the caller
+      // separate those with a second question; throwing would not.
+      const tokens = answering(404, '{"message":"Not Found"}')
+      assert.equal(await tokens.onRepository('acme/storefront'), null)
+    })
+
+    test('anything else throws rather than reading as no installation', async () => {
+      // A rate limit read as "the App is not installed" would tell somebody to
+      // install an App that is already installed.
+      const tokens = answering(429, '{"message":"API rate limit exceeded"}')
+      await assert.rejects(
+        () => tokens.onRepository('acme/storefront'),
+        /refused to say which installation covers acme\/storefront: 429/,
+      )
+    })
+  })
 })
 
 describe('slugs', () => {

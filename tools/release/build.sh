@@ -54,8 +54,15 @@ mkdir -p "$stage/$name/runner"
 
 # The runner travels with the binary rather than being fetched later, so the
 # source a release was tested with is the source it runs.
-cp -R "$root/runner/src" "$root/runner/package.json" "$root/runner/tsconfig.json" \
-      "$root/runner/README.md" "$stage/$name/runner/"
+#
+# package-lock.json is part of that promise and was missing from every archive
+# up to and including v0.1.1, checked by downloading the published one and
+# listing it. Without the lockfile `af runner install` resolves the ^ ranges in
+# package.json afresh, so two people installing one release get two different
+# dependency trees and neither is the tree the release was tested against. The
+# source travelling with the binary is worth nothing if the versions do not.
+cp -R "$root/runner/src" "$root/runner/package.json" "$root/runner/package-lock.json" \
+      "$root/runner/tsconfig.json" "$root/runner/README.md" "$stage/$name/runner/"
 cp "$root/LICENSE" "$root/README.md" "$stage/$name/"
 
 # reltar rather than `tar -czf`. tar takes the mtime of every entry from the

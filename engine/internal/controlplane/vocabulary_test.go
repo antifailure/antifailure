@@ -98,6 +98,12 @@ func TestEveryMappedTypeIsOneTheControlPlaneAccepts(t *testing.T) {
 func TestTheControlPlaneTypesWithNoEngineEventAreTheExpectedOnes(t *testing.T) {
 	// Neither has an engine event mapped to it, and neither is built. See the
 	// comment on KnownTypes in sink.go for what each is reserved for.
+	//
+	// The three workload types were briefly here and are not any more, which is
+	// the whole point of a list like this: they were a live consumer with no
+	// producer, the engine now claims a run and emits all three, and taking
+	// them off is what records that the gap closed. A branch that adds them
+	// back is a branch whose engine half has been lost.
 	expected := []string{"artifact.stored", "environment.queued"}
 
 	produced := map[string]bool{}

@@ -124,7 +124,13 @@ async function main(): Promise<number> {
       : {}),
   };
 
-  const results = doc.workflows.length > 0 ? await run(job) : [];
+  // Tolerant about both lists, because this is a boundary and one bad or
+  // absent field must not take out the whole run. It used to read
+  // doc.workflows.length directly, and the engine sends null for that field on
+  // every exploration, so af explore died here with a TypeError before it
+  // reached the goals it was given. A caller that sends no workflows means no
+  // workflows, which is a legal document and not a fault.
+  const results = doc.workflows?.length ? await run(job) : [];
   const explorations = doc.goals?.length
     ? await explore({
         baseURL: doc.base_url,

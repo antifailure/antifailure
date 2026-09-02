@@ -78,4 +78,7 @@ This page is generated from `schemas/events.v1.json`. Edit the schema, then run 
 | `webhook.delivered` | An inbound webhook was delivered and acknowledged. |
 | `webhook.failed` | An inbound webhook could not be delivered after its retries. |
 | `webhook.queued` | An inbound webhook was queued for delivery. |
+| `workload.cancelled` | A hosted workload run stopped before finishing, because a signal or a cancel command reached it. |
+| `workload.finished` | A hosted workload run ended and reported what it measured. The data is the result document, which says whether the work happened and, separately, what it found. |
+| `workload.started` | A hosted workload run has been claimed and started. The data carries the control plane's run identifier. |
 

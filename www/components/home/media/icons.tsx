@@ -122,10 +122,20 @@ export function FeatureIcon({
 /**
  * The two trust-model marks.
  *
- * These slots used to be `size-8 rounded-full bg-black`, a filled circle in
- * place of an icon, which reads as a decision nobody made. They now say what
- * the claim underneath them says: a packet stopped at a closed gate, and a
- * boundary with the data inside it.
+ * These slots have now been wrong twice. They were `size-8 rounded-full
+ * bg-black`, a filled circle standing in for an icon, and then they were two
+ * 36px diagrams that tried to narrate the whole claim: an arrow, a green bar
+ * and three ghosted lines for one, a square inside a square with a dotted stub
+ * for the other. At the size they actually render, neither one resolved into a
+ * thing. A reader saw a smudge and moved on, and the two marks did not even
+ * carry the same visual weight.
+ *
+ * So they are drawn as pictograms rather than as diagrams: one subject each,
+ * one stroke weight, one colour, sized so the subject survives. A shut padlock
+ * is "fail closed" without reading the label under it, and a store of data
+ * standing inside a wall is "customer-hosted". Nothing here is coloured,
+ * because a highlight stroke inside a 48px mark is a detail nobody can see and
+ * it fought the mark's own outline for attention.
  */
 export function TrustIcon({
   name,
@@ -134,47 +144,36 @@ export function TrustIcon({
   name: "failclosed" | "hosted";
   className?: string;
 }) {
-  const cls = cn("pointer-events-none size-10 max-xl:size-9 max-lg:size-8", className);
+  const cls = cn("pointer-events-none size-12 max-lg:size-11 max-md:size-10", className);
   if (name === "failclosed") {
-    // An attempt that stops short of the wall, and the production behind the
-    // wall it never reached.
+    // A padlock, shut. The shackle is closed on purpose: the resting state of
+    // the gate is the locked one, which is the whole claim.
     return (
-      <svg viewBox="0 0 36 36" className={cls} fill="none" aria-hidden>
-        <path d="M2 18h11.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <svg viewBox="0 0 48 48" className={cls} fill="none" aria-hidden>
         <path
-          d="m9.8 14.4 3.6 3.6-3.6 3.6"
+          d="M11.5 21v-6.5a8.5 8.5 0 0 1 17 0V21"
           stroke="currentColor"
           strokeWidth="1.6"
           strokeLinecap="round"
-          strokeLinejoin="round"
         />
-        <path d="M18.4 3v30" stroke="#33bf00" strokeWidth="2.4" strokeLinecap="round" />
-        <path
-          d="M23.4 11h10.6M23.4 18h10.6M23.4 25h7.6"
-          stroke="currentColor"
-          strokeOpacity="0.3"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-        />
+        <rect x="3" y="21" width="34" height="21" rx="2" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="20" cy="29" r="2.4" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M20 31.4v4.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
       </svg>
     );
   }
-  // The customer boundary with the data inside it, and the control plane
-  // outside, holding no copy.
+  // A store of data standing inside a wall that has no opening. The control
+  // plane is not drawn at all, because the claim is about what never leaves.
   return (
-    <svg viewBox="0 0 36 36" className={cls} fill="none" aria-hidden>
-      <rect x="1.8" y="8.6" width="22" height="21.6" stroke="currentColor" strokeWidth="1.6" />
-      <rect x="6.4" y="13.6" width="12.8" height="11.6" stroke="#33bf00" strokeWidth="1.6" />
-      <path d="M24.6 19.4h3.4" stroke="currentColor" strokeWidth="1.6" strokeDasharray="2 2.2" />
-      <rect
-        x="28.6"
-        y="15.4"
-        width="5.6"
-        height="8"
+    <svg viewBox="0 0 48 48" className={cls} fill="none" aria-hidden>
+      <rect x="3" y="7" width="40" height="34" stroke="currentColor" strokeWidth="1.6" />
+      <ellipse cx="23" cy="17" rx="11.5" ry="4" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M11.5 17v13c0 2.21 5.15 4 11.5 4s11.5-1.79 11.5-4V17"
         stroke="currentColor"
-        strokeOpacity="0.45"
         strokeWidth="1.6"
       />
+      <path d="M11.5 23.5c0 2.21 5.15 4 11.5 4s11.5-1.79 11.5-4" stroke="currentColor" strokeWidth="1.6" />
     </svg>
   );
 }

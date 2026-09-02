@@ -13,8 +13,8 @@ check.
 | `pass` | Everything asked, nothing found. | 0 |
 | `warn` | A real finding about this change that does not stop the merge. | 0 |
 | `flaky` | A workflow passed only sometimes. | 0 |
-| `blocked` | The runner or the environment could not evaluate something. | 0 |
-| `unverified` | A workflow ran and proved nothing either way. | 0 |
+| `blocked` | The runner or the environment could not evaluate something. | 0, unless every workflow was |
+| `unverified` | A workflow ran and proved nothing either way. | 0, unless every workflow was |
 | `fail` | A workflow failed, an invariant did not hold, or a finding your policy puts at `fail`. | non zero |
 
 When more than one applies, the run reports the worst: `fail`, then `flaky`,
@@ -31,6 +31,35 @@ says so in as many words.
 This is deliberate. A check that failed a build because our runner could not
 start is a check people route around, and a check people route around is a
 check that stops finding anything.
+
+## A whole run that verified nothing is a failure
+
+The rule above is about one workflow. It is not about all of them.
+
+If every workflow came back `blocked` or `unverified`, or the manifest declares
+no workflows at all, the run did not decline to blame your application. It never
+looked at it, and a check that exits zero there has told your pipeline the
+application was examined and found fine. Those are different claims and only the
+first one is true.
+
+So `af test` and `af ci` exit `9` when no workflow reached a verdict, which is a
+different code from the `8` a real failure exits with. A pipeline reading the
+number can tell "your change broke something" from "nothing was tested", and the
+two want opposite responses: the first is evidence, the second means the setup
+needs fixing before there is any.
+
+Individual verdicts are untouched by this. One blocked workflow beside one that
+passed is still a passing run, because the run did test the application.
+
+If your project has no workflows yet, say so rather than being told:
+
+```yaml
+policy:
+  workflows_unverified: warn
+```
+
+That reports the fact and exits zero, and the choice is in the manifest where
+somebody can see it, rather than being a silence nobody chose.
 
 ## Warn is a real finding
 
@@ -87,17 +116,18 @@ resolves to.
 
 ## Exit codes
 
-`af ci` exits zero for every verdict except `fail`. When it does fail, the code
-names what failed:
+`af ci` exits zero for every verdict except `fail`, and for a run in which no
+workflow reached a verdict. When it does exit non zero, the code names why:
 
 | Code | What failed |
 | --- | --- |
 | `6` | An unknown destination, with `egress_surprise` at `fail`. |
 | `7` | The branch read back with data that still parses as real. |
 | `8` | A workflow, an invariant, a migration finding, or a load threshold. |
+| `9` | No workflow reached a verdict, so nothing about the application was tested. |
 | `10` | Teardown left resources behind. The journal remembers them; `af down` finishes the job. |
 
-The full list of exit codes is in the [error reference](/docs/reference/errors/).
+The full list of exit codes is in the [error reference](/docs/reference/errors).
 
 ## Verdicts on one workflow
 
