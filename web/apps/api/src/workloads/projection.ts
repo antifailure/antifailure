@@ -74,7 +74,7 @@
 // A refusal is COUNTED on the row rather than only answered in the response.
 // An engine that stood down and was refused is proof the mechanism worked, and
 // it is what tells an abandoned run that changed hands from one whose only
-// engine died. See migration 0024.
+// engine died. See migration 0025.
 
 import { sql } from 'drizzle-orm'
 import type { Db } from '@antifailure/db'

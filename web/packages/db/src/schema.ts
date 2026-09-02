@@ -53,7 +53,7 @@ export const verdictValue = pgEnum('verdict_value', [
   'pass', 'fail', 'flaky', 'blocked', 'unverified',
 ])
 
-// Load definitions and runs. See migrations/0023_load_definitions_and_runs.sql for why these four
+// Load definitions and runs. See migrations/0024_load_definitions_and_runs.sql for why these four
 // kinds stay four kinds, and why a run's state and its verdict are two columns.
 export const workloadKind = pgEnum('workload_kind', [
   'observed_load', 'http_scenario', 'browser_workflow', 'exploration',
@@ -769,7 +769,7 @@ export const organizationDeletionExports = pgTable('organization_deletion_export
 // ---------------------------------------------------------------------------
 
 /** A named, versioned thing to run against an environment. See
- *  migrations/0023_load_definitions_and_runs.sql: the kind is on the definition because
+ *  migrations/0024_load_definitions_and_runs.sql: the kind is on the definition because
  *  the four kinds measure materially different things, and there is no common
  *  intermediate representation behind them. */
 export const workloads = pgTable('workloads', {
@@ -827,7 +827,7 @@ export const workloadRuns = pgTable('workload_runs', {
   // What happened to the lease, so an abandoned run can say which kind of
   // silence it was. A run taken over by a second engine and a run whose only
   // engine died both go quiet and both end as `abandoned`, and only this side
-  // holds the facts that separate them. See migration 0024.
+  // holds the facts that separate them. See migration 0025.
   leaseTakeovers: integer('lease_takeovers').notNull().default(0),
   leaseLostAt: timestamp('lease_lost_at', { withTimezone: true }),
   unheldReports: integer('unheld_reports').notNull().default(0),
@@ -940,7 +940,7 @@ export const workloadEvidence = pgTable('workload_evidence', {
 
 /** What the control plane is asking a runtime to do, durably, with a lease and
  *  an acknowledgement. A teardown that is only a column update is a teardown
- *  that never happens; see migrations/0023_load_definitions_and_runs.sql. */
+ *  that never happens; see migrations/0024_load_definitions_and_runs.sql. */
 export const runtimeCommands = pgTable('runtime_commands', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').notNull(),
