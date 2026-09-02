@@ -2,7 +2,7 @@
 title: Workloads
 description: A saved selection out of your manifest, run through the command that names it, with the exact command that reproduces the result.
 sidebar:
-  order: 14
+  order: 15
 ---
 
 A workload is a saved selection out of your manifest plus the knobs the command

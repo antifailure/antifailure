@@ -2,7 +2,7 @@
 title: Your own provider keys
 description: Store an Anthropic or OpenAI key, cap what it may spend, and rotate it, from the console or a terminal.
 sidebar:
-  order: 15
+  order: 20
 ---
 
 Runs use your Anthropic and OpenAI keys, not ours. You store one, you cap what
@@ -76,10 +76,16 @@ this without seeing the words. See [Signing in from a terminal](/docs/guides/sig
 ```
 $ af provider list
 
-  Provider   Key           Monthly cap                    Spent
-  anthropic  ••••••••7777  50.00 USD                      12.50 USD
-  openai     not set       none, so nothing may be spent  —
+  PROVIDER   KEY                             MONTHLY CAP        SPENT
+  anthropic  ********7777                      50.00 USD    12.50 USD
+  openai     not set       none, so nothing may be spent  not tracked
 ```
+
+The key is masked with plain asterisks rather than bullet characters, because
+this output is read in CI logs and pasted into pull request comments as often
+as it is read on a terminal, and neither of those is guaranteed to have the
+character. A provider with no cap says so in words for the same kind of reason:
+a dash in that column reads as unlimited and it means the opposite.
 
 ### Storing a key
 
