@@ -1,0 +1,75 @@
+name: CodeQL
+
+# Semantic scanning, which is a different question from the one Security asks.
+# `security.yml` reads advisories: it knows a dependency has a published CVE.
+# CodeQL reads the code: it finds a taint path this repository wrote itself,
+# which no advisory database can know about. Both, or neither answer is worth
+# much.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, off the hour, so it does not queue behind everything else that
+    # thinks midnight is a good time.
+    - cron: '43 17 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Same reasoning as CI and Security. A run on main is a verdict something
+  # downstream reads, so it is never cancelled. On a branch nothing depends on
+  # the superseded answer.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: codeql, ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    # The Go leg builds the whole engine, so this is generous on purpose. It is
+    # still a bound: a job with no timeout that hangs reports `cancelled`, and
+    # `cancelled` is not a verdict.
+    timeout-minutes: 60
+
+    permissions:
+      # Uploading a SARIF result is a write to the security tab, and it is the
+      # only write anything here does.
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
+          # Python is deliberately absent. The only Python in this repository
+          # is `examples/django-api`, a fixture that exists to be a small,
+          # obvious application for the product to operate on, plus one Helm
+          # ordering script. Scanning a fixture fills the security tab with
+          # findings nobody will ever act on, and a tab full of noise is a tab
+          # that stops being read. Add Python here the day Python runs in
+          # production, not before.
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@fddeee1a7ece751b577e409a89057319e3172939 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@fddeee1a7ece751b577e409a89057319e3172939 # v4
+        with:
+          category: "/language:${{ matrix.language }}"
