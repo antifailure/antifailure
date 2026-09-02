@@ -10,21 +10,19 @@
 // client are behind the money routes. A route that forgot its permission, or
 // named one no role holds, fails here.
 //
-// What they do NOT prove: the HTTP mount, and the cross-site protection that
-// belongs with it. There is no mount yet. The operator cookie is
-// `__Host-` prefixed and `SameSite=Strict`, which closes ordinary cross-site
-// forgery on its own, but the product's own /trpc guard exists because
-// SameSite is site-scoped rather than origin-scoped and a subdomain an attacker
-// controls is inside it. Whoever mounts these owes them the same guard, and
-// that is the boundary owner rather than this lane. Said here so the gap is
-// recorded next to the tests that would otherwise look like full coverage.
+// What they do NOT prove: the HTTP layer. These routes are composed into
+// `adminRouter`, which is served on /trpc, and the cross-site guard for the
+// operator cookie is asserted in server.ts's own tests rather than here. The
+// split is deliberate: this file is about whether a route does the right thing
+// for the right operator, and duplicating a transport assertion in it would be
+// a second, weaker copy of somebody else's test.
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import postgres from 'postgres'
 import { createAdminPool, sql, type AdminPool } from '@antifailure/db'
-import { adminMoneyRouter } from '../src/admin/routers.ts'
+import { adminRouter } from '../src/admin/router.ts'
 import type { AdminContext } from '../src/admin/trpc.ts'
 import type { AdminRole } from '../src/admin/permissions.ts'
 import { adminUrl, available, dropOrg, seedOrg, startApi, stripeAgainstMockPack, type ApiHarness, type Org } from './harness.ts'
@@ -101,6 +99,10 @@ describe('the operator money routes', async () => {
       admin: {
         adminUserId: operatorId,
         label,
+        // The pool records `email` on the connection, not `label`. They are the
+        // same string for a provisioned operator and the two fields exist
+        // because one survives the row being deleted.
+        email: label,
         role,
         sessionId: randomUUID(),
         impersonating: false,
@@ -119,7 +121,7 @@ describe('the operator money routes', async () => {
       origin: 'admin',
       ip: '203.0.113.10',
     } as unknown as AdminContext
-    return adminMoneyRouter.createCaller(ctx as never)
+    return adminRouter.createCaller(ctx as never)
   }
 
   // -------------------------------------------------------------------------

@@ -33,6 +33,11 @@ import { TRPCError } from '@trpc/server'
 import { router } from '../trpc.ts'
 import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
 import {
+  adminBillingRouter,
+  adminEntitlementsRouter,
+  adminFlagsRouter,
+} from './routers.ts'
+import {
   ADMIN_PERMISSIONS,
   ADMIN_PERMISSION_DESCRIPTIONS,
   ADMIN_ROLES,
@@ -97,6 +102,14 @@ const SAFE_COLUMNS = {
  * naming the owner. Do NOT add a second `admin:` key to appRouter.
  */
 export const adminRouter = router({
+  // The money lane, composed in rather than mounted beside. One operator tree
+  // means one matrix test walking it and one place a reader looks for "what can
+  // an operator do", which is the same argument this file's own header makes
+  // for one catalog.
+  billing: adminBillingRouter,
+  entitlements: adminEntitlementsRouter,
+  flags: adminFlagsRouter,
+
   /**
    * Who the operator is, and what the shell may show them.
    *
