@@ -464,7 +464,13 @@ function reasonFor(err: unknown): string {
   return `${inner}\n${outer}`
 }
 
-interface Row {
+// A type alias rather than an interface, and the difference is load bearing
+// here rather than stylistic. db.execute<T> constrains T to Record<string,
+// unknown>, and TypeScript gives an object TYPE an implicit index signature
+// while an interface gets none, so the interface form does not satisfy the
+// constraint. `node --test` strips types without checking them, so this failed
+// tsc while every test still ran green.
+type Row = {
   session_hash: string | null
   email: string | null
   who: string | null
