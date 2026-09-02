@@ -1,16 +1,14 @@
 module github.com/antifailure/antifailure/tools
 
-go 1.25.0
-
-toolchain go1.25.14
+go 1.26.0
 
 require (
 	github.com/antifailure/antifailure/engine v0.0.0-20260827003151-4d231565e530
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	golang.org/x/mod v0.39.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
