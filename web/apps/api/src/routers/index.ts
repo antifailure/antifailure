@@ -27,6 +27,7 @@ import { createEnvironment, agentsRouter, loadRouter } from './dispatch.ts'
 import { runtimesRouter } from './runtimes.ts'
 import { billingRouter } from './billing.ts'
 import { subscriptionsRouter } from './subscriptions.ts'
+import { adminRouter } from '../admin/router.ts'
 
 const uuid = z.string().uuid()
 
@@ -1082,6 +1083,19 @@ const tokensRouter = router({
 
 export const appRouter = router({
   health: publicProcedure.query(() => ({ ok: true })),
+
+  /**
+   * The operator portal.
+   *
+   * Mounted under `admin.` and that prefix is load bearing rather than
+   * cosmetic: admin-infra's maintenance mode exempts `/trpc/admin.*` so an
+   * operator can still reach the switch that releases it. Moving this key
+   * locks the operator out of the control that ends an outage.
+   *
+   * Every procedure inside is built with adminProcedure, which takes its
+   * permission as an argument, so none of them can exist unguarded.
+   */
+  admin: adminRouter,
 
   /** The permission catalog, which is what the documentation table is built
    *  from. Public because it describes the product rather than any tenant. */
