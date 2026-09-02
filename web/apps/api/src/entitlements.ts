@@ -221,8 +221,19 @@ export interface Subject {
 
 export class Entitlements {
   private readonly resolved: Map<string, Resolved>
+  /**
+   * The plan these were resolved against.
+   *
+   * Carried so a refusal can NAME it. "This organization is holding 4 of 3
+   * environments, which is what the plan allows" tells somebody nothing they
+   * can act on; "what the free plan allows" tells them what upgrading buys.
+   * That sentence is the whole of the self-service path out of a refusal, and
+   * dropping the plan from it turns a refusal into a support ticket.
+   */
+  readonly plan: string
 
-  constructor(resolved: Map<string, Resolved>) {
+  constructor(plan: string, resolved: Map<string, Resolved>) {
+    this.plan = plan
     this.resolved = resolved
   }
 
@@ -370,7 +381,7 @@ export function applyOverrides(plan: string, rows: readonly OverrideRow[]): Enti
     })
   }
 
-  return new Entitlements(out)
+  return new Entitlements(plan, out)
 }
 
 /**
@@ -423,8 +434,8 @@ function asDate(v: string | Date): Date {
  *  told they had forty environments being refused at forty with a message that
  *  says the team plan allows twenty five. That reads as the grant having been
  *  lost, and generates a support ticket that a sentence would have prevented. */
-function because(r: Resolved): string {
-  if (r.override === null) return `the plan`
+function because(r: Resolved, plan: string): string {
+  if (r.override === null) return `the ${plan} plan`
   const until = r.override.expiresAt ? `, until ${r.override.expiresAt.toISOString().slice(0, 10)}` : ''
   return `a ${r.override.scope} override${until}`
 }
@@ -459,7 +470,7 @@ export function checkQuotaWithEntitlements(
     limit,
     reason:
       `This organization is holding ${current} of ${limit} ${spec?.unit ?? key}, which is what ` +
-      `${because(resolved)} allows. Tear one down, or change the plan. Nothing that already ` +
+      `${because(resolved, entitlements.plan)} allows. Tear one down, or change the plan. Nothing that already ` +
       `exists was removed.`,
   }
 }
@@ -486,7 +497,7 @@ export function checkCostCapWithEntitlements(
       current: Math.round(runHours * 10) / 10,
       limit: perRun.value,
       reason:
-        `This run would hold an environment for ${hours(runHours)}, and ${because(perRun)} allows ` +
+        `This run would hold an environment for ${hours(runHours)}, and ${because(perRun, entitlements.plan)} allows ` +
         `${hours(perRun.value)} in one run. Lower runtime.ttl in the manifest, or ask an owner of ` +
         `this organization to change the plan. Nothing was created and nothing was removed.`,
     }
@@ -504,7 +515,7 @@ export function checkCostCapWithEntitlements(
       reason:
         `This organization has used ${hours(usedDayHours)} of environment time in the last day and ` +
         `this run would take it to ${hours(usedDayHours + runHours)}, past the ${hours(perDay.value)} ` +
-        `${because(perDay)} allows. Wait, shorten the run, or ask an owner of this organization to ` +
+        `${because(perDay, entitlements.plan)} allows. Wait, shorten the run, or ask an owner of this organization to ` +
         `change the plan. Nothing was created and nothing was removed.`,
     }
   }
@@ -545,7 +556,7 @@ export function seatVerdict(
     limit,
     reason:
       `This organization is using ${held} of ${limit} seats${invitations}, which is what ` +
-      `${because(resolved)} allows. Withdraw an invitation, remove a member, or change the plan. ` +
+      `${because(resolved, entitlements.plan)} allows. Withdraw an invitation, remove a member, or change the plan. ` +
       `Nobody was removed.`,
   }
 }
