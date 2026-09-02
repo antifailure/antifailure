@@ -2,7 +2,7 @@
 title: Insights
 description: What Postgres itself can tell you about a change, before anybody clicks anything.
 sidebar:
-  order: 11
+  order: 13
 ---
 
 A branch is a real database with production's shape in it, which makes some

@@ -44,7 +44,7 @@ docker run \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
-  -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
+  -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/github/callback \
   -p 8080:8080 ghcr.io/antifailure/control-plane:main-b53906a
 ```
 
