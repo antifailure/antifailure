@@ -1,0 +1,88 @@
+{
+  "duration_ms": 0,
+  "engine": {
+    "commit": "bb1579d9",
+    "edition": "oss",
+    "version": "0.0.0-dev"
+  },
+  "environment": {
+    "branch": "w-studio-engine",
+    "env_id": "aftest-04e645",
+    "url": "http://127.0.0.1:8081"
+  },
+  "evidence": [
+    {
+      "availability": "runner_local",
+      "kind": "screenshot",
+      "label": "reach checkout",
+      "locator": ".antifailure/artifacts/checkout.png",
+      "sha256": "6c414001d2f8ba5f9d29c4c2846e286024f9cb3083f4f03fd64131c3f60cd09f",
+      "size_bytes": 36
+    }
+  ],
+  "finished_at": "2026-09-01T06:40:00Z",
+  "kind": "exploration",
+  "outcome": "succeeded",
+  "reproduce": {
+    "argv": [
+      "af",
+      "explore"
+    ],
+    "command": "af explore",
+    "manifest_digest": "sha256:0d1e2f",
+    "note": "run this from the repository root, against an environment that is already up for the same branch"
+  },
+  "result": {
+    "achieved_rate": null,
+    "duration_ms": 31500,
+    "error_rate": null,
+    "failures": null,
+    "findings": 2,
+    "goals": 2,
+    "goals_reached": 1,
+    "iterations": null,
+    "max_ms": null,
+    "p50_ms": null,
+    "p90_ms": null,
+    "p95_ms": null,
+    "p99_ms": null,
+    "refused_routes": [],
+    "requests": null,
+    "scheduled_ms": null,
+    "sessions": null,
+    "steps": null,
+    "target_rate": null,
+    "workflows": null,
+    "workflows_blocked": null,
+    "workflows_failed": null,
+    "workflows_flaky": null,
+    "workflows_passed": null,
+    "workflows_unverified": null
+  },
+  "routes": [],
+  "run_id": "5e4a1c8e-1f0b-4a35-9a1b-0c6d2f8e7a91",
+  "schema": "antifailure.workload.result/v1",
+  "started_at": "2026-09-01T06:40:00Z",
+  "state": "succeeded",
+  "thresholds": [
+    {
+      "measure": "goal_reached",
+      "name": "find the pricing page",
+      "observed": null,
+      "position": 0,
+      "threshold": null,
+      "value": "pass"
+    },
+    {
+      "detail": "the goal was not reached",
+      "measure": "goal_reached",
+      "name": "reach checkout",
+      "observed": null,
+      "position": 1,
+      "threshold": null,
+      "value": "unverified"
+    }
+  ],
+  "verdict": "unverified",
+  "workload_run_id": "5e4a1c8e-1f0b-4a35-9a1b-0c6d2f8e7a91"
+}

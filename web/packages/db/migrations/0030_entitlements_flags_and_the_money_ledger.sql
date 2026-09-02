@@ -66,24 +66,29 @@ BEGIN;
 -- Who may write any of this
 -- ---------------------------------------------------------------------------
 --
--- 0029 already answered this and the answer is not a database role, so this
--- file deliberately creates none.
+-- 0023_the_operator_who_can_see_every_tenant already answered this, and the
+-- answer IS a database role, so this file creates none and grants to the one
+-- that exists.
 --
--- An operator is `antifailure_app`, the same role every request runs as,
--- holding a connection that has declared the hash of a live operator session.
--- `current_admin_user()` resolves to a row only for such a connection, so a
--- policy keyed on it is keyed on a credential rather than on a claim. A second
--- role here would be a second boundary: two things to grant, two things to
--- revoke, and two answers to "who can move money", which is the question that
--- must have one.
+-- An operator connects as `antifailure_admin`, a credential separate from the
+-- `antifailure_app` that every tenant request runs as, holding BYPASSRLS. That
+-- is the whole boundary: policies do not apply to that role at all, so nothing
+-- below tries to express "is this an operator" as a predicate.
 --
--- What that means for the grants below, and it is the opposite of what it looks
--- like: `antifailure_app` is granted INSERT and UPDATE on all four tables, and
--- a tenant still cannot write a single row. The grant is what makes the write
--- POSSIBLE; the policy is what makes it permitted, and every write policy here
--- requires current_admin_user() to be non-null, which it is not on a tenant
--- connection. Withholding the grant instead would also withhold it from the
--- operator, because they are the same role.
+-- An earlier draft of this file did express it as a predicate, keyed on
+-- `current_admin_user()`, and granted `antifailure_app` INSERT and UPDATE on
+-- all four tables so the policy could permit what the grant made possible.
+-- 0029_the_admin_portal chose the separate credential instead, and it is the
+-- better boundary for a reason worth keeping: a policy predicate is a CLAIM the
+-- connection makes about itself, while a role is a credential it had to be
+-- issued. The old shape left a write path on the tenant-facing role that was
+-- closed by a WHERE clause rather than by not being granted.
+--
+-- So the grants below are the opposite of that draft. `antifailure_app` gets
+-- SELECT and is explicitly revoked from every write verb, and gets nothing at
+-- all on the ledger. `antifailure_admin` gets the writes. A tenant connection
+-- cannot write these tables because it was never granted the verb, which is a
+-- stronger statement than a policy that evaluates to false.
 
 -- ---------------------------------------------------------------------------
 -- Overrides
@@ -412,8 +417,9 @@ CREATE INDEX admin_operations_in_flight_idx ON admin_operations (started_at)
 -- ---------------------------------------------------------------------------
 -- Grants
 --
--- Exactly the verbs used, per table, the rule 0002 states. One role, because
--- 0029 decided that; see the note above for why a grant that looks wide is not.
+-- Exactly the verbs used, per table, the rule 0002 states. Two roles, because
+-- 0023_the_operator_who_can_see_every_tenant decided that; see the note above
+-- for why the tenant-facing role is revoked rather than merely unpermitted.
 --
 -- Nothing gets DELETE. An override is revoked, a flag is killed, an operation
 -- is settled. "Who granted this, and when did it stop" is a question that has
@@ -434,7 +440,7 @@ REVOKE ALL ON admin_operations FROM antifailure_app;
 -- The operator writes all four and deletes none of them.
 --
 -- These GRANTs are not redundant with BYPASSRLS and the distinction is the one
--- 0030's own comment makes: BYPASSRLS exempts a role from row level security
+-- 0029_the_admin_portal's own comment makes: BYPASSRLS exempts a role from row
 -- and gives it no table privileges whatsoever, so a connection as
 -- `antifailure_admin` with no grant here gets 42501 on every statement. The
 -- policies are what a tenant is stopped by; these are what the operator is
@@ -449,9 +455,9 @@ FROM antifailure_admin;
 -- No SELECT grants here, and the absence is the point.
 --
 -- An earlier draft of this file granted the operator SELECT on the six billing
--- tables and on `organizations`, because 0030 grants it only the admin tables
--- and the first statement of every route in this lane was 42501. That was true
--- and it is no longer: 0023 grants `SELECT ON ALL TABLES IN SCHEMA public` and
+-- tables and on `organizations`, because 0029_the_admin_portal grants it only
+-- the admin tables, and the first statement of every route in this lane was
+-- 42501. That was true and it is no longer: 0023 grants `SELECT ON ALL TABLES IN SCHEMA public` and
 -- sets `ALTER DEFAULT PRIVILEGES ... GRANT SELECT ON TABLES`, so every table in
 -- the schema is covered, including the four created above and any a later
 -- migration adds.
@@ -521,12 +527,13 @@ CREATE POLICY tenant_sees_nothing ON admin_operations
   FOR ALL TO antifailure_app
   USING (false) WITH CHECK (false);
 
--- Nothing here for the operator, and that is the change 0030 made necessary.
+-- Nothing here for the operator, and that is the change 0029_the_admin_portal
+-- made necessary.
 --
 -- An earlier draft of this file gave `antifailure_app` INSERT and UPDATE on
--- these four tables behind a policy keyed on current_admin_user(). 0030 chose a
--- different and better boundary: the operator connects as `antifailure_admin`,
--- a separate credential holding BYPASSRLS, so policies do not apply to it at
+-- these four tables behind a policy keyed on current_admin_user(). That file
+-- chose a different and better boundary: the operator connects as
+-- `antifailure_admin`, a separate credential holding BYPASSRLS, so policies do not apply to it at
 -- all. That leaves the old design as a write path on the tenant-facing role
 -- that nothing would ever use, and a grant nobody needs is a grant somebody
 -- will eventually reach through. It is gone.

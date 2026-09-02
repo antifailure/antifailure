@@ -30,6 +30,7 @@ import {
 import type { Billing } from '../src/billing/index.ts'
 import {
   advanceDeletion,
+  stopWork,
   resumeDeletions,
   runToCompletion,
   type DeletionDeps,
@@ -602,17 +603,43 @@ describe(
         INSERT INTO organization_deletions (org_id, org_slug, org_name, requested_by_label)
         VALUES (${org.orgId}, ${org.slug}, 'deleting', 'the test')`
 
+      // Both calls are aimed at the SAME step, which is the thing being
+      // tested, rather than at the step machine, which is not.
+      //
+      // This used to fire two advanceDeletion calls through Promise.all and
+      // assert that exactly one reported progress. Promise.all does not
+      // guarantee overlap: it starts both and waits, and on a loaded runner
+      // the first can finish before the second reads its step. Then the second
+      // reads the NEXT step and advances that instead, and both report
+      // progress honestly. Instrumented and serialized on purpose, that is
+      // exactly what happens: the first advances stop_work, the second
+      // advances cancel_subscription, both return moved, and the assertion
+      // reported 2 !== 1 against a product that had done nothing wrong. It
+      // took green pull requests down at random for as long as it stood.
+      //
+      // So the invariant is asserted where it lives. stopWork claims the
+      // record before it does anything, and the promise is that a second
+      // caller finds it claimed and stops. That is true whether the two
+      // overlap or serialize, which is what makes this deterministic without
+      // making it weaker.
       const [a, b] = await Promise.all([
-        advanceDeletion(deps, org.orgId),
-        advanceDeletion(deps, org.orgId),
+        stopWork(deps, org.orgId),
+        stopWork(deps, org.orgId),
       ])
-      // Exactly one of them did the step. The other found the timestamp already
-      // set and reported no progress, which is what the WHERE clause on every
-      // step's write is for.
-      assert.equal([a.moved, b.moved].filter(Boolean).length, 1)
+      assert.equal([a, b].filter(Boolean).length, 1,
+        'two callers both reported doing the same step, so the claim did not hold')
 
+      // And the step happened once, with the count recorded by the caller that
+      // actually did it. If the claim moved but the work did not, or the work
+      // ran under a caller whose counts were then thrown away, this is where
+      // it shows.
       const row = await record()
       assert.equal(row.environments_stopped, 1)
+      assert.equal(row.runs_cancelled, 0)
+      const [env] = await h.admin<{ n: string }[]>`
+        SELECT count(*)::text AS n FROM environments
+        WHERE org_id = ${org.orgId} AND state = 'torn_down'`
+      assert.equal(env!.n, '1', 'the environment was not torn down exactly once')
     })
 
     // -----------------------------------------------------------------------

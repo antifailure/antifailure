@@ -35,9 +35,9 @@ Creating an operator mints no credential. The row lands with a null password
 hash, so the account exists and cannot be signed into until somebody provisions
 one out of band.
 
-Four surfaces are here: organizations, sessions, users, and operators. The
-portal is the mount point and the boundary as much as it is those four: the
-other operator lanes hang their sub routers off the same object, so there is
-one place an operator route can exist and one matrix test that walks all of
-them. Impersonation, the support console, and search have their schema and
-their permission names and no routes yet.
+Five surfaces are here: tenants, users, sessions, operators, and a reader over
+the operator audit trail. The portal is the mount point and the boundary as
+much as it is those five: the other operator lanes hang their sub routers off
+the same object, so there is one place an operator route can exist and one
+matrix test that walks all of them. Impersonation, the support console, and
+search have their schema and their permission names and no routes yet.

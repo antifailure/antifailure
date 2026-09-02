@@ -86,7 +86,7 @@ describe('the operator permission catalog', () => {
   })
 
   test('the root role matches what the database trigger enforces', () => {
-    // 0030 refuses to let the root row be demoted from owner. This constant and
+    // 0029 refuses to let the root row be demoted from owner. This constant and
     // that trigger have to agree, and this is the test that makes them.
     assert.equal(ROOT_ADMIN_ROLE, 'owner')
   })

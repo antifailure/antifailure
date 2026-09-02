@@ -2,7 +2,7 @@
 title: Control plane configuration
 description: Every environment variable the control plane reads, what it does, and what happens when it is missing.
 sidebar:
-  order: 7
+  order: 5
 ---
 
 The control plane reads its configuration from the environment and refuses to
@@ -54,6 +54,13 @@ is a process that fails in production rather than at deploy time.
 | Variable | Where it is set | What it is |
 | --- | --- | --- |
 | `AF_CONTROL_PLANE_TOKEN` | On the engine, or in a CI job | An engine token, which the control plane **issues and verifies but never reads from its own environment**. Somebody running their own control plane creates one by posting to `/v1/tokens`, then sets it where `af` runs so the CLI can reach a hosted control plane. It is listed here because this is the page somebody setting up a self-hosted installation reads, and a token the control plane mints is easy to mistake for a variable the control plane consumes. Setting it on the control plane process does nothing at all. |
+
+A job in GitHub Actions should set none of that. It asks GitHub for a workflow
+identity and exchanges it at `/v1/auth/github-oidc` for a token that expires in
+fifteen minutes, so there is no secret to paste and none to rotate. The
+repository has to be claimed once first, and
+[the GitHub guide](/docs/guides/github#sending-events-with-no-token-at-all)
+says why that step is what grants access rather than the signature.
 
 Everything above this section is read by the control plane process itself.
 

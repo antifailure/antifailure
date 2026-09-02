@@ -367,7 +367,7 @@ export async function runOnce<T>(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     const code = (err as { code?: string | null }).code ?? null
-    // Whether the provider answered. See the column comment in 0031: this
+    // Whether the provider answered. See the column comment in 0030_entitlements_flags_and_the_money_ledger: this
     // decides whether the NEXT deliberate retry may have a key of its own or
     // has to reuse this one. Anything that is not a provider error is treated
     // as unanswered, which is the direction that cannot double charge.

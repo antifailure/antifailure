@@ -2,7 +2,7 @@
 title: Synthesis
 description: Answering an API with a model, when a fixture would have to be invented anyway.
 sidebar:
-  order: 13
+  order: 15
 ---
 
 `synth` answers a request with a model, given the API's shape and the request

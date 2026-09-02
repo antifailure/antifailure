@@ -2,7 +2,7 @@
 title: Signing in from a terminal
 description: af login uses the device grant, so the token is never shown, copied, or typed.
 sidebar:
-  order: 14
+  order: 19
 ---
 
 `af login` signs this machine in to a control plane. It prints a short code,

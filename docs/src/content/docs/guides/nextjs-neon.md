@@ -2,7 +2,7 @@
 title: Next.js with Neon
 description: An environment per pull request whose database is a Neon branch, and the three things that differ from the local provider.
 sidebar:
-  order: 14
+  order: 17
 ---
 
 [The Next.js guide](/docs/guides/nextjs) covers what the service needs. This

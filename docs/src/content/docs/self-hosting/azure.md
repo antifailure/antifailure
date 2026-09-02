@@ -177,7 +177,7 @@ terraform apply \
   -var subscription_id=... \
   -var github_client_id=... \
   -var github_client_secret=... \
-  -var github_redirect_uri=https://cp.example.com/auth/callback
+  -var github_redirect_uri=https://cp.example.com/auth/github/callback
 ```
 
 One apply from nothing produces a resource group with a budget, a Postgres with

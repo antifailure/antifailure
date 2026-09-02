@@ -145,7 +145,7 @@ export function PricingPage() {
         lead="Community is the local engine and it works today. Team is a platform fee plus run usage. Growth and Enterprise add volume, policy, and governance. These bands are illustrative, not a quote."
         actions={
           <>
-            <Button href="/signup">Join the waitlist</Button>
+            <Button href="/signup">Request access</Button>
             <Button href="/docs" theme="outlined">
               Read the docs
             </Button>

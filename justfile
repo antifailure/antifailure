@@ -70,6 +70,8 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "the sidebar order is chosen"    just sidebarcheck
+    run "spoken variables are documented" just varcheck
     run "STATUS keeps its own rule"      just statuscheck
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
@@ -150,7 +152,7 @@ setup:
     }
 
     echo "Toolchain"
-    need go     "go1.25"  "https://go.dev/dl/ , or: brew install go"           go version
+    need go     "go1.26"  "https://go.dev/dl/ , or: brew install go"           go version
     need node   "v24"     "https://nodejs.org/ , or: brew install node@24"     node --version
     need npm    ""        "ships with node"                                    npm --version
     need docker ""        "https://docs.docker.com/get-docker/"                docker --version
@@ -475,8 +477,17 @@ scanrepo:
     go run ./tools/scanrepo .
 
 # Every af command shown in the docs is a command that exists.
+# -count=1 for the same reason test-tools needs it, proven the same way.
+#
+# This test reads docs/src/content/docs and examples/, both outside the engine
+# module, so nothing it depends on is anything the cache watches. Measured: a
+# documentation page was edited to read `af init --wat`, a flag that does not
+# exist, and `just docexamples` answered "ok (cached)". The same test with
+# -count=1 failed on it immediately. CI already passes -count=1 through
+# `go test ./...`, so this was a local-only lie, and a local-only lie is the
+# worst kind here: CONTRIBUTING promises a green `just gate` means a green CI.
 docexamples:
-    cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists
+    cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists -count=1
 
 # The punctuation this project does not use.
 prosecheck:
@@ -742,6 +753,34 @@ forbidden:
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
+
+# Every variable the product names at a user is one the documentation explains.
+#
+# `af license install` tells a paying customer to set AF_LICENSE_KEY and AF_ORG,
+# then points them at the licensing page, and that page named neither. The
+# product asked for two things and sent the reader to the one page that should
+# have said what they are. `af doctor` had the same shape with
+# AF_PORT_RANGE_START. The control plane has had this check since
+# config-docs.test.ts; the engine, which is the half a customer runs on their
+# own machine, never did.
+#
+# It parses rather than greps, because the first version was line oriented and
+# returned a clean zero over AF_PORT_RANGE_START while looking straight at it:
+# `r.Remediation = fmt.Sprintf(` and the string naming the variable sit on
+# different lines.
+varcheck:
+    go run ./tools/varcheck .
+
+# The sidebar order is a decision rather than an accident.
+#
+# Starlight breaks a tie in sidebar.order on FILE NAME, which is invisible to
+# somebody editing a page and silent everywhere else. 27 of the 78 ordered
+# pages shared a number with a sibling, so a third of the sidebar was
+# alphabetised by slug while reading like a designed order: "Watching a run"
+# split the two runtime guides, "Provider limits" split the three provider
+# pages, and On-call came before Standing up production.
+sidebarcheck:
+    go run ./tools/sidebarcheck .
 
 # STATUS.md keeps the rule it states about itself.
 #
@@ -1018,8 +1057,15 @@ generate:
 #
 # A machine with no keyring daemon skips rather than fails. That is correct: the
 # chain's whole design is that an unavailable source is named and stepped over.
+#
+# -count=1 because it was NOT the same command, which made the sentence above
+# false. keyring.yml:68 has always passed -count=1 and this did not, and the
+# test reads the operating system's credential store, which is as far outside
+# the module as a dependency gets, so nothing it touches is anything the cache
+# watches. Measured: 20.677s, then `ok (cached)` on the second run. A gate that
+# certifies this machine's keychain works, by not looking at the keychain.
 keyring:
-    cd engine && go test ./internal/secrets/
+    cd engine && go test ./internal/secrets/ -count=1
 
 # Lint the code the other platforms compile.
 #

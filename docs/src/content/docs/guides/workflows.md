@@ -2,7 +2,7 @@
 title: Workflows
 description: Writing a description an agent can follow and a verdict can be decided against.
 sidebar:
-  order: 7
+  order: 8
 ---
 
 A workflow is one thing a user does, described well enough that somebody who

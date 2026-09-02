@@ -329,10 +329,12 @@ per event instead.
 Everything above is the same wherever the engine runs, and there are two other
 places to run it.
 
-[An environment per pull request](/docs/guides/github) is Antifailure inside
-GitHub Actions: the same `af up`, in a workflow, with one comment on the pull
-request that is updated in place rather than appended to. Nothing else is
-needed, and in particular no server.
+[An environment per pull request](/docs/getting-started/pull-requests) is
+Antifailure inside GitHub Actions: the same `af up`, in a workflow, with one
+comment on the pull request that is updated in place rather than appended to.
+Nothing else is needed, and in particular no server. It is the next page in
+this section, and [GitHub](/docs/guides/github) is the reference behind it:
+the two modes, what the App must be granted, forks, and teardown.
 
 [The control plane](/docs/self-hosting/control-plane) is the optional hosted
 piece, and the page opens by saying what still works without it, which is all

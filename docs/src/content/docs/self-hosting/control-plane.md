@@ -74,7 +74,7 @@ docker run \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
-  -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
+  -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/github/callback \
   -p 8080:8080 ghcr.io/antifailure/control-plane:main-b53906a
 ```
 
@@ -196,10 +196,18 @@ that nobody classified.
 
 ## Connecting an engine
 
-An engine token is what a CI job and a self-hosted engine present. It belongs to
-the organization rather than to whoever made it, so it keeps working after they
+An engine token is what a self-hosted engine presents. It belongs to the
+organization rather than to whoever made it, so it keeps working after they
 leave, and it carries no identity: it can send events and read an environment
 back, and it cannot reach a key, a member, or another token.
+
+**A job in GitHub Actions needs none of this.** Give the workflow
+`permissions: id-token: write` and set the `AF_CONTROL_PLANE` variable, and the
+engine trades the identity GitHub signs for that job for a short-lived
+credential of its own, at `POST /v1/engine/token`. Nothing is stored in the
+repository and nothing has to be rotated. The rest of this section is for an
+engine running somewhere GitHub will not vouch for it: a developer's machine, a
+self-hosted runner outside Actions, or another CI system.
 
 Mint one from a terminal.
 

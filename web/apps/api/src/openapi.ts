@@ -10,6 +10,8 @@ import { appRouter } from './routers/index.ts'
 import { declaredPermissions } from './trpc.ts'
 import { EVENT_TYPES, MAX_BATCH } from './ingest.ts'
 import { toJSONSchema } from 'zod'
+import { CALLBACK_AUDIENCE } from './github/oidc.ts'
+import { OIDC_TOKEN_TTL_MS } from './github/exchange.ts'
 
 export const API_VERSION = '1.0.0'
 
@@ -306,6 +308,147 @@ export function openApiDocument(): Record<string, unknown> {
           '500': serverFailure,
         },
       },
+    },
+    '/v1/auth/github-oidc': {
+      post: {
+        operationId: 'exchangeWorkflowIdentity',
+        summary: 'Exchange a GitHub Actions workflow identity for an engine token',
+        description:
+          'How a job in a customer\'s CI authenticates with no token, no environment variable ' +
+          'and no repository secret. The workflow asks GitHub for an identity token with the ' +
+          `audience ${CALLBACK_AUDIENCE} (it needs \`id-token: write\`), posts it here, and ` +
+          'receives an engine token good for ' +
+          `${Math.round(OIDC_TOKEN_TTL_MS / 60000)} minutes on POST /v1/events.\n\n` +
+          'The signature, issuer, audience and expiry are all checked, and none of that is what ' +
+          'decides which organization the token belongs to. A signed identity proves which ' +
+          'repository a job runs in and nothing about who that repository belongs to, because ' +
+          'anybody can run Actions in a repository they own. Access comes from a claim on the ' +
+          'repository instead.\n\n' +
+          'Most callers never make that claim themselves. When a repository has no claim and ' +
+          'exactly one organization holds a live GitHub App installation on its owner, the ' +
+          'claim is created on this first exchange and recorded as having come from the ' +
+          'installation. What is refused is a repository with no claim AND no installation to ' +
+          'stand in for one: an owner nobody has installed the App on reaches nobody, and an ' +
+          'owner two organizations have installed on is refused rather than guessed at. ' +
+          'POST /v1/oidc/bindings claims one by hand, for a repository the App is not ' +
+          'installed on.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token'],
+                properties: {
+                  token: {
+                    type: 'string',
+                    description: `The workflow identity token, minted for audience ${CALLBACK_AUDIENCE}.`,
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'An engine token, returned once and stored nowhere. Present it as a bearer token ' +
+              'on POST /v1/events exactly as a static one.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['token', 'expires_at'],
+                  properties: {
+                    token: { type: 'string' },
+                    expires_at: { type: 'string', format: 'date-time' },
+                    org_id: { type: 'string', format: 'uuid' },
+                    repository: { type: 'string', description: 'owner/name.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'The body is not JSON, or carries no token.' },
+          '401': {
+            description:
+              'The identity token did not verify. `reason` is one of malformed, bad_algorithm, ' +
+              'no_key, invalid_signature, wrong_issuer, wrong_audience, expired, not_yet_valid, ' +
+              'no_repository or keys_unavailable, and `error` is a sentence the workflow author ' +
+              'can act on.',
+          },
+          '403': {
+            description:
+              'The identity verified and grants nothing. `reason` is no_binding when the ' +
+              'repository has not been claimed, binding_revoked when the claim was withdrawn, ' +
+              'or installation_suspended.',
+          },
+          '429': {
+            description: 'Too many exchanges for this repository. A job needs one credential.',
+            headers: { 'Retry-After': { schema: { type: 'integer' } } },
+          },
+        },
+      },
+    },
+  }
+
+  // Studio, for an engine. Described here because an engine that is not this
+  // repository's `af` has no other way to learn the shape, and because the
+  // claim endpoint is the only place a workload version's body crosses a wire.
+  const engineOnly = {
+    security: [{ engineToken: [] }],
+    responses: {
+      '200': { description: 'The answer.' },
+      '400': { description: 'The body is not JSON, or is missing a field.' },
+      '401': { description: 'The token is not valid.' },
+      '403': { description: 'The organization is suspended.' },
+      '404': { description: 'No such environment in this organization.' },
+      '409': { description: 'This token does not hold the lease.' },
+    },
+  }
+  paths['/v1/workloads/claim'] = {
+    post: {
+      ...engineOnly,
+      operationId: 'claimWorkloadRun',
+      summary: 'Take the workload run waiting for an environment',
+      description:
+        'Moves the oldest requested run for the environment to accepted and returns its ' +
+        'compiled version, with a lease. Answers 200 and a null run when nothing is waiting, ' +
+        'so a poller can tell that apart from a failure. The engine pulls rather than being ' +
+        'told because a workflow_dispatch carries only the inputs the workflow declares.',
+    },
+  }
+  paths['/v1/workloads/runs/{runId}/heartbeat'] = {
+    post: {
+      ...engineOnly,
+      operationId: 'heartbeatWorkloadRun',
+      summary: 'Say the run is still going',
+      description:
+        'Extends the lease and the deadline. A run whose deadline passes with nothing said ' +
+        'about it ends as abandoned, which is the control plane admitting it never heard ' +
+        'rather than a claim that the work failed.',
+    },
+  }
+  paths['/v1/commands/claim'] = {
+    post: {
+      ...engineOnly,
+      operationId: 'claimRuntimeCommands',
+      summary: 'Take the runtime commands waiting for this organization',
+      description:
+        'Teardowns and cancellations, with a lease. Reachable while the organization is ' +
+        'suspended, deliberately: a suspension stops new work, and stopping what is running ' +
+        'is the opposite of new work.',
+    },
+  }
+  paths['/v1/commands/{id}/ack'] = {
+    post: {
+      ...engineOnly,
+      operationId: 'ackRuntimeCommand',
+      summary: 'Say what happened to a command',
+      description:
+        'Only the holder of the lease may acknowledge, and an acknowledgement that matches no ' +
+        'row answers 409 rather than 200: an acknowledgement nobody applied is the silent ' +
+        'nothing the durable command exists to end.',
     },
   }
 
