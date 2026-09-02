@@ -965,7 +965,7 @@ errors:
   - code: AF-EE-004
     area: EE
     message: "The license covers {seats} seats and they are all in use."
-    next_step: "Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed."
+    next_step: "Remove an inactive member, or ask for more seats at https://antifailure.dev/contact. No existing member was removed."
     docs: enterprise/licensing
     retryable: false
     exit_code: 6

@@ -519,3 +519,39 @@ func TestErrors_AreDistinguishable(t *testing.T) {
 	require.False(t, errors.Is(license.ErrTampered, license.ErrUnknownKey))
 	require.False(t, errors.Is(license.ErrUnknownKey, license.ErrMalformed))
 }
+
+// TestParse_ToleratesAFeatureThisBuildDoesNotKnow pins the permissiveness.
+//
+// It looks like a bug and it is load bearing. A license issued for a newer
+// release names features an older binary does not carry, and a verifier that
+// refused the whole license over one unknown name would take away the features
+// the customer did buy every time an upgrade and a renewal crossed. The unknown
+// name is carried and never permitted, and tools/licensegen is what stops one
+// being signed in the first place.
+func TestParse_ToleratesAFeatureThisBuildDoesNotKnow(t *testing.T) {
+	s := newSigner(t, "k1")
+	claims := validClaims()
+	// One real feature and one from a release this build predates.
+	claims.Features = []license.Feature{license.FeatureSSO, license.Feature("a_later_release")}
+
+	v := license.NewVerifier(map[string]ed25519.PublicKey{s.keyID: s.pub})
+	parsed, err := v.Parse(s.sign(t, claims))
+	require.NoError(t, err, "an unknown feature must not invalidate the whole license")
+
+	status := v.Evaluate(parsed, license.Evaluation{Org: claims.Org, Now: claims.IssuedAt})
+	require.Equal(t, license.StateActive, status.State)
+	require.True(t, status.Enabled(license.FeatureSSO), "the known feature is still permitted")
+	// The unknown name is carried through and would answer true if anything
+	// asked, which nothing does: every caller asks by constant, and this build
+	// has no constant for a feature a later release introduced. Asserted rather
+	// than left implied, because the harmless version of this and the dangerous
+	// version look identical from the outside.
+	require.True(t, status.Enabled(license.Feature("a_later_release")),
+		"the unknown name is carried rather than dropped")
+	for _, f := range license.AllFeatures() {
+		if f == license.FeatureSSO {
+			continue
+		}
+		require.False(t, status.Enabled(f), "no feature this build knows is granted by accident")
+	}
+}

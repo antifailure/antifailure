@@ -546,7 +546,7 @@
       "area": "EE",
       "areaName": "Enterprise",
       "message": "The license covers {seats} seats and they are all in use.",
-      "resolution": "Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed.",
+      "resolution": "Remove an inactive member, or ask for more seats at https://antifailure.dev/contact. No existing member was removed.",
       "docs": "https://antifailure.dev/docs/enterprise/licensing",
       "retryable": false,
       "exitCode": 6,

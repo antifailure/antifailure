@@ -636,7 +636,7 @@ The diff at {path} could not be read: {detail}
 
 The license covers {seats} seats and they are all in use.
 
-**What to do.** Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed.
+**What to do.** Remove an inactive member, or ask for more seats at https://antifailure.dev/contact. No existing member was removed.
 
 | | |
 | --- | --- |

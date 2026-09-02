@@ -674,7 +674,7 @@ export function DpaPage() {
               ],
               [
                 "Contact for data protection",
-                "Security reports go to security@antifailure.dev today. A separate privacy address will be published with the signed copy.",
+                "Security reports go through GitHub private vulnerability reporting today. A separate privacy address will be published with the signed copy.",
               ],
             ]}
           />
@@ -1218,7 +1218,7 @@ export function DataRetentionPage() {
             rows={[
               [
                 "How to ask",
-                "Write to the privacy contact once it is published. Until then, security@antifailure.dev reaches a person who can act on it.",
+                "Write to the privacy contact once it is published. Until then, a GitHub private vulnerability report reaches a person who can act on it, and it is confidential rather than a public issue.",
               ],
               [
                 "What happens",
