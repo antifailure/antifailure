@@ -2,7 +2,11 @@
 title: Runbooks
 description: The alerts that exist, what each one means, and the page to open when one of them wakes you.
 sidebar:
-  order: 5
+  # Distinct from the title, because the group this page sits in is also called
+  # Runbooks and the sidebar showed the same word twice, once as a heading and
+  # once as its first item. The label says what the page answers.
+  label: Which alert is which
+  order: 9
 ---
 
 Eleven alert rules watch the hosted control plane. Each one names its runbook in

@@ -2,7 +2,7 @@
 title: Your own model key
 description: Bring an Anthropic or OpenAI key, keep it on your machine, point it at a local model, and prove it works, all from a terminal.
 sidebar:
-  order: 14
+  order: 20
 ---
 
 The agents drive a real browser. To read a page and decide what a person would
@@ -150,11 +150,19 @@ it:
 
 ```
 $ af model set anthropic
+
   Stored the anthropic key in the system keyring.
 
-  It is not the key runs will use: this shell's environment also holds a
-  ANTHROPIC_API_KEY and is asked first. Unset that one, or this has no effect.
+  It is not the key runs will use. ANTHROPIC_API_KEY is also set
+  in this shell's environment, which is asked first.
+  Unset it there, or storing this one has no effect.
 ```
+
+It names where the other key is rather than only that there is one, because
+"unset it" is not advice until you know which file to open.
+
+When nothing shadows the key you just stored, that paragraph does not appear
+and the command ends with `Check it works: af model test`.
 
 `af model show` reports it from the other direction, naming the source that won
 and the one being shadowed.

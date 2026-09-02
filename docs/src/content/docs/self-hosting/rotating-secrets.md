@@ -2,7 +2,7 @@
 title: Rotating secrets
 description: Every secret the control plane's Key Vault holds, what breaks while each one is being replaced, and how to prove the replacement took.
 sidebar:
-  order: 5
+  order: 8
 ---
 
 The Terraform in `infra/terraform/modules/control-plane` puts eight secrets in

@@ -2,7 +2,7 @@
 title: SCIM provisioning
 description: Users and groups managed by your identity provider, with deprovisioning that actually removes access.
 sidebar:
-  order: 3
+  order: 4
 ---
 
 Your identity provider creates, updates and removes members here, so that

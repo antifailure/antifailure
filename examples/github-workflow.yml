@@ -74,7 +74,10 @@ on:
           - scenario
           - explore
       workflows:
-        description: Comma separated names this workload selects. Empty means all of them.
+        description: >-
+          Comma separated names selected out of this manifest: workflows for
+          agents, scenarios for scenario, goals for explore. Empty means all of
+          them, where the command has such a default.
         required: false
         default: ''
       duration:
@@ -95,6 +98,17 @@ on:
         default: ''
       run_id:
         description: The control plane's identifier for this run. Leave it empty; the engine asks.
+        required: false
+        default: ''
+      seed:
+        description: >-
+          Replays the same schedule or the same wander. A whole number for
+          scenario and any string for explore, because that is what each
+          command's own --seed takes.
+        required: false
+        default: ''
+      concurrency:
+        description: Ceiling on requests in flight, for scenario.
         required: false
         default: ''
 
@@ -124,8 +138,13 @@ permissions:
   # exactly that. There is no repository secret to paste and nothing here holds
   # a long lived token.
   #
+  # Two things use it, for the same reason and by the same exchange. The report
+  # step below trades this identity for a credential to publish what the run
+  # concluded, and the engine itself trades it for one to report its event
+  # stream while the run happens.
+  #
   # GitHub does NOT grant this to a pull request job running on a fork, which is
-  # what keeps a fork away from every secret: the exchange below simply fails
+  # what keeps a fork away from every secret: the exchanges below simply fail
   # there, and the control plane says the commit needs a maintainer's approval.
   # Delete this line if you do not use the hosted control plane; nothing else
   # needs it.
@@ -224,6 +243,21 @@ jobs:
           # Set this so every runner produces the same masking, and two
           # goldens can be compared. Left unset, each machine generates its own.
           AF_MASKING_KEY: ${{ secrets.AF_MASKING_KEY }}
+          # Where the engine reports its own event stream, which is a different
+          # thing from the report below: the report is what the run concluded,
+          # and this is what it did while reaching that conclusion. The engine
+          # reads AF_CONTROL_PLANE_URL, so the job level AF_CONTROL_PLANE is
+          # passed under that name here rather than left for the engine to
+          # guess. Without this line a self hosted installation would send its
+          # events to the hosted instance instead of its own, which is the
+          # default the engine falls back to.
+          #
+          # No token. The engine trades this job's identity for a short lived
+          # credential the same way the report step below does, which is what
+          # the `id-token: write` at the top of this file is for. Unset, the
+          # engine attaches no control plane sink at all and the run is
+          # unaffected.
+          AF_CONTROL_PLANE_URL: ${{ vars.AF_CONTROL_PLANE }}
         run: |
           set -euo pipefail
           case "$AF_COMMAND" in
@@ -240,6 +274,32 @@ jobs:
               # removed and what is still standing. A row marked torn down
               # while the containers keep running is worse than a failure.
               af workload teardown --result teardown-result.json
+              ;;
+            scenario)
+              args=()
+              IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
+              for name in "${names[@]:-}"; do
+                if [ -n "$name" ]; then args+=(--only "$name"); fi
+              done
+              if [ -n "$AF_SEED" ]; then args+=(--seed "$AF_SEED"); fi
+              if [ -n "$AF_CONCURRENCY" ]; then args+=(--concurrency "$AF_CONCURRENCY"); fi
+              af load scenario ${args[@]+"${args[@]}"}
+              ;;
+            explore)
+              args=()
+              IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
+              for name in "${names[@]:-}"; do
+                if [ -n "$name" ]; then args+=(--only "$name"); fi
+              done
+              if [ -n "$AF_SEED" ]; then args+=(--seed "$AF_SEED"); fi
+              af explore ${args[@]+"${args[@]}"}
+              ;;
+            down)
+              # No branch flag, for the same reason 'up' has none: the dispatch
+              # ran on the branch the environment belongs to. Teardown exits 10
+              # when something could not be removed, which has to fail this job
+              # rather than read as a clean teardown in the control plane.
+              af down
               ;;
             *)
               # Everything else is a workload, and one command runs all four

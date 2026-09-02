@@ -1551,6 +1551,12 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			return "", zero, secrets.Value{}, secrets.Value{}, aferrors.Coded(
 				aferrors.AFORC009, "version", pinned)
 		}
+		o.progress("branching the database from " + version + ", pinned by the caller")
+		// Announced on this path too. A pinned golden used to reach branchFrom
+		// without an event, so the one run most likely to be a compliance
+		// rehearsal, where the version is pinned precisely so two environments
+		// share it, was the run the control plane heard nothing about.
+		o.announceGolden(s, goldens, version, "golden "+version+" is pinned")
 		return o.branchFrom(ctx, s, version,
 			"pinned by the caller, "+prov.describe())
 	}
@@ -1612,17 +1618,13 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			return "", zero, secrets.Value{}, secrets.Value{}, refreshErr
 		}
 		version = gv.ID
-		o.event(s, events.GoldenReady, "golden "+version+" is ready",
-			events.F("phase", "golden"), events.F("version", version),
-			events.F("verified", gv.Verified))
+		o.event(s, events.GoldenReady, "golden "+version+" is ready", o.goldenFields(gv)...)
 	} else {
 		// Reported even though nothing was done, because the display cannot
 		// tell a verified golden from an unverified one by its absence, and
 		// calling a verified golden unverified on every ordinary run is worse
 		// than one extra event.
-		o.event(s, events.GoldenReady, "golden "+version+" is verified",
-			events.F("phase", "golden"), events.F("version", version),
-			events.F("verified", true))
+		o.announceGolden(s, goldens, version, "golden "+version+" is verified")
 	}
 	return o.branchFrom(ctx, s, version, prov.describe())
 }
@@ -2013,6 +2015,15 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 	ctx = s.tel.StartCommand(ctx, "af down")
 
 	o.event(s, events.EnvDestroying, "removing "+o.envID)
+
+	// Before the teardown, because the sidecar holds the egress log and the
+	// teardown removes the sidecar. This is the one place the decisions are
+	// reported: the bus stamps a random identifier on every event, so the
+	// control plane cannot tell a resend from a second report, and the
+	// console's network page counts rows. Sending them from two places would
+	// double every number on it.
+	o.ReportDecisions(ctx, s)
+
 	td := o.teardown(ctx, s, o.envID)
 
 	// Ordering, and it is load bearing rather than stylistic: the replay inside

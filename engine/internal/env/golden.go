@@ -376,6 +376,17 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 	if err := o.recordRefresh(ctx, s); err != nil {
 		return result, err
 	}
+	// Said out loud, because a refresh is the only way a golden comes into
+	// existence and this path emitted nothing. `af golden refresh` produced a
+	// masked, verified, attested version and the control plane never heard of
+	// it, so the row the compliance pack reads was written by nobody. The
+	// attestation is taken from the result when the provider did not put it on
+	// the version, because Verify's return value is where it is produced and
+	// only some providers copy it back.
+	if gv.Attestation == "" {
+		gv.Attestation = result.Attestation
+	}
+	o.event(s, events.GoldenReady, "golden "+gv.ID+" is ready", o.goldenFields(gv)...)
 	// Published after the version exists locally, never instead of it. A
 	// publish that fails leaves a golden this machine can still branch, and
 	// the failure is reported rather than turned into a failed refresh: the

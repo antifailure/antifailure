@@ -1,0 +1,81 @@
+{
+  "detail": "signup: the order total was 0",
+  "duration_ms": 0,
+  "engine": {
+    "commit": "bb1579d9",
+    "edition": "oss",
+    "version": "0.0.0-dev"
+  },
+  "environment": {
+    "branch": "w-studio-engine",
+    "env_id": "aftest-04e645",
+    "url": "http://127.0.0.1:8081"
+  },
+  "evidence": [
+    {
+      "availability": "runner_local",
+      "kind": "trace",
+      "label": "signup",
+      "locator": ".antifailure/artifacts/checkout.trace.zip",
+      "sha256": "f1419f4b88b0cce4a272fd50ecfe43e5d84b77647773e685c35fe8e258f98a26",
+      "size_bytes": 42
+    },
+    {
+      "availability": "runner_local",
+      "kind": "screenshot",
+      "label": "signup",
+      "locator": ".antifailure/artifacts/checkout.png",
+      "sha256": "6c414001d2f8ba5f9d29c4c2846e286024f9cb3083f4f03fd64131c3f60cd09f",
+      "size_bytes": 36
+    }
+  ],
+  "finished_at": "2026-09-01T06:40:00Z",
+  "kind": "browser_workflow",
+  "outcome": "succeeded",
+  "reproduce": {
+    "argv": [
+      "af",
+      "test",
+      "--attempts",
+      "0"
+    ],
+    "command": "af test --attempts 0",
+    "manifest_digest": "sha256:0d1e2f",
+    "note": "run this from the repository root, against an environment that is already up for the same branch"
+  },
+  "result": {
+    "achieved_rate": null,
+    "duration_ms": 92000,
+    "error_rate": null,
+    "failures": null,
+    "findings": null,
+    "goals": null,
+    "goals_reached": null,
+    "iterations": null,
+    "max_ms": null,
+    "p50_ms": null,
+    "p90_ms": null,
+    "p95_ms": null,
+    "p99_ms": null,
+    "refused_routes": [],
+    "requests": null,
+    "scheduled_ms": null,
+    "sessions": null,
+    "steps": 9,
+    "target_rate": null,
+    "workflows": 8,
+    "workflows_blocked": 0,
+    "workflows_failed": 1,
+    "workflows_flaky": 1,
+    "workflows_passed": 4,
+    "workflows_unverified": 2
+  },
+  "routes": [],
+  "run_id": "5e4a1c8e-1f0b-4a35-9a1b-0c6d2f8e7a91",
+  "schema": "antifailure.workload.result/v1",
+  "started_at": "2026-09-01T06:40:00Z",
+  "state": "succeeded",
+  "thresholds": [],
+  "verdict": "fail",
+  "workload_run_id": "5e4a1c8e-1f0b-4a35-9a1b-0c6d2f8e7a91"
+}

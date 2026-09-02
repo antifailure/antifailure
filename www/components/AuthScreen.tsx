@@ -34,6 +34,12 @@ function GitHubMark({ className }: { className?: string }) {
  * to yet" for as long as there was one, which reads to an invited person as
  * being turned away.
  *
+ * The signup heading is "Request access" rather than "Get started", because
+ * nothing here starts. Both routes render this same screen and neither creates
+ * an account: one of the two doors is opened by an invitation somebody else
+ * holds, and the other is a list. A heading promising a beginning is the same
+ * false state the browser tab used to carry, moved onto the page.
+ *
  * And the two are kept independent, which they were not. Joining the waitlist
  * used to replace the entire screen with a confirmation, remembered in local
  * storage, so from then on this page had no sign-in on it at all. Both people
@@ -117,7 +123,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
           <div className="w-full max-w-[400px]">
             <>
               <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black max-sm:text-[28px]">
-                {mode === "signup" ? "Get started" : "Sign in"}
+                {mode === "signup" ? "Request access" : "Sign in"}
               </h1>
               <p className="mt-4 text-[14px] leading-6 text-black/55">
                 The hosted control plane is invitation only while it is in

@@ -24,7 +24,7 @@
 // credential rather than inheriting one written down in a public repository.
 // A test needs to connect as it, so the test is the installation here.
 //
-// The grants below are 0023's and 0030's, restated. They are asserted rather
+// The grants below are 0023's and 0029's, restated. They are asserted rather
 // than assumed by the fresh-migration check in the report, and if this block
 // and the migrations ever disagree it is the migrations that are right.
 
@@ -60,14 +60,14 @@ function operatorUrl(base = adminUrl): string {
 /**
  * What 0023 already did, minus the one thing a test has to supply.
  *
- * 0023 creates antifailure_admin and 0030 grants on the chains, so a migrated
+ * 0023 creates antifailure_admin and 0029 grants on the chains, so a migrated
  * database needs nothing from this function except a way to CONNECT as the
  * role: 0023 deliberately creates it NOLOGIN so a self-hosted installation
  * supplies its own credential rather than inheriting one written down in a
  * public repository. The suite is that installation.
  *
  * The grants are restated rather than assumed, so this suite still runs against
- * a database built before 0030 landed. If this block and the migrations ever
+ * a database built before 0029 landed. If this block and the migrations ever
  * disagree, the migrations are right: the report checks the real privileges by
  * asking has_table_privilege rather than by reading either.
  */

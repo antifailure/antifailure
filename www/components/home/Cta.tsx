@@ -46,7 +46,7 @@ export function Cta() {
           <div className="flex shrink-0 flex-col items-end gap-y-4 max-lg:w-full max-lg:items-stretch">
             <div className="flex items-center gap-4 max-md:flex-col max-md:items-stretch max-md:gap-y-3 max-md:[&_a]:w-full">
               <Button href="/signup" theme="white">
-                Get started
+                Request access
               </Button>
               <Button href="/docs" theme="outlined-inverse">
                 Read the docs
