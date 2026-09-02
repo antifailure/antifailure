@@ -2,7 +2,7 @@
 title: Compliance packs
 description: SOC 2 and HIPAA evidence from what this installation recorded, and what the report deliberately does not say.
 sidebar:
-  order: 5
+  order: 7
 ---
 
 *Requires an enterprise license with the `compliance_packs` feature, and the

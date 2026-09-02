@@ -497,7 +497,6 @@ func writeReport(e *Env, run report.Run, output, jsonOutput string) {
 	e.Out.Raw(run.Markdown())
 }
 
-// summariseEgress counts what the environment reached.
 // summariseEgress delegates to the shared reader.
 func summariseEgress(decisions []local.Decision) *report.Egress {
 	return egress.Summarise(decisions)

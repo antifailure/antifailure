@@ -1,0 +1,21 @@
+# Environment variables the product names at a user and the documentation does
+# not explain, with the reason each one is allowed to stay that way.
+#
+# Two tab separated fields: the variable, and why it is not documented. A reason
+# is required, because an exemption with no argument behind it cannot be told
+# apart from somebody silencing a finding they did not understand. An exemption
+# that stops being needed is reported, so this list cannot rot: figurecheck's
+# equivalent had five stale rows found in one evening, which is only possible
+# because staleness fails.
+#
+# The reason has to be true, and that is the whole mechanism. A variable only
+# ever named inside a message aimed at somebody working on this repository can
+# say so. A variable a customer is told to set cannot be given a truthful reason
+# here, and the answer is then to document it. The two that this gate was
+# written for, AF_LICENSE_KEY and AF_ORG, would have needed a row, and there was
+# nothing true to write in one: `af license install` tells a paying customer to
+# set them.
+#
+# THIS FILE IS EMPTY, and that is a result rather than an oversight. Every
+# variable the engine or the enterprise binary names at a user is documented as
+# of 2026-09-01. It exists for the next one.

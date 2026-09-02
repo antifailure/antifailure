@@ -2,7 +2,7 @@
 title: Sandbox credentials
 description: How a live key stays outside the environment while sandbox calls still work.
 sidebar:
-  order: 6
+  order: 7
 ---
 
 In `sandbox` mode the application never holds the credential it appears to use.

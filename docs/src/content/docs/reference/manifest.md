@@ -2,7 +2,7 @@
 title: Manifest reference
 description: Every block in antifailure.yaml, what it does, and what happens when it is wrong.
 sidebar:
-  order: 1
+  order: 2
 ---
 
 `antifailure.yaml` sits at the repository root. `af init` writes one from what
