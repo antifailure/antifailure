@@ -181,7 +181,7 @@ describe('the operator routes', { skip: hasDb ? false : 'no database' }, () => {
     // door: a session that cannot act as an operator cannot start another one.
     const { token } = await callerFor('owner')
     const hash = hashAdminToken(token)
-    const [user] = await h.admin<{ id: string }[]>`SELECT id FROM users LIMIT 1`
+    const user = await seedImpersonationTarget(h)
     const [seq] = await h.admin<{ seq: string }[]>`
       SELECT seq FROM admin_audit_entries ORDER BY seq DESC LIMIT 1`
     await h.admin`
@@ -364,3 +364,22 @@ describe('the operator routes', { skip: hasDb ? false : 'no database' }, () => {
     assert.ok(operators.length > 0, 'no operators were returned, so this proved nothing')
   })
 })
+
+/**
+ * A customer account to impersonate.
+ *
+ * Created here rather than read with `SELECT id FROM users LIMIT 1`, which is
+ * how these tests were written and why three of them were unreliable: on a
+ * database another suite had populated they found a row and passed, and on a
+ * FRESH one they found nothing and failed. A fixture that depends on leftovers
+ * is green for the wrong reason, which is worse than red.
+ */
+async function seedImpersonationTarget(h: ApiHarness): Promise<{ id: string }> {
+  const suffix = randomUUID().slice(0, 8)
+  const [row] = await h.admin<{ id: string }[]>`
+    INSERT INTO users (github_id, github_login, email, name)
+    VALUES (${Math.floor(Math.random() * 2_000_000_000)}, ${`target-${suffix}`},
+            ${`target-${suffix}@example.test`}, 'Impersonation Target')
+    RETURNING id`
+  return row!
+}
