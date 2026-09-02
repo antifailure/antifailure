@@ -125,6 +125,27 @@ export const ROUTE_BOUNDARY: Record<string, RouteBoundary> = {
     reason: 'A workflow author writes this call into their own workflow by hand, so the request and its refusals are theirs to read rather than the engine\'s.',
   },
 
+  // The Studio endpoints. An engine token reaches all four, and the engine
+  // that reaches them is the one running in the customer's own CI rather than
+  // one this repository controls, so the shape of these is a contract with a
+  // process on somebody else's machine.
+  'POST /v1/workloads/claim': {
+    audience: 'contract',
+    reason: 'Takes the oldest requested run for an environment and returns it with a lease. The engine pulls rather than being told, so the poller is the caller and the shape is its contract.',
+  },
+  'POST /v1/workloads/runs/:runId/heartbeat': {
+    audience: 'contract',
+    reason: 'Extends the lease on a claimed run. A run whose deadline passes with nothing said about it ends as abandoned, so a caller that gets this wrong loses work.',
+  },
+  'POST /v1/commands/claim': {
+    audience: 'contract',
+    reason: 'Takes the teardowns and cancellations waiting for an organization, with a lease. Reachable while the organization is suspended, which is a promise worth publishing rather than discovering.',
+  },
+  'POST /v1/commands/:id/ack': {
+    audience: 'contract',
+    reason: 'Says what happened to a claimed command. Only the lease holder may acknowledge and a mismatch answers 409, which is exactly the kind of refusal a generated client has to be told about.',
+  },
+
   // ---------------------------------------------------------------------
   // The console's wire.
   // ---------------------------------------------------------------------

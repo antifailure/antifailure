@@ -9,7 +9,8 @@ import {
   Prose,
   RelatedGrid,
 } from "@/components/pages/kit";
-import { CONTACT_POINTS, DOCS_URL, REPO_URL } from "@/lib/site";
+import { CONTACT_POINTS, REPO_URL } from "@/lib/site";
+import { CalBooking } from "./CalBooking";
 
 const CONTACT_DETAILS = {
   security: {
@@ -78,18 +79,46 @@ export function ContactPage() {
         path="/contact"
         eyebrow="Contact"
         title="Use the route that matches the question."
-        lead="Antifailure uses GitHub for private vulnerability reports, public product work, and community discussion. Hosted-product interest goes through the existing waitlist. The project does not currently publish a working email channel."
+        lead="Antifailure uses GitHub for private vulnerability reports, public product work, and community discussion. A call can be booked on this page, and hosted-product interest goes through the existing waitlist. The project does not currently publish a working email channel."
         actions={
           <>
-            <Button href={`${REPO_URL}/issues`} theme="filled">
-              Search product issues
+            <Button href="#book" theme="filled">
+              Book a call
             </Button>
-            <Button href={DOCS_URL} theme="outlined">
-              Read the documentation
+            <Button href={`${REPO_URL}/issues`} theme="outlined">
+              Search product issues
             </Button>
           </>
         }
       />
+
+      {/* First, and above the four written routes, because it is the only one
+          that reaches a person rather than a tracker. The four below are the
+          right route for almost every technical question and they are slower
+          by design: a public issue is searchable and a call is not. */}
+      <PageSection>
+        <div id="book" className="scroll-mt-24">
+          <PageHeading
+            kicker="Book a call"
+            title="<strong>Thirty minutes with the person building it.</strong> The times below are real openings, not a form."
+          />
+          <Prose className="mt-8">
+            <p>
+              Use this for a hosted evaluation, a design partnership, or
+              anything commercial that does not belong in a public issue. A
+              security report should still go through{" "}
+              <a href={`${REPO_URL}/security/advisories/new`}>
+                GitHub private vulnerability reporting
+              </a>
+              , which is confidential, tracked, and read by the maintainers
+              rather than by one calendar.
+            </p>
+          </Prose>
+          <div className="mt-12 max-w-[1040px] max-xl:mt-10">
+            <CalBooking />
+          </div>
+        </div>
+      </PageSection>
 
       <PageSection>
         <PageHeading

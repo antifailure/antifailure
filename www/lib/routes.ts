@@ -294,6 +294,28 @@ export const ROUTES: readonly Route[] = [
     parent: "/privacy",
   },
   {
+    path: "/acceptable-use",
+    title: pageTitle("Acceptable Use"),
+    description:
+      "Where the product may and may not be pointed, and what we will not do to a customer.",
+    summary: "The acceptable use policy, and the enforcement that exists rather than the kind that does not.",
+    section: "legal",
+    indexable: true,
+    priority: 0.3,
+    parent: "/terms",
+  },
+  {
+    path: "/developer-policy",
+    title: pageTitle("Developer Policy"),
+    description:
+      "The rules for the control plane API and for the engine's Model Context Protocol surface.",
+    summary: "What a token may reach, what a model driving the engine is responsible for, and what may change without notice.",
+    section: "legal",
+    indexable: true,
+    priority: 0.3,
+    parent: "/terms",
+  },
+  {
     path: "/sla",
     title: pageTitle("Service levels"),
     description:

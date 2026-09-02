@@ -11,7 +11,17 @@ on:
 # about the older commit stopped mattering the moment the newer one arrived.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on main is the verdict a tag and a deploy are read against, so it
+  # is never cancelled. On a branch the saving is real and nothing depends
+  # on the superseded answer, so cancelling stays.
+  #
+  # Six merges landed inside one run's length on 2026-09-02 and each cancelled
+  # the one before it, so main went from 09:07 to past 12:30 with no COMPLETED
+  # run at all. Cancelled is not red, but it is not a verdict either, and
+  # `release.yml` has no gate of its own, so the only thing standing between
+  # an unverified commit and published binaries was somebody holding merges
+  # by hand. Tags are excluded for the same reason.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 # Read, and only read. No job in this workflow writes anything back, and a
 # token that could is a token an action pulled from the internet could use.
@@ -536,7 +546,7 @@ jobs:
         # backs starts answering with the 404 page and nothing else notices.
         run: |
           missing=0
-          for route in index environments runs masking network audit members plan keys device 404; do
+          for route in index environments runs load masking network audit members plan keys device 404; do
             if [ ! -f "console/out/$route.html" ]; then
               echo "::error::console/out/$route.html was not exported"
               missing=1
