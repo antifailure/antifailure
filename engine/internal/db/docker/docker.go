@@ -161,7 +161,14 @@ func (p *Provider) Capabilities() provider.Caps {
 		// numbers the user needs.
 		MaxConcurrentBranches: 0,
 		ExpectedBranchLatency: 15 * time.Second,
-		SupportedVersions:     []int{14, 15, 16, 17},
+		// Every major the stock postgres image is published for. A golden
+		// here is that image with the data committed into it, so the set is
+		// the registry's rather than this provider's, and leaving 18 out of it
+		// walled off everybody whose production is on the current release with
+		// advice that could not be followed: "use a provider that supports
+		// Postgres 18" named no such provider, and "upgrade the source" is the
+		// wrong direction.
+		SupportedVersions:     []int{14, 15, 16, 17, 18},
 	}
 }
 
