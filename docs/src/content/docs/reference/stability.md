@@ -112,22 +112,36 @@ useful than a promise that quietly bends.
   import `engine/internal` at all: the Go toolchain refuses an import of an
   internal path from outside the subtree rooted at its parent, so that half
   needs nothing from us and gets nothing.
-
-### What holds the Go line
-
-`tools/surfacecheck` runs in CI and refuses three things. A package that
-becomes importable and is classified nowhere. A change to a stable package that
-version 1 does not allow, measured against `engine/api/v1.0.0.txt`, which
-records the exported surface as it stood at the tag: adding an export passes,
-removing one, changing a signature, changing an exported constant's value, or
-adding a method to a published interface does not. And a stable signature
-naming a type from a package that is not stable, which is the one that was
-already broken.
 - **Lint rule names and their findings.** Rules are added and sharpened, and a
   release may find something in a migration an earlier one passed. That is the
   product working. Within a release the rule name identifies the finding.
 - **The event stream's set of types.** Types are added as features land.
 - **Anything under `docs/plan/`.** Working notes, not documentation.
+
+## What holds these lines
+
+Each of the two carve-outs above is checked rather than described, and both
+checks run in CI and in `just gate`.
+
+`tools/surfacecheck` reads the Go tree and refuses:
+
+- a Go module in the repository that nothing says anything about, and an
+  importable package inside a shipped one that nothing classifies;
+- a change to a stable package that version 1 does not allow, measured against
+  `engine/api/v1.0.0.txt`, which records the exported surface as it stood at
+  the tag. Adding an export passes. Removing one, changing a signature,
+  changing an exported constant's value, and adding a method to an interface
+  published for implementing do not;
+- an exported signature in a stable package naming a type from a package that
+  is not stable, which is the one that was already broken.
+
+`web/apps/api/test/route-boundary.test.ts` asks the control plane's router for
+its own route table and holds the answer against the published document both
+ways: a route classified as contract that the document does not carry fails,
+and a route classified as excluded that it does carry fails too. The check
+before it compared the published file to what the generator declares, which is
+the file against itself, so a route the generator never mentioned was missing
+from both sides and the comparison stayed green.
 
 ## Deprecation
 
