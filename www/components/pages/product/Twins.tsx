@@ -195,8 +195,8 @@ export function TwinsPage() {
       <RelatedGrid
         items={[
           { href: "/product/safe-state", title: "Safe State", description: "What gets restored into the twin." },
-          { href: "/product/architecture", title: "Architecture", description: "Customer-hosted data plane." },
-          { href: "/product/report", title: "Safety Report", description: "What the run says it could not measure." },
+          { href: "/product/firewall", title: "Side-Effect Firewall", description: "How side effects are contained." },
+          { href: "/product/load", title: "Load", description: "Traffic shaped like production's access log." },
         ]}
       />
     </PageShell>

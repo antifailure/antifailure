@@ -1,0 +1,19 @@
+---
+description: Search the Production Wind Tunnel brief first; do not start building yet
+alwaysApply: true
+---
+
+# Production Wind Tunnel — source of truth
+
+Before answering product, architecture, positioning, MVP, messaging, or implementation questions, **search and read** `docs/PRODUCTION_WIND_TUNNEL_BRIEF.md` first. Treat that file as the definitive product brief. Do not invent a different category, wedge, or buyer.
+
+**Do not start building the site or product** until the user explicitly asks. The recommended next action in the brief is not building the universal platform.
+
+## Non-negotiables from the brief
+
+- Category: **pre-production deployment safety**. Not AI QA, synthetic-user, staging, DB-replication, or load-testing.
+- Promise: a disposable production twin that proves whether a deployment is safe before it ships. Do not claim zero-failure or perfect cloud clones.
+- Initial wedge: automated safety validation for risky **Postgres-backed** web deployments, especially **schema migrations**.
+- Crowdi is a Workload Studio feature (exploratory AI users), not the product, buyer, or main value.
+- Fail closed. Production data stays in the customer boundary. Cleanup is a first-class safety property.
+- Output is an evidence-backed **pass / warning / block**, not a dataset or a preview URL alone.

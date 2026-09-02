@@ -178,7 +178,7 @@ export function OverviewPage() {
           plans before and after.
         </Illustrative>
 
-        <div className="mt-8 grid grid-cols-2 gap-x-16 gap-y-12 max-xl:grid-cols-1">
+        <div className="mt-8 grid grid-cols-2 items-start gap-x-16 gap-y-12 max-xl:grid-cols-1">
           <POV04 />
 
           <div className="flex min-w-0 flex-col justify-center">

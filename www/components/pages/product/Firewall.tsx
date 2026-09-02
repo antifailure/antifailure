@@ -28,14 +28,14 @@ export function FirewallPage() {
             title="<strong>Every outbound attempt is recorded, including the denials.</strong> Six per-host modes, from refusing outright to answering from an offline pack. Never a live processor."
           />
         </Split>
-        <ul className="mt-14 grid grid-cols-3 gap-x-16 gap-y-12 max-xl:grid-cols-1">
-          <li>
+        <ul className="mt-10 grid grid-cols-3 items-start gap-x-16 gap-y-10 max-xl:grid-cols-1">
+          <li className="min-w-0 [&_.rounded-\[32px\]]:!rounded-[18px]">
             <PFW02 />
           </li>
-          <li>
+          <li className="min-w-0 [&_.rounded-\[32px\]]:!rounded-[18px]">
             <PFW03 />
           </li>
-          <li>
+          <li className="min-w-0 [&_.rounded-\[32px\]]:!rounded-[18px]">
             <PFW04 />
           </li>
         </ul>
@@ -91,8 +91,8 @@ export function FirewallPage() {
 
       <RelatedGrid
         items={[
-          { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
-          { href: "/product/report", title: "Safety Report", description: "Where the attempted effects are summarised." },
+          { href: "/product/twins", title: "Isolated Twin", description: "Where containment is applied." },
+          { href: "/product/load", title: "Load", description: "Traffic sent at the contained twin." },
           { href: "/docs/concepts/egress", title: "Egress docs", description: "Controls and example behavior." },
         ]}
       />
