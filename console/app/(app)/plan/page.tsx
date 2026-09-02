@@ -191,9 +191,13 @@ function Billing() {
         <div className="space-y-6">
           <Card
             title="Plan and billing"
-            note={data.billing.configured
-              ? "Stripe holds the card and computes plan changes. This control plane stores only the subscription state and card metadata."
-              : "This self-hosted installation does not take payment. Plan changes only change local quotas."}
+            note={
+              data.billing.configured
+                ? "Stripe holds the card and computes plan changes. This control plane stores only the subscription state and card metadata."
+                : data.quota.operatorSetsPlan
+                  ? "This installation takes no payment. A plan change here only changes local quotas."
+                  : "This installation takes no payment, and its plan is set by whoever runs it."
+            }
             actions={
               error ? (
                 <span
@@ -318,11 +322,7 @@ function Billing() {
 
           <Card
             title="What each plan allows"
-            note={
-              data.billing.configured || data.quota.operatorSetsPlan
-                ? "A plan that is already over its limit refuses the next environment and removes nothing that exists."
-                : "A plan that is already over its limit refuses the next environment and removes nothing that exists. This control plane takes no payment and does not grant plans by hand, so the plan is whatever its operator set."
-            }
+            note="A plan that is already over its limit refuses the next environment and removes nothing that exists."
           >
             <TableWrap>
               <Table>
