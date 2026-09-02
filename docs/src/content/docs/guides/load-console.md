@@ -2,7 +2,7 @@
 title: Running a workload from the console
 description: The Load area of the console, the four kinds of workload, and what every number on a result means.
 sidebar:
-  order: 16
+  order: 21
 ---
 
 `af load run` prints a summary and exits. That is the right amount of output
