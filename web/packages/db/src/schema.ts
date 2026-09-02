@@ -894,7 +894,7 @@ export const adminNotes = pgTable('admin_notes', {
 }, (t) => [index('admin_notes_subject_idx').on(t.subjectType, t.subjectId, t.createdAt)])
 
 /* ---------------------------------------------------------------------------
- * The operator portal (0029)
+ * The operator portal (0030)
  *
  * Deliberately absent from tenantScopedTables below. None of these three has an
  * org_id and none of them should: an operator is not a tenant, and the audit
