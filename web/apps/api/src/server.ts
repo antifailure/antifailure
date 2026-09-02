@@ -23,7 +23,9 @@ import {
 } from './tokens.ts'
 import { sql as rawSql } from 'drizzle-orm'
 import { trpcServer } from '@hono/trpc-server'
-import type { Pool } from '@antifailure/db'
+import type { Pool, AdminPool } from '@antifailure/db'
+import { ADMIN_SESSION_COOKIE, resolveAdminSession } from './admin/session.ts'
+import { actorOf } from './admin/trpc.ts'
 import { appRouter } from './routers/index.ts'
 import type { Context as TrpcContext, Actor } from './trpc.ts'
 import type { Clock } from './clock.ts'
@@ -133,6 +135,16 @@ import {
 
 export interface ServerOptions {
   pool: Pool
+  /**
+   * The operator database credential, for the admin portal.
+   *
+   * A SEPARATE pool with a separate role, never `pool` handed in twice: the
+   * cross tenant read has to be a credential the application cannot acquire.
+   * Absent means this installation has no operator portal, which is the correct
+   * default for somebody running this for one team, and the admin procedures
+   * say so by name rather than rendering an empty portal.
+   */
+  adminPool?: AdminPool | null
   github: GitHubClient
   clock?: Clock
   /** Set false only for local HTTP development. The cookie is Secure otherwise. */
@@ -1947,8 +1959,19 @@ export function createServer(options: ServerOptions) {
             }
           }
         }
+        // The operator cookie, resolved beside the product one and never
+        // instead of it. A request can legitimately carry both: an operator
+        // signed in to the product as themselves is still an operator, and the
+        // two sessions are independent credentials in independent tables.
+        const adminToken = readCookie(c.req.header('cookie'), ADMIN_SESSION_COOKIE)
+        const adminSession = adminToken
+          ? await resolveAdminSession(options.pool, adminToken, clock.now())
+          : null
+
         const context: TrpcContext = {
           pool: options.pool,
+          admin: adminSession ? actorOf(adminSession) : null,
+          adminPool: options.adminPool ?? null,
           clock,
           github: options.github,
           stripe: options.stripe ?? null,

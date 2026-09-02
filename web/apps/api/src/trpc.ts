@@ -11,7 +11,8 @@
 // in two places is a rule that survives one of them being refactored away.
 
 import { initTRPC, TRPCError } from '@trpc/server'
-import type { Pool, Tenant } from '@antifailure/db'
+import type { Pool, Tenant, AdminPool } from '@antifailure/db'
+import type { AdminActor } from './admin/trpc.ts'
 import { appendAudit, type AuditInput } from '@antifailure/db'
 import type { Permission, Role } from './permissions.ts'
 import { permits } from './permissions.ts'
@@ -81,6 +82,24 @@ export interface Context {
   hostedRequiredPlan: HostedRequiredPlan | null
   /** Null for an unauthenticated request. */
   actor: Actor | null
+  /**
+   * The operator making this request, when an operator session cookie resolved.
+   *
+   * Separate from `actor` and never merged into it. They are different id
+   * spaces, different session tables and different permission catalogs, and one
+   * nullable field holding either would make "is this person allowed" a
+   * question with two meanings.
+   */
+  admin: AdminActor | null
+  /**
+   * The operator database credential, when this installation has one.
+   *
+   * Null is a supported state: a self-hosted control plane that never set
+   * AF_ADMIN_DATABASE_URL has no operator portal, and adminProcedure answers
+   * PRECONDITION_FAILED naming the variable rather than the process refusing to
+   * start over a feature nobody wants.
+   */
+  adminPool: AdminPool | null
   /** Where the request came from, recorded on every audit entry. */
   origin: 'web' | 'api' | 'engine' | 'github' | 'system'
   ip?: string

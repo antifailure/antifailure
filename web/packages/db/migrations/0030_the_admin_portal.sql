@@ -8,17 +8,35 @@
 -- careless widening is not a bug in one screen, it is every tenant able to
 -- read every other tenant's rows.
 --
--- WHAT THIS DELIBERATELY DOES NOT DO. It does not grant BYPASSRLS, it does not
--- create a superuser, it does not add a second login role, and it does not
--- turn row security off. antifailure_app stays NOLOGIN NOBYPASSRLS and owns
--- nothing, exactly as 0001 left it.
+-- WHAT THIS DOES NOT DO. It does not make antifailure_app privileged.
+-- antifailure_app stays NOLOGIN NOBYPASSRLS and owns nothing, exactly as 0001
+-- left it, and nothing here grants it membership of any other role.
 --
--- A second role was the obvious alternative and it is a trap. Postgres applies
--- a policy when the current user HAS THE PRIVILEGES OF the named role, not
--- when it is acting as that role, so `FOR SELECT TO antifailure_admin` would
--- also apply to antifailure_app the moment anybody granted membership, and it
--- would be a hole that no test asserting "the admin role can read" would ever
--- notice.
+-- THE ONE RULE ABOUT THE OPERATOR ROLE, and it is narrower than an earlier
+-- draft of this comment claimed. antifailure_admin, created in 0029, holds
+-- BYPASSRLS, and this file grants privileges to it.
+--
+-- NEVER WRITE A `CREATE POLICY` NAMING antifailure_admin.
+--
+-- Postgres applies a policy when the current user HAS THE PRIVILEGES OF the
+-- named role, not when it is acting as that role. So a policy written
+-- `FOR SELECT TO antifailure_admin` would also apply to antifailure_app the
+-- moment anybody granted membership, silently, and no test asserting "the
+-- operator can read" would notice.
+--
+-- BYPASSRLS does NOT have that problem, and the difference is worth stating
+-- because an earlier version of this header got it wrong and a comment like
+-- that gets cited as if it were a finding. Role ATTRIBUTES are not inherited
+-- through membership; PRIVILEGES are. Measured on Postgres 17.11 rather than
+-- reasoned about:
+--
+--   probe_admin NOLOGIN BYPASSRLS, GRANT probe_admin TO probe_app, INHERIT
+--     probe_app on an RLS + FORCE table, no scope set   -> 0 rows
+--     probe_app after an explicit SET ROLE probe_admin  -> 2 rows
+--     a policy FOR SELECT TO probe_admin instead        -> 2 rows, no SET ROLE
+--
+-- So membership alone does not carry BYPASSRLS across, and it does carry a
+-- policy across. The hazard is real and it lives entirely in CREATE POLICY.
 --
 -- WHAT IT DOES INSTEAD. It is the sixth instance of a pattern this schema
 -- already uses five times. withGitHubAccount, withStripeCustomer,
@@ -369,6 +387,43 @@ GRANT USAGE, SELECT ON SEQUENCE admin_audit_entries_seq_seq TO antifailure_app;
 -- Explicitly withheld, so that a later blanket grant has to overwrite a
 -- statement that says why it should not.
 REVOKE UPDATE, DELETE, TRUNCATE ON admin_audit_entries FROM antifailure_app;
+
+-- ---------------------------------------------------------------------------
+-- The operator role
+--
+-- antifailure_admin is created in 0029 and holds BYPASSRLS, so the policies
+-- below do not apply to it. BYPASSRLS is not a GRANT, though: it exempts a
+-- role from row level security and gives it no table privileges at all. A
+-- connection as antifailure_admin with no grant on these tables gets 42501 on
+-- every statement, which is the failure this block exists to prevent.
+--
+-- That ordering is why this file is 0030 and not 0029. A GRANT cannot name a
+-- table that does not exist yet, and it cannot name a role that does not exist
+-- yet, so the role has to be created first and the grants have to live in
+-- whichever migration comes second. There is exactly one order in which both
+-- statements are writable, and this is the second half of it.
+--
+-- Without this the operator pool could read every tenant and could not write
+-- its own audit chain, which is the worst of both: a backdoor that works and a
+-- record of it that does not.
+--
+-- The append-only shape is preserved for this role too. UPDATE and DELETE are
+-- withheld here exactly as they are for the application, because "the operator
+-- cannot rewrite what the operator did" is the whole value of the chain, and a
+-- role that could rewrite it would make the hashes decorative.
+GRANT SELECT, INSERT, UPDATE, DELETE ON admin_users, admin_sessions TO antifailure_admin;
+GRANT SELECT, INSERT ON admin_audit_entries TO antifailure_admin;
+GRANT USAGE, SELECT ON SEQUENCE admin_audit_entries_seq_seq TO antifailure_admin;
+REVOKE UPDATE, DELETE, TRUNCATE ON admin_audit_entries FROM antifailure_admin;
+
+-- The tenant chain, so the customer-visible half of an operator's action can
+-- be written. SELECT as well as INSERT, and the SELECT is load bearing rather
+-- than convenience: appendAudit links the chain by reading its own tail, so a
+-- writer without it would record a null predecessor and FORK the tenant's
+-- chain at the first operator action.
+GRANT SELECT, INSERT ON audit_entries TO antifailure_admin;
+GRANT USAGE, SELECT ON SEQUENCE audit_entries_seq_seq TO antifailure_admin;
+REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM antifailure_admin;
 
 -- ---------------------------------------------------------------------------
 -- Policies on the operator's own tables
