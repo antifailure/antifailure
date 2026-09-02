@@ -210,7 +210,7 @@ export interface Pool {
    *
    * The only scope in this file that can read across tenants, and the shape is
    * the same as every other non-tenant scope here: it declares a value the
-   * caller must ALREADY HOLD, and the policies in 0030 are keyed on that value.
+   * caller must ALREADY HOLD, and the policies in 0029 are keyed on that value.
    * What it declares is the hash of the operator's session cookie, so
    * current_admin_user() resolves to a row only for a connection physically
    * holding a live, unrevoked, unexpired operator session.
