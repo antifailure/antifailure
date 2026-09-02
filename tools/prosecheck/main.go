@@ -33,6 +33,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -45,6 +46,7 @@ import (
 )
 
 // documents are the trees whose Markdown prose is checked.
+//
 // examples is here because an example's README is documentation a user reads
 // before anything else: it is the first prose most people meet.
 // `.changes` is here because a fragment is not a working note: `just changelog`
@@ -53,7 +55,14 @@ import (
 // gate could not see. Measured before it was added rather than after: all 119
 // fragments that existed at the time were already clean, so this closes a hole
 // without changing anybody's file.
-var documents = []string{"docs/src/content/docs", "examples", ".changes", "."}
+//
+// www and console are here because their Markdown was the one hole left by the
+// split below. This checker reads their TypeScript, so "the site is scanned"
+// looked true, and a `.md` under either was read by nothing at all: the Markdown
+// trees did not include them and the source extensions did not include Markdown.
+// Nothing was shipping through it, which is the reason to close it now rather
+// than after something is.
+var documents = []string{"docs/src/content/docs", "examples", ".changes", ".", "www", "console"}
 
 // sources are the trees whose TypeScript carries copy rather than only code.
 //
@@ -273,8 +282,33 @@ func defects(name string, num int, line, clean string) []finding {
 // markdown lists the documents to check, relative to root.
 func markdown(root string) ([]string, error) {
 	return collect(root, documents, func(path string) bool {
-		return filepath.Ext(path) == ".md"
+		return filepath.Ext(path) == ".md" && !generatedAgentFile(path)
 	})
+}
+
+// generatedAgentFile reports whether a file is one `next dev` writes for itself.
+//
+// Bringing www and console Markdown into scope brought these with it, and they
+// are not ours to style: `next dev` appends its block on every start, so anybody
+// who had run the dev server would get a red gate, in prose they did not write,
+// on a file they cannot keep clean. .gitignore keeps the same two files out of
+// the repository for the same reason. Verified rather than reasoned about: with
+// www in scope and no exemption, this gate reports two em dashes in
+// www/AGENTS.md and exits 1 on a tree where the dev server has run, while CI,
+// which only ever builds, stays green. Green in CI and red on every developer's
+// machine is the worst shape a gate can have.
+//
+// Matched on the generator's own marker rather than on a list of paths. A list
+// would exempt a real CLAUDE.md somebody writes at one of those paths, and it
+// would rot in silence the day the generator picks a different filename. The
+// marker appears only in what the generator wrote, so a hand written file at the
+// same path is still checked.
+func generatedAgentFile(path string) bool {
+	if base := filepath.Base(path); base != "AGENTS.md" && base != "CLAUDE.md" {
+		return false
+	}
+	b, err := os.ReadFile(path)
+	return err == nil && bytes.Contains(b, []byte("BEGIN:nextjs-agent-rules"))
 }
 
 // source lists the site and console files to check, relative to root.

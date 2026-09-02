@@ -52,8 +52,37 @@ func (o *Orchestrator) BaselineTreeForTest(ctx context.Context, rev string) (str
 // needs to be able to reach directly. Reaching it through Up would need a
 // provider, a runtime, a journal and a lock, and the property being asserted
 // is a property of one loop.
-func PickGoldenForTest(goldens []provider.GoldenVersion, wantRules string) (string, int) {
-	return pickGolden(goldens, wantRules)
+func PickGoldenForTest(goldens []provider.GoldenVersion, want string) (string, int) {
+	return pickGolden(goldens, want)
+}
+
+// GoldenProvenanceForTest is the identity an orchestrator computes for its own
+// project, as the digest a golden records.
+//
+// Exported because the property this file's tests exist for is a property of
+// two orchestrators taken together: that two projects compute different
+// identities, and that one project computes the same one on every branch. A
+// test of the selection loop alone cannot see either, and the selection loop
+// was never the part that was wrong.
+func (o *Orchestrator) GoldenProvenanceForTest() (string, error) {
+	return o.GoldenIdentity()
+}
+
+// RulesDigestForTest is the masking rules digest, which used to be the whole
+// of golden selection.
+//
+// Exported so a test can state the defect as a property rather than describe
+// it: two unrelated projects with no masking.yaml compute the SAME rules
+// digest, which is why that value could never have been a project key.
+func (o *Orchestrator) RulesDigestForTest() (string, error) {
+	_, hash, err := o.rules()
+	return hash, err
+}
+
+// AttestedProvenanceForTest exposes attestedProvenance, which is the check a
+// machine pulling from a shared store makes before it restores anything.
+func AttestedProvenanceForTest(attestation string) string {
+	return attestedProvenance(attestation)
 }
 
 // RunSeedForTest exposes runSeed to the package's external tests.
@@ -98,4 +127,30 @@ func (o *Orchestrator) InvokeRunnerForTest(
 	ctx context.Context, runnerPath, artifacts string,
 ) ([]byte, error) {
 	return o.invokeRunner(ctx, runnerPath, jobDocument{Artifacts: artifacts})
+}
+
+// InvokeRunnerCapturingDocument runs the runner and returns the exact bytes
+// that went to its standard input.
+//
+// The document between the engine and the runner is a wire format, and nothing
+// asserted its shape until af explore turned out to have been impossible on
+// every machine: the exploration path never set the workflows field, a nil
+// slice marshals as null, and main.ts read null.length before it looked at the
+// goals. Both halves worked and the document between them was untested.
+//
+// So this hands the caller the real bytes rather than the struct, because the
+// defect was in what json.Marshal produced and not in what the struct held.
+func (o *Orchestrator) InvokeRunnerCapturingDocument(
+	ctx context.Context, runnerPath, artifacts string, goals []schema.Goal,
+) ([]byte, []byte, error) {
+	job := jobDocument{Artifacts: artifacts, Headless: true}
+	for _, g := range goals {
+		job.Goals = append(job.Goals, goalDoc{Name: g.Name, Goal: g.Goal, Seed: g.Seed})
+	}
+	captured, err := o.runnerDocument(job)
+	if err != nil {
+		return nil, nil, err
+	}
+	out, err := o.invokeRunner(ctx, runnerPath, job)
+	return captured, out, err
 }

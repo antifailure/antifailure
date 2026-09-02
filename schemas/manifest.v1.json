@@ -1252,18 +1252,21 @@
             "p95_increase": {
               "type": "number",
               "minimum": 0,
-              "default": 0.25
+              "default": 0.25,
+              "description": "How much slower than production a route may get, as a ratio. It divides a measured p95 by production's own p95 for that route, so it needs a source that carries one: the default applies under source otel, and the engine refuses this key under access_log or none, where a route arrives with no baseline and the threshold could never fire."
             },
             "error_rate": {
               "type": "number",
               "minimum": 0,
               "maximum": 1,
-              "default": 0.01
+              "default": 0.01,
+              "description": "The share of requests that may fail. Counted from the run's own responses, so it needs no baseline and works under every source."
             },
             "query_count_increase": {
               "type": "number",
               "minimum": 0,
-              "default": 0.2
+              "deprecated": true,
+              "description": "Not read by anything, and refused by the engine. A load run counts requests, not statements. The check that compares statement counts against the base branch is insights.query_regression, and how much growth fails it is insights.regression_factor."
             }
           }
         }
@@ -1418,6 +1421,16 @@
           ],
           "default": "fail",
           "description": "Teardown left a resource behind. The journal remembers what is left, so 'af down' can finish the job."
+        },
+        "workflows_unverified": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "A run in which no workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. Distinct from a single blocked workflow, which is never counted against the application: one gap in the tooling is not evidence, and a run where every workflow was a gap has tested nothing at all, so reporting it as a pass says the application was checked when it was not. Set it to warn if the project has no workflows yet and you would rather record that choice than be told about it."
         }
       }
     },
@@ -1491,7 +1504,7 @@
         "comment": {
           "type": "boolean",
           "default": true,
-          "description": "Whether to maintain a single comment on the pull request. It is updated in place rather than appended, so a busy pull request does not accumulate twenty bot comments."
+          "description": "Whether to maintain a single comment on the pull request. It is updated in place rather than appended, so a busy pull request does not accumulate twenty bot comments. Set false and af change and af ci write comment=false to GITHUB_OUTPUT for the workflow to gate its comment step on. The report files are still written, because the report is also the job summary and the payload a control plane is sent."
         },
         "fork_policy": {
           "type": "string",
@@ -1501,7 +1514,7 @@
             "always"
           ],
           "default": "label",
-          "description": "What to do with a pull request from a fork. label requires a maintainer to add antifailure:allow first, which is the only safe default: a fork's code would otherwise run with the environment's credentials."
+          "description": "What to do with a pull request from a fork. label requires a maintainer to add antifailure:allow first, which is the only safe default: a fork's code would otherwise run with the environment's credentials. Enforced by af ci, af up, af test and af load run before an environment is created, on pull_request and pull_request_target, and read from the base branch rather than from the pull request, because the pull request's copy of this file belongs to the contributor."
         },
         "teardown_on": {
           "type": "array",
@@ -1519,7 +1532,7 @@
               "ttl"
             ]
           },
-          "description": "Events that tear the environment down."
+          "description": "Accepted and read by nothing. Teardown is unconditional: af ci tears down whatever the outcome, and the control plane asks for teardown on close, merge, supersession and timeout without reading your manifest. The lifetime ceiling is runtime.max_ttl."
         }
       }
     },

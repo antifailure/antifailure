@@ -43,6 +43,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.fidelity(m)
 	v.runtime(m)
 	v.change(m)
+	v.github(m)
 
 	if v.suppressed > 0 {
 		v.problems = append(v.problems, Problem{
@@ -903,6 +904,7 @@ func (v *validator) load(m *schema.Manifest) {
 			fmt.Sprintf("The load source is %s and no path is configured.", l.Source),
 			"Set source_config.path to the file the traffic is read from.")
 	}
+	v.loadThresholds(l)
 
 	for i := range l.Scenarios {
 		sc := l.Scenarios[i]
@@ -924,6 +926,62 @@ func (v *validator) load(m *schema.Manifest) {
 		if sc.Sessions < 0 || sc.Iterations < 0 {
 			v.add(base, "A scenario cannot run a negative number of times.", "")
 		}
+	}
+}
+
+// loadThresholds refuses a threshold that cannot fire.
+//
+// The same judgement that removed Datadog and New Relic from the load sources:
+// a key somebody can set that cannot work reads as a broken product rather
+// than an unfinished one, and it is worse than not offering the key at all,
+// because the run goes green having checked nothing and nobody looks at a
+// green check. The scenario runner already exits non-zero when a journey
+// proved nothing, for the same reason.
+//
+// Only a threshold somebody wrote is refused. normalizeLoad sets p95_increase
+// on every manifest, so refusing its own default would make access_log
+// unusable rather than honest. A run under the default reports the inertness
+// instead, from the numbers it actually measured.
+func (v *validator) loadThresholds(l *schema.Load) {
+	t := l.Thresholds
+	if t == nil {
+		return
+	}
+
+	// p95_increase divides a measured p95 by a per route baseline, and only a
+	// trace export carries one. A combined format log line has no duration in
+	// it, and the default shape has no production behind it, so under either
+	// every route arrives with HasBaseline false and Breaches skips all of
+	// them.
+	if t.P95Increase > 0 && declaredAt(v.doc, "load.thresholds.p95_increase") {
+		switch l.Source {
+		case schema.LoadAccessLog:
+			v.add("load.thresholds.p95_increase",
+				"The load source is access_log and p95_increase is set.",
+				"A combined format log line carries no duration, so every route read from one "+
+					"arrives with no baseline and this threshold can never fire. Read the traffic "+
+					"with source: otel, which carries production's own p95 for each route, or "+
+					"remove the threshold and judge the run on error_rate.")
+		case "", schema.LoadNone:
+			v.add("load.thresholds.p95_increase",
+				"The load source is none and p95_increase is set.",
+				"With no source the shape is a default that exercises the root, and there is no "+
+					"production behind it to be a baseline, so this threshold can never fire. Set "+
+					"source: otel to read production's own p95 for each route, or remove the "+
+					"threshold and judge the run on error_rate.")
+		}
+	}
+
+	// query_count_increase is worse than inert under one source: nothing has
+	// ever read it. It reached the schema, the Go type and the normalizer, and
+	// no load run counts statements, so it has never affected any verdict. The
+	// check it describes exists under a different name.
+	if t.QueryCountIncrease > 0 && declaredAt(v.doc, "load.thresholds.query_count_increase") {
+		v.add("load.thresholds.query_count_increase",
+			"Nothing measures query_count_increase.",
+			"A load run counts requests, not statements. The check that compares statement "+
+				"counts against the base branch is insights.query_regression, and how much "+
+				"growth fails it is insights.regression_factor. Set it there and remove this.")
 	}
 }
 
@@ -1007,21 +1065,68 @@ func isCatchAll(p string) bool {
 // to a default would mean a manifest that says "block" quietly warns instead,
 // and the first time anybody noticed would be a merge that should not have
 // happened.
+// github checks the values in the github block.
+//
+// There was no github function here at all, so none of the three enumerations
+// in that block was enforced by the engine: `fork_policy: bogus`,
+// `mode: sideways` and `teardown_on: [closed, merged]` all loaded without a
+// word. The JSON Schema has had the enums the whole time, and the reference
+// page is generated from it, so the page told a reader the values and nothing
+// held them to it. Two documentation pages in this repository shipped
+// `teardown_on: [closed, merged]` for exactly that reason.
+//
+// fork_policy is the one that matters. normalize only fills an EMPTY policy,
+// so a misspelling survives as itself, and everything downstream treats an
+// unrecognised policy as label. That is the safe direction and it is silent:
+// somebody who writes `nevr` gets label, believes they wrote never, and is
+// running a stranger's code behind one label instead of refusing it outright.
+// A typo in a security control has to be an error, not a shrug.
+func (v *validator) github(m *schema.Manifest) {
+	g := m.GitHub
+	if g == nil {
+		return
+	}
+	switch g.Mode {
+	case "", schema.GitHubActions, schema.GitHubApp, schema.GitHubOff:
+	default:
+		v.add("github.mode",
+			fmt.Sprintf("The value %q is not one of actions, app or off.", g.Mode),
+			"actions runs everything inside the workflow. app uses the GitHub App and a control plane. off disables the integration.")
+	}
+	switch g.ForkPolicy {
+	case "", schema.ForkNever, schema.ForkLabel, schema.ForkAlways:
+	default:
+		v.add("github.fork_policy",
+			fmt.Sprintf("The value %q is not one of never, label or always.", g.ForkPolicy),
+			"label is the default and the safe one: a fork's pull request runs only once a maintainer has added the antifailure:allow label. An unrecognised value would be treated as label, which is why this is refused rather than assumed.")
+	}
+	for i, on := range g.TeardownOn {
+		switch on {
+		case "close", "merge", "ttl":
+		default:
+			v.add(fmt.Sprintf("github.teardown_on[%d]", i),
+				fmt.Sprintf("The value %q is not one of close, merge or ttl.", on),
+				"Teardown is unconditional whatever this says, so the shortest fix is to remove the key.")
+		}
+	}
+}
+
 func (v *validator) policy(m *schema.Manifest) {
 	p := m.Policy
 	if p == nil {
 		return
 	}
 	levels := map[string]schema.PolicyLevel{
-		"migration_failed":  p.MigrationFailed,
-		"migration_rewrite": p.MigrationRewrite,
-		"migration_lint":    p.MigrationLint,
-		"plan_regression":   p.PlanRegression,
-		"query_regression":  p.QueryRegression,
-		"load_regression":   p.LoadRegression,
-		"egress_surprise":   p.EgressSurprise,
-		"masking":           p.Masking,
-		"cleanup":           p.Cleanup,
+		"migration_failed":     p.MigrationFailed,
+		"migration_rewrite":    p.MigrationRewrite,
+		"migration_lint":       p.MigrationLint,
+		"plan_regression":      p.PlanRegression,
+		"query_regression":     p.QueryRegression,
+		"load_regression":      p.LoadRegression,
+		"egress_surprise":      p.EgressSurprise,
+		"workflows_unverified": p.WorkflowsUnverified,
+		"masking":              p.Masking,
+		"cleanup":              p.Cleanup,
 	}
 	keys := make([]string, 0, len(levels))
 	for k := range levels {
@@ -1460,6 +1565,38 @@ func validateCronField(f string, lo, hi int) error {
 		}
 	}
 	return nil
+}
+
+// declaredAt reports whether a dotted path was actually written in the
+// document.
+//
+// nodeAt cannot answer this: it deliberately falls back to the containing
+// mapping when a key is absent, so that a problem about a missing key can
+// still point at a line. That fallback makes it useless for asking whether
+// somebody set a value, and the difference matters wherever normalization
+// fills a field in. A default the engine chose is not a promise the author
+// made, and refusing one as though it were would fail every manifest.
+func declaredAt(doc *yaml.Node, dotted string) bool {
+	if doc == nil || dotted == "" {
+		return false
+	}
+	n := doc
+	if n.Kind == yaml.DocumentNode && len(n.Content) > 0 {
+		n = n.Content[0]
+	}
+	for _, seg := range splitPath(dotted) {
+		n = mapValue(n, seg.key)
+		if n == nil {
+			return false
+		}
+		if seg.index >= 0 {
+			if n.Kind != yaml.SequenceNode || seg.index >= len(n.Content) {
+				return false
+			}
+			n = n.Content[seg.index]
+		}
+	}
+	return true
 }
 
 // nodeAt resolves a dotted path such as services[1].port to its YAML node, so

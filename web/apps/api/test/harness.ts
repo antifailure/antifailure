@@ -13,6 +13,9 @@ import { findConsoleBuild } from '../src/console/static.ts'
 import { RealStripeClient } from '../src/billing/stripe.ts'
 import type { StripeConfig } from '../src/billing/plans.ts'
 import type { Billing } from '../src/billing/index.ts'
+import type { HostedRequiredPlan } from '../src/hosted.ts'
+import type { RepositoryApi } from '../src/github/api.ts'
+import { ActionsKeys } from '../src/github/oidc.ts'
 import { MockPack, loadPack } from './mockpack.ts'
 
 export const adminUrl =
@@ -95,6 +98,28 @@ export interface StartApiOptions {
    *  server takes no money, which is the self-hosted default and has its own
    *  tests. */
   stripe?: Billing | null
+  /** The plan required by a hosted deployment. Null is the self-hosted default. */
+  hostedRequiredPlan?: HostedRequiredPlan | null
+  githubAppInstallUrl?: string
+  /** Acting on a repository as the installation. Undefined means no App, which
+   *  is a real way to run this: deliveries still record installations and
+   *  nothing is published. */
+  githubApi?: RepositoryApi | null
+  /**
+   * GitHub's signing key set, as a JSON string, for the workflow identity
+   * tokens a job exchanges for a callback credential.
+   *
+   * Given as a function rather than as an ActionsKeys, because ActionsKeys
+   * needs the harness's own FakeClock and a test cannot hold that until after
+   * startApi has returned. A key set read against the wall clock while the
+   * token was minted against the fake one is expired or issued in the future
+   * depending on the day, which is the worst kind of flake: it depends on when
+   * somebody runs the suite.
+   */
+  actionsJwks?: () => string
+  /** Drops a cached installation token. Undefined means no App is configured,
+   *  which is when there is no cache for the webhook to drop from. */
+  forgetInstallationToken?: (installationId: number) => void
 }
 
 export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
@@ -132,6 +157,22 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     ...(options.providerBases ? { providerBases: options.providerBases } : {}),
     ...(options.consoleDir ? { consoleBuild: await findConsoleBuild(options.consoleDir) } : {}),
     stripe: options.stripe ?? null,
+    hostedRequiredPlan: options.hostedRequiredPlan ?? null,
+    githubAppInstallUrl: options.githubAppInstallUrl,
+    githubApi: options.githubApi ?? null,
+    ...(options.forgetInstallationToken
+      ? { forgetInstallationToken: options.forgetInstallationToken }
+      : {}),
+    ...(options.actionsJwks
+      ? {
+          actionsKeys: new ActionsKeys(clock, {
+            fetchImpl: async () =>
+              new Response(options.actionsJwks!(), {
+                headers: { 'content-type': 'application/json' },
+              }),
+          }),
+        }
+      : {}),
   })
 
   return {
@@ -159,8 +200,11 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
  * this arrangement is what found five defects in the shipped pack.
  *
  * A request no route matches answers 501 rather than 404, because 404 is a real
- * answer here: getSubscription reads it as "Stripe has never heard of this",
- * and a missing ROUTE must never be mistaken for a missing OBJECT.
+ * answer here twice over: the subscription and invoice list calls read it as
+ * "Stripe holds nothing for this customer" and return an empty collection, and
+ * getSubscription reads it as "Stripe has never heard of this one". A missing
+ * ROUTE must never be mistaken for a customer who genuinely has nothing, nor
+ * for a missing OBJECT.
  */
 export async function stripeAgainstMockPack(
   overrides: Partial<StripeConfig> = {},
@@ -323,5 +367,32 @@ export function errorCode(body: unknown): string | null {
 
 export async function dropOrg(admin: postgres.Sql, orgId: string): Promise<void> {
   await admin`DELETE FROM audit_entries WHERE org_id = ${orgId}`
+  // Deliberately not cascaded from organizations, because the deletion record
+  // is the one row that has to outlive the organization it is about. See
+  // migrations/0022. A suite that left them behind would hit the partial unique
+  // index the next time it deleted the same organization.
+  await admin`DELETE FROM organization_deletions WHERE org_id = ${orgId}`
   await admin`DELETE FROM organizations WHERE id = ${orgId}`
+}
+
+/** A signed-in session for somebody who belongs to no organization, which is
+ *  the state an invited person is in when they open the link. */
+export async function signInWithNoOrganization(
+  h: ApiHarness,
+  label = 'invitee',
+): Promise<SignedIn & { email: string }> {
+  const login = `${label}-${randomUUID().slice(0, 6)}`
+  const email = `${login}@example.test`
+  const [user] = await h.admin<{ id: string }[]>`
+    INSERT INTO users (github_id, github_login, email, name)
+    VALUES (${Math.floor(Math.random() * 1e12)}, ${login}, ${email}, ${label})
+    RETURNING id`
+  const issued = await issueSession(h.pool, h.clock, { userId: user!.id, orgId: null })
+  return {
+    userId: user!.id,
+    email,
+    token: issued.token,
+    csrfToken: issued.csrfToken,
+    cookie: `af_session=${issued.token}`,
+  }
 }

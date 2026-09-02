@@ -280,6 +280,53 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
       stripe_event_id, org_id, stripe_customer_id, type, event_created_at, outcome)
     VALUES (${`evt_${slug}`}, ${orgId}, ${customerId}, 'invoice.paid', now(), 'applied')`
 
+  // Running the organization. Every table with an org_id needs a row here, or
+  // the cross-tenant suite's "the fixture is missing" assertion fires: a read
+  // that returns nothing because nothing was inserted looks exactly like
+  // isolation working.
+  await admin`
+    INSERT INTO invitations (org_id, email, role, token_hash, invited_by_label, expires_at)
+    VALUES (${orgId}, ${`invited@${slug}.test`}, 'member', ${tokenHash(`invite-${slug}`)},
+            'the fixture', now() + interval '14 days')`
+  await admin`
+    INSERT INTO billing_contacts (org_id, email, updated_by_label)
+    VALUES (${orgId}, ${`finance@${slug}.test`}, 'the fixture')`
+  const [deletion] = await admin<{ id: string }[]>`
+    INSERT INTO organization_deletions (org_id, org_slug, org_name, requested_by_label, cancelled_at)
+    VALUES (${orgId}, ${slug}, ${label}, 'the fixture', now())
+    RETURNING id`
+  await admin`
+    INSERT INTO organization_deletion_exports
+      (deletion_id, org_id, token_hash, document, entry_count, size_bytes, expires_at)
+    VALUES (${deletion!.id}, ${orgId}, ${tokenHash(`export-${slug}`)}, '{}'::jsonb, 0, 0,
+            now() + interval '7 days')`
+  // The pull request lifecycle. Every one of these carries org_id, so the
+  // cross-tenant suite finds them in the database and needs a row per tenant to
+  // attack: a query returning nothing because the fixture never inserted
+  // anything looks exactly like isolation working.
+  const headSha = `${'0'.repeat(33)}${slug.replace(/[^0-9a-f]/g, '0').slice(0, 7)}`
+  const [pullRequest] = await admin<{ id: string }[]>`
+    INSERT INTO pull_requests (
+      org_id, repository_id, number, head_sha, head_ref, base_ref, head_repository)
+    VALUES (${orgId}, ${repoId}, 1, ${headSha}, 'feature', 'main', ${`${slug}/app`})
+    RETURNING id`
+  // OVERDUE, deliberately. The sweeper policies admit a row only when it is
+  // already past its deadline, so a fixture whose generation is not overdue
+  // cannot see whether those policies leak across tenants: the row condition
+  // would be false and the cross-tenant read would come back empty for the
+  // wrong reason. A fixture that does not satisfy a policy's predicate proves
+  // nothing about that policy.
+  const [generation] = await admin<{ id: string }[]>`
+    INSERT INTO pr_generations (org_id, pull_request_id, head_sha, deadline_at)
+    VALUES (${orgId}, ${pullRequest!.id}, ${headSha}, now() - interval '1 minute')
+    RETURNING id`
+  await admin`
+    INSERT INTO teardown_requests (org_id, environment_id, env_id, repository_id, generation_id, reason)
+    VALUES (${orgId}, ${envId}, ${`env-${slug}`}, ${repoId}, ${generation!.id}, 'seed')`
+  await admin`
+    INSERT INTO github_deliveries (delivery_id, org_id, account_login, event, action)
+    VALUES (${`delivery-${slug}`}, ${orgId}, ${slug}, 'pull_request', 'opened')`
+
   return { orgId, userId, repoId, envId, runId, slug, connectionId, customerId }
 }
 
@@ -290,6 +337,9 @@ export function tokenHash(value: string): Buffer {
 /** Removes a tenant and everything cascading from it. */
 export async function dropTenant(admin: postgres.Sql, orgId: string): Promise<void> {
   await admin`DELETE FROM audit_entries WHERE org_id = ${orgId}`
+  // Deliberately not cascaded, because the deletion record is the one row that
+  // has to outlive the organization it is about. See migrations/0022.
+  await admin`DELETE FROM organization_deletions WHERE org_id = ${orgId}`
   await admin`DELETE FROM organizations WHERE id = ${orgId}`
 }
 

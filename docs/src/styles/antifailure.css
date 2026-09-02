@@ -178,39 +178,28 @@ body {
 /* A rule above every h2 gives the page a spine you can scan, which is most of
    what somebody does when they arrive here from an error message.
 
-   The spine goes on the WRAPPER, not on the heading, and that distinction is
-   the whole of this block.
+   It goes on the WRAPPER rather than on the heading, and that is the whole
+   point of this block. Starlight renders every linkable heading as
+   <div class="sl-heading-wrapper"><h2>...</h2><a class="sl-anchor-link">, and
+   anchor-links.css sets the heading itself to display:inline so the link sits
+   at the end of the last line rather than on a line of its own. This
+   stylesheet is unlayered and Starlight's is in @layer starlight.content, so
+   an unlayered `display: block` here wins whatever its specificity, and the
+   heading became a block box with the anchor pushed underneath it: 67px below
+   the heading top, on every h2 on every page.
 
-   Starlight 0.41 renders an anchored heading as
-   <div class="sl-heading-wrapper level-h2"><h2>..</h2><a class="sl-anchor-link">
-   and makes the anchor land at the end of the last line by leaving the heading
-   `display: inline` and reserving space after it. An earlier version of this
-   file set `display: block` on the h2 instead, for a correct reason: a
-   border-top on an inline box is only as wide as its text, and the rule above
-   "Top level" in the manifest reference measured 146px in a 343px column, a
-   stub rather than a spine. It won because Starlight's rules sit in a cascade
-   layer and this stylesheet does not, and an unlayered declaration beats every
-   layered one whatever its specificity. So the more specific framework rule
-   lost, the h2 became a block, the inline-flex anchor could no longer share
-   its line, and every heading on the live site rendered a green icon on the
-   line beneath it. Vir found it on /docs/enterprise/secrets.
+   Styling the wrapper answers both halves at once. The wrapper is already a
+   block, so the border is the full column width rather than the 146px stub a
+   border on an inline box gave, and the heading stays inline so the anchor
+   stays beside it.
 
-   The wrapper is already a block and already the full column, so putting the
-   rule there gets both things: a full-width spine and the anchor where
-   Starlight puts it. `>` reaches the headings Starlight did not wrap, and
-   nothing else.
-
-   There is no h3 rule here any more, and its absence is deliberate. It set
-   `margin-top: 2rem` on an inline box, which does nothing, and the obvious
-   repair was to move it to `.sl-heading-wrapper.level-h3`. That would have
-   made things worse: Starlight's own
-   `:not(h1..h6, .sl-heading-wrapper) + .sl-heading-wrapper { margin-top: 1.5em }`
-   already puts 43.5px above every h3, measured in a browser, so relocating
-   2rem would have overridden 43.5px with 32px and tightened every h3 on 81
-   pages. Dead CSS whose death costs nothing is deleted, not relocated. */
+   No margin-top here, deliberately. Starlight's own rule gives the wrapper
+   1.5em, which is 52.5px at 1280 and 43.5px at 390, and today that number is
+   what renders: the h2's 2.75rem collapses into it and loses. Restating 2.75rem
+   on the wrapper would block the collapse, win, and quietly tighten every
+   heading on 81 pages by 8.5px. The number to keep is the one on the screen. */
 .sl-markdown-content .sl-heading-wrapper.level-h2,
 .sl-markdown-content > h2 {
-  margin-top: 2.75rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--af-rule);
 }
@@ -298,6 +287,25 @@ body {
 
 .expressive-code .frame:not(.has-title) .header {
   display: none;
+}
+
+/* Hiding that title bar is what put the copy button outside the block.
+ *
+ * Expressive Code positions the button from the frame's own --button-spacing,
+ * and a terminal frame reserves the height of its title bar there
+ * (1.9rem + border + 2 * uiPaddingBlock, which is 40px here) so the button
+ * lands just below the bar rather than on top of it. The rule above deletes
+ * the bar but not the reservation, so on all 116 terminal blocks the button
+ * started 40px down a 54px block: it hung off the bottom right corner, over
+ * the paragraph beneath, and dragged the "Copied!" tooltip out with it. That
+ * was the first thing a new reader saw, on the install command.
+ *
+ * 0.4rem is the value Expressive Code itself uses for a frame with no header,
+ * which is what this frame now is. Setting the property rather than restating
+ * `.copy { inset-block-start }` keeps their calc, so the border width and the
+ * inline inset still come from the theme after an upgrade. */
+.expressive-code .frame.is-terminal:not(.has-title) {
+  --button-spacing: 0.4rem;
 }
 
 .sl-markdown-content table {
@@ -507,10 +515,31 @@ starlight-theme-select select,
 
   /* Expressive Code's copy button renders at 32px. It sits on top of the code
      it copies, so it is the control most likely to be missed and the one most
-     likely to hit the code instead. */
+     likely to hit the code instead.
+
+     The extra 12px is a transparent border, so the hit area grows and the
+     painted control does not. Growing the box instead put a 44px slab on a
+     54px block once the button was anchored back inside it, and Expressive
+     Code reserves exactly 2rem of padding-inline-end on the first line to
+     clear the button, so a 44px button covered the end of the very command it
+     is there to copy. Everything the button paints is a child at inset: 0,
+     which resolves against the padding box, so the background, the border and
+     the icon all follow the inner 2rem without being restated here. The
+     background needs the clip because a transparent border still shows it. */
   .expressive-code .copy button {
+    box-sizing: border-box;
     width: 2.75rem;
     height: 2.75rem;
+    border: 0.375rem solid transparent;
+    background-clip: padding-box;
+  }
+
+  /* The focus ring draws on the border box, so that transparent border would
+     leave it floating 6px off the control it is pointing at, wider here than
+     the same ring is one pixel above this breakpoint. Pull it back to the 2px
+     the rest of the site uses. */
+  .expressive-code .copy button:focus-visible {
+    outline-offset: -0.25rem;
   }
 
   /* The two calls to action on the landing page measured 40px and 33px. They
@@ -559,8 +588,8 @@ starlight-theme-select select,
     --sl-text-h1: 2rem;
     --sl-nav-height: 7.35rem;
   }
-  .sl-markdown-content h2 {
-    margin-top: 2.25rem;
+  .sl-markdown-content .sl-heading-wrapper.level-h2,
+  .sl-markdown-content > h2 {
     padding-top: 1.25rem;
   }
 }

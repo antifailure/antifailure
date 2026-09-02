@@ -103,9 +103,19 @@ export const SITE_DESCRIPTION =
 /**
  * The longer form, for places with room to be specific: the JSON-LD
  * Organization description, llms.txt, and the documentation landing page.
+ *
+ * "builds your services and then runs them inside a sandbox" is worded that
+ * way on purpose and the word order is the claim. It used to say "builds and
+ * runs your services inside a sandbox that cannot reach the internet", which
+ * put the build inside the sandbox and was false: `ImageBuildOptions` in
+ * engine/internal/build/docker.go sets no NetworkMode, and the buildpack path
+ * runs `npm ci` and `pip install`, so a build necessarily has a route out. The
+ * containment is real and adversarially tested, and it applies to the running
+ * services. This string is read by search engines and by models through
+ * JSON-LD and llms.txt, so it is the one place a loose word travels furthest.
  */
 export const SITE_DESCRIPTION_LONG =
-  "Antifailure builds a disposable copy of your production stack for every pull request. It branches a masked, referentially consistent Postgres from a verified golden, builds and runs your services inside a sandbox that cannot reach the internet except where you say it can, drives real workflows with agents that use the accessibility tree the way a person does, and rehearses pending migrations for exclusive locks, table rewrites and query plan regressions before any of it reaches production.";
+  "Antifailure builds a disposable copy of your production stack for every pull request. It branches a masked, referentially consistent Postgres from a verified golden, builds your services and then runs them inside a sandbox that cannot reach the internet except where you say it can, drives real workflows with agents that use the accessibility tree the way a person does, and rehearses pending migrations for exclusive locks, table rewrites and query plan regressions before any of it reaches production.";
 
 /** The category, stated outright rather than implied, so an engine can place it. */
 export const SITE_CATEGORY = "Pre-production testing and release safety for teams that deploy to Postgres";

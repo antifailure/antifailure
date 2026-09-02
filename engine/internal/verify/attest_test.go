@@ -24,7 +24,7 @@ func TestSign_ProducesSomethingThatVerifies(t *testing.T) {
 	_, priv, err := verify.GenerateKey()
 	require.NoError(t, err)
 
-	a, err := verify.Sign(sampleReport(), "gv_1", "rules-abc", priv)
+	a, err := verify.Sign(sampleReport(), "gv_1", "rules-abc", "gp1-abc", priv)
 	require.NoError(t, err)
 	require.True(t, a.Verify())
 	require.NotEmpty(t, a.Signature)
@@ -39,7 +39,7 @@ func TestVerify_RejectsAChangedReport(t *testing.T) {
 	_, priv, err := verify.GenerateKey()
 	require.NoError(t, err)
 
-	a, err := verify.Sign(sampleReport(), "gv_1", "rules-abc", priv)
+	a, err := verify.Sign(sampleReport(), "gv_1", "rules-abc", "gp1-abc", priv)
 	require.NoError(t, err)
 
 	tampered := a
@@ -59,6 +59,22 @@ func TestVerify_RejectsAChangedReport(t *testing.T) {
 	tampered.RulesHash = "other-rules"
 	require.False(t, tampered.Verify(),
 		"a golden verified under one set of rules is not one verified under another")
+
+	// The claim a machine pulling from a shared store acts on. A golden store
+	// is shared by a fleet on purpose, and the only thing stopping a runner
+	// restoring another project's masked production is that this field says
+	// whose it is. Rewriting it must not survive.
+	tampered = a
+	tampered.Provenance = "gp1-somebody-else"
+	require.False(t, tampered.Verify(),
+		"an attestation must not be transferable to another project")
+
+	// And the direction that matters more, because it looks like an old
+	// document rather than an edited one: taking the claim out entirely.
+	tampered = a
+	tampered.Provenance = ""
+	require.False(t, tampered.Verify(),
+		"a signed claim about whose golden this is cannot be dropped to make it anybody's")
 }
 
 func TestVerify_RejectsAFindingRemovedFromAReport(t *testing.T) {
@@ -73,7 +89,7 @@ func TestVerify_RejectsAFindingRemovedFromAReport(t *testing.T) {
 		Schema: "public", Table: "customers", Column: "email",
 		Detector: "email", Example: "ad****om", Rows: 200,
 	}}
-	a, err := verify.Sign(report, "gv_1", "rules-abc", priv)
+	a, err := verify.Sign(report, "gv_1", "rules-abc", "gp1-abc", priv)
 	require.NoError(t, err)
 	require.False(t, a.Report.Clean())
 	require.True(t, a.Verify())
@@ -91,7 +107,7 @@ func TestVerify_RejectsAnotherKeysSignature(t *testing.T) {
 	otherPub, otherPriv, err := verify.GenerateKey()
 	require.NoError(t, err)
 
-	a, err := verify.Sign(sampleReport(), "gv_1", "rules-abc", priv)
+	a, err := verify.Sign(sampleReport(), "gv_1", "rules-abc", "gp1-abc", priv)
 	require.NoError(t, err)
 
 	// Swapping in another key's public half, which is what somebody who wanted
@@ -101,7 +117,7 @@ func TestVerify_RejectsAnotherKeysSignature(t *testing.T) {
 	require.False(t, forged.Verify())
 
 	// And a signature from another key over the same document.
-	resigned, err := verify.Sign(sampleReport(), "gv_1", "rules-abc", otherPriv)
+	resigned, err := verify.Sign(sampleReport(), "gv_1", "rules-abc", "gp1-abc", otherPriv)
 	require.NoError(t, err)
 	mixed := a
 	mixed.Signature = resigned.Signature
@@ -112,7 +128,7 @@ func TestVerify_RejectsMalformedFields(t *testing.T) {
 	t.Parallel()
 	_, priv, err := verify.GenerateKey()
 	require.NoError(t, err)
-	a, err := verify.Sign(sampleReport(), "gv_1", "rules-abc", priv)
+	a, err := verify.Sign(sampleReport(), "gv_1", "rules-abc", "gp1-abc", priv)
 	require.NoError(t, err)
 
 	for name, mutate := range map[string]func(*verify.Attestation){

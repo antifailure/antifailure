@@ -37,7 +37,11 @@ type meta struct {
 	Antifailure int    `json:"antifailure"`
 	Version     string `json:"version"`
 	RulesHash   string `json:"rules_hash"`
-	CreatedAt   string `json:"created_at"`
+	// Provenance is the project the golden was made for. A snapshot written
+	// before this field existed leaves it empty, and the engine refuses to
+	// branch such a snapshot rather than guessing whose it is.
+	Provenance string `json:"provenance,omitempty"`
+	CreatedAt  string `json:"created_at"`
 	// Verified is written true and never false. A refresh that fails
 	// verification never reaches the snapshot at all, so an unverified golden
 	// cannot be created by this provider. The field is here because reading it

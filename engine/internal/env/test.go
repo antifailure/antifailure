@@ -13,6 +13,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/personas"
+	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -48,7 +49,10 @@ type TestReport struct {
 	// Invariants is what the data said after the workflows ran. Filled by the
 	// engine rather than by the runner, which never sees the database.
 	Invariants []InvariantResult `json:"invariants,omitempty"`
-	Duration   time.Duration     `json:"-"`
+	// Notes say what the run noticed that belongs to no single workflow.
+	// Filled by the engine, which is the only half that sees the environment.
+	Notes    []string      `json:"notes,omitempty"`
+	Duration time.Duration `json:"-"`
 }
 
 // InvariantsViolated counts the invariants shown to be broken.
@@ -96,6 +100,11 @@ type WorkflowResult struct {
 		Failed     []string `json:"failed"`
 	} `json:"evidence"`
 	DurationMs int64 `json:"durationMs"`
+	// StartedAt and FinishedAt are when the runner ran this workflow, RFC 3339
+	// in UTC. They exist so an outbound request can be attributed to the
+	// workflow that caused it; see markSynthesized.
+	StartedAt  string `json:"startedAt"`
+	FinishedAt string `json:"finishedAt"`
 }
 
 // AnyFailed reports whether anything counted against the application.
@@ -110,6 +119,23 @@ type WorkflowResult struct {
 // screen was never going to say so.
 func (r TestReport) AnyFailed() bool {
 	return r.Failed > 0 || r.InvariantsViolated() > 0
+}
+
+// NothingVerified reports that no workflow reached a verdict about the
+// application.
+//
+// The counterpart to AnyFailed and not a weakening of it. AnyFailed answers
+// "did we find something wrong", and the comment above is right that a blocked
+// workflow must not answer yes. This answers "did we find anything at all",
+// which nothing asked until now: `af test` exited zero on a run where every
+// workflow was blocked, which tells a pipeline the application was checked and
+// found fine when it was never driven.
+//
+// Passed, failed and flaky are verdicts about the application. Blocked and
+// unverified are statements about us. A run made only of the second kind, or of
+// no workflows at all, has tested nothing.
+func (r TestReport) NothingVerified() bool {
+	return r.Passed+r.Failed+r.Flaky == 0
 }
 
 // jobDocument is what the runner reads.
@@ -219,7 +245,174 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		}
 	}
 	report.Invariants = invs
+
+	// Last, because it reads the log of what the workflows made the
+	// application do. See markSynthesized: this is the only place the fact
+	// that a response was invented can reach a verdict.
+	o.markSynthesized(ctx, report)
 	return report, nil
+}
+
+// markSynthesized downgrades a workflow that touched a response a model
+// invented.
+//
+// THE PROMISE THIS KEEPS, which was made in five places and kept in none. The
+// proxy's synth mode asks a model to invent a response for a host with no
+// sandbox and no fixture, and every description of it says the same thing: a
+// workflow that touched one reports unverified rather than passed, because
+// what it saw came from a model rather than from the thing under test. The
+// sidecar has always recorded `synthesized` on the decision and set an
+// `X-Antifailure-Synthesized` response header. Nothing on this side of the
+// boundary had a field for it, so the decode dropped it, and the runner's
+// mapping from `synthesized-response` to unverified sat there with its only
+// producer firing on a completely different condition, a page nobody could
+// read. A green run over an invented Stripe charge reported PASSED.
+//
+// IT HAS TO BE HERE RATHER THAN IN THE RUNNER. The runner drives a browser. A
+// synthesized call is made by the APPLICATION, server side, and never appears
+// in anything the browser can see. Only the proxy knows, and only the engine
+// reads the proxy. That is why the runner emits a window instead of a verdict
+// for this case.
+//
+// Attribution is by time window, which is exact enough because the runner runs
+// workflows one after another and honest about what it cannot do: a request
+// the application makes AFTER the workflow that triggered it has finished,
+// from a background job say, lands on whatever workflow was running then or on
+// none. That is recorded rather than hidden, and a decision inside no window
+// is reported as a note on the run instead of being attributed to a workflow
+// that did not cause it.
+//
+// A log that cannot be read changes nothing. The workflows have already
+// produced a real result, and discarding it because a follow up read failed
+// would throw away the more expensive answer of the two.
+func (o *Orchestrator) markSynthesized(ctx context.Context, report *TestReport) {
+	decisions, err := o.Decisions(ctx, 2000)
+	if err != nil || len(decisions) == 0 {
+		return
+	}
+	attributeSynthesized(report, decisions)
+}
+
+// attributeSynthesized is markSynthesized without the environment, so the
+// decision it makes can be tested against a log rather than against a running
+// Docker daemon. The reading of the log is the part that needs one; which
+// workflow owns which invented response is arithmetic on timestamps.
+func attributeSynthesized(report *TestReport, decisions []local.Decision) {
+	var synthesized []local.Decision
+	for _, d := range decisions {
+		if d.Synthesized {
+			synthesized = append(synthesized, d)
+		}
+	}
+	if len(synthesized) == 0 {
+		return
+	}
+
+	attributed := make([]bool, len(synthesized))
+	for i := range report.Results {
+		r := &report.Results[i]
+		from, to, ok := window(r.StartedAt, r.FinishedAt)
+		if !ok {
+			continue
+		}
+		var hosts []string
+		seen := map[string]bool{}
+		for j, d := range synthesized {
+			at := d.At
+			if at.IsZero() {
+				parsed, pErr := time.Parse(time.RFC3339Nano, d.AtRaw)
+				if pErr != nil {
+					continue
+				}
+				at = parsed
+			}
+			if at.Before(from) || at.After(to) {
+				continue
+			}
+			attributed[j] = true
+			if !seen[d.Host] {
+				seen[d.Host] = true
+				hosts = append(hosts, d.Host)
+			}
+		}
+		if len(hosts) == 0 {
+			continue
+		}
+		sort.Strings(hosts)
+		// Only a pass is downgraded. A failure is a real finding about the
+		// application and stays one: the application did the wrong thing with
+		// an invented answer, and calling that unverified would hide a defect
+		// behind our own escape hatch. Blocked and unverified are already not
+		// passes and are left alone.
+		if r.Outcome.Verdict != "pass" {
+			continue
+		}
+		report.Passed--
+		report.Unverified++
+		r.Outcome.Verdict = "unverified"
+		r.Outcome.Cause = "synthesized-response"
+		r.Outcome.Detail = fmt.Sprintf(
+			"This workflow passed, and it touched a response a model invented rather than one "+
+				"%s returned, so nothing it showed is evidence either way. Give %s a sandbox "+
+				"credential or a mock fixture and run it again.",
+			strings.Join(hosts, " and "), pick(len(hosts) == 1, "that host", "those hosts"))
+		r.Outcome.Reproduction = nil
+	}
+
+	// A synthesized call inside no workflow's window is still worth saying.
+	// Attributing it to a workflow that did not cause it would be worse than
+	// not attributing it, and saying nothing would put the run back where it
+	// started.
+	stray := map[string]bool{}
+	for j, d := range synthesized {
+		if !attributed[j] {
+			stray[d.Host] = true
+		}
+	}
+	if len(stray) > 0 {
+		hosts := make([]string, 0, len(stray))
+		for h := range stray {
+			hosts = append(hosts, h)
+		}
+		sort.Strings(hosts)
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"a model invented %d responses outside any workflow's run, for %s. They belong to "+
+				"no verdict here; see 'af net log'.",
+			countOutside(synthesized, attributed), strings.Join(hosts, ", ")))
+	}
+}
+
+// countOutside counts the synthesized decisions no workflow claimed.
+func countOutside(all []local.Decision, attributed []bool) int {
+	n := 0
+	for i := range all {
+		if !attributed[i] {
+			n++
+		}
+	}
+	return n
+}
+
+// window parses a workflow's start and end.
+//
+// A workflow with no window is skipped rather than given the whole run. The
+// timestamps come from the runner, and a runner from before they existed, or
+// one somebody is driving by hand, sends none: attributing every synthesized
+// call in the log to every workflow would be a confident wrong answer, which
+// is the failure this whole file is written against.
+func window(startedAt, finishedAt string) (time.Time, time.Time, bool) {
+	from, err := time.Parse(time.RFC3339Nano, startedAt)
+	if err != nil {
+		return time.Time{}, time.Time{}, false
+	}
+	to, err := time.Parse(time.RFC3339Nano, finishedAt)
+	if err != nil {
+		return time.Time{}, time.Time{}, false
+	}
+	if to.Before(from) {
+		return time.Time{}, time.Time{}, false
+	}
+	return from, to, true
 }
 
 // runnerJob is one invocation of the agent runner.
@@ -361,11 +554,82 @@ func (o *Orchestrator) personaDocs(provisioned *personas.Result) []personaDoc {
 }
 
 // LoadOptions configure a load run.
+//
+// Duration and Scale are what the CALLER asked for, and zero means the caller
+// did not ask. That distinction is the whole point of the two Default fields
+// beside them, and it exists because it was missing: a cobra flag holds its
+// default value whether or not anybody typed it, so `af load run` handed 60s
+// and scale 1.0 down here on every invocation and the manifest's own
+// load.scale and load.duration were unreachable. A repository whose manifest
+// said `scale: 0.05` because it was pointing this at something fragile got
+// production's full arrival rate, while `af explain` read the 5 percent back
+// correctly. Only the command knows whether a value was typed; only these
+// fields let it say so.
 type LoadOptions struct {
+	// Duration and Scale override the manifest. Zero means the caller did not
+	// ask, and the manifest decides.
 	Duration time.Duration
 	Scale    float64
+	// DefaultDuration and DefaultScale apply when neither the caller nor the
+	// manifest named one. They are the command's own defaults, carried here
+	// rather than baked into a flag, so that an untyped flag cannot be
+	// mistaken for a choice.
+	DefaultDuration time.Duration
+	DefaultScale    float64
+	// Ceiling caps the resolved values at the two Default fields, for a
+	// caller whose defaults are a promise rather than a preference.
+	// `af load smoke` promises a short burst; a manifest asking for five
+	// minutes at production's rate must not silently turn one into a full
+	// run. It only ever lowers, so it cannot cause the defect above.
+	Ceiling bool
+
 	Seed     int64
 	Progress func(load.Progress)
+}
+
+// ResolveLoadRate settles how long to send for and at what multiple of
+// production's rate.
+//
+// Three sources in precedence order, and the order is the fix: what the caller
+// explicitly asked for, then what the manifest configured, then the caller's
+// own fallback. A caller that passes its fallback in the first slot, which is
+// what a cobra flag default does, makes the middle one unreachable.
+//
+// Exported because the defect was a disagreement between two layers about
+// exactly this, and neither could see the other. The command decides what the
+// user typed; the engine decides what that means beside the manifest. A test
+// that asserts one of those and not the seam between them stayed green through
+// the whole thing.
+func ResolveLoadRate(opts LoadOptions, cfg *schema.Load) (time.Duration, float64) {
+	duration := opts.Duration
+	if duration <= 0 && cfg != nil && cfg.Duration != "" {
+		if d, parseErr := time.ParseDuration(cfg.Duration); parseErr == nil {
+			duration = d
+		}
+	}
+	if duration <= 0 {
+		duration = opts.DefaultDuration
+	}
+	scale := opts.Scale
+	if scale <= 0 && cfg != nil && cfg.Scale > 0 {
+		scale = cfg.Scale
+	}
+	if scale <= 0 {
+		scale = opts.DefaultScale
+	}
+
+	// The cap applies to the manifest and to the default, never to a typed
+	// flag: somebody who types --duration 5m on a smoke has said what they
+	// want, and refusing it would be a second surprise rather than a fix.
+	if opts.Ceiling {
+		if opts.Duration <= 0 && opts.DefaultDuration > 0 && duration > opts.DefaultDuration {
+			duration = opts.DefaultDuration
+		}
+		if opts.Scale <= 0 && opts.DefaultScale > 0 && scale > opts.DefaultScale {
+			scale = opts.DefaultScale
+		}
+	}
+	return duration, scale
 }
 
 // Load sends traffic shaped like production's at the environment.
@@ -404,16 +668,7 @@ func (o *Orchestrator) Load(ctx context.Context, opts LoadOptions) (*load.Result
 			"detail", "every route in the shape is unsafe to send; add safe_routes to the manifest")
 	}
 
-	duration := opts.Duration
-	if duration <= 0 && cfg != nil && cfg.Duration != "" {
-		if d, parseErr := time.ParseDuration(cfg.Duration); parseErr == nil {
-			duration = d
-		}
-	}
-	scale := opts.Scale
-	if scale <= 0 && cfg != nil && cfg.Scale > 0 {
-		scale = cfg.Scale
-	}
+	duration, scale := ResolveLoadRate(opts, cfg)
 
 	res, err := load.Run(ctx, load.Options{
 		BaseURL: status.URL, Shape: sendable, Scale: scale, Duration: duration,
@@ -620,4 +875,13 @@ func describeSkipped(skipped map[string]int) string {
 		parts = append(parts, fmt.Sprintf("%d %s", p.n, p.reason))
 	}
 	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+// pick chooses between two words. Not plural, which is next door in oracle.go
+// and prefixes the count, and a count in front of "that host" reads wrong.
+func pick(one bool, a, b string) string {
+	if one {
+		return a
+	}
+	return b
 }

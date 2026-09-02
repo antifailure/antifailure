@@ -33,6 +33,18 @@ type GoldenVersion struct {
 	// RulesHash identifies the masking rules that produced it, so that a rules
 	// change can be detected without re-reading the data.
 	RulesHash string
+	// Provenance identifies the project this version was made for and the
+	// inputs that produced it, so that selection can refuse a golden belonging
+	// to somebody else.
+	//
+	// A golden pool is shared: the Docker provider keeps versions as images on
+	// a machine wide daemon, and a configured store is shared by a fleet on
+	// purpose. RulesHash alone cannot answer whether a version may be branched
+	// here, because two unrelated projects that declare no masking rules
+	// declare the SAME rules and hash to the same value. Empty means the
+	// version predates this field or arrived some other way, and the engine
+	// refuses to branch it rather than guessing.
+	Provenance string
 	// Verified reports whether the verification scanner passed. Branch refuses
 	// an unverified version; that rule is the product's central promise and it
 	// is enforced here rather than in a checklist.
@@ -136,6 +148,10 @@ type GoldenSpec struct {
 	Version int
 	// RulesHash identifies the masking rules being applied.
 	RulesHash string
+	// Provenance identifies the project the golden is being made for. A
+	// provider records it alongside the version and returns it from
+	// ListGoldens; it is opaque to the provider and is never parsed by one.
+	Provenance string
 	// Load fills the candidate from the source, and REPLACES the provider's
 	// own copy when it is set.
 	//

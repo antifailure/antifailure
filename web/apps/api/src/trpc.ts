@@ -18,6 +18,13 @@ import { permits } from './permissions.ts'
 import type { Clock } from './clock.ts'
 import type { GitHubClient } from './auth/github.ts'
 import type { Billing } from './billing/index.ts'
+import type { Message as MailMessage } from './auth/mail.ts'
+import {
+  HOSTED_ACCESS_MESSAGE,
+  HOSTED_GATE_EXEMPT,
+  hasHostedAccess,
+  type HostedRequiredPlan,
+} from './hosted.ts'
 
 /** Who is making the request, once the session cookie has been resolved. */
 export interface Actor {
@@ -25,6 +32,12 @@ export interface Actor {
   label: string
   orgId: string
   role: Role
+  /** The session this request arrived on, so a page listing every session can
+   *  say which one the reader is holding. Signing yourself out of the machine
+   *  you are sitting at is a reasonable thing to do and a terrible thing to do
+   *  by accident. */
+  sessionId: string
+  plan: string
 }
 
 export interface Context {
@@ -44,6 +57,28 @@ export interface Context {
    * than the process refusing to start over a feature nobody wants.
    */
   stripe: Billing | null
+  /**
+   * Where the browser-facing application lives, for the links this control
+   * plane puts in front of a person: an invitation, and an export download.
+   * These cannot be built from the request, because a request that arrives
+   * through a proxy carries the proxy's idea of the host.
+   */
+  appBaseUrl: string
+  /**
+   * Sends one message, when this installation has a mailer.
+   *
+   * Null is a supported state and not a degraded one: a self-hosted control
+   * plane with no AF_MAIL_FROM has no way to send anything, and every route
+   * that would have sent something hands the link back to the caller instead.
+   * A feature that silently does nothing on those installations would be worse
+   * than one that says what it did.
+   */
+  mailer: { send(message: MailMessage): Promise<void> } | null
+  /** What the product calls itself in a message. */
+  productName: string
+  /** Null on self-hosted installations. Hosted Antifailure sets enterprise,
+   *  leaving billing reachable while operational procedures are refused. */
+  hostedRequiredPlan: HostedRequiredPlan | null
   /** Null for an unauthenticated request. */
   actor: Actor | null
   /** Where the request came from, recorded on every audit entry. */
@@ -58,15 +93,38 @@ export interface Meta {
   permission?: Permission
 }
 
+/** What the client is told when the control plane broke rather than refused.
+ *
+ * Every other tRPC code carries a message somebody wrote for the person
+ * reading it: BAD_REQUEST says which field, FORBIDDEN says which role,
+ * PRECONDITION_FAILED names the variable that is not set. Those are answers
+ * and they travel. INTERNAL_SERVER_ERROR is the one code whose message nobody
+ * wrote, so whatever threw decides what the browser prints.
+ */
+const BROKE_RATHER_THAN_REFUSED =
+  'Something went wrong on the control plane. Nothing was changed, and the reason is in its logs.'
+
 const t = initTRPC.context<Context>().meta<Meta>().create({
   errorFormatter({ shape, error }) {
+    // Both halves of the same rule, and shipping one without the other is how
+    // this got out. The stack was already withheld because it names internal
+    // paths and table names to anyone who can provoke an error. The message
+    // beside it was not, and drizzle writes a query failure as "Failed query:
+    // <the whole statement>" with the bound parameters after it, so a renamed
+    // table put the schema, the join, the WHERE clause and the source
+    // comments inside it onto the console's error card for any signed-in
+    // viewer to read. Withholding the stack and sending that is no control at
+    // all.
+    //
+    // Only this code is replaced. Every other one carries a message written
+    // for the reader, and blanking those would turn "your role cannot see
+    // this" into a shrug.
+    const broke = shape.data.code === 'INTERNAL_SERVER_ERROR'
     return {
       ...shape,
+      message: broke ? BROKE_RATHER_THAN_REFUSED : shape.message,
       data: {
         ...shape.data,
-        // The stack is deliberately not sent. A stack from the control plane
-        // names internal paths and table names to anyone who can provoke an
-        // error, and it helps nobody outside the process.
         stack: undefined,
       },
     }
@@ -154,6 +212,16 @@ export function orgProcedure(permission: Permission) {
           // roles have it tells a caller about the organization's structure.
           message: `This needs the ${permission} permission, which your role does not have.`,
         })
+      }
+      // The exits stay reachable. Everything else is enforced here, where every
+      // tRPC procedure passes, rather than repeated on whichever pages happen to
+      // be visible. HOSTED_GATE_EXEMPT carries the line that decides which side
+      // a permission falls on, and why shortening it is a legal problem.
+      if (
+        !HOSTED_GATE_EXEMPT.has(permission) &&
+        !hasHostedAccess(octx.actor.plan, octx.hostedRequiredPlan)
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: HOSTED_ACCESS_MESSAGE })
       }
       return next({ ctx: octx })
     }),

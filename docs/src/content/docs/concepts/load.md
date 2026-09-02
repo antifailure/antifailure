@@ -18,8 +18,8 @@ load:
     path: traffic/production.otlp.json
   scale: 0.05
   duration: 5m
-  safe_routes: ["GET /*", "POST /api/search"]
-  unsafe_routes: ["POST /api/payments/*", "DELETE /*"]
+  safe_routes: ["GET /**", "POST /api/search"]
+  unsafe_routes: ["POST /api/payments/**", "DELETE /**"]
   thresholds:
     p95_increase: 0.25
     error_rate: 0.01
@@ -77,11 +77,20 @@ noise people turn off.
 ### Access logs
 
 A combined format line has no duration in it, so routes read from a log have no
-baseline and `p95_increase` has nothing to measure. Everything else works: the
-mix, the relative weights and the arrival rate, which is counted from the
-timestamps rather than assumed. When no line carries a readable timestamp the
-report says the arrival rate was assumed rather than presenting a guess as
-production's number.
+baseline and `p95_increase` has nothing to measure. The manifest refuses the
+combination rather than accepting it and staying quiet, and no default fills
+the threshold in under this source, so a run here is judged on `error_rate`
+alone and says as much.
+
+```
+load.thresholds.p95_increase: The load source is access_log and p95_increase
+is set.
+```
+
+Everything else works: the mix, the relative weights and the arrival rate,
+which is counted from the timestamps rather than assumed. When no line carries
+a readable timestamp the report says the arrival rate was assumed rather than
+presenting a guess as production's number.
 
 ## Safe and unsafe routes
 
@@ -92,6 +101,15 @@ is a mess to read even when no money moves.
 
 `safe_routes` is the allowlist when you would rather state what may be called
 than what may not.
+
+`*` covers exactly one path segment and `**` covers the rest, and for these two
+lists the difference matters more than it looks. `DELETE /*` blocks
+`DELETE /orders` and does not block `DELETE /orders/42`, and a delete almost
+always carries an id, so the entry written to stop deletes would send the
+realistic ones and say nothing. Write `**` unless you mean one segment
+exactly. The asymmetry is worth knowing in both directions: getting it wrong in
+`safe_routes` is loud, because the run refuses everything and tells you, and
+getting it wrong in `unsafe_routes` is silent.
 
 ## Scenarios
 
@@ -212,6 +230,30 @@ baseline is production's own p95 for that route, which comes from the traffic
 source, so a route the source could not measure is never a breach. Absolute
 numbers are deliberately not used: they fail on a slow CI runner and tell you
 nothing about the change.
+
+Which means the threshold needs a source that carries durations, and only
+`otel` does. Setting it under `access_log` or `none` is refused by the
+manifest, and the default is not applied there either: a threshold the report
+lists and no route can be measured against is a check everybody believes is
+running.
+
+```
+AF-LOD-016 The p95_increase threshold proved nothing: no baseline for any of
+the 4 routes the run sent, so nothing was compared.
+```
+
+That is the case the manifest cannot see. A trace export whose every route was
+seen fewer than twenty times arrives with no baseline anywhere, so the
+threshold was in force and evaluated nothing, and the run exits non-zero rather
+than reporting a clean p95. Point `source_config.path` at a longer export.
+
+`error_rate: 0.01` is counted from the run's own responses, so it needs no
+baseline and applies under every source.
+
+There is no `query_count_increase`. It was in the schema, nothing ever read it,
+and a manifest that sets it is now refused by name. The check it describes is
+`insights.query_regression`, and how much growth fails it is
+`insights.regression_factor`.
 
 ## Aborting
 

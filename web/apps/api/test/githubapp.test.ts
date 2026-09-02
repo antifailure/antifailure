@@ -15,7 +15,7 @@
 
 import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { createHmac, generateKeyPairSync } from 'node:crypto'
+import { createHmac, generateKeyPairSync, randomUUID } from 'node:crypto'
 import {
   appConfigFrom,
   appJwt,
@@ -25,6 +25,7 @@ import {
   verifySignature,
 } from '../src/github/app.ts'
 import { handleDelivery, slugFor } from '../src/github/webhook.ts'
+import { CLAIM_TAKEOVER_MS } from '../src/github/deliveries.ts'
 import { available, startApi, dropOrg, type ApiHarness } from './harness.ts'
 import type { Clock } from '../src/clock.ts'
 
@@ -559,27 +560,125 @@ describe('the webhook endpoint', {
   })
   after(async () => {
     const rows = await api.admin<{ id: string }[]>`
-      SELECT id FROM organizations WHERE github_login = 'endpoint-test-org'`
+      SELECT id FROM organizations
+      WHERE github_login IN ('endpoint-test-org', 'replay-test-org', 'concurrent-test-org')`
     for (const row of rows) await dropOrg(api.admin, row.id)
+    await api.admin`DELETE FROM github_deliveries WHERE delivery_id LIKE ${'%-' + run} 
+      OR delivery_id LIKE ${'test-delivery-' + run + '-%'}`
     await api.close()
   })
 
+  // A DIFFERENT DELIVERY IDENTIFIER EVERY TIME, unless a test asks for the same
+  // one. That is what GitHub does, and the default used to be one constant
+  // here, which made every delivery after the first a replay the moment the
+  // ledger existed. Worth keeping as a shape: a fixture that reuses an
+  // identifier is a fixture that cannot see a replay fence working OR failing.
+  // Unique to this PROCESS. The ledger is durable, so a fixed identifier makes
+  // every delivery of a second run a replay of the first run's, and a suite
+  // that died before its cleanup would leave every later run reporting the
+  // state its predecessor left.
+  const run = randomUUID().slice(0, 8)
+  let deliveries = 0
   async function deliver(
     event: string,
     payload: unknown,
-    opts: { signature?: string; secret?: string } = {},
+    opts: { signature?: string; secret?: string; deliveryId?: string } = {},
   ) {
     const body = JSON.stringify(payload)
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       'x-github-event': event,
-      'x-github-delivery': 'test-delivery',
+      'x-github-delivery': opts.deliveryId
+        ? `${opts.deliveryId}-${run}`
+        : `test-delivery-${run}-${(deliveries += 1)}`,
     }
     const signature = opts.signature ?? sign(body, opts.secret ?? SECRET)
     if (signature) headers['x-hub-signature-256'] = signature
     const res = await api.fetch('/webhooks/github', { method: 'POST', headers, body })
     return { status: res.status, body: await res.text() }
   }
+
+  /**
+   * The hour of wrong answers, closed end to end.
+   *
+   * Not a unit test of `forget`, because the defect was never that `forget` did
+   * not work. It was that nothing called it: a real `InstallationTokens` holds
+   * a token for a full hour, GitHub invalidates the outstanding ones the moment
+   * a grant changes, and the delivery saying so did nothing to the cache. On
+   * 2026-08-31 that put a 403 in front of a person from 00:38:54Z, when the
+   * Actions write grant was accepted, until roughly 01:36Z, when the token it
+   * was still using finally expired.
+   *
+   * So this runs the real cache, delivers a real signed `installation` webhook
+   * over HTTP, and asks whether the NEXT mint is a new token. A test that
+   * asserted `forget` empties a Map would have passed on every day of that
+   * hour.
+   */
+  test('a permission acceptance invalidates the cached token, over HTTP', async () => {
+    let minted = 0
+    const tokens = new InstallationTokens(
+      { appId: '1', privateKey, webhookSecret: SECRET },
+      frozen,
+      (async () => {
+        minted++
+        return new Response(
+          JSON.stringify({ token: `ghs_${minted}`, expires_at: '2026-08-28T13:00:00Z' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }) as unknown as typeof fetch,
+    )
+    const wired = await startApi({
+      githubWebhookSecret: SECRET,
+      forgetInstallationToken: (id) => tokens.forget(id),
+    })
+    try {
+      // A token, cached the way a page load caches one.
+      assert.equal(await tokens.for(4242), 'ghs_1')
+      assert.equal(await tokens.for(4242), 'ghs_1', 'the cache is not caching')
+      assert.equal(minted, 1)
+
+      // The delivery GitHub sends the instant somebody accepts a permission.
+      const body = JSON.stringify({
+        action: 'new_permissions_accepted',
+        installation: {
+          id: 4242,
+          account: { login: `forget-test-${run}`, type: 'Organization' },
+        },
+        repositories: [],
+      })
+      const res = await wired.fetch('/webhooks/github', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-github-event': 'installation',
+          // Suffixed with `run`, like every other delivery in this file, and
+          // for a reason the fixed id hid. `claimDelivery` is keyed on the
+          // delivery id, so a second run of this test against a database that
+          // already holds the row is answered as a REPLAY and never reaches
+          // handleDelivery at all. With a fixed id the test passes exactly once
+          // per database: green in CI, which builds a fresh one, and red for
+          // anybody who runs the suite twice. It also made the mutation proof
+          // meaningless, because a broken build and a replayed delivery fail
+          // with the same assertion.
+          'x-github-delivery': `forget-test-${run}`,
+          'x-hub-signature-256': sign(body, SECRET),
+        },
+        body,
+      })
+      assert.equal(res.status, 200, await res.text())
+
+      // The clock has not moved, so the cached token is still inside its hour.
+      // Anything but a fresh one here means the delivery changed nothing.
+      assert.equal(await tokens.for(4242), 'ghs_2', 'the cached token survived the delivery')
+      assert.equal(minted, 2)
+    } finally {
+      await wired.admin`DELETE FROM github_deliveries WHERE delivery_id = ${`forget-test-${run}`}`
+      const rows = await wired.admin<{ id: string }[]>`
+        SELECT id FROM organizations WHERE github_login = ${`forget-test-${run}`}`
+      for (const row of rows) await dropOrg(wired.admin, row.id)
+      await wired.close()
+    }
+  })
 
   test('an unsigned delivery is refused and writes nothing', async () => {
     const res = await deliver(
@@ -675,6 +774,132 @@ describe('the webhook endpoint', {
     } finally {
       await bare.close()
     }
+  })
+
+  test('a delivery with no identifier is refused rather than handled unfenced', async () => {
+    // The header has been on every delivery since webhooks existed, so a
+    // delivery without one is not one GitHub sent. Handling it would mean
+    // handling something that cannot be recorded, and the whole point of the
+    // ledger is that nothing runs twice.
+    const body = JSON.stringify({ action: 'created' })
+    const res = await api.fetch('/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-github-event': 'installation',
+        'x-hub-signature-256': sign(body),
+      },
+      body,
+    })
+    assert.equal(res.status, 400)
+  })
+
+  test('ordering: the same delivery sent twice is handled once', async () => {
+    // The HMAC says a delivery is genuine. It says nothing at all about it
+    // being new, so a delivery captured off the wire verifies exactly as well
+    // the second time.
+    const payload = {
+      action: 'created',
+      installation: { id: 901777, account: { login: 'replay-test-org', type: 'Organization' } },
+      repositories: [{ id: 71, full_name: 'replay-test-org/one' }],
+    }
+    const first = await deliver('installation', payload, { deliveryId: 'replay-fence-1' })
+    assert.equal(first.status, 200)
+    assert.doesNotMatch(first.body, /"replay":true/)
+
+    // The second copy is answered without the handler running. Proven by the
+    // effect rather than by the answer: a delivery that ran again would
+    // rewrite updated_at on the installation row.
+    const [before] = await api.admin<{ updated_at: Date }[]>`
+      SELECT updated_at FROM github_installations WHERE installation_id = 901777`
+    const second = await deliver('installation', payload, { deliveryId: 'replay-fence-1' })
+    assert.equal(second.status, 200)
+    assert.match(second.body, /"replay":true/)
+    const [after] = await api.admin<{ updated_at: Date }[]>`
+      SELECT updated_at FROM github_installations WHERE installation_id = 901777`
+    assert.equal(
+      new Date(after!.updated_at).getTime(),
+      new Date(before!.updated_at).getTime(),
+      'the replay ran the handler again',
+    )
+
+    const [ledger] = await api.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM github_deliveries WHERE delivery_id = ${`replay-fence-1-${run}`}`
+    assert.equal(ledger!.n, 1)
+  })
+
+  test('ordering: two copies of one delivery arriving at once run the handler once', async () => {
+    // Concurrent rather than sequential, which is the case a primary key alone
+    // does not settle: both attempts insert, one wins, and the loser has to be
+    // told to come back rather than told it succeeded.
+    const payload = {
+      action: 'created',
+      installation: { id: 901778, account: { login: 'concurrent-test-org', type: 'Organization' } },
+    }
+    const [a, b] = await Promise.all([
+      deliver('installation', payload, { deliveryId: 'concurrent-fence-1' }),
+      deliver('installation', payload, { deliveryId: 'concurrent-fence-1' }),
+    ])
+    const statuses = [a!.status, b!.status].sort()
+    // 200 for the one that took the claim, and 503 with a Retry-After for the
+    // one that did not. Never two 200s: answering success for work that is
+    // still running is how a delivery is lost silently when that work fails.
+    assert.deepEqual(statuses, [200, 503])
+
+    const [ledger] = await api.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM github_deliveries WHERE delivery_id = ${`concurrent-fence-1-${run}`}`
+    assert.equal(ledger!.n, 1)
+  })
+
+  test('ordering: a claim a dead process left behind is taken over, not waited on forever', async () => {
+    // A process killed mid-delivery leaves a claim nobody will ever stamp.
+    // Without a takeover window that delivery is refused forever while looking
+    // handled, which is the failure mode of every lease that is really a flag.
+    const payload = {
+      action: 'created',
+      installation: { id: 901779, account: { login: 'stale-claim-org', type: 'Organization' } },
+    }
+    // The same identifier deliver() will send: it appends the per-process
+    // suffix to an explicit one, so building it by hand has to append it too or
+    // the seeded claim and the delivery are two different deliveries.
+    const id = `stale-claim-${run}`
+
+    // The claim, written the way a process that then died would have left it:
+    // received, never stamped.
+    await api.admin`
+      INSERT INTO github_deliveries (delivery_id, event, action, received_at)
+      VALUES (${id}, 'installation', 'created', ${api.clock.now()})`
+
+    // Inside the window, the retry is told to come back rather than told it
+    // succeeded, because the first attempt may still be running.
+    const early = await deliver('installation', payload, { deliveryId: 'stale-claim' })
+    assert.equal(early.status, 503)
+
+    // Past it, the retry takes the claim and the delivery is handled.
+    api.clock.advance(CLAIM_TAKEOVER_MS + 1000)
+    const late = await deliver('installation', payload, { deliveryId: 'stale-claim' })
+    assert.equal(late.status, 200)
+    assert.doesNotMatch(late.body, /"replay":true/)
+
+    const [org] = await api.admin<{ id: string }[]>`
+      SELECT id FROM organizations WHERE github_login = 'stale-claim-org'`
+    assert.ok(org, 'the taken-over delivery was answered and did nothing')
+    await dropOrg(api.admin, org!.id)
+    await api.admin`DELETE FROM github_deliveries WHERE delivery_id = ${id}`
+  })
+
+  test('a pull request payload that names no account is answered, not thrown', async () => {
+    // Every statement the lifecycle makes runs on a connection scoped to the
+    // account the payload named, and an empty one is refused rather than
+    // silently matching nothing. A 500 here would be a delivery GitHub retries
+    // into the same 500 forever.
+    const res = await deliver('pull_request', {
+      action: 'opened',
+      number: 1,
+      pull_request: { number: 1, head: { sha: 'f'.repeat(40) } },
+    })
+    assert.equal(res.status, 200)
+    assert.match(res.body, /"handled":false/)
   })
 
   test('the endpoint is in the rate limit table', async () => {

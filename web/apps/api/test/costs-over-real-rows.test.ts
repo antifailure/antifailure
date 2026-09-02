@@ -18,7 +18,8 @@ import { randomUUID, createHash } from 'node:crypto'
 
 import { capsFor, checkCostCap, costAttribution, environmentHoursSince } from '../src/costs.ts'
 import {
-  available, startApi, seedOrg, dropOrg, type ApiHarness, type Org,
+  available, startApi, seedOrg, dropOrg, signInAs, callProcedure,
+  type ApiHarness, type Org,
 } from './harness.ts'
 
 const hasDatabase = await available()
@@ -166,6 +167,86 @@ describe('the cost caps over real environments', {
       assert.ok(verdict.reason.includes('72 hours'))
     } finally {
       await dropOrg(h.admin, capped.orgId)
+    }
+  })
+
+  // ---------------------------------------------------------------------------
+  // The whole chain, in one call
+  // ---------------------------------------------------------------------------
+
+  it('answers environments.costs with a number that is not zero, from events alone', async () => {
+    // The one assertion that covers every link: an engine posts to /v1/events,
+    // the projection creates a row, the cost SQL sums it, and the procedure a
+    // person actually calls returns it. Every one of those was in place before
+    // and the answer was still zero, because the table in the middle was never
+    // filled and nothing between the two ends could tell.
+    const viewer = await signInAs(h, org, 'admin')
+    const res = await callProcedure(h, viewer, 'environments.costs', 'query', { hours: 24 })
+    assert.equal(res.status, 200)
+
+    const data = (res.body as {
+      result: {
+        data: {
+          plan: string
+          usedHours: number
+          remainingDayHours: number
+          caps: { perDayHours: number }
+          environments: Array<{ repository: string; branch: string; hours: number }>
+        }
+      }
+    }).result.data
+
+    assert.notEqual(data.usedHours, 0, 'environments.costs still answers zero for every caller')
+    assert.equal(data.usedHours, 8)
+    assert.equal(data.remainingDayHours, data.caps.perDayHours - 8)
+    assert.ok(data.environments.length >= 2, 'a total with no lines is a number nobody can act on')
+    assert.equal(data.environments[0]!.branch, 'finished')
+    assert.equal(data.environments[0]!.repository, org.repository)
+  })
+
+  it('bills the build even when the creating event never arrived, through the same procedure', async () => {
+    // The failure this guards is a number that is wrong and looks right. If
+    // created_at came from whichever event arrived first, an environment whose
+    // creating event was dropped from the spool would bill from AFTER its
+    // build, and a cold build is the expensive part of a run.
+    const lost = await seedOrg(h.admin, 'costs-lost-creating')
+    try {
+      await h.admin`DELETE FROM environments WHERE org_id = ${lost.orgId}`
+      const lostToken = `aft_${randomUUID().replace(/-/g, '')}`
+      await h.admin`
+        INSERT INTO engine_tokens (org_id, name, token_hash, prefix)
+        VALUES (${lost.orgId}, 'ci',
+                ${createHash('sha256').update(lostToken).digest()}, 'aft_lost')`
+
+      const now = h.clock.now()
+      const cameUp = new Date(now.getTime() - 5 * HOUR)
+      // Half an hour of build before it was ready, and no creating event ever
+      // sent. The bill has to be five hours, not four and a half.
+      const readyAt = new Date(cameUp.getTime() + 0.5 * HOUR)
+
+      const res = await h.fetch('/v1/events', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${lostToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          events: [{
+            id: randomUUID(), type: 'environment.ready',
+            envId: `env-lost-${randomUUID().slice(0, 8)}`, sequence: 2,
+            occurredAt: readyAt.toISOString(),
+            payload: {
+              repository: lost.repository, branch: 'cold-build',
+              ttl_seconds: 24 * 3600, started_at: cameUp.toISOString(), seconds: 1800,
+            },
+          }],
+        }),
+      })
+      assert.equal(((await res.json()) as { accepted: number }).accepted, 1)
+
+      const used = await h.pool.withTenant({ orgId: lost.orgId }, (db) =>
+        environmentHoursSince(db, lost.orgId, new Date(now.getTime() - 24 * HOUR), now))
+      assert.equal(Math.round(used * 100) / 100, 5,
+        `the build was not billed: the sum says ${used} where it should say 5`)
+    } finally {
+      await dropOrg(h.admin, lost.orgId)
     }
   })
 })

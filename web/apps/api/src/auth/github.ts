@@ -74,6 +74,21 @@ export interface GitHubClient {
     ref: string,
     inputs: Record<string, string>,
   ): Promise<void>
+  /**
+   * Uninstalls the App from an account, for an organization that is being
+   * deleted.
+   *
+   * `removed` false means GitHub had no such installation, which is success
+   * rather than failure: a deletion that is re-entered reaches this twice.
+   * The refusal that matters is a throw, and it stops the deletion rather than
+   * letting it purge an organization whose App is still installed and still
+   * able to dispatch workflows.
+   *
+   * Returns `configured: false` when no GitHub App is set up at all, which is
+   * the ordinary self-hosted case. The caller records that it did not call
+   * GitHub rather than recording that GitHub said no.
+   */
+  revokeInstallation(installationId: number): Promise<{ configured: boolean; removed: boolean }>
 }
 
 export interface GitHubConfig {
@@ -82,9 +97,13 @@ export interface GitHubConfig {
   redirectUri: string
   apiBase?: string
   webBase?: string
-  /** Mints installation tokens. Absent when no GitHub App is configured, and
-   *  membersOf says so rather than returning an empty list. */
-  installationTokens?: { for(installationId: number): Promise<string> }
+  /** Mints installation tokens, and removes installations. Absent when no
+   *  GitHub App is configured, and membersOf says so rather than returning an
+   *  empty list. */
+  installationTokens?: {
+    for(installationId: number): Promise<string>
+    revoke(installationId: number): Promise<{ removed: boolean }>
+  }
 }
 
 export class GitHubError extends Error {}
@@ -167,8 +186,36 @@ export class RealGitHubClient implements GitHubClient {
   }
 
   async organizationsFor(accessToken: string): Promise<GitHubOrg[]> {
-    const orgs = (await this.get(accessToken, '/user/orgs')) as { id: number; login: string }[]
-    return orgs.map((o) => ({ id: o.id, login: o.login }))
+    // Paged, for the reason membersOf is paged, with a worse consequence.
+    // /user/orgs returns thirty per page by default, and this list decides
+    // which organizations somebody may enter. Truncating it does not shrink a
+    // list somebody reads: it silently withholds the tenant they came here
+    // for, and the console renders the empty state that means "nobody has
+    // installed the App" to a person whose App is installed. The failure is
+    // invisible from inside, because thirty organizations is a plausible
+    // number to have.
+    const out: GitHubOrg[] = []
+    const seen = new Set<number>()
+    for (let page = 1; page <= 20; page++) {
+      const batch = await this.get(accessToken, `/user/orgs?per_page=100&page=${page}`)
+      // A page that is not a list is a shape this code will not guess at, and
+      // continuing would loop twenty times over the same surprise.
+      if (!Array.isArray(batch) || batch.length === 0) break
+      for (const item of batch) {
+        // One malformed entry must not discard the organizations around it.
+        // This list is assembled from a foreign boundary and then decides
+        // access, so a single odd row costing somebody every tenant is the
+        // expensive direction to fail in.
+        if (typeof item !== 'object' || item === null) continue
+        const org = item as { id?: unknown; login?: unknown }
+        if (typeof org.id !== 'number' || typeof org.login !== 'string' || !org.login) continue
+        if (seen.has(org.id)) continue
+        seen.add(org.id)
+        out.push({ id: org.id, login: org.login })
+      }
+      if (batch.length < 100) break
+    }
+    return out
   }
 
   /**
@@ -290,6 +337,16 @@ export class RealGitHubClient implements GitHubClient {
    * trigger list from the DEFAULT branch, so a workflow that only gained
    * `workflow_dispatch` on a feature branch cannot be dispatched at all.
    */
+  async revokeInstallation(installationId: number): Promise<{ configured: boolean; removed: boolean }> {
+    const tokens = this.config.installationTokens
+    // No App configured at all. Reported rather than thrown: a self-hosted
+    // control plane with no GitHub App has no installation to remove, and a
+    // deletion must not stop on the absence of a thing that was never there.
+    if (!tokens) return { configured: false, removed: false }
+    const { removed } = await tokens.revoke(installationId)
+    return { configured: true, removed }
+  }
+
   async dispatchWorkflow(
     installationId: number,
     repository: string,

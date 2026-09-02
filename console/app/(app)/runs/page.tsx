@@ -3,9 +3,10 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { bytes, when } from "@/lib/format";
-import { mutate, query, useApi } from "@/lib/api";
+import { mutate, query, useApi, usePages } from "@/lib/api";
 import { may } from "@/lib/roles";
 import { useSessionContext } from "@/components/session";
+import { More } from "@/components/pagination";
 import {
   Badge,
   Button,
@@ -366,8 +367,17 @@ function Runs() {
   const params = useSearchParams();
   const router = useRouter();
   const selected = params.get("run");
-  const state = useApi<{ runs: Run[]; nextCursor: string | null }>(
-    () => query("runs.recent", { limit: 50 }),
+  // `runs.recent` names its cursor `before` and returns `nextCursor`, which is
+  // not the pair `environments.list` uses, so the adapter is here rather than
+  // in the hook.
+  const state = usePages<Run>(
+    async (cursor) => {
+      const page = await query<{ runs: Run[]; nextCursor: string | null }>("runs.recent", {
+        limit: 50,
+        ...(cursor === null ? {} : { before: cursor }),
+      });
+      return { rows: page.runs, next: page.nextCursor };
+    },
     [],
   );
 
@@ -393,13 +403,14 @@ function Runs() {
       <Card title="Recent runs">
         <Loaded state={state} skeleton={<TableSkeleton rows={6} cols={5} />}>
           {(data) =>
-            data.runs.length === 0 ? (
+            data.length === 0 ? (
               <Empty title="No runs yet">
                 A run appears the first time the engine exercises an
                 environment. Nothing here means nothing has run, not that
                 something is broken.
               </Empty>
             ) : (
+              <>
               <TableWrap>
                 <Table>
                   <thead>
@@ -413,7 +424,7 @@ function Runs() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.runs.map((r) => {
+                    {data.map((r) => {
                       const failing = Number(r.failing ?? 0);
                       const total = Number(r.verdicts ?? 0);
                       return (
@@ -446,6 +457,15 @@ function Runs() {
                   </tbody>
                 </Table>
               </TableWrap>
+              <More
+                shown={data.length}
+                noun={{ one: "run", many: "runs" }}
+                hasMore={state.hasMore}
+                busy={state.busy}
+                error={state.moreError}
+                onMore={state.more}
+              />
+              </>
             )
           }
         </Loaded>

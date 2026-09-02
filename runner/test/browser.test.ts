@@ -274,8 +274,18 @@ test('an exploration that cannot reach the application is blocked, not passed',
  * against a runner that cannot drive any real application, which is what the
  * fixture above this one was doing.
  */
-function protectedConsole(): { server: Server; url: Promise<string> } {
+function protectedConsole(): { server: Server; url: Promise<string>; sent: () => boolean } {
   let linked = false;
+  // Whether the application has sent the sign-in mail yet.
+  //
+  // A captured inbox holds nothing until something sends something, and the
+  // fake here used to hand the message over on every read, including the reads
+  // that happen before the button is pressed. That is not an inbox, it is the
+  // answer left on the table, and it is the one shape that hides the defect
+  // this fixture's own comment is about: a magic link is single use, so a
+  // second attempt that matches the first attempt's message follows a token
+  // already spent.
+  let sent = false;
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const html = (code: number, body: string) => {
@@ -283,6 +293,7 @@ function protectedConsole(): { server: Server; url: Promise<string> } {
       res.end(`<html><body>${body}</body></html>`);
     };
     if (req.method === 'POST' && url.pathname === '/auth/email') {
+      sent = true;
       return html(200, '<h1>Check your mail</h1><p>A sign-in link is on its way.</p>');
     }
     if (url.pathname === '/auth/link') {
@@ -310,11 +321,11 @@ function protectedConsole(): { server: Server; url: Promise<string> } {
       resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
     });
   });
-  return { server, url };
+  return { server, url, sent: () => sent };
 }
 
 test('it signs in where the form actually is, not where /login would be', { timeout: 120_000 }, async () => {
-  const { server, url } = protectedConsole();
+  const { server, url, sent } = protectedConsole();
   const baseURL = await url;
   const artifacts = mkdtempSync(join(tmpdir(), 'af-runner-'));
   try {
@@ -329,6 +340,7 @@ test('it signs in where the form actually is, not where /login would be', { time
       personas: [{ name: 'owner', email: 'owner@example.test', login: 'magic_link' }],
       inbox: {
         async list() {
+          if (!sent()) return [];
           return [{
             seq: 1, at: new Date().toISOString(), provider: 'resend', kind: 'email',
             to: ['owner@example.test'], subject: 'Your sign-in link',

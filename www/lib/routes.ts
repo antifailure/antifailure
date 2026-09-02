@@ -103,7 +103,7 @@ export const ROUTES: readonly Route[] = [
     path: "/product/load",
     title: pageTitle("Load"),
     description:
-      "Traffic shaped like production's own, read from a trace export or an access log, sent at the twin and compared against the p95 production serves each route in.",
+      "Traffic shaped like production's own, read from a trace export or an access log, sent at the twin and compared against the p95 a trace export carries for each route.",
     summary:
       "Where the traffic shape comes from, which routes are sent, and what a regression is measured against.",
     section: "product",
@@ -210,6 +210,19 @@ export const ROUTES: readonly Route[] = [
     section: "company",
     indexable: true,
     priority: 0.9,
+    parent: "/",
+  },
+
+  {
+    path: "/changelog",
+    title: pageTitle("Changelog"),
+    description:
+      "Every change to the engine, the control plane and the site, written when it was made and dated by the commit that landed it.",
+    summary:
+      "What has changed and when, newest first, built from the repository's own changelog fragments.",
+    section: "company",
+    indexable: true,
+    priority: 0.6,
     parent: "/",
   },
 
@@ -324,10 +337,18 @@ export const ROUTES: readonly Route[] = [
   // Utility. Real pages, deliberately not in the index: they are a waitlist
   // form with nothing to rank for, and indexing them spends crawl budget that
   // belongs to the product pages.
+  //
+  // Both descriptions used to say "There is no hosted control plane yet",
+  // which was true when it was written and had become the opposite of what the
+  // page under it says: AuthScreen offers sign-in with GitHub above a line
+  // reading "The hosted control plane is invitation only", and
+  // app.antifailure.dev answers. These strings are the meta description, so
+  // the contradiction was served to every crawler and every link preview while
+  // the visible page was correct. Nothing read them.
   {
     path: "/signin",
     title: pageTitle("Join the waitlist"),
-    description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
+    description: "The hosted control plane is invitation only while it is in private beta. Sign in with GitHub if you have been invited, or join the waitlist.",
     summary: "Waitlist form.",
     section: "utility",
     indexable: false,
@@ -337,7 +358,7 @@ export const ROUTES: readonly Route[] = [
   {
     path: "/signup",
     title: pageTitle("Join the waitlist"),
-    description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
+    description: "The hosted control plane is invitation only while it is in private beta. Sign in with GitHub if you have been invited, or join the waitlist.",
     summary: "Waitlist form.",
     section: "utility",
     indexable: false,

@@ -3,8 +3,22 @@ import { cn } from "@/lib/cn";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 const sizes = {
-  new: "h-11 px-7 tracking-extra-tight max-lg:px-[18px] max-lg:text-sm",
-  xxs: "h-8 px-4 text-sm tracking-extra-tight font-medium",
+  // 44px tall and 16px of type at every width, including the narrow ones.
+  // `max-lg:h-9 max-lg:text-sm` used to shrink this to 36px and 14px below
+  // 1024, which is exactly backwards: the phone is where a thumb needs the
+  // target and where small type costs the most, and it was the only place the
+  // site's primary action was under 44px. The narrower horizontal padding
+  // below `lg` stays, because that is what keeps two buttons on one line.
+  new: "h-11 px-7 tracking-extra-tight max-lg:px-[18px]",
+  // `h-9 px-[18px]` rather than `h-8 px-4`, because 36px and 18px is what this
+  // size has always rendered as. Both of its call sites passed
+  // `className="h-9 px-[18px]"`, and `cn` is a plain join with no
+  // tailwind-merge, so the element carried h-8 and h-9 together and rendered at
+  // 36px only because Tailwind emits height utilities in ascending order and
+  // the later one won. It produced the right answer for the wrong reason: the
+  // same override written to make a button SHORTER would have been emitted
+  // first, lost silently, and read in the diff exactly as though it worked.
+  xxs: "h-9 px-[18px] text-sm tracking-extra-tight font-medium",
 } as const;
 
 /**

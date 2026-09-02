@@ -36,7 +36,9 @@ var commandExamples = map[string]string{
 	"af ci": "" +
 		"# What CI runs: up, migrate, test, load, gate, report, down.\n" +
 		"af ci\n" +
-		"af ci --report report.json --keep",
+		"# --report is Markdown for a person, --report-json is the same run\n" +
+		"# for a program.\n" +
+		"af ci --report report.md --report-json report.json --keep",
 	"af doctor": "af doctor\naf doctor -o json",
 	"af down":   "af down\naf down --branch feature/checkout",
 	"af env":    "af env list",

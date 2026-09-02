@@ -194,6 +194,7 @@ export const FOOTER_MENUS = [
       { text: "Documentation", href: "/docs" },
       { text: "Quickstart", href: "/docs/getting-started/quickstart" },
       { text: "Writing", href: "/blog" },
+      { text: "Changelog", href: "/changelog" },
       { text: "Manifest", href: "/docs/reference/manifest" },
       { text: "Error reference", href: "/docs/reference/errors" },
       { text: "Enterprise", href: "/docs/enterprise/licensing" },

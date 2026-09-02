@@ -309,6 +309,51 @@ func TestDoctor_ReportsEveryCheckWithARemediation(t *testing.T) {
 	}
 }
 
+// TestDoctor_PortCheckReportsTheRangeAFPortRangeStartNames is the doctor half of
+// the variable's wiring.
+//
+// The remediation named AF_PORT_RANGE_START from the day it was written and
+// nothing anywhere read it, so a user who followed the advice moved nothing and
+// the check went on reporting the range they had just left. It also reported on
+// the databases alone, which is not the range `af up` publishes a service on.
+func TestDoctor_PortCheckReportsTheRangeAFPortRangeStartNames(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, t.TempDir(), map[string]string{"AF_PORT_RANGE_START": "51000"},
+		"doctor", "-o", "json")
+	var report cli.DoctorReport
+	require.NoError(t, json.Unmarshal([]byte(got.stdout), &report))
+	ports := doctorCheck(t, report, "Local ports")
+	require.Contains(t, ports.Detail, "51000", "the databases range must move with the variable")
+	require.Contains(t, ports.Detail, "54000", "the published services range must move with it too")
+	require.Contains(t, ports.Remediation, "AF_PORT_RANGE_START")
+}
+
+// A value that cannot be a port is refused rather than ignored, because
+// ignoring it leaves the user looking at the range they were moving away from
+// with nothing on the screen to explain why.
+func TestDoctor_PortCheckRefusesARangeStartThatIsNotAPort(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, t.TempDir(), map[string]string{"AF_PORT_RANGE_START": "half past two"},
+		"doctor", "-o", "json")
+	var report cli.DoctorReport
+	require.NoError(t, json.Unmarshal([]byte(got.stdout), &report))
+	ports := doctorCheck(t, report, "Local ports")
+	require.Equal(t, cli.CheckFail, ports.Status)
+	require.Contains(t, ports.Detail, "AF-RUN-046")
+	require.Contains(t, ports.Detail, "half past two")
+}
+
+func doctorCheck(t *testing.T, report cli.DoctorReport, name string) cli.CheckResult {
+	t.Helper()
+	for _, c := range report.Checks {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("doctor reported no check named %q", name)
+	return cli.CheckResult{}
+}
+
 func TestDoctor_ExitsNonZeroWhenACheckFails(t *testing.T) {
 	t.Parallel()
 	// The disk check runs against the working directory, so a directory that
@@ -572,6 +617,53 @@ func TestInit_AnAnswerThatNamesNothingIsRefusedWithTheOnesThatDo(t *testing.T) {
 	require.Contains(t, got.stderr, "service.acme-web.port",
 		"the refusal has to name the id that would have worked")
 	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
+}
+
+// COPY . . reads the context but says nothing about which directory it is, so
+// af init asks. The default is what 'docker build dashboard' does. Overriding
+// it has to reach the manifest, or the question is decorative.
+func TestInit_TheContextQuestionCanBeAnsweredEitherWay(t *testing.T) {
+	t.Parallel()
+	build := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "dashboard"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "dashboard", "package.json"),
+			[]byte(`{"name":"dash","scripts":{"start":"next start"},"dependencies":{"next":"16.0.0"}}`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "dashboard", "Dockerfile"),
+			[]byte("FROM node:22-alpine\nWORKDIR /app\nCOPY . .\nEXPOSE 3100\nCMD [\"npm\", \"start\"]\n"), 0o600))
+		return dir
+	}
+
+	t.Run("the default is the Dockerfile's own directory", func(t *testing.T) {
+		t.Parallel()
+		dir := build(t)
+		got := runCLI(t, dir, nil, "init", "--non-interactive")
+		require.Zero(t, got.code, got.stderr)
+		body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+		require.NoError(t, err)
+		require.Contains(t, string(body), "context: dashboard")
+	})
+
+	t.Run("and the repository root can be chosen instead", func(t *testing.T) {
+		t.Parallel()
+		dir := build(t)
+		got := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.dash.context=.")
+		require.Zero(t, got.code, got.stderr)
+		body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+		require.NoError(t, err)
+		require.NotContains(t, string(body), "context:",
+			"the root is what an unset context already means, so writing it would say nothing")
+	})
+
+	t.Run("and it is offered by the refusal that lists the ids", func(t *testing.T) {
+		t.Parallel()
+		dir := build(t)
+		got := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.typo.context=x")
+		require.NotZero(t, got.code)
+		require.Contains(t, prose(got.stderr), "AF-DET-006")
+		require.Contains(t, prose(got.stderr), "service.dash.context")
+	})
 }
 
 func TestInit_AnswerFlagAvoidsAPrompt(t *testing.T) {
