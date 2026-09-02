@@ -96,6 +96,36 @@ const serverFailure = {
   content: json({ $ref: '#/components/schemas/ServerFailure' }),
 }
 
+/**
+ * Whether a procedure belongs in the document published at the apex.
+ *
+ * `admin.*` does not, and the reason is not squeamishness about naming the
+ * operator surface. This generator describes a procedure's authorisation from
+ * `Meta.permission`, which is the tenant catalogue. Operator procedures declare
+ * `Meta.adminPermission` instead, a separate catalogue on a separate session
+ * and a separate database role, so `declaredPermissions()` returns nothing for
+ * them and the branch below documents them as `security: []` with the sentence
+ * "Requires no permission." That is not an omission, it is a false statement
+ * about an operator route, published at antifailure.dev/openapi.json and handed
+ * to whatever agent generates a client from it.
+ *
+ * Describing them correctly is not the fix either. The document advertises one
+ * server, the tenant API, and no customer credential can reach `admin.*` at
+ * all: `adminProcedure` refuses a tenant session before it looks at the input.
+ * So a correct entry would document a route every reader of this document is
+ * structurally unable to call.
+ *
+ * This narrows the DOCUMENT and nothing else. `listProcedures` still returns
+ * every procedure, because `limits.test.ts` and `permissions.test.ts` walk it
+ * to prove that each route has a rate limit and a declared permission, and an
+ * operator route that fell out of those two walks would lose both gates in
+ * exchange for a tidier JSON file. `openapi.test.ts` pins both directions of
+ * this predicate.
+ */
+export function isPublishedProcedure(path: string): boolean {
+  return !path.startsWith('admin.')
+}
+
 /** Walks the router tree and returns every procedure with its kind. */
 export function listProcedures(): { path: string; type: 'query' | 'mutation' }[] {
   const out: { path: string; type: 'query' | 'mutation' }[] = []
@@ -273,7 +303,7 @@ export function openApiDocument(): Record<string, unknown> {
   // tRPC's own client carries the types and this document exists for callers
   // that are not that client.
   const permissions = declaredPermissions()
-  for (const { path, type } of listProcedures()) {
+  for (const { path, type } of listProcedures().filter((p) => isPublishedProcedure(p.path))) {
     const permission = permissions.get(path)
     const input = procedureInput(path)
     const isQuery = type === 'query'
