@@ -102,6 +102,14 @@ manifest or pipeline does.
 - A migration that holds an exclusive lock past `policy.migration_lock.fail_ms`
   now fails the check and names the table. The rehearsal has sampled `pg_locks`
   since phase 3 and none of it reached a pull request before now.
+- Every route to the hosted control plane says the same thing about it. The
+  `/signin` and `/signup` tabs both read "Join the waitlist" and both
+  descriptions said there was no hosted control plane, which a crawler, a
+  bookmark and a shared link all carried while the page underneath offered a
+  working GitHub button. The buttons leading there said four different things
+  depending on where you found them. Each route now carries its own name, the
+  titles and descriptions match the page they open, and the home page states
+  that the control plane is invitation only and the engine is not.
 - `load.source` no longer accepts `datadog` or `newrelic`. Both were in the
   schema, so a manifest could set them, and both refused when a run reached
   them. An unrecognised source is now refused by name at validation time, with
@@ -837,6 +845,33 @@ it.
   carried a `runtime.GOOS` skip, which reads as though the platform had been
   handled and cannot help, because the skip runs at run time and the missing
   symbol is a compile error, so the whole package failed to typecheck.
+
+- `af explore` runs. It never had. The engine built the runner's job document
+  with a nil Go slice for `workflows`, which marshals as `null`, and the runner
+  read `doc.workflows.length` with no guard, so every exploration on every
+  application died with a TypeError before the browser opened, and everything
+  downstream of it including `--emit-workflow` had therefore never run either.
+  Both sides compiled and both typechecked; they disagreed only on the wire.
+  The engine now sends `[]`, strict on the write, and the runner tolerates a
+  null or absent list, tolerant on the read.
+- Expired sessions are deleted. The sweeper had removed zero rows, on every
+  instance, for as long as it existed. It ran on a connection with no tenant
+  and every policy on that table keys on a declared value, so its DELETE
+  matched nothing and reported success, because a statement that matches
+  nothing does not raise. Housekeeping now has a role of its own, entered for
+  one transaction, in which a cutoff passed in can only narrow the sweep and
+  never widen it.
+- The sign-in and sign-up pages no longer advertise a markdown file that
+  answered 404. Every page carries a `text/markdown` alternate pointing at its
+  own address, and the generator deliberately skips anything marked `noindex`.
+  Those two pages are the only ones the site marks `noindex`, so they were the
+  only two promising a file the build never wrote. The check now asserts that
+  every twin a page advertises is a file the build actually produced.
+- `af runner install` finds the runner from anywhere inside a checkout rather
+  than only from its root. It searched the working directory and its parent,
+  which assumed those were the same place. Run from a subdirectory it reported
+  that no runner source existed while standing inside a checkout that had one,
+  and told the reader to install a runner they already had.
 
 ### Security
 
