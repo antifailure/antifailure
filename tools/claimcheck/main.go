@@ -66,6 +66,9 @@ var notAPath = map[string]string{
 	".gate-reports/": "created by `just gate` when it runs and gitignored, so it is a place output goes rather than something the repository contains",
 
 	"THIRD_PARTY_NOTICES.md": "generated at release time from what is actually linked, so it is deliberately absent from the tree",
+
+	"checksums.txt.sigstore.json": "a release asset on the GitHub releases page, produced by the signing step, and the whole point of naming it is that a reader checks the release rather than this tree",
+	"sbom.spdx.json":              "the same, the bill of materials asset, and it is named so a reader can tell a release that ran the signing steps from one that predates them",
 }
 
 // claim is one backticked token that looks like a path into this repository.
@@ -205,6 +208,14 @@ func checkDocsLinks(root string, tracked map[string]bool, out io.Writer) error {
 					continue
 				}
 				page := strings.Trim(strings.TrimPrefix(target, docsBase), "/")
+				// /docs/<page>.md is the Markdown behind the rendered page,
+				// emitted by docs/src/pages/[...slug].md.ts from the same
+				// content collection this checks against. So it resolves
+				// exactly when the page does, and checking the page is
+				// checking the twin. Without this the gate calls a working
+				// address a 404, which is the false finding that gets a gate
+				// weakened rather than fixed.
+				page = strings.TrimSuffix(page, ".md")
 				if page != "" && !docPageExists(tracked, page) {
 					dead = append(dead, where+" -> "+target)
 				}

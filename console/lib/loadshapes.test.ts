@@ -88,11 +88,11 @@ function readIfPresent(relative: string): string | null {
 }
 
 const initSql = readIfPresent('web/packages/db/migrations/0001_init.sql')
-const studioSql = readIfPresent('web/packages/db/migrations/0023_load_definitions_and_runs.sql')
+const studioSql = readIfPresent('web/packages/db/migrations/0024_load_definitions_and_runs.sql')
 const storeTs = readIfPresent('web/apps/api/src/workloads/store.ts')
 
 const missing = [
-  studioSql === null ? '0023_load_definitions_and_runs.sql' : null,
+  studioSql === null ? '0024_load_definitions_and_runs.sql' : null,
   storeTs === null ? 'src/workloads/store.ts' : null,
   initSql === null ? '0001_init.sql' : null,
 ].filter((f): f is string => f !== null)

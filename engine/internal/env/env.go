@@ -39,6 +39,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/lock"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
+	"github.com/antifailure/antifailure/engine/internal/masking"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/policy"
@@ -1550,6 +1551,12 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			return "", zero, secrets.Value{}, secrets.Value{}, aferrors.Coded(
 				aferrors.AFORC009, "version", pinned)
 		}
+		o.progress("branching the database from " + version + ", pinned by the caller")
+		// Announced on this path too. A pinned golden used to reach branchFrom
+		// without an event, so the one run most likely to be a compliance
+		// rehearsal, where the version is pinned precisely so two environments
+		// share it, was the run the control plane heard nothing about.
+		o.announceGolden(s, goldens, version, "golden "+version+" is pinned")
 		return o.branchFrom(ctx, s, version,
 			"pinned by the caller, "+prov.describe())
 	}
@@ -1592,45 +1599,32 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 		if o.opts.Manifest.Database != nil {
 			seed = o.opts.Manifest.Database.Seed
 		}
-		gv, refreshErr := s.dbProv.RefreshGolden(ctx, provider.GoldenSpec{
-			Version:   databaseVersion(o.opts.Manifest),
-			RulesHash: seedRulesHash(seed),
-			// Recorded here as well as on the refresh path, and it is what
-			// makes this golden reusable at all. Before provenance existed
-			// this branch stamped seedRulesHash(seed), which for a project
-			// with no seed is the literal string "empty", while selection
-			// asked for the digest of an empty rule set. Those two never
-			// matched, so a project with no production database built a fresh
-			// golden on every single `af up` and branched it once. The fix for
-			// the leak is also the fix for that: one identity, written by
-			// every path that publishes and read by the path that selects.
-			Provenance: want,
-			// No source database is configured, so the golden is built from
-			// nothing. Where the manifest names a seed command, that command
-			// is what puts data in it; otherwise the schema arrives with the
-			// migrations and the golden is empty. Masking and verification
-			// still run either way, because a seeded database is still a
-			// database somebody could have put an address into.
-			Mask: func(ctx context.Context, candidate secrets.Value) error {
-				return o.runSeed(ctx, s, seed, candidate)
-			},
-			Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
-		})
+		// The masking key and the rules, read before the refresh rather than
+		// inside the callback, so a manifest with an unreadable masking.yaml
+		// fails before a candidate database exists rather than halfway
+		// through building one.
+		key, keyErr := o.MaskingKey(ctx, s)
+		if keyErr != nil {
+			return "", zero, secrets.Value{}, secrets.Value{}, keyErr
+		}
+		rules, hash, rulesErr := o.rules()
+		if rulesErr != nil {
+			return "", zero, secrets.Value{}, secrets.Value{}, rulesErr
+		}
+
+		gv, refreshErr := s.dbProv.RefreshGolden(ctx,
+			o.seedGoldenSpec(s, seed, key, rules, hash, want))
 		if refreshErr != nil {
 			return "", zero, secrets.Value{}, secrets.Value{}, refreshErr
 		}
 		version = gv.ID
-		o.event(s, events.GoldenReady, "golden "+version+" is ready",
-			events.F("phase", "golden"), events.F("version", version),
-			events.F("verified", gv.Verified))
+		o.event(s, events.GoldenReady, "golden "+version+" is ready", o.goldenFields(gv)...)
 	} else {
 		// Reported even though nothing was done, because the display cannot
 		// tell a verified golden from an unverified one by its absence, and
 		// calling a verified golden unverified on every ordinary run is worse
 		// than one extra event.
-		o.event(s, events.GoldenReady, "golden "+version+" is verified",
-			events.F("phase", "golden"), events.F("version", version),
-			events.F("verified", true))
+		o.announceGolden(s, goldens, version, "golden "+version+" is verified")
 	}
 	return o.branchFrom(ctx, s, version, prov.describe())
 }
@@ -2021,6 +2015,15 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 	ctx = s.tel.StartCommand(ctx, "af down")
 
 	o.event(s, events.EnvDestroying, "removing "+o.envID)
+
+	// Before the teardown, because the sidecar holds the egress log and the
+	// teardown removes the sidecar. This is the one place the decisions are
+	// reported: the bus stamps a random identifier on every event, so the
+	// control plane cannot tell a resend from a second report, and the
+	// console's network page counts rows. Sending them from two places would
+	// double every number on it.
+	o.ReportDecisions(ctx, s)
+
 	td := o.teardown(ctx, s, o.envID)
 
 	// Ordering, and it is load bearing rather than stylistic: the replay inside
@@ -2303,6 +2306,99 @@ func serviceDir(inContext func(string) (string, bool), dir, name string) string 
 		return joinPath(dir, name)
 	}
 	return rel
+}
+
+// seedGoldenSpec is the golden a project with no production database gets.
+//
+// Extracted so that the two hooks can be reached by a test. They are the whole
+// masking guarantee on this path and they were both wrong: Mask ran the seed
+// command instead of the masker, and Verify returned the literal {"rows":0}
+// without opening a connection, while four lines above them a comment said
+// masking and verification still run either way. The docker provider then
+// reports Verified as `spec.Verify != nil`, which is true, so a database
+// nothing had read was published as verified.
+//
+// The README says a scanner reads back every column of every table and signs
+// an attestation, that an unverified golden cannot be branched, and that this
+// is enforced in code rather than in a checklist. On this path it was a
+// checklist. A customer whose seed.sql is a trimmed production export got no
+// scan and a green light, and af fidelity later read the {"rows":0} back,
+// found no public key in it, and told them their attestation had been changed
+// after it was signed: an accusation about a document the product wrote.
+//
+// An ordinary seed is not refused by this. verify/detect.go treats
+// example.com, example.org, example.net and the reserved test domains as
+// synthetic, so a seed full of fake addresses passes and a seed carrying real
+// ones does not, which is the whole claim.
+func (o *Orchestrator) seedGoldenSpec(
+	s *session, seed string, key *masking.Key, rules *masking.RuleSet, hash string,
+	provenance string,
+) provider.GoldenSpec {
+	return provider.GoldenSpec{
+		Version:   databaseVersion(o.opts.Manifest),
+		RulesHash: seedRulesHash(seed),
+		// Recorded here as well as on the refresh path, and it is what
+		// makes this golden reusable at all. Before provenance existed
+		// this branch stamped seedRulesHash(seed), which for a project
+		// with no seed is the literal string "empty", while selection
+		// asked for the digest of an empty rule set. Those two never
+		// matched, so a project with no production database built a fresh
+		// golden on every single `af up` and branched it once. The fix for
+		// the leak is also the fix for that: one identity, written by
+		// every path that publishes and read by the path that selects.
+		Provenance: provenance,
+		// No source database is configured, so the golden is built from
+		// nothing. Where the manifest names a seed command, that command
+		// is what puts data in it; otherwise the schema arrives with the
+		// migrations and the golden is empty.
+		//
+		// Then the same mask and the same scan the refresh path runs, on
+		// the same candidate, because this comment used to say masking and
+		// verification still run either way and four lines below it the
+		// Mask hook ran the seed command and the Verify hook returned the
+		// literal {"rows":0} without opening a connection. The provider
+		// then reports Verified: spec.Verify != nil, which is true, so a
+		// database nothing had read was published as verified.
+		//
+		// The README says a scanner reads back every column of every table
+		// and signs an attestation, that an unverified golden cannot be
+		// branched, and that this is enforced in code rather than in a
+		// checklist. On this path it was a checklist. A customer whose
+		// seed.sql is a trimmed production export got no scan and a green
+		// light, and af fidelity later read the {"rows":0} back, found no
+		// public key in it, and told them their attestation had been
+		// changed after it was signed: an accusation about a document the
+		// product itself wrote.
+		//
+		// An ordinary seed is not refused by this. verify/detect.go treats
+		// example.com, example.org, example.net and the reserved test
+		// domains as synthetic, so a seed full of fake addresses passes
+		// and a seed carrying real ones does not, which is the whole
+		// claim.
+		Mask: func(ctx context.Context, candidate secrets.Value) error {
+			if seedErr := o.runSeed(ctx, s, seed, candidate); seedErr != nil {
+				return seedErr
+			}
+			// Declared rules applied to seeded data. A manifest that names
+			// a rule and a seed together meant the rule silently did
+			// nothing; there is no reason a seed should be the one input
+			// masking is not allowed to touch.
+			_, _, maskErr := o.maskDatabase(ctx, s, candidate, key, rules, hash)
+			return maskErr
+		},
+		// The provenance is signed into the attestation, not just stamped on
+		// the golden. main made it an argument to verifyDatabase for the two
+		// paths that already had one, and a seeded golden whose attestation
+		// named no provenance would be the one publish that could not be
+		// traced back to the work it was made for.
+		Verify: func(ctx context.Context, candidate secrets.Value) (string, error) {
+			_, att, verifyErr := o.verifyDatabase(ctx, s, candidate, hash, provenance)
+			if verifyErr != nil {
+				return "", verifyErr
+			}
+			return att, nil
+		},
+	}
 }
 
 // seedRulesHash identifies a golden built from a seed command.

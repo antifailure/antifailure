@@ -2,10 +2,10 @@
 title: Next.js with Neon
 description: An environment per pull request whose database is a Neon branch, and the three things that differ from the local provider.
 sidebar:
-  order: 14
+  order: 16
 ---
 
-[The Next.js guide](/docs/guides/nextjs/) covers what the service needs. This
+[The Next.js guide](/docs/guides/nextjs) covers what the service needs. This
 covers what changes when the database is a Neon branch instead of a container
 on the machine running `af`.
 
@@ -72,7 +72,7 @@ environment is torn down, and teardown is not a setting: `af ci` tears down
 whatever the outcome, including on a failed job and including on a cancelled
 one. This page used to tell you to set `github.teardown_on` here, which was
 wrong twice over, since that key is
-[read by nothing](/docs/reference/manifest/#github) and the values it named
+[read by nothing](/docs/reference/manifest#github) and the values it named
 were not ones the schema accepts.
 
 ## What a free tier will and will not hold
@@ -83,6 +83,6 @@ production database. If your golden is larger than that, either subset it or
 use the local `docker` provider, which is bounded by the disk on the machine
 rather than by a plan.
 
-Related: [the Neon provider in full](/docs/providers/neon/),
-[Next.js](/docs/guides/nextjs/), [an environment per pull
-request](/docs/getting-started/pull-requests/).
+Related: [the Neon provider in full](/docs/providers/neon),
+[Next.js](/docs/guides/nextjs), [an environment per pull
+request](/docs/getting-started/pull-requests).

@@ -2,7 +2,7 @@
 title: Insights
 description: What Postgres itself can tell you about a change, before anybody clicks anything.
 sidebar:
-  order: 11
+  order: 13
 ---
 
 A branch is a real database with production's shape in it, which makes some
@@ -34,7 +34,7 @@ Every check here also runs inside `af ci`, so what it finds reaches the pull
 request comment rather than only a terminal somebody chose to open. `af ci`
 takes the same two flags, spelled `--save-baseline` and `--baseline`. What each
 finding does to the check is the manifest's
-[policy block](/docs/concepts/verdicts/): a lock held past two seconds fails by
+[policy block](/docs/concepts/verdicts): a lock held past two seconds fails by
 default, a rewrite and a lint finding warn.
 
 The rehearsal runs on every change, including one with no migrations in it.
@@ -423,6 +423,6 @@ Not measured: query statistics need the pg_stat_statements extension, which is
 not available here
 ```
 
-Related: [verdicts](/docs/concepts/verdicts/),
-[goldens](/docs/concepts/goldens/), [load](/docs/concepts/load/),
-[invariants](/docs/guides/invariants/).
+Related: [verdicts](/docs/concepts/verdicts),
+[goldens](/docs/concepts/goldens), [load](/docs/concepts/load),
+[invariants](/docs/guides/invariants).

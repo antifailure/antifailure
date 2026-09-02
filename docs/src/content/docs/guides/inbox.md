@@ -2,7 +2,7 @@
 title: The inbox
 description: Mail an environment sends goes here, so a flow finishes and no real address receives anything.
 sidebar:
-  order: 4
+  order: 5
 ---
 
 A host in `capture` mode is answered locally. The provider's API returns what it
@@ -66,5 +66,5 @@ recorded and answered with a plausible success, and `af inbox get` shows the
 raw body. Less convenient than a parsed message and better than a flow that
 cannot finish.
 
-Related: [egress](/docs/concepts/egress/), [personas](/docs/guides/personas/),
-[workflows](/docs/guides/workflows/).
+Related: [egress](/docs/concepts/egress), [personas](/docs/guides/personas),
+[workflows](/docs/guides/workflows).

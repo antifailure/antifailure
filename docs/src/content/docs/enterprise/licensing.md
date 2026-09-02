@@ -16,17 +16,39 @@ that cannot be switched on by patching a boolean.
 
 ## Installing a license
 
+There is nothing to install. The enterprise binary reads its license from the
+environment and stores nothing, so a license is two variables set wherever the
+engine runs:
+
 ```sh
-af license install <token>
+export AF_LICENSE_KEY=<token>
+export AF_ORG=globex
 af license status
-af license remove
 ```
+
+That is deliberate rather than unfinished. A key on disk is a key that outlives
+the machine it was put on, survives a rollback, and has to be removed from every
+copy. Two variables are removed by unsetting them, and every enterprise setting
+is preserved when they are gone: features fall back to the community behaviour
+rather than failing.
+
+So `af license install` and `af license remove` exist and both say so instead of
+pretending. On the enterprise binary they name these variables; on the community
+binary they refuse outright, because storing a key that build can never act on
+would leave somebody believing enterprise features are on until the rollout they
+bought the license for.
 
 A license is an Ed25519 signed statement carrying the organisation it was issued
 to, the features it permits, the seat count, when it expires, and which key
-signed it. Verification is a signature check against a key compiled into the
-binary; it needs no network, which is what makes an air gapped installation
-possible.
+signed it. Verification is a signature check against keys stamped into the
+binary at release; it needs no network, which is what makes an air gapped
+installation possible.
+
+An installation that mints its own licenses supplies its key in
+`AF_LICENSE_PUBLIC_KEYS`, as `kid=base64,kid=base64`. Those are merged with the
+build's own rather than replacing them, taking precedence on a shared
+identifier, because trusting your own key must not stop the vendor's from
+working.
 
 ## When it does not verify
 
@@ -99,4 +121,4 @@ Each is named in the license, so a license permits exactly what was bought.
 Contributions are under the DCO, not a CLA. You keep your copyright. See
 `CONTRIBUTING.md`.
 
-Related: [policy](/docs/enterprise/policy/), [runtimes](/docs/enterprise/runtimes/).
+Related: [policy](/docs/enterprise/policy), [runtimes](/docs/enterprise/runtimes).

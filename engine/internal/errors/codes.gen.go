@@ -18,6 +18,8 @@ const (
 	AFAGT005 Code = "AF-AGT-005"
 	// The {provider} endpoint could not be reached: {detail}
 	AFAGT006 Code = "AF-AGT-006"
+	// No workflow reached a verdict about the application: {detail}
+	AFAGT007 Code = "AF-AGT-007"
 	// Invariant {invariant} did not finish within {timeout}.
 	AFAGT010 Code = "AF-AGT-010"
 	// Invariant {invariant} is not read only.
@@ -39,6 +41,10 @@ const (
 	// The build context for {service} holds more than {count} files;
 	// {path} is where the count was reached.
 	AFBLD004 Code = "AF-BLD-004"
+	// The build for service {service} failed after {duration}, and its
+	// Dockerfile is {dockerfile} inside a build context rooted at the
+	// repository.
+	AFBLD005 Code = "AF-BLD-005"
 	// No build strategy could be detected for {service}.
 	AFBLD010 Code = "AF-BLD-010"
 	// The Dockerfile {dockerfile} for {service} is excluded from the build
@@ -53,6 +59,8 @@ const (
 	AFCP001 Code = "AF-CP-001"
 	// The control plane rejected this engine's token.
 	AFCP002 Code = "AF-CP-002"
+	// The control plane could not complete this request.
+	AFCP003 Code = "AF-CP-003"
 
 	// Control plane
 	// No control plane token is configured.
@@ -108,6 +116,9 @@ const (
 	AFDB020 Code = "AF-DB-020"
 	// {provider} rejected the admin token used to create personas.
 	AFDB021 Code = "AF-DB-021"
+	// No table that looks like a users table was found, so there is
+	// nowhere to create the personas that sign in.
+	AFDB022 Code = "AF-DB-022"
 	// Migrations failed on the branch: {detail}
 	AFDB030 Code = "AF-DB-030"
 	// The migration finding {rule} fails this project's policy: {detail}
@@ -426,6 +437,15 @@ var catalog = map[Code]Entry{
 		Retryable: true,
 		ExitCode:  ExitProvider,
 	},
+	AFAGT007: {
+		Code:      AFAGT007,
+		Area:      "AGT",
+		Message:   "No workflow reached a verdict about the application: {detail}",
+		NextStep:  "Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet.",
+		Docs:      "concepts/verdicts",
+		Retryable: false,
+		ExitCode:  ExitInterruptedClean,
+	},
 	AFAGT010: {
 		Code:      AFAGT010,
 		Area:      "AGT",
@@ -507,6 +527,15 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
+	AFBLD005: {
+		Code:      AFBLD005,
+		Area:      "BLD",
+		Message:   "The build for service {service} failed after {duration}, and its Dockerfile is {dockerfile} inside a build context rooted at the repository.",
+		NextStep:  "If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed.",
+		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitFailure,
+	},
 	AFBLD010: {
 		Code:      AFBLD010,
 		Area:      "BLD",
@@ -551,6 +580,15 @@ var catalog = map[Code]Entry{
 		Docs:      "self-hosting/control-plane",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFCP003: {
+		Code:      AFCP003,
+		Area:      "CP",
+		Message:   "The control plane could not complete this request.",
+		NextStep:  "Retry once. If it fails again, quote the requestId the response carries: it is the only thing that ties the answer to a log line.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: true,
+		ExitCode:  ExitProvider,
 	},
 	AFCPL001: {
 		Code:      AFCPL001,
@@ -619,7 +657,7 @@ var catalog = map[Code]Entry{
 		Code:      AFDB004,
 		Area:      "DB",
 		Message:   "The golden version {version} no longer exists.",
-		NextStep:  "Run 'af golden list' to see the available versions, then 'af up --golden <version>'.",
+		NextStep:  "Run 'af golden list' to see what exists, or 'af golden refresh' to make one. 'af up' chooses a version itself.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -740,6 +778,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/personas",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFDB022: {
+		Code:      AFDB022,
+		Area:      "DB",
+		Message:   "No table that looks like a users table was found, so there is nowhere to create the personas that sign in.",
+		NextStep:  "Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.",
+		Docs:      "guides/personas",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFDB030: {
 		Code:      AFDB030,
@@ -1042,7 +1089,7 @@ var catalog = map[Code]Entry{
 		Code:      AFMAN003,
 		Area:      "MAN",
 		Message:   "The manifest at {path} declares schema version {found}, which this build does not understand.",
-		NextStep:  "Upgrade with 'af version -check' and install the release that supports version {found}.",
+		NextStep:  "Check the build you are running with 'af version' and install the release that supports version {found}.",
 		Docs:      "reference/manifest",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

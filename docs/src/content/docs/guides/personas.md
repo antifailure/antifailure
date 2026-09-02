@@ -2,7 +2,7 @@
 title: Personas
 description: The users an agent signs in as, and how they come to exist.
 sidebar:
-  order: 8
+  order: 9
 ---
 
 A persona is a user of your application. Agents sign in as one, and different
@@ -210,5 +210,5 @@ for a reason nobody can see.
 Use them to reach states that are otherwise hard to arrange. A persona that has
 never onboarded is one line here and twenty minutes of clicking otherwise.
 
-Related: [workflows](/docs/guides/workflows/), [the inbox](/docs/guides/inbox/),
-[agents](/docs/concepts/agents/).
+Related: [workflows](/docs/guides/workflows), [the inbox](/docs/guides/inbox),
+[agents](/docs/concepts/agents).

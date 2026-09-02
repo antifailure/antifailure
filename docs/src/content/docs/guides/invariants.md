@@ -2,7 +2,7 @@
 title: Invariants
 description: Statements about your data that must stay true while agents use the application.
 sidebar:
-  order: 9
+  order: 10
 ---
 
 An invariant is a read only query that must return no rows, asked of the branch
@@ -120,4 +120,4 @@ Write one the first time a bug of that shape reaches production. It is the
 cheapest possible regression test, and the intent is that it runs against every
 branch afterwards.
 
-Related: [agents](/docs/concepts/agents/), [insights](/docs/concepts/insights/).
+Related: [agents](/docs/concepts/agents), [insights](/docs/concepts/insights).

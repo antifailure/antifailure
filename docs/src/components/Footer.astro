@@ -12,8 +12,25 @@ import SiteFooter from "./SiteFooter.astro";
 <SiteFooter />
 
 <style>
+  /* The footer's rule spans the pane; its words stay on the column.
+   *
+   * The site header above is full width with its hairline running edge to
+   * edge. This footer sat inside Starlight's measure column, so on a phone it
+   * was a 358px box with a 358px rule under 358px of text, and it read as one
+   * more block of content rather than as the bottom of the page. The header
+   * and the footer are meant to be a pair and they did not match.
+   *
+   * Negative margin to break out of the column, and the same value back as
+   * padding so the copyright stays on the exact left edge of the paragraph
+   * above it. Widening without the compensating padding is the version that
+   * looks like a bug: the rule reaches the edges and drags the words out with
+   * it. Measured after the change at 42 widths from 280 to 1920: the rule
+   * spans the pane and the text is still aligned with the body to the pixel. */
   :global(.af-site-footer) {
     margin-top: 2rem;
+    margin-inline: calc(-1 * var(--sl-content-pad-x, 1.5rem));
+    padding-inline: var(--sl-content-pad-x, 1.5rem);
+    width: auto;
   }
 
   :global(footer.sl-flex .meta) {

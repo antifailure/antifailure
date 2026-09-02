@@ -57,13 +57,25 @@ export function HeroServices() {
   }, [startedThrough, items.length]);
 
   return (
-    <ul className="grid grid-cols-5 grid-rows-[auto_auto] gap-x-16 gap-y-8 max-xl:-mx-5 max-xl:flex max-xl:snap-x max-xl:snap-mandatory max-xl:scroll-px-5 max-xl:gap-x-8 max-xl:gap-y-0 max-xl:overflow-x-auto max-xl:px-5 max-xl:no-scrollbars max-md:gap-x-6">
+    // Five peers, and the reader has to be able to see that there are five and
+    // read all five: this row is the value proposition enumerated, not a feed
+    // to browse. Below `xl` it used to be a horizontal scroller with its
+    // scrollbar hidden, so from 640px to 1279px the fifth card sat off the
+    // right edge with no cue that it existed and the fourth was cut mid-word.
+    // It reflows now, and the scroller survives only below `sm`, where a card
+    // is 78vw so the next one always peeks and a sideways swipe is the native
+    // gesture anyway.
+    //
+    // `grid-rows-subgrid` on each card is what keeps the artwork tops aligned
+    // across a row when the paragraphs above them wrap to different heights,
+    // so the wrapped rows need the row pair, not a plain two-row card.
+    <ul className="grid grid-cols-5 grid-rows-[auto_auto] gap-x-16 gap-y-8 max-xl:grid-cols-3 max-xl:gap-x-10 max-xl:gap-y-12 max-md:grid-cols-2 max-md:gap-x-8 max-md:gap-y-10 max-sm:-mx-5 max-sm:flex max-sm:snap-x max-sm:snap-mandatory max-sm:scroll-px-5 max-sm:gap-x-6 max-sm:gap-y-0 max-sm:overflow-x-auto max-sm:px-5 max-sm:no-scrollbars">
       {items.map((item, index) => {
         const started = index <= startedThrough;
         return (
           <li
             key={item.title}
-            className="group row-span-2 grid w-full max-w-64 cursor-default grid-rows-subgrid content-start text-black max-xl:w-[min(16rem,78vw)] max-xl:shrink-0 max-xl:snap-start max-xl:grid-rows-[auto_auto] max-xl:gap-y-8 max-xl:self-start max-md:gap-y-6"
+            className="group row-span-2 grid w-full max-w-64 cursor-default grid-rows-subgrid content-start text-black max-xl:max-w-none max-sm:w-[min(16rem,78vw)] max-sm:shrink-0 max-sm:snap-start max-sm:grid-rows-[auto_auto] max-sm:gap-y-6 max-sm:self-start"
           >
             <p className="block max-w-sm text-base tracking-extra-tight text-pretty text-gray-new-50">
               <span className="font-semibold text-black">{item.title}.</span> {item.description}

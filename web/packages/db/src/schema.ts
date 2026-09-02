@@ -53,7 +53,7 @@ export const verdictValue = pgEnum('verdict_value', [
   'pass', 'fail', 'flaky', 'blocked', 'unverified',
 ])
 
-// Load definitions and runs. See migrations/0023_load_definitions_and_runs.sql for why these four
+// Load definitions and runs. See migrations/0024_load_definitions_and_runs.sql for why these four
 // kinds stay four kinds, and why a run's state and its verdict are two columns.
 export const workloadKind = pgEnum('workload_kind', [
   'observed_load', 'http_scenario', 'browser_workflow', 'exploration',
@@ -89,6 +89,16 @@ export const users = pgTable('users', {
   // audit_entries points at it with NO ACTION; see migrations/0022 for why a
   // delete is refused and what is erased instead.
   closedAt: timestamp('closed_at', { withTimezone: true }),
+  // Set by an operator to stop this person signing in anywhere, without
+  // destroying the memberships an investigation needs. The same three columns
+  // organizations has carried since 0001, deliberately: two vocabularies for
+  // one idea is how a check ends up reading the wrong one.
+  suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+  suspendedReason: text('suspended_reason'),
+  suspendedBy: text('suspended_by'),
+  // Null on every account that predates the column. A DEFAULT here would be a
+  // claim that they were all verified, which is a lie told by a schema.
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex('users_github_id_key').on(t.githubId), index('users_email_idx').on(t.email)])
@@ -129,6 +139,21 @@ export const sessions = pgTable('sessions', {
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  // Impersonation travels on the session row rather than in a side table.
+  // resolveSession reads this row on every request, and a marker it cannot
+  // reach in one query is a marker some code path will forget to consult: an
+  // impersonated session that looks ordinary to the gate is the whole failure
+  // this is built to prevent.
+  impersonatedBy: uuid('impersonated_by'),
+  /** Who the operator was, kept as text so the banner still names them after
+   *  their own account is closed. */
+  impersonatorLabel: text('impersonator_label'),
+  impersonationReason: text('impersonation_reason'),
+  /** The audit entry that authorised this session. The database refuses a row
+   *  that sets impersonatedBy without it, which is what makes "the record was
+   *  written before the session existed" a property rather than an intention.
+   *  See migrations/0024. */
+  impersonationAuditSeq: bigint('impersonation_audit_seq', { mode: 'number' }),
 }, (t) => [index('sessions_user_idx').on(t.userId), index('sessions_expiry_idx').on(t.expiresAt)])
 
 export const oauthStates = pgTable('oauth_states', {
@@ -769,7 +794,7 @@ export const organizationDeletionExports = pgTable('organization_deletion_export
 // ---------------------------------------------------------------------------
 
 /** A named, versioned thing to run against an environment. See
- *  migrations/0023_load_definitions_and_runs.sql: the kind is on the definition because
+ *  migrations/0024_load_definitions_and_runs.sql: the kind is on the definition because
  *  the four kinds measure materially different things, and there is no common
  *  intermediate representation behind them. */
 export const workloads = pgTable('workloads', {
@@ -827,7 +852,7 @@ export const workloadRuns = pgTable('workload_runs', {
   // What happened to the lease, so an abandoned run can say which kind of
   // silence it was. A run taken over by a second engine and a run whose only
   // engine died both go quiet and both end as `abandoned`, and only this side
-  // holds the facts that separate them. See migration 0024.
+  // holds the facts that separate them. See migration 0025.
   leaseTakeovers: integer('lease_takeovers').notNull().default(0),
   leaseLostAt: timestamp('lease_lost_at', { withTimezone: true }),
   unheldReports: integer('unheld_reports').notNull().default(0),
@@ -940,7 +965,7 @@ export const workloadEvidence = pgTable('workload_evidence', {
 
 /** What the control plane is asking a runtime to do, durably, with a lease and
  *  an acknowledgement. A teardown that is only a column update is a teardown
- *  that never happens; see migrations/0023_load_definitions_and_runs.sql. */
+ *  that never happens; see migrations/0024_load_definitions_and_runs.sql. */
 export const runtimeCommands = pgTable('runtime_commands', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').notNull(),
@@ -1056,6 +1081,36 @@ export const teardownRequests = pgTable('teardown_requests', {
   acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index('teardown_requests_org_idx').on(t.orgId, t.requestedAt)])
+
+/**
+ * What an operator wrote down about an account.
+ *
+ * Deliberately NOT tenant scoped, and deliberately not reachable by the
+ * application role at all. These are the operator's words about a customer
+ * rather than the customer's own data, so a note must not turn up in that
+ * organization's export, in its audit log, or on any page it can open. The
+ * grant that would make that possible is the one migrations/0024 withholds.
+ *
+ * subjectType and subjectId rather than three nullable foreign keys. The cost
+ * is a reference the database cannot enforce; the benefit is that a note about
+ * an account that has since been deleted survives, and a note about the
+ * deleted account is exactly the note an investigation comes looking for.
+ */
+export const adminNotes = pgTable('admin_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  subjectType: text('subject_type').notNull(),
+  subjectId: uuid('subject_id').notNull(),
+  body: text('body').notNull(),
+  authorUserId: uuid('author_user_id'),
+  /** Kept as text so the note still says who wrote it once that operator's own
+   *  account is gone, the same reason auditEntries carries actorLabel. */
+  authorLabel: text('author_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  /** Soft deleted: a note somebody retracted is still a thing an operator
+   *  wrote about a customer, and the retraction is worth being able to see. */
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => [index('admin_notes_subject_idx').on(t.subjectType, t.subjectId, t.createdAt)])
 
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is

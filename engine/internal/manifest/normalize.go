@@ -509,6 +509,7 @@ func normalizePolicy(m *schema.Manifest) {
 	level(&p.QueryRegression, schema.PolicyWarn)
 	level(&p.LoadRegression, schema.PolicyWarn)
 	level(&p.EgressSurprise, schema.PolicyFail)
+	level(&p.WorkflowsUnverified, schema.PolicyFail)
 	level(&p.Masking, schema.PolicyFail)
 	level(&p.Cleanup, schema.PolicyFail)
 }

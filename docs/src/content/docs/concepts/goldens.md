@@ -229,7 +229,7 @@ trade. The failure is printed.
 
 Publishing goes through memory, so it is bounded, and it refuses a dump larger
 than the bound rather than swallowing the machine. If you are publishing you
-almost certainly want [subsetting](/docs/concepts/subsetting/) as well: a slice is
+almost certainly want [subsetting](/docs/concepts/subsetting) as well: a slice is
 what makes a golden small enough to move.
 
 ## Collection
@@ -271,7 +271,7 @@ provider such as Neon this is rarer, because a branch shares its parent's
 storage rather than copying it.
 
 The other answer is to make each golden smaller. See
-[subsetting](/docs/concepts/subsetting/).
+[subsetting](/docs/concepts/subsetting).
 
 ## What a golden is not
 
@@ -279,5 +279,5 @@ It is not a backup. It is masked, which means it is deliberately not the data
 production has. Do not restore one into production, and do not treat a
 successful branch as evidence that your backups work.
 
-Related: [masking](/docs/concepts/masking/), [verification](/docs/concepts/verification/),
-[subsetting](/docs/concepts/subsetting/), [providers](/docs/providers/overview/).
+Related: [masking](/docs/concepts/masking), [verification](/docs/concepts/verification),
+[subsetting](/docs/concepts/subsetting), [providers](/docs/providers/overview).

@@ -64,10 +64,14 @@ gate: _reports
     run "generated files are current" just _generated
     run "release stamps a real version"  just ldcheck
     run "release publishes what it signs" just releasecheck
+    run "release notes exist for the tag" just relnotes
+    run "version pins name real tags"    just tagsync
     run "error catalog and code agree"   just errcheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "the sidebar order is chosen"    just sidebarcheck
+    run "spoken variables are documented" just varcheck
     run "STATUS keeps its own rule"      just statuscheck
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
@@ -104,6 +108,7 @@ gate: _reports
     run "license parser fuzz"            just fuzz-license
     run "engine parser fuzz"             just fuzz-engine
     run "authorship and sign-off"        just authorship
+    run "every change says what changed" just changecheck
 
     echo
     if [ ${#failed[@]} -eq 0 ]; then
@@ -440,7 +445,8 @@ fmt-check:
 errcheck:
     go run ./tools/errcheck .
 
-# The release stamps version variables that exist.
+# The release stamps version variables that exist, and stamps every one it
+# declares.
 ldcheck:
     go run ./tools/ldcheck .
 
@@ -450,13 +456,38 @@ ldcheck:
 releasecheck:
     go run ./tools/releasecheck .
 
+# Every changelog section has something under it, so no tag can publish a
+# release whose notes are a heading and nothing else.
+relnotes:
+    go run ./tools/relnotes .
+
+# No version pin names a tag nobody has published. The Terraform image_tag
+# defaults are live, so bumping them with the tag rather than after it points
+# the next apply at an image that does not exist.
+#
+# It also holds the four version literals in the verification page to the
+# release being cut, and holds them strictly: naming an older tag that really
+# was published is the defect that shipped, since the page then tells a reader
+# to fetch a bundle that release does not carry.
+tagsync:
+    go run ./tools/tagsync .
+
 # Nothing in the tree looks like a live credential.
 scanrepo:
     go run ./tools/scanrepo .
 
 # Every af command shown in the docs is a command that exists.
+# -count=1 for the same reason test-tools needs it, proven the same way.
+#
+# This test reads docs/src/content/docs and examples/, both outside the engine
+# module, so nothing it depends on is anything the cache watches. Measured: a
+# documentation page was edited to read `af init --wat`, a flag that does not
+# exist, and `just docexamples` answered "ok (cached)". The same test with
+# -count=1 failed on it immediately. CI already passes -count=1 through
+# `go test ./...`, so this was a local-only lie, and a local-only lie is the
+# worst kind here: CONTRIBUTING promises a green `just gate` means a green CI.
 docexamples:
-    cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists
+    cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists -count=1
 
 # The punctuation this project does not use.
 prosecheck:
@@ -723,6 +754,34 @@ forbidden:
 claimcheck:
     go run ./tools/claimcheck .
 
+# Every variable the product names at a user is one the documentation explains.
+#
+# `af license install` tells a paying customer to set AF_LICENSE_KEY and AF_ORG,
+# then points them at the licensing page, and that page named neither. The
+# product asked for two things and sent the reader to the one page that should
+# have said what they are. `af doctor` had the same shape with
+# AF_PORT_RANGE_START. The control plane has had this check since
+# config-docs.test.ts; the engine, which is the half a customer runs on their
+# own machine, never did.
+#
+# It parses rather than greps, because the first version was line oriented and
+# returned a clean zero over AF_PORT_RANGE_START while looking straight at it:
+# `r.Remediation = fmt.Sprintf(` and the string naming the variable sit on
+# different lines.
+varcheck:
+    go run ./tools/varcheck .
+
+# The sidebar order is a decision rather than an accident.
+#
+# Starlight breaks a tie in sidebar.order on FILE NAME, which is invisible to
+# somebody editing a page and silent everywhere else. 27 of the 78 ordered
+# pages shared a number with a sibling, so a third of the sidebar was
+# alphabetised by slug while reading like a designed order: "Watching a run"
+# split the two runtime guides, "Provider limits" split the three provider
+# pages, and On-call came before Standing up production.
+sidebarcheck:
+    go run ./tools/sidebarcheck .
+
 # STATUS.md keeps the rule it states about itself.
 #
 # That file opens by saying every component carries one of a fixed set of
@@ -948,8 +1007,16 @@ _generated:
     (cd engine && go test ./internal/events -update-schema)
     (cd engine && go test ./internal/masking -update-transforms)
     (cd engine && go test ./internal/hud -update-frames)
+    # The OpenAPI artifact is generated too, and its generator is TypeScript
+    # rather than Go. Its own --check mode is the comparison, so it is run in
+    # the same form and the same directory CI runs it in: a gate is the command
+    # AND the directory, and two spellings of it are what tools/gatecheck
+    # exists to catch.
+    go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    npm --prefix web run openapi:check --workspace apps/api
     git diff --exit-code -- \
       THIRD_PARTY_NOTICES.md \
+      www/public/errors.v1.json \
       engine/internal/errors/codes.gen.go \
       docs/src/content/docs/reference/errors.md \
       engine/internal/proxyimage/sources.gen.go \
@@ -966,6 +1033,8 @@ _generated:
 # Regenerate and keep the result.
 generate:
     go run ./tools/errgen
+    go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    npm --prefix web run openapi --workspace apps/api
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md
@@ -988,8 +1057,15 @@ generate:
 #
 # A machine with no keyring daemon skips rather than fails. That is correct: the
 # chain's whole design is that an unavailable source is named and stepped over.
+#
+# -count=1 because it was NOT the same command, which made the sentence above
+# false. keyring.yml:68 has always passed -count=1 and this did not, and the
+# test reads the operating system's credential store, which is as far outside
+# the module as a dependency gets, so nothing it touches is anything the cache
+# watches. Measured: 20.677s, then `ok (cached)` on the second run. A gate that
+# certifies this machine's keychain works, by not looking at the keychain.
 keyring:
-    cd engine && go test ./internal/secrets/
+    cd engine && go test ./internal/secrets/ -count=1
 
 # Lint the code the other platforms compile.
 #
@@ -1050,6 +1126,18 @@ authorship:
       exit 1
     fi
     echo "attributed and signed off"
+
+# Anything a user can see says what changed, and the fragments still parse.
+#
+# CONTRIBUTING.md has promised this gate since the first week and there was
+# none. The sign-off rule went the same way: required by the same document,
+# unchecked, and 65 of the first 80 commits had no trailer. Eight of the twenty
+# product changes since the fragment convention began landed without one.
+#
+# Runs the same range CI does, so a contributor finds out here rather than
+# twenty minutes later. Locally that range is where this branch left main.
+changecheck:
+    go run ./tools/changecheck .
 
 # Nothing this repository created is still running.
 leaks:

@@ -24,7 +24,13 @@ import { capsFor, costAttribution, environmentHoursSince } from '../costs.ts'
 import { syncMembership, SignInError } from '../auth/signin.ts'
 import { GitHubError } from '../auth/github.ts'
 import {
-  createEnvironment, agentsRouter, loadRouter, dispatch, installationFor, workflowFile,
+  createEnvironment,
+  agentsRouter,
+  loadRouter,
+  dispatch,
+  installationFor,
+  workflowFile,
+  environmentReadiness,
 } from './dispatch.ts'
 import { runtimesRouter } from './runtimes.ts'
 import { workloadsRouter } from './workloads.ts'
@@ -42,6 +48,10 @@ const environmentsRouter = router({
   // Lives in dispatch.ts because it acts rather than reads, and everything
   // that acts goes out through the customer's own CI. See that file's header.
   create: createEnvironment,
+
+  // Beside create rather than under a namespace of its own, because it answers
+  // one question about that one route: whether pressing it would work.
+  readiness: environmentReadiness,
 
   list: orgProcedure('environments.view')
     .input(
