@@ -9,7 +9,7 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
-import { URL as DR_URL, start as startPostgres } from './pgcontainer.ts'
+import { start as startPostgres, url as drUrl } from './pgcontainer.ts'
 
 // Against this suite's own Postgres rather than the shared development
 // container, for the reason the drill suite gives at length: a run that takes
@@ -19,7 +19,7 @@ import { URL as DR_URL, start as startPostgres } from './pgcontainer.ts'
 // module is loaded, which is what the dynamic import below is for; a static
 // import would be evaluated first and would read the old value.
 const hasDatabase = await startPostgres()
-if (hasDatabase) process.env.AF_TEST_DATABASE_URL = DR_URL
+if (hasDatabase) process.env.AF_TEST_DATABASE_URL = drUrl()
 
 const { dropOrg, seedOrg, startApi } = await import('./harness.ts')
 type ApiHarness = Awaited<ReturnType<typeof startApi>>
