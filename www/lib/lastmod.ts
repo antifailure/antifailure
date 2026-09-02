@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { getPost, postModified } from "./blog";
+import { changelogModified } from "./changelog";
 
 /**
  * When the content behind a route last actually changed.
@@ -70,6 +71,17 @@ function sourcesFor(routePath: string): string[] {
     candidates.push(`content/blog/${slug}.tsx`, "app/blog/[slug]/page.tsx");
   } else if (routePath === "/blog") {
     candidates.push("app/blog/page.tsx", "lib/blog.ts");
+  } else if (routePath === "/changelog") {
+    // Controls.tsx as well, because this list is written by hand and a file
+    // added to a route after somebody wrote its line here is exactly what it
+    // fails to notice. It is a fallback either way: contentLastModified
+    // answers /changelog from the fragments and never reaches this unless git
+    // cannot date them.
+    candidates.push(
+      "app/changelog/page.tsx",
+      "app/changelog/Controls.tsx",
+      "lib/changelog.ts",
+    );
   } else if (routePath === "/pricing") {
     candidates.push("app/pricing/page.tsx", "components/pages/company/Pricing.tsx");
   } else if (routePath === "/signin" || routePath === "/signup") {
@@ -158,6 +170,16 @@ export function contentLastModified(routePath: string): Date {
   // /blog/what-staging-misses-about-migrations. Before this branch existed
   // these three routes fell through to the build clock, which is the exact
   // thing this module was written to stop, and check:seo caught it.
+  // The changelog's content is the fragments, not the page that renders them,
+  // and the newest fragment is the only thing about it that has changed. Asking
+  // git when app/changelog/page.tsx last moved would stamp the page with the
+  // date of a styling edit and say nothing changed on a day forty entries
+  // landed.
+  if (routePath === "/changelog") {
+    const newest = changelogModified();
+    if (newest) return newest;
+  }
+
   if (routePath.startsWith("/blog/")) {
     const post = getPost(routePath.slice("/blog/".length));
     if (post) return new Date(postModified(post));

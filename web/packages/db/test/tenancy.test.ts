@@ -95,6 +95,38 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'or the user code the caller already holds, the same shape as oauth_states',
       ],
       ['schema_migrations', "the schema's own bookkeeping, not tenant data"],
+      [
+        'admin_notes',
+        'an operator\'s words about a customer rather than the customer\'s data; ' +
+          'the application role holds no grant on it at all, which the test below proves',
+      ],
+      [
+        'feature_flags',
+        'a flag is the platform\'s own configuration rather than a tenant\'s. It has no org_id ' +
+          'because it belongs to no organization: a rollout applies ACROSS tenants and the row ' +
+          'that says which tenants is feature_flag_targets, which does carry org_id and is in ' +
+          'the loops below. Every tenant may read a flag\'s key and state, which is a small ' +
+          'deliberate disclosure of unreleased feature names, and none may read who else is ' +
+          'targeted',
+      ],
+      [
+        'admin_users',
+        'an operator is not a tenant. The row is the platform\'s own identity, deliberately ' +
+          'unrelated to users, and it is reachable only by declaring the email being signed in ' +
+          'as or by holding a live operator session',
+      ],
+      [
+        'admin_sessions',
+        'belongs to an operator, not an organization; reachable by presenting the hash of the ' +
+          'cookie it was issued as, the same shape as the policy on sessions',
+      ],
+      [
+        'admin_audit_entries',
+        'the platform\'s own chain. It carries subject_org_id rather than org_id ON PURPOSE: ' +
+          'the row records what an operator did and belongs to the platform, so a column named ' +
+          'org_id would claim a tenancy it does not have and would put this table into the ' +
+          "loops below, which demand an isolation it is not supposed to have",
+      ],
     ])
 
     // Partitions are excluded because a partition is storage for its parent
@@ -120,6 +152,54 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       `these tables are isolated by nothing this suite knows about:\n  ${unclassified.join('\n  ')}\n` +
         'Give the table an org_id, or record why it does not need one.',
     )
+  })
+
+  /**
+   * The claim the classification above makes, actually tested.
+   *
+   * Listing admin_notes as "deliberately global" is a sentence in a test file,
+   * and a sentence is not an isolation mechanism. What keeps an operator's
+   * private note about a customer away from that customer is that the
+   * application role holds no grant on the table, so every statement it can
+   * construct is refused by the database before any policy is consulted.
+   *
+   * Asserted as 42501 specifically. A SELECT that merely returns no rows would
+   * pass a weaker assertion and would mean something completely different: it
+   * would mean the table IS reachable and simply happened to be empty, which
+   * is the state this suite exists to distinguish from isolation.
+   */
+  it('the application role cannot read or write an operator\'s notes', async () => {
+    const [note] = await h.admin<{ id: string }[]>`
+      INSERT INTO admin_notes (subject_type, subject_id, body, author_label)
+      VALUES ('user', ${alice.userId}, 'a note the tenant must never see', 'the fixture')
+      RETURNING id`
+
+    // Read, on a connection that has a tenant, which is the strongest position
+    // the application is ever in.
+    const read = await h.pool
+      .withTenant({ orgId: alice.orgId, userId: alice.userId }, async (db) => {
+        await db.execute(sql`SELECT body FROM admin_notes`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.equal(
+      read?.code,
+      '42501',
+      'the application role could reach admin_notes; an operator note is not tenant data',
+    )
+
+    const write = await h.pool
+      .withTenant({ orgId: alice.orgId, userId: alice.userId }, async (db) => {
+        await db.execute(sql`DELETE FROM admin_notes WHERE id = ${note!.id}::uuid`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.equal(write?.code, '42501', 'the application role could delete an operator note')
+
+    // Still there, so the refusals above were refusals rather than statements
+    // that quietly matched nothing.
+    const [left] = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM admin_notes WHERE id = ${note!.id}::uuid`
+    assert.equal(Number(left!.n), 1)
+    await h.admin`DELETE FROM admin_notes WHERE id = ${note!.id}::uuid`
   })
 
   it('every tenant-scoped table has row-level security enabled and a policy', async () => {
@@ -191,7 +271,47 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
   it("reads of another tenant's rows return nothing, for every tenant-scoped table", async () => {
     const tables = await orgScopedTables()
 
+    // Which tables the application role may SELECT at all, asked of the
+    // database rather than written down, exactly as the write test below asks
+    // about UPDATE and DELETE.
+    //
+    // Not every org-scoped table grants it. `admin_operations` is the money
+    // ledger: it carries org_id because an operator action concerns a tenant,
+    // and the application role holds NO privilege on it, because what an
+    // operator did is not the tenant's record. Its customer-visible half is
+    // written into that tenant's own audit_entries instead.
+    //
+    // A loop that assumed SELECT would report that as an error and read like a
+    // broken test rather than like stronger isolation, so this asserts BOTH
+    // outcomes: where SELECT is granted the policy has to return nothing, and
+    // where it is withheld the database has to refuse the statement outright.
+    const readable = new Set(
+      (
+        await h.admin<{ table_name: string }[]>`
+          SELECT table_name FROM information_schema.role_table_grants
+          WHERE grantee = 'antifailure_app' AND table_schema = 'public'
+            AND privilege_type = 'SELECT'`
+      ).map((r) => r.table_name),
+    )
+    assert.ok(
+      tables.some((t) => !readable.has(t)),
+      'every tenant-scoped table grants SELECT, so the withheld half of this test proves nothing',
+    )
+
     for (const table of tables) {
+      if (!readable.has(table)) {
+        const refused = await h.pool
+          .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+            await db.execute(sql`SELECT count(*) FROM ${sql.identifier(table)}`)
+          })
+          .then(() => null, (e: unknown) => pgError(e))
+        assert.equal(
+          refused?.code,
+          '42501',
+          `${table} grants the application no SELECT, so reading it must be refused outright`,
+        )
+        continue
+      }
       // Proves the row is there before proving it is invisible. Without this,
       // a query that returns nothing because the fixture failed to insert
       // would look exactly like isolation working.
@@ -330,6 +450,141 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       err.code,
       '42501',
       `expected ownership to be refused, got ${err.code}: ${err.message}`,
+    )
+  })
+
+  /**
+   * The admin portal's backdoor, and the wall around it.
+   *
+   * Migration 0023 creates a role that CAN read every tenant, which is a
+   * deliberate hole and is the only way to answer a support question without
+   * asking the customer to paste their data into a ticket. The property that
+   * makes it a bounded hole rather than an unbounded one is that the
+   * application cannot climb into it: the request path holds antifailure_app's
+   * credential, and reaching antifailure_admin would mean either being a
+   * member of that role or opening a second connection with a password this
+   * process is not given.
+   *
+   * ---------------------------------------------------------------------
+   * WHY THIS IS A ROLE AND NOT A POLICY, and the alternative that was built
+   * and rejected. Recorded here rather than in the migration because that
+   * file has been applied and migrate.ts digests its whole body, so its
+   * prose is frozen: a comment-only edit throws exactly like a DDL edit, on
+   * every database that already ran it. This is the only copy.
+   * ---------------------------------------------------------------------
+   *
+   * First, a correction to what that migration says. Its comment claims
+   * BYPASSRLS is the only mechanism that reads two tenants at once. It is
+   * not. Policies are OR'd, so a permissive policy keyed on a credential the
+   * caller already holds widens just as effectively with no role privilege at
+   * all. That is not a hypothetical: the design was BUILT, it was shown to
+   * work on a real cluster with FORCE ROW LEVEL SECURITY on and row_security
+   * untouched, and it was rejected afterwards. The conclusion below survives;
+   * the reason the migration gives for it does not.
+   *
+   * It was rejected on three grounds, and the third is the one that decides.
+   *
+   * COST THAT SCALES. A policy per table is a boundary whose size grows with
+   * the schema, so it is one somebody eventually forgets to extend. That is
+   * not a prediction either. A single review of the rejected design, of a
+   * schema written hours earlier by a careful author, found three separate
+   * omissions: an operator could read the audit log but not append to it, so
+   * the first refund would have raised on the audit write with the money
+   * already moved; five billing tables were missing from the cross-tenant
+   * read set; and four more were not classified at all.
+   *
+   * CREDENTIAL RATHER THAN CLAIM. A role attribute is a credential the
+   * application cannot be granted its way into, because reaching it means
+   * holding a password this process is not given. A policy keyed on a session
+   * hash is reachable by anyone who can present that hash, which is a claim
+   * rather than a credential, and claims travel.
+   *
+   * LOUD RATHER THAN SILENT, which is the deciding one. The two mechanisms
+   * fail in opposite directions. A missing PRIVILEGE raises permission denied
+   * immediately and names itself. A false POLICY predicate matches zero rows
+   * and REPORTS SUCCESS. Dropping one policy from the rejected design was
+   * tried deliberately: the operator read zero organizations and nothing
+   * raised. So the failure mode of a forgotten policy is a portal that shows
+   * an empty page indistinguishable from a tenant that has no data, and the
+   * failure mode of a forgotten grant is a stack trace. Given that somebody
+   * WILL forget one, the mechanism that shouts is the correct one.
+   *
+   * ---------------------------------------------------------------------
+   * THREE THINGS ABOUT THIS ROLE THAT ARE EASY TO GET WRONG
+   * ---------------------------------------------------------------------
+   *
+   * BYPASSRLS grants NO TABLE PRIVILEGES AT ALL. It is about policies, and
+   * policies only. A role holding it and nothing else gets 42501 on every
+   * statement it attempts, which is what happened to the first code written
+   * against this role.
+   *
+   * ALTER DEFAULT PRIVILEGES covers only what it enumerates, and the one in
+   * migration 0023 enumerates SELECT. Future tables are therefore readable
+   * and not writable, and an operator write needs an explicit INSERT or
+   * UPDATE grant naming the table. That is deliberate, and it is why the
+   * write grants in that file are a short enumerated list rather than a
+   * second blanket.
+   *
+   * Role ATTRIBUTES are not inherited through membership; PRIVILEGES are.
+   * That asymmetry is why the assertion below is about SET ROLE rather than
+   * about inheritance, and it produces the silent failure a third time, now
+   * inside the role mechanism itself. Measured on Postgres 17 against two
+   * organizations:
+   *
+   *   a role holding only BYPASSRLS            permission denied (42501)
+   *   a member of it, reading directly         0 rows, and NO error
+   *   that same parent role, reading directly  2 rows
+   *   the member again, after SET ROLE         2 rows
+   *
+   * The second line is the trap. Membership hands over the GRANTS, so the
+   * statement is permitted and nothing raises, and withholds the ATTRIBUTE,
+   * so the policies still apply and it reads nothing. An operator in that
+   * state sees an empty portal and no error to search for. SET ROLE is what
+   * hands over both, because assuming a role assumes its attributes, which is
+   * why that is the statement this test tries.
+   *
+   * SET ROLE is the specific attack. It needs no password and no new
+   * connection, so if antifailure_admin were ever granted to antifailure_app,
+   * which is one careless GRANT away and would look tidy in a migration, then
+   * every handler in the product would be one statement from reading the
+   * whole database. Nothing else in this suite would notice, because every
+   * other assertion here is about policies, and a role with BYPASSRLS is not
+   * subject to policies at all.
+   */
+  it('the application role cannot become the admin role', async () => {
+    const [admin] = await h.admin<{ rolbypassrls: boolean; rolcanlogin: boolean }[]>`
+      SELECT rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = 'antifailure_admin'`
+    assert.ok(admin, 'migration 0023 did not create antifailure_admin')
+    // If this is ever false the admin portal reads zero rows and every page
+    // renders an empty state that looks like a product with no customers.
+    assert.equal(admin.rolbypassrls, true, 'the admin role cannot actually bypass row-level security')
+
+    // No membership. This is the grant that must never be written.
+    const members = await h.admin<{ member: string }[]>`
+      SELECT m.rolname AS member
+      FROM pg_auth_members am
+      JOIN pg_roles r ON r.oid = am.roleid
+      JOIN pg_roles m ON m.oid = am.member
+      WHERE r.rolname = 'antifailure_admin'`
+    assert.deepEqual(
+      members.map((r) => r.member),
+      [],
+      'something has been granted the admin role; the application must never be able to SET ROLE into it',
+    )
+
+    // And the statement itself, refused, rather than only the catalog being
+    // the right shape. A catalog assertion proves the grant is absent today;
+    // this proves what happens when somebody tries.
+    const escalated = await h.pool
+      .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+        await db.execute(sql`SET ROLE antifailure_admin`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.ok(escalated, 'the application role became the admin role')
+    assert.equal(
+      escalated.code,
+      '42501',
+      `expected SET ROLE to be refused, got ${escalated.code}: ${escalated.message}`,
     )
   })
 
@@ -569,6 +824,203 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     assert.equal(resolved[0]!.user_id, alice.userId)
 
     await h.admin`DELETE FROM sessions WHERE token_hash = ${token}`
+  })
+
+  // -------------------------------------------------------------------------
+  // The session sweeper's role.
+  // -------------------------------------------------------------------------
+  //
+  // Housekeeping on this table belongs to no user and no organization, so no
+  // policy matched it and it deleted nothing for as long as it existed. The
+  // obvious fix, a policy on antifailure_app admitting expired rows, is the
+  // trap: permissive policies are OR'd, so one naming no tenant does not
+  // narrow anything, it widens every other policy on the table for every
+  // request the application makes. A session row carries user_id and org_id,
+  // so that would hand every tenant a list of which users of which OTHER
+  // organizations had recently been signed in.
+  //
+  // 0024 puts the policy on a role of its own instead, entered for one
+  // transaction. These are the two directions that have to hold at once: the
+  // sweep must reach expired rows, and nothing about it may widen what an
+  // ordinary request can see.
+  //
+  // Every case is written as an attempt, the same as the rest of this file. A
+  // test that only checked "the sweeper can delete" would pass with the
+  // column grant removed and with the policy written USING (true).
+
+  describe('the session sweeper', () => {
+    const expiredAlice = Buffer.from('e1'.repeat(32), 'hex')
+    const expiredBob = Buffer.from('e2'.repeat(32), 'hex')
+    const expiredNobody = Buffer.from('e3'.repeat(32), 'hex')
+    const liveAlice = Buffer.from('e4'.repeat(32), 'hex')
+
+    before(async () => {
+      await h.admin`
+        INSERT INTO sessions (token_hash, user_id, org_id, expires_at) VALUES
+          (${expiredAlice}, ${alice.userId}, ${alice.orgId}, now() - interval '1 day'),
+          (${expiredBob}, ${bob.userId}, ${bob.orgId}, now() - interval '1 day'),
+          -- org_id is NULLABLE. A sign-in abandoned before an organization was
+          -- chosen leaves this row, and it is the reason a per-tenant sweep
+          -- driven by enumerating organizations could never have worked: there
+          -- is no tenant to enumerate it under.
+          (${expiredNobody}, ${alice.userId}, NULL, now() - interval '1 day'),
+          (${liveAlice}, ${alice.userId}, ${alice.orgId}, now() + interval '1 day')`
+    })
+
+    after(async () => {
+      await h.admin`
+        DELETE FROM sessions WHERE token_hash IN
+          (${expiredAlice}, ${expiredBob}, ${expiredNobody}, ${liveAlice})`
+    })
+
+    it('did not widen what a signed-in tenant can read', async () => {
+      // Bob, scoped to his own organization, asking for the rows the sweep
+      // policy admits. If that policy were attached to antifailure_app this
+      // would return alice's expired session and the org-less one.
+      const rows = await h.pool.withTenant(
+        { orgId: bob.orgId, userId: bob.userId },
+        async (db) =>
+          db.execute<{ n: string }>(sql`
+            SELECT count(*) AS n FROM sessions
+            WHERE token_hash IN (${expiredAlice}, ${expiredNobody})`),
+      )
+      assert.equal(
+        Number(rows[0]!.n),
+        0,
+        'a tenant can read expired sessions that are not its own',
+      )
+    })
+
+    it('did not widen what a signed-in tenant can delete', async () => {
+      const deleted = await h.pool.withTenant(
+        { orgId: bob.orgId, userId: bob.userId },
+        async (db) =>
+          db.execute<{ n: string }>(sql`
+            WITH gone AS (
+              DELETE FROM sessions
+              WHERE expires_at <= now() AND user_id <> ${bob.userId}
+              RETURNING 1
+            ) SELECT count(*) AS n FROM gone`),
+      )
+      assert.equal(
+        Number(deleted[0]!.n),
+        0,
+        "a tenant deleted another user's expired sessions",
+      )
+    })
+
+    it('the old path still deletes nothing, which is the defect being fixed', async () => {
+      // Kept as a live assertion rather than a comment. If some later change
+      // makes withoutTenant able to delete these rows, that is a policy
+      // admitting an unauthenticated connection to the whole table, and it
+      // should fail here rather than look like the sweeper starting to work.
+      const deleted = await h.pool.withoutTenant(async (db) =>
+        db.execute<{ n: string }>(sql`
+          WITH gone AS (
+            DELETE FROM sessions WHERE expires_at <= now() RETURNING 1
+          ) SELECT count(*) AS n FROM gone`),
+      )
+      assert.equal(Number(deleted[0]!.n), 0, 'a connection with no tenant deleted session rows')
+    })
+
+    it('cannot read a session row, expired or live', async () => {
+      // Row-level security has no way to restrict a column, so the policy
+      // alone would leave this role able to read token_hash on every expired
+      // row. A column GRANT can say it, and this is the assertion that the
+      // GRANT is still narrow. It has to be a refusal rather than an empty
+      // result: a refusal says so, an empty result looks like an empty table.
+      for (const column of ['token_hash', 'user_id', 'org_id', '*']) {
+        const err = await h.pool
+          .withSessionSweeper(async (db) =>
+            db.execute(sql`SELECT ${sql.raw(column)} FROM sessions LIMIT 1`),
+          )
+          .then(
+            () => null,
+            (e: unknown) => pgError(e),
+          )
+        assert.ok(err, `the sweeper read sessions.${column}`)
+        assert.equal(
+          err.code,
+          '42501',
+          `expected reading ${column} to be refused for insufficient privilege, ` +
+            `got ${err.code}: ${err.message}`,
+        )
+      }
+    })
+
+    it('holds nothing anywhere else in the database', async () => {
+      for (const table of ['users', 'organizations', 'members', 'audit_entries']) {
+        const err = await h.pool
+          .withSessionSweeper(async (db) =>
+            db.execute(sql`SELECT count(*) FROM ${sql.raw(table)}`),
+          )
+          .then(
+            () => null,
+            (e: unknown) => pgError(e),
+          )
+        assert.ok(err, `the sweeper read ${table}`)
+        assert.equal(err.code, '42501', `reading ${table} gave ${err.code}: ${err.message}`)
+      }
+    })
+
+    it('sees expired rows and no live one', async () => {
+      const rows = await h.pool.withSessionSweeper(async (db) =>
+        db.execute<{ live: string; dead: string }>(sql`
+          SELECT count(*) FILTER (WHERE expires_at > now()) AS live,
+                 count(*) FILTER (WHERE expires_at <= now()) AS dead
+          FROM sessions`),
+      )
+      assert.equal(Number(rows[0]!.live), 0, 'the sweeper can see a live session')
+      assert.ok(
+        Number(rows[0]!.dead) >= 3,
+        `the sweeper cannot see the expired rows it exists to remove: ${rows[0]!.dead}`,
+      )
+    })
+
+    it('deletes expired rows across every tenant, including the org-less one', async () => {
+      const deleted = await h.pool.withSessionSweeper(async (db) =>
+        db.execute<{ n: string }>(sql`
+          WITH gone AS (
+            DELETE FROM sessions WHERE expires_at <= now() RETURNING 1
+          ) SELECT count(*) AS n FROM gone`),
+      )
+      assert.ok(Number(deleted[0]!.n) >= 3, `the sweep removed ${deleted[0]!.n} rows`)
+
+      const [remaining] = await h.admin<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM sessions
+        WHERE token_hash IN (${expiredAlice}, ${expiredBob}, ${expiredNobody})`
+      assert.equal(remaining!.n, 0, 'an expired session survived the sweep')
+
+      const [kept] = await h.admin<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM sessions WHERE token_hash = ${liveAlice}`
+      assert.equal(kept!.n, 1, 'the sweep removed a live session')
+    })
+
+    it('cannot act as the sweeper without asking, which is the trap in this design', async () => {
+      // Postgres decides whether a policy applies by asking whether the
+      // current user has the PRIVILEGES OF the policy's role, not whether it
+      // is acting as it. An inheriting grant would therefore apply
+      // sweep_expired_sessions to every ordinary request, silently, and every
+      // assertion above about tenants would go red at once. This is the
+      // property that keeps them honest, asserted directly.
+      const [row] = await h.admin<{ inherits: boolean; member: boolean }[]>`
+        SELECT pg_has_role('antifailure_app', 'antifailure_sweeper', 'USAGE') AS inherits,
+               pg_has_role('antifailure_app', 'antifailure_sweeper', 'MEMBER') AS member`
+      assert.equal(row!.inherits, false, 'antifailure_app inherits the sweeper role')
+      assert.equal(row!.member, true, 'antifailure_app cannot enter the sweeper role')
+    })
+
+    it('reverts the role at the end of the transaction', async () => {
+      // SET LOCAL, for the same reason every setting in client.ts is local: a
+      // pooled connection returned still acting as the sweeper is read by
+      // whoever borrows it next.
+      await h.pool.withSessionSweeper(async (db) => db.execute(sql`SELECT 1`))
+      const rows = await h.pool.withTenant(
+        { orgId: alice.orgId, userId: alice.userId },
+        async (db) => db.execute<{ who: string }>(sql`SELECT current_user AS who`),
+      )
+      assert.equal(rows[0]!.who, 'antifailure_app')
+    })
   })
 })
 

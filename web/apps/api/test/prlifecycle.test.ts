@@ -47,6 +47,7 @@ import {
   TEARDOWN_ATTEMPTS,
   TEARDOWN_LEASE_MS,
   TIMED_OUT_DETAIL,
+  WORKFLOW_ENGINE_TTL_MS,
 } from '../src/github/lifecycle.ts'
 import { CHECK_NAME, COMMENT_MARKER } from '../src/github/render.ts'
 import { checkShapeFor, GENERATION_STATES } from '../src/github/states.ts'
@@ -483,6 +484,138 @@ describe(
       // event that has already happened.
       await deliver('pull_request', pullRequestPayload('opened', 15, head))
       assert.ok(await callbackFor(head, 5005))
+    })
+
+    // -----------------------------------------------------------------------
+    // The engine's own credential, minted from the same identity
+    //
+    // Until this existed the engine's control plane sink read
+    // AF_CONTROL_PLANE_TOKEN, and nothing in any workflow this project ships
+    // ever set it, so the sink was never built and a CI run reported no events
+    // at all. These prove the exchange that replaced that variable, and they
+    // prove it by using what it hands back rather than by inspecting it.
+    // -----------------------------------------------------------------------
+
+    /** The credential the engine would hold, through the endpoint it calls. */
+    async function engineTokenFor(runId: number): Promise<Response> {
+      return h.fetch('/v1/engine/token', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${identityToken({ repository, runId }, h.clock.now())}`,
+        },
+        body: '{}',
+      })
+    }
+
+    /** One event, sent the way the engine's sink sends a batch. */
+    async function sendEvent(token: string, id: string): Promise<Response> {
+      return h.fetch('/v1/events', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          events: [{
+            id,
+            type: 'environment.ready',
+            envId: 'env-minted',
+            sequence: 1,
+            occurredAt: h.clock.now().toISOString(),
+          }],
+        }),
+      })
+    }
+
+    it('a workflow identity buys a credential the ingestion endpoint accepts', async () => {
+      const res = await engineTokenFor(6001)
+      assert.equal(res.status, 200)
+      const body = (await res.json()) as { token?: string; expires_in?: number }
+      assert.ok(body.token, 'no token came back')
+      assert.equal(body.expires_in, Math.floor(WORKFLOW_ENGINE_TTL_MS / 1000))
+
+      // The whole point, and the only assertion that proves it: the credential
+      // works on the endpoint the sink actually posts to. A token that came
+      // back but was refused here would be the dead path this change exists to
+      // remove.
+      const sent = await sendEvent(body.token!, 'ev-minted-1')
+      assert.equal(sent.status, 202)
+      const [row] = await h.admin`
+        SELECT id FROM events
+        WHERE idempotency_key = ${'ev-minted-1'} AND org_id = ${org.orgId}`
+      assert.ok(row, 'the event never reached the database')
+    })
+
+    it('the credential expires, and the column that says so is enforced', async () => {
+      const res = await engineTokenFor(6002)
+      const { token } = (await res.json()) as { token: string }
+
+      // Good now.
+      assert.equal((await sendEvent(token, 'ev-before-expiry')).status, 202)
+
+      // And not a moment past its life. expires_at existed on engine_tokens
+      // since migration 0012 and nothing read it, which cost nothing while
+      // every token was permanent and would have made "short lived" a comment
+      // rather than a property the moment one was not.
+      h.clock.advance(WORKFLOW_ENGINE_TTL_MS + 1000)
+      const late = await sendEvent(token, 'ev-after-expiry')
+      assert.equal(late.status, 401)
+      const [row] = await h.admin`
+        SELECT id FROM events WHERE idempotency_key = ${'ev-after-expiry'}`
+      assert.equal(row, undefined, 'an expired credential still wrote an event')
+    })
+
+    it('a repository this control plane has never heard of gets no credential', async () => {
+      const res = await h.fetch('/v1/engine/token', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${identityToken(
+            { repository: 'somebody-else/not-connected', runId: 6003 }, h.clock.now(),
+          )}`,
+        },
+        body: '{}',
+      })
+      assert.equal(res.status, 409)
+      assert.match(await res.text(), /not connected to this control plane/)
+    })
+
+    it('an identity minted for another audience buys nothing', async () => {
+      // The default audience GitHub mints is the repository owner's URL, which
+      // every workflow in the organization can obtain. Accepting one here would
+      // let any workflow in the org report as this repository, so this route
+      // has to check it and not merely trust that the caller asked correctly.
+      const res = await h.fetch('/v1/engine/token', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${identityToken(
+            { repository, runId: 6004, audience: 'https://github.com/somebody' }, h.clock.now(),
+          )}`,
+        },
+        body: '{}',
+      })
+      assert.equal(res.status, 401)
+      assert.match(await res.text(), /wrong_audience/)
+    })
+
+    it('an identity nobody could have signed buys nothing', async () => {
+      const impostor = generateKeyPairSync('rsa', { modulusLength: 2048 })
+      const res = await h.fetch('/v1/engine/token', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${identityToken(
+            { repository, runId: 6005, key: impostor.privateKey }, h.clock.now(),
+          )}`,
+        },
+        body: '{}',
+      })
+      assert.equal(res.status, 401)
+    })
+
+    it('no identity at all is told how to present one', async () => {
+      const res = await h.fetch('/v1/engine/token', { method: 'POST', body: '{}' })
+      assert.equal(res.status, 401)
+      assert.match(await res.text(), /id-token: write/)
     })
 
     // -----------------------------------------------------------------------
@@ -1046,6 +1179,127 @@ describe(
       // The repository comes from the signed token and not from the body, so
       // this looks up somebody else's repository and finds nothing.
       assert.equal(res.status, 409)
+    })
+
+    // -----------------------------------------------------------------------
+    // A suspended organization
+    //
+    // The suspension was read at /v1/events and nowhere else, so a stopped
+    // organization was issued a working credential and refused only when it
+    // tried to use it. Nothing crossed a tenant boundary and nothing could be
+    // ingested, so this is noise rather than a breach, but it is the expensive
+    // kind of noise: the customer is shown a failure on the reporting path when
+    // the answer is their billing state, and that is where they go looking.
+    // -----------------------------------------------------------------------
+
+    it('a suspended organization is refused the credential rather than the report', async () => {
+      const head = sha('suspended-org')
+      await deliver('pull_request', pullRequestPayload('opened', 33, head))
+
+      await h.admin`
+        UPDATE organizations
+        SET suspended_at = now(), suspended_reason = 'unpaid invoice'
+        WHERE id = ${org.orgId}`
+      try {
+        const res = await h.fetch('/v1/pr/callback-token', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${identityToken({ repository, runId: 5021 }, h.clock.now())}`,
+          },
+          body: JSON.stringify({ head_sha: head }),
+        })
+        assert.equal(res.status, 409)
+        const body = (await res.json()) as { error: string }
+        // The message names the suspension AND its reason. "409" on its own
+        // sends the reader back to the check, which is where this defect used
+        // to send them.
+        assert.match(body.error, /suspended/i)
+        assert.match(body.error, /unpaid invoice/)
+        assert.doesNotMatch(body.error, /no check is waiting/)
+
+        // Nothing was minted. The refusal has to happen BEFORE the write, not
+        // beside it: a row carrying a callback hash is a credential that exists.
+        const [row] = await h.admin<{ callback_hash: Buffer | null; state: string }[]>`
+          SELECT g.callback_hash, g.state::text AS state
+          FROM pr_generations g JOIN pull_requests p ON p.id = g.pull_request_id
+          WHERE p.repository_id = ${org.repoId}::uuid AND g.head_sha = ${head}`
+        assert.ok(row, 'the generation the delivery created is missing')
+        assert.equal(row!.callback_hash, null)
+        assert.equal(row!.state, 'queued')
+      } finally {
+        await h.admin`
+          UPDATE organizations SET suspended_at = NULL, suspended_reason = NULL
+          WHERE id = ${org.orgId}`
+      }
+
+      // And the same call succeeds once the suspension lifts, which is what
+      // separates this from a check that refuses everybody.
+      const res = await h.fetch('/v1/pr/callback-token', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${identityToken({ repository, runId: 5022 }, h.clock.now())}`,
+        },
+        body: JSON.stringify({ head_sha: head }),
+      })
+      assert.equal(res.status, 200)
+      const issued = (await res.json()) as { token: string }
+      assert.ok(issued.token)
+    })
+
+    it('the suspension is read where the tenant is known, not where the account is', async () => {
+      // The same organization, reached through a SECOND installation whose
+      // account login is not the one on the organization row. An organization
+      // can hold more than one installation, which is why installationFor looks
+      // an installation up by owner rather than taking the organization's
+      // first.
+      //
+      // This is the case that separates a suspension read under the tenant from
+      // one read on the GitHub account connection. On that connection the
+      // organizations table is reachable only through the policy matching
+      // organizations.github_login against the account, so from here the row is
+      // invisible, and a check written there reads zero rows and lets the mint
+      // through. The refusal below is the correct scope working; a mint, or a
+      // refusal that talks about a missing check, is the wrong one.
+      const second = `second-${randomUUID().slice(0, 8)}`
+      const full = `${second}/app`
+      await h.admin`
+        INSERT INTO github_installations (org_id, installation_id, account_login, account_type)
+        VALUES (${org.orgId}, ${installationId + 1}, ${second}, 'Organization')`
+      await h.admin`INSERT INTO repositories (org_id, full_name) VALUES (${org.orgId}, ${full})`
+      await h.admin`
+        UPDATE organizations
+        SET suspended_at = now(), suspended_reason = 'an incident'
+        WHERE id = ${org.orgId}`
+      try {
+        const res = await h.fetch('/v1/pr/callback-token', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${identityToken(
+              { repository: full, runId: 5023 },
+              h.clock.now(),
+            )}`,
+          },
+          body: JSON.stringify({ head_sha: sha('second-account') }),
+        })
+        assert.equal(res.status, 409)
+        const body = (await res.json()) as { error: string }
+        assert.match(body.error, /suspended/i)
+        assert.match(body.error, /an incident/)
+        // The tell of the wrong scope. With no generation on this commit, an
+        // implementation whose suspension read came back empty falls straight
+        // through to the generation lookup and answers with this instead.
+        assert.doesNotMatch(body.error, /no check is waiting/)
+      } finally {
+        await h.admin`
+          UPDATE organizations SET suspended_at = NULL, suspended_reason = NULL
+          WHERE id = ${org.orgId}`
+        await h.admin`DELETE FROM repositories WHERE full_name = ${full}`
+        await h.admin`
+          DELETE FROM github_installations WHERE installation_id = ${installationId + 1}`
+      }
     })
 
     function lifecycle() {

@@ -16,7 +16,7 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { listProcedures } from '../src/openapi.ts'
-import { declaredPermissions } from '../src/trpc.ts'
+import { declaredAdminPermissions, declaredPermissions } from '../src/trpc.ts'
 import {
   PERMISSIONS, ROLES, ROLE_PERMISSIONS, roleHas, type Permission, type Role,
 } from '../src/permissions.ts'
@@ -53,6 +53,10 @@ function inputsFor(org: Org): Record<string, unknown> {
     // PRECONDITION_FAILED, which is what the matrix accepts and what proves the
     // gate let the call through rather than what GitHub then made of it.
     'environments.create': { repository: org.repository, branch: 'main' },
+    // Guarded by environments.create, because it answers one question about
+    // that one route: whether pressing it would work. It refuses nothing, so
+    // an allowed role gets an answer here rather than PRECONDITION_FAILED.
+    'environments.readiness': { repository: org.repository },
     'agents.run': { envId: org.envId },
     'load.run': { envId: org.envId },
     'runs.list': { envId: org.envId },
@@ -146,6 +150,45 @@ function inputsFor(org: Org): Record<string, unknown> {
     'account.context': {},
     // Deliberately not anybody's login, for the same reason.
     'account.close': { confirm: 'not-your-login' },
+    // Studio. Every read and every write here names something that is
+    // deliberately not in this fixture, so the handler is reached and answers
+    // NOT_FOUND, which is what the matrix accepts as proof that the permission
+    // gate let the call through. What each route then does is proved in
+    // workloads.test.ts against a fixture built for it.
+    'workloads.list': { limit: 10, includeArchived: false },
+    'workloads.get': { slug: 'nothing-defined-here' },
+    'workloads.runs': { limit: 10 },
+    'workloads.inspect': { runId: '00000000-0000-0000-0000-000000000000' },
+    'workloads.addVersion': { slug: 'nothing-defined-here', body: { select: [] } },
+    'workloads.archive': { slug: 'nothing-defined-here' },
+    'workloads.start': { slug: 'nothing-defined-here', envId: org.envId },
+    'workloads.cancel': { runId: '00000000-0000-0000-0000-000000000000' },
+    'workloads.retry': { runId: '00000000-0000-0000-0000-000000000000' },
+    // Three roles hold workloads.edit, so the second and third to run get
+    // BAD_REQUEST for a slug that is already taken. The matrix accepts that as
+    // the gate having let the call through, which is all it claims to test.
+    'workloads.create': {
+      repository: org.repository,
+      slug: 'matrix',
+      name: 'Matrix',
+      kind: 'browser_workflow',
+      body: { select: ['sign-up'] },
+    },
+    // A real exploration document, so the compiler runs rather than the route
+    // refusing at its own boundary. A repeat is the same digest and answers
+    // created: false, which is a 200 and not a side effect.
+    'workloads.promote': {
+      repository: org.repository,
+      exploration: {
+        name: 'matrix promotion',
+        goal: 'reach the billing page',
+        seed: 'matrix',
+        reached: true,
+        journey: [{ kind: 'goto', url: 'http://env.test/pricing' }],
+        findings: [],
+        missing: [],
+      },
+    },
   }
 }
 
@@ -174,10 +217,22 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
   })
 
   it('every route declares a permission or is deliberately public', () => {
+    // Operator routes declare a PLATFORM permission and are walked by their own
+    // matrix in admin-routes.test.ts, which asserts the same three properties
+    // against the platform catalog.
+    //
+    // Skipped by DECLARATION and never by path prefix. A prefix skip would let
+    // a route named `admin.something` that declares nothing at all fall through
+    // this test AND be absent from the platform one, guarded by neither and
+    // visible to no test, which is worse than the problem it solves.
     const declared = declaredPermissions()
+    const operatorRoutes = declaredAdminPermissions()
     const undeclared = listProcedures()
       .map(({ path }) => path)
-      .filter((path) => !declared.has(path) && !PUBLIC_ROUTES.has(path))
+      .filter(
+        (path) =>
+          !declared.has(path) && !PUBLIC_ROUTES.has(path) && !operatorRoutes.has(path),
+      )
 
     assert.deepEqual(
       undeclared,
@@ -188,10 +243,16 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
   })
 
   it('every route has a sample input, so none drops out of the matrix', () => {
+    // Operator routes are excluded for the same reason and by the same test as
+    // above: they are driven by their own matrix against the platform catalog,
+    // and they take an operator session this org-scoped harness does not have.
+    // Excluded by DECLARATION, so an operator route that declares nothing is
+    // still missing here and still fails.
     const inputs = inputsFor(org)
+    const operatorRoutes = declaredAdminPermissions()
     const missing = listProcedures()
       .map(({ path }) => path)
-      .filter((path) => !(path in inputs))
+      .filter((path) => !(path in inputs) && !operatorRoutes.has(path))
     assert.deepEqual(missing, [], `no sample input for: ${missing.join(', ')}`)
   })
 
@@ -234,12 +295,19 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
     }
   })
 
+  /** Operator routes, excluded from the TENANT matrix by declaration rather
+   *  than by path, so one that declares nothing still fails above. */
+  const operatorPaths = declaredAdminPermissions()
+
   // The matrix itself. One test per role per route, named so that a failure
   // says which cell broke.
   for (const role of ROLES) {
     describe(`as ${role}`, () => {
       for (const { path, type } of listProcedures()) {
         if (PUBLIC_ROUTES.has(path)) continue
+        // Operator routes take an operator session, which this org-scoped
+        // harness cannot mint. admin-routes.test.ts drives them with one.
+        if (operatorPaths.has(path)) continue
 
         it(`${type} ${path}`, async () => {
           const permission = declaredPermissions().get(path) as Permission
@@ -284,6 +352,7 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
   it('no session at all is unauthorized, not forbidden and not allowed', async () => {
     for (const { path, type } of listProcedures()) {
       if (PUBLIC_ROUTES.has(path)) continue
+      if (operatorPaths.has(path)) continue
       const { body } = await callProcedure(h, null, path, type, inputsFor(org)[path])
       assert.equal(
         errorCode(body),

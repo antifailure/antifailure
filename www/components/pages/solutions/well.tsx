@@ -154,9 +154,15 @@ function HeroCopy({
           </p>
         ))}
       </div>
-      <div className="mt-8">
-        <Button href="/signup" theme="filled">
-          Get started
+      {/* The same pair as every other hero on the site, in the same order.
+          This one offered only the invitation wall, so a solutions page pitched
+          the product and then gave a visitor nothing they could do today. */}
+      <div className="mt-8 flex gap-x-5 max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full">
+        <Button href="/docs/getting-started/quickstart" theme="filled">
+          Start the quickstart
+        </Button>
+        <Button href="/signup" theme="outlined">
+          Request hosted access
         </Button>
       </div>
     </>

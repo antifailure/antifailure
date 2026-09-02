@@ -2,7 +2,7 @@
 title: The journal
 description: Why every resource is recorded before it is created, and what that buys.
 sidebar:
-  order: 6
+  order: 8
 ---
 
 Antifailure writes down what it is about to create before it creates it, and
@@ -90,4 +90,4 @@ environments in one lock namespace. `af doctor` prints the path it is using.
 It is local state and belongs in `.gitignore`, which `af init` adds. It holds no
 secrets: connection strings are resolved when needed and never written down.
 
-Related: [the local runtime](/docs/guides/local-runtime/), [providers](/docs/providers/overview/).
+Related: [the local runtime](/docs/guides/local-runtime), [providers](/docs/providers/overview).

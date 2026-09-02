@@ -72,6 +72,12 @@ key_vault_name = "afcp-kv-centralus"
 # nobody can review.
 signin_allowlist = ["virsanghavi", "maksymrajszewski"]
 
+# Where the accounts that list does not name are sent. Without it a refused
+# visitor reads "ask an owner of this installation", which is the right answer
+# for somebody self-hosting and the wrong one for a person who arrived from the
+# marketing site and was one click away from the waitlist.
+signup_url = "https://antifailure.dev/signup"
+
 # The GitHub App.
 #
 # Not a secret: an App ID is public, it appears in every JWT this control plane

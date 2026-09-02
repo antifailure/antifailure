@@ -1,6 +1,6 @@
 {
   "name": "@antifailure/api",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -14,7 +14,9 @@
   "scripts": {
     "start": "node src/main.ts",
     "test": "node --test --test-concurrency=1 test/*.test.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "openapi": "node scripts/openapi.ts ../../../www/public/openapi.json",
+    "openapi:check": "node scripts/openapi.ts ../../../www/public/openapi.json --check"
   },
   "dependencies": {
     "@antifailure/db": "*",

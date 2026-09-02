@@ -1,3 +1,5 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 package compliance
 
 // The audit chain verifier, checked against the implementation that wrote every

@@ -7,11 +7,40 @@ on:
     branches: [main]
   pull_request:
 
-# A second push cancels the first run on the same branch, because the answer
-# about the older commit stopped mattering the moment the newer one arrived.
+# A second push cancels the first run on a BRANCH, because the answer about the
+# older commit stopped mattering the moment the newer one arrived. On main it
+# does not, and the reason is directly below.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on main is the verdict a tag and a deploy are read against, so it
+  # is never cancelled. On a branch the saving is real and nothing depends
+  # on the superseded answer, so cancelling stays.
+  #
+  # Six merges landed inside one run's length on 2026-09-02 and each cancelled
+  # the one before it, so main went from 09:07 to past 12:30 with no COMPLETED
+  # run at all. Cancelled is not red, but it is not a verdict either, and at
+  # the time `release.yml` had no gate of its own, so the only thing standing
+  # between an unverified commit and published binaries was somebody holding
+  # merges by hand.
+  #
+  # `release.yml` has a gate now and it reads THIS workflow's conclusion, which
+  # makes this line matter more rather than less: the gate refuses a cancelled
+  # run, so a main run that never finished is a release that cannot be cut.
+  #
+  # There is no clause for tags here because this workflow does not run on
+  # one. The `on:` block above is a push to main and a pull request, and
+  # nothing else, so `refs/tags/` is a ref this expression is never evaluated
+  # against. The first version of this line excluded tags anyway, which read
+  # as protection and was a condition that could not be true.
+  #
+  # What this does NOT buy, so nobody reads more into it than it does: a run
+  # that has already STARTED is never cancelled, and that is the whole of it.
+  # GitHub still cancels a run that is merely PENDING when a newer one queues
+  # behind the same in progress run. So the newest commit always reaches a
+  # verdict, which is what a tag and a deploy are read against, and commits in
+  # between a burst of merges still get skipped. Every commit reaching a
+  # verdict needs a merge queue, not a bigger timeout.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Read, and only read. No job in this workflow writes anything back, and a
 # token that could is a token an action pulled from the internet could use.
@@ -35,10 +64,19 @@ jobs:
       # claimcheck binary passed in the job that had the history. They fail
       # rather than skip on purpose: a check that cannot find its answer and
       # reports green is the false green this repository has produced twice.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history, for the claimcheck tests described above.
+          fetch-depth: 0
+          # The tags, which a checkout does not fetch by default. tools/tagsync
+          # compares a version pin against the tags that exist, and against an
+          # empty tag list every pin would look unpublished. It refuses to run
+          # on an empty list rather than passing over nothing, so without this
+          # the job fails loudly instead of checking quietly, which is the right
+          # direction and still not the one anybody wants.
+          fetch-tags: true
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -120,6 +158,35 @@ jobs:
         # looking finished.
         run: go run ./tools/releasecheck .
 
+      - name: The release notes for a tag exist and say something
+        # A changelog section that is a heading and nothing under it reads as
+        # finished in the diff and would publish a release that says nothing.
+        # Checked here rather than only at tag time, because at tag time the
+        # only remedy is to delete a tag people may already have fetched.
+        run: go run ./tools/relnotes .
+
+      - name: No version pin names a tag nobody published
+        # The Terraform image_tag defaults are live: the maintenance container
+        # app job reads them with no ignore_changes, so an apply from main takes
+        # the value. Bumping them in the same commit as the tag points the next
+        # apply at an image that does not exist yet. This is that ordering as a
+        # gate rather than as a sentence somebody has to remember once a
+        # release, which is about as often as anybody remembers anything.
+        run: go run ./tools/tagsync .
+
+      - name: The license is detectable and the ee carve out is stated
+        # LICENSE carried the MIT text plus one paragraph naming the ee carve
+        # out. The paragraph was correct and it made the license undetectable:
+        # Licensee folds appended prose into the text it compares, so GitHub
+        # reported NOASSERTION for an MIT project. No license in the sidebar,
+        # absent from the license filter, and to anyone scanning it, all rights
+        # reserved. Nobody looks at a badge, so nothing found it.
+        #
+        # Both halves are checked together on purpose. Holding LICENSE to pure
+        # MIT alone would be satisfied by deleting the carve out, and a paid
+        # directory nobody knows is paid is the worse of the two failures.
+        run: go run ./tools/licensecheck .
+
       - name: The one command runs what this workflow runs
         # CONTRIBUTING.md promises that a green `just gate` means a green CI.
         # Nothing watched that, so a job added here would quietly stop being
@@ -128,12 +195,31 @@ jobs:
         # supposed to prevent.
         run: go run ./tools/gatecheck .
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - name: Every script this repository runs by path can be executed
+        # tools/site/check-tls.sh was committed at mode 100644. Both of the
+        # places that run it name it as a bare relative path, the certificate
+        # step in deploy.yml and the `check-tls` recipe, so the kernel refused
+        # to exec it and the step died with "Permission denied" and status 126.
+        # It had never run anywhere: the only job that calls it fires on a push
+        # to main and not on a pull request, so the first push that reached the
+        # deploy job was also the first time anybody learned that the
+        # certificate check had never checked a certificate.
+        #
+        # The mode is read from the git index rather than from the disk, which
+        # is what makes this a gate rather than a check on whoever ran it: a
+        # `chmod +x` without a `git update-index --chmod=+x` leaves a working
+        # tree that runs the script and a commit that does not.
+        run: go run ./tools/execcheck .
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         # For the examples that are not Go. Pinned to the same major the
         # runtime images use, so the version that builds an example here is the
-        # version that builds it in the Dockerfile a user copies.
+        # version that builds it in the Dockerfile a user copies. That is a
+        # promise this file has to keep by hand: nothing reads the Dockerfile
+        # and compares, so a base image bump that leaves this line alone makes
+        # the comment false and the job green.
         with:
-          node-version: '22'
+          node-version: '26'
           cache: npm
           cache-dependency-path: examples/*/package-lock.json
 
@@ -208,6 +294,22 @@ jobs:
         # while before anything enforced it, which is how a claim in
         # documentation quietly stops being true.
         run: go run ./tools/errcheck .
+
+      - name: The Go packages version 1 promised are the ones it still has
+        # Two sentences of the release notes, held to the tree. The engine's
+        # stable packages are engine/pkg/provider, engine/pkg/schema,
+        # engine/pkg/secret and engine/conformance, everything else is free to
+        # change, and engine/internal cannot be imported from outside the module
+        # at all. The last of those is the toolchain's and needs nothing; the
+        # rest had nothing behind them.
+        #
+        # It caught a live one. provider.Database.ConnString returned a type
+        # from engine/internal/secrets, so the interface the notes call an
+        # integration surface could not be implemented from outside the
+        # repository: the return type has no spelling an outside package is
+        # allowed to use. It compiled here, reviewed as correct, and would have
+        # failed on the first line of the first real provider anybody wrote.
+        run: go run ./tools/surfacecheck .
 
       - name: Vet
         run: cd engine && go vet ./...
@@ -347,9 +449,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -384,7 +486,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The sitemap's lastmod for each route comes from when the files
           # behind it last changed, which means asking git. The default shallow
@@ -394,7 +496,7 @@ jobs:
           # this was caught rather than shipped.
           fetch-depth: 0
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: npm
@@ -404,7 +506,7 @@ jobs:
             api/package-lock.json
 
       # For classcheck below, which reads the built HTML this job produces.
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: tools/go.mod
           cache-dependency-path: tools/go.sum
@@ -492,7 +594,7 @@ jobs:
         # backs starts answering with the 404 page and nothing else notices.
         run: |
           missing=0
-          for route in index environments runs masking network audit members plan keys device 404; do
+          for route in index environments runs load masking network audit members plan keys device 404; do
             if [ ! -f "console/out/$route.html" ]; then
               echo "::error::console/out/$route.html was not exported"
               missing=1
@@ -578,7 +680,7 @@ jobs:
         # The pull request preview. An artifact rather than a deployment,
         # because a pull request from a fork must not be able to publish to the
         # address people trust.
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: site-preview
           path: site
@@ -610,9 +712,9 @@ jobs:
       AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/antifailure
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: npm
@@ -646,14 +748,44 @@ jobs:
         run: npm test --workspaces --if-present
         working-directory: web
 
+      - name: The published OpenAPI document is the one this router serves
+        # Runs even when Test failed, which is the whole point of the line
+        # below. This step is sequenced immediately after Test, and Test is red
+        # on every branch in a migration chain because the numbering gate reads
+        # a gap until the branches ahead land. A skipped step renders exactly
+        # like one that had nothing to do, so for the length of a queue this
+        # control was dark and its darkness was invisible: the job already said
+        # failure for the reason you expected.
+        #
+        # That is not hypothetical. Mounting the operator router put eighteen
+        # admin routes into the published document described as `security: []`
+        # and "Requires no permission", and this step did not run on the change
+        # that introduced them, or on the change that fixed it. It was found by
+        # running the check by hand.
+        #
+        # A gate whose subject is a published document should not be silenced
+        # by an unrelated failure in the same job.
+        if: always()
+        # www/public/openapi.json is what antifailure.dev/openapi.json serves,
+        # and it is generated from the router in this job's workspace rather
+        # than proxied from production at request time. The reason is in
+        # web/apps/api/scripts/openapi.ts; the consequence is that it can go
+        # stale against the router silently, exactly like any other generated
+        # file, and the site would publish a contract this revision does not
+        # serve. This is the step that stops that, and it validates the
+        # document before comparing, so a malformed one cannot be committed
+        # either.
+        run: npm run openapi:check --workspace apps/api
+        working-directory: web
+
   edition-boundary:
     name: edition boundary
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -741,9 +873,9 @@ jobs:
       AF_REQUIRE_DATABASE: '1'
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
 
@@ -758,7 +890,7 @@ jobs:
           GOWORK=off go vet ./...
           GOWORK=off go test ./... -race -count=1 -timeout 15m
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
 
@@ -801,10 +933,10 @@ jobs:
     steps:
       # Full history, because the build stamps the commit date and a shallow
       # checkout of a merge commit does not have the one the release would use.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -828,8 +960,21 @@ jobs:
         # without its prerequisites. The script is the shared part.
         run: ./tools/release/reproducible.sh
 
-  secrets:
-    name: no credentials in the tree
+  # This job is named for what it checks, not for its most important step.
+  #
+  # It used to be called "no credentials in the tree", and the credential scan
+  # was the LAST of nine steps. A job stops at its first failure, so when an em
+  # dash failed prosecheck at step eight, `scanrepo` never executed and the
+  # check reported FAILED under a name that makes a security claim. Two agents
+  # read that as a credential in the tree and escalated. Neither reading was
+  # possible to check from the summary, because the absence of a step looks
+  # exactly like its failure.
+  #
+  # A false credential alarm is expensive twice: it burns an escalation now,
+  # and it teaches the next reader to discount the one that matters. So the
+  # scan is its own job below, and this one no longer claims to be it.
+  documents:
+    name: the documents and the site tell the truth
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -840,10 +985,10 @@ jobs:
       # check FAILS rather than skipping when it cannot find one: an absent
       # answer read as a satisfied condition is how this repository has
       # produced false green twice already.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -855,6 +1000,23 @@ jobs:
         # dead end somebody finds only after following our instructions, and
         # the security one was a promise to researchers.
         run: go run ./tools/claimcheck .
+
+      - name: The sidebar order is a decision rather than an accident
+        # Starlight breaks a tie in sidebar.order on file name, which the
+        # person editing a page cannot see and nothing else reports. 27 of the
+        # 78 ordered pages shared a number with a sibling, so a third of the
+        # sidebar was alphabetised by slug: "Watching a run" split the two
+        # runtime guides, "Provider limits" split the three provider pages,
+        # and On-call came before Standing up production.
+        run: go run ./tools/sidebarcheck .
+
+      - name: Every variable the product names at a user is documented
+        # af license install tells a paying customer to set AF_LICENSE_KEY and
+        # AF_ORG, then points them at the licensing page, and that page named
+        # neither, so the correct instructions did not exist anywhere. af doctor
+        # had the same shape with AF_PORT_RANGE_START. The control plane has had
+        # this check since config-docs.test.ts; the engine never did.
+        run: go run ./tools/varcheck .
 
       - name: STATUS.md keeps the rule it states about itself
         # STATUS.md is the answer this project gives to "does it do X yet", and
@@ -915,11 +1077,72 @@ jobs:
         # rather than one a reviewer has to notice.
         run: go run ./tools/modecheck .
 
+  # Alone, and deliberately so.
+  #
+  # This is the only step in this job, which is what makes its result mean what
+  # its name says: green here is "the scanner ran and found nothing", never
+  # "the scanner never ran". It also means a prose failure can no longer stop
+  # the credential scan from happening at all, which is the half of the old
+  # arrangement that actually mattered.
+  credentials:
+    name: no credentials in the tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
       - name: Nothing in the repository looks like a live credential
         # Uses the engine's own detector, so the check and the runtime refusal
         # cannot disagree about what a credential looks like. Its own tests
         # assemble fake keys at runtime for exactly this reason.
         run: cd engine && go run ../tools/scanrepo ..
+
+  changelog:
+    name: every change says what changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The whole history, because the range this examines starts where the
+      # branch left the base and a shallow checkout has no merge base to find.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Anything a user can see comes with a changelog fragment
+        # CONTRIBUTING.md has said "a missing fragment fails a gate" since the
+        # first week, README.md names the four categories one may open with,
+        # and the pull request template carries a checkbox for it. Nothing
+        # checked any of that. The Developer Certificate of Origin went the
+        # same way in this repository: required by the same document, unread,
+        # and 65 of the first 80 commits had no trailer by the time anybody
+        # counted. Eight of the twenty product changes since the fragment
+        # convention began landed with none either.
+        #
+        # This is deliberately not "a pull request with no new file in
+        # .changes fails". Run that over this history and it fires on a lint
+        # fix, on four double hyphens removed from two components, and on a
+        # check script that ships nothing. A gate whose findings are not all
+        # real gets routed around and then deleted, so this asks whether
+        # anything a user could NOTICE changed, and passes in silence
+        # otherwise. tools/changecheck/classify.go carries the list and the
+        # commit each exemption was learned from.
+        #
+        # Its own job, so that a red here cannot hide the steps after it: a
+        # job stops at its first failure and the ones it skipped read exactly
+        # like the ones that passed.
+        env:
+          AF_CHANGECHECK_BASE: ${{ github.event.pull_request.base.sha }}
+          AF_CHANGECHECK_BEFORE: ${{ github.event.before }}
+        run: go run ./tools/changecheck .
 
   authorship:
     name: commits are attributed to their author
@@ -927,7 +1150,7 @@ jobs:
     timeout-minutes: 5
     steps:
       # Enough history to see the range this push added, and no more.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
 
       - name: No commit is authored by an identity that belongs to somebody else

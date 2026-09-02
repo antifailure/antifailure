@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/egress"
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/insights"
@@ -137,6 +138,7 @@ change.`),
 				// what we failed to clean up.
 				run.Findings = append(run.Findings, migration...)
 				for _, f := range []*report.Finding{
+					workflowsUnverifiedFinding(run, gate),
 					egressFinding(run.Egress, gate),
 					maskingFinding(run.Verification, gate),
 					loadFinding(run.Load, gate),
@@ -206,7 +208,20 @@ change.`),
 
 			if withLoad {
 				e.Out.Section("Generating load")
-				if res, refused, lErr := o.Load(ctx, env.LoadOptions{Duration: 30 * time.Second}); lErr == nil {
+				// DefaultDuration rather than Duration, so the manifest's own
+				// load.duration still decides. The hardcoded 30s used to sit
+				// in the slot that overrides it.
+				res, refused, lErr := o.Load(ctx, env.LoadOptions{
+					DefaultDuration: 30 * time.Second, DefaultScale: 1,
+				})
+				switch {
+				case lErr != nil:
+					// The header with nothing under it is how this read
+					// before: a load run that failed outright produced the
+					// section and no finding, and silence is read as success.
+					e.Out.Printf("  %s %s\n", e.Out.S(StyleWarn, SymbolWarn), lErr.Error())
+					run.Notes = append(run.Notes, "the load run did not complete: "+lErr.Error())
+				default:
 					p95, errorRate := o.Thresholds()
 					run.Load = loadReport(res, refused, p95, errorRate, &run)
 				}
@@ -482,33 +497,9 @@ func writeReport(e *Env, run report.Run, output, jsonOutput string) {
 	e.Out.Raw(run.Markdown())
 }
 
-// summariseEgress counts what the environment reached.
+// summariseEgress delegates to the shared reader.
 func summariseEgress(decisions []local.Decision) *report.Egress {
-	out := &report.Egress{}
-	surprises := map[string]bool{}
-	for _, d := range decisions {
-		switch d.Mode {
-		case "allow", "sandbox":
-			out.Allowed++
-		case "capture":
-			out.Captured++
-		case "mock":
-			out.Mocked++
-		default:
-			out.Refused++
-			if d.Rule == "" && d.Host != "" {
-				// No rule matched at all, which means the manifest does not
-				// mention this host. Usually a dependency somebody added
-				// without noticing.
-				surprises[d.Host] = true
-			}
-		}
-	}
-	for host := range surprises {
-		out.Surprises = append(out.Surprises, host)
-	}
-	sort.Strings(out.Surprises)
-	return out
+	return egress.Summarise(decisions)
 }
 
 func branchName(e *Env, override string) string {

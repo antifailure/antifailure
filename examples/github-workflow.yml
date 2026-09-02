@@ -36,9 +36,15 @@ on:
   # your database and your credentials leaving your own cloud.
   #
   # Two things about this that are easy to get wrong and cost an afternoon.
-  # Without this block a dispatch answers 404, indistinguishable from the App
-  # not being installed. And GitHub reads the trigger list from the DEFAULT
-  # branch, so adding this on a feature branch alone does nothing at all.
+  # Without this block a dispatch answers 422 saying the workflow has no
+  # workflow_dispatch trigger, and without the FILE it answers 404, which is
+  # the same answer GitHub gives for a repository it will not show the App. And
+  # GitHub reads the trigger list from the DEFAULT branch, so adding this on a
+  # feature branch alone does nothing at all.
+  #
+  # The input NAMES here are load bearing. GitHub answers 422 "Unexpected
+  # inputs provided" for anything the console sends that is not declared, so
+  # renaming one breaks every button rather than that one flag.
   #
   # Delete it if you do not use the hosted control plane. `af ci` on a pull
   # request needs none of it.
@@ -49,17 +55,60 @@ on:
         required: true
         default: up
         type: choice
-        options: [up, agents, load]
+        # Verbs rather than the control plane's kind names, and the reason is
+        # not aesthetic. GitHub reads this trigger definition from YOUR
+        # DEFAULT BRANCH, and refuses a dispatch carrying a value the file does
+        # not declare with a 422, which is indistinguishable from the file
+        # being missing. Renaming these would make every copy of this file
+        # already in the wild start failing on the two values that work today.
+        #
+        # So the verbs stay and the list grows. `scenario` and `explore` need
+        # this newer file; `up`, `down`, `agents` and `load` work on the older
+        # one too. af workload run accepts both spellings and its result says
+        # which kind a verb resolved to.
+        options:
+          - up
+          - down
+          - agents
+          - load
+          - scenario
+          - explore
       workflows:
-        description: Comma separated workflow names for agents. Empty means all of them.
+        description: >-
+          Comma separated names selected out of this manifest: workflows for
+          agents, scenarios for scenario, goals for explore. Empty means all of
+          them, where the command has such a default.
         required: false
         default: ''
       duration:
-        description: How long to send load for, as a Go duration such as 60s.
+        description: How long to send load for, as a Go duration such as 60s. observed_load only.
         required: false
         default: ''
       scale:
-        description: Multiplier on production's rate, for load.
+        description: Multiplier on production's rate. observed_load only.
+        required: false
+        default: ''
+      seed:
+        description: Makes two runs do the same thing. A number for load, free text for exploration.
+        required: false
+        default: ''
+      concurrency:
+        description: Ceiling on requests in flight. http_scenario only.
+        required: false
+        default: ''
+      run_id:
+        description: The control plane's identifier for this run. Leave it empty; the engine asks.
+        required: false
+        default: ''
+      seed:
+        description: >-
+          Replays the same schedule or the same wander. A whole number for
+          scenario and any string for explore, because that is what each
+          command's own --seed takes.
+        required: false
+        default: ''
+      concurrency:
+        description: Ceiling on requests in flight, for scenario.
         required: false
         default: ''
 
@@ -68,9 +117,17 @@ on:
 concurrency:
   # github.head_ref is empty on anything that is not a pull request, so a
   # dispatch would otherwise share one group called `antifailure-` with every
-  # other dispatch and cancel it.
-  group: antifailure-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  # other dispatch. The event name is in the group as well so that a dispatch
+  # and a pull request run for the same branch never replace each other.
+  group: antifailure-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  # A push replaces the run for the same pull request, because only the newest
+  # commit is worth a preview. A dispatch replaces nothing, and that difference
+  # is the whole reason this is an expression rather than `true`: the console's
+  # three buttons run one after another against one branch, so somebody who
+  # presses "Ask for an environment" and then "Run agents" would otherwise have
+  # the second dispatch cancel the run that was building the environment the
+  # first one asked for. With this, the second queues behind the first.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -81,8 +138,13 @@ permissions:
   # exactly that. There is no repository secret to paste and nothing here holds
   # a long lived token.
   #
+  # Two things use it, for the same reason and by the same exchange. The report
+  # step below trades this identity for a credential to publish what the run
+  # concluded, and the engine itself trades it for one to report its event
+  # stream while the run happens.
+  #
   # GitHub does NOT grant this to a pull request job running on a fork, which is
-  # what keeps a fork away from every secret: the exchange below simply fails
+  # what keeps a fork away from every secret: the exchanges below simply fail
   # there, and the control plane says the commit needs a maintainer's approval.
   # Delete this line if you do not use the hosted control plane; nothing else
   # needs it.
@@ -140,19 +202,38 @@ jobs:
         # ran the analysis, so its outputs are empty, and gating on them alone
         # would silently skip the one job somebody pressed a button to get.
         if: github.event_name != 'pull_request' || steps.change.outputs.environment == 'true'
-        # A pull request runs the whole check. A dispatch runs the third of it
+        # A pull request runs the whole check. A dispatch runs the part of it
         # the console asked for, because `af ci` would bring up an environment,
         # run the agents and tear it down again, which is not what somebody
-        # pressing "Run agents" against a running environment asked for.
+        # pressing a button against a running environment asked for.
         #
         # The inputs go through the environment rather than into the script
         # text. A `${{ inputs.workflows }}` interpolated into a run block is a
-        # shell injection from anybody who can dispatch this workflow.
+        # shell injection from anybody who can dispatch this workflow, and a
+        # YAML comment inside a run block is not a safe place to write one
+        # either: the runner substitutes the expression before bash sees the
+        # `#`, so an input carrying a newline escapes the comment.
         env:
           AF_COMMAND: ${{ inputs.command || 'ci' }}
           AF_WORKFLOWS: ${{ inputs.workflows }}
           AF_DURATION: ${{ inputs.duration }}
           AF_SCALE: ${{ inputs.scale }}
+          AF_SEED: ${{ inputs.seed }}
+          AF_CONCURRENCY: ${{ inputs.concurrency }}
+          AF_RUN_ID: ${{ inputs.run_id }}
+          # Without this the run is invisible in the console.
+          #
+          # It is what `af` authenticates to the hosted control plane with, and
+          # nothing here needs it to do the work: an environment comes up, the
+          # agents run and the report is written with no token at all. What it
+          # decides is whether any of that is REPORTED. Unset, the engine sends
+          # no events, claims no hosted run, and a workload somebody started
+          # from the console is dispatched, runs, and ends as abandoned at its
+          # deadline, because the control plane never heard from it.
+          #
+          # Create one with `af token create ci` and put it in the repository's
+          # secrets. Leave it out if you do not use the hosted control plane.
+          AF_CONTROL_PLANE_TOKEN: ${{ secrets.AF_CONTROL_PLANE_TOKEN }}
           # Bring your own key. Without one the agents still run; workflows
           # that need a page read come back unverified rather than guessed at.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -162,6 +243,21 @@ jobs:
           # Set this so every runner produces the same masking, and two
           # goldens can be compared. Left unset, each machine generates its own.
           AF_MASKING_KEY: ${{ secrets.AF_MASKING_KEY }}
+          # Where the engine reports its own event stream, which is a different
+          # thing from the report below: the report is what the run concluded,
+          # and this is what it did while reaching that conclusion. The engine
+          # reads AF_CONTROL_PLANE_URL, so the job level AF_CONTROL_PLANE is
+          # passed under that name here rather than left for the engine to
+          # guess. Without this line a self hosted installation would send its
+          # events to the hosted instance instead of its own, which is the
+          # default the engine falls back to.
+          #
+          # No token. The engine trades this job's identity for a short lived
+          # credential the same way the report step below does, which is what
+          # the `id-token: write` at the top of this file is for. Unset, the
+          # engine attaches no control plane sink at all and the run is
+          # unaffected.
+          AF_CONTROL_PLANE_URL: ${{ vars.AF_CONTROL_PLANE }}
         run: |
           set -euo pipefail
           case "$AF_COMMAND" in
@@ -170,29 +266,83 @@ jobs:
               # belongs to, so the checked out one is already right.
               af up
               ;;
-            agents)
+            ci)
+              af ci --report report.md --report-json report.json
+              ;;
+            down)
+              # The real teardown, with an acknowledgement saying what was
+              # removed and what is still standing. A row marked torn down
+              # while the containers keep running is worse than a failure.
+              #
+              # No branch flag, for the same reason 'up' has none: the dispatch
+              # ran on the branch the environment belongs to. It exits 10 when
+              # something could not be removed, which has to fail this job
+              # rather than read as a clean teardown in the control plane.
+              af workload teardown --result teardown-result.json
+              ;;
+            scenario)
               args=()
-              # `|| true`, and `if` rather than `[ ... ] && ...`, because both
-              # of those return non zero on the ordinary empty case and set -e
-              # would end the job there with no output at all.
               IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
               for name in "${names[@]:-}"; do
                 if [ -n "$name" ]; then args+=(--only "$name"); fi
               done
-              # ${args[@]+"${args[@]}"} rather than "${args[@]}": under set -u
-              # an empty array is an unbound variable on bash 3.2, which is the
-              # bash on a macOS runner, and "run everything" is the ordinary
-              # case here.
-              af test ${args[@]+"${args[@]}"}
+              if [ -n "$AF_SEED" ]; then args+=(--seed "$AF_SEED"); fi
+              if [ -n "$AF_CONCURRENCY" ]; then args+=(--concurrency "$AF_CONCURRENCY"); fi
+              af load scenario ${args[@]+"${args[@]}"}
               ;;
-            load)
+            explore)
               args=()
-              if [ -n "$AF_DURATION" ]; then args+=(--duration "$AF_DURATION"); fi
-              if [ -n "$AF_SCALE" ]; then args+=(--scale "$AF_SCALE"); fi
-              af load run ${args[@]+"${args[@]}"}
+              IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
+              for name in "${names[@]:-}"; do
+                if [ -n "$name" ]; then args+=(--only "$name"); fi
+              done
+              if [ -n "$AF_SEED" ]; then args+=(--seed "$AF_SEED"); fi
+              af explore ${args[@]+"${args[@]}"}
               ;;
             *)
-              af ci --report report.md --report-json report.json
+              # Everything else is a workload, and one command runs all four
+              # kinds. This used to be a case arm per kind assembling its own
+              # flags, and the three things wrong with that are the three
+              # things this command adds.
+              #
+              # It dropped an input silently. A seed passed to a browser
+              # workflow went nowhere, because af test has no --seed flag, and
+              # nothing said so. af workload run refuses it by name instead.
+              #
+              # It produced no result. An exit code was everything anybody
+              # learned, and an exit code cannot tell a run that failed from a
+              # run that never measured anything. The document written below
+              # carries what was measured, route by route, with the verdict of
+              # every threshold.
+              #
+              # And it left nothing to reproduce. The result names the plain af
+              # command that produces the same run on a laptop, which is the
+              # only thing that makes a hosted number checkable.
+              #
+              # --run-id is normally empty and that is correct. A dispatch
+              # carries only the inputs the workflow DECLARES, GitHub reads
+              # that declaration from your DEFAULT branch, and it refuses an
+              # undeclared input with a 422 nobody can tell from a missing
+              # file. So the control plane cannot send the identifier, and the
+              # engine asks for it instead: it claims the run waiting for this
+              # environment, says when it started, says it is still going, and
+              # reports what it measured. Pass one by hand only to reproduce a
+              # particular hosted run without taking the next queued one.
+              #
+              # Values reach the script through the env block above rather
+              # than through the script text, exactly as they did before. An
+              # expression interpolated into a run block is substituted by the
+              # runner before bash ever sees it, so a dispatch input carrying a
+              # newline and a command would execute here.
+              af workload run \
+                --kind "$AF_COMMAND" \
+                --select "$AF_WORKFLOWS" \
+                --duration "$AF_DURATION" \
+                --scale "$AF_SCALE" \
+                --seed "$AF_SEED" \
+                --concurrency "$AF_CONCURRENCY" \
+                --run-id "$AF_RUN_ID" \
+                --result workload-result.json
               ;;
           esac
 
@@ -255,6 +405,15 @@ jobs:
             -H 'content-type: application/json' \
             --data-binary @payload.json
           echo "handled=true" >> "$GITHUB_OUTPUT"
+      # Always, because the result of a failing workload is the one worth
+      # reading, and because a cancelled or timed out run still writes one.
+      - name: Keep the workload result
+        if: always() && hashFiles('workload-result.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: workload-result
+          path: workload-result.json
+          retention-days: 30
 
       - name: Leave the report on the pull request
         # Always, because the report of a failing run is the one worth reading.

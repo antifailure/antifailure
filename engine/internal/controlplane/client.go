@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -37,14 +38,34 @@ const DefaultBaseURL = "https://app.antifailure.dev"
 // Client is a connection to one control plane.
 type Client struct {
 	baseURL *url.URL
-	token   string
 	http    *http.Client
 	clock   clock.Clock
 	// redactor scrubs anything before it is written to a log line here. The
 	// control plane's own error bodies are quoted in diagnostics, and a body
 	// that echoes a request header would otherwise print a token.
 	redactor *redact.Redactor
+
+	// mu guards the credential, which is replaced in place when a minted one
+	// expires. Flushes can overlap, so two goroutines can be reading it while a
+	// third is renewing it.
+	mu sync.Mutex
+	// token is the credential currently presented.
+	token string
+	// renew obtains a fresh one, or is nil when the credential is static.
+	renew func(context.Context) (string, error)
+	// lastRenew bounds how often a refusal may trigger an exchange, because a
+	// control plane that refuses everything must not be answered with one
+	// exchange per batch.
+	lastRenew time.Time
 }
+
+// RenewFloor is the least time between two credential exchanges.
+//
+// A refused batch is the signal to renew, and a control plane refusing for a
+// reason renewing cannot fix, a revoked organization, say, would otherwise turn
+// every flush into an identity exchange. One attempt a minute is enough to
+// recover from an expiry promptly and slow enough not to become a loop.
+const RenewFloor = time.Minute
 
 // Options configures a client.
 type Options struct {
@@ -53,6 +74,15 @@ type Options struct {
 	// Token authenticates this engine. It is never logged and never written to
 	// disk by this package.
 	Token string
+	// Renew obtains a fresh credential when the control plane refuses the
+	// current one, and nil means the credential is static.
+	//
+	// This exists because a minted credential is deliberately short lived and a
+	// run outlives it. A token acquired once when the environment came up and
+	// then held would work for the first minutes of an `af ci` and quietly stop
+	// reporting for the rest, which is the worst of both: the dashboard shows a
+	// run that started and never finished, and nothing says why.
+	Renew func(context.Context) (string, error)
 	Clock clock.Clock
 	// HTTP is the transport, for tests.
 	HTTP *http.Client
@@ -110,10 +140,54 @@ func New(opts Options) (*Client, error) {
 	return &Client{
 		baseURL:  base,
 		token:    opts.Token,
+		renew:    opts.Renew,
 		http:     httpClient,
 		clock:    c,
 		redactor: opts.Redactor,
 	}, nil
+}
+
+// bearer reads the credential currently presented.
+func (c *Client) bearer() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.token
+}
+
+// renewCredential exchanges for a fresh credential, at most once a minute.
+//
+// It reports whether the credential changed. False covers every reason not to
+// have another go: a static token, a renewal that failed, one attempted too
+// recently, and one that came back with the same value it replaced. The caller
+// retries only on true, so a refusal that renewing cannot fix costs one
+// exchange rather than one per batch forever.
+func (c *Client) renewCredential(ctx context.Context) bool {
+	c.mu.Lock()
+	if c.renew == nil {
+		c.mu.Unlock()
+		return false
+	}
+	now := c.clock.Now()
+	if !c.lastRenew.IsZero() && now.Sub(c.lastRenew) < RenewFloor {
+		c.mu.Unlock()
+		return false
+	}
+	c.lastRenew = now
+	previous := c.token
+	renew := c.renew
+	c.mu.Unlock()
+
+	// Outside the lock. The exchange is two network calls and holding the
+	// credential's mutex across them would stall every flush behind it.
+	fresh, err := renew(ctx)
+	if err != nil || strings.TrimSpace(fresh) == "" || fresh == previous {
+		return false
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.token = fresh
+	return true
 }
 
 // Event is one event in the wire form the control plane accepts.
@@ -136,11 +210,43 @@ type SendResult struct {
 	Accepted   int `json:"accepted"`
 	Duplicates int `json:"duplicates"`
 	Rejected   int `json:"rejected"`
-	Outcomes   []struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-		Reason string `json:"reason,omitempty"`
-	} `json:"outcomes"`
+	// Unprojected counts events that were stored and changed nothing. It is
+	// not a failure and it is not a success either: the event is on record and
+	// whatever it was meant to advance did not advance.
+	Unprojected int       `json:"unprojected"`
+	Outcomes    []Outcome `json:"outcomes"`
+}
+
+// Outcome is what happened to one event.
+//
+// `reason` and `note` are two fields because they are two answers, and reading
+// only one of them is how this type came to discard half of what it was told.
+// A rejected event has a `reason` and was not stored. An accepted event with a
+// `note` WAS stored and changed nothing, which is the more interesting of the
+// two: it is the control plane saying it understood the event and could not
+// apply it, and it is the only signal that distinguishes a report that landed
+// from one that was refused by a projection.
+//
+// The engine decoded `reason` and not `note`. The control plane's own comment
+// says the note "reaches the sender in the batch response", and it did not
+// reach it: it was dropped by this struct and then, further along, the whole
+// SendResult was discarded by the only caller. Two silent losses in one path,
+// on the one channel that explains why a run said nothing.
+type Outcome struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+	Note   string `json:"note,omitempty"`
+}
+
+// Explanation is the sentence this outcome carries, or empty when it carries
+// none. A duplicate carries neither and is not worth a word: it is the ordinary
+// result of a resend and the idempotency key working.
+func (o Outcome) Explanation() string {
+	if o.Reason != "" {
+		return o.Reason
+	}
+	return o.Note
 }
 
 // Throttled is returned when the control plane asks for a pause.
@@ -188,6 +294,25 @@ func (c *Client) Send(ctx context.Context, events []Event) (SendResult, error) {
 		return zero, err
 	}
 	defer func() { _ = res.Body.Close() }()
+
+	// A minted credential is short lived by design, and a run outlives it. The
+	// control plane says so with a 401, which is the only signal there is: the
+	// engine is not told when the credential dies and polling for it would be a
+	// worse design than being told. So a refusal is one reason to try once more
+	// with a fresh one, and exactly once, because the second 401 means renewing
+	// is not the answer.
+	//
+	// The batch is re-read from the same bytes rather than re-marshalled, so
+	// the retry sends the identical payload and the control plane's idempotency
+	// on event ID does the rest if the first attempt was somehow applied.
+	if res.StatusCode == http.StatusUnauthorized && c.renewCredential(ctx) {
+		_ = res.Body.Close()
+		res, err = c.do(ctx, http.MethodPost, "/v1/events", bytes.NewReader(body))
+		if err != nil {
+			return zero, err
+		}
+		defer func() { _ = res.Body.Close() }()
+	}
 
 	if res.StatusCode == http.StatusTooManyRequests {
 		return zero, &Throttled{RetryAfter: retryAfter(res, 30*time.Second)}
@@ -292,7 +417,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (*
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: %w", err)
 	}
-	req.Header.Set("authorization", "Bearer "+c.token)
+	req.Header.Set("authorization", "Bearer "+c.bearer())
 	req.Header.Set("accept", "application/json")
 	if body != nil {
 		req.Header.Set("content-type", "application/json")

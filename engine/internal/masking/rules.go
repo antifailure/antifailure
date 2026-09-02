@@ -271,9 +271,29 @@ func (rs *RuleSet) Assign(tables []Table) []Assignment {
 			// Only the types that can hold a sentence. A bigint called quantity
 			// needs no rule and emptying it would break every environment for
 			// nothing, which is how a fail-closed default gets turned off.
-			if a.Transform == "" && looksSensitive(c) {
+			if a.Transform == "" && !knownStructural(c) {
 				a.Unmatched = true
 				switch {
+				case !looksSensitive(c):
+					// A THIRD ANSWER, and the reason it exists.
+					//
+					// looksSensitive is a known-yes list of six types and there
+					// was no known-no list, so everything else fell through with
+					// no transform AND no Unmatched, which meant a citext column
+					// was neither masked nor reported. Not in the plan at all.
+					// That is worse than the not-null case below, which at least
+					// prints a line saying what shipped.
+					//
+					// information_schema reports citext as USER-DEFINED and
+					// text[] as ARRAY, so neither is exotic and neither was
+					// visible. Reported and NOT masked: emptying it by default
+					// would change what an existing golden holds, move every
+					// rules_digest, and blank a column some environment needs.
+					// Saying so is the half that costs nobody anything.
+					a.Why = "This classifier does not recognise the type " + c.Type +
+						", so nothing decided what happens to this column and it is " +
+						"copied unchanged. The verification scan does not read this " +
+						"type either. Give it a transform, or a rule saying it is fine."
 				case isJSON(c):
 					// A JSON column is emptied whether or not it can hold
 					// null, because `empty_json` writes a value rather than
@@ -410,6 +430,35 @@ func isJSON(c ColumnInfo) bool {
 func looksSensitive(c ColumnInfo) bool {
 	switch strings.ToLower(c.Type) {
 	case "text", "character varying", "character", "json", "jsonb", "xml":
+		return true
+	}
+	return false
+}
+
+// knownStructural reports the types worth saying nothing about.
+//
+// The counterpart to looksSensitive, and the pair is the point: one is a
+// known-yes list, this is a known-no list, and a type in NEITHER is one nobody
+// has classified. Before this existed the absence of a known-no list meant
+// every unrecognised type was silently treated as structural, so citext and
+// text[] were passed over as though somebody had decided they were safe.
+//
+// A bigint called quantity genuinely needs no rule and asking about it would
+// produce a list nobody reads, which is the same as producing no list. These
+// are the types whose text form cannot carry a sentence somebody typed:
+// numbers, times, booleans, and identifiers the database generates.
+//
+// Deliberately NOT here: bytea, inet, cidr, macaddr, hstore, tsvector, ARRAY
+// and USER-DEFINED. A bytea holds whatever was uploaded, an inet locates
+// somebody, and the last two are how information_schema reports every array
+// and every extension or enum type, citext among them.
+func knownStructural(c ColumnInfo) bool {
+	switch strings.ToLower(c.Type) {
+	case "smallint", "integer", "bigint", "decimal", "numeric", "real",
+		"double precision", "money", "smallserial", "serial", "bigserial",
+		"boolean", "uuid", "date", "time", "time without time zone",
+		"time with time zone", "timestamp", "timestamp without time zone",
+		"timestamp with time zone", "interval", "oid", "bit", "bit varying":
 		return true
 	}
 	return false

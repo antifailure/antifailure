@@ -205,6 +205,72 @@ export interface Pool {
    * cannot be running under it.
    */
   withSweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn as antifailure_sweeper, to delete expired sessions.
+   *
+   * Not withSweeper, which is a different mechanism for a different table.
+   * That one declares a setting the policies on antifailure_app consult, and
+   * those policies are SELECT only. Deleting a session needs a policy that
+   * permits the delete, and on THIS table such a policy on antifailure_app
+   * widens every other one, which is the whole argument in 0024.
+   *
+   * Deleting expired sessions belongs to no organization and no user, so no
+   * policy on that table matches it, and it deleted nothing for as long as it
+   * existed. The fix could not be a policy on antifailure_app: permissive
+   * policies are OR'd, so one naming no tenant widens every other policy on
+   * the table, and a session row names a user and an organization.
+   *
+   * So the sweep enters a role of its own for one transaction. Policies are
+   * attached to roles, so the one admitting it does not join the OR for
+   * ordinary requests. Inside here the role can reach expired sessions and can
+   * read two of their columns; it holds nothing else in the database. See
+   * 0024 for the whole argument, including why the row restriction is the
+   * database's clock rather than a value passed in from here.
+   *
+   * SET LOCAL, so the role is reverted when the transaction ends however it
+   * ends. A pooled connection returned still acting as the sweeper is the same
+   * class of bug as one returned with a tenant still set on it.
+   */
+  withSessionSweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn as an operator, for the administrative portal.
+   *
+   * The only scope in this file that can read across tenants, and the shape is
+   * the same as every other non-tenant scope here: it declares a value the
+   * caller must ALREADY HOLD, and the policies in 0029 are keyed on that value.
+   * What it declares is the hash of the operator's session cookie, so
+   * current_admin_user() resolves to a row only for a connection physically
+   * holding a live, unrevoked, unexpired operator session.
+   *
+   * That is what keeps the widening honest. Permissive policies are OR'd, so
+   * every admin policy widens the SELECT on its table for whoever the predicate
+   * is true for. A predicate that merely read a setting would be true for every
+   * caller, because every caller can set a setting. Requiring the hash to match
+   * a stored row makes it a credential rather than a claim, exactly as
+   * resolve_by_token does for a product session.
+   *
+   * Passing a hash that names no session is not an error and not an escalation:
+   * every policy evaluates false and the transaction sees an empty database.
+   */
+  withPlatformAdmin<T>(sessionHash: Buffer, fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn for an operator sign-in attempt, which has no session yet.
+   *
+   * The bootstrapping case, and the same one resolve_by_token solves for
+   * product sessions: the password has to be checked against a row that has to
+   * be found first, on a connection that by definition holds no session. So it
+   * declares the email being asked about, and the policy returns that operator
+   * and no other.
+   *
+   * The row carries a scrypt hash and its salt, which are not credentials:
+   * verifying a password requires the password. What declaring the email buys
+   * is that a connection cannot ENUMERATE the operators, only confirm the one
+   * it already named.
+   *
+   * This scope can also append to the operator audit chain, and nothing else,
+   * because a failed sign-in has no session and is the line most worth having.
+   */
+  withAdminSignin<T>(email: string, fn: (db: Db) => Promise<T>): Promise<T>
   /** The raw client, for migrations and tests only. */
   sql: postgres.Sql
   close(): Promise<void>
@@ -290,6 +356,18 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          // Cleared for the same reason as every setting above it, and this pair
+          // matters more than most: the policies they key are the only ones in the
+          // schema that read ACROSS tenants.
+          //
+          // Transaction locality already makes these empty on entry, so these
+          // two lines are not what keeps the scope safe today. They are here so
+          // the invariant is checkable by READING this function, which is the
+          // reason given at the top of the file for writing every other setting
+          // out longhand too. admin.test.ts checks the source for exactly that
+          // and fails when a scope does not name both.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
         },
         fn,
       )
@@ -331,6 +409,18 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          // Cleared for the same reason as every setting above it, and this pair
+          // matters more than most: the policies they key are the only ones in the
+          // schema that read ACROSS tenants.
+          //
+          // Transaction locality already makes these empty on entry, so these
+          // two lines are not what keeps the scope safe today. They are here so
+          // the invariant is checkable by READING this function, which is the
+          // reason given at the top of the file for writing every other setting
+          // out longhand too. admin.test.ts checks the source for exactly that
+          // and fails when a scope does not name both.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
         },
         fn,
       )
@@ -361,6 +451,18 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          // Cleared for the same reason as every setting above it, and this pair
+          // matters more than most: the policies they key are the only ones in the
+          // schema that read ACROSS tenants.
+          //
+          // Transaction locality already makes these empty on entry, so these
+          // two lines are not what keeps the scope safe today. They are here so
+          // the invariant is checkable by READING this function, which is the
+          // reason given at the top of the file for writing every other setting
+          // out longhand too. admin.test.ts checks the source for exactly that
+          // and fails when a scope does not name both.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
         },
         fn,
       )
@@ -391,6 +493,18 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          // Cleared for the same reason as every setting above it, and this pair
+          // matters more than most: the policies they key are the only ones in the
+          // schema that read ACROSS tenants.
+          //
+          // Transaction locality already makes these empty on entry, so these
+          // two lines are not what keeps the scope safe today. They are here so
+          // the invariant is checkable by READING this function, which is the
+          // reason given at the top of the file for writing every other setting
+          // out longhand too. admin.test.ts checks the source for exactly that
+          // and fails when a scope does not name both.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
         },
         fn,
       )
@@ -419,6 +533,18 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': id,
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          // Cleared for the same reason as every setting above it, and this pair
+          // matters more than most: the policies they key are the only ones in the
+          // schema that read ACROSS tenants.
+          //
+          // Transaction locality already makes these empty on entry, so these
+          // two lines are not what keeps the scope safe today. They are here so
+          // the invariant is checkable by READING this function, which is the
+          // reason given at the top of the file for writing every other setting
+          // out longhand too. admin.test.ts checks the source for exactly that
+          // and fails when a scope does not name both.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
         },
         fn,
       )
@@ -443,6 +569,18 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': hash.toString('hex'),
           'antifailure.sweeper': '',
+          // Cleared for the same reason as every setting above it, and this pair
+          // matters more than most: the policies they key are the only ones in the
+          // schema that read ACROSS tenants.
+          //
+          // Transaction locality already makes these empty on entry, so these
+          // two lines are not what keeps the scope safe today. They are here so
+          // the invariant is checkable by READING this function, which is the
+          // reason given at the top of the file for writing every other setting
+          // out longhand too. admin.test.ts checks the source for exactly that
+          // and fails when a scope does not name both.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
         },
         fn,
       )
@@ -464,6 +602,128 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': 'on',
+          // Cleared for the same reason as every setting above it, and this pair
+          // matters more than most: the policies they key are the only ones in the
+          // schema that read ACROSS tenants.
+          //
+          // Transaction locality already makes these empty on entry, so these
+          // two lines are not what keeps the scope safe today. They are here so
+          // the invariant is checkable by READING this function, which is the
+          // reason given at the top of the file for writing every other setting
+          // out longhand too. admin.test.ts checks the source for exactly that
+          // and fails when a scope does not name both.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
+        },
+        fn,
+      )
+    },
+    withPlatformAdmin(sessionHash, fn) {
+      if (!sessionHash || sessionHash.length === 0) {
+        // An empty setting makes every admin policy deny, which reads as a
+        // platform with no tenants on it rather than as a bug. Naming it here
+        // is the difference between a portal that shows an empty table and one
+        // that says why it is empty.
+        throw new Error('withPlatformAdmin needs the hash of an operator session')
+      }
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
+          'antifailure.admin_session_hash': sessionHash.toString('hex'),
+          // Cleared even here. This scope resolves an operator by their live
+          // session, never by the email somebody typed, and leaving the sign-in
+          // setting on would mean an authenticated transaction could still
+          // reach the one row that path is allowed to read.
+          'antifailure.admin_email': '',
+        },
+        fn,
+      )
+    },
+    withAdminSignin(email, fn) {
+      const address = email.trim().toLowerCase()
+      if (!address) {
+        throw new Error('withAdminSignin needs an email address')
+      }
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
+          // Lower-cased here rather than at the call site, for the reason
+          // withGitHubAccount gives: the column is lower-cased by a CHECK
+          // constraint, and one caller forgetting would produce a statement
+          // that matches nothing and raises nothing, which reads as a wrong
+          // password rather than as a bug.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': address,
+        },
+        fn,
+      )
+    },
+    withSessionSweeper(fn) {
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.email_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.sso_handle': '',
+          'antifailure.sso_entity_id': '',
+          'antifailure.sso_domain': '',
+          'antifailure.sso_state': '',
+          'antifailure.scim_token_hash': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
+          'antifailure.invitation_token_hash': '',
+          'antifailure.deletion_token_hash': '',
+          // The two operator settings, cleared here like everywhere else. This
+          // scope arrived from main while the operator boundary was still on a
+          // branch, so it was the one scope in this file that did not name
+          // them, and a pooled connection borrowed straight after an operator
+          // request would have entered the sweeper still carrying a live
+          // session hash. The source check in test/admin.test.ts counts the
+          // scopes and found it.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
+          // Last, and through set_config for the same reason as everything
+          // else here: SET LOCAL ROLE would need the identifier spliced into
+          // the statement text. Every setting above is cleared first so that
+          // the sweeper cannot be handed a tenant it has no policy for and no
+          // business carrying.
+          role: 'antifailure_sweeper',
         },
         fn,
       )

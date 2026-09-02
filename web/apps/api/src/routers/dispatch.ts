@@ -34,9 +34,14 @@ import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
 import type { Db } from '@antifailure/db'
 import { router, orgProcedure, audit, type OrgContext } from '../trpc.ts'
-import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
-import { capsFor, checkCostCap, environmentHoursSince } from '../costs.ts'
-import { GitHubError } from '../auth/github.ts'
+import { DEFAULT_PLAN } from '../limits.ts'
+import {
+  checkCostCapWithEntitlements,
+  checkQuotaWithEntitlements,
+  resolveEntitlements,
+} from '../entitlements.ts'
+import { environmentHoursSince } from '../costs.ts'
+import { GitHubError, blockerFor, type DispatchCause } from '../auth/github.ts'
 
 /**
  * The workflow file a dispatch targets.
@@ -47,7 +52,7 @@ import { GitHubError } from '../auth/github.ts'
  * or that keeps its checks under a different one, would otherwise be unable to
  * use any of this.
  */
-const workflowFile = z
+export const workflowFile = z
   .string()
   .min(1)
   .max(100)
@@ -57,7 +62,7 @@ const workflowFile = z
 /** A git ref a dispatch may name. Not a commit: GitHub refuses a SHA here. */
 const gitRef = z.string().min(1).max(255)
 
-interface Installation extends Record<string, unknown> {
+export interface Installation extends Record<string, unknown> {
   installation_id: string
   account_login: string
 }
@@ -70,7 +75,7 @@ interface Installation extends Record<string, unknown> {
  * of this product, not a fault in it, and the person reading the message is
  * the one who can fix it.
  */
-async function installationFor(c: OrgContext): Promise<Installation> {
+export async function installationFor(c: OrgContext): Promise<Installation> {
   const installation = await c.pool.withTenant(c.tenant, async (db) => {
     const rows = await db.execute<Installation>(sql`
       SELECT installation_id, account_login FROM github_installations
@@ -97,7 +102,7 @@ async function installationFor(c: OrgContext): Promise<Installation> {
  * reached the ingestion path. A verb that dispatched work during a suspension
  * would be the switch quietly not working.
  */
-async function refuseWhileSuspended(c: OrgContext): Promise<void> {
+export async function refuseWhileSuspended(c: OrgContext): Promise<void> {
   const reason = await c.pool.withTenant(c.tenant, async (db) => {
     const rows = await db.execute<{ suspended_reason: string | null }>(sql`
       SELECT suspended_reason FROM organizations
@@ -123,7 +128,7 @@ async function refuseWhileSuspended(c: OrgContext): Promise<void> {
  * they read as a bug in this control plane and the sentence that names the fix
  * is thrown away, which is exactly what `members.sync` found.
  */
-async function dispatch(
+export async function dispatch(
   c: OrgContext,
   installation: Installation,
   repository: string,
@@ -158,7 +163,7 @@ function noRepository(fullName: string): TRPCError {
   })
 }
 
-interface Target {
+export interface Target {
   repository: string
   ref: string
   envId: string
@@ -173,7 +178,7 @@ interface Target {
  * produces a run that fails in the customer's CI for a reason the console
  * already knew.
  */
-async function targetFor(db: Db, envId: string): Promise<Target> {
+export async function targetFor(db: Db, envId: string): Promise<Target> {
   const rows = await db.execute<{
     env_id: string
     branch: string
@@ -198,6 +203,72 @@ async function targetFor(db: Db, envId: string): Promise<Target> {
   }
   return { repository: env.repository, ref: env.branch, envId: env.env_id }
 }
+
+// ---------------------------------------------------------------------------
+// environments.readiness
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a dispatch would work, asked before anybody fills in the form.
+ *
+ * Three states and not two. `blocked` is something GitHub said, `ready` is
+ * nothing GitHub said would stop it, and `unknown` is this control plane not
+ * having been able to ask. Collapsing `unknown` into either of the others is
+ * the mistake worth avoiding: reported as blocked it is a false alarm on a
+ * page's primary action, and reported as ready it is a promise made on no
+ * evidence. It renders as nothing at all.
+ */
+type Readiness =
+  | { status: 'ready' }
+  | { status: 'blocked'; cause: DispatchCause; message: string }
+  | { status: 'unknown' }
+
+/**
+ * Guarded by `environments.create` rather than by a permission of its own.
+ *
+ * The question this answers is "would the button work", so the people who
+ * should be told are exactly the people who have the button. A new permission
+ * here would guard one query, which is how this repository ends up with
+ * permissions that no route reads.
+ *
+ * It refuses nothing and writes nothing, so a wrong answer costs a sentence on
+ * a screen. That is what lets it report a missing installation as a state
+ * instead of throwing the way `environments.create` does: a query that throws
+ * on a supported state makes a page look broken, and an organization that has
+ * not installed the App yet is the most ordinary state this product has.
+ */
+export const environmentReadiness = orgProcedure('environments.create')
+  .input(z.object({ repository: z.string(), workflow: workflowFile }))
+  .query(async ({ ctx, input }): Promise<Readiness> => {
+    const c = ctx as OrgContext
+    const installation = await c.pool.withTenant(c.tenant, async (db) => {
+      const rows = await db.execute<Installation>(sql`
+        SELECT installation_id, account_login FROM github_installations
+        WHERE suspended_at IS NULL ORDER BY created_at ASC LIMIT 1`)
+      return rows[0] ?? null
+    })
+    if (!installation) {
+      return {
+        status: 'blocked',
+        ...blockerFor('app-not-installed', {
+          repository: input.repository,
+          workflow: input.workflow,
+        }),
+      }
+    }
+    try {
+      const blocker = await c.github.dispatchBlocker(
+        Number(installation.installation_id),
+        input.repository,
+        input.workflow,
+      )
+      return blocker ? { status: 'blocked', ...blocker } : { status: 'ready' }
+    } catch {
+      // GitHub being unreachable is not evidence about the customer's setup.
+      // Saying so is the only honest answer, and the screen shows nothing.
+      return { status: 'unknown' }
+    }
+  })
 
 // ---------------------------------------------------------------------------
 // environments.create
@@ -258,7 +329,28 @@ export const createEnvironment = orgProcedure('environments.create')
         FROM organizations o WHERE o.id = ${c.actor.orgId}`)
       const row = counts[0]
       const plan = row?.plan || DEFAULT_PLAN
-      const quota = checkQuota(plan, 'environments', Number(row?.environments ?? 0))
+
+      // The plan says what this organization gets; an override says what it was
+      // SOLD. Resolved here, inside the transaction that is already open, and
+      // in the same tenant scope, so the read costs one more statement rather
+      // than one more round trip and cannot see another tenant's grants.
+      //
+      // Both scopes that can apply to a creation are passed. The repository is
+      // the `project` scope, because capacity is routinely sold for one
+      // repository rather than for a whole organization, and the acting user is
+      // the `user` scope. Leaving either out would make a grant at that scope a
+      // row that changes nothing, which is the exact failure the catalogue's
+      // `enforcedAt` field exists to prevent.
+      const entitlements = await resolveEntitlements(db, c.clock.now(), {
+        orgId: c.actor.orgId,
+        plan,
+        userId: c.actor.userId,
+        repositoryId: repo.id,
+      })
+
+      const quota = checkQuotaWithEntitlements(
+        entitlements, 'environments', Number(row?.environments ?? 0),
+      )
       if (!quota.allowed) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: quota.reason })
       }
@@ -283,8 +375,13 @@ export const createEnvironment = orgProcedure('environments.create')
       // "unknown lifetime" is the most the plan would allow for one: reserving
       // less would let an unstated run slip past the daily cap that a stated
       // one of the same size is refused for.
-      const runHours = input.ttlHours ?? capsFor(plan).perRunHours
-      const cap = checkCostCap(plan, runHours, used)
+      //
+      // Read off the ENTITLEMENT rather than off the plan, because an
+      // organization sold a longer per-run cap must have its unstated runs
+      // reserved at the cap it actually holds. Reserving the plan's smaller
+      // number here would refuse a run that the next line was about to allow.
+      const runHours = input.ttlHours ?? entitlements.number('perRunHours')
+      const cap = checkCostCapWithEntitlements(entitlements, runHours, used)
       if (!cap.allowed) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: cap.reason })
       }

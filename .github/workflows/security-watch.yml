@@ -133,7 +133,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PROBLEM: ${{ steps.check.outputs.problem }}
           SCAN_URL: ${{ steps.check.outputs.url }}
-          RUNBOOK: https://antifailure.dev/docs/self-hosting/runbooks/security-workflow/
+          RUNBOOK: https://antifailure.dev/docs/self-hosting/runbooks/security-workflow
         run: |
           set -euo pipefail
           title="The vulnerability scan is not protecting this repository"

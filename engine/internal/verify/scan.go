@@ -77,7 +77,22 @@ type Report struct {
 }
 
 // Clean reports whether the golden may be branched.
-func (r Report) Clean() bool { return len(r.Findings) == 0 }
+//
+// Skipped counts, and it did not. The sentence above the field says a column
+// nobody could read is not a column that passed, and the comment above the
+// append that fills it says ignoring one would let an unreadable column count
+// as a clean one. Both were true statements about a rule nothing enforced:
+// this read only Findings, so a scan that failed on a column returned clean and
+// env/golden.go published the golden on the strength of it.
+//
+// Which is the one way a golden could pass verification without having been
+// verified, and it is worse than a finding, because a finding is a column the
+// scan READ and disliked while a skip is a column it never saw at all.
+//
+// Reading it as unclean is deliberately the strict direction. A scan that
+// cannot read a column is a scan whose answer is "I do not know", and the whole
+// design of this package is that not knowing fails rather than passes.
+func (r Report) Clean() bool { return len(r.Findings) == 0 && len(r.Skipped) == 0 }
 
 // DefaultSampleSize is how many rows per column are read.
 //

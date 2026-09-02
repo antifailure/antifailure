@@ -6,7 +6,10 @@ import {
   HOSTED_GATE_EXEMPT,
   githubAppInstallUrlFrom,
   hostedRequiredPlanFrom,
+  operatorSetsPlanFrom,
 } from '../src/hosted.ts'
+import { readFile, readdir } from 'node:fs/promises'
+import path from 'node:path'
 import { hashEngineToken } from '../src/ingest.ts'
 import { fileURLToPath } from 'node:url'
 import {
@@ -37,6 +40,18 @@ describe('the hosted plan configuration', () => {
     assert.equal(hostedRequiredPlanFrom(undefined), null)
     assert.equal(hostedRequiredPlanFrom(' enterprise '), 'enterprise')
     assert.throws(() => hostedRequiredPlanFrom('team'), /must be enterprise or unset/)
+  })
+
+  it('treats plans set by hand as off unless an operator says otherwise', () => {
+    assert.equal(operatorSetsPlanFrom(undefined), false)
+    assert.equal(operatorSetsPlanFrom(''), false)
+    assert.equal(operatorSetsPlanFrom('0'), false)
+    assert.equal(operatorSetsPlanFrom('false'), false)
+    assert.equal(operatorSetsPlanFrom('1'), true)
+    assert.equal(operatorSetsPlanFrom(' TRUE '), true)
+    // Anything else is a typo, and a typo that reads as off would be a plane
+    // whose operator believes they turned the route on.
+    assert.throws(() => operatorSetsPlanFrom('yes'), /must be 1, 0 or unset/)
   })
 
   it('accepts only the public GitHub App installation address shape', () => {
@@ -102,6 +117,26 @@ describe('starting up with the gate set', {
     const { code, out } = await start({ AF_HOSTED_REQUIRED_PLAN: 'enterprise' })
     assert.equal(code, 2, `expected a refusal, got ${code}: ${out}`)
     assert.match(out, /AF_HOSTED_REQUIRED_PLAN is set but billing is off/)
+  })
+
+  it('refuses to start when plans are set by hand on a plane that takes money', async () => {
+    // The contradiction, refused where it cannot be reached around. A route
+    // that grants a plan and a checkout that sells the same plan on one
+    // process is a product nobody has to pay for, and it stops here rather
+    // than in whichever procedure happens to carry the check today.
+    const stripe = await start({
+      AF_OPERATOR_SETS_PLAN: '1',
+      AF_STRIPE_SECRET_KEY: 'sk_test_not_a_real_key',
+      AF_STRIPE_WEBHOOK_SECRET: 'whsec_not_a_real_secret',
+      AF_STRIPE_PRICE_TEAM: 'price_team',
+      AF_STRIPE_PRICE_ENTERPRISE: 'price_enterprise',
+    })
+    assert.equal(stripe.code, 2, `expected a refusal, got ${stripe.code}: ${stripe.out}`)
+    assert.match(stripe.out, /AF_OPERATOR_SETS_PLAN/)
+
+    const value = await start({ AF_OPERATOR_SETS_PLAN: 'yes' })
+    assert.equal(value.code, 2, value.out)
+    assert.match(value.out, /must be 1, 0 or unset/)
   })
 
   it('refuses a plan it does not sell and an installation address it cannot trust', async () => {
@@ -436,5 +471,236 @@ describe('a lapsed plan does not close the exits', {
       [...HOSTED_GATE_EXEMPT].sort(),
       exits.map((e) => e.permission).sort(),
     )
+  })
+})
+
+/**
+ * The plan nobody paid for.
+ *
+ * THE CONFIGURATION UNDER TEST IS THE ONE PRODUCTION BOOTS IN, and that is the
+ * only reason this suite exists. No Stripe, no plan gate, sign-in open to
+ * whoever the allowlist admits. Every other suite in this file configures
+ * something; this one configures nothing, because a hosted plane whose operator
+ * has not got to billing yet is not a hypothetical, it is the state the hosted
+ * control plane is in the day the code that can take money first reaches it.
+ *
+ * `billing.set` used to refuse only when Stripe or the gate was configured, so
+ * in exactly this configuration an org owner, which is what the first person
+ * into any organization becomes, could call it with `enterprise` and take a
+ * five hundred environment, twenty thousand env-hour plan for nothing.
+ *
+ * It has been proved able to fail: with the refusal removed from
+ * `routers/billing.ts`, the first cell below goes red reporting that the
+ * organization is on the enterprise plan.
+ */
+describe('a control plane that takes no money does not hand out its own plans', {
+  skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL',
+}, () => {
+  let h: ApiHarness
+  let org: Org
+  let owner: SignedIn
+
+  before(async () => {
+    // Nothing configured, deliberately. This is the whole fixture.
+    h = await startApi()
+    org = await seedOrg(h.admin, 'plan-unconfigured')
+    owner = await signInAs(h, org, 'owner')
+  })
+
+  after(async () => {
+    await dropOrg(h.admin, org.orgId)
+    await h.close()
+  })
+
+  async function planOf(): Promise<string> {
+    const [row] = await h.admin<{ plan: string }[]>`
+      SELECT plan FROM organizations WHERE id = ${org.orgId}`
+    return row!.plan
+  }
+
+  it('refuses an owner who asks for the enterprise plan', async () => {
+    assert.equal(await planOf(), 'free')
+    const refused = await callProcedure(h, owner, 'billing.set', 'mutation', {
+      plan: 'enterprise',
+    })
+    assert.equal(errorCode(refused.body), 'PRECONDITION_FAILED', JSON.stringify(refused.body))
+    assert.match(JSON.stringify(refused.body), /AF_OPERATOR_SETS_PLAN/)
+    assert.equal(await planOf(), 'free', 'an owner granted themselves the enterprise plan')
+  })
+
+  it('refuses every other plan too, and writes no audit entry', async () => {
+    for (const plan of ['team', 'free']) {
+      const refused = await callProcedure(h, owner, 'billing.set', 'mutation', { plan })
+      assert.equal(errorCode(refused.body), 'PRECONDITION_FAILED', `${plan}: ${JSON.stringify(refused.body)}`)
+    }
+    const entries = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM audit_entries
+      WHERE org_id = ${org.orgId} AND action = 'organization.plan_changed'`
+    assert.equal(Number(entries[0]!.n), 0, 'a refused plan change was audited as a change')
+    assert.equal(await planOf(), 'free')
+  })
+
+  it('says so in the payload the console renders, so no button is offered', async () => {
+    // The other half of the same defect. The route refusing while the console
+    // still draws "Move to enterprise" is a product that offers a control it
+    // always refuses, which reads as broken rather than as refused.
+    const { status, body } = await callProcedure(h, owner, 'billing.get', 'query', {})
+    assert.equal(status, 200, JSON.stringify(body))
+    const got = data<{ takesPayment: boolean; operatorSetsPlan: boolean }>(body)
+    assert.equal(got.takesPayment, false)
+    assert.equal(got.operatorSetsPlan, false)
+  })
+})
+
+/**
+ * The self-hosted operator, who is the reason the route exists at all.
+ *
+ * One person runs the control plane, runs the database, and decides what their
+ * own organization is on. Refusing them would be refusing somebody who can
+ * already write the column with psql, so the route stays, behind one variable
+ * they set once.
+ */
+describe('an operator who says they set plans by hand may set them', {
+  skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL',
+}, () => {
+  let h: ApiHarness
+  let org: Org
+  let owner: SignedIn
+
+  before(async () => {
+    h = await startApi({ operatorSetsPlan: true })
+    org = await seedOrg(h.admin, 'plan-self-hosted')
+    owner = await signInAs(h, org, 'owner')
+  })
+
+  after(async () => {
+    await dropOrg(h.admin, org.orgId)
+    await h.close()
+  })
+
+  it('moves the plan and audits it', async () => {
+    const { status, body } = await callProcedure(h, owner, 'billing.set', 'mutation', {
+      plan: 'team',
+      reason: 'self-hosted, and I am the operator',
+    })
+    assert.equal(status, 200, JSON.stringify(body))
+    const got = data<{ plan: string; changed: boolean; operatorSetsPlan: boolean }>(body)
+    assert.equal(got.plan, 'team')
+    assert.equal(got.changed, true)
+    assert.equal(got.operatorSetsPlan, true)
+
+    const [row] = await h.admin<{ plan: string }[]>`
+      SELECT plan FROM organizations WHERE id = ${org.orgId}`
+    assert.equal(row!.plan, 'team')
+
+    const [entry] = await h.admin<{ detail: { plan: string; tookPayment: boolean } }[]>`
+      SELECT detail FROM audit_entries
+      WHERE org_id = ${org.orgId} AND action = 'organization.plan_changed'
+      ORDER BY seq DESC LIMIT 1`
+    assert.equal(entry!.detail.plan, 'team')
+    assert.equal(entry!.detail.tookPayment, false)
+  })
+})
+
+/**
+ * Stripe configured, no plan gate. The middle configuration, and the one this
+ * file had no cell for: the enterprise-only suite above proves the gate refuses
+ * it, and proving that only with the gate on would leave a plane that takes
+ * money but sells every plan untested.
+ */
+describe('a plane that takes money never grants a plan by hand', {
+  skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL',
+}, () => {
+  let h: ApiHarness
+  let org: Org
+  let owner: SignedIn
+
+  before(async () => {
+    const stripe = await stripeAgainstMockPack()
+    h = await startApi({ stripe: stripe.billing })
+    org = await seedOrg(h.admin, 'plan-stripe-only')
+    owner = await signInAs(h, org, 'owner')
+  })
+
+  after(async () => {
+    await dropOrg(h.admin, org.orgId)
+    await h.close()
+  })
+
+  it('refuses and names Stripe rather than a variable', async () => {
+    const refused = await callProcedure(h, owner, 'billing.set', 'mutation', { plan: 'team' })
+    assert.equal(errorCode(refused.body), 'PRECONDITION_FAILED', JSON.stringify(refused.body))
+    assert.match(JSON.stringify(refused.body), /derives paid plans from Stripe/)
+    const [row] = await h.admin<{ plan: string }[]>`
+      SELECT plan FROM organizations WHERE id = ${org.orgId}`
+    assert.equal(row!.plan, 'free')
+  })
+})
+
+/**
+ * The guard against the next procedure, rather than against this one.
+ *
+ * A refusal inside `billing.set` protects `billing.set`. It says nothing about
+ * the route somebody adds next year that also writes the column, and a guard
+ * that covers one caller of a shared piece of state is the shape of defect this
+ * whole file exists because of. So the column's writers are enumerated from the
+ * source: three, one gated on the operator's declaration, one gated on a signed
+ * Stripe delivery, and one gated on an operator session. A fourth has to be
+ * classified deliberately, here, before the suite goes green again.
+ */
+describe('the writers of organizations.plan', () => {
+  // admin/router.ts is the operator portal's `tenants.setPlan`, and it is the
+  // third writer classified rather than merely added. It is `adminProcedure`,
+  // so reaching it needs an operator session issued by a separate sign in on a
+  // separate cookie, plus the `admin.tenants.plan` permission, which only
+  // owner, super_admin and billing hold. That is a STRONGER gate than the one
+  // billing.set carries: `AF_OPERATOR_SETS_PLAN` is a claim the installation
+  // makes about itself in its own environment, while this is a credential the
+  // caller had to be issued from outside the tenant boundary entirely. It also
+  // writes an audit entry carrying the plan before and after, which neither of
+  // the other two writers does.
+  const expected = ['routers/billing.ts', 'billing/webhook.ts', 'admin/router.ts'].sort()
+
+  async function sources(dir: string): Promise<string[]> {
+    const entries = await readdir(dir, { withFileTypes: true })
+    const out: string[] = []
+    for (const e of entries) {
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) out.push(...(await sources(full)))
+      else if (e.name.endsWith('.ts')) out.push(full)
+    }
+    return out
+  }
+
+  it('are the three the product intends and nothing else', async () => {
+    const root = fileURLToPath(new URL('../src', import.meta.url))
+    const found: string[] = []
+    for (const file of await sources(root)) {
+      const text = await readFile(file, 'utf8')
+      for (const m of text.matchAll(/(?:UPDATE|INSERT INTO)\s+organizations\b[\s\S]*?`/gi)) {
+        if (/\bplan\b/i.test(m[0])) {
+          found.push(path.relative(root, file))
+          break
+        }
+      }
+    }
+    assert.deepEqual(
+      [...new Set(found)].sort(),
+      expected,
+      'a route that writes organizations.plan was added or removed. A new one is a new way to ' +
+        'grant an entitlement: gate it the way billing.set is gated, then add it here.',
+    )
+  })
+
+  it('finds the known writers at all, so a broken scan cannot pass quietly', async () => {
+    // The negative control. If the pattern stops matching, the assertion above
+    // goes green having compared two empty lists.
+    const text = await readFile(
+      fileURLToPath(new URL('../src/routers/billing.ts', import.meta.url)),
+      'utf8',
+    )
+    const hits = [...text.matchAll(/(?:UPDATE|INSERT INTO)\s+organizations\b[\s\S]*?`/gi)]
+      .filter((m) => /\bplan\b/i.test(m[0]))
+    assert.equal(hits.length, 1, 'the scan no longer finds the write it was written against')
   })
 })

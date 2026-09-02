@@ -113,7 +113,7 @@ export function SaasPage() {
       <RelatedGrid
         items={[
           { href: "/product/migrations", title: "Migration Safety", description: "The lock on subscriptions is the first finding." },
-          { href: "/signup", title: "Sign up", description: "Join the waitlist." },
+          { href: "/signup", title: "Request access", description: "Invitation only. Join the list if you have not been invited." },
           { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
         ]}
       />

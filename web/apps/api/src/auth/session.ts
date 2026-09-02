@@ -157,11 +157,12 @@ export async function resolveSession(
         expires_at: Date | string
         last_seen_at: Date | string
         revoked_at: Date | string | null
+        suspended_at: Date | string | null
         github_login: string
         name: string | null
       }>(sql`
         SELECT s.id, s.user_id, s.org_id, s.expires_at, s.last_seen_at,
-               s.revoked_at, u.github_login, u.name
+               s.revoked_at, u.suspended_at, u.github_login, u.name
         FROM sessions s
         JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ${tokenHash}`)
@@ -169,6 +170,22 @@ export async function resolveSession(
       const row = rows[0]
       if (!row) return null
       if (row.revoked_at) return null
+      // A suspended ACCOUNT, checked on every request beside the revoked
+      // session, because they are the same kind of fact and want the same
+      // enforcement point.
+      //
+      // This is what makes an operator's Suspend mean anything. The column
+      // migration 0029 added was read by nothing: an operator could suspend an
+      // account, the row would change, the audit entry would be written, and
+      // the person would keep working until their session happened to expire.
+      // A Suspend that does not suspend is the canonical failure this project
+      // exists to catch, and it was sitting one join away from the check that
+      // already worked.
+      //
+      // Here rather than at sign-in, for the reason the comment on the role
+      // read below gives: enforcing at sign-in takes effect whenever somebody
+      // next signs in, which for a live session may be never.
+      if (row.suspended_at) return null
 
       const expiresAt = asDate(row.expires_at)
       const lastSeen = asDate(row.last_seen_at)
@@ -233,9 +250,29 @@ export async function revokeSession(pool: Pool, token: string): Promise<void> {
   )
 }
 
-/** Removes expired sessions. Housekeeping, not enforcement. */
+/**
+ * Removes expired sessions. Housekeeping, not enforcement.
+ *
+ * It ran through withoutTenant until 0024 and deleted nothing, on every
+ * instance, for as long as it existed. Every policy on this table keys on the
+ * acting user, on the hash of a presented token, or on the tenant, and a
+ * sweeper has none of the three, so the DELETE matched no row and reported
+ * success. A statement that matches nothing does not raise.
+ *
+ * withSessionSweeper enters a role of its own for the length of this
+ * transaction. The policy admitting that role restricts it to rows already
+ * expired by the DATABASE's clock, and the WHERE below restricts it to rows
+ * expired by the APPLICATION's. A row has to be past both to be deleted, so
+ * the cutoff passed from here can only ever narrow what is removed, never
+ * widen it: this cannot reach a live session even if the clock it is given is
+ * wrong.
+ *
+ * The count comes from RETURNING a constant rather than a column, because the
+ * sweeper is granted SELECT on expires_at and on nothing else. Returning id
+ * would be refused, which is the right refusal in the wrong place.
+ */
 export async function sweepSessions(pool: Pool, clock: Clock): Promise<number> {
-  return pool.withoutTenant(async (db) => {
+  return pool.withSessionSweeper(async (db) => {
     const rows = await db.execute<{ n: string }>(sql`
       WITH gone AS (
         DELETE FROM sessions WHERE expires_at <= ${clock.now().toISOString()} RETURNING 1

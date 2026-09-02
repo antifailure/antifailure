@@ -50,6 +50,12 @@ type Policy struct {
 	EgressSurprise   Level
 	Masking          Level
 	Cleanup          Level
+	// WorkflowsUnverified is a whole run in which no workflow reached a
+	// verdict about the application. Not a per workflow level: one blocked
+	// workflow stays uncounted, because a gap in our tooling must not read as
+	// a broken application. All of them blocked is a different claim, and
+	// exiting zero on it says "tested, fine" about a run that tested nothing.
+	WorkflowsUnverified Level
 }
 
 // Configure resolves the manifest block. A nil block is the default, which is
@@ -68,6 +74,11 @@ func Configure(in *schema.Policy) Policy {
 		EgressSurprise:   LevelFail,
 		Masking:          LevelFail,
 		Cleanup:          LevelFail,
+		// Fail by default, because the default has to be the one that does not
+		// lie. A project that genuinely has no workflows yet can set this to
+		// warn and have that choice recorded in its manifest, which is better
+		// than the silent pass it used to get for free.
+		WorkflowsUnverified: LevelFail,
 	}
 	if in == nil {
 		return p
@@ -94,6 +105,7 @@ func Configure(in *schema.Policy) Policy {
 	set(&p.EgressSurprise, in.EgressSurprise)
 	set(&p.Masking, in.Masking)
 	set(&p.Cleanup, in.Cleanup)
+	set(&p.WorkflowsUnverified, in.WorkflowsUnverified)
 	return p
 }
 

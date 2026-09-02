@@ -30,6 +30,16 @@ dist="$6"; stage="$7"
 root=$(cd "$(dirname "$0")/../.." && pwd)
 mkdir -p "$dist" "$stage"
 
+# Absolute, before anything uses them. Both callers pass these relative, and
+# the go build below runs from $root/engine, so a relative -o resolved against
+# engine/ rather than against the directory this script just made: the binary
+# landed in engine/stage/<name>/af, the archive was assembled from the staged
+# directory without it, and the script exited 0 having packaged a release with
+# no `af` in it. Nothing caught it because tools/relpack passed absolute paths,
+# which is the one shape neither caller uses.
+dist=$(cd "$dist" && pwd)
+stage=$(cd "$stage" && pwd)
+
 name="antifailure_${version}_${goos}_${goarch}"
 binary="$stage/$name/af"
 mkdir -p "$stage/$name/runner"
@@ -54,8 +64,15 @@ mkdir -p "$stage/$name/runner"
 
 # The runner travels with the binary rather than being fetched later, so the
 # source a release was tested with is the source it runs.
-cp -R "$root/runner/src" "$root/runner/package.json" "$root/runner/tsconfig.json" \
-      "$root/runner/README.md" "$stage/$name/runner/"
+#
+# package-lock.json is part of that promise and was missing from every archive
+# up to and including v0.1.1, checked by downloading the published one and
+# listing it. Without the lockfile `af runner install` resolves the ^ ranges in
+# package.json afresh, so two people installing one release get two different
+# dependency trees and neither is the tree the release was tested against. The
+# source travelling with the binary is worth nothing if the versions do not.
+cp -R "$root/runner/src" "$root/runner/package.json" "$root/runner/package-lock.json" \
+      "$root/runner/tsconfig.json" "$root/runner/README.md" "$stage/$name/runner/"
 cp "$root/LICENSE" "$root/README.md" "$stage/$name/"
 
 # reltar rather than `tar -czf`. tar takes the mtime of every entry from the

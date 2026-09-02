@@ -74,7 +74,7 @@ docker run \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
-  -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
+  -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/github/callback \
   -p 8080:8080 ghcr.io/antifailure/control-plane:main-b53906a
 ```
 
@@ -96,7 +96,7 @@ Both run inside the image, from its working directory, so reach them with
 `docker exec` on the running container or `docker run --rm ... node
 apps/api/src/backup-cli.ts`. Installed on a host they are on the path as
 `af-control-plane-backup`, which is how the [operations
-page](/docs/self-hosting/operations/#nobody-can-sign-in) writes break-glass.
+page](/docs/self-hosting/operations#nobody-can-sign-in) writes break-glass.
 
 Step 3 prints what it did:
 
@@ -128,7 +128,7 @@ there and leaves its name and GitHub login exactly as they are, in case an
 installation has adopted it since.
 
 Every variable it reads is in the [configuration
-reference](/docs/reference/control-plane/), including retention and the schema
+reference](/docs/reference/control-plane), including retention and the schema
 maintenance that keeps the events table partitioned.
 
 On Kubernetes, use the chart in `deploy/helm/antifailure-control-plane`, which
@@ -196,10 +196,18 @@ that nobody classified.
 
 ## Connecting an engine
 
-An engine token is what a CI job and a self-hosted engine present. It belongs to
-the organization rather than to whoever made it, so it keeps working after they
+An engine token is what a self-hosted engine presents. It belongs to the
+organization rather than to whoever made it, so it keeps working after they
 leave, and it carries no identity: it can send events and read an environment
 back, and it cannot reach a key, a member, or another token.
+
+**A job in GitHub Actions needs none of this.** Give the workflow
+`permissions: id-token: write` and set the `AF_CONTROL_PLANE` variable, and the
+engine trades the identity GitHub signs for that job for a short-lived
+credential of its own, at `POST /v1/engine/token`. Nothing is stored in the
+repository and nothing has to be rotated. The rest of this section is for an
+engine running somewhere GitHub will not vouch for it: a developer's machine, a
+self-hosted runner outside Actions, or another CI system.
 
 Mint one from a terminal.
 
@@ -275,4 +283,4 @@ role has `INSERT` and `SELECT` on it and nothing else, and `UPDATE`, `DELETE`
 and `TRUNCATE` are explicitly revoked. Entries are hash chained, so removing one
 from the middle leaves a break that anybody can detect.
 
-Related: [configuration](/docs/reference/control-plane/), [GitHub](/docs/guides/github/).
+Related: [configuration](/docs/reference/control-plane), [GitHub](/docs/guides/github).

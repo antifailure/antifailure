@@ -323,10 +323,11 @@
             14,
             15,
             16,
-            17
+            17,
+            18
           ],
           "default": 17,
-          "description": "Postgres major version. Must match the source, because a dump does not restore across majors."
+          "description": "Postgres major version. Match it to the source: a golden built on a different major is an environment running a Postgres your application does not."
         },
         "source_url_env": {
           "type": "string",
@@ -1421,6 +1422,16 @@
           ],
           "default": "fail",
           "description": "Teardown left a resource behind. The journal remembers what is left, so 'af down' can finish the job."
+        },
+        "workflows_unverified": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "A run in which no workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. Distinct from a single blocked workflow, which is never counted against the application: one gap in the tooling is not evidence, and a run where every workflow was a gap has tested nothing at all, so reporting it as a pass says the application was checked when it was not. Set it to warn if the project has no workflows yet and you would rather record that choice than be told about it."
         }
       }
     },

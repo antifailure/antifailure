@@ -312,6 +312,28 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 	started := o.opts.Clock.Now()
 	source := o.sourceURL()
 
+	// A manifest that names production and a shell that does not hold it is a
+	// refusal rather than an empty golden.
+	//
+	// This is the same defect `af up` already refuses with AF-DB-012, arriving
+	// through the other door. A refresh with the variable unset copied nothing,
+	// masked nothing, verified nothing, published a golden whose provenance is
+	// indistinguishable from a real one, exited 0 and printed "Bring an
+	// environment up from it with: af up". The next `af up` then found a golden
+	// for this project, branched an empty database, ran the migrations against
+	// it, and produced an environment that looks correct and holds none of
+	// production's shape or volume. It is the one failure a preview environment
+	// exists to prevent, and the run that caused it reported success.
+	//
+	// It is not hypothetical and it is not a typo. A pull request from a fork
+	// gets no secrets, so the variable is empty in exactly the runs nobody
+	// watches.
+	if o.opts.Manifest.Database != nil &&
+		o.opts.Manifest.Database.SourceURLEnv != "" && source.IsZero() {
+		return result, aferrors.Coded(aferrors.AFDB016,
+			"variable", o.opts.Manifest.Database.SourceURLEnv)
+	}
+
 	spec := provider.GoldenSpec{
 		Version:    databaseVersion(o.opts.Manifest),
 		RulesHash:  hash,
@@ -376,6 +398,17 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 	if err := o.recordRefresh(ctx, s); err != nil {
 		return result, err
 	}
+	// Said out loud, because a refresh is the only way a golden comes into
+	// existence and this path emitted nothing. `af golden refresh` produced a
+	// masked, verified, attested version and the control plane never heard of
+	// it, so the row the compliance pack reads was written by nobody. The
+	// attestation is taken from the result when the provider did not put it on
+	// the version, because Verify's return value is where it is produced and
+	// only some providers copy it back.
+	if gv.Attestation == "" {
+		gv.Attestation = result.Attestation
+	}
+	o.event(s, events.GoldenReady, "golden "+gv.ID+" is ready", o.goldenFields(gv)...)
 	// Published after the version exists locally, never instead of it. A
 	// publish that fails leaves a golden this machine can still branch, and
 	// the failure is reported rather than turned into a failed refresh: the
@@ -670,16 +703,52 @@ func (o *Orchestrator) verifyDatabase(
 				events.F("detector", f.Detector),
 				events.F("table", f.Schema+"."+f.Table), events.F("column", f.Column))
 		}
-		first := report.Findings[0]
-		return report, string(body), aferrors.Coded(aferrors.AFMSK002,
-			"detector", first.Detector, "table", first.Schema+"."+first.Table,
-			"column", first.Column)
+		// A skip with no findings reaches here now, and it did not before, so
+		// this index was safe and is not. Clean() used to ignore Skipped, which
+		// meant every path into this branch had at least one finding;
+		// report.Findings[0] on a report whose only problem is an unreadable
+		// column is an index out of range, and the fix for a silent pass would
+		// have been a panic. Findings first, because a column the scan READ and
+		// disliked is the more specific answer.
+		if len(report.Findings) > 0 {
+			first := report.Findings[0]
+			return report, string(body), aferrors.Coded(aferrors.AFMSK002,
+				"detector", first.Detector, "table", first.Schema+"."+first.Table,
+				"column", first.Column)
+		}
+		for _, skipped := range report.Skipped {
+			o.eventErr(s, events.MaskFinding,
+				"verification could not read "+skipped,
+				events.F("skipped", skipped))
+		}
+		// Safe because !Clean() with no findings means Skipped is non empty,
+		// which is Clean()'s definition and not an assumption about the caller.
+		table, column, detail := describeSkip(report.Skipped[0])
+		return report, string(body), aferrors.Coded(aferrors.AFMSK011,
+			"table", table, "column", column, "detail", detail)
 	}
 	o.event(s, events.MaskVerified,
 		fmt.Sprintf("verified %d columns across %d tables", report.Columns, report.Tables),
 		events.F("tables", report.Tables), events.F("columns", report.Columns),
 		events.F("rows_sampled", report.RowsSampled), events.F("verified", true))
 	return report, string(body), nil
+}
+
+// describeSkip splits one of verify.Scan's skipped lines into the fields the
+// error catalogue names.
+//
+// The line is "schema.table.column: reason", so the column is what follows the
+// LAST dot rather than the first: a schema qualified name has two, and cutting
+// on the first turns public.customers.notes into table "public" and column
+// "customers.notes". Written as its own function because that off by one is
+// invisible in an error nobody has triggered yet.
+func describeSkip(line string) (table, column, detail string) {
+	where, detail, _ := strings.Cut(line, ": ")
+	table, column = where, ""
+	if i := strings.LastIndex(where, "."); i >= 0 {
+		table, column = where[:i], where[i+1:]
+	}
+	return table, column, detail
 }
 
 // PlanResult is what af mask plan produced.

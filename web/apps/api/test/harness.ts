@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto'
 import postgres from 'postgres'
-import { createPool, migrate, type Pool } from '@antifailure/db'
+import { createAdminPool, createPool, migrate, type AdminPool, type Pool } from '@antifailure/db'
 import { createServer } from '../src/server.ts'
 import { FakeClock } from '../src/clock.ts'
 import { FakeGitHub } from '../src/auth/fakegithub.ts'
@@ -69,6 +69,14 @@ export interface ApiHarness {
   app: ReturnType<typeof createServer>['app']
   admin: postgres.Sql
   pool: Pool
+  /**
+   * The OPERATOR pool, on the antifailure_admin role.
+   *
+   * Built here rather than by each suite, because without it every
+   * adminProcedure answers PRECONDITION_FAILED naming AF_ADMIN_DATABASE_URL and
+   * no admin route can be tested through HTTP at all.
+   */
+  adminPool: AdminPool
   clock: FakeClock
   github: FakeGitHub
   /** Every message the sign-in path tried to send. Nothing leaves the process. */
@@ -78,6 +86,17 @@ export interface ApiHarness {
 }
 
 export interface StartApiOptions {
+  /**
+   * Serve cookies the way production does. Defaults false, because the test
+   * client speaks plain HTTP.
+   *
+   * Worth setting for anything that depends on the cookie NAME rather than on
+   * its transport: the operator cookie takes the __Host- prefix only when
+   * Secure, so a suite that never turns this on cannot see a reader that knows
+   * the bare name and not the prefixed one. Tests that forward Set-Cookie by
+   * hand are unaffected by Secure, since they are their own cookie jar.
+   */
+  secureCookies?: boolean
   /** Who may sign in. Undefined leaves the server open, which is its default. */
   signInAllowlist?: ReadonlySet<string> | null
   /** The secret that seals provider keys. Undefined means none is configured,
@@ -100,7 +119,15 @@ export interface StartApiOptions {
   stripe?: Billing | null
   /** The plan required by a hosted deployment. Null is the self-hosted default. */
   hostedRequiredPlan?: HostedRequiredPlan | null
+  /** Whether this installation's operator sets plans by hand. Undefined is the
+   *  default the server ships with, and it is the refusing one: `billing.set`
+   *  is off unless somebody says otherwise, so a suite that does not mention
+   *  this is testing the configuration production runs in. */
+  operatorSetsPlan?: boolean
   githubAppInstallUrl?: string
+  /** Where a refused person is sent. Undefined is the self-hosted default and
+   *  means the refusal page offers no link at all. */
+  signupUrl?: string
   /** Acting on a repository as the installation. Undefined means no App, which
    *  is a real way to run this: deliveries still record installations and
    *  nothing is published. */
@@ -131,6 +158,30 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
   await migrate(admin)
   await admin.unsafe(`ALTER ROLE antifailure_app LOGIN PASSWORD 'app-test-password'`)
 
+  // The operator credential. 0023 creates the role NOLOGIN so a self-hosted
+  // installation supplies its own password rather than inheriting one from a
+  // public repository; the suite is that installation. BYPASSRLS is reasserted
+  // rather than assumed, because createAdminPool refuses a role without it and
+  // the refusal would name the role rather than this line.
+  await admin.unsafe(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'antifailure_admin') THEN
+        CREATE ROLE antifailure_admin NOLOGIN BYPASSRLS;
+      ELSE
+        ALTER ROLE antifailure_admin BYPASSRLS;
+      END IF;
+    END $$;
+    ALTER ROLE antifailure_admin LOGIN PASSWORD 'admin-test-password';
+  `)
+  const adminPoolUrl = new URL(adminUrl)
+  adminPoolUrl.username = 'antifailure_admin'
+  adminPoolUrl.password = 'admin-test-password'
+  const adminPool = createAdminPool({
+    url: adminPoolUrl.toString(),
+    max: 3,
+    connectTimeoutSeconds: Number(process.env.AF_TEST_CONNECT_TIMEOUT ?? 30),
+  })
+
   const pool = createPool({
     url: appUrl(),
     max: 6,
@@ -141,6 +192,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
   const mailer = new RecordingMailer()
   const { app } = createServer({
     pool,
+    adminPool,
     github,
     clock,
     // Configured, so the two routes exist and the catalog test covers them.
@@ -148,7 +200,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     emailSignIn: { mailer, baseUrl: 'http://api.test', productName: 'Antifailure' },
     // The test client speaks plain HTTP, and a Secure cookie would not come
     // back. Production defaults the other way and there is a test for that.
-    secureCookies: false,
+    secureCookies: options.secureCookies ?? false,
     appBaseUrl: 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
     sealingKey: options.sealingKey ?? null,
@@ -158,7 +210,9 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     ...(options.consoleDir ? { consoleBuild: await findConsoleBuild(options.consoleDir) } : {}),
     stripe: options.stripe ?? null,
     hostedRequiredPlan: options.hostedRequiredPlan ?? null,
+    operatorSetsPlan: options.operatorSetsPlan ?? false,
     githubAppInstallUrl: options.githubAppInstallUrl,
+    signupUrl: options.signupUrl,
     githubApi: options.githubApi ?? null,
     ...(options.forgetInstallationToken
       ? { forgetInstallationToken: options.forgetInstallationToken }
@@ -179,11 +233,13 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     app,
     admin,
     pool,
+    adminPool,
     clock,
     github,
     mailer,
     fetch: async (path, init) => app.fetch(new Request(`http://api.test${path}`, init)),
     async close() {
+      await adminPool.close()
       await pool.close()
       await admin.end({ timeout: 5 })
     },

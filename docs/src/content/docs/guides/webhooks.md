@@ -2,7 +2,7 @@
 title: Webhooks
 description: Inbound callbacks reach an environment that has no public address.
 sidebar:
-  order: 5
+  order: 6
 ---
 
 An environment is not on the internet, so a provider cannot call it. Without
@@ -61,5 +61,5 @@ exactly what it received rather than against what you think it received.
 from a fixture pack, and a pack may include events to deliver, which is how a
 provider with no sandbox still exercises a callback path.
 
-Related: [egress](/docs/concepts/egress/), [mocking](/docs/guides/mocking/),
-[sandbox credentials](/docs/guides/sandbox/).
+Related: [egress](/docs/concepts/egress), [mocking](/docs/guides/mocking),
+[sandbox credentials](/docs/guides/sandbox).

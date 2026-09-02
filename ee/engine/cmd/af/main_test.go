@@ -1,3 +1,5 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 package main_test
 
 // The test this binary did not have.
@@ -14,6 +16,7 @@ package main_test
 // was already there.
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,6 +78,51 @@ func run(t *testing.T, env map[string]string, args ...string) string {
 	cmd.Stderr = &stderr
 	_ = cmd.Run()
 	return stderr.String()
+}
+
+// runStdout invokes the binary and returns what it wrote to standard output.
+//
+// The other helper reads standard error because it was written for the startup
+// banner. What a command prints about the installation is output, not a banner,
+// and asserting on the right stream is half of what these tests are for.
+func runStdout(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := exec.Command(enterpriseBinary(t), args...)
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	var stdout strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = nil
+	require.NoError(t, cmd.Run())
+	return stdout.String()
+}
+
+// af version and af license status must agree about which binary this is.
+//
+// They did not. af license status asked the context, which this binary fills in
+// at startup, and said enterprise. af version printed a package variable that no
+// build ever stamped and said community, in this binary, on the command an
+// auditor runs to record what they are running. Both were green in every unit
+// test because a unit test of the community command tree attaches nothing and
+// community is the right answer there.
+func TestAfVersionSaysThisIsTheEnterpriseEdition(t *testing.T) {
+	t.Parallel()
+
+	text := runStdout(t, "version")
+	require.Contains(t, text, "enterprise edition",
+		"the enterprise binary reported the wrong edition on the command that names it")
+
+	var version struct {
+		Edition string `json:"edition"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(runStdout(t, "version", "-o", "json")), &version))
+	require.Equal(t, "enterprise", version.Edition)
+
+	var licence struct {
+		Edition string `json:"edition"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(runStdout(t, "license", "status", "-o", "json")), &licence))
+	require.Equal(t, version.Edition, licence.Edition,
+		"one binary answered two different editions to two commands")
 }
 
 func policyFile(t *testing.T, body string) string {

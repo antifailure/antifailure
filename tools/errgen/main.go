@@ -9,6 +9,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"go/format"
@@ -64,24 +65,26 @@ var areaNames = map[string]string{
 	"SCH": "Scheduling",
 	"FID": "Fidelity",
 	"CPL": "Control plane",
+	"WLD": "Workloads",
 }
 
 func main() {
 	var (
-		in     = flag.String("catalog", "engine/internal/errors/catalog.yaml", "path to the catalog")
-		goOut  = flag.String("go", "engine/internal/errors/codes.gen.go", "path for the generated Go file")
-		docOut = flag.String("docs", "docs/src/content/docs/reference/errors.md", "path for the generated reference page")
-		check  = flag.Bool("check", false, "fail if regenerating would change anything")
+		in      = flag.String("catalog", "engine/internal/errors/catalog.yaml", "path to the catalog")
+		goOut   = flag.String("go", "engine/internal/errors/codes.gen.go", "path for the generated Go file")
+		docOut  = flag.String("docs", "docs/src/content/docs/reference/errors.md", "path for the generated reference page")
+		jsonOut = flag.String("json", "www/public/errors.v1.json", "path for the public machine-readable catalog")
+		check   = flag.Bool("check", false, "fail if regenerating would change anything")
 	)
 	flag.Parse()
 
-	if err := run(*in, *goOut, *docOut, *check); err != nil {
+	if err := run(*in, *goOut, *docOut, *jsonOut, *check); err != nil {
 		fmt.Fprintln(os.Stderr, "errgen:", err)
 		os.Exit(1)
 	}
 }
 
-func run(in, goOut, docOut string, check bool) error {
+func run(in, goOut, docOut, jsonOut string, check bool) error {
 	raw, err := os.ReadFile(in)
 	if err != nil {
 		return err
@@ -102,11 +105,15 @@ func run(in, goOut, docOut string, check bool) error {
 		return err
 	}
 	docSrc := renderDocs(c.Errors)
+	jsonSrc, err := renderJSON(c.Errors)
+	if err != nil {
+		return err
+	}
 
 	for _, f := range []struct {
 		path string
 		data []byte
-	}{{goOut, goSrc}, {docOut, docSrc}} {
+	}{{goOut, goSrc}, {docOut, docSrc}, {jsonOut, jsonSrc}} {
 		if check {
 			old, err := os.ReadFile(f.path)
 			if err != nil {
@@ -128,6 +135,55 @@ func run(in, goOut, docOut string, check bool) error {
 		fmt.Printf("errgen: %d codes across %d areas\n", len(c.Errors), countAreas(c.Errors))
 	}
 	return nil
+}
+
+type publicEntry struct {
+	Code       string `json:"code"`
+	Area       string `json:"area"`
+	AreaName   string `json:"areaName"`
+	Message    string `json:"message"`
+	Resolution string `json:"resolution"`
+	Docs       string `json:"docs"`
+	Retryable  bool   `json:"retryable"`
+	ExitCode   int    `json:"exitCode"`
+	Planned    bool   `json:"planned"`
+}
+
+func renderJSON(es []entry) ([]byte, error) {
+	public := struct {
+		SchemaVersion int           `json:"schemaVersion"`
+		Product       string        `json:"product"`
+		Errors        []publicEntry `json:"errors"`
+	}{SchemaVersion: 1, Product: "Antifailure", Errors: make([]publicEntry, 0, len(es))}
+
+	for _, e := range es {
+		// Planned codes are reserved for source compatibility and deliberately
+		// absent from the human reference. Publishing them here would tell an
+		// agent how to recover from an error this version cannot return.
+		if e.Planned {
+			continue
+		}
+		public.Errors = append(public.Errors, publicEntry{
+			Code:       e.Code,
+			Area:       e.Area,
+			AreaName:   areaNames[e.Area],
+			Message:    e.Message,
+			Resolution: e.NextStep,
+			Docs:       "https://antifailure.dev" + docsURL(e.Docs),
+			Retryable:  e.Retryable,
+			ExitCode:   e.ExitCode,
+			Planned:    e.Planned,
+		})
+	}
+
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(public); err != nil {
+		return nil, fmt.Errorf("render public error catalog: %w", err)
+	}
+	return b.Bytes(), nil
 }
 
 func countAreas(es []entry) int {
@@ -290,7 +346,12 @@ func renderDocs(es []entry) []byte {
 	b.WriteString("---\n")
 	b.WriteString("title: Error reference\n")
 	b.WriteString("description: Every error Antifailure can return, what causes it, and what to do about it.\n")
-	b.WriteString("sidebar:\n  order: 6\n")
+	// 3, matching the hand-listed Reference group in docs/astro.config.mjs and
+	// the four sibling pages renumbered with it. This page is GENERATED, so
+	// editing its frontmatter alone moved nothing: the next `just generated`
+	// wrote 6 back and the "generated files are current" gate went red. The
+	// number lives here because this is the only place that decides it.
+	b.WriteString("sidebar:\n  order: 3\n")
 	b.WriteString("---\n\n")
 	b.WriteString("Every user facing error carries a code of the form `AF-<AREA>-<NNN>`.\n")
 	b.WriteString("This page is generated from `engine/internal/errors/catalog.yaml`, so it\n")
@@ -310,8 +371,17 @@ func renderDocs(es []entry) []byte {
 		{"6", "A policy denied the operation."},
 		{"7", "Verification failed. Masking or an invariant."},
 		{"8", "A test failed. Agent verdicts or load thresholds."},
-		{"9", "Interrupted, and teardown completed cleanly."},
-		{"10", "Interrupted, and resources are still recorded. Run `af down` again."},
+		// 9 and 10 are the two codes whose published meaning has to be read
+		// off the catalog rather than off the name in errors.go, and one of
+		// them was wrong here. Nothing returns 9 for an interrupt: a second
+		// interrupt exits 10, and the only two entries carrying 9 are
+		// AF-AGT-007, a run that reached no verdict, and AF-WLD-014, a
+		// workload that did not finish. This page says these codes are stable
+		// and scripts branch on them, so a sentence describing something the
+		// binary never does is the worst kind of wrong to publish under that
+		// promise.
+		{"9", "Nothing was measured. No workflow reached a verdict, or a workload did not finish."},
+		{"10", "Interrupted, or a teardown left resources recorded. Run `af down` again."},
 	} {
 		fmt.Fprintf(&b, "| `%s` | %s |\n", r[0], r[1])
 	}
@@ -365,14 +435,23 @@ func renderDocs(es []entry) []byte {
 
 // docsURL turns a catalog docs field into the address the built site serves.
 //
-// The trailing slash goes on the path, not on the end of the string. Two codes
-// point at a heading rather than a page, and appending the slash blindly built
+// No trailing slash, because that is the address the host actually serves.
+// www/public/staticwebapp.config.json sets "trailingSlash": "never", so Azure
+// answers /docs/reference/cli/ with a 301 to /docs/reference/cli. This function
+// used to write the slashed form, which put a redirect behind the "More" link
+// of all 131 error codes, on the page a reader reaches at the moment something
+// has already gone wrong for them.
+//
+// The earlier defect this replaces is still worth keeping in mind, because the
+// shape of the string is the same: two codes point at a heading rather than a
+// page, and treating the whole field as a path built
 // /docs/reference/cli#af-init/, whose fragment is "af-init/" and matches no
-// heading. The link resolved, landed at the top of a long page, and looked
-// like it worked.
+// heading. The link resolved, landed at the top of a 900 line page, and looked
+// like it worked. So the field is still split on the fragment first; there is
+// simply no longer a slash to misplace.
 func docsURL(docs string) string {
 	path, fragment, hasFragment := strings.Cut(docs, "#")
-	url := "/docs/" + path + "/"
+	url := "/docs/" + path
 	if hasFragment {
 		url += "#" + fragment
 	}
