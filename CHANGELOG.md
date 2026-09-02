@@ -185,10 +185,13 @@ manifest or pipeline does.
   `deploy/docker/control-plane.Dockerfile` move together, the dependency
   install, the console build and the runtime, so an operator pulling the new
   tag gets one runtime rather than a mixture of two. The three examples move
-  with it, because an example is the first Dockerfile most people copy. Alpine
-  3.24 carries psql 18 under the unversioned `postgresql-client` package where
-  3.20 carried psql 16, and a client newer than the server is the direction
-  libpq supports, so the migration those examples run behaves as it did.
+  with it, because an example is the first Dockerfile most people copy. One of
+  them changes the psql its migration runs: the Go example's runtime moves from
+  Alpine 3.20 to 3.24, which carries psql 18 under the unversioned
+  `postgresql-client` package where 3.20 carried psql 16. A client newer than
+  the server is the direction libpq supports, so that migration behaves as it
+  did. The Next.js example does not move, because its Node base was already
+  built on Alpine 3.24 and was already giving it psql 18.
 - Every route to the hosted control plane says the same thing about it. The
   `/signin` and `/signup` tabs both read "Join the waitlist" and both
   descriptions said there was no hosted control plane, which a crawler, a

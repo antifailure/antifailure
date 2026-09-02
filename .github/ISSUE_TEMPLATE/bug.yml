@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        If this is a security problem, stop and email security@antifailure.dev instead.
+        If this is a security problem, stop and open a private vulnerability report instead.
 
         `af support bundle` collects logs, events, the manifest, and doctor output
         with the redactor applied, and prints a manifest of exactly what it included.
