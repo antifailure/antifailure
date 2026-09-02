@@ -2,7 +2,7 @@
 title: HTTP endpoints
 description: What answers on antifailure.dev, what answers on the control plane, and which of the two is the product's API.
 sidebar:
-  order: 9
+  order: 6
 ---
 
 Two hosts serve HTTP, and only one of them is an API worth building against.
@@ -63,6 +63,7 @@ below that take no session either.
 | `POST /v1/pr/report` | that credential | What a job says about the commit it checked. |
 | `POST /webhooks/github`, `POST /webhooks/stripe` | an HMAC over the raw body | Deliveries. Verified before the body is parsed, and each one handled once. |
 | `/auth/*` | varies | GitHub sign in for a browser, and the device flow `af login` uses. |
+| `GET /exports/deletion` | the token in the link, and nothing else | Downloads the export of an organization that has been deleted. |
 | `POST /webhooks/github` | HMAC signature | Deliveries from the GitHub App. No session and no token: the body's signature is the credential, and an unsigned delivery is refused. |
 | `POST /webhooks/stripe` | HMAC signature | Billing deliveries, verified the same way. |
 | `POST /byok/anthropic/v1/messages` | engine or CLI token, in that provider's own header | The budgeted model proxy. See [Model keys](/docs/guides/model-keys). |
@@ -81,6 +82,17 @@ are asking the same organization to spend its own money. The token goes in
 whichever header that provider's own client already sends, `x-api-key` for
 Anthropic and an `Authorization` bearer for OpenAI, so pointing an existing SDK
 at this host is a base URL change rather than an edit to the caller.
+
+`GET /exports/deletion` is the one row here whose credential is the URL. An
+organization that has been deleted has no members left to authenticate, so a
+session cannot be the thing that opens its export; the link mailed at closure
+is. It is rate limited like a sign in rather than like an API read for that
+reason, because it is the one address on this list somebody could usefully
+guess at. `?describe=1` returns the export's size and expiry without the body,
+so the page that opens the link can say whether the export is still there
+before it offers a download rather than after. A link naming nothing answers
+`404`, and one naming an export that is not built yet answers `409`, which is
+a real link and worth trying again.
 
 The `/console/api/*` routes need the CSRF token as well as the cookie, and
 saying "session cookie" alone would send somebody to a `403` they could not
