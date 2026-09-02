@@ -22,7 +22,12 @@
 
 import { TRPCError } from '@trpc/server'
 import type { Db } from '@antifailure/db'
-import type { StripeClient, StripeInvoice, StripeSubscription } from '../billing/stripe.ts'
+import type {
+  StripeCharge,
+  StripeClient,
+  StripeInvoice,
+  StripeSubscription,
+} from '../billing/stripe.ts'
 import { StripeError } from '../billing/stripe.ts'
 import type { StripeConfig, PaidPlan } from '../billing/plans.ts'
 import { PAID_PLANS } from '../billing/plans.ts'
@@ -116,6 +121,42 @@ function asTrpc(err: unknown): never {
 // Refunds
 // ---------------------------------------------------------------------------
 
+/**
+ * Refuses a refund bigger than what is left on the charge, before anything is
+ * sent.
+ *
+ * Stripe would refuse it too, with a good message. What this adds is that
+ * NOTHING WAS SENT: an operator who mistyped an amount has not consumed an
+ * idempotency key, has not written a failed ledger row, and has not left a
+ * refused refund in the Stripe dashboard for somebody to find later and wonder
+ * about.
+ *
+ * Both amounts are named with their currency. A refusal that said "more than
+ * the remaining amount" without the numbers makes the operator open a second
+ * window to find out what to type instead.
+ */
+function refuseOverRefund(input: RefundInput, charge: StripeCharge): void {
+  const remaining = charge.amount - charge.amountRefunded
+  if (remaining <= 0) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message:
+        `Charge ${input.chargeId} has already been refunded in full ` +
+        `(${money(charge.amount, charge.currency)}). Nothing was refunded.`,
+    })
+  }
+  if (typeof input.amountMinor === 'number' && input.amountMinor > remaining) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message:
+        `That is more than is left on the charge. ${money(input.amountMinor, charge.currency)} ` +
+        `was asked for and ${money(remaining, charge.currency)} of ` +
+        `${money(charge.amount, charge.currency)} has not been refunded yet. Nothing was sent ` +
+        'to the payment provider.',
+    })
+  }
+}
+
 export interface RefundInput extends MoneyIntent {
   chargeId: string
   /** Absent means the whole charge. */
@@ -140,7 +181,15 @@ export async function refundCharge(
 ): Promise<OperationRun<{ refundId: string; amountMinor: number; currency: string }>> {
   await refuseWhenKilled(ctx, input.orgId, 'Refunding a charge')
   try {
-    const before = await beforeCharge(ctx, input.chargeId)
+    const charge = await chargeFor(ctx, input.chargeId)
+
+    const before = {
+      amountMinor: charge.amount,
+      amountRefundedMinor: charge.amountRefunded,
+      currency: charge.currency,
+      status: charge.status,
+      disputed: charge.disputed,
+    }
     return await runOnce(
       ctx.withAdmin,
       ctx.now,
@@ -162,7 +211,14 @@ export async function refundCharge(
         },
         ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
       },
-      async (key) => {
+      async (key, fresh) => {
+        // Only on a FRESH attempt. On a recovery the provider may already hold
+        // this refund, so the charge shows it as refunded and remaining is
+        // smaller than what was asked for: the guard below would refuse the
+        // recovery forever and leave the ledger row stuck in flight, which is a
+        // refund the operator can see at Stripe and can never reconcile here.
+        // A recovery sends the same key and lets the provider replay its answer.
+        if (fresh) refuseOverRefund(input, charge)
         const refund = await ctx.stripe.client.refund(
           {
             chargeId: input.chargeId,
@@ -195,9 +251,9 @@ export async function refundCharge(
   }
 }
 
-/** The charge as Stripe has it now, for the before state. A charge Stripe has
- *  never heard of is a refusal rather than a reason to guess. */
-async function beforeCharge(ctx: MoneyContext, chargeId: string): Promise<Record<string, unknown>> {
+/** The charge as Stripe has it now. A charge Stripe has never heard of is a
+ *  refusal rather than a reason to guess. */
+async function chargeFor(ctx: MoneyContext, chargeId: string): Promise<StripeCharge> {
   const charge = await ctx.stripe.client.getCharge(chargeId)
   if (!charge) {
     throw new TRPCError({
@@ -207,13 +263,7 @@ async function beforeCharge(ctx: MoneyContext, chargeId: string): Promise<Record
         'identifier against the invoice it came from.',
     })
   }
-  return {
-    amountMinor: charge.amount,
-    amountRefundedMinor: charge.amountRefunded,
-    currency: charge.currency,
-    status: charge.status,
-    disputed: charge.disputed,
-  }
+  return charge
 }
 
 // ---------------------------------------------------------------------------

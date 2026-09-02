@@ -171,7 +171,23 @@ interface LedgerRow extends Record<string, unknown> {
  *  already did and this is its answer. Null is the third case and it is not a
  *  claim: it means "that key is spent, try the next attempt". */
 type Claim =
-  | { mine: true }
+  | {
+      mine: true
+      /**
+       * Whether this call CREATED the row, as opposed to picking up one that a
+       * previous attempt left behind.
+       *
+       * Handed to `work` because a pre-flight check that is right for a first
+       * attempt can be wrong for a recovery. The case that forced this: the
+       * refund path refuses an amount larger than what is left on the charge,
+       * which is correct for a new refund and catastrophic for a retry after a
+       * crash, because the provider ALREADY HOLDS that refund, so the charge
+       * shows it as refunded and the recovery would be refused forever with the
+       * ledger row stuck in flight. A recovery must send the same key and let
+       * the provider replay its own answer.
+       */
+      fresh: boolean
+    }
   | { mine: false; replay: { after: unknown; providerObjectId: string | null } }
 
 /**
@@ -198,7 +214,7 @@ export async function runOnce<T>(
   withAdmin: <R>(fn: (db: Db) => Promise<R>) => Promise<R>,
   now: Date,
   req: OperationRequest,
-  work: (idempotencyKey: string) => Promise<OperationOutcome<T>>,
+  work: (idempotencyKey: string, fresh: boolean) => Promise<OperationOutcome<T>>,
   /** What was true before, read by the caller so this file never has to know
    *  what a subscription looks like. */
   before?: Record<string, unknown>,
@@ -216,7 +232,7 @@ export async function runOnce<T>(
   // this deliberate retry needs a key the provider has not already answered.
   // Every other state either returns or claims the key it is looking at.
   let key = keyFor(req)
-  let claimed: { mine: true } | { mine: false; replay: { after: unknown; providerObjectId: string | null } } | null = null
+  let claimed: Claim | null = null
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS && claimed === null; attempt += 1) {
     key = keyFor(req, attempt)
@@ -234,7 +250,10 @@ export async function runOnce<T>(
           ${now.toISOString()})
         ON CONFLICT (idempotency_key) DO NOTHING
         RETURNING idempotency_key`)
-      if (inserted.length > 0) return { mine: true }
+      // A row that did not exist. This is a first attempt, or a deliberate
+      // retry that minted its own key after a refusal; either way nothing has
+      // been sent under this key and a pre-flight check is meaningful.
+      if (inserted.length > 0) return { mine: true, fresh: true }
 
       // Somebody else holds it. The row is locked while it is read so that two
       // arrivals do not both decide the other is stale and both call Stripe;
@@ -289,8 +308,10 @@ export async function runOnce<T>(
         // Stale: whatever claimed this is gone, and it may have reached the
         // provider before it died. Retrying under the SAME key is the only safe
         // recovery, because the provider then replays its own answer instead of
-        // doing the work again.
-        return { mine: true }
+        // doing the work again. NOT fresh: the provider may already hold the
+        // result, so a pre-flight check would be looking at a world this
+        // operation has already changed.
+        return { mine: true, fresh: false }
       }
 
       // Failed, and which kind of failed decides everything.
@@ -304,7 +325,8 @@ export async function runOnce<T>(
       }
       // No answer came back. The request may have been executed and the
       // response lost, so the same key goes back out and the provider decides.
-      return { mine: true }
+      // Not fresh, for the same reason as the stale branch above.
+      return { mine: true, fresh: false }
     })
   }
 
@@ -328,7 +350,7 @@ export async function runOnce<T>(
   // ---- 2. Do it. -----------------------------------------------------------
   let outcome: OperationOutcome<T>
   try {
-    outcome = await work(key)
+    outcome = await work(key, claimed.fresh)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     const code = (err as { code?: string | null }).code ?? null
