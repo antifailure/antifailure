@@ -39,6 +39,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import type { Context, Hono } from 'hono'
+import type { ApiEnv } from '../env.ts'
 import { appendAudit, type Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import { RateLimiter } from '../ratelimit.ts'
@@ -201,7 +202,7 @@ export async function exchangeWorkflowIdentity(
   }
 
   // 3. Which organization, if any, has claimed it. On a connection scoped to
-  //    the account out of the verified token, so the policy in 0027 can only
+  //    the account out of the verified token, so the policy in 0028 can only
   //    reach bindings held by organizations with an installation on that
   //    account: a bug here writes nothing into somebody else's tenant.
   const rows = await deps.pool.withGitHubAccount(owner, async (db) => {
@@ -340,7 +341,7 @@ export async function exchangeWorkflowIdentity(
  * sends the customer to the manual claim, where a person decides.
  *
  * The write runs under the tenant rather than under the GitHub account scope,
- * deliberately: migration 0027 gives the account scope SELECT and UPDATE and no
+ * deliberately: migration 0028 gives the account scope SELECT and UPDATE and no
  * INSERT, so a connection holding only a repository owner's name still cannot
  * mint the permission. The organization is read from the verified installation
  * first, and the row is written as that organization.
@@ -647,7 +648,7 @@ export interface WorkflowIdentityRoutes {
    *  here because the server owns the hosted plan gate that goes with it, and
    *  a second implementation of a permission check is where the two disagree. */
   cliCaller: (
-    c: Context,
+    c: Context<ApiEnv>,
     need: 'tokens.manage',
   ) => Promise<{ orgId: string; userId: string; label: string } | Response>
 }
@@ -659,7 +660,7 @@ export interface WorkflowIdentityRoutes {
  * halves cannot be added apart: an exchange with no way to create a binding
  * refuses every request, and bindings with no exchange are rows nothing reads.
  */
-export function registerWorkflowIdentityRoutes(app: Hono, deps: WorkflowIdentityRoutes): void {
+export function registerWorkflowIdentityRoutes(app: Hono<ApiEnv>, deps: WorkflowIdentityRoutes): void {
   app.post('/v1/auth/github-oidc', async (c) => {
     let body: { token?: unknown }
     try {
@@ -757,7 +758,7 @@ export function registerWorkflowIdentityRoutes(app: Hono, deps: WorkflowIdentity
   // holding the repository name, which is what the list shows and what a person
   // has in front of them during an incident, must not have to go and find a
   // uuid first.
-  const revoke = async (c: Context, idOrRepository: string): Promise<Response> => {
+  const revoke = async (c: Context<ApiEnv>, idOrRepository: string): Promise<Response> => {
     const caller = await deps.cliCaller(c, 'tokens.manage')
     if (caller instanceof Response) return caller
     try {
