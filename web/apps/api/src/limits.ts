@@ -261,6 +261,17 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 2, burst: 60, key: 'ip',
     reason: 'One report per job. Refusing this loses the result of a run somebody has already paid for, so it is as generous as the exchange that precedes it.',
   },
+  // The engine's own exchange, keyed by address for the same reason as the
+  // callback one: the call that gets a token cannot be keyed on a token.
+  //
+  // Held to one per job. Unlike the callback exchange this one writes a row
+  // every time it succeeds, so a loop here grows a table rather than merely
+  // costing a signature check, and the burst is what twenty pull requests
+  // starting at once behind one NAT actually need.
+  'POST /v1/engine/token': {
+    rate: 2, burst: 60, key: 'ip',
+    reason: 'One exchange per job, before the engine has any credential to be keyed on. A workflow identity is verified against a cached key set before a row is written, so an unsigned flood is refused cheaply.',
+  },
   'POST /v1/events': {
     rate: 200, burst: 2000, key: 'token',
     reason: 'An engine that was offline sends its backlog at once. The burst absorbs a re-connect; the rate is what one busy CI account sustains.',

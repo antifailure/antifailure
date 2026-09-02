@@ -169,11 +169,21 @@ export async function authenticateEngine(
       name: string
       token_hash: Buffer
       revoked_at: Date | string | null
+      expires_at: Date | string | null
     }>(sql`
-      SELECT id, org_id, name, token_hash, revoked_at FROM engine_tokens
+      SELECT id, org_id, name, token_hash, revoked_at, expires_at FROM engine_tokens
       WHERE token_hash = ${hash}`)
     const row = rows[0]
     if (!row || row.revoked_at) return null
+    // An expiry that nothing enforced would make "short lived" a comment rather
+    // than a property. The column has existed since migration 0012 and was
+    // never read, which cost nothing while every token was permanent and would
+    // have cost everything the moment one was not: a workflow identity is
+    // traded for a token that is supposed to die within the hour, and without
+    // this line it would authenticate forever.
+    if (row.expires_at !== null && new Date(row.expires_at).getTime() <= clock.now().getTime()) {
+      return null
+    }
     // Compared again in constant time. The database comparison is what found
     // the row; this is what makes the code correct if the lookup is ever
     // changed to a prefix scan.
