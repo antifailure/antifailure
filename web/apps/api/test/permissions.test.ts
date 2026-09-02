@@ -199,6 +199,79 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ['permissions', 'describes the product, not any tenant; the docs table is built from it'],
 ])
 
+/**
+ * The instrument, before its answer.
+ *
+ * EVERY ASSERTION IN THIS FILE IS SATISFIED BY FINDING NOTHING, and that is not
+ * a figure of speech about one of them. The matrix itself is BUILT from
+ * `listProcedures()`: the cells below are generated inside
+ * `for (const { path } of listProcedures())`, so a route list that came back
+ * empty would not fail this file, it would EMIT NO TESTS AT ALL. Zero cells,
+ * zero refusals checked, zero escalations found, and a green run reporting that
+ * the permission matrix passed.
+ *
+ * The three scans above the matrix fail the same way and more quietly, because
+ * they at least run. "Every route declares a permission" filters an empty list
+ * and finds nothing undeclared. "Every route has a sample input" filters an
+ * empty list and finds nothing missing. Both are the assertion this file exists
+ * to make, and both are satisfied by a router that handed over nothing.
+ *
+ * The header of this file says the matrix is worth something precisely because
+ * the route list is not written here but read out of the router. That is true,
+ * and it is exactly why the read has to be checked: a list nobody wrote is a
+ * list nobody notices the absence of.
+ *
+ * Deliberately OUTSIDE the matrix's describe, so it is not skipped when there
+ * is no Postgres. None of it touches a database, and an instrument check that
+ * only runs on the machines that already run everything is not much of a check.
+ */
+describe('the matrix is generated from a route list, so the route list has to be there', () => {
+  it('the router hands over a plausible number of routes', () => {
+    const routes = listProcedures()
+    assert.ok(
+      routes.length >= 60,
+      `listProcedures() returned ${routes.length} routes. The matrix below is generated from ` +
+        'this list, so a short one does not fail it, it silently shrinks it. Every assertion ' +
+        'in this file is then satisfied by having examined nothing.',
+    )
+  })
+
+  it('it names routes this file is certain exist', () => {
+    // Named rather than only counted, because a list of the right length made
+    // of the wrong things passes a count. One route per shape the matrix
+    // depends on: a query, a mutation, one guarded by a permission only an
+    // owner holds, and one deliberately public.
+    const paths = new Set(listProcedures().map((r) => r.path))
+    for (const path of ['environments.list', 'environments.teardown', 'billing.set', 'health']) {
+      assert.ok(paths.has(path), `listProcedures() no longer names ${path}, so the scan is wrong`)
+    }
+  })
+
+  it('every route it names carries the type the matrix calls it with', () => {
+    // The matrix calls each route as `type`, and a route arriving with neither
+    // 'query' nor 'mutation' would be called wrongly and refused for a reason
+    // that has nothing to do with permissions, which reads as a passing cell.
+    const wrong = listProcedures().filter((r) => r.type !== 'query' && r.type !== 'mutation')
+    assert.deepEqual(wrong.map((r) => `${r.path}: ${r.type}`), [])
+  })
+
+  it('the roles and permissions it crosses the routes with are not empty either', () => {
+    // ROLES is the outer loop of the matrix and PERMISSIONS is what the catalog
+    // assertions are made against. Either one empty is the same defect from a
+    // different direction.
+    assert.ok(ROLES.length >= 4, `only ${ROLES.length} roles, so the matrix has almost no rows`)
+    assert.ok(
+      PERMISSIONS.length >= 20,
+      `only ${PERMISSIONS.length} permissions, so the catalog assertions check almost nothing`,
+    )
+    assert.ok(
+      declaredPermissions().size >= 60,
+      `only ${declaredPermissions().size} routes declare a permission; the matrix reads this map ` +
+        'to decide what each cell should expect, and an empty one expects nothing of anybody',
+    )
+  })
+})
+
 describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org

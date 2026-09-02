@@ -154,3 +154,6 @@ func (o *Orchestrator) InvokeRunnerCapturingDocument(
 	out, err := o.invokeRunner(ctx, runnerPath, job)
 	return captured, out, err
 }
+
+// DescribeSkipForTest exposes the split of one verify.Scan skipped line.
+func DescribeSkipForTest(line string) (string, string, string) { return describeSkip(line) }

@@ -206,45 +206,6 @@ export interface Pool {
    */
   withSweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
   /**
-   * Runs fn as an operator, for the administrative portal.
-   *
-   * The only scope in this file that can read across tenants, and the shape is
-   * the same as every other non-tenant scope here: it declares a value the
-   * caller must ALREADY HOLD, and the policies in 0029 are keyed on that value.
-   * What it declares is the hash of the operator's session cookie, so
-   * current_admin_user() resolves to a row only for a connection physically
-   * holding a live, unrevoked, unexpired operator session.
-   *
-   * That is what keeps the widening honest. Permissive policies are OR'd, so
-   * every admin policy widens the SELECT on its table for whoever the predicate
-   * is true for. A predicate that merely read a setting would be true for every
-   * caller, because every caller can set a setting. Requiring the hash to match
-   * a stored row makes it a credential rather than a claim, exactly as
-   * resolve_by_token does for a product session.
-   *
-   * Passing a hash that names no session is not an error and not an escalation:
-   * every policy evaluates false and the transaction sees an empty database.
-   */
-  withPlatformAdmin<T>(sessionHash: Buffer, fn: (db: Db) => Promise<T>): Promise<T>
-  /**
-   * Runs fn for an operator sign-in attempt, which has no session yet.
-   *
-   * The bootstrapping case, and the same one resolve_by_token solves for
-   * product sessions: the password has to be checked against a row that has to
-   * be found first, on a connection that by definition holds no session. So it
-   * declares the email being asked about, and the policy returns that operator
-   * and no other.
-   *
-   * The row carries a scrypt hash and its salt, which are not credentials:
-   * verifying a password requires the password. What declaring the email buys
-   * is that a connection cannot ENUMERATE the operators, only confirm the one
-   * it already named.
-   *
-   * This scope can also append to the operator audit chain, and nothing else,
-   * because a failed sign-in has no session and is the line most worth having.
-   */
-  withAdminSignin<T>(email: string, fn: (db: Db) => Promise<T>): Promise<T>
-  /**
    * Runs fn as antifailure_sweeper, to delete expired sessions.
    *
    * Not withSweeper, which is a different mechanism for a different table.

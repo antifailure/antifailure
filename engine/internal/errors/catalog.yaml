@@ -562,6 +562,13 @@ errors:
     docs: concepts/masking
     retryable: false
     exit_code: 3
+  - code: AF-MSK-011
+    area: MSK
+    message: "Verification could not read {table}.{column}, so the golden was not verified: {detail}"
+    next_step: "Grant the scanner read access to {table}.{column} and refresh the golden. A column the scan could not read is not a column that passed."
+    docs: concepts/verification
+    retryable: false
+    exit_code: 7
   - code: AF-NET-001
     area: NET
     message: "The request to {host} was blocked by rule {rule}."
