@@ -16,7 +16,7 @@ named. Everything else is refused with a decision you can read.
 A manifest declaring `version: 1` keeps working for the whole of version 1 of
 Antifailure. Keys are added and existing ones gain new accepted values; a key is
 not removed, renamed, or given a different meaning without a major version.
-[What is stable](/docs/reference/stability/) is the whole commitment, including
+[What is stable](/docs/reference/stability) is the whole commitment, including
 what it deliberately does not cover.
 
 ## Top level
