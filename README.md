@@ -131,11 +131,41 @@ are `examples/go-api` and `examples/django-api`, and
 `examples/github-workflow.yml` is the same run inside GitHub Actions, which
 leaves one comment on the pull request and edits it in place.
 
+## Your coding agent can run it
+
+`af mcp` serves the rehearsal tools to an agent over the Model Context
+Protocol. It is started by an MCP client rather than typed, in the checkout it
+should serve, and it speaks the protocol on standard input and output, so
+running it in a terminal looks like it has hung. It needs no account, no
+control plane and no model key of its own.
+
+The part worth reading twice is what an agent cannot do with it. The agent
+chooses the hypothesis and Antifailure chooses the safety controls, and that is
+a property of the schemas rather than a convention the tools ask an agent to
+respect. There is no argument on any tool that can disable sanitization, widen
+the egress policy, lower a threshold, name a database or skip the rehearsal,
+and unknown fields are refused rather than ignored. So an agent cannot weaken
+an experiment in order to make its own change pass. Thresholds come from the
+`policy` block of your manifest, and the verdict comes from the same evaluator
+`af ci` uses, so a tool call and a pull request check cannot disagree about the
+same change.
+
+| Tool | What it does |
+| --- | --- |
+| `rehearse_migration_safety` | Applies the branch's pending migrations to a throwaway branch of a masked copy of production and reports the slow statements, the tables Postgres rewrote, the locks and their durations, and what the schema linter objected to at production's table sizes. Returns a `run_id`. |
+| `inspect_egress_firewall` | What the environment may reach, what it reached, and whether containment held. Read only. Reports whether a sandbox credential was really swapped on the way out, which is the case that otherwise looks identical to a working one. |
+| `get_rehearsal_run` | Status, and the verdict once it has finished. Evidence is paginated. |
+| `cancel_rehearsal_run` | Asks a run to stop at the next point it can tear down safely, rather than killing it and leaking the environment. |
+
+A run answers `PASS`, `FAIL` or `INCONCLUSIVE`. `INCONCLUSIVE` is not a weaker
+`PASS`: an experiment that did not finish says nothing about the change. The
+[MCP reference](https://antifailure.dev/docs/reference/mcp) has the rest.
+
 ## What is in here
 
 | Path | What it is |
 | --- | --- |
-| `engine` | The Go engine and the `af` command. Orchestration, masking, verification, egress policy, insights, the journal. |
+| `engine` | The Go engine and the `af` command. Orchestration, masking, verification, egress policy, insights, the journal, and the MCP server. |
 | `runner` | The agent runner. TypeScript, because it drives Chromium, and installed beside `af` rather than downloaded. |
 | `schemas` | The JSON Schemas that are the source of truth. The Go types mirror `schemas/manifest.v1.json` and a test fails when they drift. |
 | `examples` | Three applications that run: a Next.js app, a Go API, a Django API. |
@@ -197,6 +227,10 @@ commands with their flags and exit codes, the JSON each command documents
 under `--output json`, the provider interfaces, and the error codes. That page
 also names what is deliberately not covered, which is the half worth reading
 first.
+
+Builds are reproducible, and that is a gate rather than an aspiration: two
+builds in two directories with two caches produce identical archives on all
+four platforms, checked in CI on every pull request.
 
 Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building
 locally, running the gates and structuring commits.
