@@ -349,9 +349,16 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
   await admin`
     INSERT INTO workload_evidence (org_id, workload_run_id, kind, availability, locator)
     VALUES (${orgId}, ${workloadRunId}, 'trace', 'runner_local', ${`/home/runner/${slug}/trace.zip`})`
+  // workload.cancel, because it is the only kind runtime_commands still has.
+  // This row seeded 'environment.teardown' until 0026 removed that kind, and
+  // the removal did not reach here: the insert then failed inside seedTenant,
+  // which is awaited by every suite's setup, so the failure arrived as an
+  // unresolved promise and the whole file hung rather than reporting itself.
+  // A cancel names a run and no environment, which is what the target CHECK
+  // says now that it has one clause.
   await admin`
-    INSERT INTO runtime_commands (org_id, kind, environment_id, expires_at, requested_by)
-    VALUES (${orgId}, 'environment.teardown', ${envId}, now() + interval '1 hour', ${userId})`
+    INSERT INTO runtime_commands (org_id, kind, workload_run_id, expires_at, requested_by)
+    VALUES (${orgId}, 'workload.cancel', ${workloadRunId}, now() + interval '1 hour', ${userId})`
 
   // The pull request lifecycle. Every one of these carries org_id, so the
   // cross-tenant suite finds them in the database and needs a row per tenant to
