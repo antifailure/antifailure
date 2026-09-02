@@ -10,10 +10,30 @@
 import Search from "virtual:starlight/components/Search";
 import SiteChrome from "./SiteChrome.astro";
 import config from "virtual:starlight/user-config";
+import { getCollection } from "astro:content";
 
 const shouldRenderSearch =
   config.pagefind ||
   config.components.Search !== "@astrojs/starlight/components/Search.astro";
+
+// The Markdown address for the page this header is on, and only when there
+// really is one.
+//
+// /docs/llms-full.txt served the whole corpus from the first build and nothing
+// on the site linked to it, so the single most useful thing this site can hand
+// an assistant was reachable only by somebody who already knew it existed.
+// That is the dead-capability shape with the last step missing, and the last
+// step is an affordance a person can see.
+//
+// Resolved against the collection rather than assembled from the URL, because
+// a control that 404s is worse than no control: this header also renders on
+// the 404 page, where there is no page to copy.
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const here = Astro.url.pathname.replace(/\/$/, "");
+const slug = here.startsWith(base) ? here.slice(base.length).replace(/^\//, "") : "";
+const docs = await getCollection("docs");
+const hasMarkdown = docs.some((d) => d.id === (slug === "" ? "index" : slug));
+const markdownHref = `${base}/${slug === "" ? "index" : slug}.md`;
 ---
 
 <SiteChrome />
@@ -21,8 +41,77 @@ const shouldRenderSearch =
 <div class="af-docsbar">
   <div class="af-docsbar-inner">
     {shouldRenderSearch && <Search />}
+    {
+      hasMarkdown && (
+        <af-page-markdown class="af-md" data-href={markdownHref}>
+          <button type="button" class="af-md-copy" aria-label="Copy this page as Markdown">
+            <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4">
+              <rect x="5.75" y="1.75" width="8.5" height="10.5" rx="1.5" />
+              <path d="M10.25 14.25h-7a1.5 1.5 0 0 1-1.5-1.5v-9" />
+            </svg>
+            <span class="af-md-copy-text">Copy as Markdown</span>
+          </button>
+          <a class="af-md-view" href={markdownHref} aria-label="View this page as Markdown">
+            View <span class="af-md-ext">.md</span>
+          </a>
+        </af-page-markdown>
+      )
+    }
   </div>
 </div>
+
+<script>
+  /**
+   * Copies the page's own Markdown, by fetching the address an agent would.
+   *
+   * Fetching rather than embedding the source in every page: the corpus is
+   * 665 KB across 81 pages and inlining each page's Markdown into its own HTML
+   * would roughly double what every reader downloads to serve a control most
+   * of them never press. It also means the button exercises the same route the
+   * documentation tells an agent to use, so a broken route cannot pass here and
+   * fail there.
+   */
+  class PageMarkdown extends HTMLElement {
+    connectedCallback() {
+      const button = this.querySelector("button");
+      const label = this.querySelector(".af-md-copy-text");
+      const href = this.dataset.href;
+      if (!button || !label || !href) return;
+
+      const idle = label.textContent ?? "Copy as Markdown";
+      let timer: ReturnType<typeof setTimeout> | undefined;
+
+      const say = (text: string) => {
+        label.textContent = text;
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          label.textContent = idle;
+        }, 2000);
+      };
+
+      button.addEventListener("click", async () => {
+        // navigator.clipboard is undefined on a page served over plain http
+        // from anything but localhost, which is every self-hosted preview
+        // somebody stands up on an internal address. Saying so and leaving the
+        // link is better than a button that does nothing.
+        if (!navigator.clipboard) {
+          say("Use the .md link");
+          return;
+        }
+        try {
+          const res = await fetch(href);
+          if (!res.ok) throw new Error(String(res.status));
+          await navigator.clipboard.writeText(await res.text());
+          say("Copied");
+        } catch {
+          say("Could not copy");
+        }
+      });
+    }
+  }
+
+  customElements.define("af-page-markdown", PageMarkdown);
+</script>
 
 <style>
   /* Starlight's own header wrapper pads its contents by --sl-nav-pad-x and
@@ -56,6 +145,89 @@ const shouldRenderSearch =
   .af-docsbar-inner :global(site-search) {
     flex: 1;
     max-width: 34rem;
+  }
+
+  /* The Markdown affordance, quiet on purpose.
+   *
+   * It sits in the bar rather than beside the heading because the bar is the
+   * page chrome that is already there on every page and at every width, and
+   * because a control beside an h1 competes with the h1. Text and a hairline,
+   * no fill and no badge: it should be findable when looked for and invisible
+   * when not. */
+  .af-md {
+    display: flex;
+    align-items: stretch;
+    flex-shrink: 0;
+    /* Pushed to the far end of the bar rather than left sitting against the
+       search field, so the two controls bracket the row instead of clustering
+       in the middle of 650px of empty bar at a desktop width. */
+    margin-inline-start: auto;
+    gap: 0;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: var(--af-radius-sm, 4px);
+    overflow: hidden;
+  }
+
+  .af-md button,
+  .af-md a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    /* 2.25rem here and 2.75rem on a phone below: 36px is comfortable beside a
+       search field on a desktop and under the floor a thumb needs. */
+    min-height: 2.25rem;
+    padding-inline: 0.7rem;
+    background: transparent;
+    border: 0;
+    color: var(--sl-color-gray-2);
+    font-size: 0.8125rem;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .af-md button:hover,
+  .af-md a:hover {
+    background: var(--sl-color-gray-7, #f5f5f5);
+    color: var(--sl-color-white);
+  }
+
+  .af-md a {
+    border-inline-start: 1px solid var(--sl-color-hairline);
+  }
+
+  .af-md svg {
+    width: 0.9375rem;
+    height: 0.9375rem;
+    flex-shrink: 0;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .af-md-ext {
+    font-family: var(--sl-font-mono);
+    font-size: 0.9em;
+  }
+
+  /* Under 30rem the label is the first thing to go, not the control. The icon
+     plus the .md link still says what it does, and the button keeps its
+     accessible name from data-label. */
+  @media (max-width: 30rem) {
+    .af-md button,
+    .af-md a {
+      min-height: 2.75rem;
+      padding-inline: 0.6rem;
+    }
+    .af-md-copy-text {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
   }
   @media (max-width: 50rem) {
     .af-docsbar-inner {

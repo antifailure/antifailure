@@ -1,0 +1,77 @@
+name: Cross platform lint
+
+# The lint that compiles what this machine never compiles.
+#
+# It lived in keyring.yml, which is path filtered to engine/internal/secrets/**
+# because the Windows and Linux keyring jobs need scarce runners and should not
+# make every unrelated pull request wait for one. This job needs none of that:
+# it runs on ubuntu-latest and only type checks other platforms, which costs
+# about a minute.
+#
+# Sharing that filter cost three red mains in one night. syscall.Kill in one
+# pull request, syscall.Mkfifo in another, and then the pull request fixing the
+# second one, all in engine/internal/mcp/, none of them touching the secrets
+# package, so none of them ran this job. The last of those is the sharpest: the
+# gate that existed to catch the break could not see the fix for it either, so
+# sixteen green checks all answered questions other than the one being asked.
+#
+# keyring.yml's own comment already named this, and offered workflow_dispatch as
+# the answer. A job somebody has to remember to run by hand is not a gate. The
+# trigger is the fix: a cross platform break arrives in whatever file the author
+# happened to touch, so the trigger has to be the whole of what it compiles.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'engine/**'
+      - '.github/workflows/crosslint.yml'
+  pull_request:
+    paths:
+      - 'engine/**'
+      - '.github/workflows/crosslint.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  crosslint:
+    name: The other platforms lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      # The main lint runs on one machine, so it only ever sees the files that
+      # machine's build tags select. keyring_windows.go and keyring_darwin.go
+      # are invisible to it, and a file nothing lints drifts: GOOS=windows found
+      # an unchecked return in the Windows keyring that had been merged and
+      # green for a day, because no linter on any runner had compiled it.
+      #
+      # On ubuntu-latest rather than on a runner of each platform, because this
+      # type checks rather than runs. Cross compiling for the lint costs a
+      # minute and needs no scarce runner.
+      - name: Lint what the other platforms compile
+        working-directory: engine
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.13.1/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.13.1
+          for target in windows darwin; do
+            echo "::group::GOOS=$target"
+            GOOS="$target" "$(go env GOPATH)/bin/golangci-lint" run --timeout 15m
+            echo "::endgroup::"
+          done
+
