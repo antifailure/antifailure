@@ -10,9 +10,12 @@ CLI token with an expiry, and the device sign-in path honours it. So a CLI token
 that had aged out was correctly turned away from the route that only tells you
 who you are, and was still accepted by the route that ingests events.
 
-Both routes now read the expiry. Anybody whose CLI token is older than ninety
-days will find event submission refused where it previously succeeded, which is
-the point: the token had expired and only one of the two doors was checking.
+The expiry is now read where the token is resolved, so every door checks it.
+Anybody whose CLI token is older than ninety days will find event submission
+refused where it previously succeeded, and the same for reading an environment
+back and for the model proxy that spends against a provider budget. That is the
+point: the token had expired and only the door that answers who you are was
+looking.
 
 Revoking a claim on a repository was also unreachable by that repository's name.
 `owner/name` contains a slash and one path parameter matches one segment, so the
