@@ -2,7 +2,7 @@
 title: Webhooks
 description: Inbound callbacks reach an environment that has no public address.
 sidebar:
-  order: 5
+  order: 6
 ---
 
 An environment is not on the internet, so a provider cannot call it. Without
