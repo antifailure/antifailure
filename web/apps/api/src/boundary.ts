@@ -348,6 +348,30 @@ export const ROUTE_BOUNDARY: Record<string, RouteBoundary> = {
   // ---------------------------------------------------------------------
   // Credentials the document does not describe.
   // ---------------------------------------------------------------------
+  // The operator sign in. #93 argues the case at length in openapi.ts and the
+  // argument is right: an operator route is not something a customer can call.
+  // It takes an operator session from a different table, issued by a different
+  // sign in, carried in a differently named `__Host-` cookie with its own CSRF
+  // token, so describing one correctly would still describe an API no reader of
+  // this document is able to use. What that argument could not do on its own is
+  // say so out loud, because a route absent from the document looked the same
+  // whether it was withheld on purpose or forgotten. These three say it.
+  'POST /v1/admin/signin': {
+    audience: 'excluded',
+    grounds: 'different-credential',
+    reason: 'Issues an operator session from the operators table, which no customer credential in this document can obtain. Publishing it would map the operator surface for somebody enumerating it.',
+  },
+  'POST /v1/admin/signout': {
+    audience: 'excluded',
+    grounds: 'different-credential',
+    reason: 'Clears that operator session. Meaningless to a caller who could never have been issued one.',
+  },
+  'GET /v1/admin/session': {
+    audience: 'excluded',
+    grounds: 'different-credential',
+    reason: 'Reports which operator is signed in, for the admin console. It reads the operator cookie and nothing else, so a session cookie or a bearer token reaches it as an anonymous caller.',
+  },
+
   'POST /webhooks/github': {
     audience: 'excluded',
     grounds: 'different-credential',

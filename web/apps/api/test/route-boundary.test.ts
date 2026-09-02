@@ -55,29 +55,32 @@ const publishedPath = path.join(here, '..', '..', '..', '..', 'www', 'public', '
  * here in the same commit. KNOWN_UNDOCUMENTED in route-docs.test.ts is the
  * same device and it emptied itself once already.
  *
- * These four are being documented by the change that adds them to openapi.ts.
- * They are classified `contract` rather than parked as excluded because there
- * is no `af` command in front of them: guides/github.md hands a customer a curl
- * line, so the HTTP call is the surface and there is nothing else it could be.
+ * EMPTY, and it emptied itself. It held the four `/v1/oidc/bindings` routes,
+ * which are classified `contract` because there is no `af` command in front of
+ * them and guides/github.md hands a customer a curl line, so the HTTP call is
+ * the surface. The change that documented them could not land without these
+ * four lines going in the same merge, because the assertion below fails when an
+ * entry STOPS being missing. That is what happened.
  *
- * Leave this empty. A new contract route belongs in the document, not here.
+ * Leave it empty. A new contract route belongs in the document, not here.
  */
-const CONTRACT_NOT_YET_IN_DOCUMENT: string[] = [
-  'POST /v1/oidc/bindings',
-  'GET /v1/oidc/bindings',
-  'DELETE /v1/oidc/bindings/:binding',
-  'DELETE /v1/oidc/bindings/:owner/:name',
-]
+const CONTRACT_NOT_YET_IN_DOCUMENT: string[] = []
 
 /**
  * tRPC procedures deliberately kept out of the document.
  *
- * Empty, and it should stay that way until there is a procedure a reader of the
- * document genuinely cannot call. #93 adds the operator ones and argues the
- * case in openapi.ts; when it lands, `admin.` belongs here with that argument
- * cited, and the assertion below stops it being a silent narrowing instead.
+ * `admin.` is the operator surface, and the case for withholding it is argued
+ * at length on `isPublishedProcedure` in openapi.ts: those procedures take an
+ * operator session from a different table, so describing them correctly would
+ * describe an API no reader of this document can use, and publishing them would
+ * map the operator surface for somebody enumerating it.
+ *
+ * The prefix is here rather than only in that predicate because narrowing what
+ * a document enumerates does not show up in the document. Thirty five
+ * procedures left the published set when #93 landed, and without this line the
+ * only visible effect would have been a tidier file.
  */
-const EXCLUDED_PROCEDURES: string[] = []
+const EXCLUDED_PROCEDURES: string[] = ['admin.']
 
 /** Every route the process can ever serve, from the router itself.
  *

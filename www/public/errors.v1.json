@@ -282,7 +282,7 @@
       "area": "DB",
       "areaName": "Database",
       "message": "The source database is Postgres {found}, and this provider supports {supported}.",
-      "resolution": "Use a provider that supports Postgres {found}, or upgrade the source.",
+      "resolution": "Set database.version to one of {supported} if the source is one of those, or point database.provider at one that handles Postgres {found}. The docker provider builds a golden in the stock postgres image, so it handles every major that image is published for.",
       "docs": "https://antifailure.dev/docs/providers/overview",
       "retryable": false,
       "exitCode": 3,

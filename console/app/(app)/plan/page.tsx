@@ -38,10 +38,31 @@ interface Plan {
   goldens: Verdict;
 }
 
+interface Override {
+  scope: "global" | "organization" | "project" | "user";
+  reason: string;
+  ticket: string | null;
+  grantedBy: string;
+  grantedAt: string;
+  expiresAt: string | null;
+}
+
+interface Entitlement {
+  key: string;
+  value: number | boolean;
+  /** What the plan alone would give. Shown struck through beside an override,
+   *  so nobody has to open the pricing page to see what was changed. */
+  planValue: number | boolean;
+  unit: string | null;
+  description: string;
+  override: Override | null;
+}
+
 interface PlanState {
   plan: string;
   plans: Plan[];
   holding: { environments: number; goldens: number };
+  entitlements: Entitlement[];
   takesPayment: boolean;
   hostedRequiredPlan: string | null;
   /** Whether billing.set would do anything. False unless whoever runs this
@@ -191,9 +212,13 @@ function Billing() {
         <div className="space-y-6">
           <Card
             title="Plan and billing"
-            note={data.billing.configured
-              ? "Stripe holds the card and computes plan changes. This control plane stores only the subscription state and card metadata."
-              : "This self-hosted installation does not take payment. Plan changes only change local quotas."}
+            note={
+              data.billing.configured
+                ? "Stripe holds the card and computes plan changes. This control plane stores only the subscription state and card metadata."
+                : data.quota.operatorSetsPlan
+                  ? "This installation takes no payment. A plan change here only changes local quotas."
+                  : "This installation takes no payment, and its plan is set by whoever runs it."
+            }
             actions={
               error ? (
                 <span
@@ -234,6 +259,9 @@ function Billing() {
               </div>
             </dl>
           </Card>
+
+
+          <Entitlements entitlements={data.quota.entitlements} plan={data.quota.plan} />
 
           {data.billing.configured ? (
             <Card
@@ -318,11 +346,7 @@ function Billing() {
 
           <Card
             title="What each plan allows"
-            note={
-              data.billing.configured || data.quota.operatorSetsPlan
-                ? "A plan that is already over its limit refuses the next environment and removes nothing that exists."
-                : "A plan that is already over its limit refuses the next environment and removes nothing that exists. This control plane takes no payment and does not grant plans by hand, so the plan is whatever its operator set."
-            }
+            note="A plan that is already over its limit refuses the next environment and removes nothing that exists."
           >
             <TableWrap>
               <Table>
@@ -452,4 +476,133 @@ export default function PlanPage() {
       <Billing />
     </Page>
   );
+}
+
+/**
+ * What this organization is entitled to, and which of it is not the plan.
+ *
+ * The whole point of the card is the second column. An override that renders
+ * as an ordinary number is a limit nobody can explain: the customer's finance
+ * department reads it, compares it with the pricing page, and opens a ticket
+ * asking which one is a mistake. So a grant is marked, the plan's own value is
+ * shown struck through beside it, and the reason and the expiry are on the
+ * row rather than behind a hover, because a phone cannot hover.
+ */
+function Entitlements({ entitlements, plan }: { entitlements: Entitlement[]; plan: string }) {
+  const granted = entitlements.filter((e) => e.override !== null).length;
+  return (
+    <Card
+      title="Limits"
+      note={
+        granted === 0
+          ? `Every limit below is the ${plan} plan's own.`
+          : granted === 1
+            ? "One of these limits was set for this organization rather than by the plan."
+            : `${granted} of these limits were set for this organization rather than by the plan.`
+      }
+    >
+      {entitlements.length === 0 ? (
+        <Empty title="No limits to show">
+          The control plane did not report any. Reload, and if it stays empty the plan it is
+          reading may be one it does not have limits for.
+        </Empty>
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <Th>Limit</Th>
+                <Th numeric>Applies</Th>
+                <Th numeric>On the {plan} plan</Th>
+                <Th>Why</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {entitlements.map((e) => (
+                <Row key={e.key}>
+                  <Td>
+                    <span className="font-medium text-ink">{label(e.key)}</span>
+                    <span className="mt-0.5 block max-w-[42ch] text-[12px] leading-5 text-dim">
+                      {e.description}
+                    </span>
+                  </Td>
+                  {/* nowrap on both number columns, and ONLY from sm up.
+                      A limit that wraps puts a strikethrough across two lines,
+                      which stops reading as "replaced" and starts reading as a
+                      rendering fault; the table scrolls on its own if that
+                      makes it too wide, which is the better failure.
+                      Below sm the table stacks into a two column grid whose
+                      first column is 10.5ch, and an unwrappable "ON THE FREE
+                      PLAN" overflows it and lands on top of its own value. The
+                      breakpoint is the same 640px the stacking media query in
+                      globals.css uses, so the two cannot disagree. */}
+                  <Td label="Applies" numeric className="sm:whitespace-nowrap">
+                    <span className="font-medium">{value(e.value, e.unit)}</span>
+                  </Td>
+                  {/* The plan's own number, kept even when it is the same, so the
+                      two columns can be read straight down rather than the eye
+                      having to work out which rows are missing one. */}
+                  <Td label={`On the ${plan} plan`} numeric className="sm:whitespace-nowrap">
+                    {e.override === null ? (
+                      <span className="text-dim">Same</span>
+                    ) : (
+                      <span className="text-muted line-through">{value(e.planValue, e.unit)}</span>
+                    )}
+                  </Td>
+                  <Td label="Why">
+                    {e.override === null ? (
+                      <span className="text-dim">The plan</span>
+                    ) : (
+                      <div className="max-w-[46ch] space-y-1">
+                        <Badge tone="warn">Override</Badge>
+                        <p className="text-[12px] leading-5 text-ink">{e.override.reason}</p>
+                        <p className="text-[12px] leading-5 text-dim">
+                          Set by {e.override.grantedBy} <When value={e.override.grantedAt} />
+                          {e.override.expiresAt ? (
+                            <>
+                              {" "}
+                              &middot; ends <When value={e.override.expiresAt} />
+                            </>
+                          ) : null}
+                          {e.override.ticket ? <> &middot; {e.override.ticket}</> : null}
+                        </p>
+                      </div>
+                    )}
+                  </Td>
+                </Row>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Card>
+  );
+}
+
+/** `perRunHours` as a person reads it. Written out rather than de-camel-cased
+ *  by a regular expression, because "Per day hours" is not what anybody calls
+ *  it and a limit somebody is being refused by has to be nameable. */
+function label(key: string): string {
+  const names: Record<string, string> = {
+    environments: "Live environments",
+    goldens: "Golden snapshots",
+    artifactGigabytes: "Artifact storage",
+    perRunHours: "Longest single run",
+    perDayHours: "Environment time per day",
+    seats: "Seats",
+    apiRateMultiplier: "API rate",
+    retentionDays: "History kept",
+  };
+  return names[key] ?? key;
+}
+
+/** A limit with its unit. A bare integer in a table of limits is a number
+ *  whose meaning the reader has to guess, and two of these are hours. */
+function value(v: number | boolean, unit: string | null): string {
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  const n = v.toLocaleString();
+  if (!unit) return n;
+  // A multiplier is written against the number, not beside it: "1 x" reads as
+  // a number and a stray letter, "1x" reads as a multiplier.
+  return unit === "x" ? `${n}x` : `${n} ${unit}`;
 }

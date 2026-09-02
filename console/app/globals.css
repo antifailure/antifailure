@@ -106,6 +106,22 @@ body {
 }
 
 /*
+ * The same ring, inverted, on a near-black surface.
+ *
+ * The rule above is `2px solid var(--color-ink)`, and --color-ink is #101010.
+ * The operator portal's rail, mobile header and drawer are `bg-ink`, which is
+ * the SAME #101010, so on those surfaces the focus ring is drawn in the
+ * background colour and is invisible. Keyboard navigation of the operator
+ * portal's own navigation would have had no visible focus at all.
+ *
+ * Marked with an attribute rather than fixed per component, so a control added
+ * to the rail later inherits it instead of being the one that forgets.
+ */
+[data-surface="inverted"] :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline-color: #ffffff;
+}
+
+/*
  * Density is a desktop decision.
  *
  * A 32px row of controls is right in a table somebody reads all day with a

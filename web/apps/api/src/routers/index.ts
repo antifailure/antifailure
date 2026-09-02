@@ -19,7 +19,8 @@ import {
   sessionsRouter,
 } from './enterprise.ts'
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLES, ROLE_PERMISSIONS, rolesWith } from '../permissions.ts'
-import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
+import { DEFAULT_PLAN } from '../limits.ts'
+import { checkQuotaWithEntitlements, resolveEntitlements } from '../entitlements.ts'
 import { capsFor, costAttribution, environmentHoursSince } from '../costs.ts'
 import { syncMembership, SignInError } from '../auth/signin.ts'
 import { GitHubError } from '../auth/github.ts'
@@ -37,6 +38,7 @@ import { workloadsRouter } from './workloads.ts'
 import { expireOverdueCommands } from '../workloads/commands.ts'
 import { billingRouter } from './billing.ts'
 import { subscriptionsRouter } from './subscriptions.ts'
+import { adminRouter } from '../admin/router.ts'
 
 const uuid = z.string().uuid()
 
@@ -1103,14 +1105,27 @@ const orgRouter = router({
       if (!row) throw notFound('organization', c.actor.orgId)
 
       const plan = row.plan || DEFAULT_PLAN
+      // Resolved rather than read off the plan, because the plan's number is no
+      // longer the number that refuses anything. An organization sold forty
+      // environments is refused at forty by dispatch, and a status endpoint
+      // still saying twenty five would tell somebody they are over a limit they
+      // are not over, or under one they are over. A reported limit that
+      // disagrees with the enforced one is worse than no reported limit.
+      const entitlements = await resolveEntitlements(db, c.clock.now(), {
+        orgId: c.actor.orgId,
+        plan,
+        userId: c.actor.userId,
+      })
       return {
         slug: row.slug,
         plan,
         suspended: row.suspended_at !== null,
         suspendedReason: row.suspended_reason,
         quotas: {
-          environments: checkQuota(plan, 'environments', Number(row.environments)),
-          goldens: checkQuota(plan, 'goldens', Number(row.goldens)),
+          environments: checkQuotaWithEntitlements(
+            entitlements, 'environments', Number(row.environments),
+          ),
+          goldens: checkQuotaWithEntitlements(entitlements, 'goldens', Number(row.goldens)),
         },
       }
     })
@@ -1204,6 +1219,19 @@ const tokensRouter = router({
 
 export const appRouter = router({
   health: publicProcedure.query(() => ({ ok: true })),
+
+  /**
+   * The operator portal.
+   *
+   * Mounted under `admin.` and that prefix is load bearing rather than
+   * cosmetic: admin-infra's maintenance mode exempts `/trpc/admin.*` so an
+   * operator can still reach the switch that releases it. Moving this key
+   * locks the operator out of the control that ends an outage.
+   *
+   * Every procedure inside is built with adminProcedure, which takes its
+   * permission as an argument, so none of them can exist unguarded.
+   */
+  admin: adminRouter,
 
   /** The permission catalog, which is what the documentation table is built
    *  from. Public because it describes the product rather than any tenant. */

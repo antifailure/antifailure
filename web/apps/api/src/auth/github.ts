@@ -230,6 +230,27 @@ export interface GitHubClient {
    * GitHub rather than recording that GitHub said no.
    */
   revokeInstallation(installationId: number): Promise<{ configured: boolean; removed: boolean }>
+
+  /**
+   * Withdraws the OAuth authorization a person granted moments ago.
+   *
+   * Called on one path only: a sign-in that was refused after the code was
+   * already exchanged. Being refused at the callback means the visitor has
+   * already pressed Authorize on a third party application, and the grant
+   * outlives the refusal unless somebody takes it back. Nobody should have to
+   * go to their GitHub settings to undo an authorization the product accepted
+   * and then declined to honour.
+   *
+   * DELETE /applications/{client_id}/grant, authenticated with the OAuth
+   * app's own client id and secret rather than with the token: this deletes
+   * the grant and every token issued under it, which revoking the token alone
+   * does not.
+   *
+   * Returns whether the grant is actually gone. False is a normal answer, not
+   * an error: GitHub may be unreachable, and a refusal must not fail because
+   * the tidying up did.
+   */
+  revokeAuthorization(accessToken: string): Promise<{ revoked: boolean }>
 }
 
 export interface GitHubConfig {
@@ -731,6 +752,32 @@ export class RealGitHubClient implements GitHubClient {
     if (!res.ok) return null
     const body = (await res.json()) as { role?: string }
     return body.role === 'admin' ? 'admin' : 'member'
+  }
+
+  async revokeAuthorization(accessToken: string): Promise<{ revoked: boolean }> {
+    const base = this.config.apiBase ?? 'https://api.github.com'
+    const credentials = Buffer.from(
+      `${this.config.clientId}:${this.config.clientSecret}`,
+    ).toString('base64')
+    try {
+      const res = await fetch(new URL(`/applications/${this.config.clientId}/grant`, base), {
+        method: 'DELETE',
+        headers: {
+          authorization: `Basic ${credentials}`,
+          accept: 'application/vnd.github+json',
+          'content-type': 'application/json',
+          'user-agent': 'antifailure-control-plane',
+        },
+        body: JSON.stringify({ access_token: accessToken }),
+      })
+      // 204 is done. 404 means GitHub has no such grant, which is the same end
+      // state and is what a retry of the same refusal sees.
+      return { revoked: res.status === 204 || res.status === 404 }
+    } catch {
+      // Swallowed on purpose. The caller is in the middle of refusing somebody
+      // and the answer it owes them does not depend on this succeeding.
+      return { revoked: false }
+    }
   }
 
   private async get(accessToken: string, path: string): Promise<unknown> {

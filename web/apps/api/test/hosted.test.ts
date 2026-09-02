@@ -644,12 +644,22 @@ describe('a plane that takes money never grants a plan by hand', {
  * the route somebody adds next year that also writes the column, and a guard
  * that covers one caller of a shared piece of state is the shape of defect this
  * whole file exists because of. So the column's writers are enumerated from the
- * source: two, one gated on the operator's declaration and one gated on a
- * signed Stripe delivery. A third has to be classified deliberately, here,
- * before the suite goes green again.
+ * source: three, one gated on the operator's declaration, one gated on a signed
+ * Stripe delivery, and one gated on an operator session. A fourth has to be
+ * classified deliberately, here, before the suite goes green again.
  */
 describe('the writers of organizations.plan', () => {
-  const expected = ['routers/billing.ts', 'billing/webhook.ts'].sort()
+  // admin/router.ts is the operator portal's `tenants.setPlan`, and it is the
+  // third writer classified rather than merely added. It is `adminProcedure`,
+  // so reaching it needs an operator session issued by a separate sign in on a
+  // separate cookie, plus the `admin.tenants.plan` permission, which only
+  // owner, super_admin and billing hold. That is a STRONGER gate than the one
+  // billing.set carries: `AF_OPERATOR_SETS_PLAN` is a claim the installation
+  // makes about itself in its own environment, while this is a credential the
+  // caller had to be issued from outside the tenant boundary entirely. It also
+  // writes an audit entry carrying the plan before and after, which neither of
+  // the other two writers does.
+  const expected = ['routers/billing.ts', 'billing/webhook.ts', 'admin/router.ts'].sort()
 
   async function sources(dir: string): Promise<string[]> {
     const entries = await readdir(dir, { withFileTypes: true })
@@ -662,7 +672,7 @@ describe('the writers of organizations.plan', () => {
     return out
   }
 
-  it('are the two the product intends and nothing else', async () => {
+  it('are the three the product intends and nothing else', async () => {
     const root = fileURLToPath(new URL('../src', import.meta.url))
     const found: string[] = []
     for (const file of await sources(root)) {
