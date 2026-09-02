@@ -39,12 +39,25 @@ export function pageMetadata(path: string, overrides: Metadata = {}): Metadata {
     description: route.description,
     alternates: {
       canonical: url,
-      types: {
-        // The markdown twin of this page. Assistants and agent runtimes that
-        // prefer source over rendered HTML can follow this instead of parsing
-        // a 300KB document to recover 800 words.
-        "text/markdown": `${url === SITE_URL ? SITE_URL : url}.md`,
-      },
+      // The markdown twin of this page. Assistants and agent runtimes that
+      // prefer source over rendered HTML can follow this instead of parsing a
+      // 300KB document to recover 800 words.
+      //
+      // Only on indexable pages, because only indexable pages get a twin.
+      // scripts/markdown-twins.mjs deliberately skips anything carrying
+      // noindex, so /signin and /signup advertised a /signin.md and a
+      // /signup.md that the build never wrote and the host answered 404 for.
+      // Publishing the two missing files would silence the link checker and
+      // would be the wrong fix: it would put a page we asked crawlers to
+      // ignore back on the menu in a machine-readable form. The link is what
+      // was untrue, so the link is what goes.
+      ...(route.indexable
+        ? {
+            types: {
+              "text/markdown": `${url === SITE_URL ? SITE_URL : url}.md`,
+            },
+          }
+        : {}),
     },
     robots: route.indexable
       ? {
