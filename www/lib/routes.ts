@@ -294,6 +294,28 @@ export const ROUTES: readonly Route[] = [
     parent: "/privacy",
   },
   {
+    path: "/acceptable-use",
+    title: pageTitle("Acceptable Use"),
+    description:
+      "Where the product may and may not be pointed, and what we will not do to a customer.",
+    summary: "The acceptable use policy, and the enforcement that exists rather than the kind that does not.",
+    section: "legal",
+    indexable: true,
+    priority: 0.3,
+    parent: "/terms",
+  },
+  {
+    path: "/developer-policy",
+    title: pageTitle("Developer Policy"),
+    description:
+      "The rules for the control plane API and for the engine's Model Context Protocol surface.",
+    summary: "What a token may reach, what a model driving the engine is responsible for, and what may change without notice.",
+    section: "legal",
+    indexable: true,
+    priority: 0.3,
+    parent: "/terms",
+  },
+  {
     path: "/sla",
     title: pageTitle("Service levels"),
     description:
@@ -334,22 +356,26 @@ export const ROUTES: readonly Route[] = [
     schemaType: "ContactPage",
   },
 
-  // Utility. Real pages, deliberately not in the index: they are a waitlist
-  // form with nothing to rank for, and indexing them spends crawl budget that
-  // belongs to the product pages.
+  // Utility. Real pages, deliberately not in the index: a sign-in form and a
+  // waitlist have nothing to rank for, and indexing them spends crawl budget
+  // that belongs to the product pages.
   //
-  // Both descriptions used to say "There is no hosted control plane yet",
-  // which was true when it was written and had become the opposite of what the
-  // page under it says: AuthScreen offers sign-in with GitHub above a line
-  // reading "The hosted control plane is invitation only", and
-  // app.antifailure.dev answers. These strings are the meta description, so
-  // the contradiction was served to every crawler and every link preview while
-  // the visible page was correct. Nothing read them.
+  // These two entries said "Join the waitlist" and "There is no hosted control
+  // plane yet" for as long as there was one. The pages themselves had already
+  // been corrected, so an invited customer following the header got a tab, a
+  // bookmark and a shared link all telling them they were being turned away,
+  // while the page under them offered a working GitHub button. The title is the
+  // one piece of copy a person reads before the page renders and the only piece
+  // that survives being sent to somebody else, so it is the last place a stale
+  // claim should be allowed to sit. The description is served the same way, to
+  // every crawler and every link preview, while the visible page was already
+  // correct and nothing compared the two.
   {
     path: "/signin",
-    title: pageTitle("Join the waitlist"),
-    description: "The hosted control plane is invitation only while it is in private beta. Sign in with GitHub if you have been invited, or join the waitlist.",
-    summary: "Waitlist form.",
+    title: pageTitle("Sign in"),
+    description:
+      "The hosted control plane is invitation only while it is in development. Sign in with GitHub if your account has been invited.",
+    summary: "Sign in to the hosted control plane, or ask to be told when it opens.",
     section: "utility",
     indexable: false,
     priority: 0.1,
@@ -357,9 +383,10 @@ export const ROUTES: readonly Route[] = [
   },
   {
     path: "/signup",
-    title: pageTitle("Join the waitlist"),
-    description: "The hosted control plane is invitation only while it is in private beta. Sign in with GitHub if you have been invited, or join the waitlist.",
-    summary: "Waitlist form.",
+    title: pageTitle("Request access"),
+    description:
+      "The hosted control plane is invitation only while it is in development. Sign in with GitHub if you have been invited, or leave an address and we will tell you when it opens. The engine is open source and runs on your own machine today.",
+    summary: "Ask for access to the hosted control plane. The engine needs none of it.",
     section: "utility",
     indexable: false,
     priority: 0.1,

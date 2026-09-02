@@ -230,6 +230,13 @@ errors:
     docs: concepts/goldens
     retryable: false
     exit_code: 5
+  - code: AF-DB-016
+    area: DB
+    message: "database.source_url_env names {variable}, and {variable} holds nothing in this shell."
+    next_step: "Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 3
   - code: AF-DB-007
     planned: true
     area: DB

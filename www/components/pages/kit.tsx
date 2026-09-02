@@ -67,7 +67,7 @@ function PagesClose() {
           <div className="flex min-w-0 flex-col items-start gap-4 max-lg:w-full">
             <div className="flex gap-x-5 max-sm:w-full max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
               <Button href="/signup" theme="filled">
-                Get started
+                Request access
               </Button>
               <Button href="/docs" theme="outlined">
                 Read the docs
@@ -137,7 +137,7 @@ export function PageHero({
           {actions ?? (
             <>
               <Button href="/signup" theme="filled">
-                Get started
+                Request access
               </Button>
               <Button href="/docs" theme="outlined">
                 Read the docs

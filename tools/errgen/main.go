@@ -371,8 +371,17 @@ func renderDocs(es []entry) []byte {
 		{"6", "A policy denied the operation."},
 		{"7", "Verification failed. Masking or an invariant."},
 		{"8", "A test failed. Agent verdicts or load thresholds."},
-		{"9", "Interrupted, and teardown completed cleanly."},
-		{"10", "Interrupted, and resources are still recorded. Run `af down` again."},
+		// 9 and 10 are the two codes whose published meaning has to be read
+		// off the catalog rather than off the name in errors.go, and one of
+		// them was wrong here. Nothing returns 9 for an interrupt: a second
+		// interrupt exits 10, and the only two entries carrying 9 are
+		// AF-AGT-007, a run that reached no verdict, and AF-WLD-014, a
+		// workload that did not finish. This page says these codes are stable
+		// and scripts branch on them, so a sentence describing something the
+		// binary never does is the worst kind of wrong to publish under that
+		// promise.
+		{"9", "Nothing was measured. No workflow reached a verdict, or a workload did not finish."},
+		{"10", "Interrupted, or a teardown left resources recorded. Run `af down` again."},
 	} {
 		fmt.Fprintf(&b, "| `%s` | %s |\n", r[0], r[1])
 	}

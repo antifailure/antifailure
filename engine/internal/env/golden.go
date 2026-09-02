@@ -312,6 +312,28 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 	started := o.opts.Clock.Now()
 	source := o.sourceURL()
 
+	// A manifest that names production and a shell that does not hold it is a
+	// refusal rather than an empty golden.
+	//
+	// This is the same defect `af up` already refuses with AF-DB-012, arriving
+	// through the other door. A refresh with the variable unset copied nothing,
+	// masked nothing, verified nothing, published a golden whose provenance is
+	// indistinguishable from a real one, exited 0 and printed "Bring an
+	// environment up from it with: af up". The next `af up` then found a golden
+	// for this project, branched an empty database, ran the migrations against
+	// it, and produced an environment that looks correct and holds none of
+	// production's shape or volume. It is the one failure a preview environment
+	// exists to prevent, and the run that caused it reported success.
+	//
+	// It is not hypothetical and it is not a typo. A pull request from a fork
+	// gets no secrets, so the variable is empty in exactly the runs nobody
+	// watches.
+	if o.opts.Manifest.Database != nil &&
+		o.opts.Manifest.Database.SourceURLEnv != "" && source.IsZero() {
+		return result, aferrors.Coded(aferrors.AFDB016,
+			"variable", o.opts.Manifest.Database.SourceURLEnv)
+	}
+
 	spec := provider.GoldenSpec{
 		Version:    databaseVersion(o.opts.Manifest),
 		RulesHash:  hash,

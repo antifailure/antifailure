@@ -11,7 +11,17 @@ on:
 # about the older commit stopped mattering the moment the newer one arrived.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on main is the verdict a tag and a deploy are read against, so it
+  # is never cancelled. On a branch the saving is real and nothing depends
+  # on the superseded answer, so cancelling stays.
+  #
+  # Six merges landed inside one run's length on 2026-09-02 and each cancelled
+  # the one before it, so main went from 09:07 to past 12:30 with no COMPLETED
+  # run at all. Cancelled is not red, but it is not a verdict either, and
+  # `release.yml` has no gate of its own, so the only thing standing between
+  # an unverified commit and published binaries was somebody holding merges
+  # by hand. Tags are excluded for the same reason.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 # Read, and only read. No job in this workflow writes anything back, and a
 # token that could is a token an action pulled from the internet could use.
@@ -35,7 +45,7 @@ jobs:
       # claimcheck binary passed in the job that had the history. They fail
       # rather than skip on purpose: a check that cannot find its answer and
       # reports green is the false green this repository has produced twice.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history, for the claimcheck tests described above.
           fetch-depth: 0
@@ -47,7 +57,7 @@ jobs:
           # direction and still not the one anybody wants.
           fetch-tags: true
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -153,12 +163,15 @@ jobs:
         # supposed to prevent.
         run: go run ./tools/gatecheck .
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         # For the examples that are not Go. Pinned to the same major the
         # runtime images use, so the version that builds an example here is the
-        # version that builds it in the Dockerfile a user copies.
+        # version that builds it in the Dockerfile a user copies. That is a
+        # promise this file has to keep by hand: nothing reads the Dockerfile
+        # and compares, so a base image bump that leaves this line alone makes
+        # the comment false and the job green.
         with:
-          node-version: '22'
+          node-version: '26'
           cache: npm
           cache-dependency-path: examples/*/package-lock.json
 
@@ -372,9 +385,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -409,7 +422,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The sitemap's lastmod for each route comes from when the files
           # behind it last changed, which means asking git. The default shallow
@@ -419,7 +432,7 @@ jobs:
           # this was caught rather than shipped.
           fetch-depth: 0
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: npm
@@ -429,7 +442,7 @@ jobs:
             api/package-lock.json
 
       # For classcheck below, which reads the built HTML this job produces.
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: tools/go.mod
           cache-dependency-path: tools/go.sum
@@ -517,7 +530,7 @@ jobs:
         # backs starts answering with the 404 page and nothing else notices.
         run: |
           missing=0
-          for route in index environments runs masking network audit members plan keys device 404; do
+          for route in index environments runs load masking network audit members plan keys device 404; do
             if [ ! -f "console/out/$route.html" ]; then
               echo "::error::console/out/$route.html was not exported"
               missing=1
@@ -603,7 +616,7 @@ jobs:
         # The pull request preview. An artifact rather than a deployment,
         # because a pull request from a fork must not be able to publish to the
         # address people trust.
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: site-preview
           path: site
@@ -635,9 +648,9 @@ jobs:
       AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/antifailure
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: npm
@@ -672,6 +685,23 @@ jobs:
         working-directory: web
 
       - name: The published OpenAPI document is the one this router serves
+        # Runs even when Test failed, which is the whole point of the line
+        # below. This step is sequenced immediately after Test, and Test is red
+        # on every branch in a migration chain because the numbering gate reads
+        # a gap until the branches ahead land. A skipped step renders exactly
+        # like one that had nothing to do, so for the length of a queue this
+        # control was dark and its darkness was invisible: the job already said
+        # failure for the reason you expected.
+        #
+        # That is not hypothetical. Mounting the operator router put eighteen
+        # admin routes into the published document described as `security: []`
+        # and "Requires no permission", and this step did not run on the change
+        # that introduced them, or on the change that fixed it. It was found by
+        # running the check by hand.
+        #
+        # A gate whose subject is a published document should not be silenced
+        # by an unrelated failure in the same job.
+        if: always()
         # www/public/openapi.json is what antifailure.dev/openapi.json serves,
         # and it is generated from the router in this job's workspace rather
         # than proxied from production at request time. The reason is in
@@ -689,9 +719,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -779,9 +809,9 @@ jobs:
       AF_REQUIRE_DATABASE: '1'
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
 
@@ -796,7 +826,7 @@ jobs:
           GOWORK=off go vet ./...
           GOWORK=off go test ./... -race -count=1 -timeout 15m
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
 
@@ -839,10 +869,10 @@ jobs:
     steps:
       # Full history, because the build stamps the commit date and a shallow
       # checkout of a merge commit does not have the one the release would use.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -891,10 +921,10 @@ jobs:
       # check FAILS rather than skipping when it cannot find one: an absent
       # answer read as a satisfied condition is how this repository has
       # produced false green twice already.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -995,9 +1025,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -1015,10 +1045,10 @@ jobs:
     steps:
       # The whole history, because the range this examines starts where the
       # branch left the base and a shallow checkout has no merge base to find.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -1056,7 +1086,7 @@ jobs:
     timeout-minutes: 5
     steps:
       # Enough history to see the range this push added, and no more.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
 
       - name: No commit is authored by an identity that belongs to somebody else

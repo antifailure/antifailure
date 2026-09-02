@@ -111,6 +111,9 @@ const (
 	// The published golden {version} in {store} was made for a different
 	// project.
 	AFDB015 Code = "AF-DB-015"
+	// database.source_url_env names {variable}, and {variable} holds
+	// nothing in this shell.
+	AFDB016 Code = "AF-DB-016"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
@@ -760,6 +763,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
+	},
+	AFDB016: {
+		Code:      AFDB016,
+		Area:      "DB",
+		Message:   "database.source_url_env names {variable}, and {variable} holds nothing in this shell.",
+		NextStep:  "Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFDB020: {
 		Code:      AFDB020,

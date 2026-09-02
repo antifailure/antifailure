@@ -58,7 +58,7 @@ else's GitHub account, which is a mistake this repository has actually made.
 CI checks both, so the hooks only decide whether you find out before the push
 or after it.
 
-You need Go 1.25, Node 24 or newer, npm, and a working Docker daemon. The
+You need Go 1.26, Node 24 or newer, npm, and a working Docker daemon. The
 documentation gates need two more: `vale` for prose style and `lychee` for
 links, both `brew install`.
 `just setup` reports anything missing with the command that installs it, and

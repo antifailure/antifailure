@@ -65,7 +65,7 @@ jobs:
     if: ${{ github.repository == 'antifailure/antifailure' }}
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # www/lib/lastmod.ts asks git when the files behind each route last
           # changed, and writes that into the sitemap. The default shallow
@@ -74,7 +74,7 @@ jobs:
           # freshness signal into noise.
           fetch-depth: 0
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: npm
@@ -213,6 +213,32 @@ jobs:
           fi
 
           echo "GET /api is 200 and lists the waitlist; POST /api/waitlist rejects junk with 400"
+
+      - name: Every hostname presents a valid certificate
+        # A publish is not a reachable site, and this is the part of the site
+        # that can be perfectly deployed and still be unreachable for a reader.
+        #
+        # antifailure.dev and www.antifailure.dev are two custom domains on this
+        # one Static Web App, and Azure provisions and renews a separate managed
+        # certificate for each. The apex certificate carries SAN
+        # DNS:antifailure.dev alone and the www certificate carries SAN
+        # DNS:www.antifailure.dev alone, so they are two independent renewal
+        # lifecycles and nothing here noticed if one of them lapsed. Anyone who
+        # typed the apex would see a completely healthy site while www failed.
+        #
+        # It is a hard failure rather than a warning because .dev is an HSTS
+        # preloaded top level domain: the rule is compiled into the browser, it
+        # applies on a cold profile, and a certificate fault on either name is
+        # an ERR_SSL_PROTOCOL_ERROR with no "proceed anyway" to click.
+        #
+        # The limit of the check, stated because it would otherwise be read as
+        # a stronger claim than it is: one handshake from one runner proves one
+        # edge node answered one client. It catches a lapsed certificate within
+        # a deploy cycle. It cannot see a fault that only some clients hit.
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: tools/site/check-tls.sh
 
       - name: The machine-readable surfaces answer, and describe this revision
         # The other half of "a publish is not a working endpoint", for the two
