@@ -102,13 +102,6 @@ const SAFE_COLUMNS = {
  * naming the owner. Do NOT add a second `admin:` key to appRouter.
  */
 export const adminRouter = router({
-  // The money lane, composed in rather than mounted beside. One operator tree
-  // means one matrix test walking it and one place a reader looks for "what can
-  // an operator do", which is the same argument this file's own header makes
-  // for one catalog.
-  billing: adminBillingRouter,
-  entitlements: adminEntitlementsRouter,
-  flags: adminFlagsRouter,
 
   /**
    * Who the operator is, and what the shell may show them.
@@ -812,6 +805,11 @@ export const adminRouter = router({
   // Each exports its sub-routers from its own file and this object names them,
   // so the matrix test in admin-routes.test.ts walks every operator route in one
   // pass. A lane mounted as its own `admin:` key would be invisible to it.
+  // ---------------------------------------------------------------------------
+  // admin-money.
+  billing: adminBillingRouter,
+  entitlements: adminEntitlementsRouter,
+  flags: adminFlagsRouter,
   // ---------------------------------------------------------------------------
 })
 
