@@ -1,84 +1,96 @@
-<h1 align="center">Antifailure</h1>
+<p align="center">
+  <img src=".github/banner.svg" alt="Antifailure. Know what happens before you deploy, on a disposable production twin." />
+</p>
 
 <p align="center">
   <strong>A disposable copy of your production stack for every pull request.</strong><br>
-  Masked Postgres branches, contained third-party APIs, agents that use the app like people, and load shaped like your real traffic.
+  Masked Postgres, contained third-party APIs, and agents that use your app like people.
 </p>
 
 <p align="center">
   <a href="https://antifailure.dev/docs">Documentation</a> &middot;
   <a href="https://antifailure.dev/docs/getting-started/quickstart">Quickstart</a> &middot;
+  <a href="https://antifailure.dev/changelog">Changelog</a> &middot;
   <a href="CONTRIBUTING.md">Contributing</a> &middot;
   <a href="SECURITY.md">Security</a>
 </p>
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT%20except%20ee%2F-101014" alt="MIT licensed, except the ee directory" /></a>
+</p>
+
 ---
 
-## What it is
+## Why it exists
 
-Every pull request gets its own environment built from the shape of production: the real schema and real data volume with every identifier masked and the masking proved, your services built and running in a sandbox that cannot reach the internet except where you say it can, and inbound webhooks simulated so flows actually finish.
+The question before a risky deploy is always the same, and the usual ways of
+answering it answer a different question.
 
-```bash
-curl -fsSL https://antifailure.dev/install.sh | sh
-af start           # where you are on the first run, and what to run next
-af runner install  # the agent runner, which drives a real browser and needs node
-af init            # reads your repo, writes antifailure.yaml
-af up              # masked database branch, built services, sealed network
-af test            # agents run your workflows and return verdicts with evidence
-af down            # every resource it created, gone
-```
+| What you do before shipping | What it does not tell you |
+| --- | --- |
+| Run the suite against a seeded database | How long the migration holds a lock at production's row counts. Four seconds on an empty database is ninety on a real one. |
+| Click around staging | Whether the path that charges a card would have charged one, because staging reaches the vendor too. |
+| Read the migration in review | Whether that `ALTER TABLE` rewrites the table. The statement does not say. It depends on the server version and on the type it is coming from. |
+| Ship behind a flag and watch | Nothing, until customers are already on it. |
 
-`af start` is the one to remember. It reports every step of that list as
-observed on this machine right now and names the single next command, so a first
-run you walked away from is one you can walk back into. It runs nothing and
-writes nothing.
-
-The installer puts `af` under `~/.antifailure` and puts that on your PATH, by
-appending one line to the startup file your login shell reads. It prints the
-line and names the file, so deleting it undoes the change, and
-`AF_NO_MODIFY_PATH=1` declines it. The terminal you ran it in gets one line to
-paste, because a running shell cannot see a file written a second ago.
+Antifailure answers them by building the thing you were going to deploy to,
+one copy per branch, and then destroying it.
 
 ## What it does
 
-**Masked data, verified.** Masking is compiled to SQL and executed in resumable chunks, deterministic so the same customer maps to the same fake customer across every table and every refresh. Then a scanner reads back every column of every table, sampling rows rather than reading all of them, looking for anything that still parses as an email, a card, a phone number, or a key, and signs an attestation that records the sample size it used. An unverified golden cannot be branched. That is enforced in code, not in a checklist.
+**A masked copy of production, and the masking is proved.** The rules compile
+to SQL and run in resumable chunks, deterministic, so one customer maps to the
+same fake customer across every table and every refresh. A scanner then reads
+the result back with the detectors that would find a leak, sampling rows, and
+signs an attestation recording the sample size it used. An unverified golden
+cannot be branched, and that is enforced in code rather than in a checklist.
 
-**A network you control.** Every environment gets a sidecar that owns its network namespace. Nothing leaves except through it. Each host gets a mode: `BLOCK` refuses with a decision you can read, `ALLOW` lets it through with a rate limit, `SANDBOX` swaps in test credentials and trips a wire if a live key ever appears, `CAPTURE` records the email or SMS into a searchable inbox your agents can read, `MOCK` answers from a stateful offline pack, and `SYNTH` asks a model to invent a response and marks every result that touched it as unverified rather than passed. The Stripe pack is complete enough to run checkout, subscribe, renew, and cancel with signed webhooks and no network at all.
+**A network the application cannot get around.** Every environment sits on a
+network with no route out. The only thing on both networks is a sidecar that
+owns the namespace, so a client that ignores its proxy variables has nowhere to
+send the packet. Interception is by DNS, which is what makes it work for
+runtimes with no proxy support and for SDKs that bundle their own client. Each
+host gets one of six modes: `block`, `allow`, `sandbox`, `capture`, `mock` and
+`synth`. A live credential on the way out is refused rather than redacted.
 
-**Agents, not scripts.** Workflows are written as sentences. The runner drives a real browser through the accessibility tree, logs in the way a person does (password, magic link from the captured inbox, one-time code, TOTP), and returns `pass`, `fail`, `flaky`, `blocked`, or `unverified` with a video, a trace, and reproduction steps. A failure caused by the runner is classified as such and never counted against your application.
+**Agents, not scripts.** A workflow is a sentence. The runner drives a real
+browser through the accessibility tree, signs in the way a person does with a
+password, a magic link out of the captured inbox, a one time code or TOTP, and
+answers with `pass`, `fail`, `flaky`, `blocked` or `unverified`, a video, a
+trace and steps to reproduce. A failure caused by the runner is classified as
+such and never counted against your application.
 
-**Database review, automatically.** Pending migrations are rehearsed on a fresh branch with per-statement timing and the strongest lock held per table. `pg_stat_statements` is diffed between main and your branch to catch the N+1 you just introduced. Query plans are compared to catch the index you stopped using.
+**Database review the branch makes possible.** Pending migrations are rehearsed
+on a throwaway branch of the golden, every statement timed on its own, with
+`pg_locks` sampled every 250 milliseconds from a second connection because a
+lock held by a statement in flight is invisible to the session holding it.
+Whether a statement rewrites a table is answered by an event trigger rather
+than by reading the SQL. Query plans and `pg_stat_statements` are diffed
+against a baseline saved on the base branch.
 
-**Nothing outlives its environment.** Every resource is journaled before it is created and compensated on teardown, so a crash at any instant is recoverable by replay. The leak detector inventories every provider and fails the build if anything untracked exists.
+## Try it
 
-## Installation
+Docker and a Postgres connection string you are allowed to read from. No
+account, no control plane, nothing calls home.
 
 ```bash
 curl -fsSL https://antifailure.dev/install.sh | sh
+
+af start          # where you are on this machine, and the single next command
+af runner install # the agent runner, which drives a real browser and needs node
+af init           # reads your repo, writes antifailure.yaml
+af up             # masked database branch, built services, sealed network
+af test           # agents run your workflows and return verdicts with evidence
+af down           # every resource it created, gone
 ```
 
-The installer downloads the release for your platform, refuses to install it unless it matches the published checksum, and puts `af` and its runner under `~/.antifailure`. There is no path through that check that installs an unverified archive: a missing `checksums.txt`, a `checksums.txt` with no line for your platform's archive, and a machine with neither `shasum` nor `sha256sum` all stop the install rather than warning and carrying on. It is POSIX sh rather than bash, so it works in an Alpine container as well as on a laptop.
+`af start` is the one to remember. It reports every step of that list as
+observed on this machine right now and names the one command to run next, so a
+first run you walked away from is one you can walk back into. It runs nothing
+and writes nothing.
 
-Then install the agent runner, which is a separate program in a separate language because it drives a real browser:
-
-```bash
-af runner install
-```
-
-It needs node 22.6 or newer. The runner is copied from the source that ships beside `af` rather than downloaded, so the source a release was tested with is the source it runs, and its dependencies come from the lockfile that ships with it, so two people installing one release get one tree. It then downloads chromium, which is the slow part and is not fatal if it fails: a workflow that needs a page read comes back `unverified` rather than guessed at.
-
-Two commands report on the machine, and neither one guesses:
-
-```bash
-af doctor          # disk, ports, DNS, egress, kernel isolation, leftovers
-af runner check    # the runner source, its dependencies, node, and the browser
-```
-
-Read the [quickstart](/docs/src/content/docs/getting-started/quickstart.md) for a complete walkthrough from an empty machine to a proven run.
-
-## A manifest example
-
-The manifest describes what to build, where the database comes from, what the environment may reach on the network, who the agents log in as, and what they do. It is the whole configuration surface: nothing about an environment is configured anywhere else.
+The manifest is the whole configuration surface. Nothing about an environment
+is configured anywhere else.
 
 ```yaml
 version: 1
@@ -94,76 +106,102 @@ services:
     build:
       strategy: dockerfile
       dockerfile: Dockerfile
-    env:
-      - name: PORT
-        value: "3000"
-      - name: NODE_ENV
-        value: "production"
 
 database:
   provider: docker
   version: 17
   masking_rules: masking.yaml
-  golden:
-    schedule: "0 3 * * *"
-    max_age: 168h
-    retain: 3
 
 egress:
   default: block
+
+workflows:
+  - name: read-the-spend-by-customer
+    description: >-
+      As the visitor, open the orders page and check that a customer out of the
+      branch is on it, in a table rather than in the empty state.
+    persona: visitor
+    start_path: /
+    expect:
+      - "Katherine Johnson"
 ```
 
-See the [manifest reference](/docs/src/content/docs/reference/manifest.md) for every option.
+That manifest is `examples/next-app/antifailure.yaml`, and it runs. Beside it
+are `examples/go-api` and `examples/django-api`, and
+`examples/github-workflow.yml` is the same run inside GitHub Actions, which
+leaves one comment on the pull request and edits it in place.
 
-## Where it runs
+## What is in here
 
-Locally on Docker, in GitHub Actions, or on your own Kubernetes. The database comes from Docker, Neon, Supabase, or DBLab thin clones in front of any Postgres, including RDS, Cloud SQL, and Azure Database. Providers are an interface with a published conformance suite, so adding one is a package, not a fork.
+| Path | What it is |
+| --- | --- |
+| `engine` | The Go engine and the `af` command. Orchestration, masking, verification, egress policy, insights, the journal. |
+| `runner` | The agent runner. TypeScript, because it drives Chromium, and installed beside `af` rather than downloaded. |
+| `schemas` | The JSON Schemas that are the source of truth. The Go types mirror `schemas/manifest.v1.json` and a test fails when they drift. |
+| `examples` | Three applications that run: a Next.js app, a Go API, a Django API. |
+| `web` | The optional control plane: organizations, policy, aggregated reports, billing. |
+| `console` | The signed-in dashboard. |
+| `www` | The marketing site, published to antifailure.dev. |
+| `docs` | The documentation site, published under antifailure.dev/docs. |
+| `deploy` | Container images and the Helm chart for self-hosting the control plane. |
+| `infra` | Terraform for the hosted control plane. |
+| `tools` | The build gates. Most of the rules this repository holds itself to are programs in here, not conventions. |
+| `ee` | The enterprise edition, never compiled into the community binary, images or chart. |
 
-## Self-hosting
+## What is proven
 
-Antifailure works without a control plane. `af up` builds an environment on the machine it runs on, and nothing calls home.
+Four words are used about every component in
+[docs/plan/STATUS.md](docs/plan/STATUS.md) and they are not interchangeable.
+**proven** means the code exists, its tests pass, and the behaviour has been
+exercised end to end against the real thing. **written** means it passes its
+tests against a fake and has never talked to the real service. **planned**
+means specified, not built. **mixed** means the parts are genuinely in
+different states, and the row says which are which.
 
-The hosted control plane at https://app.antifailure.dev holds organizations, policy, aggregated reports, and billing. It is optional. When you are ready to add it, you can run your own or use the hosted version. The control plane degrades gracefully: environments keep working if the control plane is unreachable, events are buffered and sent when it returns, and teardown still works because it reads the local journal instead.
+Proven does not mean it runs in CI. A suite that needs a real vendor account
+cannot run on a fork's pull request, so the rows below say where each one ran.
 
-For self-hosting:
+| Database provider | Exercised against | Runs in CI |
+| --- | --- | --- |
+| Docker | A real daemon and a real Postgres, with nothing left behind across repeated runs | Yes |
+| Neon | The real Neon API. Found three bugs a fake would have agreed with. | No, by hand |
+| Supabase | The real Supabase Management API, zero skips. Took four runs, and all three bugs it found were orderings rather than states. | No, by hand |
+| DBLab | A real Database Lab Engine over a ZFS pool. Found a clone that left the API before its dataset was released. | No, by hand |
 
-```sh
-docker run --rm \
-  -e AF_MIGRATION_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
-  -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
-  ghcr.io/antifailure/control-plane:main-b53906a node bootstrap.mjs
+The interface they all implement declares 24 behaviours in
+`engine/conformance/db.go`, and a provider that cannot support one skips it by
+name rather than passing quietly. The suite is itself proved able to fail: a
+provider that violates exactly one guarantee has to go red in that named
+behaviour, and a positive control asserts the same behaviours pass rather than
+skip.
 
-docker run \
-  -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
-  -e AF_GITHUB_CLIENT_ID=... \
-  -e AF_GITHUB_CLIENT_SECRET=... \
-  -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/github/callback \
-  -p 8080:8080 ghcr.io/antifailure/control-plane:main-b53906a
-```
+`docs/plan/STATUS.md` carries the same treatment for every other component, and
+it is updated in the same pull request as the code.
 
-On Kubernetes, use the chart in `deploy/helm/antifailure-control-plane`. The Helm chart is developed against kind and runs on any conformant cluster. See [self-hosting documentation](/docs/src/content/docs/self-hosting/) for configuration, operations, upgrades, and runbooks.
+## How it compares
 
-## Status
+| | Seeded fixtures | Shared staging | A preview environment | Antifailure |
+| --- | --- | --- | --- | --- |
+| Data | Invented, and shaped like nothing | Production's, often unmasked | Empty, or shared with every other branch | Production's schema and volume, masked, and the masking verified before it can be branched |
+| Isolation | Per test run | One environment, everyone in it | Per branch | Per branch, including the database |
+| Third party calls | Mocked inside your process, so untested paths still reach out | Reach the vendor | Reach the vendor | Contained at the network, with a mode per host and a live key refused |
+| Migration cost | Not measured | Measured against staging's row counts, which are not production's | Not measured | Rehearsed per statement on production's row counts, locks sampled |
+| What is left behind | Nothing | Drift | Usually cleaned on merge | Journaled before creation, compensated on teardown, and a leak detector that fails the build |
 
-Version 1.0. That is a promise about what keeps working, and it is written down surface by surface in [what is stable](https://antifailure.dev/docs/reference/stability/) rather than made as a blanket claim: a manifest declaring `version: 1`, the commands and their flags and exit codes, the documented `--output json` fields, the provider interfaces, and the error codes. Breaking any of those costs a major version. That page also names what is deliberately not covered, which is the half worth reading before you build against something.
+## Status and license
 
-It is a promise about interfaces, not a claim that every component is finished. [docs/plan/STATUS.md](docs/plan/STATUS.md) tracks every component with one of four words, and the words are the ones that file defines rather than a paraphrase of them: proven (the code exists, its tests pass, and the behavior has been exercised end to end against the real thing), written (the code exists and passes its tests against a fake that enforces the real service's validation rules, and has never talked to the real service), planned (specified, not built), and mixed (the parts are genuinely in different states, and the row says which are which). Proven does not mean it runs in CI: a suite that needs a real Neon or Supabase account cannot run on a fork's pull request, so those rows say in their own prose that they are run by hand. That table is the honest answer to "does it do X yet", and it is updated in the same pull request as the code. [CHANGELOG.md](CHANGELOG.md) is what changed in each release.
+Version 1.0 is a promise about what keeps working, written down surface by
+surface in [what is stable](https://antifailure.dev/docs/reference/stability)
+rather than made as a blanket claim: a manifest declaring `version: 1`, the
+commands with their flags and exit codes, the JSON each command documents
+under `--output json`, the provider interfaces, and the error codes. That page
+also names what is deliberately not covered, which is the half worth reading
+first.
 
-## Contributing
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building
+locally, running the gates and structuring commits.
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to build locally, run the gates, and structure commits.
-
-Before opening a pull request:
-
-1. Run `just gate` locally or the targeted gates for what you changed.
-2. Write a changelog fragment in `.changes/<slug>.md` with the first line being one of `# added`, `# fixed`, `# changed`, or `# security`. `just changecheck` says whether your change needs one, and [the changelog](https://antifailure.dev/changelog) is built from them.
-3. Update `docs/plan/STATUS.md` surgically: touch only the rows your work changes.
-4. Update published docs under `docs/src/content/docs/` if a user-visible behavior changes.
-
-Every commit is signed with `git commit -s` per the Developer Certificate of Origin.
-
-## License
-
-This repository is MIT licensed, except for the `ee/` directory, which is licensed under the Antifailure Enterprise License (see [ee/LICENSE.md](ee/LICENSE.md)).
-
-The `ee/` directory is never compiled into the community binary, images, or Helm chart, and the boundary is proved by the community build passing green rather than asserted in a comment. The proof is run in place rather than in a mirror: the `edition boundary` job in `.github/workflows/ci.yml` deletes `ee`, then builds and tests the engine from what is left, and then inspects the binary it shipped for enterprise package paths. `.dockerignore` keeps `ee` out of the image build context.
+MIT, except `ee`, which is under the Antifailure Enterprise License. The
+boundary is proved rather than asserted: a CI job deletes `ee`, builds and
+tests the engine from what is left, and then inspects the binary it shipped for
+enterprise package paths.
