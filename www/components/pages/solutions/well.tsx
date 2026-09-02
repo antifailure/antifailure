@@ -151,7 +151,7 @@ function HeroCopy({
       </div>
       <div className="mt-8">
         <Button href="/signup" theme="filled">
-          Get started
+          Request access
         </Button>
       </div>
     </>

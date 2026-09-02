@@ -203,6 +203,101 @@ The control plane's own gate in front of this one is not configurable: it
 applies `label` behaviour to every repository, because it never reads your
 manifest, so it cannot honour `never` or `always`.
 
+## Sending events with no token at all
+
+A workflow that reports to a control plane needs a credential, and the obvious
+one is wrong. A repository secret holding an engine token is readable by every
+workflow in the repository, has to be created by a person before anything works,
+and never expires, so it is the single thing most likely to still be valid a
+year after whoever pasted it has left.
+
+So the job proves who it is instead. GitHub Actions can mint a short lived
+OpenID Connect token for a job, signed by GitHub, and the control plane
+exchanges it for an engine token that expires in fifteen minutes.
+
+```yaml
+permissions:
+  id-token: write        # without this GitHub mints nothing
+  contents: read
+```
+
+```bash
+# The identity, from the runner. ACTIONS_ID_TOKEN_REQUEST_* are set by the
+# runner only when id-token: write is granted.
+identity=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+  "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=antifailure-control-plane" | jq -r .value)
+
+# The exchange.
+curl -sS -X POST "$AF_CONTROL_PLANE/v1/auth/github-oidc" \
+  -H 'content-type: application/json' \
+  -d "{\"token\": \"$identity\"}"
+# {"token": "aft_...", "expires_at": "...", "org_id": "...", "repository": "owner/name"}
+```
+
+The audience is `antifailure-control-plane` and it is not optional. GitHub's
+default audience is your organisation's URL, which every workflow of every
+repository in the organisation gets by asking for nothing, so a token minted for
+something else entirely would be a valid credential here. Naming an audience
+makes the token useless anywhere else and makes a token minted elsewhere useless
+here.
+
+### The claim, which usually makes itself
+
+Access to an organization comes from a claim on the repository, not from the
+token. Most customers never make one by hand: when a repository has no claim and
+exactly one organization has the Antifailure GitHub App installed on its owner,
+the claim is created on the first exchange and recorded as having come from the
+installation.
+
+**Why a claim exists at all**, because this is the part that looks like
+friction and is not. A GitHub identity token says, truthfully and with a
+signature nobody can fake, "this job runs in repository R". It says nothing
+about who R belongs to. Anybody with a GitHub account can create a repository,
+put `id-token: write` in a workflow, and mint a genuine, correctly signed token
+naming it. A control plane that read that claim and looked up "the organisation
+for that repository's owner" would have verified a stranger's signature
+perfectly and then let them write into whichever tenant the lookup landed on.
+
+So the claim is what grants and the token only identifies. What the installation
+changes is who makes the claim, not whether one is needed: an installation is
+GitHub telling this control plane you control the account, checked against a
+signature when it was delivered, which is the same evidence a manual claim is
+measured against with one step fewer.
+
+**What is refused** is a repository with no claim AND no installation to stand
+in for one, with `"reason": "no_binding"`. A repository whose owner nobody has
+installed the App on reaches nobody. So does one whose owner two organisations
+have installed on, because choosing between them would decide which tenant your
+events land in by the order rows come back, and that is refused rather than
+guessed at.
+
+One repository can be claimed by one organisation. A second claim is refused
+with `"reason": "already_claimed"`.
+
+**Claiming by hand** is for a repository the App is not installed on, or one you
+want claimed before its first run. An owner or admin does it once:
+
+```bash
+curl -sS -X POST "$AF_CONTROL_PLANE/v1/oidc/bindings" \
+  -H "authorization: Bearer $AF_CONTROL_PLANE_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"repository": "your-org/your-repo"}'
+```
+
+Revoking a claim stops new exchanges **and kills the credentials that claim
+already issued**, which is what makes it a revocation rather than a note:
+
+```bash
+curl -sS -X DELETE "$AF_CONTROL_PLANE/v1/oidc/bindings/your-org/your-repo" \
+  -H "authorization: Bearer $AF_CONTROL_PLANE_TOKEN"
+# {"revoked": true, "repository": "your-org/your-repo", "tokensRevoked": 1}
+```
+
+A fork gets none of this. GitHub does not grant `id-token: write` to a pull
+request job running on a fork, so there is no identity to exchange, and the fork
+case is closed by GitHub's own rules rather than by this control plane
+remembering to check.
+
 ## Teardown, and what "torn down" means
 
 An environment that outlives its pull request is the leak this product exists to
