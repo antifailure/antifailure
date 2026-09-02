@@ -106,8 +106,11 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
             {error}
           </p>
         ) : null}
-        <Button type="submit" variant="primary" full disabled={busy}>
-          {busy ? "Signing in" : "Sign in"}
+        {/* busy rather than a spinner beside it: the console's Button already
+            has a pressed-and-waiting state, and a second convention for "this
+            is working" is how two buttons in one product stop matching. */}
+        <Button type="submit" variant="primary" busy={busy} disabled={busy}>
+          Sign in
         </Button>
       </form>
     </Standalone>
@@ -138,7 +141,6 @@ function Impersonating({ label }: { label: string }) {
       <div className="mt-7">
         <Button
           variant="primary"
-          full
           onClick={() => {
             void adminSignOut().then(() => window.location.reload());
           }}
@@ -250,7 +252,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       <Standalone title="The control plane did not answer" width={440} alert>
         <Lede>{error.message}</Lede>
         <div className="mt-7">
-          <Button variant="primary" full onClick={reload}>
+          <Button variant="primary" onClick={reload}>
             Try again
           </Button>
         </div>
