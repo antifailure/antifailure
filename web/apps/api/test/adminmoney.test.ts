@@ -483,6 +483,14 @@ describe('money moves once', async () => {
     assert.equal(sim.refunds.length, 1, 'the interrupted attempt did not reach the provider')
 
     // Now the retry, well past the grace period, through the ordinary path.
+    //
+    // This also pins the interaction that the over-refund guard nearly broke.
+    // The provider now shows ch_6 as 4200 refunded of 5000, so only 800 is
+    // left, and this retry asks for 4200 again. A guard that ran on a recovery
+    // would refuse it forever and leave the ledger row stuck in flight against
+    // a refund the operator can see at Stripe and can never reconcile here.
+    // runOnce tells `work` whether it created the row, and the guard runs only
+    // when it did.
     const recovered = await refundCharge(
       ctx(new Date(Date.parse('2026-03-01T11:00:00Z') + IN_FLIGHT_GRACE_MS + 1000)),
       intent,
@@ -739,6 +747,58 @@ describe('money moves once', async () => {
       /attempted 20 times and refused every time/,
     )
     assert.equal((await ledger()).length, MAX_ATTEMPTS)
+  })
+
+  it('a refund larger than what is left is refused before anything is sent', async () => {
+    await reset()
+    // The simulator's charges are 5000 minor units. Refund 3000 of it first.
+    await refundCharge(ctx(), {
+      orgId: org.orgId, chargeId: 'ch_partial', amountMinor: 3000, reason: 'AF-940',
+    })
+    const sent = sim.countOf('POST /v1/refunds')
+
+    // 4000 against a charge with 2000 left. A different amount, so a different
+    // key: asking for the SAME 3000 again would be a replay of the first
+    // refund, which is the correct answer to a double click and would never
+    // reach this guard.
+    await assert.rejects(
+      () => refundCharge(ctx(), {
+        orgId: org.orgId, chargeId: 'ch_partial', amountMinor: 4000, reason: 'AF-941',
+      }),
+      (err: Error) => {
+        // Both amounts, both with their currency. A refusal that says "more
+        // than the remaining amount" without the numbers makes the operator
+        // open a second window to find out what to type instead.
+        assert.match(err.message, /\$40\.00 was asked for/)
+        assert.match(err.message, /\$20\.00 of \$50\.00 has not been refunded/)
+        return true
+      },
+    )
+    // The point of refusing here rather than letting Stripe do it: NOTHING WAS
+    // SENT. No refused refund sits in the Stripe dashboard for somebody to
+    // find later and wonder about.
+    assert.equal(sim.countOf('POST /v1/refunds'), sent)
+    // The attempt is still recorded, as failed. "An operator tried to refund
+    // $40.00 on a charge with $20.00 left" is exactly the sort of thing the
+    // ledger exists to have kept, and the row is what makes a retry reuse the
+    // key rather than mint one.
+    const rows = await ledger()
+    assert.equal(rows.length, 2)
+    assert.equal(rows.find((r) => r.state === 'failed')?.error_answered, false)
+  })
+
+  it('a charge already refunded in full is refused, naming the amount', async () => {
+    await reset()
+    await refundCharge(ctx(), {
+      orgId: org.orgId, chargeId: 'ch_full', reason: 'AF-942',
+    })
+    await assert.rejects(
+      () => refundCharge(ctx(), {
+        orgId: org.orgId, chargeId: 'ch_full', amountMinor: 100, reason: 'AF-943',
+      }),
+      /already been refunded in full \(\$50\.00\)/,
+    )
+    assert.equal(sim.refunds.length, 1)
   })
 
   it('an operation with no reason is refused', async () => {
