@@ -36,7 +36,12 @@ import { sql } from 'drizzle-orm'
 import type { Db } from '@antifailure/db'
 import { PLAN_QUOTAS, DEFAULT_PLAN } from './limits.ts'
 import type { QuotaVerdict } from './limits.ts'
-import { PLAN_COST_CAPS } from './costs.ts'
+// hours and round come from costs.ts rather than being written again here.
+// Two formatters for one number is how two code paths start disagreeing about
+// the same value: the local copy this replaced rounded to one decimal place
+// and never said "minutes", so a sub-hour cap read differently depending on
+// which function refused it.
+import { PLAN_COST_CAPS, hours, round } from './costs.ts'
 import type { CapVerdict } from './costs.ts'
 
 export type EntitlementValue = number | boolean
@@ -437,7 +442,13 @@ function asDate(v: string | Date): Date {
 function because(r: Resolved, plan: string): string {
   if (r.override === null) return `the ${plan} plan`
   const until = r.override.expiresAt ? `, until ${r.override.expiresAt.toISOString().slice(0, 10)}` : ''
-  return `a ${r.override.scope} override${until}`
+  // "a organization override" is the kind of defect that makes a customer trust
+  // the rest of the sentence less, and the scope is the only word here that can
+  // start with a vowel. Chosen from the four scopes rather than by a rule about
+  // vowels, because a rule would be wrong the first time a scope is named
+  // something like "unit".
+  const article = r.override.scope === 'organization' ? 'an' : 'a'
+  return `${article} ${r.override.scope} override${until}`
 }
 
 /**
@@ -464,14 +475,26 @@ export function checkQuotaWithEntitlements(
   const limit = resolved.value
   if (current < limit) return { allowed: true, current, limit, reason: '' }
   const spec = ENTITLEMENTS[key]
+  const noun = spec?.unit ?? key
+  // Two shapes, and the first is checkQuota's sentence unchanged.
+  //
+  // "holding 4 of 3 environments on the free plan" is what this product has
+  // always said, and it is the version a support macro or a documentation page
+  // would quote. Only the case that did not exist before, a limit that came
+  // from a grant rather than from the price list, gets new wording, because
+  // "on an organization override" does not read as English.
   return {
     allowed: false,
     current,
     limit,
     reason:
-      `This organization is holding ${current} of ${limit} ${spec?.unit ?? key}, which is what ` +
-      `${because(resolved, entitlements.plan)} allows. Tear one down, or change the plan. Nothing that already ` +
-      `exists was removed.`,
+      resolved.override === null
+        ? `This organization is holding ${current} of ${limit} ${noun} on the ` +
+          `${entitlements.plan} plan. Tear one down, or change the plan. Nothing that already ` +
+          `exists was removed.`
+        : `This organization is holding ${current} of ${limit} ${noun}, and ${limit} is what ` +
+          `${because(resolved, entitlements.plan)} allows. Tear one down, or change the plan. ` +
+          `Nothing that already exists was removed.`,
   }
 }
 
@@ -494,7 +517,7 @@ export function checkCostCapWithEntitlements(
     return {
       allowed: false,
       kind: 'per-run',
-      current: Math.round(runHours * 10) / 10,
+      current: round(runHours),
       limit: perRun.value,
       reason:
         `This run would hold an environment for ${hours(runHours)}, and ${because(perRun, entitlements.plan)} allows ` +
@@ -504,23 +527,39 @@ export function checkCostCapWithEntitlements(
   }
 
   // The PROJECTED total rather than the current one, the same as checkCostCap:
-  // admitting a run that is already over the cap and refusing the next one
-  // spends the overage before noticing it.
+  // admitting a run that is itself larger than the remaining allowance is how a
+  // cap is passed by exactly one run, every time, and the customer sees a limit
+  // that does not hold.
   if (perDay && typeof perDay.value === 'number' && usedDayHours + runHours > perDay.value) {
     return {
       allowed: false,
       kind: 'per-day',
-      current: Math.round((usedDayHours + runHours) * 10) / 10,
+      // What has been USED, not the projection. The projection is in the
+      // sentence; this field is the fact, and a caller totalling it would be
+      // counting a run that never happened.
+      current: round(usedDayHours),
       limit: perDay.value,
+      // Word for word what checkCostCap says, with only the clause naming the
+      // limit's source replaced.
+      //
+      // Not a stylistic choice. This exact paragraph is quoted in
+      // docs/src/content/docs/reference/environment-lifetime.md, and rewriting
+      // it left the documentation describing a message the product no longer
+      // produces. It also lost two things the doc calls out as deliberate:
+      // "in the last 24 hours" rather than "in the last day", which is the
+      // window the number is actually computed over, and "this run would need
+      // another N hours", which is the part that tells somebody how much to
+      // shorten it by.
       reason:
-        `This organization has used ${hours(usedDayHours)} of environment time in the last day and ` +
-        `this run would take it to ${hours(usedDayHours + runHours)}, past the ${hours(perDay.value)} ` +
-        `${because(perDay, entitlements.plan)} allows. Wait, shorten the run, or ask an owner of this organization to ` +
+        `This organization has used ${hours(usedDayHours)} of environment time in the last ` +
+        `24 hours, and ${because(perDay, entitlements.plan)} allows ${hours(perDay.value)}. ` +
+        `This run would need another ${hours(runHours)}. Tear down an environment you are ` +
+        `finished with, wait for the window to move, or ask an owner of this organization to ` +
         `change the plan. Nothing was created and nothing was removed.`,
     }
   }
 
-  return { allowed: true, kind: null, current: Math.round(usedDayHours * 10) / 10, limit: perDay && typeof perDay.value === 'number' ? perDay.value : 0, reason: '' }
+  return { allowed: true, kind: null, current: round(usedDayHours), limit: perDay && typeof perDay.value === 'number' ? perDay.value : 0, reason: '' }
 }
 
 /**
@@ -555,14 +594,9 @@ export function seatVerdict(
     current: held,
     limit,
     reason:
-      `This organization is using ${held} of ${limit} seats${invitations}, which is what ` +
-      `${because(resolved, entitlements.plan)} allows. Withdraw an invitation, remove a member, or change the plan. ` +
-      `Nobody was removed.`,
+      `This organization is using ${held} of ${limit} seats${invitations}, and ${limit} is ` +
+      `what ${because(resolved, entitlements.plan)} allows. Withdraw an invitation, remove a ` +
+      `member, or change the plan. Nobody was removed.`,
   }
 }
 
-/** Hours, said the way the cost cap messages already say them. */
-function hours(n: number): string {
-  const rounded = Math.round(n * 10) / 10
-  return rounded === 1 ? '1 hour' : `${rounded} hours`
-}
