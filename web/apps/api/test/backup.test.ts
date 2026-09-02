@@ -71,11 +71,31 @@ after(async () => {
   await h.end({ timeout: 5 })
 })
 
+/**
+ * Skips when there is no cluster to drill against.
+ *
+ * The only honest reason to skip. Every other failure throws, because a skip
+ * the code under test can cause is a pass with extra steps.
+ *
+ * Every test that touches a database calls this, and "every" is the part that
+ * was wrong: two of them opened their own connection to the cluster without
+ * asking, so on a machine with no Docker they reported ECONNREFUSED as a
+ * failure while the other eleven skipped. That makes an environment outage indistinguishable
+ * from a defect in the backup code, which is the one thing a red test must
+ * never be ambiguous about, and it is what a full run of this suite reported
+ * tonight: two failures out of 963, both of them this.
+ *
+ * The guard is on the tests rather than on the file because the suite has one
+ * test that needs no database at all, and skipping that one would quietly drop
+ * real coverage on exactly the machines that have no Docker.
+ */
 function skipWithoutDatabase(t: { skip: (reason: string) => void }): boolean {
   if (!h) {
-    // The only honest reason to skip. Every other failure throws, because a
-    // skip the code under test can cause is a pass with extra steps.
-    t.skip('no Docker daemon, so there is nowhere to stand up a database to restore into')
+    t.skip(
+      'Docker cannot start a cluster and AF_DR_URL names none, so there is ' +
+        'nowhere to stand up a database to restore into. Set AF_DR_URL to a ' +
+        'cluster you are already running to make this suite use it.',
+    )
     return true
   }
   return false
@@ -702,6 +722,16 @@ function urlInto(database: string): string {
 
 test('the cluster belongs to this checkout and not to the machine', { timeout: 60_000 }, async (t) => {
   if (skipWithoutDatabase(t)) return
+  // The property under test belongs to the container this file starts. When
+  // AF_DR_URL names a cluster there is no such container, and the isolation it
+  // buys is something the operator has taken on themselves, so asserting it
+  // here would be asserting something nobody promised. Named rather than
+  // silently passing, because a test that quietly stops testing is the shape
+  // this whole file exists to argue against.
+  if (process.env.AF_DR_URL) {
+    t.skip('AF_DR_URL names a cluster, so this suite started no container to own')
+    return
+  }
 
   // Two different checkouts must not be able to land on one container. Proved
   // over the pure function rather than by standing up a second container,
@@ -770,6 +800,10 @@ test('the cluster belongs to this checkout and not to the machine', { timeout: 6
 
 test('the ledger holds this checkout\'s migrations and nobody else\'s', { timeout: 60_000 }, async (t) => {
   if (skipWithoutDatabase(t)) return
+  if (process.env.AF_DR_URL) {
+    t.skip('AF_DR_URL names a cluster whose ledger is the operator\'s to keep, not this checkout\'s')
+    return
+  }
 
   // THE ASSERTION THIS WHOLE CHANGE IS FOR.
   //

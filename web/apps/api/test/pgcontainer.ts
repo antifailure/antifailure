@@ -100,6 +100,25 @@ export function keyFor(root: string): string {
 
 export const CONTAINER = `af-dr-${keyFor(checkout)}`
 
+/**
+ * A cluster somebody else stood up, named on purpose.
+ *
+ * Docker is how this file STARTS a cluster and was never what the tests need.
+ * A machine that runs Postgres natively and keeps Docker stopped could not be
+ * pointed at the cluster sitting in front of it, so the whole drill skipped,
+ * and a drill that skips proves nothing about a backup nobody has restored.
+ *
+ * Naming it is also what makes the skip honest. An unset variable and a
+ * stopped Docker are the same state, there is nowhere to restore into, and
+ * skipping is right. A variable that IS set is a statement that a cluster is
+ * running, so start() fails rather than skips when nothing answers there.
+ *
+ * It replaces the container rather than configuring it. The per checkout
+ * isolation argued at the top of this file is the container's job, and an
+ * operator who names their own cluster has taken that job on themselves.
+ */
+const named = process.env.AF_DR_URL ?? null
+
 /** Set by start(), once Docker has said which port it published. */
 let published: string | null = null
 
@@ -111,12 +130,12 @@ let published: string | null = null
  * exists to remove: a suite that quietly runs against somebody else's cluster.
  */
 export function url(): string {
+  if (named) return named
   if (!published) {
     throw new Error('pgcontainer.url() was read before start() resolved; call start() first')
   }
   return published
 }
-
 /**
  * A token unique to this process, put in the name of every database this run
  * creates so that the cleanup can find its own and nothing else.
@@ -214,11 +233,30 @@ async function reachable(candidate: string, timeoutSeconds: number): Promise<boo
 /**
  * Starts the container if it is not already answering, and waits for it.
  *
- * Returns false when there is no Docker at all, which is the one honest reason
- * to skip. Every other failure throws with what Docker said, because a skip the
- * code under test can cause is a pass with extra steps.
+ * Returns false when there is nothing to drill against, which is the one
+ * honest reason to skip. Every other failure throws with what Docker said,
+ * because a skip the code under test can cause is a pass with extra steps.
+ *
+ * Whether a cluster is already answering is asked BEFORE whether Docker
+ * exists, and the order is the whole point. It used to be the other way
+ * round, so a machine with Postgres running on the port and no Docker was
+ * told it had nowhere to restore into while the cluster sat there answering.
+ * Docker is how this file STARTS a cluster; it was never what the tests need,
+ * and requiring it to find one that is already up made the drill unrunnable
+ * on exactly the machines that had deliberately stopped running Docker.
  */
 export async function start(): Promise<boolean> {
+  // Asked before Docker, because Docker is only one way of answering the
+  // question "is there a cluster", and it was being treated as the question.
+  if (named) {
+    if (await reachable(named, 5)) return true
+    throw new Error(
+      'AF_DR_URL names a cluster and nothing answered there within five seconds. ' +
+        'Setting it is a statement that one is running: unset it to let this suite ' +
+        'start its own, or to skip on a machine that has neither.',
+    )
+  }
+
   try {
     await docker(['version', '--format', '{{.Server.Version}}'])
   } catch {
