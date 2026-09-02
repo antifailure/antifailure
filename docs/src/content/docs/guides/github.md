@@ -2,7 +2,7 @@
 title: GitHub
 description: An environment per pull request, and the two ways to run it.
 sidebar:
-  order: 11
+  order: 12
 ---
 
 ```yaml
@@ -43,6 +43,25 @@ address and not a credential, and it is read by your workflow rather than by the
 control plane. Do not confuse it with `AF_CONTROL_PLANE_TOKEN`, which is one
 word longer and a different thing entirely: an engine token, for `af` talking to
 a control plane from a terminal. Nothing here needs one.
+
+That last sentence is a claim about the code rather than a wish, and this is
+what makes it true. A workflow talks to a control plane twice, and neither call
+carries a stored credential:
+
+- **The engine**, while the run is happening, reporting the events that say an
+  environment is coming up, is ready, or has been torn down.
+- **The report step**, at the end, publishing what the run concluded.
+
+Both trade the same thing for a short-lived credential: the workflow identity
+GitHub signs for a job with `id-token: write`. That is the one permission the
+example workflow declares for this, and it is the whole of the setup. The
+credentials each call gets back are scoped and expire on their own, so there is
+nothing to rotate and nothing to leak, and a fork's pull request cannot obtain
+either, because GitHub does not mint an identity for one.
+
+If you set `AF_CONTROL_PLANE_TOKEN` anyway, the engine uses it and does not ask
+for an identity. That is the path for a self-hosted engine that is not running
+in GitHub Actions, and it stays supported.
 
 ## The check
 

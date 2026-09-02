@@ -2,7 +2,7 @@
 title: Error reference
 description: Every error Antifailure can return, what causes it, and what to do about it.
 sidebar:
-  order: 6
+  order: 3
 ---
 
 Every user facing error carries a code of the form `AF-<AREA>-<NNN>`.

@@ -157,9 +157,11 @@ runner/artifacts/
 /sbomcheck
 /scanrepo
 /schemadoc
+/sidebarcheck
 /site
 /statuscheck
 /tagsync
+/varcheck
 /vulncheck
 /walkthrough
 engine/af-proxy
