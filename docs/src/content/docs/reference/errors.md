@@ -472,6 +472,18 @@ The published golden {version} in {store} was made for a different project.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens) |
 
+### AF-DB-016
+
+database.source_url_env names {variable}, and {variable} holds nothing in this shell.
+
+**What to do.** Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
 ### AF-DB-020
 
 Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured.
