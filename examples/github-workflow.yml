@@ -124,8 +124,13 @@ permissions:
   # exactly that. There is no repository secret to paste and nothing here holds
   # a long lived token.
   #
+  # Two things use it, for the same reason and by the same exchange. The report
+  # step below trades this identity for a credential to publish what the run
+  # concluded, and the engine itself trades it for one to report its event
+  # stream while the run happens.
+  #
   # GitHub does NOT grant this to a pull request job running on a fork, which is
-  # what keeps a fork away from every secret: the exchange below simply fails
+  # what keeps a fork away from every secret: the exchanges below simply fail
   # there, and the control plane says the commit needs a maintainer's approval.
   # Delete this line if you do not use the hosted control plane; nothing else
   # needs it.
@@ -224,6 +229,21 @@ jobs:
           # Set this so every runner produces the same masking, and two
           # goldens can be compared. Left unset, each machine generates its own.
           AF_MASKING_KEY: ${{ secrets.AF_MASKING_KEY }}
+          # Where the engine reports its own event stream, which is a different
+          # thing from the report below: the report is what the run concluded,
+          # and this is what it did while reaching that conclusion. The engine
+          # reads AF_CONTROL_PLANE_URL, so the job level AF_CONTROL_PLANE is
+          # passed under that name here rather than left for the engine to
+          # guess. Without this line a self hosted installation would send its
+          # events to the hosted instance instead of its own, which is the
+          # default the engine falls back to.
+          #
+          # No token. The engine trades this job's identity for a short lived
+          # credential the same way the report step below does, which is what
+          # the `id-token: write` at the top of this file is for. Unset, the
+          # engine attaches no control plane sink at all and the run is
+          # unaffected.
+          AF_CONTROL_PLANE_URL: ${{ vars.AF_CONTROL_PLANE }}
         run: |
           set -euo pipefail
           case "$AF_COMMAND" in
