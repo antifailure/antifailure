@@ -232,6 +232,13 @@ Builds are reproducible, and that is a gate rather than an aspiration: two
 builds in two directories with two caches produce identical archives on all
 four platforms, checked in CI on every pull request.
 
+Every release from v1.0.0 carries `checksums.txt.sigstore.json` and
+`sbom.spdx.json`: the checksums and a bill of materials read out of the built
+binaries, each signed with cosign keyless so there is no public key to fetch.
+The verification commands are on the release page. Neither is a claim you have
+to take on trust, because a release that ran them carries both files and
+v0.1.0 and v0.1.1 carry neither.
+
 Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building
 locally, running the gates and structuring commits.
 
