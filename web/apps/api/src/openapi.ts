@@ -412,6 +412,158 @@ export function openApiDocument(): Record<string, unknown> {
     },
   }
 
+  // The repository claims behind the workflow identity exchange.
+  //
+  // These are documented because a customer reaches them with `curl` rather
+  // than through `af`. `docs/guides/github.md` hands them the command line,
+  // so the HTTP call IS the surface here, and a surface a customer is told to
+  // call and cannot look up is undocumented rather than internal.
+  //
+  // Hand written rather than generated, like every other route in this block,
+  // because they are Hono routes and not tRPC procedures. There is no
+  // validator to read a schema out of.
+  const bindingsAuth = {
+    security: [{ cliToken: [] }],
+    tags: ['Workflow identity'],
+  }
+  const bindingRefusals = {
+    '401': refusal('The bearer token is not a valid CLI token.'),
+    '402': refusal('This organization\'s plan does not include the hosted control plane.'),
+    '403': refusal(
+      'The token does not carry `tokens.manage`. The message names the command that fixes it, ' +
+      'because a caller told only that they are forbidden goes looking for a role problem.',
+    ),
+    '500': serverFailure,
+  }
+  paths['/v1/oidc/bindings'] = {
+    post: {
+      ...bindingsAuth,
+      operationId: 'claimRepositoryBinding',
+      summary: 'Claim a repository for workflow identity',
+      description:
+        'Claims `owner/name` for this organization, so a workflow in it can exchange a GitHub ' +
+        'identity token for an engine token. Needed when the App is not installed on the ' +
+        'owner, which is the case the first exchange cannot resolve on its own.\n\n' +
+        'Behind the same permission as minting an engine token, because a claim grants a ' +
+        'workflow the standing ability to mint one.',
+      requestBody: {
+        required: true,
+        content: json({
+          type: 'object',
+          properties: { repository: { type: 'string', example: 'acme/app' } },
+          required: ['repository'],
+          additionalProperties: false,
+        }),
+      },
+      responses: {
+        '201': {
+          description: 'The claim, as the list renders it.',
+          content: json({ $ref: '#/components/schemas/OidcBinding' }),
+        },
+        '400': refusal('The body is not JSON, or the repository is not `owner/name`.'),
+        '409': refusal(
+          'Another organization already holds this repository. Nothing about the request is ' +
+          'malformed, and sending it again unchanged will never work, which is why it is not a 400.',
+        ),
+        ...bindingRefusals,
+      },
+    },
+    get: {
+      ...bindingsAuth,
+      operationId: 'listRepositoryBindings',
+      summary: 'List this organization\'s repository claims',
+      description:
+        'Every claim this organization holds, with the audience a workflow must ask GitHub ' +
+        'for. The audience is returned rather than documented alone so a caller building a ' +
+        'workflow file reads it from the server that will check it.',
+      responses: {
+        '200': {
+          description: 'The claims and the audience.',
+          content: json({
+            type: 'object',
+            properties: {
+              audience: { type: 'string', example: CALLBACK_AUDIENCE },
+              bindings: { type: 'array', items: { $ref: '#/components/schemas/OidcBinding' } },
+            },
+            required: ['audience', 'bindings'],
+          }),
+        },
+        ...bindingRefusals,
+      },
+    },
+  }
+
+  // Two paths for one operation, and that is not duplication.
+  //
+  // A repository is `owner/name` and a slash is a path separator, so a single
+  // `{binding}` segment cannot match one. Before the second path existed,
+  // `DELETE /v1/oidc/bindings/acme/app` matched no route at all and was
+  // answered by the "this endpoint has no declared rate limit" refusal, which
+  // is the loudest possible way to say a revocation is unreachable. Somebody
+  // holding the repository name, which is what the list shows and what a
+  // person has in front of them during an incident, must not have to go and
+  // find a uuid first.
+  const revokeResponses = {
+    '200': {
+      description: 'What the revocation did.',
+      content: json({
+        type: 'object',
+        properties: {
+          revoked: { type: 'boolean' },
+          repository: { type: 'string' },
+          alreadyRevoked: {
+            type: 'boolean',
+            description: 'True when the claim was already revoked, so a retry is not an error.',
+          },
+          tokensRevoked: {
+            type: 'integer',
+            description:
+              'How many live engine tokens this killed. Named, because "revoked" on its own ' +
+              'does not tell somebody in an incident whether the credentials already out ' +
+              'there are dead.',
+          },
+        },
+        required: ['revoked', 'repository', 'alreadyRevoked', 'tokensRevoked'],
+      }),
+    },
+    '400': refusal('The identifier is neither a uuid nor `owner/name`.'),
+    '404': refusal(
+      'No claim here has that id or repository. The same answer whether it belongs to another ' +
+      'organization or does not exist, which is what every other lookup on this server does.',
+    ),
+    ...bindingRefusals,
+  }
+  paths['/v1/oidc/bindings/{binding}'] = {
+    delete: {
+      ...bindingsAuth,
+      operationId: 'revokeRepositoryBindingById',
+      summary: 'Revoke a repository claim by id',
+      description:
+        'Revokes the claim and kills every engine token minted through it. The count of tokens ' +
+        'killed is in the answer.',
+      parameters: [{
+        name: 'binding', in: 'path', required: true,
+        schema: { type: 'string', format: 'uuid' },
+      }],
+      responses: revokeResponses,
+    },
+  }
+  paths['/v1/oidc/bindings/{owner}/{name}'] = {
+    delete: {
+      ...bindingsAuth,
+      operationId: 'revokeRepositoryBindingByRepository',
+      summary: 'Revoke a repository claim by repository name',
+      description:
+        'The same operation as revoking by id, reachable with the name a person has in front ' +
+        'of them. See the note above about why this is a second path rather than one segment.',
+      parameters: [
+        { name: 'owner', in: 'path', required: true, schema: { type: 'string' } },
+        { name: 'name', in: 'path', required: true, schema: { type: 'string' } },
+      ],
+      responses: revokeResponses,
+    },
+  }
+
   // The tRPC procedures. They are described rather than fully typed, because
   // tRPC's own client carries the types and this document exists for callers
   // that are not that client.
@@ -524,8 +676,29 @@ export function openApiDocument(): Record<string, unknown> {
       securitySchemes: {
         session: { type: 'apiKey', in: 'cookie', name: 'af_session' },
         engineToken: { type: 'http', scheme: 'bearer' },
+        // A third credential and not a spelling of the second. An engine token
+        // is minted for one workflow run and lasts minutes; a CLI token comes
+        // from `af login`, carries scopes, and belongs to a person. Declaring
+        // one scheme for both would tell a reader they are interchangeable.
+        cliToken: { type: 'http', scheme: 'bearer' },
       },
       schemas: {
+        OidcBinding: {
+          type: 'object',
+          description:
+            'A repository claimed for workflow identity. `lastUsedAt` and `revokedAt` are null ' +
+            'rather than absent, so a caller can tell "never used" from a field this version ' +
+            'does not send.',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            repository: { type: 'string', example: 'acme/app' },
+            createdAt: { type: 'string', format: 'date-time' },
+            lastUsedAt: { type: 'string', format: 'date-time', nullable: true },
+            revokedAt: { type: 'string', format: 'date-time', nullable: true },
+          },
+          required: ['id', 'repository', 'createdAt', 'lastUsedAt', 'revokedAt'],
+          additionalProperties: false,
+        },
         Refusal: {
           type: 'object',
           description:
