@@ -619,6 +619,12 @@ describe('money moves once', async () => {
     const rows = await ledger()
     assert.equal((rows[0]!.before_state as { priceId: string }).priceId, 'price_team')
     assert.equal((rows[0]!.after_state as { priceId: string }).priceId, 'price_enterprise')
+    // One read, not two. changePlan has to read the subscription to refuse a
+    // no-op and to find the item id, and the recorded before state is THAT
+    // read rather than a second one: two reads mean the state audited can
+    // differ from the state the decision was made on, so a change that raced
+    // a webhook would be audited against a subscription nobody ever saw.
+    assert.equal(sim.countOf('GET /v1/subscriptions/sub_1'), 1)
   })
 
   it('changing to the plan somebody is already on is refused rather than recorded', async () => {
