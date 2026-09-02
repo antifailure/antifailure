@@ -42,7 +42,7 @@ errors:
   - code: AF-MAN-003
     area: MAN
     message: "The manifest at {path} declares schema version {found}, which this build does not understand."
-    next_step: "Upgrade with 'af version -check' and install the release that supports version {found}."
+    next_step: "Check the build you are running with 'af version' and install the release that supports version {found}."
     docs: reference/manifest
     retryable: false
     exit_code: 3

@@ -800,7 +800,7 @@ The manifest at {path} is not valid: {detail}
 
 The manifest at {path} declares schema version {found}, which this build does not understand.
 
-**What to do.** Upgrade with 'af version -check' and install the release that supports version {found}.
+**What to do.** Check the build you are running with 'af version' and install the release that supports version {found}.
 
 | | |
 | --- | --- |

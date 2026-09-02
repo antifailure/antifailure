@@ -119,7 +119,7 @@ func isCommandLike(w string) bool {
 		return false
 	}
 	for _, r := range w {
-		if !(r >= 'a' && r <= 'z') && r != '-' {
+		if (r < 'a' || r > 'z') && r != '-' {
 			return false
 		}
 	}
@@ -307,26 +307,36 @@ func TestTheExtractorFindsCommandsInEveryShapeTheCatalogUses(t *testing.T) {
 func goStringLiterals(t *testing.T, dir string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	// One file at a time rather than the directory helper go/parser used to
+	// offer, which is deprecated because it does not consider build tags when
+	// grouping files into packages. Every literal in the directory's non test
+	// files is wanted here whatever package they claim, so that grouping was
+	// never used.
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("parsing %s: %v", dir, err)
+		t.Fatalf("reading %s: %v", dir, err)
 	}
 	var out []string
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			ast.Inspect(file, func(n ast.Node) bool {
-				lit, ok := n.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					return true
-				}
-				if s, uerr := strconv.Unquote(lit.Value); uerr == nil {
-					out = append(out, s)
-				}
-				return true
-			})
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
 		}
+		path := filepath.Join(dir, name)
+		file, perr := parser.ParseFile(fset, path, nil, 0)
+		if perr != nil {
+			t.Fatalf("parsing %s: %v", path, perr)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			if s, uerr := strconv.Unquote(lit.Value); uerr == nil {
+				out = append(out, s)
+			}
+			return true
+		})
 	}
 	return out
 }

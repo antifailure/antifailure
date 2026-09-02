@@ -1078,7 +1078,7 @@ var catalog = map[Code]Entry{
 		Code:      AFMAN003,
 		Area:      "MAN",
 		Message:   "The manifest at {path} declares schema version {found}, which this build does not understand.",
-		NextStep:  "Upgrade with 'af version -check' and install the release that supports version {found}.",
+		NextStep:  "Check the build you are running with 'af version' and install the release that supports version {found}.",
 		Docs:      "reference/manifest",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

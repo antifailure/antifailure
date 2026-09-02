@@ -172,9 +172,19 @@ func checkInvocation(root *cobra.Command, line string) string {
 		cmd = child
 		consumed++
 	}
-	if consumed == 0 {
+	// consumed == 0 with a leading flag means the command is the root itself,
+	// as in `af --help`, which is a real invocation. Only a leading word that
+	// resolves to no subcommand is a command that does not exist. The flag
+	// check below still runs either way, so `af --nonsense` is still caught.
+	if consumed == 0 && !strings.HasPrefix(fields[0], "-") {
 		return fmt.Sprintf("%q is not a command", fields[0])
 	}
+
+	// Cobra registers --help lazily, when a command is executed rather than
+	// when it is built, so without this the flag every command really does
+	// accept looks like one none of them have.
+	cmd.InitDefaultHelpFlag()
+	root.InitDefaultHelpFlag()
 
 	for _, flag := range longFlag.FindAllString(line, -1) {
 		name := strings.TrimPrefix(flag, "--")
