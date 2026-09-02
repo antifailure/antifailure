@@ -213,7 +213,7 @@ Repository permissions, and what each one is actually for:
 | Metadata | Read-only | Mandatory for every App. |
 | Contents | Read-only | Reading the manifest and the workflow file. |
 | Pull requests | Read and write | The one comment per pull request, and the pull request a masking rule change becomes. |
-| Actions | Read and write | The console's **Create environment**, **Run agents** and **Run load**, and cancelling the run that holds an environment when a pull request closes. |
+| Actions | Read and write | The console's **Create environment**, **Run agents**, **Run load** and **Tear down**, and cancelling the run that holds an environment when a pull request closes. |
 | Checks | Read and write | The one check run per commit that a branch protection rule can require. |
 
 Organization permissions:

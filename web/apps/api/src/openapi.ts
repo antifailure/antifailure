@@ -286,6 +286,7 @@ export function openApiDocument(): Record<string, unknown> {
   paths['/v1/workloads/claim'] = {
     post: {
       ...engineOnly,
+      operationId: 'claimWorkloadRun',
       summary: 'Take the workload run waiting for an environment',
       description:
         'Moves the oldest requested run for the environment to accepted and returns its ' +
@@ -297,6 +298,7 @@ export function openApiDocument(): Record<string, unknown> {
   paths['/v1/workloads/runs/{runId}/heartbeat'] = {
     post: {
       ...engineOnly,
+      operationId: 'heartbeatWorkloadRun',
       summary: 'Say the run is still going',
       description:
         'Extends the lease and the deadline. A run whose deadline passes with nothing said ' +
@@ -307,6 +309,7 @@ export function openApiDocument(): Record<string, unknown> {
   paths['/v1/commands/claim'] = {
     post: {
       ...engineOnly,
+      operationId: 'claimRuntimeCommands',
       summary: 'Take the runtime commands waiting for this organization',
       description:
         'Teardowns and cancellations, with a lease. Reachable while the organization is ' +
@@ -317,6 +320,7 @@ export function openApiDocument(): Record<string, unknown> {
   paths['/v1/commands/{id}/ack'] = {
     post: {
       ...engineOnly,
+      operationId: 'ackRuntimeCommand',
       summary: 'Say what happened to a command',
       description:
         'Only the holder of the lease may acknowledge, and an acknowledgement that matches no ' +
